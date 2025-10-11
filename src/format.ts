@@ -29,9 +29,9 @@ const WHEN_TEXT: Partial<Record<EventTiming, string>> = {
   [EventTiming["After Lunch"]]: "after lunch",
   [EventTiming["After Dinner"]]: "after dinner",
   [EventTiming.Meal]: "with meals",
-  [EventTiming.Breakfast]: "with morning meal",
+  [EventTiming.Breakfast]: "with breakfast",
   [EventTiming.Lunch]: "with lunch",
-  [EventTiming.Dinner]: "with evening meal",
+  [EventTiming.Dinner]: "with dinner",
   [EventTiming.Morning]: "in the morning",
   [EventTiming["Early Morning"]]: "in the early morning",
   [EventTiming["Late Morning"]]: "in the late morning",
@@ -57,6 +57,111 @@ const DAY_NAMES: Record<string, string> = {
   sat: "Saturday",
   sun: "Sunday"
 };
+
+interface RouteGrammar {
+  verb: string;
+  routePhrase?: string | ((context: { hasSite: boolean; internal: ParsedSigInternal }) => string | undefined);
+  sitePreposition?: string;
+}
+
+const DEFAULT_ROUTE_GRAMMAR: RouteGrammar = { verb: "Use" };
+
+const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
+  [RouteCode["Oral route"]]: { verb: "Take", routePhrase: "by mouth" },
+  [RouteCode["Ophthalmic route"]]: {
+    verb: "Instill",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "in the eye"),
+    sitePreposition: "in"
+  },
+  [RouteCode["Intravitreal route (qualifier value)"]]: {
+    verb: "Inject",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "into the eye"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Topical route"]]: {
+    verb: "Apply",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "topically"),
+    sitePreposition: "to"
+  },
+  [RouteCode["Transdermal route"]]: {
+    verb: "Apply",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "transdermally"),
+    sitePreposition: "to"
+  },
+  [RouteCode["Subcutaneous route"]]: {
+    verb: "Inject",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "subcutaneously"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Intramuscular route"]]: {
+    verb: "Inject",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "intramuscularly"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Intravenous route"]]: {
+    verb: "Inject",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "intravenously"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Nasal route"]]: {
+    verb: "Use",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "via nasal route"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Respiratory tract route (qualifier value)"]]: {
+    verb: "Use",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "via inhalation"),
+    sitePreposition: "into"
+  }
+};
+
+function grammarFromRouteText(text: string | undefined): RouteGrammar | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.includes("mouth") || normalized.includes("oral")) {
+    return ROUTE_GRAMMAR[RouteCode["Oral route"]];
+  }
+  if (normalized.includes("ophthalm")) {
+    return ROUTE_GRAMMAR[RouteCode["Ophthalmic route"]];
+  }
+  if (normalized.includes("intravitreal")) {
+    return ROUTE_GRAMMAR[RouteCode["Intravitreal route (qualifier value)"]];
+  }
+  if (normalized.includes("topical")) {
+    return ROUTE_GRAMMAR[RouteCode["Topical route"]];
+  }
+  if (normalized.includes("transdermal")) {
+    return ROUTE_GRAMMAR[RouteCode["Transdermal route"]];
+  }
+  if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
+    return ROUTE_GRAMMAR[RouteCode["Subcutaneous route"]];
+  }
+  if (normalized.includes("intramuscular") || normalized === "im") {
+    return ROUTE_GRAMMAR[RouteCode["Intramuscular route"]];
+  }
+  if (normalized.includes("intravenous") || normalized === "iv") {
+    return ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
+  }
+  if (normalized.includes("nasal")) {
+    return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
+  }
+  if (normalized.includes("inhal")) {
+    return ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]];
+  }
+  return undefined;
+}
+
+function resolveRouteGrammar(internal: ParsedSigInternal): RouteGrammar {
+  if (internal.routeCode && ROUTE_GRAMMAR[internal.routeCode]) {
+    return ROUTE_GRAMMAR[internal.routeCode] ?? DEFAULT_ROUTE_GRAMMAR;
+  }
+  return grammarFromRouteText(internal.routeText) ?? DEFAULT_ROUTE_GRAMMAR;
+}
 
 function pluralize(unit: string, value: number): string {
   if (Math.abs(value) === 1) {
@@ -198,17 +303,188 @@ function formatDoseLong(internal: ParsedSigInternal): string | undefined {
   return undefined;
 }
 
-function describeWhen(internal: ParsedSigInternal): string | undefined {
+function collectWhenPhrases(internal: ParsedSigInternal): string[] {
   if (!internal.when.length) {
-    return undefined;
+    return [];
   }
-  const parts = internal.when
+  const unique: EventTiming[] = [];
+  const seen = new Set<EventTiming>();
+  for (const code of internal.when) {
+    if (!seen.has(code)) {
+      seen.add(code);
+      unique.push(code);
+    }
+  }
+  const hasSpecificAfter = unique.some((code) =>
+    code === EventTiming["After Breakfast"] ||
+    code === EventTiming["After Lunch"] ||
+    code === EventTiming["After Dinner"]
+  );
+  const hasSpecificBefore = unique.some((code) =>
+    code === EventTiming["Before Breakfast"] ||
+    code === EventTiming["Before Lunch"] ||
+    code === EventTiming["Before Dinner"]
+  );
+  const hasSpecificWith = unique.some((code) =>
+    code === EventTiming.Breakfast ||
+    code === EventTiming.Lunch ||
+    code === EventTiming.Dinner
+  );
+  return unique
+    .filter((code) => {
+      if (code === EventTiming["After Meal"] && hasSpecificAfter) {
+        return false;
+      }
+      if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
+        return false;
+      }
+      if (code === EventTiming.Meal && hasSpecificWith) {
+        return false;
+      }
+      return true;
+    })
     .map((code) => WHEN_TEXT[code] ?? code)
-    .filter(Boolean);
+    .filter((text): text is string => Boolean(text));
+}
+
+function joinWithAnd(parts: string[]): string {
   if (!parts.length) {
+    return "";
+  }
+  if (parts.length === 1) {
+    return parts[0];
+  }
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+function combineFrequencyAndEvents(
+  frequency: string | undefined,
+  events: string[],
+): { frequency?: string; event?: string } {
+  if (!frequency) {
+    if (!events.length) {
+      return {};
+    }
+    return { event: joinWithAnd(events) };
+  }
+  if (!events.length) {
+    return { frequency };
+  }
+  if (events.length === 1 && events[0] === "at bedtime") {
+    const lowerFrequency = frequency.toLowerCase();
+    if (lowerFrequency === "twice daily" || lowerFrequency === "three times daily" || lowerFrequency === "four times daily") {
+      return { frequency: `${frequency} and ${events[0]}` };
+    }
+  }
+  return { frequency, event: joinWithAnd(events) };
+}
+
+function buildRoutePhrase(
+  internal: ParsedSigInternal,
+  grammar: RouteGrammar,
+  hasSite: boolean,
+): string | undefined {
+  if (typeof grammar.routePhrase === "function") {
+    return grammar.routePhrase({ hasSite, internal });
+  }
+  if (typeof grammar.routePhrase === "string") {
+    return grammar.routePhrase;
+  }
+  const text = internal.routeText?.trim();
+  if (!text) {
     return undefined;
   }
-  return parts.join(" and ");
+  const normalized = text.toLowerCase();
+  if (normalized.startsWith("by ") || normalized.startsWith("per ") || normalized.startsWith("via ")) {
+    return text;
+  }
+  if (normalized === "oral") {
+    return "by mouth";
+  }
+  if (normalized === "intravenous") {
+    return "intravenously";
+  }
+  if (normalized === "intramuscular") {
+    return "intramuscularly";
+  }
+  if (normalized === "subcutaneous") {
+    return "subcutaneously";
+  }
+  if (normalized === "topical") {
+    return "topically";
+  }
+  if (normalized === "transdermal") {
+    return "transdermally";
+  }
+  if (normalized === "intranasal" || normalized === "nasal") {
+    return "via nasal route";
+  }
+  if (normalized.includes("inhal")) {
+    return "via inhalation";
+  }
+  return `via ${text}`;
+}
+
+function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string | undefined {
+  const text = internal.siteText?.trim();
+  if (!text) {
+    return undefined;
+  }
+  const lower = text.toLowerCase();
+  let preposition = grammar.sitePreposition;
+  if (!preposition) {
+    if (lower.includes("eye")) {
+      preposition = "in";
+    } else if (lower.includes("nostril") || lower.includes("nose")) {
+      preposition = "into";
+    } else if (lower.includes("lung") || lower.includes("airway") || lower.includes("bronch")) {
+      preposition = "into";
+    } else if (lower.includes("ear")) {
+      preposition = "in";
+    } else if (
+      /(skin|arm|leg|thigh|abdomen|shoulder|hand|foot|cheek|forearm|back|buttock|hip)/.test(lower)
+    ) {
+      preposition = "to";
+    } else {
+      preposition = "at";
+    }
+  }
+  const noun = formatSiteNoun(text, preposition);
+  return `${preposition} ${noun}`.trim();
+}
+
+function formatSiteNoun(site: string, preposition: string): string {
+  const trimmed = site.trim();
+  const lower = trimmed.toLowerCase();
+  const skipArticlePrefixes = [
+    "the ",
+    "both ",
+    "each ",
+    "either ",
+    "every ",
+    "all ",
+    "bilateral ",
+  ];
+  for (const prefix of skipArticlePrefixes) {
+    if (lower.startsWith(prefix)) {
+      return trimmed;
+    }
+  }
+  const needsArticle = /^(left|right|upper|lower|inner|outer|mid|middle|posterior|anterior|proximal|distal|medial|lateral|dorsal|ventral)\b/.test(
+    lower,
+  );
+  if (needsArticle || preposition === "at") {
+    return `the ${trimmed}`;
+  }
+  if (
+    /(eye|nostril|ear|arm|leg|thigh|abdomen|hand|foot|cheek|skin|back)/.test(lower)
+  ) {
+    return `the ${trimmed}`;
+  }
+  return `the ${trimmed}`;
 }
 
 function describeDayOfWeek(internal: ParsedSigInternal): string | undefined {
@@ -216,10 +492,10 @@ function describeDayOfWeek(internal: ParsedSigInternal): string | undefined {
     return undefined;
   }
   const days = internal.dayOfWeek.map((d) => DAY_NAMES[d] ?? d);
-  if (days.length === 1) {
-    return `on ${days[0]}`;
+  if (!days.length) {
+    return undefined;
   }
-  return `on ${days.join(" and ")}`;
+  return `on ${joinWithAnd(days)}`;
 }
 
 export function formatInternal(
@@ -296,37 +572,44 @@ function formatShort(internal: ParsedSigInternal): string {
 }
 
 function formatLong(internal: ParsedSigInternal): string {
-  const parts: string[] = [];
-  const dosePart = formatDoseLong(internal);
-  if (dosePart) {
-    parts.push(dosePart);
+  const grammar = resolveRouteGrammar(internal);
+  const dosePart = formatDoseLong(internal) ?? "the medication";
+  const sitePart = formatSite(internal, grammar);
+  const routePart = buildRoutePhrase(internal, grammar, Boolean(sitePart));
+  const frequencyPart = describeFrequency(internal);
+  const eventParts = collectWhenPhrases(internal);
+  const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
+  const dayPart = describeDayOfWeek(internal);
+  const asNeededPart = internal.asNeeded
+    ? internal.asNeededReason
+      ? `as needed for ${internal.asNeededReason}`
+      : "as needed"
+    : undefined;
+
+  const segments: string[] = [dosePart];
+  if (routePart) {
+    segments.push(routePart);
   }
-  if (internal.routeText) {
-    parts.push(internal.routeText);
+  if (timing.frequency) {
+    segments.push(timing.frequency);
   }
-  const freqText = describeFrequency(internal);
-  if (freqText) {
-    parts.push(freqText);
+  if (timing.event) {
+    segments.push(timing.event);
   }
-  const whenText = describeWhen(internal);
-  if (whenText) {
-    parts.push(whenText);
+  if (dayPart) {
+    segments.push(dayPart);
   }
-  const dayText = describeDayOfWeek(internal);
-  if (dayText) {
-    parts.push(dayText);
+  if (asNeededPart) {
+    segments.push(asNeededPart);
   }
-  if (internal.asNeeded) {
-    parts.push(
-      internal.asNeededReason
-        ? `as needed for ${internal.asNeededReason}`
-        : "as needed"
-    );
+  if (sitePart) {
+    segments.push(sitePart);
   }
-  if (internal.siteText) {
-    parts.push(`at ${internal.siteText}`);
+  const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  if (!body) {
+    return `${grammar.verb}.`;
   }
-  return parts.join(" ").trim();
+  return `${grammar.verb} ${body}.`;
 }
 
 function stripTrailingZero(value: number): string {

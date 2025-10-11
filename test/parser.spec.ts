@@ -22,7 +22,12 @@ describe("parseSig core scenarios", () => {
       code: SNOMEDCTRouteCodes["Oral route"],
       display: "Oral route"
     });
-    expect(result.longText).toBe("1 tablet by mouth three times daily after meals");
+    expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
+  });
+
+  it("formats oral bedtime instructions", () => {
+    const result = parseSig("1 mg po hs");
+    expect(result.longText).toBe("Take 1 mg by mouth at bedtime.");
   });
 
   it("parses dose ranges with frequency code", () => {
@@ -378,6 +383,7 @@ describe("ocular and injection scenarios", () => {
       code: SNOMEDCTRouteCodes["Ophthalmic route"],
       display: "Ophthalmic route"
     });
+    expect(result.longText).toBe("Instill 1 drop four times daily in the right eye.");
   });
 
   it("parses left eye drops every 2 hours", () => {
@@ -393,6 +399,14 @@ describe("ocular and injection scenarios", () => {
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q1H");
     expect(result.fhir.site?.text).toBe("both eyes");
+    expect(result.longText).toBe("Instill 1 drop every 1 hour in both eyes.");
+  });
+
+  it("formats combined qid and bedtime ocular dosing", () => {
+    const result = parseSig("1 drop OU QID hs");
+    expect(result.longText).toBe(
+      "Instill 1 drop four times daily and at bedtime in both eyes."
+    );
   });
 
   it("parses intramuscular injections", () => {

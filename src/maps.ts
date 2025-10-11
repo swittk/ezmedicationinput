@@ -409,6 +409,9 @@ export const KNOWN_DOSAGE_FORMS_TO_DOSE: Record<string, string> = {
   collodion: "collodion",
   "powder for rectal solution": "powder for rectal solution",
   "eye drops, solution": "eye drops, solution",
+  // additional helpers
+  "eye drops": "eye drops, solution",
+  "eye drop": "eye drops, solution",
   "oromucosal paste": "oromucosal paste",
   "dental paste": "dental paste",
   "solution for peritoneal dialysis": "solution for peritoneal dialysis",
