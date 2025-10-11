@@ -173,6 +173,7 @@ export enum SNOMEDCTRouteCodes {
   "Intrapulmonary route (qualifier value)" = "420201002",
   "Mucous fistula route (qualifier value)" = "420204005",
   "Nasoduodenal route (qualifier value)" = "420218003",
+  "Body cavity route" = "420254004",
   "A route that begins within a non-pathologic hollow cavity, such as that of the abdominal cavity or uterus." = "420254004",
   "Intraventricular route - cardiac (qualifier value)" = "420287000",
   "Intracerebroventricular route (qualifier value)" = "420719007",

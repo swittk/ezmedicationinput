@@ -768,7 +768,7 @@ export function parseInternal(
 
   // Process tokens sequentially
   const tryRouteSynonym = (startIndex: number): boolean => {
-    const maxSpan = Math.min(5, tokens.length - startIndex);
+    const maxSpan = Math.min(24, tokens.length - startIndex);
     for (let span = maxSpan; span >= 1; span--) {
       const slice = tokens.slice(startIndex, startIndex + span);
       if (slice.some((part) => internal.consumed.has(part.index))) {

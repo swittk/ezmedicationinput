@@ -80,64 +80,84 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
     map[normalized] = { code, text: ROUTE_TEXT[code] };
   };
 
-  assign("po", RouteCode["Oral route"]);
-  assign("oral", RouteCode["Oral route"]);
-  assign("by mouth", RouteCode["Oral route"]);
-  assign("per os", RouteCode["Oral route"]);
-  assign("sl", RouteCode["Sublingual route"]);
-  assign("s.l.", RouteCode["Sublingual route"]);
-  assign("sublingual", RouteCode["Sublingual route"]);
-  assign("buccal", RouteCode["Buccal route"]);
-  assign("inh", RouteCode["Respiratory tract route (qualifier value)"]);
-  assign("inhalation", RouteCode["Respiratory tract route (qualifier value)"]);
-  assign("inhaled", RouteCode["Respiratory tract route (qualifier value)"]);
-  assign("iv", RouteCode["Intravenous route"]);
-  assign("ivp", RouteCode["Intravenous route"]);
-  assign("ivpb", RouteCode["Intravenous route"]);
-  assign("iv push", RouteCode["Intravenous route"]);
-  assign("iv bolus", RouteCode["Intravenous route"]);
-  assign("iv drip", RouteCode["Intravenous route"]);
-  assign("intravenous", RouteCode["Intravenous route"]);
-  assign("im", RouteCode["Intramuscular route"]);
-  assign("im injection", RouteCode["Intramuscular route"]);
-  assign("intramuscular", RouteCode["Intramuscular route"]);
-  assign("sc", RouteCode["Subcutaneous route"]);
-  assign("sq", RouteCode["Subcutaneous route"]);
-  assign("subq", RouteCode["Subcutaneous route"]);
-  assign("subcut", RouteCode["Subcutaneous route"]);
-  assign("subcutaneous", RouteCode["Subcutaneous route"]);
-  assign("in", RouteCode["Nasal route"]);
-  assign("intranasal", RouteCode["Nasal route"]);
-  assign("nasal", RouteCode["Nasal route"]);
-  assign("top", RouteCode["Topical route"]);
-  assign("topical", RouteCode["Topical route"]);
-  assign("td", RouteCode["Transdermal route"]);
-  assign("patch", RouteCode["Transdermal route"]);
-  assign("transdermal", RouteCode["Transdermal route"]);
-  assign("pr", RouteCode["Per rectum"]);
-  assign("rectal", RouteCode["Per rectum"]);
-  assign("pv", RouteCode["Per vagina"]);
-  assign("vaginal", RouteCode["Per vagina"]);
-  assign("oph", RouteCode["Ophthalmic route"]);
-  assign("ophth", RouteCode["Ophthalmic route"]);
-  assign("ophthalmic", RouteCode["Ophthalmic route"]);
-  assign("ocular", RouteCode["Ophthalmic route"]);
-  assign("intravitreal", RouteCode["Intravitreal route (qualifier value)"]);
-  assign("intravitreal injection", RouteCode["Intravitreal route (qualifier value)"]);
-  assign("ivt", RouteCode["Intravitreal route (qualifier value)"]);
+  const registerVariants = (value: string | undefined, code: RouteCode) => {
+    if (!value) return;
+    assign(value, code);
+    const withoutParens = value
+      .replace(/[()]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    assign(withoutParens, code);
+    const withoutCommas = value
+      .replace(/,/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    assign(withoutCommas, code);
+    const withoutPunctuation = value
+      .replace(/[().,-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    assign(withoutPunctuation, code);
+  };
+
+  registerVariants("po", RouteCode["Oral route"]);
+  registerVariants("oral", RouteCode["Oral route"]);
+  registerVariants("by mouth", RouteCode["Oral route"]);
+  registerVariants("per os", RouteCode["Oral route"]);
+  registerVariants("sl", RouteCode["Sublingual route"]);
+  registerVariants("s.l.", RouteCode["Sublingual route"]);
+  registerVariants("sublingual", RouteCode["Sublingual route"]);
+  registerVariants("buccal", RouteCode["Buccal route"]);
+  registerVariants("inh", RouteCode["Respiratory tract route (qualifier value)"]);
+  registerVariants("inhalation", RouteCode["Respiratory tract route (qualifier value)"]);
+  registerVariants("inhaled", RouteCode["Respiratory tract route (qualifier value)"]);
+  registerVariants("iv", RouteCode["Intravenous route"]);
+  registerVariants("ivp", RouteCode["Intravenous route"]);
+  registerVariants("ivpb", RouteCode["Intravenous route"]);
+  registerVariants("iv push", RouteCode["Intravenous route"]);
+  registerVariants("iv bolus", RouteCode["Intravenous route"]);
+  registerVariants("iv drip", RouteCode["Intravenous route"]);
+  registerVariants("intravenous", RouteCode["Intravenous route"]);
+  registerVariants("im", RouteCode["Intramuscular route"]);
+  registerVariants("im injection", RouteCode["Intramuscular route"]);
+  registerVariants("intramuscular", RouteCode["Intramuscular route"]);
+  registerVariants("sc", RouteCode["Subcutaneous route"]);
+  registerVariants("sq", RouteCode["Subcutaneous route"]);
+  registerVariants("subq", RouteCode["Subcutaneous route"]);
+  registerVariants("subcut", RouteCode["Subcutaneous route"]);
+  registerVariants("subcutaneous", RouteCode["Subcutaneous route"]);
+  registerVariants("in", RouteCode["Nasal route"]);
+  registerVariants("intranasal", RouteCode["Nasal route"]);
+  registerVariants("nasal", RouteCode["Nasal route"]);
+  registerVariants("top", RouteCode["Topical route"]);
+  registerVariants("topical", RouteCode["Topical route"]);
+  registerVariants("td", RouteCode["Transdermal route"]);
+  registerVariants("patch", RouteCode["Transdermal route"]);
+  registerVariants("transdermal", RouteCode["Transdermal route"]);
+  registerVariants("pr", RouteCode["Per rectum"]);
+  registerVariants("rectal", RouteCode["Per rectum"]);
+  registerVariants("pv", RouteCode["Per vagina"]);
+  registerVariants("vaginal", RouteCode["Per vagina"]);
+  registerVariants("oph", RouteCode["Ophthalmic route"]);
+  registerVariants("ophth", RouteCode["Ophthalmic route"]);
+  registerVariants("ophthalmic", RouteCode["Ophthalmic route"]);
+  registerVariants("ocular", RouteCode["Ophthalmic route"]);
+  registerVariants("intravitreal", RouteCode["Intravitreal route (qualifier value)"]);
+  registerVariants("intravitreal injection", RouteCode["Intravitreal route (qualifier value)"]);
+  registerVariants("ivt", RouteCode["Intravitreal route (qualifier value)"]);
 
   for (const [routeCode, meta] of ROUTE_SNOMED_ENTRIES) {
     const display = meta.display.toLowerCase();
-    assign(display, routeCode);
+    registerVariants(display, routeCode);
     const withoutQualifier = display.replace(/\s*\(qualifier value\)/g, "").trim();
-    assign(withoutQualifier, routeCode);
+    registerVariants(withoutQualifier, routeCode);
     const withoutSuffix = withoutQualifier
       .replace(/\b(route|use)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    assign(withoutSuffix, routeCode);
+    registerVariants(withoutSuffix, routeCode);
     const withoutPer = withoutSuffix.replace(/^per\s+/, "").trim();
-    assign(withoutPer, routeCode);
+    registerVariants(withoutPer, routeCode);
   }
 
   return map;
