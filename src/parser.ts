@@ -17,6 +17,8 @@ import {
   ParseOptions,
   RouteCode
 } from "./types";
+import { objectEntries } from "./utils/object";
+import { arrayIncludes } from "./utils/array";
 
 export interface Token {
   original: string;
@@ -209,7 +211,7 @@ function mark(consumed: Set<number>, token: Token) {
 }
 
 function addWhen(target: EventTiming[], code: EventTiming) {
-  if (!target.includes(code)) {
+  if (!arrayIncludes(target, code)) {
     target.push(code);
   }
 }
@@ -340,19 +342,19 @@ function expandMealTimings(
 
   const replacements: Array<{ general: EventTiming; specifics: EventTiming[] }> = [];
 
-  if (internal.when.includes(EventTiming["Before Meal"])) {
+  if (arrayIncludes(internal.when, EventTiming["Before Meal"])) {
     const specifics = computeMealExpansions("before", frequency, pairPreference);
     if (specifics) {
       replacements.push({ general: EventTiming["Before Meal"], specifics });
     }
   }
-  if (internal.when.includes(EventTiming["After Meal"])) {
+  if (arrayIncludes(internal.when, EventTiming["After Meal"])) {
     const specifics = computeMealExpansions("after", frequency, pairPreference);
     if (specifics) {
       replacements.push({ general: EventTiming["After Meal"], specifics });
     }
   }
-  if (internal.when.includes(EventTiming.Meal)) {
+  if (arrayIncludes(internal.when, EventTiming.Meal)) {
     const specifics = computeMealExpansions("with", frequency, pairPreference);
     if (specifics) {
       replacements.push({ general: EventTiming.Meal, specifics });
@@ -714,7 +716,7 @@ export function parseInternal(
   const context = options?.context ?? undefined;
   const customRouteMap = options?.routeMap
     ? new Map(
-        Object.entries(options.routeMap).map(([key, value]) => [
+        objectEntries(options.routeMap).map(([key, value]) => [
           key.toLowerCase(),
           value
         ])
@@ -858,7 +860,7 @@ export function parseInternal(
     // Day of week
     const day = DAY_OF_WEEK_TOKENS[token.lower];
     if (day) {
-      if (!internal.dayOfWeek.includes(day)) {
+      if (!arrayIncludes(internal.dayOfWeek, day)) {
         internal.dayOfWeek.push(day);
       }
       mark(internal.consumed, token);

@@ -7,6 +7,8 @@ import {
   FhirTimingRepeat,
   SNOMEDCTRouteCodes
 } from "./types";
+import { objectValues } from "./utils/object";
+import { arrayIncludes } from "./utils/array";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -134,7 +136,10 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       : [],
     when: dosage.timing?.repeat?.when
       ? dosage.timing.repeat.when.filter((value): value is EventTiming =>
-          Object.values(EventTiming).includes(value as EventTiming)
+          arrayIncludes(
+            objectValues(EventTiming) as EventTiming[],
+            value as EventTiming
+          )
         )
       : [],
     warnings: [],

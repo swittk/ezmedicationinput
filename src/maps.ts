@@ -5,7 +5,12 @@ import {
   RouteCode,
   SNOMEDCTRouteCodes
 } from "./types";
+import { objectEntries, objectFromEntries } from "./utils/object";
 
+type RouteSnomedEntry = [
+  RouteCode,
+  { code: SNOMEDCTRouteCodes; display: string }
+];
 
 const ROUTE_TEXT_OVERRIDES: Partial<Record<RouteCode, string>> = {
   [RouteCode["Oral route"]]: "by mouth",
@@ -30,26 +35,26 @@ function defaultRouteText(display: string): string {
   return withoutSuffix.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-const ROUTE_SNOMED_ENTRIES = Object.entries(SNOMEDCTRouteCodes).map(
-  ([display, code]) => {
-    const routeCode = code as RouteCode;
-    return [
-      routeCode,
-      { code: code as SNOMEDCTRouteCodes, display }
-    ] as const;
-  }
-);
+const ROUTE_SNOMED_ENTRIES: RouteSnomedEntry[] = objectEntries(
+  SNOMEDCTRouteCodes
+).map(([display, code]) => {
+  const routeCode = code as RouteCode;
+  return [
+    routeCode,
+    { code: code as SNOMEDCTRouteCodes, display }
+  ];
+});
 
 /**
  * SNOMED CT codings aligned with every known RouteCode. Keeping the structure
  * data-driven ensures any additions to the enumeration are surfaced
  * automatically throughout the library.
  */
-export const ROUTE_SNOMED = Object.fromEntries(
+export const ROUTE_SNOMED = objectFromEntries(
   ROUTE_SNOMED_ENTRIES
 ) as Record<RouteCode, { code: SNOMEDCTRouteCodes; display: string }>;
 
-export const ROUTE_TEXT = Object.fromEntries(
+export const ROUTE_TEXT = objectFromEntries(
   ROUTE_SNOMED_ENTRIES.map(([routeCode, meta]) => [
     routeCode,
     ROUTE_TEXT_OVERRIDES[routeCode] ?? defaultRouteText(meta.display)
@@ -60,7 +65,7 @@ export const ROUTE_TEXT = Object.fromEntries(
  * Inverse lookup so that SNOMED codes flowing in from FHIR can be mapped back
  * into our internal RouteCode abstraction during round-tripping.
  */
-export const ROUTE_BY_SNOMED = Object.fromEntries(
+export const ROUTE_BY_SNOMED = objectFromEntries(
   ROUTE_SNOMED_ENTRIES.map(([routeCode, meta]) => [meta.code, routeCode])
 ) as Record<SNOMEDCTRouteCodes, RouteCode>;
 

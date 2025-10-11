@@ -8,6 +8,7 @@ import {
   NextDueDoseConfig,
   NextDueDoseOptions
 } from "./types";
+import { arrayIncludes } from "./utils/array";
 
 /**
  * Default institution times used when a dosage only specifies frequency without
@@ -54,9 +55,44 @@ interface ExpandedTime {
   dayShift: number;
 }
 
+interface DateTimeFormatPart {
+  type: string;
+  value: string;
+}
+
+interface IntlDateTimeFormatOptionsExtended extends Intl.DateTimeFormatOptions {
+  calendar?: string;
+  numberingSystem?: string;
+}
+
+interface DateTimeFormatWithParts extends Intl.DateTimeFormat {
+  formatToParts?: (date: Date) => DateTimeFormatPart[];
+}
+
 /** Simple zero-padding helper for numeric components. */
 function pad(value: number, length = 2): string {
-  return value.toString().padStart(length, "0");
+  const absolute = Math.abs(value);
+  let output = absolute.toString();
+  while (output.length < length) {
+    output = `0${output}`;
+  }
+  return value < 0 ? `-${output}` : output;
+}
+
+function formatToParts(formatter: Intl.DateTimeFormat, date: Date): DateTimeFormatPart[] {
+  const withParts = formatter as DateTimeFormatWithParts;
+  if (typeof withParts.formatToParts === "function") {
+    return withParts.formatToParts(date);
+  }
+  const iso = date.toISOString();
+  return [
+    { type: "year", value: iso.slice(0, 4) },
+    { type: "month", value: iso.slice(5, 7) },
+    { type: "day", value: iso.slice(8, 10) },
+    { type: "hour", value: iso.slice(11, 13) },
+    { type: "minute", value: iso.slice(14, 16) },
+    { type: "second", value: iso.slice(17, 19) }
+  ];
 }
 
 /**
@@ -95,7 +131,7 @@ function normalizeClock(clock: string): string {
 function getDateTimeFormat(timeZone: string): Intl.DateTimeFormat {
   let formatter = dateTimeFormatCache.get(timeZone);
   if (!formatter) {
-    formatter = new Intl.DateTimeFormat("en-CA", {
+    const options: IntlDateTimeFormatOptionsExtended = {
       timeZone,
       calendar: "iso8601",
       numberingSystem: "latn",
@@ -106,7 +142,8 @@ function getDateTimeFormat(timeZone: string): Intl.DateTimeFormat {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit"
-    });
+    };
+    formatter = new Intl.DateTimeFormat("en-CA", options);
     dateTimeFormatCache.set(timeZone, formatter);
   }
   return formatter;
@@ -132,7 +169,7 @@ function getWeekdayFormat(timeZone: string): Intl.DateTimeFormat {
 function getTimeParts(date: Date, timeZone: string): TimeParts {
   const formatter = getDateTimeFormat(timeZone);
   const parts: Partial<TimeParts> = {};
-  const rawParts = formatter.formatToParts(date);
+  const rawParts = formatToParts(formatter, date);
   for (const part of rawParts) {
     if (part.type === "literal") {
       continue;
@@ -156,7 +193,7 @@ function getTimeParts(date: Date, timeZone: string): TimeParts {
     // instant forward slightly so we can capture the correct calendar date and
     // reset the hour component back to zero.
     const forward = new Date(date.getTime() + 60 * 1000);
-    const forwardParts = formatter.formatToParts(forward);
+    const forwardParts = formatToParts(formatter, forward);
     for (const part of forwardParts) {
       if (part.type === "literal") {
         continue;
@@ -538,7 +575,7 @@ export function nextDueDoses(
         return a.time.localeCompare(b.time);
       });
     }
-    const includesImmediate = whenCodes.includes(EventTiming.Immediate);
+    const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
     if (includesImmediate && orderedAt >= baseline) {
       const instantIso = formatZonedIso(orderedAt, timeZone);
       results.push(instantIso);
