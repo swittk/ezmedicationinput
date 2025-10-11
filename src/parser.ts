@@ -1,6 +1,7 @@
 import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_ROUTE_SYNONYMS,
+  DEFAULT_UNIT_BY_ROUTE,
   DEFAULT_UNIT_SYNONYMS,
   EVENT_TIMING_TOKENS,
   MEAL_KEYWORDS,
@@ -147,6 +148,13 @@ const EYE_SITE_TOKENS: Record<string, { site: string; route?: RouteCode }> = {
     route: RouteCode["Intravitreal route (qualifier value)"]
   }
 };
+
+const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
+  { pattern: /\beye(s)?\b/i, route: RouteCode["Ophthalmic route"] },
+  { pattern: /\bear(s)?\b/i, route: RouteCode["Otic route"] },
+  { pattern: /\bnostril(s)?\b/i, route: RouteCode["Nasal route"] },
+  { pattern: /\bnares?\b/i, route: RouteCode["Nasal route"] }
+];
 
 export function tokenize(input: string): Token[] {
   const separators = /[(),]/g;
@@ -962,6 +970,13 @@ export function parseInternal(
     internal.unit = inferUnitFromContext(context);
   }
 
+  if (internal.unit === undefined) {
+    const fallbackUnit = inferUnitFromRouteHints(internal);
+    if (fallbackUnit) {
+      internal.unit = fallbackUnit;
+    }
+  }
+
   // Frequency defaults when timing code implies it
   if (
     internal.frequency === undefined &&
@@ -1060,6 +1075,47 @@ function normalizeUnit(token: string, options?: ParseOptions): string | undefine
   const defaultUnit = DEFAULT_UNIT_SYNONYMS[token];
   if (defaultUnit) {
     return defaultUnit;
+  }
+  return undefined;
+}
+
+function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefined {
+  if (internal.routeCode) {
+    const unit = DEFAULT_UNIT_BY_ROUTE[internal.routeCode];
+    if (unit) {
+      return unit;
+    }
+  }
+
+  if (internal.routeText) {
+    const normalized = internal.routeText.trim().toLowerCase();
+    const synonym = DEFAULT_ROUTE_SYNONYMS[normalized];
+    if (synonym) {
+      const unit = DEFAULT_UNIT_BY_ROUTE[synonym.code];
+      if (unit) {
+        return unit;
+      }
+    }
+  }
+
+  if (internal.siteText) {
+    const unit = inferUnitFromSiteText(internal.siteText);
+    if (unit) {
+      return unit;
+    }
+  }
+
+  return undefined;
+}
+
+function inferUnitFromSiteText(siteText: string): string | undefined {
+  for (const { pattern, route } of SITE_UNIT_ROUTE_HINTS) {
+    if (pattern.test(siteText)) {
+      const unit = DEFAULT_UNIT_BY_ROUTE[route];
+      if (unit) {
+        return unit;
+      }
+    }
   }
   return undefined;
 }

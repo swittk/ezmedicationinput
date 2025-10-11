@@ -838,3 +838,62 @@ export const DEFAULT_UNIT_BY_NORMALIZED_FORM: Record<string, string> = {
   "intravitreal implant in applicator": "implant",
   "medicated chewing-gum": "piece"
 };
+
+const ROUTE_UNIT_FALLBACK_WHITELIST = new Set([
+  "drop",
+  "puff",
+  "spray",
+  "patch",
+  "suppository",
+  "implant",
+  "piece",
+  "stick",
+  "pessary",
+  "lozenge"
+]);
+
+export const DEFAULT_UNIT_BY_ROUTE: Partial<Record<RouteCode, string>> = (() => {
+  const unitCandidates = new Map<RouteCode, Set<string>>();
+
+  for (const [form, snomed] of objectEntries(KNOWN_TMT_DOSAGE_FORM_TO_SNOMED_ROUTE)) {
+    const routeCode = ROUTE_BY_SNOMED[snomed];
+    if (!routeCode) {
+      continue;
+    }
+    const unit = DEFAULT_UNIT_BY_NORMALIZED_FORM[form];
+    if (!unit) {
+      continue;
+    }
+    let unitsForRoute = unitCandidates.get(routeCode);
+    if (!unitsForRoute) {
+      unitsForRoute = new Set();
+      unitCandidates.set(routeCode, unitsForRoute);
+    }
+    unitsForRoute.add(unit);
+  }
+
+  const resolved: Partial<Record<RouteCode, string>> = {};
+  for (const [route, units] of unitCandidates) {
+    if (units.size !== 1) {
+      continue;
+    }
+    const [unit] = Array.from(units);
+    if (unit && ROUTE_UNIT_FALLBACK_WHITELIST.has(unit)) {
+      resolved[route] = unit;
+    }
+  }
+
+  const ensure = (route: RouteCode, unit: string) => {
+    if (ROUTE_UNIT_FALLBACK_WHITELIST.has(unit)) {
+      resolved[route] = unit;
+    }
+  };
+
+  ensure(RouteCode["Ophthalmic route"], "drop");
+  ensure(RouteCode["Ocular route (qualifier value)"], "drop");
+  ensure(RouteCode["Otic route"], "drop");
+  ensure(RouteCode["Respiratory tract route (qualifier value)"], "puff");
+  ensure(RouteCode["Transdermal route"], "patch");
+
+  return resolved;
+})();

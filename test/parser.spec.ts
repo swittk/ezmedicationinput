@@ -25,6 +25,45 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
   });
 
+  it("infers ophthalmic units from medication context", () => {
+    const result = parseSig("1x3 OD", {
+      context: { dosageForm: "eye drops, solution" }
+    });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
+    expect(result.fhir.site?.text).toBe("right eye");
+  });
+
+  it("defaults ophthalmic units when only site hints are supplied", () => {
+    const result = parseSig("1x3 OD");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
+    expect(result.fhir.site?.text).toBe("right eye");
+  });
+
+  it("infers inhalation units from respiratory route hints", () => {
+    const result = parseSig("2 inh q4h");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Respiratory tract route (qualifier value)"]
+    );
+  });
+
+  it("infers patch units for transdermal routes", () => {
+    const result = parseSig("1 td daily");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "patch" });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Transdermal route"]);
+  });
+
+  it("infers suppository units for rectal routes", () => {
+    const result = parseSig("1 pr q12h");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "suppository"
+    });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per rectum"]);
+  });
+
   it("formats oral bedtime instructions", () => {
     const result = parseSig("1 mg po hs");
     expect(result.longText).toBe("Take 1 mg by mouth at bedtime.");
