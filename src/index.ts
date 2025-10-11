@@ -4,6 +4,7 @@ import { parseInternal } from "./parser";
 import { FhirDosage, ParseOptions, ParseResult } from "./types";
 
 export { parseInternal } from "./parser";
+export { suggestSig } from "./suggest";
 export * from "./types";
 export { nextDueDoses } from "./schedule";
 
