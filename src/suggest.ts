@@ -365,6 +365,8 @@ function buildWhenSequences(): string[][] {
   return sequences;
 }
 
+const PRECOMPUTED_WHEN_SEQUENCES = buildWhenSequences();
+
 function tokenizeForMatching(value: string): string[] {
   return value
     .toLowerCase()
@@ -511,27 +513,35 @@ function buildDoseValues(input: string): string[] {
   return [...values];
 }
 
+type CandidateMatcher = (candidate: string) => boolean;
+
 function generateCandidateDirections(
   pairs: UnitRoutePair[],
   doseValues: readonly string[],
   prnReasons: readonly string[],
   intervalTokens: readonly string[],
   whenSequences: readonly string[][],
+  limit: number,
+  matcher: CandidateMatcher,
 ): string[] {
   const suggestions: string[] = [];
   const seen = new Set<string>();
 
-  const push = (value: string) => {
+  const push = (value: string): boolean => {
     const normalized = normalizeSpacing(value);
     if (!normalized) {
-      return;
+      return false;
     }
     const key = normalizeKey(normalized);
     if (seen.has(key)) {
-      return;
+      return false;
     }
     seen.add(key);
+    if (!matcher(normalized)) {
+      return false;
+    }
     suggestions.push(normalized);
+    return suggestions.length >= limit;
   };
 
   for (const pair of pairs) {
@@ -540,22 +550,32 @@ function generateCandidateDirections(
     for (const code of FREQUENCY_CODES) {
       for (const unitVariant of unitVariants) {
         for (const dose of doseValues) {
-          push(`${dose} ${unitVariant} ${pair.route} ${code}`);
+          if (push(`${dose} ${unitVariant} ${pair.route} ${code}`)) {
+            return suggestions;
+          }
         }
       }
-      push(`${pair.route} ${code}`);
+      if (push(`${pair.route} ${code}`)) {
+        return suggestions;
+      }
     }
 
     for (const interval of intervalTokens) {
       for (const unitVariant of unitVariants) {
         for (const dose of doseValues) {
-          push(`${dose} ${unitVariant} ${pair.route} ${interval}`);
+          if (push(`${dose} ${unitVariant} ${pair.route} ${interval}`)) {
+            return suggestions;
+          }
           for (const reason of prnReasons) {
-            push(`${dose} ${unitVariant} ${pair.route} ${interval} prn ${reason}`);
+            if (push(`${dose} ${unitVariant} ${pair.route} ${interval} prn ${reason}`)) {
+              return suggestions;
+            }
           }
         }
       }
-      push(`${pair.route} ${interval}`);
+      if (push(`${pair.route} ${interval}`)) {
+        return suggestions;
+      }
     }
 
     for (const freq of FREQUENCY_NUMBERS) {
@@ -563,9 +583,13 @@ function generateCandidateDirections(
       if (!freqToken) {
         continue;
       }
-      push(`1x${freq} ${pair.route} ${freqToken}`);
+      if (push(`1x${freq} ${pair.route} ${freqToken}`)) {
+        return suggestions;
+      }
       for (const when of CORE_WHEN_TOKENS) {
-        push(`1x${freq} ${pair.route} ${when}`);
+        if (push(`1x${freq} ${pair.route} ${when}`)) {
+          return suggestions;
+        }
       }
     }
 
@@ -573,19 +597,27 @@ function generateCandidateDirections(
       const suffix = whenSequence.join(" ");
       for (const unitVariant of unitVariants) {
         for (const dose of doseValues) {
-          push(`${dose} ${unitVariant} ${pair.route} ${suffix}`);
+          if (push(`${dose} ${unitVariant} ${pair.route} ${suffix}`)) {
+            return suggestions;
+          }
         }
       }
-      push(`${pair.route} ${suffix}`);
+      if (push(`${pair.route} ${suffix}`)) {
+        return suggestions;
+      }
     }
 
     for (const reason of prnReasons) {
       for (const unitVariant of unitVariants) {
         for (const dose of doseValues) {
-          push(`${dose} ${unitVariant} ${pair.route} prn ${reason}`);
+          if (push(`${dose} ${unitVariant} ${pair.route} prn ${reason}`)) {
+            return suggestions;
+          }
         }
       }
-      push(`${pair.route} prn ${reason}`);
+      if (push(`${pair.route} prn ${reason}`)) {
+        return suggestions;
+      }
     }
   }
 
@@ -640,6 +672,9 @@ function matchesPrefix(
 
 export function suggestSig(input: string, options?: SuggestSigOptions): string[] {
   const limit = options?.limit ?? DEFAULT_LIMIT;
+  if (limit <= 0) {
+    return [];
+  }
   const prefix = normalizeSpacing(input.toLowerCase());
   const prefixCompact = prefix.replace(/\s+/g, "");
   const prefixNoDashes = prefix.replace(/-/g, "");
@@ -654,36 +689,26 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const doseValues = buildDoseValues(input);
   const prnReasons = buildPrnReasons(options?.prnReasons);
   const intervalTokens = buildIntervalTokens(input);
-  const whenSequences = buildWhenSequences();
-  const candidates = generateCandidateDirections(
+  const whenSequences = PRECOMPUTED_WHEN_SEQUENCES;
+  const matcher: CandidateMatcher = (candidate) =>
+    matchesPrefix(
+      candidate,
+      prefix,
+      prefixCompact,
+      prefixTokens,
+      prefixTokensNoDashes,
+      prefixCanonical,
+      prefixCanonicalCompact,
+      prefixNoDashes,
+      prefixCanonicalNoDashes,
+    );
+  return generateCandidateDirections(
     pairs,
     doseValues,
     prnReasons,
     intervalTokens,
     whenSequences,
+    limit,
+    matcher,
   );
-
-  const results: string[] = [];
-  for (const candidate of candidates) {
-    if (
-      matchesPrefix(
-        candidate,
-        prefix,
-        prefixCompact,
-        prefixTokens,
-        prefixTokensNoDashes,
-        prefixCanonical,
-        prefixCanonicalCompact,
-        prefixNoDashes,
-        prefixCanonicalNoDashes,
-      )
-    ) {
-      results.push(candidate);
-    }
-    if (results.length >= limit) {
-      break;
-    }
-  }
-
-  return results;
 }
