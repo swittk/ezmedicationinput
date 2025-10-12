@@ -135,6 +135,8 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "upon waking": EventTiming.Wake
 };
 
+const MEAL_CONTEXT_CONNECTORS = new Set(["and", "or", "&", "+", "plus"]);
+
 // Tracking explicit breakfast/lunch/dinner markers lets the meal-expansion
 // logic bail early when the clinician already specified precise events.
 const SPECIFIC_MEAL_TIMINGS = new Set<EventTiming>([
@@ -1183,21 +1185,32 @@ function parseMealContext(
   code: EventTiming
 ) {
   const token = tokens[index];
-  const next = tokens[index + 1];
-  if (!next || internal.consumed.has(next.index)) {
-    applyWhenToken(internal, token, code);
-    return;
-  }
-  const meal = MEAL_KEYWORDS[next.lower];
-  if (meal) {
+  let converted = 0;
+  for (let lookahead = index + 1; lookahead < tokens.length; lookahead++) {
+    const nextToken = tokens[lookahead];
+    if (internal.consumed.has(nextToken.index)) {
+      continue;
+    }
+    if (MEAL_CONTEXT_CONNECTORS.has(nextToken.lower)) {
+      mark(internal.consumed, nextToken);
+      continue;
+    }
+    const meal = MEAL_KEYWORDS[nextToken.lower];
+    if (!meal) {
+      break;
+    }
     const whenCode =
       code === EventTiming["After Meal"]
         ? meal.pc
         : code === EventTiming["Before Meal"]
         ? meal.ac
         : code;
-    applyWhenToken(internal, token, whenCode);
-    mark(internal.consumed, next);
+    addWhen(internal.when, whenCode);
+    mark(internal.consumed, nextToken);
+    converted++;
+  }
+  if (converted > 0) {
+    mark(internal.consumed, token);
     return;
   }
   applyWhenToken(internal, token, code);

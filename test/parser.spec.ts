@@ -604,6 +604,16 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Dinner"]]);
   });
 
+  it("applies pc context across multiple meals", () => {
+    const result = parseSig("pc breakfast lunch dinner hs");
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"],
+      EventTiming["Before Sleep"],
+    ]);
+  });
+
   it("maps ac dinnertime", () => {
     const result = parseSig("ac dinnertime");
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Dinner"]]);
