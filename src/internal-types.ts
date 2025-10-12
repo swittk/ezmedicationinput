@@ -1,4 +1,17 @@
-import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, RouteCode } from "./types";
+import {
+  EventTiming,
+  FhirCoding,
+  FhirDayOfWeek,
+  FhirPeriodUnit,
+  RouteCode,
+  SiteCodeLookupRequest,
+  SiteCodeSuggestion
+} from "./types";
+
+export interface SiteLookupDetail {
+  request: SiteCodeLookupRequest;
+  suggestions: SiteCodeSuggestion[];
+}
 
 export interface Token {
   original: string;
@@ -30,4 +43,7 @@ export interface ParsedSigInternal {
   siteText?: string;
   siteSource?: "abbreviation" | "text";
   siteTokenIndices: Set<number>;
+  siteCoding?: FhirCoding;
+  siteLookupRequest?: SiteCodeLookupRequest;
+  siteLookups: SiteLookupDetail[];
 }

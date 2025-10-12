@@ -111,8 +111,20 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     }
   }
 
-  if (internal.siteText) {
-    dosage.site = { text: internal.siteText };
+  if (internal.siteText || internal.siteCoding?.code) {
+    const coding = internal.siteCoding?.code
+      ? [
+          {
+            system: internal.siteCoding.system ?? SNOMED_SYSTEM,
+            code: internal.siteCoding.code,
+            display: internal.siteCoding.display
+          }
+        ]
+      : undefined;
+    dosage.site = {
+      text: internal.siteText,
+      coding
+    };
   }
 
   if (internal.asNeeded) {
@@ -158,7 +170,8 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
     siteText: dosage.site?.text,
     asNeeded: dosage.asNeededBoolean,
     asNeededReason: dosage.asNeededFor?.[0]?.text,
-    siteTokenIndices: new Set()
+    siteTokenIndices: new Set(),
+    siteLookups: []
   };
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
@@ -169,6 +182,15 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       internal.routeCode = mapped;
       internal.routeText = ROUTE_TEXT[mapped];
     }
+  }
+
+  const siteCoding = dosage.site?.coding?.find((code) => code.system === SNOMED_SYSTEM);
+  if (siteCoding?.code) {
+    internal.siteCoding = {
+      code: siteCoding.code,
+      display: siteCoding.display,
+      system: siteCoding.system
+    };
   }
 
 

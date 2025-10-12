@@ -1,5 +1,6 @@
 import {
   DAY_OF_WEEK_TOKENS,
+  DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
   DEFAULT_UNIT_SYNONYMS,
@@ -8,21 +9,31 @@ import {
   MEAL_KEYWORDS,
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
-  WORD_FREQUENCIES
+  WORD_FREQUENCIES,
+  normalizeBodySiteKey
 } from "./maps";
 import { inferUnitFromContext } from "./context";
 import { checkDiscouraged } from "./safety";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
+  BodySiteDefinition,
   EventTiming,
   FhirDayOfWeek,
   FhirPeriodUnit,
   MedicationContext,
   ParseOptions,
-  RouteCode
+  RouteCode,
+  SiteCodeLookupRequest,
+  SiteCodeResolver,
+  SiteCodeSuggestion,
+  SiteCodeSuggestionResolver,
+  SiteCodeSuggestionsResult,
+  TextRange
 } from "./types";
 import { objectEntries } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
+
+const SNOMED_SYSTEM = "http://snomed.info/sct";
 
 const BODY_SITE_HINTS = new Set([
   "left",
@@ -82,10 +93,14 @@ const BODY_SITE_HINTS = new Set([
   "veins",
   "vagina",
   "vaginal",
+  "penis",
+  "penile",
   "rectum",
   "rectal",
   "anus",
-  "perineum"
+  "perineum",
+  "temple",
+  "temples"
 ]);
 
 const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
@@ -276,7 +291,7 @@ const OPHTHALMIC_CONTEXT_TOKENS = new Set<string>([
 ]);
 
 function normalizeTokenLower(token: Token): string {
-  return token.lower.replace(/\./g, "");
+  return token.lower.replace(/[.{}]/g, "");
 }
 
 function hasOphthalmicContextHint(tokens: Token[], index: number): boolean {
@@ -723,6 +738,78 @@ export function tokenize(input: string): Token[] {
     }
   }
   return tokens;
+}
+
+/**
+ * Locates the span of the detected site tokens within the caller's original
+ * input so downstream consumers can highlight or replace the exact substring.
+ */
+function computeSiteTextRange(
+  input: string,
+  tokens: Token[],
+  indices: number[]
+): TextRange | undefined {
+  if (!indices.length) {
+    return undefined;
+  }
+  const lowerInput = input.toLowerCase();
+  let searchStart = 0;
+  let rangeStart: number | undefined;
+  let rangeEnd: number | undefined;
+  for (const tokenIndex of indices) {
+    const token = tokens[tokenIndex];
+    if (!token) {
+      continue;
+    }
+    const segment = token.original.trim();
+    if (!segment) {
+      continue;
+    }
+    const lowerSegment = segment.toLowerCase();
+    const foundIndex = lowerInput.indexOf(lowerSegment, searchStart);
+    if (foundIndex === -1) {
+      return undefined;
+    }
+    const segmentEnd = foundIndex + lowerSegment.length;
+    if (rangeStart === undefined) {
+      rangeStart = foundIndex;
+    }
+    rangeEnd = segmentEnd;
+    searchStart = segmentEnd;
+  }
+  if (rangeStart === undefined || rangeEnd === undefined) {
+    return undefined;
+  }
+  return { start: rangeStart, end: rangeEnd };
+}
+
+/**
+ * Prefers highlighting the sanitized site text when it can be located directly
+ * in the original input; otherwise falls back to the broader token-derived
+ * range.
+ */
+function refineSiteRange(
+  input: string,
+  sanitized: string,
+  tokenRange: TextRange | undefined
+): TextRange | undefined {
+  if (!input) {
+    return tokenRange;
+  }
+  const trimmed = sanitized.trim();
+  if (!trimmed) {
+    return tokenRange;
+  }
+  const lowerInput = input.toLowerCase();
+  const lowerSanitized = trimmed.toLowerCase();
+  let startIndex = tokenRange ? lowerInput.indexOf(lowerSanitized, tokenRange.start) : -1;
+  if (startIndex === -1) {
+    startIndex = lowerInput.indexOf(lowerSanitized);
+  }
+  if (startIndex === -1) {
+    return tokenRange;
+  }
+  return { start: startIndex, end: startIndex + lowerSanitized.length };
 }
 
 function splitToken(token: string): string[] {
@@ -1403,7 +1490,8 @@ export function parseInternal(
     dayOfWeek: [],
     when: [],
     warnings: [],
-    siteTokenIndices: new Set<number>()
+    siteTokenIndices: new Set<number>(),
+    siteLookups: []
   };
 
   const context = options?.context ?? undefined;
@@ -1929,7 +2017,8 @@ export function parseInternal(
   const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));
   const siteCandidateIndices = new Set<number>();
   for (const token of leftoverTokens) {
-    if (BODY_SITE_HINTS.has(token.lower)) {
+    const normalized = normalizeTokenLower(token);
+    if (BODY_SITE_HINTS.has(normalized)) {
       siteCandidateIndices.add(token.index);
     }
   }
@@ -1945,7 +2034,7 @@ export function parseInternal(
         if (!token) {
           break;
         }
-        const lower = token.lower;
+        const lower = normalizeTokenLower(token);
         if (
           SITE_CONNECTORS.has(lower) ||
           BODY_SITE_HINTS.has(lower) ||
@@ -1963,7 +2052,7 @@ export function parseInternal(
         if (!token) {
           break;
         }
-        const lower = token.lower;
+        const lower = normalizeTokenLower(token);
         if (
           SITE_CONNECTORS.has(lower) ||
           BODY_SITE_HINTS.has(lower) ||
@@ -1983,8 +2072,10 @@ export function parseInternal(
       if (!token) {
         continue;
       }
-      const lower = token.lower;
-      if (!SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
+      const lower = normalizeTokenLower(token);
+      const trimmed = token.original.trim();
+      const isBraceToken = trimmed.length > 0 && /^[{}]+$/.test(trimmed);
+      if (!isBraceToken && !SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
         displayWords.push(token.original);
       }
       mark(internal.consumed, token);
@@ -1994,18 +2085,47 @@ export function parseInternal(
       .join(" ")
       .trim();
     if (normalizedSite) {
-      const normalizedLower = normalizedSite.toLowerCase();
-      const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
-      const siteWords = normalizedLower.split(/\s+/).filter((word) => word.length > 0);
-      const hasNonSiteWords = siteWords.some((word) => !BODY_SITE_HINTS.has(word));
-      const shouldAttemptRouteDescriptor =
-        strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
-      const appliedRouteDescriptor =
-        shouldAttemptRouteDescriptor && maybeApplyRouteDescriptor(normalizedSite);
-      if (!appliedRouteDescriptor) {
-        internal.siteText = normalizedSite;
-        if (!internal.siteSource) {
-          internal.siteSource = "text";
+      const tokenRange = computeSiteTextRange(internal.input, tokens, sortedIndices);
+      let sanitized = normalizedSite;
+      let isProbe = false;
+      const probeMatch = sanitized.match(/^\{(.+)}$/);
+      if (probeMatch) {
+        // `{site}` placeholders flag interactive lookups so consumers can prompt
+        // for a coded selection even when the parser cannot resolve the entry.
+        isProbe = true;
+        sanitized = probeMatch[1];
+      }
+      // Remove stray braces and normalize whitespace so lookups and downstream
+      // displays operate on a clean phrase.
+      sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+      const range = refineSiteRange(internal.input, sanitized, tokenRange);
+      const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+      internal.siteLookupRequest = {
+        originalText: normalizedSite,
+        text: sanitized,
+        normalized: sanitized.toLowerCase(),
+        canonical: sanitized ? normalizeBodySiteKey(sanitized) : "",
+        isProbe,
+        inputText: internal.input,
+        sourceText,
+        range
+      };
+      if (sanitized) {
+        const normalizedLower = sanitized.toLowerCase();
+        const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
+        const siteWords = normalizedLower.split(/\s+/).filter((word) => word.length > 0);
+        const hasNonSiteWords = siteWords.some((word) => !BODY_SITE_HINTS.has(word));
+        const shouldAttemptRouteDescriptor =
+          strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
+        const appliedRouteDescriptor =
+          shouldAttemptRouteDescriptor && maybeApplyRouteDescriptor(sanitized);
+        if (!appliedRouteDescriptor) {
+          // Preserve the clean site text for FHIR output and resolver context
+          // whenever we keep the original phrase.
+          internal.siteText = sanitized;
+          if (!internal.siteSource) {
+            internal.siteSource = "text";
+          }
         }
       }
     }
@@ -2046,6 +2166,297 @@ export function parseInternal(
   }
 
   return internal;
+}
+
+/**
+ * Resolves parsed site text against SNOMED dictionaries and synchronous
+ * callbacks, applying the best match to the in-progress parse result.
+ */
+export function applySiteCoding(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): void {
+  runSiteCodingResolutionSync(internal, options);
+}
+
+/**
+ * Asynchronous counterpart to {@link applySiteCoding} that awaits resolver and
+ * suggestion callbacks so remote terminology services can be used.
+ */
+export async function applySiteCodingAsync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): Promise<void> {
+  await runSiteCodingResolutionAsync(internal, options);
+}
+
+/**
+ * Attempts to resolve site codings using built-in dictionaries followed by any
+ * provided synchronous resolvers. Suggestions are collected when resolution
+ * fails or a `{probe}` placeholder requested an interactive lookup.
+ */
+function runSiteCodingResolutionSync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): void {
+  internal.siteLookups = [];
+  const request = internal.siteLookupRequest;
+  if (!request) {
+    return;
+  }
+
+  const canonical = request.canonical;
+  const customDefinition = lookupBodySiteDefinition(options?.siteCodeMap, canonical);
+  let resolution = customDefinition;
+
+  if (!resolution) {
+    // Allow synchronous resolver callbacks to claim the site.
+    for (const resolver of toArray(options?.siteCodeResolvers)) {
+      const result = resolver(request);
+      if (isPromise(result)) {
+        throw new Error(
+          "Site code resolver returned a Promise; use parseSigAsync for asynchronous site resolution."
+        );
+      }
+      if (result) {
+        resolution = result;
+        break;
+      }
+    }
+  }
+
+  const defaultDefinition = canonical ? DEFAULT_BODY_SITE_SNOMED[canonical] : undefined;
+  if (!resolution && defaultDefinition) {
+    // Fall back to bundled SNOMED lookups when no overrides claim the site.
+    resolution = defaultDefinition;
+  }
+
+  if (resolution) {
+    applySiteDefinition(internal, resolution);
+  } else {
+    internal.siteCoding = undefined;
+  }
+
+  const needsSuggestions = request.isProbe || !resolution;
+  if (!needsSuggestions) {
+    return;
+  }
+
+  const suggestionMap = new Map<string, SiteCodeSuggestion>();
+  if (customDefinition) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
+  }
+  if (defaultDefinition) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition));
+  }
+
+  for (const resolver of toArray(options?.siteCodeSuggestionResolvers)) {
+    // Aggregates resolver suggestions while guarding against accidental async
+    // usage, mirroring the behavior of site resolvers.
+    const result = resolver(request);
+    if (isPromise(result)) {
+      throw new Error(
+        "Site code suggestion resolver returned a Promise; use parseSigAsync for asynchronous site suggestions."
+      );
+    }
+    collectSuggestionResult(suggestionMap, result);
+  }
+
+  const suggestions = Array.from(suggestionMap.values());
+  if (suggestions.length || request.isProbe) {
+    internal.siteLookups.push({ request, suggestions });
+  }
+}
+
+/**
+ * Async version of {@link runSiteCodingResolutionSync} that awaits resolver
+ * results and suggestion providers, enabling remote terminology services.
+ */
+async function runSiteCodingResolutionAsync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): Promise<void> {
+  internal.siteLookups = [];
+  const request = internal.siteLookupRequest;
+  if (!request) {
+    return;
+  }
+
+  const canonical = request.canonical;
+  const customDefinition = lookupBodySiteDefinition(options?.siteCodeMap, canonical);
+  let resolution = customDefinition;
+
+  if (!resolution) {
+    // Await asynchronous resolver callbacks (e.g., HTTP terminology services).
+    for (const resolver of toArray(options?.siteCodeResolvers)) {
+      const result = await resolver(request);
+      if (result) {
+        resolution = result;
+        break;
+      }
+    }
+  }
+
+  const defaultDefinition = canonical ? DEFAULT_BODY_SITE_SNOMED[canonical] : undefined;
+  if (!resolution && defaultDefinition) {
+    resolution = defaultDefinition;
+  }
+
+  if (resolution) {
+    applySiteDefinition(internal, resolution);
+  } else {
+    internal.siteCoding = undefined;
+  }
+
+  const needsSuggestions = request.isProbe || !resolution;
+  if (!needsSuggestions) {
+    return;
+  }
+
+  const suggestionMap = new Map<string, SiteCodeSuggestion>();
+  if (customDefinition) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
+  }
+  if (defaultDefinition) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition));
+  }
+
+  for (const resolver of toArray(options?.siteCodeSuggestionResolvers)) {
+    // Async suggestion providers are awaited, allowing UI workflows to fetch
+    // candidate codes on demand.
+    const result = await resolver(request);
+    collectSuggestionResult(suggestionMap, result);
+  }
+
+  const suggestions = Array.from(suggestionMap.values());
+  if (suggestions.length || request.isProbe) {
+    internal.siteLookups.push({ request, suggestions });
+  }
+}
+
+/**
+ * Looks up a body-site definition in a caller-provided map, honoring both
+ * direct keys and entries that normalize to the same canonical phrase.
+ */
+function lookupBodySiteDefinition(
+  map: Record<string, BodySiteDefinition> | undefined,
+  canonical: string
+): BodySiteDefinition | undefined {
+  if (!map) {
+    return undefined;
+  }
+  const direct = map[canonical];
+  if (direct) {
+    return direct;
+  }
+  for (const [key, definition] of objectEntries(map)) {
+    if (normalizeBodySiteKey(key) === canonical) {
+      return definition;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Applies the selected body-site definition onto the parser state, defaulting
+ * the coding system to SNOMED CT when the definition omits one.
+ */
+function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDefinition) {
+  const coding = definition.coding;
+  internal.siteCoding = {
+    code: coding.code,
+    display: coding.display,
+    system: coding.system ?? SNOMED_SYSTEM
+  };
+  if (definition.text) {
+    internal.siteText = definition.text;
+  }
+}
+
+/**
+ * Converts a body-site definition into a suggestion payload so all suggestion
+ * sources share consistent structure.
+ */
+function definitionToSuggestion(definition: BodySiteDefinition): SiteCodeSuggestion {
+  return {
+    coding: {
+      code: definition.coding.code,
+      display: definition.coding.display,
+      system: definition.coding.system ?? SNOMED_SYSTEM
+    },
+    text: definition.text
+  };
+}
+
+/**
+ * Inserts a suggestion into a deduplicated map keyed by system and code.
+ */
+function addSuggestionToMap(
+  map: Map<string, SiteCodeSuggestion>,
+  suggestion: SiteCodeSuggestion | undefined
+) {
+  if (!suggestion) {
+    return;
+  }
+  const coding = suggestion.coding;
+  if (!coding?.code) {
+    return;
+  }
+  const key = `${coding.system ?? SNOMED_SYSTEM}|${coding.code}`;
+  if (!map.has(key)) {
+    map.set(key, {
+      coding: {
+        code: coding.code,
+        display: coding.display,
+        system: coding.system ?? SNOMED_SYSTEM
+      },
+      text: suggestion.text
+    });
+  }
+}
+
+/**
+ * Normalizes resolver outputs into a consistent array before merging them into
+ * the suggestion map.
+ */
+function collectSuggestionResult(
+  map: Map<string, SiteCodeSuggestion>,
+  result:
+    | SiteCodeSuggestionsResult
+    | SiteCodeSuggestion[]
+    | SiteCodeSuggestion
+    | null
+    | undefined
+) {
+  if (!result) {
+    return;
+  }
+  const suggestions = Array.isArray(result)
+    ? result
+    : typeof result === "object" && "suggestions" in result
+    ? (result as SiteCodeSuggestionsResult).suggestions
+    : [result];
+  for (const suggestion of suggestions) {
+    addSuggestionToMap(map, suggestion);
+  }
+}
+
+/**
+ * Wraps scalar or array configuration into an array to simplify iteration.
+ */
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * Detects thenables without relying on `instanceof Promise`, which can break
+ * across execution contexts.
+ */
+function isPromise<T>(value: unknown): value is Promise<T> {
+  return !!value && typeof (value as { then?: unknown }).then === "function";
 }
 
 function normalizeUnit(token: string, options?: ParseOptions): string | undefined {

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, formatSig, parseSig } from "../src/index";
+import { fromFhirDosage, formatSig, parseSig, parseSigAsync } from "../src/index";
 import { DEFAULT_UNIT_SYNONYMS, EVENT_TIMING_TOKENS, ROUTE_TEXT } from "../src/maps";
-import { EventTiming, RouteCode, SNOMEDCTRouteCodes } from "../src/types";
+import {
+  EventTiming,
+  RouteCode,
+  SNOMEDCTRouteCodes,
+  SiteCodeLookupRequest
+} from "../src/types";
 import { normalizeDosageForm } from "../src/context";
 
 const TAB_CONTEXT = { dosageForm: "tab" } as const;
@@ -786,6 +791,186 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(
       SNOMEDCTRouteCodes["Intramuscular route"]
     );
+  });
+
+  it("codes recognized body sites with SNOMED", () => {
+    const result = parseSig("apply cream to face daily");
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "89545001",
+      display: "Face"
+    });
+    expect(result.meta.normalized.site?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "89545001",
+      display: "Face"
+    });
+  });
+
+  it("provides lookup suggestions for probe syntax", () => {
+    const input = "apply to {left arm} twice daily";
+    const result = parseSig(input);
+    const lookup = result.meta.siteLookups?.[0];
+    expect(result.fhir.site?.text).toBe("left arm");
+    expect(lookup?.request).toMatchObject({
+      text: "left arm",
+      isProbe: true,
+      inputText: input,
+      sourceText: "left arm"
+    });
+    expect(lookup?.request.range).toEqual({
+      start: input.toLowerCase().indexOf("left arm"),
+      end: input.toLowerCase().indexOf("left arm") + "left arm".length
+    });
+    const suggestionCodes = lookup?.suggestions.map((suggestion) => suggestion.coding.code);
+    expect(suggestionCodes).toContain("368208006");
+  });
+
+  it("codes additional anatomy like penis with SNOMED", () => {
+    const result = parseSig("apply ointment to penis daily");
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "18128009",
+      display: "Penis structure"
+    });
+  });
+
+  it("records probe requests for unknown sites so UIs can prompt", () => {
+    const input = "apply to {temple} nightly";
+    const result = parseSig(input);
+    const lookup = result.meta.siteLookups?.[0];
+    expect(result.fhir.site?.coding).toBeUndefined();
+    expect(result.meta.siteLookups).toHaveLength(1);
+    expect(lookup?.request).toMatchObject({
+      text: "temple",
+      isProbe: true,
+      inputText: input,
+      sourceText: "temple"
+    });
+    expect(lookup?.request.range).toEqual({
+      start: input.toLowerCase().indexOf("temple"),
+      end: input.toLowerCase().indexOf("temple") + "temple".length
+    });
+    expect(lookup?.suggestions).toEqual([]);
+  });
+
+  it("leaves suggestions empty for unknown sites without probes", () => {
+    const result = parseSig("apply to temple nightly");
+    expect(result.meta.siteLookups).toBeUndefined();
+  });
+
+  it("merges suggestion resolver results for probe lookups", () => {
+    const input = "apply to {temple} nightly";
+    const captured: SiteCodeLookupRequest[] = [];
+    const result = parseSig(input, {
+      siteCodeSuggestionResolvers: (request) => {
+        captured.push(request);
+        return {
+          suggestions: [
+            {
+              coding: {
+                system: "http://snomed.info/sct",
+                code: "280447003",
+                display: "Temple region of head"
+              },
+              text: "Temple"
+            }
+          ]
+        };
+      }
+    });
+    expect(captured[0]).toMatchObject({
+      inputText: input,
+      sourceText: "temple"
+    });
+    expect(captured[0]?.range).toEqual({
+      start: input.toLowerCase().indexOf("temple"),
+      end: input.toLowerCase().indexOf("temple") + "temple".length
+    });
+    expect(result.meta.siteLookups?.[0].suggestions).toEqual([
+      {
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "280447003",
+          display: "Temple region of head"
+        },
+        text: "Temple"
+      }
+    ]);
+  });
+
+  it("awaits asynchronous suggestion resolvers", async () => {
+    const input = "apply to {temple} nightly";
+    const result = await parseSigAsync(input, {
+      siteCodeSuggestionResolvers: async (request) => {
+        expect(request.inputText).toBe(input);
+        expect(request.sourceText).toBe("temple");
+        expect(request.range).toEqual({
+          start: input.toLowerCase().indexOf("temple"),
+          end: input.toLowerCase().indexOf("temple") + "temple".length
+        });
+        return [
+          {
+            coding: {
+              system: "http://snomed.info/sct",
+              code: "280447003",
+              display: "Temple region of head"
+            },
+            text: "Temple"
+          }
+        ];
+      }
+    });
+    expect(result.meta.siteLookups?.[0].suggestions?.[0]).toMatchObject({
+      coding: {
+        system: "http://snomed.info/sct",
+        code: "280447003",
+        display: "Temple region of head"
+      },
+      text: "Temple"
+    });
+  });
+
+  it("computes precise ranges for probe placeholders", () => {
+    const input = "apply to {upper left arm} nightly";
+    const result = parseSig(input);
+    const lookup = result.meta.siteLookups?.[0];
+    expect(lookup?.request.sourceText).toBe("upper left arm");
+    const start = input.toLowerCase().indexOf("upper left arm");
+    expect(lookup?.request.range).toEqual({ start, end: start + "upper left arm".length });
+  });
+
+  it("supports asynchronous site code resolvers", async () => {
+    const input = "apply to chin twice daily";
+    const captured: SiteCodeLookupRequest[] = [];
+    const result = await parseSigAsync(input, {
+      siteCodeResolvers: async (request) => {
+        captured.push(request);
+        if (request.canonical === "chin") {
+          return {
+            coding: {
+              system: "http://example.org/test",
+              code: "123",
+              display: "Custom chin"
+            }
+          };
+        }
+        return undefined;
+      }
+    });
+    expect(captured[0]).toMatchObject({
+      inputText: input,
+      sourceText: "chin"
+    });
+    expect(captured[0]?.range).toEqual({
+      start: input.toLowerCase().indexOf("chin"),
+      end: input.toLowerCase().indexOf("chin") + "chin".length
+    });
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://example.org/test",
+      code: "123",
+      display: "Custom chin"
+    });
   });
 
   it("short text round trip", () => {

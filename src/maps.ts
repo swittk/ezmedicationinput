@@ -1,4 +1,5 @@
 import {
+  BodySiteDefinition,
   EventTiming,
   FhirDayOfWeek,
   FhirPeriodUnit,
@@ -189,6 +190,301 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
 
   return map;
 })();
+
+/**
+ * Normalizes body-site phrases into lookup keys by trimming, lower-casing, and
+ * collapsing whitespace. Custom site maps should normalize their keys with the
+ * same logic to ensure consistent lookups.
+ */
+export function normalizeBodySiteKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
+  names: string[];
+  definition: BodySiteDefinition;
+}> = [
+  {
+    names: ["eye", "eyes"],
+    definition: { coding: { code: "81745001", display: "Eye" } }
+  },
+  {
+    names: ["left eye"],
+    definition: {
+      coding: { code: "1290031003", display: "Structure of left eye proper" }
+    }
+  },
+  {
+    names: ["right eye"],
+    definition: {
+      coding: { code: "1290032005", display: "Structure of right eye proper" }
+    }
+  },
+  {
+    names: ["both eyes", "bilateral eyes"],
+    definition: { coding: { code: "362508001", display: "Both eyes, entire" } }
+  },
+  {
+    names: ["ear", "ears"],
+    definition: { coding: { code: "117590005", display: "Ear-related structure" } }
+  },
+  {
+    names: ["left ear"],
+    definition: { coding: { code: "89644007", display: "Left ear" } }
+  },
+  {
+    names: ["right ear"],
+    definition: { coding: { code: "25577004", display: "Right ear" } }
+  },
+  {
+    names: ["both ears", "bilateral ears"],
+    definition: { coding: { code: "34338003", display: "Both ears" } }
+  },
+  {
+    names: ["nostril", "nostrils"],
+    definition: { coding: { code: "1797002", display: "Naris" } }
+  },
+  {
+    names: ["left nostril", "left naris"],
+    definition: {
+      coding: { code: "723608007", display: "Structure of left anterior naris" }
+    }
+  },
+  {
+    names: ["right nostril", "right naris"],
+    definition: {
+      coding: { code: "723609004", display: "Structure of right anterior naris" }
+    }
+  },
+  {
+    names: ["nares", "anterior nares"],
+    definition: { coding: { code: "244506005", display: "Anterior nares" } }
+  },
+  {
+    names: ["nose"],
+    definition: { coding: { code: "181195007", display: "Entire nose" } }
+  },
+  {
+    names: ["mouth"],
+    definition: { coding: { code: "123851003", display: "Mouth region" } }
+  },
+  {
+    names: ["tongue", "tongues"],
+    definition: { coding: { code: "21974007", display: "Tongue" } }
+  },
+  {
+    names: ["cheek", "cheeks"],
+    definition: {
+      coding: { code: "60819002", display: "Buccal region of face" }
+    }
+  },
+  {
+    names: ["gum", "gums"],
+    definition: {
+      coding: {
+        code: "362116001",
+        display: "Entire gum and supporting structure of tooth"
+      }
+    }
+  },
+  {
+    names: ["tooth"],
+    definition: { coding: { code: "38199008", display: "Tooth" } }
+  },
+  {
+    names: ["teeth"],
+    definition: { coding: { code: "1162715001", display: "All teeth" } }
+  },
+  {
+    names: ["arm", "upper arm"],
+    definition: { coding: { code: "302538001", display: "Entire upper arm" } }
+  },
+  {
+    names: ["left arm", "left upper arm"],
+    definition: {
+      coding: { code: "368208006", display: "Left upper arm structure" }
+    }
+  },
+  {
+    names: ["right arm", "right upper arm"],
+    definition: { coding: { code: "368209003", display: "Right upper arm" } }
+  },
+  {
+    names: ["both arms", "bilateral arms"],
+    definition: { coding: { code: "69273007", display: "Both arms" } }
+  },
+  {
+    names: ["forearm"],
+    definition: { coding: { code: "14975008", display: "Forearm" } }
+  },
+  {
+    names: ["left forearm"],
+    definition: { coding: { code: "66480008", display: "Left forearm" } }
+  },
+  {
+    names: ["right forearm"],
+    definition: { coding: { code: "64262003", display: "Right forearm" } }
+  },
+  {
+    names: ["leg", "lower leg"],
+    definition: {
+      coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" }
+    }
+  },
+  {
+    names: ["left leg", "left lower leg"],
+    definition: { coding: { code: "213384005", display: "Entire left lower leg" } }
+  },
+  {
+    names: ["right leg", "right lower leg"],
+    definition: { coding: { code: "213289002", display: "Entire right lower leg" } }
+  },
+  {
+    names: ["both legs", "bilateral legs"],
+    definition: { coding: { code: "40927001", display: "Both legs" } }
+  },
+  {
+    names: ["thigh"],
+    definition: { coding: { code: "68367000", display: "Thigh" } }
+  },
+  {
+    names: ["left thigh"],
+    definition: { coding: { code: "61396006", display: "Left thigh" } }
+  },
+  {
+    names: ["right thigh"],
+    definition: { coding: { code: "11207009", display: "Right thigh" } }
+  },
+  {
+    names: ["hand", "hands"],
+    definition: { coding: { code: "85562004", display: "Hand" } }
+  },
+  {
+    names: ["left hand"],
+    definition: { coding: { code: "85151006", display: "Left hand" } }
+  },
+  {
+    names: ["right hand"],
+    definition: { coding: { code: "78791008", display: "Right hand" } }
+  },
+  {
+    names: ["foot", "feet"],
+    definition: { coding: { code: "56459004", display: "Foot" } }
+  },
+  {
+    names: ["left foot"],
+    definition: { coding: { code: "22335008", display: "Left foot" } }
+  },
+  {
+    names: ["right foot"],
+    definition: { coding: { code: "7769000", display: "Right foot" } }
+  },
+  {
+    names: ["abdomen", "abdominal", "belly"],
+    definition: { coding: { code: "302553009", display: "Entire abdomen" } }
+  },
+  {
+    names: ["back"],
+    definition: { coding: { code: "77568009", display: "Back" } }
+  },
+  {
+    names: ["scalp"],
+    definition: { coding: { code: "41695006", display: "Scalp" } }
+  },
+  {
+    names: ["face"],
+    definition: { coding: { code: "89545001", display: "Face" } }
+  },
+  {
+    names: ["forehead"],
+    definition: { coding: { code: "52795006", display: "Forehead" } }
+  },
+  {
+    names: ["chin"],
+    definition: {
+      coding: {
+        code: "897081006",
+        display: "Skin and/or subcutaneous tissue of chin"
+      }
+    }
+  },
+  {
+    names: ["neck"],
+    definition: { coding: { code: "45048000", display: "Neck" } }
+  },
+  {
+    names: ["buttock", "buttocks", "gluteal", "glute"],
+    definition: { coding: { code: "46862004", display: "Buttock" } }
+  },
+  {
+    names: ["left buttock", "left gluteal"],
+    definition: { coding: { code: "723979003", display: "Structure of left buttock" } }
+  },
+  {
+    names: ["right buttock", "right gluteal"],
+    definition: { coding: { code: "723980000", display: "Structure of right buttock" } }
+  },
+  {
+    names: ["muscle", "muscles"],
+    definition: {
+      coding: {
+        code: "362876008",
+        display: "All skeletal and smooth muscles of the body"
+      }
+    }
+  },
+  {
+    names: ["vein", "veins"],
+    definition: { coding: { code: "181367001", display: "Entire vein" } }
+  },
+  {
+    names: ["vagina", "vaginal"],
+    definition: { coding: { code: "76784001", display: "Vagina" } }
+  },
+  {
+    names: ["penis", "penile"],
+    definition: { coding: { code: "18911002", display: "Penis structure" } }
+  },
+  {
+    names: ["rectum", "rectal"],
+    definition: { coding: { code: "34402009", display: "Rectum" } }
+  },
+  {
+    names: ["anus"],
+    definition: { coding: { code: "181262009", display: "Entire anus" } }
+  },
+  {
+    names: ["perineum"],
+    definition: { coding: { code: "243990009", display: "Entire perineum" } }
+  },
+  {
+    names: ["skin"],
+    definition: { coding: { code: "181469002", display: "Entire skin" } }
+  },
+  {
+    names: ["hair"],
+    definition: {
+      coding: { code: "386045008", display: "Hair structure (body structure)" }
+    }
+  }
+];
+
+export const DEFAULT_BODY_SITE_SNOMED = objectFromEntries(
+  DEFAULT_BODY_SITE_SNOMED_SOURCE.reduce<Array<[
+    string,
+    BodySiteDefinition
+  ]>>((entries, source) => {
+    const { names, definition } = source;
+    for (const name of names) {
+      const key = normalizeBodySiteKey(name);
+      if (!key) {
+        continue;
+      }
+      entries.push([key, definition]);
+    }
+    return entries;
+  }, [])
+) as Record<string, BodySiteDefinition>;
 
 type UnitSynonymMap = Record<string, string>;
 

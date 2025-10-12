@@ -14,6 +14,7 @@
 - Applies medication context to infer default units when they are omitted.
 - Surfaces warnings when discouraged tokens (`QD`, `QOD`, `BLD`) are used and optionally rejects them.
 - Generates upcoming administration timestamps from FHIR dosage data via `nextDueDoses` using configurable clinic clocks.
+- Auto-codes common body-site phrases (e.g. "left arm", "right eye") with SNOMED CT anatomy concepts and supports interactive lookup flows for ambiguous sites.
 
 ## Installation
 
@@ -109,6 +110,105 @@ Key EventTiming mappings include:
 When `when` is populated, `timeOfDay` is intentionally omitted to stay within HL7 constraints.
 
 Routes always include SNOMED CT codings. Every code from the SNOMED Route of Administration value set is represented so you can confidently pass parsed results into downstream FHIR services that expect coded routes.
+
+### SNOMED body-site coding & interactive probes
+
+Spelled-out application sites are automatically coded when the phrase is known to the bundled SNOMED CT anatomy dictionary. The normalized site text is also surfaced in `Dosage.site.text` and in the `ParseResult.meta.normalized.site` object.
+
+```ts
+import { parseSig } from "ezmedicationinput";
+
+const result = parseSig("apply cream to left arm twice daily");
+
+result.fhir.site?.coding?.[0];
+// → { system: "http://snomed.info/sct", code: "368208006", display: "Left upper arm structure" }
+```
+
+When the parser encounters an unfamiliar site, it leaves the text untouched and records nothing in `meta.siteLookups`. Wrapping the phrase in braces (e.g. `apply to {mole on scalp}`) preserves the same parsing behavior but flags the entry as a **probe** so `meta.siteLookups` always contains the request. This allows UIs to display lookup widgets even before a matching code exists. Braces are optional when the site is already recognized—they simply make the clinician's intent explicit.
+
+You can extend or replace the built-in codings via `ParseOptions`:
+
+```ts
+import { parseSigAsync } from "ezmedicationinput";
+
+const result = await parseSigAsync("apply to {left temple} nightly", {
+  siteCodeMap: {
+    "left temple": {
+      coding: {
+        system: "http://example.org/custom",
+        code: "LTEMP",
+        display: "Left temple"
+      }
+    }
+  },
+  siteCodeResolvers: async (request) => {
+    if (request.canonical === "mole on scalp") {
+      return {
+        coding: { system: "http://snomed.info/sct", code: "39937001", display: "Scalp structure" },
+        text: request.text
+      };
+    }
+    return undefined;
+  },
+  siteCodeSuggestionResolvers: async (request) => {
+    if (request.isProbe) {
+      return [
+        {
+          coding: { system: "http://snomed.info/sct", code: "39937001", display: "Scalp structure" },
+          text: "Scalp"
+        },
+        {
+          coding: { system: "http://snomed.info/sct", code: "280447003", display: "Temple region of head" },
+          text: "Temple"
+        }
+      ];
+    }
+    return undefined;
+  }
+});
+
+result.meta.siteLookups;
+// → [{ request: { text: "left temple", isProbe: true, ... }, suggestions: [...] }]
+```
+
+- `siteCodeMap` lets you supply deterministic overrides for normalized site phrases.
+- `siteCodeResolvers` (sync or async) can call external services to resolve sites on demand.
+- `siteCodeSuggestionResolvers` return candidate codes; their results populate `meta.siteLookups[0].suggestions`.
+- Each resolver receives the full `SiteCodeLookupRequest`, including the original input, the cleaned site text, and a `{ start, end }` range you can use to highlight the substring in UI workflows.
+- `parseSigAsync` behaves like `parseSig` but awaits asynchronous resolvers and suggestion providers.
+
+#### Site resolver signatures
+
+```ts
+export interface SiteCodeLookupRequest {
+  originalText: string; // Sanitized phrase before brace/whitespace cleanup
+  text: string;         // Brace-free, whitespace-collapsed site text
+  normalized: string;   // Lower-case variant of `text`
+  canonical: string;    // Normalized key for dictionary lookups
+  isProbe: boolean;     // True when the sig used `{placeholder}` syntax
+  inputText: string;    // Full sig string the parser received
+  sourceText?: string;  // Substring extracted from `inputText`
+  range?: { start: number; end: number }; // Character range of `sourceText`
+}
+
+export type SiteCodeResolver = (
+  request: SiteCodeLookupRequest
+) => SiteCodeResolution | null | undefined | Promise<SiteCodeResolution | null | undefined>;
+
+export type SiteCodeSuggestionResolver = (
+  request: SiteCodeLookupRequest
+) =>
+  | SiteCodeSuggestionsResult
+  | SiteCodeSuggestion[]
+  | SiteCodeSuggestion
+  | null
+  | undefined
+  | Promise<SiteCodeSuggestionsResult | SiteCodeSuggestion[] | SiteCodeSuggestion | null | undefined>;
+```
+
+`SiteCodeResolution`, `SiteCodeSuggestion`, and `SiteCodeSuggestionsResult` mirror the values shown in the example above. Resolvers can use `request.range` (start inclusive, end exclusive) together with `request.sourceText` to paint highlights or replace the detected phrase in client applications.
+
+Consumers that only need synchronous resolution can continue calling `parseSig`. If any synchronous resolver accidentally returns a Promise, an error is thrown with guidance to switch to `parseSigAsync`.
 
 You can specify the number of times (total count) the medication is supposed to be used by ending with `for {number} times`, `x {number} doses`, or simply `x {number}`
 

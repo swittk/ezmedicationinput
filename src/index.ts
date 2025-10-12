@@ -1,7 +1,7 @@
 import { formatInternal } from "./format";
 import { internalFromFhir, toFhir } from "./fhir";
 import { resolveSigLocalization } from "./i18n";
-import { parseInternal } from "./parser";
+import { applySiteCoding, applySiteCodingAsync, parseInternal } from "./parser";
 import { FhirDosage, FormatOptions, ParseOptions, ParseResult } from "./types";
 
 export { parseInternal } from "./parser";
@@ -23,37 +23,17 @@ export type {
 
 export function parseSig(input: string, options?: ParseOptions): ParseResult {
   const internal = parseInternal(input, options);
-  const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatInternal(internal, "short", localization);
-  const longText = formatInternal(internal, "long", localization);
-  const fhir = toFhir(internal);
-  if (longText) {
-    fhir.text = longText;
-  }
+  applySiteCoding(internal, options);
+  return buildParseResult(internal, options);
+}
 
-  const consumedTokens = internal.tokens
-    .filter((token) => internal.consumed.has(token.index))
-    .map((token) => token.original);
-  const leftoverTokens = internal.tokens.filter(
-    (token) => !internal.consumed.has(token.index)
-  );
-
-  return {
-    fhir,
-    shortText,
-    longText,
-    warnings: internal.warnings,
-    meta: {
-      consumedTokens,
-      leftoverText: leftoverTokens.length
-        ? leftoverTokens.map((t) => t.original).join(" ")
-        : undefined,
-      normalized: {
-        route: internal.routeCode,
-        unit: internal.unit
-      }
-    }
-  };
+export async function parseSigAsync(
+  input: string,
+  options?: ParseOptions
+): Promise<ParseResult> {
+  const internal = parseInternal(input, options);
+  await applySiteCodingAsync(internal, options);
+  return buildParseResult(internal, options);
 }
 
 export function formatSig(
@@ -84,8 +64,87 @@ export function fromFhirDosage(
       consumedTokens: [],
       normalized: {
         route: internal.routeCode,
-        unit: internal.unit
+        unit: internal.unit,
+        site: internal.siteText || internal.siteCoding?.code
+          ? {
+              text: internal.siteText,
+              coding: internal.siteCoding?.code
+                ? {
+                    code: internal.siteCoding.code,
+                    display: internal.siteCoding.display,
+                    system: internal.siteCoding.system
+                  }
+                : undefined
+            }
+          : undefined
       }
+    }
+  };
+}
+
+function buildParseResult(
+  internal: ReturnType<typeof parseInternal>,
+  options?: ParseOptions
+): ParseResult {
+  const localization = resolveSigLocalization(options?.locale, options?.i18n);
+  const shortText = formatInternal(internal, "short", localization);
+  const longText = formatInternal(internal, "long", localization);
+  const fhir = toFhir(internal);
+  if (longText) {
+    fhir.text = longText;
+  }
+
+  const consumedTokens = internal.tokens
+    .filter((token) => internal.consumed.has(token.index))
+    .map((token) => token.original);
+  const leftoverTokens = internal.tokens.filter(
+    (token) => !internal.consumed.has(token.index)
+  );
+
+  const siteCoding = internal.siteCoding?.code
+    ? {
+        code: internal.siteCoding.code,
+        display: internal.siteCoding.display,
+        system: internal.siteCoding.system
+      }
+    : undefined;
+
+  const siteLookups = internal.siteLookups.length
+    ? internal.siteLookups.map((entry) => ({
+        request: entry.request,
+        suggestions: entry.suggestions.map((suggestion) => ({
+          coding: {
+            code: suggestion.coding.code,
+            display: suggestion.coding.display,
+            system: suggestion.coding.system
+          },
+          text: suggestion.text
+        }))
+      }))
+    : undefined;
+
+  return {
+    fhir,
+    shortText,
+    longText,
+    warnings: internal.warnings,
+    meta: {
+      consumedTokens,
+      leftoverText: leftoverTokens.length
+        ? leftoverTokens.map((t) => t.original).join(" ")
+        : undefined,
+      normalized: {
+        route: internal.routeCode,
+        unit: internal.unit,
+        site:
+          internal.siteText || siteCoding
+            ? {
+                text: internal.siteText,
+                coding: siteCoding
+              }
+            : undefined
+      },
+      siteLookups
     }
   };
 }
