@@ -15,6 +15,7 @@ export interface ParsedSigInternal {
   unit?: string;
   routeCode?: RouteCode;
   routeText?: string;
+  count?: number;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

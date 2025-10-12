@@ -137,6 +137,63 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
 
 const MEAL_CONTEXT_CONNECTORS = new Set(["and", "or", "&", "+", "plus"]);
 
+const COUNT_KEYWORDS = new Set([
+  "time",
+  "times",
+  "dose",
+  "doses",
+  "application",
+  "applications",
+  "use",
+  "uses"
+]);
+
+const COUNT_CONNECTOR_WORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "total",
+  "of",
+  "up",
+  "to",
+  "no",
+  "more",
+  "than",
+  "max",
+  "maximum",
+  "additional",
+  "extra"
+]);
+
+const ROUTE_DESCRIPTOR_FILLER_WORDS = new Set([
+  "per",
+  "by",
+  "via",
+  "the",
+  "a",
+  "an"
+]);
+
+function normalizeRouteDescriptorPhrase(phrase: string): string {
+  return phrase
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 0 && !ROUTE_DESCRIPTOR_FILLER_WORDS.has(word))
+    .join(" ");
+}
+
+const DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS = (() => {
+  const map = new Map<string, { code: RouteCode; text: string }>();
+  for (const [phrase, synonym] of objectEntries(DEFAULT_ROUTE_SYNONYMS)) {
+    const normalized = normalizeRouteDescriptorPhrase(phrase);
+    if (normalized && !map.has(normalized)) {
+      map.set(normalized, synonym);
+    }
+  }
+  return map;
+})();
+
 // Tracking explicit breakfast/lunch/dinner markers lets the meal-expansion
 // logic bail early when the clinician already specified precise events.
 const SPECIFIC_MEAL_TIMINGS = new Set<EventTiming>([
@@ -1319,6 +1376,21 @@ function parseNumericRange(token: string): { low: number; high: number } | undef
   return { low, high };
 }
 
+function applyCountLimit(internal: ParsedSigInternal, value: number | undefined): boolean {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return false;
+  }
+  if (internal.count !== undefined) {
+    return false;
+  }
+  const rounded = Math.round(value);
+  if (rounded <= 0) {
+    return false;
+  }
+  internal.count = rounded;
+  return true;
+}
+
 export function parseInternal(
   input: string,
   options?: ParseOptions
@@ -1341,6 +1413,14 @@ export function parseInternal(
           key.toLowerCase(),
           value
         ])
+      )
+    : undefined;
+
+  const customRouteDescriptorMap = customRouteMap
+    ? new Map(
+        Array.from(customRouteMap.entries())
+          .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
+          .filter(([normalized]) => normalized.length > 0)
       )
     : undefined;
 
@@ -1388,6 +1468,52 @@ export function parseInternal(
       mark(internal.consumed, token);
     }
   }
+
+  const applyRouteDescriptor = (code: RouteCode, text?: string): boolean => {
+    if (internal.routeCode && internal.routeCode !== code) {
+      return false;
+    }
+    setRoute(internal, code, text);
+    return true;
+  };
+
+  const maybeApplyRouteDescriptor = (phrase: string | undefined): boolean => {
+    if (!phrase) {
+      return false;
+    }
+    const normalized = phrase.trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+    const customCode = customRouteMap?.get(normalized);
+    if (customCode) {
+      if (applyRouteDescriptor(customCode as RouteCode)) {
+        return true;
+      }
+    }
+    const synonym = DEFAULT_ROUTE_SYNONYMS[normalized];
+    if (synonym) {
+      if (applyRouteDescriptor(synonym.code, synonym.text)) {
+        return true;
+      }
+    }
+    const normalizedDescriptor = normalizeRouteDescriptorPhrase(normalized);
+    if (normalizedDescriptor && normalizedDescriptor !== normalized) {
+      const customDescriptorCode = customRouteDescriptorMap?.get(normalizedDescriptor);
+      if (customDescriptorCode) {
+        if (applyRouteDescriptor(customDescriptorCode as RouteCode)) {
+          return true;
+        }
+      }
+      const fallbackSynonym = DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS.get(normalizedDescriptor);
+      if (fallbackSynonym) {
+        if (applyRouteDescriptor(fallbackSynonym.code, fallbackSynonym.text)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
 
   // Process tokens sequentially
   const tryRouteSynonym = (startIndex: number): boolean => {
@@ -1529,6 +1655,135 @@ export function parseInternal(
       }
       mark(internal.consumed, token);
       continue;
+    }
+
+    if (internal.count === undefined) {
+      const countMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+      if (countMatch) {
+        if (applyCountLimit(internal, parseFloat(countMatch[1]))) {
+          mark(internal.consumed, token);
+          const nextToken = tokens[i + 1];
+          if (nextToken && COUNT_KEYWORDS.has(nextToken.lower)) {
+            mark(internal.consumed, nextToken);
+          }
+          continue;
+        }
+      }
+      if (token.lower === "x" || token.lower === "*") {
+        const numericToken = tokens[i + 1];
+        if (
+          numericToken &&
+          !internal.consumed.has(numericToken.index) &&
+          /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower) &&
+          applyCountLimit(internal, parseFloat(numericToken.original))
+        ) {
+          mark(internal.consumed, token);
+          mark(internal.consumed, numericToken);
+          const afterToken = tokens[i + 2];
+          if (afterToken && COUNT_KEYWORDS.has(afterToken.lower)) {
+            mark(internal.consumed, afterToken);
+          }
+          continue;
+        }
+      }
+      if (token.lower === "for") {
+        const skipConnectors = (
+          startIndex: number,
+          bucket: Token[],
+        ): number => {
+          let cursor = startIndex;
+          while (cursor < tokens.length) {
+            const candidate = tokens[cursor];
+            if (!candidate) {
+              break;
+            }
+            if (internal.consumed.has(candidate.index)) {
+              cursor += 1;
+              continue;
+            }
+            if (!COUNT_CONNECTOR_WORDS.has(candidate.lower)) {
+              break;
+            }
+            bucket.push(candidate);
+            cursor += 1;
+          }
+          return cursor;
+        };
+
+        const preConnectors: Token[] = [];
+        let lookaheadIndex = skipConnectors(i + 1, preConnectors);
+        const numericToken = tokens[lookaheadIndex];
+        if (
+          numericToken &&
+          !internal.consumed.has(numericToken.index) &&
+          /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
+        ) {
+          const postConnectors: Token[] = [];
+          lookaheadIndex = skipConnectors(lookaheadIndex + 1, postConnectors);
+          const keywordToken = tokens[lookaheadIndex];
+          if (
+            keywordToken &&
+            !internal.consumed.has(keywordToken.index) &&
+            COUNT_KEYWORDS.has(keywordToken.lower) &&
+            applyCountLimit(internal, parseFloat(numericToken.original))
+          ) {
+            mark(internal.consumed, token);
+            for (const connector of preConnectors) {
+              mark(internal.consumed, connector);
+            }
+            mark(internal.consumed, numericToken);
+            for (const connector of postConnectors) {
+              mark(internal.consumed, connector);
+            }
+            mark(internal.consumed, keywordToken);
+            continue;
+          }
+        }
+      }
+      if (COUNT_KEYWORDS.has(token.lower)) {
+        const partsToMark: Token[] = [token];
+        let value: number | undefined;
+        const prevToken = tokens[i - 1];
+        if (prevToken && !internal.consumed.has(prevToken.index)) {
+          const prevLower = prevToken.lower;
+          const suffixMatch = prevLower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
+          const prefixMatch = prevLower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+          if (suffixMatch) {
+            value = parseFloat(suffixMatch[1]);
+            partsToMark.push(prevToken);
+          } else if (prefixMatch) {
+            value = parseFloat(prefixMatch[1]);
+            partsToMark.push(prevToken);
+          } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(prevLower)) {
+            const maybeX = tokens[i - 2];
+            if (
+              maybeX &&
+              !internal.consumed.has(maybeX.index) &&
+              (maybeX.lower === "x" || maybeX.lower === "*")
+            ) {
+              value = parseFloat(prevToken.original);
+              partsToMark.push(maybeX, prevToken);
+            }
+          }
+        }
+        if (value === undefined) {
+          const nextToken = tokens[i + 1];
+          if (
+            nextToken &&
+            !internal.consumed.has(nextToken.index) &&
+            /^[0-9]+(?:\.[0-9]+)?$/.test(nextToken.lower)
+          ) {
+            value = parseFloat(nextToken.original);
+            partsToMark.push(nextToken);
+          }
+        }
+        if (applyCountLimit(internal, value)) {
+          for (const part of partsToMark) {
+            mark(internal.consumed, part);
+          }
+          continue;
+        }
+      }
     }
 
     // Numeric dose
@@ -1691,7 +1946,11 @@ export function parseInternal(
           break;
         }
         const lower = token.lower;
-        if (SITE_CONNECTORS.has(lower) || BODY_SITE_HINTS.has(lower)) {
+        if (
+          SITE_CONNECTORS.has(lower) ||
+          BODY_SITE_HINTS.has(lower) ||
+          ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
+        ) {
           indicesToInclude.add(token.index);
           prev -= 1;
           continue;
@@ -1705,7 +1964,11 @@ export function parseInternal(
           break;
         }
         const lower = token.lower;
-        if (SITE_CONNECTORS.has(lower) || BODY_SITE_HINTS.has(lower)) {
+        if (
+          SITE_CONNECTORS.has(lower) ||
+          BODY_SITE_HINTS.has(lower) ||
+          ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
+        ) {
           indicesToInclude.add(token.index);
           next += 1;
           continue;
@@ -1731,9 +1994,19 @@ export function parseInternal(
       .join(" ")
       .trim();
     if (normalizedSite) {
-      internal.siteText = normalizedSite;
-      if (!internal.siteSource) {
-        internal.siteSource = "text";
+      const normalizedLower = normalizedSite.toLowerCase();
+      const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
+      const siteWords = normalizedLower.split(/\s+/).filter((word) => word.length > 0);
+      const hasNonSiteWords = siteWords.some((word) => !BODY_SITE_HINTS.has(word));
+      const shouldAttemptRouteDescriptor =
+        strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
+      const appliedRouteDescriptor =
+        shouldAttemptRouteDescriptor && maybeApplyRouteDescriptor(normalizedSite);
+      if (!appliedRouteDescriptor) {
+        internal.siteText = normalizedSite;
+        if (!internal.siteSource) {
+          internal.siteSource = "text";
+        }
       }
     }
   }

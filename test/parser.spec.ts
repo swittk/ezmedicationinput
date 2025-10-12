@@ -25,6 +25,57 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
   });
 
+  it("parses fractional q-intervals and count limits", () => {
+    const result = parseSig("1 tab po q0.5h x3 times", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 30,
+      periodUnit: "min",
+      count: 3
+    });
+  });
+
+  it("supports slash fractions and trailing count tokens", () => {
+    const result = parseSig("1 drop to OS q1/4h x4", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 15,
+      periodUnit: "min",
+      count: 4
+    });
+    expect(result.fhir.site?.text).toBe("left eye");
+  });
+
+  it("extracts count limits from dose descriptors", () => {
+    const result = parseSig("500 mg po pc breakfast lunch dinner x5 doses");
+    expect(result.fhir.timing?.repeat?.count).toBe(5);
+  });
+
+  it("parses count phrases introduced by for", () => {
+    const result = parseSig("1 tab po q1h for 10 times", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat?.count).toBe(10);
+    expect(result.shortText).toBe("1 tab PO Q1H x10");
+    expect(result.longText).toBe("Take 1 tablet by mouth every 1 hour for 10 doses.");
+  });
+
+  it("parses asterisk-prefixed count limits", () => {
+    const result = parseSig("1 tab po q6h *10 doses", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat?.count).toBe(10);
+    expect(result.longText).toBe("Take 1 tablet by mouth every 6 hours for 10 doses.");
+  });
+
+  it("omits redundant mouth sites when route is oral", () => {
+    const result = parseSig("500 mg per mouth every 4 to 6 hours as needed for pain");
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.longText).toBe("Take 500 mg by mouth as needed for pain.");
+  });
+
+  it("treats descriptive route phrases as routes instead of sites", () => {
+    const result = parseSig("2 mL via intravenous route every 8 hours");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Intravenous route"]
+    );
+    expect(result.fhir.site).toBeUndefined();
+  });
+
   it("infers ophthalmic units from medication context", () => {
     const result = parseSig("1x3 OD", {
       context: { dosageForm: "eye drops, solution" }

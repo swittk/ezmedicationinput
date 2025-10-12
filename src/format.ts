@@ -593,6 +593,9 @@ function formatShort(internal: ParsedSigInternal): string {
         .join(",")
     );
   }
+  if (internal.count !== undefined) {
+    parts.push(`x${stripTrailingZero(internal.count)}`);
+  }
   if (internal.asNeeded) {
     if (internal.asNeededReason) {
       parts.push(`PRN ${internal.asNeededReason}`);
@@ -612,6 +615,9 @@ function formatLong(internal: ParsedSigInternal): string {
   const eventParts = collectWhenPhrases(internal);
   const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
   const dayPart = describeDayOfWeek(internal);
+  const countPart = internal.count
+    ? `for ${stripTrailingZero(internal.count)} ${internal.count === 1 ? "dose" : "doses"}`
+    : undefined;
   const asNeededPart = internal.asNeeded
     ? internal.asNeededReason
       ? `as needed for ${internal.asNeededReason}`
@@ -630,6 +636,9 @@ function formatLong(internal: ParsedSigInternal): string {
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (countPart) {
+    segments.push(countPart);
   }
   if (asNeededPart) {
     segments.push(asNeededPart);

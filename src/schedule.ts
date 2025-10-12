@@ -592,6 +592,14 @@ export function nextDueDoses(
     return [];
   }
 
+  const rawCount = repeat.count;
+  const normalizedCount =
+    rawCount === undefined ? undefined : Math.max(0, Math.floor(rawCount));
+  if (normalizedCount === 0) {
+    return [];
+  }
+  const effectiveLimit = normalizedCount !== undefined ? Math.min(limit, normalizedCount) : limit;
+
   const results: string[] = [];
   const seen = new Set<string>();
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
@@ -617,17 +625,22 @@ export function nextDueDoses(
       const immediateSource = orderedAt ?? from;
       if (!orderedAt || orderedAt >= from) {
         const instantIso = formatZonedIso(immediateSource, timeZone);
-        results.push(instantIso);
-        seen.add(instantIso);
+        if (!seen.has(instantIso)) {
+          seen.add(instantIso);
+          results.push(instantIso);
+        }
       }
     }
+    if (results.length >= effectiveLimit) {
+      return results.slice(0, effectiveLimit);
+    }
     if (expanded.length === 0) {
-      return results.slice(0, limit);
+      return results.slice(0, effectiveLimit);
     }
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = limit * 31;
-    while (results.length < limit && iterations < maxIterations) {
+    const maxIterations = effectiveLimit * 31;
+    while (results.length < effectiveLimit && iterations < maxIterations) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
         for (const entry of expanded) {
@@ -648,16 +661,19 @@ export function nextDueDoses(
           if (!seen.has(iso)) {
             seen.add(iso);
             results.push(iso);
-            if (results.length === limit) {
+            if (results.length === effectiveLimit) {
               break;
             }
           }
         }
       }
+      if (results.length >= effectiveLimit) {
+        break;
+      }
       currentDay = addLocalDays(currentDay, 1, timeZone);
       iterations += 1;
     }
-    return results.slice(0, limit);
+    return results.slice(0, effectiveLimit);
   }
 
   const treatAsInterval =
@@ -673,7 +689,7 @@ export function nextDueDoses(
     const candidates = generateIntervalSeries(
       baseTime,
       from,
-      limit,
+      effectiveLimit,
       repeat,
       timeZone,
       dayFilter,
@@ -693,8 +709,8 @@ export function nextDueDoses(
     }
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = limit * 31;
-    while (results.length < limit && iterations < maxIterations) {
+    const maxIterations = effectiveLimit * 31;
+    while (results.length < effectiveLimit && iterations < maxIterations) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
         for (const clock of clocks) {
@@ -712,7 +728,7 @@ export function nextDueDoses(
           if (!seen.has(iso)) {
             seen.add(iso);
             results.push(iso);
-            if (results.length === limit) {
+            if (results.length === effectiveLimit) {
               break;
             }
           }
@@ -721,7 +737,7 @@ export function nextDueDoses(
       currentDay = addLocalDays(currentDay, 1, timeZone);
       iterations += 1;
     }
-    return results.slice(0, limit);
+    return results.slice(0, effectiveLimit);
   }
 
   return [];
@@ -734,7 +750,7 @@ export function nextDueDoses(
 function generateIntervalSeries(
   baseTime: Date,
   from: Date,
-  limit: number,
+  effectiveLimit: number,
   repeat: FhirTimingRepeat,
   timeZone: string,
   dayFilter: Set<string>,
@@ -749,7 +765,7 @@ function generateIntervalSeries(
   const seen = new Set<string>();
   let current = baseTime;
   let guard = 0;
-  const maxIterations = limit * 1000;
+  const maxIterations = effectiveLimit * 1000;
   while (current < from && guard < maxIterations) {
     const next = increment(current);
     if (!next || next.getTime() === current.getTime()) {
@@ -758,7 +774,7 @@ function generateIntervalSeries(
     current = next;
     guard += 1;
   }
-  while (results.length < limit && guard < maxIterations) {
+  while (results.length < effectiveLimit && guard < maxIterations) {
     const weekday = getLocalWeekday(current, timeZone);
     if (!enforceDayFilter || dayFilter.has(weekday)) {
       if (current < from) {
@@ -793,7 +809,7 @@ function generateIntervalSeries(
     current = next;
     guard += 1;
   }
-  return results.slice(0, limit);
+  return results.slice(0, effectiveLimit);
 }
 
 /**

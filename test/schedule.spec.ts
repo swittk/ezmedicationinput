@@ -83,6 +83,31 @@ describe("nextDueDoses", () => {
     ]);
   });
 
+  it("stops generating interval doses once the count limit is met", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          period: 1,
+          periodUnit: "h",
+          count: 3
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      limit: 10
+    });
+
+    expect(results).toEqual([
+      "2024-01-01T09:00:00+00:00",
+      "2024-01-01T10:00:00+00:00",
+      "2024-01-01T11:00:00+00:00"
+    ]);
+  });
+
   it("uses frequency defaults when no timing anchors exist", () => {
     const dosage: FhirDosage = {
       timing: {
@@ -131,6 +156,29 @@ describe("nextDueDoses", () => {
       "2024-01-01T07:30:00+00:00",
       "2024-01-01T12:00:00+00:00",
       "2024-01-01T18:00:00+00:00"
+    ]);
+  });
+
+  it("respects count limits for anchored event timings", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          when: [EventTiming.Breakfast, EventTiming.Dinner],
+          count: 2
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T06:00:00Z",
+      from: "2024-01-01T07:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T18:30:00+00:00"
     ]);
   });
 

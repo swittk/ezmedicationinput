@@ -110,6 +110,8 @@ When `when` is populated, `timeOfDay` is intentionally omitted to stay within HL
 
 Routes always include SNOMED CT codings. Every code from the SNOMED Route of Administration value set is represented so you can confidently pass parsed results into downstream FHIR services that expect coded routes.
 
+You can specify the number of times (total count) the medication is supposed to be used by ending with `for {number} times`, `x {number} doses`, or simply `x {number}`
+
 ### Advanced parsing options
 
 `parseSig` accepts a `ParseOptions` object. Highlights:

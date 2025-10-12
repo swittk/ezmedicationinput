@@ -251,6 +251,7 @@ export enum FhirDayOfWeek {
 }
 
 export interface FhirTimingRepeat {
+  count?: number;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

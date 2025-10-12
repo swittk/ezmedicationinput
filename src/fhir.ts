@@ -21,6 +21,10 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     repeat.frequency = internal.frequency;
     hasRepeat = true;
   }
+  if (internal.count !== undefined) {
+    repeat.count = internal.count;
+    hasRepeat = true;
+  }
   if (internal.frequencyMax !== undefined) {
     repeat.frequencyMax = internal.frequencyMax;
     hasRepeat = true;
@@ -144,6 +148,7 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       : [],
     warnings: [],
     timingCode: dosage.timing?.code?.coding?.[0]?.code,
+    count: dosage.timing?.repeat?.count,
     frequency: dosage.timing?.repeat?.frequency,
     frequencyMax: dosage.timing?.repeat?.frequencyMax,
     period: dosage.timing?.repeat?.period,
