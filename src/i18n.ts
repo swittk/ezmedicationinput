@@ -137,6 +137,7 @@ const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {
   [RouteCode["Per rectum"]]: "PR",
   [RouteCode["Per vagina"]]: "PV",
   [RouteCode["Ophthalmic route"]]: "OPH",
+  [RouteCode["Otic route"]]: "OT",
   [RouteCode["Intravitreal route (qualifier value)"]]: "IVT"
 };
 
@@ -187,6 +188,8 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   "right ear": "หูขวา",
   "left ear": "หูซ้าย",
   "both ears": "หูทั้งสองข้าง",
+  ear: "หู",
+  ears: "หูทั้งสองข้าง",
   "right nostril": "รูจมูกขวา",
   "left nostril": "รูจมูกซ้าย",
   "both nostrils": "รูจมูกทั้งสองข้าง",
@@ -274,6 +277,11 @@ const THAI_ROUTE_GRAMMAR: Partial<Record<RouteCode, ThaiRouteGrammar>> = {
   [RouteCode["Ophthalmic route"]]: {
     verb: "หยอด",
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "ที่ดวงตา"),
+    sitePreposition: "ที่"
+  },
+  [RouteCode["Otic route"]]: {
+    verb: "หยอด",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "ที่หู"),
     sitePreposition: "ที่"
   },
   [RouteCode["Intravitreal route (qualifier value)"]]: {
