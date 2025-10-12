@@ -156,16 +156,6 @@ describe("nextDueDoses", () => {
       "2024-01-04T08:00:00+00:00",
       "2024-01-04T16:00:00+00:00",
     ]);
-
-    const results2 = nextDueDoses(dosage, {
-      ...BASE_OPTIONS,
-      orderedAt: "2024-01-01T00:00:00Z",
-      from: "2024-01-05T12:00:00Z",
-      limit: 5
-    });
-
-    // Should be empty because all prior ones should have passed with count limit of 8
-    expect(results).toEqual([]);
   });
 
   it("respects doses entirely consumed before the evaluation window when priorCount is not provided", () => {

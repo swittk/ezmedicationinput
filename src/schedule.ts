@@ -566,19 +566,8 @@ export function nextDueDoses(
       throw new Error("Invalid priorCount supplied to nextDueDoses");
     }
   }
-  let priorCount: number;
-  if (priorCountInput !== undefined) {
-    priorCount = Math.floor(priorCountInput);
-  }
-  else {
-    if (!orderedAt) {
-      // nothing to compare time range between.
-      priorCount = 0;
-    }
-    else {
-      // TODO: Compute prior count by traversing all past doses between orderedAt and from.
-    }
-  }
+  let priorCount = priorCountInput !== undefined ? Math.floor(priorCountInput) : 0;
+  const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt;
   const baseTime = orderedAt ?? from;
 
   const providedConfig = options.config;
@@ -606,6 +595,23 @@ export function nextDueDoses(
   };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
+
+  if (
+    needsDerivedPriorCount &&
+    orderedAt &&
+    timing &&
+    repeat &&
+    repeat.count !== undefined
+  ) {
+    priorCount = derivePriorCountFromHistory(
+      timing,
+      repeat,
+      config,
+      orderedAt,
+      from,
+      timeZone
+    );
+  }
 
   if (!timing || !repeat) {
     return [];
@@ -766,6 +772,170 @@ export function nextDueDoses(
   }
 
   return [];
+}
+
+function derivePriorCountFromHistory(
+  timing: FhirTiming,
+  repeat: FhirTimingRepeat,
+  config: NextDueDoseConfig,
+  orderedAt: Date,
+  from: Date,
+  timeZone: string
+): number {
+  if (from <= orderedAt) {
+    return 0;
+  }
+
+  const normalizedCount = repeat.count === undefined
+    ? undefined
+    : Math.max(0, Math.floor(repeat.count));
+
+  if (normalizedCount === 0) {
+    return 0;
+  }
+
+  const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
+  const enforceDayFilter = dayFilter.size > 0;
+  const seen = new Set<string>();
+  let count = 0;
+
+  const recordCandidate = (candidate: Date | null) => {
+    if (!candidate) {
+      return false;
+    }
+    if (candidate < orderedAt || candidate >= from) {
+      return false;
+    }
+    const iso = formatZonedIso(candidate, timeZone);
+    if (seen.has(iso)) {
+      return false;
+    }
+    seen.add(iso);
+    count += 1;
+    return true;
+  };
+
+  const whenCodes = repeat.when ?? [];
+  const timeOfDayEntries = repeat.timeOfDay ?? [];
+
+  if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
+    const expanded = expandWhenCodes(whenCodes, config, repeat);
+    if (timeOfDayEntries.length > 0) {
+      for (const clock of timeOfDayEntries) {
+        expanded.push({ time: normalizeClock(clock), dayShift: 0 });
+      }
+      expanded.sort((a, b) => {
+        if (a.dayShift !== b.dayShift) {
+          return a.dayShift - b.dayShift;
+        }
+        return a.time.localeCompare(b.time);
+      });
+    }
+
+    if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
+      if (recordCandidate(orderedAt) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+        return count;
+      }
+    }
+
+    if (expanded.length === 0) {
+      return count;
+    }
+
+    let currentDay = startOfLocalDay(orderedAt, timeZone);
+    let iterations = 0;
+    const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
+    while (currentDay < from && iterations < maxIterations) {
+      const weekday = getLocalWeekday(currentDay, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        for (const entry of expanded) {
+          const targetDay = entry.dayShift === 0
+            ? currentDay
+            : addLocalDays(currentDay, entry.dayShift, timeZone);
+          const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+          if (!zoned) {
+            continue;
+          }
+          if (zoned < orderedAt || zoned >= from) {
+            continue;
+          }
+          if (recordCandidate(zoned) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+            return count;
+          }
+        }
+      }
+      currentDay = addLocalDays(currentDay, 1, timeZone);
+      iterations += 1;
+    }
+
+    return count;
+  }
+
+  const treatAsInterval =
+    !!repeat.period &&
+    !!repeat.periodUnit &&
+    (!repeat.frequency ||
+      repeat.periodUnit !== "d" ||
+      (repeat.frequency === 1 && repeat.period > 1));
+
+  if (treatAsInterval) {
+    const increment = createIntervalStepper(repeat, timeZone);
+    if (!increment) {
+      return count;
+    }
+
+    let current = orderedAt;
+    let guard = 0;
+    const maxIterations = normalizedCount !== undefined ? normalizedCount * 1000 : 1000;
+    while (current < from && guard < maxIterations) {
+      const weekday = getLocalWeekday(current, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        if (recordCandidate(current) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+          return count;
+        }
+      }
+      const next = increment(current);
+      if (!next || next.getTime() === current.getTime()) {
+        break;
+      }
+      current = next;
+      guard += 1;
+    }
+
+    return count;
+  }
+
+  if (repeat.frequency && repeat.period && repeat.periodUnit) {
+    const clocks = resolveFrequencyClocks(timing, config);
+    if (clocks.length === 0) {
+      return count;
+    }
+
+    let currentDay = startOfLocalDay(orderedAt, timeZone);
+    let iterations = 0;
+    const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
+    while (currentDay < from && iterations < maxIterations) {
+      const weekday = getLocalWeekday(currentDay, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        for (const clock of clocks) {
+          const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
+          if (!zoned) {
+            continue;
+          }
+          if (zoned < orderedAt || zoned >= from) {
+            continue;
+          }
+          if (recordCandidate(zoned) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+            return count;
+          }
+        }
+      }
+      currentDay = addLocalDays(currentDay, 1, timeZone);
+      iterations += 1;
+    }
+  }
+
+  return count;
 }
 
 /**
