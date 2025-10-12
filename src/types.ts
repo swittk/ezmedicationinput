@@ -503,6 +503,7 @@ export interface NextDueDoseOptions {
   from: Date | string;
   orderedAt?: Date | string;
   limit?: number;
+  priorCount?: number;
   timeZone?: string;
   eventClock?: EventClockMap;
   mealOffsets?: MealOffsetMap;

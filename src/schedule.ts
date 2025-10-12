@@ -560,6 +560,25 @@ export function nextDueDoses(
   const from = coerceDate(options.from, "from");
   const orderedAt =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
+  const priorCountInput = options.priorCount;
+  if (priorCountInput !== undefined) {
+    if (!Number.isFinite(priorCountInput) || priorCountInput < 0) {
+      throw new Error("Invalid priorCount supplied to nextDueDoses");
+    }
+  }
+  let priorCount: number;
+  if (priorCountInput !== undefined) {
+    priorCount = Math.floor(priorCountInput);
+  }
+  else {
+    if (!orderedAt) {
+      // nothing to compare time range between.
+      priorCount = 0;
+    }
+    else {
+      // TODO: Compute prior count by traversing all past doses between orderedAt and from.
+    }
+  }
   const baseTime = orderedAt ?? from;
 
   const providedConfig = options.config;
@@ -598,7 +617,13 @@ export function nextDueDoses(
   if (normalizedCount === 0) {
     return [];
   }
-  const effectiveLimit = normalizedCount !== undefined ? Math.min(limit, normalizedCount) : limit;
+  const remainingCount =
+    normalizedCount === undefined ? undefined : Math.max(0, normalizedCount - priorCount);
+  if (remainingCount === 0) {
+    return [];
+  }
+  const effectiveLimit =
+    remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
 
   const results: string[] = [];
   const seen = new Set<string>();

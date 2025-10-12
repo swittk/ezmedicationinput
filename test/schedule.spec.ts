@@ -108,6 +108,87 @@ describe("nextDueDoses", () => {
     ]);
   });
 
+  it("respects doses consumed before the evaluation window when priorCount is provided", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          period: 1,
+          periodUnit: "d",
+          count: 5
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-04T09:00:00Z",
+      priorCount: 3,
+      limit: 5
+    });
+
+    expect(results).toEqual([
+      "2024-01-04T09:00:00+00:00",
+      "2024-01-05T09:00:00+00:00"
+    ]);
+  });
+
+  it("respects doses consumed before the evaluation window when priorCount is not provided", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          count: 8,
+          timeOfDay: ['08:00', '16:00']
+        },
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-03T12:00:00Z",
+      limit: 5
+    });
+
+    // Should only have only 3 entries because 5 prior ones should have passed with count limit of 8
+    expect(results).toEqual([
+      "2024-01-03T16:00:00+00:00",
+      "2024-01-04T08:00:00+00:00",
+      "2024-01-04T16:00:00+00:00",
+    ]);
+
+    const results2 = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-05T12:00:00Z",
+      limit: 5
+    });
+
+    // Should be empty because all prior ones should have passed with count limit of 8
+    expect(results).toEqual([]);
+  });
+
+  it("respects doses entirely consumed before the evaluation window when priorCount is not provided", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          count: 8,
+          timeOfDay: ['08:00', '16:00']
+        },
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-05T12:00:00Z",
+      limit: 5
+    });
+
+    // Should be empty because all prior ones should have passed with count limit of 8
+    expect(results).toEqual([]);
+  });
+
   it("uses frequency defaults when no timing anchors exist", () => {
     const dosage: FhirDosage = {
       timing: {

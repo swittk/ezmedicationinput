@@ -228,7 +228,7 @@ You can specify the number of times (total count) the medication is supposed to 
 
 ### Next due dose generation
 
-`nextDueDoses` produces upcoming administration timestamps from an existing FHIR `Dosage`. Supply the evaluation window (`from`), optionally the order start (`orderedAt`), and clinic clock details such as a time zone and event timing anchors.
+`nextDueDoses` produces upcoming administration timestamps from an existing FHIR `Dosage`. Supply the evaluation window (`from`), optionally the order start (`orderedAt`), and clinic clock details such as a time zone and event timing anchors. When a `Timing.repeat.count` cap exists and prior occurrences have already been administered, pass `priorCount` to indicate how many doses were consumed before the `from` timestamp so remaining administrations are calculated correctly without re-traversing the timeline.
 
 ```ts
 import { EventTiming, nextDueDoses, parseSig } from "ezmedicationinput";
