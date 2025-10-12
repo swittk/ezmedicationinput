@@ -24,6 +24,12 @@ export interface SuggestSigOptions extends ParseOptions {
 interface UnitRoutePair {
   unit: string;
   route: string;
+  routeLower: string;
+}
+
+interface UnitVariant {
+  value: string;
+  lower: string;
 }
 
 interface UnitRoutePreference {
@@ -271,10 +277,41 @@ function normalizeSpacing(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-function getUnitVariants(unit: string): string[] {
+function removeWhitespaceCharacters(value: string): string {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 32) {
+      const result: string[] = [];
+      for (let inner = 0; inner < value.length; inner += 1) {
+        const currentCode = value.charCodeAt(inner);
+        if (currentCode > 32) {
+          result.push(value.charAt(inner));
+        }
+      }
+      return result.join("");
+    }
+  }
+  return value;
+}
+
+function removeDashes(value: string): string {
+  if (value.indexOf("-") === -1) {
+    return value;
+  }
+  const result: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value.charAt(index);
+    if (char !== "-") {
+      result.push(char);
+    }
+  }
+  return result.join("");
+}
+
+function getUnitVariants(unit: string): UnitVariant[] {
   const canonical = resolveCanonicalUnit(unit) ?? normalizeSpacing(unit);
   const normalizedCanonical = normalizeKey(canonical);
-  const variants = new Set<string>();
+  const variants = new Map<string, UnitVariant>();
 
   const push = (candidate: string | undefined) => {
     if (!candidate) {
@@ -284,7 +321,11 @@ function getUnitVariants(unit: string): string[] {
     if (!normalizedCandidate) {
       return;
     }
-    variants.add(normalizedCandidate);
+    const lower = normalizedCandidate.toLowerCase();
+    if (variants.has(lower)) {
+      return;
+    }
+    variants.set(lower, { value: normalizedCandidate, lower });
   };
 
   push(canonical);
@@ -297,7 +338,7 @@ function getUnitVariants(unit: string): string[] {
     }
   }
 
-  return [...variants];
+  return [...variants.values()];
 }
 
 function buildIntervalTokens(input: string): string[] {
@@ -367,17 +408,24 @@ function buildWhenSequences(): string[][] {
 
 const PRECOMPUTED_WHEN_SEQUENCES = buildWhenSequences();
 
-function tokenizeForMatching(value: string): string[] {
+function tokenizeLowercaseForMatching(value: string): string[] {
   return value
-    .toLowerCase()
     .split(/\s+/)
     .map((token) => token.replace(/^[^a-z0-9-]+|[^a-z0-9-]+$/g, ""))
     .filter((token) => token.length > 0)
     .filter((token) => !OPTIONAL_MATCH_TOKENS.has(token));
 }
 
+function tokenizeForMatching(value: string): string[] {
+  return tokenizeLowercaseForMatching(value.toLowerCase());
+}
+
+function canonicalizeLowercaseForMatching(value: string): string {
+  return tokenizeLowercaseForMatching(value).join(" ");
+}
+
 function canonicalizeForMatching(value: string): string {
-  return tokenizeForMatching(value).join(" ");
+  return canonicalizeLowercaseForMatching(value.toLowerCase());
 }
 
 function tokensMatch(
@@ -436,12 +484,13 @@ function buildUnitRoutePairs(
       return;
     }
 
-    const key = `${normalizedUnit}::${normalizeKey(cleanRoute)}`;
+    const routeLower = cleanRoute.toLowerCase();
+    const key = `${normalizedUnit}::${routeLower}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    pairs.push({ unit: canonicalUnit, route: cleanRoute });
+    pairs.push({ unit: canonicalUnit, route: cleanRoute, routeLower });
   };
 
   addPair(contextUnit);
@@ -513,7 +562,46 @@ function buildDoseValues(input: string): string[] {
   return [...values];
 }
 
-type CandidateMatcher = (candidate: string) => boolean;
+type CandidateMatcher = (candidate: string, candidateLower: string) => boolean;
+
+interface CandidateFingerprint {
+  compact?: string;
+  noDashes?: string;
+  tokens?: string[];
+  canonical?: string;
+  canonicalCompact?: string;
+  canonicalNoDashes?: string;
+  tokensNoDashes?: string[];
+}
+
+const CANDIDATE_FINGERPRINT_CACHE = new Map<string, CandidateFingerprint>();
+
+function getCandidateFingerprint(candidateLower: string): CandidateFingerprint {
+  let fingerprint = CANDIDATE_FINGERPRINT_CACHE.get(candidateLower);
+  if (!fingerprint) {
+    fingerprint = {};
+    CANDIDATE_FINGERPRINT_CACHE.set(candidateLower, fingerprint);
+  }
+  return fingerprint;
+}
+
+interface PrefixMatchContext {
+  raw: string;
+  compact: string;
+  noDashes: string;
+  canonical: string;
+  canonicalCompact: string;
+  canonicalNoDashes: string;
+  tokens: readonly string[];
+  tokensNoDashes: readonly string[];
+  hasCanonical: boolean;
+  hasTokens: boolean;
+  requiresCompact: boolean;
+  requiresNoDashes: boolean;
+  requiresCanonicalCompact: boolean;
+  requiresCanonicalNoDashes: boolean;
+  requiresTokenNoDashes: boolean;
+}
 
 function generateCandidateDirections(
   pairs: UnitRoutePair[],
@@ -526,54 +614,85 @@ function generateCandidateDirections(
 ): string[] {
   const suggestions: string[] = [];
   const seen = new Set<string>();
-
-  const push = (value: string): boolean => {
-    const normalized = normalizeSpacing(value);
+  const doseVariantMap = new Map<string, UnitVariant>();
+  for (const dose of doseValues) {
+    const normalized = normalizeSpacing(dose);
     if (!normalized) {
+      continue;
+    }
+    const lower = normalized.toLowerCase();
+    if (!doseVariantMap.has(lower)) {
+      doseVariantMap.set(lower, { value: normalized, lower });
+    }
+  }
+  const doseVariants = [...doseVariantMap.values()];
+
+  const push = (value: string, lower: string): boolean => {
+    if (!lower) {
       return false;
     }
-    const key = normalizeKey(normalized);
-    if (seen.has(key)) {
+    if (seen.has(lower)) {
       return false;
     }
-    seen.add(key);
-    if (!matcher(normalized)) {
+    if (!matcher(value, lower)) {
       return false;
     }
-    suggestions.push(normalized);
+    seen.add(lower);
+    suggestions.push(value);
     return suggestions.length >= limit;
   };
 
   for (const pair of pairs) {
     const unitVariants = getUnitVariants(pair.unit);
+    const route = pair.route;
+    const routeLower = pair.routeLower;
 
     for (const code of FREQUENCY_CODES) {
+      const codeSuffix = ` ${code}`;
       for (const unitVariant of unitVariants) {
-        for (const dose of doseValues) {
-          if (push(`${dose} ${unitVariant} ${pair.route} ${code}`)) {
+        const unitRoute = `${unitVariant.value} ${route}`;
+        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
+        for (const doseVariant of doseVariants) {
+          const candidate = `${doseVariant.value} ${unitRoute}${codeSuffix}`;
+          const candidateLower = `${doseVariant.lower} ${unitRouteLower}${codeSuffix}`;
+          if (push(candidate, candidateLower)) {
             return suggestions;
           }
         }
       }
-      if (push(`${pair.route} ${code}`)) {
+      const candidate = `${route}${codeSuffix}`;
+      const candidateLower = `${routeLower}${codeSuffix}`;
+      if (push(candidate, candidateLower)) {
         return suggestions;
       }
     }
 
     for (const interval of intervalTokens) {
+      const intervalSuffix = ` ${interval}`;
       for (const unitVariant of unitVariants) {
-        for (const dose of doseValues) {
-          if (push(`${dose} ${unitVariant} ${pair.route} ${interval}`)) {
+        const unitRoute = `${unitVariant.value} ${route}`;
+        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
+        for (const doseVariant of doseVariants) {
+          const base = `${doseVariant.value} ${unitRoute}`;
+          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
+          const intervalCandidate = `${base}${intervalSuffix}`;
+          const intervalCandidateLower = `${baseLower}${intervalSuffix}`;
+          if (push(intervalCandidate, intervalCandidateLower)) {
             return suggestions;
           }
           for (const reason of prnReasons) {
-            if (push(`${dose} ${unitVariant} ${pair.route} ${interval} prn ${reason}`)) {
+            const reasonSuffix = `${intervalSuffix} prn ${reason}`;
+            const reasonCandidate = `${base}${reasonSuffix}`;
+            const reasonCandidateLower = `${baseLower}${reasonSuffix}`;
+            if (push(reasonCandidate, reasonCandidateLower)) {
               return suggestions;
             }
           }
         }
       }
-      if (push(`${pair.route} ${interval}`)) {
+      const candidate = `${route}${intervalSuffix}`;
+      const candidateLower = `${routeLower}${intervalSuffix}`;
+      if (push(candidate, candidateLower)) {
         return suggestions;
       }
     }
@@ -583,39 +702,62 @@ function generateCandidateDirections(
       if (!freqToken) {
         continue;
       }
-      if (push(`1x${freq} ${pair.route} ${freqToken}`)) {
+      const base = `1x${freq} ${route}`;
+      const baseLower = `1x${freq} ${routeLower}`;
+      const freqCandidate = `${base} ${freqToken}`;
+      const freqCandidateLower = `${baseLower} ${freqToken}`;
+      if (push(freqCandidate, freqCandidateLower)) {
         return suggestions;
       }
       for (const when of CORE_WHEN_TOKENS) {
-        if (push(`1x${freq} ${pair.route} ${when}`)) {
+        const whenCandidate = `${base} ${when}`;
+        const whenCandidateLower = `${baseLower} ${when}`;
+        if (push(whenCandidate, whenCandidateLower)) {
           return suggestions;
         }
       }
     }
 
     for (const whenSequence of whenSequences) {
-      const suffix = whenSequence.join(" ");
+      const suffix = ` ${whenSequence.join(" ")}`;
       for (const unitVariant of unitVariants) {
-        for (const dose of doseValues) {
-          if (push(`${dose} ${unitVariant} ${pair.route} ${suffix}`)) {
+        const unitRoute = `${unitVariant.value} ${route}`;
+        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
+        for (const doseVariant of doseVariants) {
+          const base = `${doseVariant.value} ${unitRoute}`;
+          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
+          const candidate = `${base}${suffix}`;
+          const candidateLower = `${baseLower}${suffix}`;
+          if (push(candidate, candidateLower)) {
             return suggestions;
           }
         }
       }
-      if (push(`${pair.route} ${suffix}`)) {
+      const candidate = `${route}${suffix}`;
+      const candidateLower = `${routeLower}${suffix}`;
+      if (push(candidate, candidateLower)) {
         return suggestions;
       }
     }
 
     for (const reason of prnReasons) {
+      const reasonSuffix = ` prn ${reason}`;
       for (const unitVariant of unitVariants) {
-        for (const dose of doseValues) {
-          if (push(`${dose} ${unitVariant} ${pair.route} prn ${reason}`)) {
+        const unitRoute = `${unitVariant.value} ${route}`;
+        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
+        for (const doseVariant of doseVariants) {
+          const base = `${doseVariant.value} ${unitRoute}`;
+          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
+          const candidate = `${base}${reasonSuffix}`;
+          const candidateLower = `${baseLower}${reasonSuffix}`;
+          if (push(candidate, candidateLower)) {
             return suggestions;
           }
         }
       }
-      if (push(`${pair.route} prn ${reason}`)) {
+      const candidate = `${route}${reasonSuffix}`;
+      const candidateLower = `${routeLower}${reasonSuffix}`;
+      if (push(candidate, candidateLower)) {
         return suggestions;
       }
     }
@@ -625,49 +767,85 @@ function generateCandidateDirections(
 }
 
 function matchesPrefix(
-  candidate: string,
-  prefix: string,
-  prefixCompact: string,
-  prefixTokens: readonly string[],
-  prefixTokensNoDashes: readonly string[],
-  prefixCanonical: string,
-  prefixCanonicalCompact: string,
-  prefixNoDashes: string,
-  prefixCanonicalNoDashes: string,
+  _candidate: string,
+  candidateLower: string,
+  context: PrefixMatchContext,
 ): boolean {
-  if (!prefix) {
+  if (!context.raw) {
     return true;
   }
-  const normalizedCandidate = candidate.toLowerCase();
-  if (normalizedCandidate.startsWith(prefix)) {
+  if (!context.hasCanonical && !context.hasTokens) {
     return true;
   }
-  const compactCandidate = normalizedCandidate.replace(/\s+/g, "");
-  if (compactCandidate.startsWith(prefixCompact)) {
+  if (candidateLower.startsWith(context.raw)) {
     return true;
   }
-  const candidateNoDashes = normalizedCandidate.replace(/-/g, "");
-  if (candidateNoDashes.startsWith(prefixNoDashes)) {
+
+  const fingerprint = getCandidateFingerprint(candidateLower);
+
+  if (context.requiresCompact) {
+    const compactCandidate =
+      fingerprint.compact ??
+      (fingerprint.compact = removeWhitespaceCharacters(candidateLower));
+    if (compactCandidate.startsWith(context.compact)) {
+      return true;
+    }
+  }
+  if (context.requiresNoDashes) {
+    const candidateNoDashes =
+      fingerprint.noDashes ?? (fingerprint.noDashes = removeDashes(candidateLower));
+    if (candidateNoDashes.startsWith(context.noDashes)) {
+      return true;
+    }
+  }
+
+  const getCandidateTokens = () => {
+    if (!fingerprint.tokens) {
+      fingerprint.tokens = tokenizeLowercaseForMatching(candidateLower);
+    }
+    return fingerprint.tokens;
+  };
+
+  if (context.hasCanonical) {
+    const canonicalCandidate =
+      fingerprint.canonical ?? (fingerprint.canonical = getCandidateTokens().join(" "));
+    if (canonicalCandidate.startsWith(context.canonical)) {
+      return true;
+    }
+    if (context.requiresCanonicalCompact) {
+      const canonicalCompact =
+        fingerprint.canonicalCompact ??
+        (fingerprint.canonicalCompact = removeWhitespaceCharacters(canonicalCandidate));
+      if (canonicalCompact.startsWith(context.canonicalCompact)) {
+        return true;
+      }
+    }
+    if (context.requiresCanonicalNoDashes) {
+      const canonicalNoDashes =
+        fingerprint.canonicalNoDashes ??
+        (fingerprint.canonicalNoDashes = removeDashes(canonicalCandidate));
+      if (canonicalNoDashes.startsWith(context.canonicalNoDashes)) {
+        return true;
+      }
+    }
+  }
+  if (context.hasTokens) {
+    const resolvedTokens = getCandidateTokens();
+    if (tokensMatch(context.tokens, resolvedTokens)) {
+      return true;
+    }
+    if (context.requiresTokenNoDashes) {
+      const candidateTokensNoDashes =
+        fingerprint.tokensNoDashes ??
+        (fingerprint.tokensNoDashes = resolvedTokens.map((token) => removeDashes(token)));
+      if (tokensMatch(context.tokensNoDashes, candidateTokensNoDashes)) {
+        return true;
+      }
+    }
+  } else if (context.requiresTokenNoDashes) {
     return true;
   }
-  const canonicalCandidate = canonicalizeForMatching(candidate);
-  if (canonicalCandidate.startsWith(prefixCanonical)) {
-    return true;
-  }
-  const canonicalCompact = canonicalCandidate.replace(/\s+/g, "");
-  if (canonicalCompact.startsWith(prefixCanonicalCompact)) {
-    return true;
-  }
-  const candidateTokens = tokenizeForMatching(candidate);
-  if (tokensMatch(prefixTokens, candidateTokens)) {
-    return true;
-  }
-  const canonicalNoDashes = canonicalCandidate.replace(/-/g, "");
-  if (canonicalNoDashes.startsWith(prefixCanonicalNoDashes)) {
-    return true;
-  }
-  const candidateTokensNoDashes = candidateTokens.map((token) => token.replace(/-/g, ""));
-  return tokensMatch(prefixTokensNoDashes, candidateTokensNoDashes);
+  return false;
 }
 
 export function suggestSig(input: string, options?: SuggestSigOptions): string[] {
@@ -678,11 +856,30 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const prefix = normalizeSpacing(input.toLowerCase());
   const prefixCompact = prefix.replace(/\s+/g, "");
   const prefixNoDashes = prefix.replace(/-/g, "");
-  const prefixCanonical = canonicalizeForMatching(prefix);
+  const prefixTokens = tokenizeLowercaseForMatching(prefix);
+  const prefixCanonical = prefixTokens.join(" ");
   const prefixCanonicalCompact = prefixCanonical.replace(/\s+/g, "");
   const prefixCanonicalNoDashes = prefixCanonical.replace(/-/g, "");
-  const prefixTokens = tokenizeForMatching(prefixCanonical);
   const prefixTokensNoDashes = prefixTokens.map((token) => token.replace(/-/g, ""));
+  const prefixContext: PrefixMatchContext = {
+    raw: prefix,
+    compact: prefixCompact,
+    noDashes: prefixNoDashes,
+    canonical: prefixCanonical,
+    canonicalCompact: prefixCanonicalCompact,
+    canonicalNoDashes: prefixCanonicalNoDashes,
+    tokens: prefixTokens,
+    tokensNoDashes: prefixTokensNoDashes,
+    hasCanonical: prefixCanonical.length > 0,
+    hasTokens: prefixTokens.length > 0,
+    requiresCompact: prefixCompact !== prefix,
+    requiresNoDashes: prefixNoDashes !== prefix,
+    requiresCanonicalCompact: prefixCanonicalCompact !== prefixCanonical,
+    requiresCanonicalNoDashes: prefixCanonicalNoDashes !== prefixCanonical,
+    requiresTokenNoDashes: prefixTokens.some(
+      (token, index) => token !== prefixTokensNoDashes[index],
+    ),
+  };
 
   const contextUnit = inferUnitFromContext(options?.context ?? undefined);
   const pairs = buildUnitRoutePairs(contextUnit, options);
@@ -690,18 +887,8 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const prnReasons = buildPrnReasons(options?.prnReasons);
   const intervalTokens = buildIntervalTokens(input);
   const whenSequences = PRECOMPUTED_WHEN_SEQUENCES;
-  const matcher: CandidateMatcher = (candidate) =>
-    matchesPrefix(
-      candidate,
-      prefix,
-      prefixCompact,
-      prefixTokens,
-      prefixTokensNoDashes,
-      prefixCanonical,
-      prefixCanonicalCompact,
-      prefixNoDashes,
-      prefixCanonicalNoDashes,
-    );
+  const matcher: CandidateMatcher = (candidate, candidateLower) =>
+    matchesPrefix(candidate, candidateLower, prefixContext);
   return generateCandidateDirections(
     pairs,
     doseValues,
