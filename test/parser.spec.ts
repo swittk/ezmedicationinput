@@ -840,6 +840,16 @@ describe("internationalization", () => {
       );
     });
 
+    it("includes count information in Thai formatting", () => {
+      const result = parseSig("1 tab po q1h for 10 times", {
+        context: TAB_CONTEXT,
+        locale: "th"
+      });
+      expect(result.shortText).toBe("1 เม็ด PO ทุก 1 ชั่วโมง x10");
+      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+    });
+
     it("describes day-of-week schedules in Thai", () => {
       const result = parseSig("1 tab po every monday", { locale: "th" });
       expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ในวันจันทร์.");

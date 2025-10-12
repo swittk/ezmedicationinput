@@ -697,6 +697,9 @@ function formatShortThai(internal: ParsedSigInternal): string {
       .join(",");
     parts.push(days);
   }
+  if (internal.count !== undefined) {
+    parts.push(`x${stripTrailingZero(internal.count)}`);
+  }
   const asNeeded = formatAsNeededThai(internal);
   if (asNeeded) {
     parts.push(asNeeded);
@@ -713,6 +716,10 @@ function formatLongThai(internal: ParsedSigInternal): string {
   const eventParts = collectWhenPhrasesThai(internal);
   const timing = combineFrequencyAndEventsThai(frequencyPart, eventParts);
   const dayPart = describeDayOfWeekThai(internal);
+  const countPart =
+    internal.count !== undefined
+      ? `จำนวน ${stripTrailingZero(internal.count)} ครั้ง`
+      : undefined;
   const asNeeded = formatAsNeededThai(internal);
 
   const segments: string[] = [dosePart];
@@ -727,6 +734,9 @@ function formatLongThai(internal: ParsedSigInternal): string {
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (countPart) {
+    segments.push(countPart);
   }
   if (asNeeded) {
     segments.push(asNeeded);
