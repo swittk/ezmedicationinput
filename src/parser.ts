@@ -15,6 +15,7 @@ import {
   EventTiming,
   FhirDayOfWeek,
   FhirPeriodUnit,
+  MedicationContext,
   ParseOptions,
   RouteCode
 } from "./types";
@@ -48,6 +49,8 @@ export interface ParsedSigInternal {
   asNeededReason?: string;
   warnings: string[];
   siteText?: string;
+  siteSource?: "abbreviation" | "text";
+  siteTokenIndices: Set<number>;
 }
 
 const BODY_SITE_HINTS = new Set([
@@ -79,7 +82,71 @@ const BODY_SITE_HINTS = new Set([
   "upper",
   "lower",
   "forearm",
-  "back"
+  "back",
+  "mouth",
+  "tongue",
+  "tongues",
+  "cheek",
+  "cheeks",
+  "gum",
+  "gums",
+  "tooth",
+  "teeth",
+  "nose",
+  "nares",
+  "hair",
+  "skin",
+  "scalp",
+  "face",
+  "forehead",
+  "chin",
+  "neck",
+  "buttock",
+  "buttocks",
+  "gluteal",
+  "glute",
+  "muscle",
+  "muscles",
+  "vein",
+  "veins",
+  "vagina",
+  "vaginal",
+  "rectum",
+  "rectal",
+  "anus",
+  "perineum"
+]);
+
+const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
+
+const SITE_FILLER_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "your",
+  "his",
+  "her",
+  "their",
+  "my"
+]);
+
+const OCULAR_DIRECTION_WORDS = new Set([
+  "left",
+  "right",
+  "both",
+  "either",
+  "each",
+  "bilateral"
+]);
+
+const OCULAR_SITE_WORDS = new Set([
+  "eye",
+  "eyes",
+  "eyelid",
+  "eyelids",
+  "ocular",
+  "ophthalmic",
+  "oculus"
 ]);
 
 const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
@@ -149,16 +216,448 @@ const EYE_SITE_TOKENS: Record<string, { site: string; route?: RouteCode }> = {
   }
 };
 
+const OPHTHALMIC_ROUTE_CODES = new Set<RouteCode>([
+  RouteCode["Ophthalmic route"],
+  RouteCode["Intravitreal route (qualifier value)"]
+]);
+
+const OPHTHALMIC_CONTEXT_TOKENS = new Set<string>([
+  "drop",
+  "drops",
+  "gtt",
+  "gtts",
+  "eye",
+  "eyes",
+  "eyelid",
+  "eyelids",
+  "ocular",
+  "ophthalmic",
+  "ophth",
+  "oculus",
+  "os",
+  "ou",
+  "re",
+  "le",
+  "be"
+]);
+
+function normalizeTokenLower(token: Token): string {
+  return token.lower.replace(/\./g, "");
+}
+
+function hasOphthalmicContextHint(tokens: Token[], index: number): boolean {
+  for (let offset = -3; offset <= 3; offset++) {
+    if (offset === 0) {
+      continue;
+    }
+    const neighbor = tokens[index + offset];
+    if (!neighbor) {
+      continue;
+    }
+    const normalized = normalizeTokenLower(neighbor);
+    if (OPHTHALMIC_CONTEXT_TOKENS.has(normalized) || normalized.includes("eye")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldInterpretOdAsOnceDaily(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number,
+  treatAsSite: boolean
+): boolean {
+  if (treatAsSite) {
+    return false;
+  }
+
+  const hasCadenceAssigned =
+    internal.frequency !== undefined ||
+    internal.frequencyMax !== undefined ||
+    internal.period !== undefined ||
+    internal.periodMax !== undefined ||
+    internal.timingCode !== undefined;
+
+  const hasPriorSiteContext = hasBodySiteContextBefore(internal, tokens, index);
+  const hasUpcomingSiteContext = hasBodySiteContextAfter(internal, tokens, index);
+
+  const previous = tokens[index - 1];
+  const previousNormalized = previous ? normalizeTokenLower(previous) : undefined;
+  const previousIsOd = previousNormalized === "od";
+  const previousConsumed = previousIsOd && internal.consumed.has(previous.index);
+  const previousOdProvidedSite = previousConsumed && /eye/i.test(internal.siteText ?? "");
+
+  if (previousOdProvidedSite) {
+    return true;
+  }
+
+  const previousEyeToken =
+    previousNormalized && previousNormalized !== "od"
+      ? EYE_SITE_TOKENS[previousNormalized]
+      : undefined;
+  if (previousEyeToken && internal.consumed.has(previous.index)) {
+    return true;
+  }
+
+  if (
+    previousNormalized === "od" &&
+    internal.siteSource === "abbreviation" &&
+    internal.siteText &&
+    /eye/i.test(internal.siteText)
+  ) {
+    return true;
+  }
+
+  if (hasPriorSiteContext || hasUpcomingSiteContext) {
+    return !hasCadenceAssigned;
+  }
+
+  if (hasCadenceAssigned) {
+    return false;
+  }
+
+  if (internal.routeCode && !OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) {
+    return true;
+  }
+
+  if (internal.unit && internal.unit !== "drop") {
+    return true;
+  }
+
+  if (internal.siteText && !/eye/i.test(internal.siteText)) {
+    return true;
+  }
+
+  const hasNonOdToken = tokens.some((token, tokenIndex) => {
+    if (tokenIndex === index) {
+      return false;
+    }
+    return normalizeTokenLower(token) !== "od";
+  });
+
+  if (!hasNonOdToken) {
+    return false;
+  }
+
+  const ophthalmicContext =
+    hasOphthalmicContextHint(tokens, index) ||
+    (internal.routeCode !== undefined && OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) ||
+    (internal.siteText !== undefined && /eye/i.test(internal.siteText));
+
+  if (ophthalmicContext && hasSpelledOcularSiteBefore(tokens, index)) {
+    return true;
+  }
+
+  return !ophthalmicContext;
+}
+
+function hasBodySiteContextBefore(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): boolean {
+  const currentToken = tokens[index];
+  const currentTokenIndex = currentToken ? currentToken.index : index;
+
+  if (internal.siteText) {
+    return true;
+  }
+
+  for (const tokenIndex of internal.siteTokenIndices) {
+    if (tokenIndex < currentTokenIndex) {
+      return true;
+    }
+  }
+
+  for (let i = 0; i < index; i++) {
+    const token = tokens[i];
+    if (!token) {
+      continue;
+    }
+    if (internal.consumed.has(token.index)) {
+      if (internal.siteTokenIndices.has(token.index) && token.index < currentTokenIndex) {
+        return true;
+      }
+      continue;
+    }
+    const normalized = normalizeTokenLower(token);
+    if (BODY_SITE_HINTS.has(normalized)) {
+      return true;
+    }
+    if (EYE_SITE_TOKENS[normalized]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasBodySiteContextAfter(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): boolean {
+  const currentToken = tokens[index];
+  const currentTokenIndex = currentToken ? currentToken.index : index;
+
+  for (const tokenIndex of internal.siteTokenIndices) {
+    if (tokenIndex > currentTokenIndex) {
+      return true;
+    }
+  }
+
+  let seenConnector = false;
+  for (let i = index + 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) {
+      continue;
+    }
+    if (internal.consumed.has(token.index)) {
+      if (internal.siteTokenIndices.has(token.index) && token.index > currentTokenIndex) {
+        return true;
+      }
+      continue;
+    }
+    const normalized = normalizeTokenLower(token);
+    if (SITE_CONNECTORS.has(normalized)) {
+      seenConnector = true;
+      continue;
+    }
+    if (SITE_FILLER_WORDS.has(normalized)) {
+      continue;
+    }
+    if (BODY_SITE_HINTS.has(normalized)) {
+      return true;
+    }
+    if (seenConnector) {
+      break;
+    }
+    if (!seenConnector) {
+      break;
+    }
+  }
+  return false;
+}
+
+function hasSpelledOcularSiteBefore(tokens: Token[], index: number): boolean {
+  let hasOcularWord = false;
+  let hasDirectionalCue = false;
+  for (let i = 0; i < index; i++) {
+    const token = tokens[i];
+    if (!token) {
+      continue;
+    }
+    const normalized = normalizeTokenLower(token);
+    if (SITE_CONNECTORS.has(normalized) || OCULAR_DIRECTION_WORDS.has(normalized)) {
+      hasDirectionalCue = true;
+    }
+    if (OCULAR_SITE_WORDS.has(normalized) || normalized.includes("eye")) {
+      hasOcularWord = true;
+    }
+    if (hasDirectionalCue && hasOcularWord) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldTreatEyeTokenAsSite(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number,
+  context?: MedicationContext | null
+): boolean {
+  const currentToken = tokens[index];
+  const normalizedSelf = normalizeTokenLower(currentToken);
+  const eyeMeta = EYE_SITE_TOKENS[normalizedSelf];
+
+  if (internal.routeCode && !OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) {
+    return false;
+  }
+
+  if (internal.siteText) {
+    return false;
+  }
+
+  if (internal.siteSource === "abbreviation") {
+    return false;
+  }
+
+  const dosageForm = context?.dosageForm?.toLowerCase();
+  const contextImpliesOphthalmic = Boolean(
+    dosageForm && /(eye|ophth|ocular|intravit)/i.test(dosageForm)
+  );
+  const eyeRouteImpliesOphthalmic =
+    eyeMeta?.route === RouteCode["Intravitreal route (qualifier value)"];
+  const ophthalmicContext =
+    hasOphthalmicContextHint(tokens, index) ||
+    (internal.routeCode !== undefined && OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) ||
+    contextImpliesOphthalmic ||
+    eyeRouteImpliesOphthalmic;
+
+  if (hasBodySiteContextAfter(internal, tokens, index)) {
+    return false;
+  }
+  if (!ophthalmicContext) {
+    const hasOtherActiveTokens = tokens.some(
+      (token, tokenIndex) =>
+        tokenIndex !== index && !internal.consumed.has(token.index)
+    );
+    const onlyEyeTokens = tokens.every((token, tokenIndex) => {
+      if (tokenIndex === index || internal.consumed.has(token.index)) {
+        return true;
+      }
+      return normalizeTokenLower(token) === "od";
+    });
+    if (!hasOtherActiveTokens) {
+      return internal.unit === undefined && internal.routeCode === undefined;
+    }
+    if (onlyEyeTokens) {
+      return true;
+    }
+    return false;
+  }
+
+  for (let i = 0; i < index; i++) {
+    const candidate = tokens[i];
+    if (internal.consumed.has(candidate.index)) {
+      continue;
+    }
+    const normalized = normalizeTokenLower(candidate);
+    if (SITE_CONNECTORS.has(normalized)) {
+      continue;
+    }
+    if (BODY_SITE_HINTS.has(normalized)) {
+      return false;
+    }
+    if (EYE_SITE_TOKENS[normalized]) {
+      return false;
+    }
+    if (DEFAULT_ROUTE_SYNONYMS[normalized]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function tryParseNumericCadence(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): boolean {
+  const token = tokens[index];
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(token.lower)) {
+    return false;
+  }
+  if (
+    internal.frequency !== undefined ||
+    internal.frequencyMax !== undefined ||
+    internal.period !== undefined ||
+    internal.periodMax !== undefined
+  ) {
+    return false;
+  }
+
+  let nextIndex = index + 1;
+  const connectors: Token[] = [];
+  while (true) {
+    const connector = tokens[nextIndex];
+    if (!connector || internal.consumed.has(connector.index)) {
+      break;
+    }
+    const normalized = normalizeTokenLower(connector);
+    if (normalized === "per" || normalized === "a" || normalized === "each" || normalized === "every") {
+      connectors.push(connector);
+      nextIndex += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (!connectors.length) {
+    return false;
+  }
+
+  const unitToken = tokens[nextIndex];
+  if (!unitToken || internal.consumed.has(unitToken.index)) {
+    return false;
+  }
+  const unitCode = mapIntervalUnit(normalizeTokenLower(unitToken));
+  if (!unitCode) {
+    return false;
+  }
+
+  const value = parseFloat(token.original);
+  if (!Number.isFinite(value)) {
+    return false;
+  }
+
+  internal.frequency = value;
+  internal.period = 1;
+  internal.periodUnit = unitCode;
+  if (value === 1 && unitCode === FhirPeriodUnit.Day && !internal.timingCode) {
+    internal.timingCode = "QD";
+  }
+
+  mark(internal.consumed, token);
+  for (const connector of connectors) {
+    mark(internal.consumed, connector);
+  }
+  mark(internal.consumed, unitToken);
+  return true;
+}
+
 const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
   { pattern: /\beye(s)?\b/i, route: RouteCode["Ophthalmic route"] },
+  { pattern: /\beyelid(s)?\b/i, route: RouteCode["Ophthalmic route"] },
+  { pattern: /\bintravitreal\b/i, route: RouteCode["Intravitreal route (qualifier value)"] },
   { pattern: /\bear(s)?\b/i, route: RouteCode["Otic route"] },
   { pattern: /\bnostril(s)?\b/i, route: RouteCode["Nasal route"] },
-  { pattern: /\bnares?\b/i, route: RouteCode["Nasal route"] }
+  { pattern: /\bnares?\b/i, route: RouteCode["Nasal route"] },
+  { pattern: /\bnose\b/i, route: RouteCode["Nasal route"] },
+  { pattern: /\bmouth\b/i, route: RouteCode["Oral route"] },
+  { pattern: /\boral\b/i, route: RouteCode["Oral route"] },
+  { pattern: /\bunder (the )?tongue\b/i, route: RouteCode["Sublingual route"] },
+  { pattern: /\btongue\b/i, route: RouteCode["Sublingual route"] },
+  { pattern: /\bcheek(s)?\b/i, route: RouteCode["Buccal route"] },
+  { pattern: /\blung(s)?\b/i, route: RouteCode["Respiratory tract route (qualifier value)"] },
+  { pattern: /\brespiratory tract\b/i, route: RouteCode["Respiratory tract route (qualifier value)"] },
+  { pattern: /\bskin\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bscalp\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bface\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bhand(s)?\b/i, route: RouteCode["Topical route"] },
+  { pattern: /(\bfoot\b|\bfeet\b)/i, route: RouteCode["Topical route"] },
+  { pattern: /\belbow(s)?\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bknee(s)?\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bleg(s)?\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\barm(s)?\b/i, route: RouteCode["Topical route"] },
+  { pattern: /\bpatch(es)?\b/i, route: RouteCode["Transdermal route"] },
+  { pattern: /\babdomen\b/i, route: RouteCode["Subcutaneous route"] },
+  { pattern: /\bbelly\b/i, route: RouteCode["Subcutaneous route"] },
+  { pattern: /\bstomach\b/i, route: RouteCode["Subcutaneous route"] },
+  { pattern: /\bthigh(s)?\b/i, route: RouteCode["Subcutaneous route"] },
+  { pattern: /\bupper arm\b/i, route: RouteCode["Subcutaneous route"] },
+  { pattern: /\bbuttock(s)?\b/i, route: RouteCode["Intramuscular route"] },
+  { pattern: /\bglute(al)?\b/i, route: RouteCode["Intramuscular route"] },
+  { pattern: /\bdeltoid\b/i, route: RouteCode["Intramuscular route"] },
+  { pattern: /\bmuscle(s)?\b/i, route: RouteCode["Intramuscular route"] },
+  { pattern: /\bvein(s)?\b/i, route: RouteCode["Intravenous route"] },
+  { pattern: /\brectum\b/i, route: RouteCode["Per rectum"] },
+  { pattern: /\banus\b/i, route: RouteCode["Per rectum"] },
+  { pattern: /\brectal\b/i, route: RouteCode["Per rectum"] },
+  { pattern: /\bvagina\b/i, route: RouteCode["Per vagina"] },
+  { pattern: /\bvaginal\b/i, route: RouteCode["Per vagina"] }
 ];
 
 export function tokenize(input: string): Token[] {
   const separators = /[(),]/g;
   let normalized = input.trim().replace(separators, " ");
+  normalized = normalized.replace(
+    /(\d+(?:\.\d+)?)\s*\/\s*(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)\b/gi,
+    (_match, value, unit) => `${value} per ${unit}`
+  );
   normalized = normalized.replace(/(\d+)\s*\/\s*(\d+)/g, (match, num, den) => {
     const numerator = parseFloat(num);
     const denominator = parseFloat(den);
@@ -718,7 +1217,8 @@ export function parseInternal(
     consumed: new Set<number>(),
     dayOfWeek: [],
     when: [],
-    warnings: []
+    warnings: [],
+    siteTokenIndices: new Set<number>()
   };
 
   const context = options?.context ?? undefined;
@@ -793,6 +1293,9 @@ export function parseInternal(
         setRoute(internal, synonym.code, synonym.text);
         for (const part of slice) {
           mark(internal.consumed, part);
+          if (BODY_SITE_HINTS.has(part.lower)) {
+            internal.siteTokenIndices.add(part.index);
+          }
         }
         return true;
       }
@@ -805,6 +1308,7 @@ export function parseInternal(
     if (internal.consumed.has(token.index)) {
       continue;
     }
+    const normalizedLower = normalizeTokenLower(token);
 
     if (token.lower === "bld" || token.lower === "b-l-d") {
       const check = checkDiscouraged(token.original, options);
@@ -821,8 +1325,31 @@ export function parseInternal(
       }
     }
 
+    if (tryParseNumericCadence(internal, tokens, i)) {
+      continue;
+    }
+
+    const eyeSite = EYE_SITE_TOKENS[normalizedLower];
+    const treatEyeTokenAsSite = eyeSite
+      ? shouldTreatEyeTokenAsSite(internal, tokens, i, context)
+      : false;
+
+    if (normalizedLower === "od") {
+      const descriptor = TIMING_ABBREVIATIONS.od;
+      if (
+        descriptor &&
+        shouldInterpretOdAsOnceDaily(internal, tokens, i, treatEyeTokenAsSite)
+      ) {
+        applyFrequencyDescriptor(internal, token, descriptor, options);
+        continue;
+      }
+    }
+
     // Frequency abbreviation map
-    const freqDescriptor = TIMING_ABBREVIATIONS[token.lower];
+    const freqDescriptor =
+      normalizedLower === "od"
+        ? undefined
+        : TIMING_ABBREVIATIONS[token.lower] ?? TIMING_ABBREVIATIONS[normalizedLower];
     if (freqDescriptor) {
       applyFrequencyDescriptor(internal, token, freqDescriptor, options);
       continue;
@@ -881,9 +1408,9 @@ export function parseInternal(
       continue;
     }
 
-    const eyeSite = EYE_SITE_TOKENS[token.lower];
-    if (eyeSite) {
+    if (eyeSite && treatEyeTokenAsSite) {
       internal.siteText = eyeSite.site;
+      internal.siteSource = "abbreviation";
       if (eyeSite.route && !internal.routeCode) {
         setRoute(internal, eyeSite.route);
       }
@@ -947,7 +1474,7 @@ export function parseInternal(
     }
 
     // Skip generic connectors
-    if (token.lower === "per" || token.lower === "a" || token.lower === "every") {
+    if (token.lower === "per" || token.lower === "a" || token.lower === "every" || token.lower === "each") {
       mark(internal.consumed, token);
       continue;
     }
@@ -1022,19 +1549,77 @@ export function parseInternal(
 
   // Determine site text from leftover tokens (excluding PRN reason tokens)
   const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));
-  if (leftoverTokens.length > 0) {
-    const siteCandidates = leftoverTokens.filter((t) => BODY_SITE_HINTS.has(t.lower));
-    if (siteCandidates.length > 0) {
-      const indices = new Set(siteCandidates.map((t) => t.index));
-      const words: string[] = [];
-      for (const token of leftoverTokens) {
-        if (indices.has(token.index) || BODY_SITE_HINTS.has(token.lower)) {
-          words.push(token.original);
-          mark(internal.consumed, token);
+  const siteCandidateIndices = new Set<number>();
+  for (const token of leftoverTokens) {
+    if (BODY_SITE_HINTS.has(token.lower)) {
+      siteCandidateIndices.add(token.index);
+    }
+  }
+  for (const idx of internal.siteTokenIndices) {
+    siteCandidateIndices.add(idx);
+  }
+  if (siteCandidateIndices.size > 0) {
+    const indicesToInclude = new Set<number>(siteCandidateIndices);
+    for (const idx of siteCandidateIndices) {
+      let prev = idx - 1;
+      while (prev >= 0) {
+        const token = tokens[prev];
+        if (!token) {
+          break;
         }
+        const lower = token.lower;
+        if (SITE_CONNECTORS.has(lower) || BODY_SITE_HINTS.has(lower)) {
+          indicesToInclude.add(token.index);
+          prev -= 1;
+          continue;
+        }
+        break;
       }
-      if (words.length > 0) {
-        internal.siteText = words.join(" ");
+      let next = idx + 1;
+      while (next < tokens.length) {
+        const token = tokens[next];
+        if (!token) {
+          break;
+        }
+        const lower = token.lower;
+        if (SITE_CONNECTORS.has(lower) || BODY_SITE_HINTS.has(lower)) {
+          indicesToInclude.add(token.index);
+          next += 1;
+          continue;
+        }
+        break;
+      }
+    }
+    const sortedIndices = Array.from(indicesToInclude).sort((a, b) => a - b);
+    const displayWords: string[] = [];
+    for (const index of sortedIndices) {
+      const token = tokens[index];
+      if (!token) {
+        continue;
+      }
+      const lower = token.lower;
+      if (!SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
+        displayWords.push(token.original);
+      }
+      mark(internal.consumed, token);
+    }
+    const normalizedSite = displayWords
+      .filter((word) => !SITE_CONNECTORS.has(word.trim().toLowerCase()))
+      .join(" ")
+      .trim();
+    if (normalizedSite) {
+      internal.siteText = normalizedSite;
+      if (!internal.siteSource) {
+        internal.siteSource = "text";
+      }
+    }
+  }
+
+  if (!internal.routeCode && internal.siteText) {
+    for (const { pattern, route } of SITE_UNIT_ROUTE_HINTS) {
+      if (pattern.test(internal.siteText)) {
+        setRoute(internal, route);
+        break;
       }
     }
   }

@@ -41,12 +41,267 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.site?.text).toBe("right eye");
   });
 
+  it("interprets OD as once daily when systemic cues are present", () => {
+    const result = parseSig("1 tab OD", { context: TAB_CONTEXT });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QD");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("preserves ophthalmic interpretation of OD when eye context exists", () => {
+    const result = parseSig("1 drop OD");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.site?.text).toBe("right eye");
+    expect(result.fhir.timing?.code).toBeUndefined();
+  });
+
+  it("interprets ophthalmic double OD as right eye once daily", () => {
+    const result = parseSig("1 drop OD OD");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.site?.text).toBe("right eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("infers ophthalmic route from spelled eye site", () => {
+    const result = parseSig("1 drop right eye once daily");
+    expect(result.fhir.site?.text).toBe("right eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+  });
+
+  it("treats OD as once daily when no other frequency cues exist", () => {
+    const result = parseSig("Take medication OD");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("interprets OS followed by OD as left eye once daily", () => {
+    const result = parseSig("1 drop OS OD");
+    expect(result.fhir.site?.text).toBe("left eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("interprets to OS OD as left eye once daily", () => {
+    const result = parseSig("1 drop to OS OD");
+    expect(result.fhir.site?.text).toBe("left eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("treats trailing OD as once daily when the eye site is already spelled out", () => {
+    const result = parseSig("1 drop to left eye od");
+    expect(result.fhir.site?.text).toBe("left eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("treats spelled non-ophthalmic sites before OD as once daily cadence", () => {
+    const result = parseSig("1 drop to forehead od");
+    expect(result.fhir.site?.text).toBe("forehead");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("treats spelled sites after OD as once daily cadence cues", () => {
+    const result = parseSig("1 drop od to left eye");
+    expect(result.fhir.site?.text).toBe("left eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps non-ophthalmic routes when OD precedes a spelled body site", () => {
+    const result = parseSig("1 drop od to skin");
+    expect(result.fhir.site?.text).toBe("skin");
+    expect(result.fhir.route?.coding?.[0]?.code).not.toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("recognizes uncommon spelled sites after OD", () => {
+    const result = parseSig("1 drop od to hair");
+    expect(result.fhir.site?.text).toBe("hair");
+    expect(result.fhir.route?.coding?.[0]?.code).not.toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("strips connector words from spelled site phrases", () => {
+    const result = parseSig("1 drop bid to face");
+    expect(result.fhir.site?.text).toBe("face");
+    expect(result.longText).toBe("Apply 1 drop twice daily to the face.");
+  });
+
+  it("interprets repeated OD as right eye once daily", () => {
+    const result = parseSig("OD OD");
+    expect(result.fhir.site?.text).toBe("right eye");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("prefers non-ophthalmic route matches over OD eye interpretation", () => {
+    const result = parseSig("1 drop td od");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Transdermal route"]
+    );
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps subcutaneous routes when OD supplies cadence", () => {
+    const result = parseSig("1 drop sc od");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Subcutaneous route"]
+    );
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("interprets dotted O.D. as once daily when paired with oral route", () => {
+    const result = parseSig("500 mg po O.D.");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 500, unit: "mg" });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+    expect(result.fhir.site).toBeUndefined();
+  });
+
+  it("parses numeric per-day cadence shorthand", () => {
+    const result = parseSig("1 tab 3/day", { context: TAB_CONTEXT });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 3,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses numeric per-day shorthand with capital D", () => {
+    const result = parseSig("1 tab 1/D", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QD");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses numeric per-week cadence", () => {
+    const result = parseSig("2 puffs 2/week");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "wk"
+    });
+  });
+
+  it("parses numeric per-month cadence", () => {
+    const result = parseSig("Apply 1 patch 1/month");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "patch" });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "mo"
+    });
+  });
+
   it("infers inhalation units from respiratory route hints", () => {
     const result = parseSig("2 inh q4h");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(
       SNOMEDCTRouteCodes["Respiratory tract route (qualifier value)"]
     );
+  });
+
+  it("infers per vagina route from spelled site text", () => {
+    const result = parseSig("Apply cream to vagina once daily");
+    expect(result.fhir.site?.text).toBe("vagina");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per vagina"]);
+  });
+
+  it("captures nasal site phrases without leaving stray text", () => {
+    const result = parseSig("Spray once daily to nostril");
+    expect(result.fhir.site?.text).toBe("nostril");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Nasal route"]);
   });
 
   it("infers patch units for transdermal routes", () => {

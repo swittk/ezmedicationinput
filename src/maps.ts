@@ -222,6 +222,12 @@ export const TIMING_ABBREVIATIONS: Record<string, FrequencyDescriptor> = {
     periodUnit: FhirPeriodUnit.Day,
     discouraged: "QOD"
   },
+  od: {
+    code: "QD",
+    frequency: 1,
+    period: 1,
+    periodUnit: FhirPeriodUnit.Day
+  },
   ad: {
     period: 2,
     periodUnit: FhirPeriodUnit.Day,
@@ -320,6 +326,7 @@ export const MEAL_KEYWORDS: Record<
 export const DISCOURAGED_TOKENS: Record<string, string> = {
   qd: "QD",
   qod: "QOD",
+  od: "OD",
   bld: "BLD",
   "b-l-d": "BLD",
   ad: "AD"

@@ -152,7 +152,8 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
     routeText: dosage.route?.text,
     siteText: dosage.site?.text,
     asNeeded: dosage.asNeededBoolean,
-    asNeededReason: dosage.asNeededFor?.[0]?.text
+    asNeededReason: dosage.asNeededFor?.[0]?.text,
+    siteTokenIndices: new Set()
   };
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
