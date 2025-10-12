@@ -165,6 +165,8 @@ const FREQUENCY_CODES = ["qd", "od", "bid", "tid", "qid"].filter(
   (token) => TIMING_ABBREVIATIONS[token] !== undefined,
 );
 
+const FREQUENCY_CODE_SUFFIXES = FREQUENCY_CODES.map((code) => ` ${code}`);
+
 const FREQ_TOKEN_BY_NUMBER: Record<number, string> = {};
 for (const [frequency, token] of [
   [1, "qd"],
@@ -308,9 +310,16 @@ function removeDashes(value: string): string {
   return result.join("");
 }
 
+const UNIT_VARIANT_CACHE = new Map<string, UnitVariant[]>();
+
 function getUnitVariants(unit: string): UnitVariant[] {
   const canonical = resolveCanonicalUnit(unit) ?? normalizeSpacing(unit);
   const normalizedCanonical = normalizeKey(canonical);
+  const cached = UNIT_VARIANT_CACHE.get(normalizedCanonical);
+  if (cached) {
+    return cached;
+  }
+
   const variants = new Map<string, UnitVariant>();
 
   const push = (candidate: string | undefined) => {
@@ -338,7 +347,9 @@ function getUnitVariants(unit: string): UnitVariant[] {
     }
   }
 
-  return [...variants.values()];
+  const result = [...variants.values()];
+  UNIT_VARIANT_CACHE.set(normalizedCanonical, result);
+  return result;
 }
 
 function buildIntervalTokens(input: string): string[] {
@@ -407,6 +418,9 @@ function buildWhenSequences(): string[][] {
 }
 
 const PRECOMPUTED_WHEN_SEQUENCES = buildWhenSequences();
+const PRECOMPUTED_WHEN_SEQUENCE_SUFFIXES = PRECOMPUTED_WHEN_SEQUENCES.map(
+  (sequence) => ` ${sequence.join(" ")}`,
+);
 
 function tokenizeLowercaseForMatching(value: string): string[] {
   return value
@@ -642,122 +656,129 @@ function generateCandidateDirections(
     return suggestions.length >= limit;
   };
 
-  for (const pair of pairs) {
+  const codeSuffixes = FREQUENCY_CODE_SUFFIXES;
+  const prnSuffixes = new Array<string>(prnReasons.length);
+  for (let i = 0; i < prnReasons.length; i += 1) {
+    prnSuffixes[i] = ` prn ${prnReasons[i]}`;
+  }
+  const intervalSuffixes = new Array<string>(intervalTokens.length);
+  for (let i = 0; i < intervalTokens.length; i += 1) {
+    intervalSuffixes[i] = ` ${intervalTokens[i]}`;
+  }
+  const whenSuffixes =
+    whenSequences === PRECOMPUTED_WHEN_SEQUENCES
+      ? PRECOMPUTED_WHEN_SEQUENCE_SUFFIXES
+      : whenSequences.map((sequence) => ` ${sequence.join(" ")}`);
+
+  for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
+    const pair = pairs[pairIndex];
     const unitVariants = getUnitVariants(pair.unit);
     const route = pair.route;
     const routeLower = pair.routeLower;
 
-    for (const code of FREQUENCY_CODES) {
-      const codeSuffix = ` ${code}`;
-      for (const unitVariant of unitVariants) {
-        const unitRoute = `${unitVariant.value} ${route}`;
-        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
-        for (const doseVariant of doseVariants) {
-          const candidate = `${doseVariant.value} ${unitRoute}${codeSuffix}`;
-          const candidateLower = `${doseVariant.lower} ${unitRouteLower}${codeSuffix}`;
-          if (push(candidate, candidateLower)) {
+    const unitDoseVariants: UnitVariant[][] = new Array(unitVariants.length);
+    for (let unitIndex = 0; unitIndex < unitVariants.length; unitIndex += 1) {
+      const unitVariant = unitVariants[unitIndex];
+      const unitRouteValue = `${unitVariant.value} ${route}`;
+      const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
+      const doseBases: UnitVariant[] = new Array(doseVariants.length);
+      for (let doseIndex = 0; doseIndex < doseVariants.length; doseIndex += 1) {
+        const doseVariant = doseVariants[doseIndex];
+        doseBases[doseIndex] = {
+          value: `${doseVariant.value} ${unitRouteValue}`,
+          lower: `${doseVariant.lower} ${unitRouteLower}`,
+        };
+      }
+      unitDoseVariants[unitIndex] = doseBases;
+    }
+
+    for (let codeIndex = 0; codeIndex < codeSuffixes.length; codeIndex += 1) {
+      const codeSuffix = codeSuffixes[codeIndex];
+      for (let unitIndex = 0; unitIndex < unitDoseVariants.length; unitIndex += 1) {
+        const doseBases = unitDoseVariants[unitIndex];
+        for (let doseIndex = 0; doseIndex < doseBases.length; doseIndex += 1) {
+          const base = doseBases[doseIndex];
+          if (push(base.value + codeSuffix, base.lower + codeSuffix)) {
             return suggestions;
           }
         }
       }
-      const candidate = `${route}${codeSuffix}`;
-      const candidateLower = `${routeLower}${codeSuffix}`;
-      if (push(candidate, candidateLower)) {
+      if (push(route + codeSuffix, routeLower + codeSuffix)) {
         return suggestions;
       }
     }
 
-    for (const interval of intervalTokens) {
-      const intervalSuffix = ` ${interval}`;
-      for (const unitVariant of unitVariants) {
-        const unitRoute = `${unitVariant.value} ${route}`;
-        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
-        for (const doseVariant of doseVariants) {
-          const base = `${doseVariant.value} ${unitRoute}`;
-          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
-          const intervalCandidate = `${base}${intervalSuffix}`;
-          const intervalCandidateLower = `${baseLower}${intervalSuffix}`;
-          if (push(intervalCandidate, intervalCandidateLower)) {
+    for (let intervalIndex = 0; intervalIndex < intervalSuffixes.length; intervalIndex += 1) {
+      const intervalSuffix = intervalSuffixes[intervalIndex];
+      for (let unitIndex = 0; unitIndex < unitDoseVariants.length; unitIndex += 1) {
+        const doseBases = unitDoseVariants[unitIndex];
+        for (let doseIndex = 0; doseIndex < doseBases.length; doseIndex += 1) {
+          const base = doseBases[doseIndex];
+          const baseIntervalValue = base.value + intervalSuffix;
+          const baseIntervalLower = base.lower + intervalSuffix;
+          if (push(baseIntervalValue, baseIntervalLower)) {
             return suggestions;
           }
-          for (const reason of prnReasons) {
-            const reasonSuffix = `${intervalSuffix} prn ${reason}`;
-            const reasonCandidate = `${base}${reasonSuffix}`;
-            const reasonCandidateLower = `${baseLower}${reasonSuffix}`;
-            if (push(reasonCandidate, reasonCandidateLower)) {
+          for (let reasonIndex = 0; reasonIndex < prnSuffixes.length; reasonIndex += 1) {
+            const reasonSuffix = prnSuffixes[reasonIndex];
+            if (push(baseIntervalValue + reasonSuffix, baseIntervalLower + reasonSuffix)) {
               return suggestions;
             }
           }
         }
       }
-      const candidate = `${route}${intervalSuffix}`;
-      const candidateLower = `${routeLower}${intervalSuffix}`;
-      if (push(candidate, candidateLower)) {
+      if (push(route + intervalSuffix, routeLower + intervalSuffix)) {
         return suggestions;
       }
     }
 
-    for (const freq of FREQUENCY_NUMBERS) {
+    for (let freqIndex = 0; freqIndex < FREQUENCY_NUMBERS.length; freqIndex += 1) {
+      const freq = FREQUENCY_NUMBERS[freqIndex];
       const freqToken = FREQ_TOKEN_BY_NUMBER[freq];
       if (!freqToken) {
         continue;
       }
-      const base = `1x${freq} ${route}`;
+      const baseValue = `1x${freq} ${route}`;
       const baseLower = `1x${freq} ${routeLower}`;
-      const freqCandidate = `${base} ${freqToken}`;
-      const freqCandidateLower = `${baseLower} ${freqToken}`;
-      if (push(freqCandidate, freqCandidateLower)) {
+      if (push(`${baseValue} ${freqToken}`, `${baseLower} ${freqToken}`)) {
         return suggestions;
       }
-      for (const when of CORE_WHEN_TOKENS) {
-        const whenCandidate = `${base} ${when}`;
-        const whenCandidateLower = `${baseLower} ${when}`;
-        if (push(whenCandidate, whenCandidateLower)) {
+      for (let whenIndex = 0; whenIndex < CORE_WHEN_TOKENS.length; whenIndex += 1) {
+        const whenToken = CORE_WHEN_TOKENS[whenIndex];
+        if (push(`${baseValue} ${whenToken}`, `${baseLower} ${whenToken}`)) {
           return suggestions;
         }
       }
     }
 
-    for (const whenSequence of whenSequences) {
-      const suffix = ` ${whenSequence.join(" ")}`;
-      for (const unitVariant of unitVariants) {
-        const unitRoute = `${unitVariant.value} ${route}`;
-        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
-        for (const doseVariant of doseVariants) {
-          const base = `${doseVariant.value} ${unitRoute}`;
-          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
-          const candidate = `${base}${suffix}`;
-          const candidateLower = `${baseLower}${suffix}`;
-          if (push(candidate, candidateLower)) {
+    for (let whenIndex = 0; whenIndex < whenSuffixes.length; whenIndex += 1) {
+      const whenSuffix = whenSuffixes[whenIndex];
+      for (let unitIndex = 0; unitIndex < unitDoseVariants.length; unitIndex += 1) {
+        const doseBases = unitDoseVariants[unitIndex];
+        for (let doseIndex = 0; doseIndex < doseBases.length; doseIndex += 1) {
+          const base = doseBases[doseIndex];
+          if (push(base.value + whenSuffix, base.lower + whenSuffix)) {
             return suggestions;
           }
         }
       }
-      const candidate = `${route}${suffix}`;
-      const candidateLower = `${routeLower}${suffix}`;
-      if (push(candidate, candidateLower)) {
+      if (push(route + whenSuffix, routeLower + whenSuffix)) {
         return suggestions;
       }
     }
 
-    for (const reason of prnReasons) {
-      const reasonSuffix = ` prn ${reason}`;
-      for (const unitVariant of unitVariants) {
-        const unitRoute = `${unitVariant.value} ${route}`;
-        const unitRouteLower = `${unitVariant.lower} ${routeLower}`;
-        for (const doseVariant of doseVariants) {
-          const base = `${doseVariant.value} ${unitRoute}`;
-          const baseLower = `${doseVariant.lower} ${unitRouteLower}`;
-          const candidate = `${base}${reasonSuffix}`;
-          const candidateLower = `${baseLower}${reasonSuffix}`;
-          if (push(candidate, candidateLower)) {
+    for (let reasonIndex = 0; reasonIndex < prnSuffixes.length; reasonIndex += 1) {
+      const reasonSuffix = prnSuffixes[reasonIndex];
+      for (let unitIndex = 0; unitIndex < unitDoseVariants.length; unitIndex += 1) {
+        const doseBases = unitDoseVariants[unitIndex];
+        for (let doseIndex = 0; doseIndex < doseBases.length; doseIndex += 1) {
+          const base = doseBases[doseIndex];
+          if (push(base.value + reasonSuffix, base.lower + reasonSuffix)) {
             return suggestions;
           }
         }
       }
-      const candidate = `${route}${reasonSuffix}`;
-      const candidateLower = `${routeLower}${reasonSuffix}`;
-      if (push(candidate, candidateLower)) {
+      if (push(route + reasonSuffix, routeLower + reasonSuffix)) {
         return suggestions;
       }
     }
