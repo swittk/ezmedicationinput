@@ -259,6 +259,133 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Apply 1 drop twice daily to the face.");
   });
 
+  describe("custom siteCodeMap usage", () => {
+    const CUSTOM_SYSTEM = "http://example.org/custom-sites";
+
+    it("resolves novel non-lateral sites via siteCodeMap definitions", () => {
+      const result = parseSig("apply to MoOb nightly", {
+        siteCodeMap: {
+          moob: {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "MOOB",
+              display: "Moob surface"
+            },
+            text: "Moob (custom)"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "MOOB",
+        display: "Moob surface"
+      });
+      expect(result.fhir.site?.text).toBe("Moob (custom)");
+      expect(result.meta.normalized.site).toEqual({
+        text: "Moob (custom)",
+        coding: {
+          system: CUSTOM_SYSTEM,
+          code: "MOOB",
+          display: "Moob surface"
+        }
+      });
+      expect(result.meta.siteLookups).toBeUndefined();
+    });
+
+    it("normalizes siteCodeMap keys before performing lookups", () => {
+      const result = parseSig("apply to calcaneus", {
+        siteCodeMap: {
+          "   CaLcAnEuS   ": {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "CALC",
+              display: "Calcaneus"
+            },
+            text: "Calcaneus (custom)"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "CALC",
+        display: "Calcaneus"
+      });
+      expect(result.fhir.site?.text).toBe("Calcaneus (custom)");
+      expect(result.meta.siteLookups).toBeUndefined();
+    });
+
+    it("records custom suggestions when brace placeholders request lookups", () => {
+      const result = parseSig("apply to {calcaneus}", {
+        siteCodeMap: {
+          calcaneus: {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "CALC",
+              display: "Calcaneus"
+            },
+            text: "Calcaneus (custom)"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]?.code).toBe("CALC");
+      expect(result.meta.siteLookups?.[0]?.request.canonical).toBe("calcaneus");
+      expect(result.meta.siteLookups?.[0]?.request.isProbe).toBe(true);
+      expect(result.meta.siteLookups?.[0]?.suggestions).toEqual([
+        {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "CALC",
+            display: "Calcaneus"
+          },
+          text: "Calcaneus (custom)"
+        }
+      ]);
+    });
+
+    it("merges custom and default suggestions for recognized sites with probes", () => {
+      const result = parseSig("apply to {scalp}", {
+        siteCodeMap: {
+          scalp: {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "SCALP",
+              display: "Scalp custom"
+            },
+            text: "Scalp (custom)"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "SCALP",
+        display: "Scalp custom"
+      });
+      expect(result.meta.siteLookups?.[0]?.request.isProbe).toBe(true);
+      expect(result.meta.siteLookups?.[0]?.suggestions).toEqual([
+        {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "SCALP",
+            display: "Scalp custom"
+          },
+          text: "Scalp (custom)"
+        },
+        {
+          coding: {
+            system: "http://snomed.info/sct",
+            code: "41695006",
+            display: "Scalp"
+          },
+          text: undefined
+        }
+      ]);
+    });
+  });
+
   it("interprets repeated OD as right eye once daily", () => {
     const result = parseSig("OD OD");
     expect(result.fhir.site?.text).toBe("right eye");

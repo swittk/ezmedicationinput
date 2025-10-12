@@ -46,4 +46,5 @@ export interface ParsedSigInternal {
   siteCoding?: FhirCoding;
   siteLookupRequest?: SiteCodeLookupRequest;
   siteLookups: SiteLookupDetail[];
+  customSiteHints?: Set<string>;
 }

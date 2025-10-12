@@ -35,6 +35,31 @@ import { arrayIncludes } from "./utils/array";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
+function buildCustomSiteHints(
+  map: Record<string, BodySiteDefinition> | undefined
+): Set<string> | undefined {
+  if (!map) {
+    return undefined;
+  }
+  const hints = new Set<string>();
+  for (const key of Object.keys(map)) {
+    const normalized = normalizeBodySiteKey(key);
+    if (!normalized) {
+      continue;
+    }
+    for (const part of normalized.split(" ")) {
+      if (part) {
+        hints.add(part);
+      }
+    }
+  }
+  return hints;
+}
+
+function isBodySiteHint(word: string, customSiteHints?: Set<string>): boolean {
+  return BODY_SITE_HINTS.has(word) || (customSiteHints?.has(word) ?? false);
+}
+
 const BODY_SITE_HINTS = new Set([
   "left",
   "right",
@@ -431,7 +456,7 @@ function hasBodySiteContextBefore(
       continue;
     }
     const normalized = normalizeTokenLower(token);
-    if (BODY_SITE_HINTS.has(normalized)) {
+    if (isBodySiteHint(normalized, internal.customSiteHints)) {
       return true;
     }
     if (EYE_SITE_TOKENS[normalized]) {
@@ -476,7 +501,7 @@ function hasBodySiteContextAfter(
     if (SITE_FILLER_WORDS.has(normalized)) {
       continue;
     }
-    if (BODY_SITE_HINTS.has(normalized)) {
+    if (isBodySiteHint(normalized, internal.customSiteHints)) {
       return true;
     }
     if (seenConnector) {
@@ -577,7 +602,7 @@ function shouldTreatEyeTokenAsSite(
     if (SITE_CONNECTORS.has(normalized)) {
       continue;
     }
-    if (BODY_SITE_HINTS.has(normalized)) {
+    if (isBodySiteHint(normalized, internal.customSiteHints)) {
       return false;
     }
     if (EYE_SITE_TOKENS[normalized]) {
@@ -1491,7 +1516,8 @@ export function parseInternal(
     when: [],
     warnings: [],
     siteTokenIndices: new Set<number>(),
-    siteLookups: []
+    siteLookups: [],
+    customSiteHints: buildCustomSiteHints(options?.siteCodeMap)
   };
 
   const context = options?.context ?? undefined;
@@ -1620,7 +1646,7 @@ export function parseInternal(
         setRoute(internal, synonym.code, synonym.text);
         for (const part of slice) {
           mark(internal.consumed, part);
-          if (BODY_SITE_HINTS.has(part.lower)) {
+          if (isBodySiteHint(part.lower, internal.customSiteHints)) {
             internal.siteTokenIndices.add(part.index);
           }
         }
@@ -2018,7 +2044,7 @@ export function parseInternal(
   const siteCandidateIndices = new Set<number>();
   for (const token of leftoverTokens) {
     const normalized = normalizeTokenLower(token);
-    if (BODY_SITE_HINTS.has(normalized)) {
+    if (isBodySiteHint(normalized, internal.customSiteHints)) {
       siteCandidateIndices.add(token.index);
     }
   }
@@ -2037,7 +2063,7 @@ export function parseInternal(
         const lower = normalizeTokenLower(token);
         if (
           SITE_CONNECTORS.has(lower) ||
-          BODY_SITE_HINTS.has(lower) ||
+          isBodySiteHint(lower, internal.customSiteHints) ||
           ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
         ) {
           indicesToInclude.add(token.index);
@@ -2055,7 +2081,7 @@ export function parseInternal(
         const lower = normalizeTokenLower(token);
         if (
           SITE_CONNECTORS.has(lower) ||
-          BODY_SITE_HINTS.has(lower) ||
+          isBodySiteHint(lower, internal.customSiteHints) ||
           ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
         ) {
           indicesToInclude.add(token.index);
@@ -2114,7 +2140,9 @@ export function parseInternal(
         const normalizedLower = sanitized.toLowerCase();
         const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
         const siteWords = normalizedLower.split(/\s+/).filter((word) => word.length > 0);
-        const hasNonSiteWords = siteWords.some((word) => !BODY_SITE_HINTS.has(word));
+        const hasNonSiteWords = siteWords.some(
+          (word) => !isBodySiteHint(word, internal.customSiteHints)
+        );
         const shouldAttemptRouteDescriptor =
           strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
         const appliedRouteDescriptor =
