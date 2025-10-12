@@ -1,5 +1,5 @@
 import { formatInternal } from "./format";
-import { ParsedSigInternal } from "./parser";
+import { ParsedSigInternal } from "./internal-types";
 import { ROUTE_BY_SNOMED, ROUTE_SNOMED, ROUTE_TEXT } from "./maps";
 import {
   EventTiming,

@@ -1,4 +1,5 @@
-import { ParsedSigInternal } from "./parser";
+import { ParsedSigInternal } from "./internal-types";
+import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
 
 const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {
@@ -500,12 +501,41 @@ function describeDayOfWeek(internal: ParsedSigInternal): string | undefined {
 
 export function formatInternal(
   internal: ParsedSigInternal,
-  style: "short" | "long"
+  style: "short" | "long",
+  localization?: SigLocalization
 ): string {
-  if (style === "short") {
-    return formatShort(internal);
+  const defaults = {
+    short: formatShort(internal),
+    long: formatLong(internal)
+  } as const;
+
+  if (!localization) {
+    return defaults[style];
   }
-  return formatLong(internal);
+
+  const formatDefault = (target: "short" | "long") => defaults[target];
+
+  if (style === "short" && localization.formatShort) {
+    const context: SigShortContext = {
+      style: "short",
+      internal,
+      defaultText: defaults.short,
+      formatDefault
+    };
+    return localization.formatShort(context);
+  }
+
+  if (style === "long" && localization.formatLong) {
+    const context: SigLongContext = {
+      style: "long",
+      internal,
+      defaultText: defaults.long,
+      formatDefault
+    };
+    return localization.formatLong(context);
+  }
+
+  return defaults[style];
 }
 
 function formatShort(internal: ParsedSigInternal): string {

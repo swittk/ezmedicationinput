@@ -12,7 +12,7 @@ import {
 } from "../src/maps";
 import { toFhir } from "../src/fhir";
 import { normalizeDosageForm, inferUnitFromContext } from "../src/context";
-import { ParsedSigInternal } from "../src/parser";
+import { ParsedSigInternal } from "../src/internal-types";
 import {
   RouteCode,
   SNOMEDCTRouteCodes
