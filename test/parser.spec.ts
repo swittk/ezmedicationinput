@@ -564,6 +564,31 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
   });
 
+  it("maps standalone breakfast tokens", () => {
+    const result = parseSig("brkfst");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
+  });
+
+  it("maps standalone lunch tokens", () => {
+    const result = parseSig("lunchtime");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Lunch]);
+  });
+
+  it("maps standalone dinner tokens", () => {
+    const result = parseSig("suppertime");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Dinner]);
+  });
+
+  it("maps midday synonym", () => {
+    const result = parseSig("midday");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Noon]);
+  });
+
+  it("maps afternoon", () => {
+    const result = parseSig("afternoon");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Afternoon]);
+  });
+
   it("maps pc breakfast", () => {
     const result = parseSig("pc breakfast");
     expect(result.fhir.timing?.repeat?.when).toEqual(["PCM"]);
@@ -572,6 +597,31 @@ describe("parseSig core scenarios", () => {
   it("maps ac dinner", () => {
     const result = parseSig("ac dinner");
     expect(result.fhir.timing?.repeat?.when).toEqual(["ACV"]);
+  });
+
+  it("maps pc suppertime", () => {
+    const result = parseSig("pc suppertime");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Dinner"]]);
+  });
+
+  it("maps ac dinnertime", () => {
+    const result = parseSig("ac dinnertime");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Dinner"]]);
+  });
+
+  it("converts standalone meal names when ac appears elsewhere", () => {
+    const result = parseSig("breakfast lunch ac");
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["Before Breakfast"],
+      EventTiming["Before Lunch"],
+    ]);
+  });
+
+  it("converts standalone meal names when pc appears elsewhere", () => {
+    const result = parseSig("pc and dinner");
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Dinner"],
+    ]);
   });
 
   it("warns for qd", () => {
@@ -936,6 +986,31 @@ describe("smart meal expansion", () => {
   it("avoids expanding when only interval cadence present", () => {
     const result = parseSig("po ac q6h", { smartMealExpansion: true });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Meal"]]);
+  });
+});
+
+describe("when ordering", () => {
+  it("sorts EventTiming entries chronologically by default", () => {
+    const result = parseSig("hs ac", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["Before Meal"],
+      EventTiming["Before Sleep"]
+    ]);
+  });
+
+  it("uses provided event clock anchors when ordering", () => {
+    const result = parseSig("breakfast lunch dinner", {
+      eventClock: {
+        [EventTiming.Dinner]: "07:00",
+        [EventTiming.Breakfast]: "12:00",
+        [EventTiming.Lunch]: "18:00"
+      }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Dinner,
+      EventTiming.Breakfast,
+      EventTiming.Lunch
+    ]);
   });
 });
 

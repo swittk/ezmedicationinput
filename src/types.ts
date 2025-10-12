@@ -323,6 +323,11 @@ export interface ParseOptions extends FormatOptions {
     }
   >;
   whenMap?: Record<string, EventTiming>;
+  /**
+   * Allows supplying institution-specific event clock anchors so parsed
+   * EventTiming arrays can be ordered chronologically for that locale.
+   */
+  eventClock?: EventClockMap;
   allowDiscouraged?: boolean;
   /**
    * When enabled the parser will expand generic meal timing tokens (AC/PC/C)

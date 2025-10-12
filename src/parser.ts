@@ -708,6 +708,93 @@ function removeWhen(target: EventTiming[], code: EventTiming) {
   }
 }
 
+const DEFAULT_EVENT_TIMING_WEIGHTS: Record<EventTiming, number> = {
+  [EventTiming.Immediate]: 0,
+  [EventTiming.Wake]: 6 * 3600,
+  [EventTiming["After Sleep"]]: 6 * 3600 + 15 * 60,
+  [EventTiming["Early Morning"]]: 7 * 3600,
+  [EventTiming["Before Meal"]]: 7 * 3600 + 30 * 60,
+  [EventTiming["Before Breakfast"]]: 7 * 3600 + 45 * 60,
+  [EventTiming.Morning]: 8 * 3600,
+  [EventTiming.Breakfast]: 8 * 3600 + 15 * 60,
+  [EventTiming.Meal]: 8 * 3600 + 30 * 60,
+  [EventTiming["After Breakfast"]]: 9 * 3600,
+  [EventTiming["After Meal"]]: 9 * 3600 + 15 * 60,
+  [EventTiming["Late Morning"]]: 10 * 3600 + 30 * 60,
+  [EventTiming["Before Lunch"]]: 11 * 3600 + 45 * 60,
+  [EventTiming.Noon]: 12 * 3600,
+  [EventTiming.Lunch]: 12 * 3600 + 15 * 60,
+  [EventTiming["After Lunch"]]: 12 * 3600 + 45 * 60,
+  [EventTiming["Early Afternoon"]]: 13 * 3600 + 30 * 60,
+  [EventTiming.Afternoon]: 15 * 3600,
+  [EventTiming["Late Afternoon"]]: 16 * 3600 + 30 * 60,
+  [EventTiming["Before Dinner"]]: 17 * 3600 + 30 * 60,
+  [EventTiming.Dinner]: 18 * 3600,
+  [EventTiming["After Dinner"]]: 19 * 3600,
+  [EventTiming["Early Evening"]]: 19 * 3600 + 30 * 60,
+  [EventTiming.Evening]: 20 * 3600,
+  [EventTiming["Late Evening"]]: 21 * 3600,
+  [EventTiming.Night]: 22 * 3600,
+  [EventTiming["Before Sleep"]]: 22 * 3600 + 30 * 60,
+};
+
+function parseClockToSeconds(clock: string): number | undefined {
+  const match = clock.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    return undefined;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] ? Number(match[3]) : 0;
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return undefined;
+  }
+  return hour * 3600 + minute * 60 + second;
+}
+
+function computeWhenWeight(code: EventTiming, options?: ParseOptions): number {
+  const clock = options?.eventClock?.[code];
+  if (clock) {
+    const seconds = parseClockToSeconds(clock);
+    if (seconds !== undefined) {
+      return seconds;
+    }
+  }
+  return DEFAULT_EVENT_TIMING_WEIGHTS[code] ?? 10000;
+}
+
+function sortWhenValues(internal: ParsedSigInternal, options?: ParseOptions) {
+  if (internal.when.length < 2) {
+    return;
+  }
+  const weighted = internal.when.map((code, index) => ({
+    code,
+    weight: computeWhenWeight(code, options),
+    index,
+  }));
+  weighted.sort((a, b) => {
+    if (a.weight !== b.weight) {
+      return a.weight - b.weight;
+    }
+    return a.index - b.index;
+  });
+  internal.when.splice(
+    0,
+    internal.when.length,
+    ...weighted.map((entry) => entry.code),
+  );
+}
+
 // Translate the requested expansion context into the appropriate sequence of
 // EventTiming values (e.g., AC -> ACM/ACD/ACV) for the detected frequency.
 function computeMealExpansions(
@@ -776,6 +863,44 @@ function computeMealExpansions(
     return [EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner];
   }
   return [EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner, bedtime];
+}
+
+function reconcileMealTimingSpecificity(internal: ParsedSigInternal) {
+  if (!internal.when.length) {
+    return;
+  }
+
+  const convertSpecifics = (
+    base: EventTiming,
+    mappings: readonly [EventTiming, EventTiming][]
+  ) => {
+    if (!arrayIncludes(internal.when, base)) {
+      return;
+    }
+    let replaced = false;
+    for (const [general, specific] of mappings) {
+      if (arrayIncludes(internal.when, general)) {
+        removeWhen(internal.when, general);
+        addWhen(internal.when, specific);
+        replaced = true;
+      }
+    }
+    if (replaced) {
+      removeWhen(internal.when, base);
+    }
+  };
+
+  convertSpecifics(EventTiming["Before Meal"], [
+    [EventTiming.Breakfast, EventTiming["Before Breakfast"]],
+    [EventTiming.Lunch, EventTiming["Before Lunch"]],
+    [EventTiming.Dinner, EventTiming["Before Dinner"]],
+  ]);
+
+  convertSpecifics(EventTiming["After Meal"], [
+    [EventTiming.Breakfast, EventTiming["After Breakfast"]],
+    [EventTiming.Lunch, EventTiming["After Lunch"]],
+    [EventTiming.Dinner, EventTiming["After Dinner"]],
+  ]);
 }
 
 // Optionally replace generic meal tokens with concrete breakfast/lunch/dinner
@@ -1525,8 +1650,12 @@ export function parseInternal(
     }
   }
 
+  reconcileMealTimingSpecificity(internal);
+
   // Expand generic meal markers into specific EventTiming codes when asked to.
   expandMealTimings(internal, options);
+
+  sortWhenValues(internal, options);
 
   // Determine site text from leftover tokens (excluding PRN reason tokens)
   const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));

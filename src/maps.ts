@@ -415,12 +415,26 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   "@meal": EventTiming.Meal,
   "@meals": EventTiming.Meal,
   cm: EventTiming.Breakfast,
+  breakfast: EventTiming.Breakfast,
+  bfast: EventTiming.Breakfast,
+  brkfst: EventTiming.Breakfast,
+  brk: EventTiming.Breakfast,
   cd: EventTiming.Lunch,
+  lunch: EventTiming.Lunch,
+  lunchtime: EventTiming.Lunch,
   cv: EventTiming.Dinner,
+  dinner: EventTiming.Dinner,
+  dinnertime: EventTiming.Dinner,
+  supper: EventTiming.Dinner,
+  suppertime: EventTiming.Dinner,
   am: EventTiming.Morning,
   morning: EventTiming.Morning,
   morn: EventTiming.Morning,
   noon: EventTiming.Noon,
+  midday: EventTiming.Noon,
+  "mid-day": EventTiming.Noon,
+  afternoon: EventTiming.Afternoon,
+  aft: EventTiming.Afternoon,
   pm: EventTiming.Evening,
   evening: EventTiming.Evening,
   night: EventTiming.Night,
@@ -431,15 +445,40 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   stat: EventTiming.Immediate
 };
 
-export const MEAL_KEYWORDS: Record<
-  string,
-  { pc: EventTiming; ac: EventTiming }
-> = {
-  breakfast: { pc: EventTiming["After Breakfast"], ac: EventTiming["Before Breakfast"] },
-  lunch: { pc: EventTiming["After Lunch"], ac: EventTiming["Before Lunch"] },
-  dinner: { pc: EventTiming["After Dinner"], ac: EventTiming["Before Dinner"] },
-  supper: { pc: EventTiming["After Dinner"], ac: EventTiming["Before Dinner"] }
-};
+const MEAL_KEYWORD_ENTRIES: Array<
+  [string, { pc: EventTiming; ac: EventTiming }]
+> = [];
+
+function registerMealKeywords(
+  keys: readonly string[],
+  meal: { pc: EventTiming; ac: EventTiming }
+) {
+  for (const key of keys) {
+    MEAL_KEYWORD_ENTRIES.push([key, meal]);
+  }
+}
+
+registerMealKeywords(
+  ["breakfast", "bfast", "brkfst", "brk"],
+  {
+    pc: EventTiming["After Breakfast"],
+    ac: EventTiming["Before Breakfast"]
+  }
+);
+
+registerMealKeywords(["lunch", "lunchtime"], {
+  pc: EventTiming["After Lunch"],
+  ac: EventTiming["Before Lunch"]
+});
+
+registerMealKeywords(["dinner", "dinnertime", "supper", "suppertime"], {
+  pc: EventTiming["After Dinner"],
+  ac: EventTiming["Before Dinner"]
+});
+
+export const MEAL_KEYWORDS = objectFromEntries(
+  MEAL_KEYWORD_ENTRIES
+) as Record<string, { pc: EventTiming; ac: EventTiming }>;
 
 export const DISCOURAGED_TOKENS: Record<string, string> = {
   qd: "QD",

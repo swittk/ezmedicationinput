@@ -96,8 +96,12 @@ Key EventTiming mappings include:
 | `pc breakfast`  | `PCM`
 | `pc lunch`      | `PCD`
 | `pc dinner`     | `PCV`
+| `breakfast`, `bfast`, `brkfst`, `brk` | `CM`
+| `lunch`, `lunchtime` | `CD`
+| `dinner`, `dinnertime`, `supper`, `suppertime` | `CV`
 | `am`, `morning` | `MORN`
-| `noon`          | `NOON`
+| `noon`, `midday`, `mid-day` | `NOON`
+| `afternoon`, `aft` | `AFT`
 | `pm`, `evening` | `EVE`
 | `night`         | `NIGHT`
 | `hs`, `bedtime` | `HS`
@@ -115,6 +119,7 @@ Routes always include SNOMED CT codings. Every code from the SNOMED Route of Adm
   `null` to explicitly disable context-based inference.
 - `smartMealExpansion`: when `true`, generic AC/PC/C tokens expand into specific EventTiming combinations (e.g. `1x2 po ac` → `ACM` + `ACV`).
 - `twoPerDayPair`: controls whether 2× AC/PC/C doses expand to breakfast+dinner (default) or breakfast+lunch.
+- `eventClock`: optional map of `EventTiming` codes to HH:mm strings that drives chronological ordering of parsed `when` values.
 - `allowHouseholdVolumeUnits`: defaults to `true`; set to `false` to ignore
   teaspoon/tablespoon units during parsing and suggestions.
 - Custom `routeMap`, `unitMap`, `freqMap`, and `whenMap` let you augment the built-in dictionaries without mutating them.
