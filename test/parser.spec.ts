@@ -25,6 +25,21 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
   });
 
+  it("parses adverbial route descriptors", () => {
+    const cases: Array<{ input: string; code: SNOMEDCTRouteCodes }> = [
+      { input: "1x2 orally bid", code: SNOMEDCTRouteCodes["Oral route"] },
+      { input: "1x2 nasally bid", code: SNOMEDCTRouteCodes["Nasal route"] },
+      { input: "1x2 topically bid", code: SNOMEDCTRouteCodes["Topical route"] },
+      { input: "1x2 transdermally bid", code: SNOMEDCTRouteCodes["Transdermal route"] },
+      { input: "1x2 intramuscularly bid", code: SNOMEDCTRouteCodes["Intramuscular route"] }
+    ];
+
+    for (const { input, code } of cases) {
+      const result = parseSig(input);
+      expect(result.fhir.route?.coding?.[0]?.code).toBe(code);
+    }
+  });
+
   it("parses fractional q-intervals and count limits", () => {
     const result = parseSig("1 tab po q0.5h x3 times", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({

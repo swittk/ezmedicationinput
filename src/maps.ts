@@ -85,24 +85,46 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
     map[normalized] = { code, text: ROUTE_TEXT[code] };
   };
 
+  const assignWithAdverb = (key: string | undefined, code: RouteCode) => {
+    assign(key, code);
+    if (!key) return;
+    const normalized = key.trim().toLowerCase();
+    if (!normalized) {
+      return;
+    }
+    if (!/^[a-z]+$/.test(normalized)) {
+      return;
+    }
+    if (normalized.length < 4 || normalized.endsWith("ly") || normalized.endsWith("eal")) {
+      return;
+    }
+    let adverb: string | undefined;
+    if (normalized.endsWith("ic")) {
+      adverb = normalized.replace(/ic$/, "ically");
+    } else {
+      adverb = `${normalized}ly`;
+    }
+    assign(adverb, code);
+  };
+
   const registerVariants = (value: string | undefined, code: RouteCode) => {
     if (!value) return;
-    assign(value, code);
+    assignWithAdverb(value, code);
     const withoutParens = value
       .replace(/[()]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    assign(withoutParens, code);
+    assignWithAdverb(withoutParens, code);
     const withoutCommas = value
       .replace(/,/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    assign(withoutCommas, code);
+    assignWithAdverb(withoutCommas, code);
     const withoutPunctuation = value
       .replace(/[().,-]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    assign(withoutPunctuation, code);
+    assignWithAdverb(withoutPunctuation, code);
   };
 
   registerVariants("po", RouteCode["Oral route"]);
