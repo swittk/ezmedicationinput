@@ -830,7 +830,7 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("apply ointment to penis daily");
     expect(result.fhir.site?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
-      code: "18128009",
+      code: "18911002",
       display: "Penis structure"
     });
   });
