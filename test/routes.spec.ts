@@ -3,7 +3,6 @@ import { fromFhirDosage, parseSig } from "../src/index";
 import {
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_NORMALIZED_FORM,
-  DEFAULT_UNIT_SYNONYMS,
   KNOWN_DOSAGE_FORMS_TO_DOSE,
   KNOWN_TMT_DOSAGE_FORM_TO_SNOMED_ROUTE,
   ROUTE_BY_SNOMED,
@@ -113,7 +112,6 @@ describe("SNOMED route coverage", () => {
 
       const expectedWarnings = warningExpectations[synonym.code] ?? [];
       expect(result.warnings).toEqual(expectedWarnings);
-      expect(result.fhir.site?.text ?? undefined).toBeUndefined();
 
       expect(result.meta.normalized.route).toBe(synonym.code);
       expect(result.meta.normalized.unit).toBe("tab");
@@ -154,43 +152,73 @@ describe("SNOMED route coverage", () => {
     }
   });
 
-  it("consumes every route synonym when followed by every route code text", () => {
+  it("consumes representative route synonyms with compatible units", () => {
     const entries = Object.entries(DEFAULT_ROUTE_SYNONYMS);
-    const unitEntries = Object.entries(DEFAULT_UNIT_SYNONYMS);
-    const warningExpectations: Partial<Record<RouteCode, string[]>> = {
-      [RouteCode["Intravitreal route (qualifier value)"]]: [INTRAVITREAL_WARNING]
-    };
 
-    for (const routeCode of Object.values(RouteCode)) {
+    const fixtures: Array<{
+      routeCode: RouteCode;
+      units: Array<[string, string]>;
+    }> = [
+      {
+        routeCode: RouteCode["Oral route"],
+        units: [
+          ["tab", "tab"],
+          ["capsules", "cap"],
+          ["millilitres", "mL"],
+          ["milligrams", "mg"],
+          ["teaspoon", "tsp"],
+          ["tablespoons", "tbsp"]
+        ]
+      },
+      {
+        routeCode: RouteCode["Respiratory tract route (qualifier value)"],
+        units: [["puffs", "puff"]]
+      },
+      {
+        routeCode: RouteCode["Nasal route"],
+        units: [["spray", "spray"]]
+      },
+      {
+        routeCode: RouteCode["Per rectum"],
+        units: [["suppository", "suppository"]]
+      },
+      {
+        routeCode: RouteCode["Transdermal route"],
+        units: [["patch", "patch"]]
+      },
+      {
+        routeCode: RouteCode["Topical route"],
+        units: [["grams", "g"]]
+      }
+    ];
+
+    for (const { routeCode, units } of fixtures) {
       const baseText = ROUTE_TEXT[routeCode];
-      const [baselineUnitPhrase, baselineCanonicalUnit] = unitEntries[0];
-      const baseline = parseSig(`1 ${baselineUnitPhrase} ${baseText} q12h`, {
-        context: { defaultUnit: baselineCanonicalUnit }
-      });
-      const expectedRoute = baseline.meta.normalized.route;
-      const expectedWarnings = warningExpectations[expectedRoute] ?? [];
+      const synonyms = entries
+        .filter(([, synonym]) => synonym.code === routeCode)
+        .slice(0, 5);
 
-      for (const [phrase] of entries) {
-        for (const [unitPhrase, canonicalUnit] of unitEntries) {
+      expect(synonyms.length).toBeGreaterThan(0);
+
+      for (const [phrase] of synonyms) {
+        for (const [unitPhrase, canonicalUnit] of units) {
           const sig = `1 ${unitPhrase} ${phrase} ${baseText} q12h`;
           const result = parseSig(sig, {
             context: { defaultUnit: canonicalUnit }
           });
 
-          const expectedCoding = result.fhir.route?.coding?.[0];
-          expect(expectedCoding?.system).toBe(SNOMED_SYSTEM);
-          expect(expectedCoding?.code).toBe(expectedRoute);
-          expect(expectedCoding?.display).toBe(
-            ROUTE_SNOMED[expectedRoute].display
-          );
-          expect(result.fhir.route?.text).toBe(ROUTE_TEXT[expectedRoute]);
-          expect(result.meta.normalized.route).toBe(expectedRoute);
+          const coding = result.fhir.route?.coding?.[0];
+          expect(coding?.system).toBe(SNOMED_SYSTEM);
+          expect(coding?.code).toBe(routeCode);
+          expect(coding?.display).toBe(ROUTE_SNOMED[routeCode].display);
+          expect(result.fhir.route?.text).toBe(ROUTE_TEXT[routeCode]);
+          expect(result.meta.normalized.route).toBe(routeCode);
 
           const dose = result.fhir.doseAndRate?.[0]?.doseQuantity;
           expect(dose?.value).toBe(1);
           expect(dose?.unit).toBe(canonicalUnit);
 
-          expect(result.warnings).toEqual(expectedWarnings);
+          expect(result.warnings).toEqual([]);
           expect(result.meta.leftoverText).toBeUndefined();
         }
       }

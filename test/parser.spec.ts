@@ -324,6 +324,42 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 mg by mouth at bedtime.");
   });
 
+  it("normalizes spelled metric dose units", () => {
+    const result = parseSig("500 milligrams po q12h");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 500,
+      unit: "mg"
+    });
+    expect(result.meta.normalized.unit).toBe("mg");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+  });
+
+  it("supports spelled millilitre synonyms", () => {
+    const result = parseSig("10 millilitres po qd");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "mL" });
+    expect(result.meta.normalized.unit).toBe("mL");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+  });
+
+  it("parses household teaspoon and tablespoon measures", () => {
+    const teaspoon = parseSig("1 teaspoon po q6h");
+    expect(teaspoon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tsp" });
+    expect(teaspoon.meta.normalized.unit).toBe("tsp");
+
+    const tablespoon = parseSig("2 tablespoons po q8h");
+    expect(tablespoon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tbsp" });
+    expect(tablespoon.meta.normalized.unit).toBe("tbsp");
+  });
+
+  it("disables household volume measures when requested", () => {
+    const result = parseSig("1 teaspoon po q6h", {
+      allowHouseholdVolumeUnits: false,
+    });
+    expect(result.meta.normalized.unit).toBeUndefined();
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity?.unit).not.toBe("tsp");
+    expect(result.meta.leftoverText?.toLowerCase() ?? "").toContain("teaspoon");
+  });
+
   it("parses dose ranges with frequency code", () => {
     const result = parseSig("1-2 tabs po prn pain tid", { context: TAB_CONTEXT });
     expect(result.fhir.doseAndRate?.[0]?.doseRange).toEqual({

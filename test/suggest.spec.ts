@@ -52,4 +52,66 @@ describe("suggestSig", () => {
     expect(suggestions).toContain("1 tab po prn agitation");
     expect(suggestions).toContain("1 tab po prn pain");
   });
+
+  it("supports multi-token timing cues", () => {
+    const suggestions = suggestSig("1 tab po morn hs", { limit: 20 });
+    expect(suggestions).toContain("1 tab po morn hs");
+  });
+
+  it("keeps matching when connectors and eye tokens are present", () => {
+    const suggestions = suggestSig("1 drop to od q2h", { limit: 20 });
+    expect(
+      suggestions.some((value) => value.startsWith("1 drop") && value.includes("q2h")),
+    ).toBe(true);
+  });
+
+  it("suggests interval ranges with PRN reasons", () => {
+    const suggestions = suggestSig("500 mg po q4-6h prn pain", { limit: 20 });
+    expect(suggestions).toContain("500 mg po q4-6h prn pain");
+  });
+
+  it("honors pluralized dose units", () => {
+    const suggestions = suggestSig("5 tabs", { limit: 20 });
+    expect(suggestions.some((value) => value.startsWith("5 tabs"))).toBe(true);
+  });
+
+  it("offers spelled metric unit suggestions", () => {
+    const suggestions = suggestSig("500 millig", { limit: 25 });
+    expect(suggestions).toContain("500 milligrams po qd");
+  });
+
+  it("suggests SI-prefixed mass and volume units", () => {
+    const micrograms = suggestSig("50 microg", { limit: 30 });
+    expect(micrograms).toContain("50 micrograms po qd");
+
+    const microliters = suggestSig("10 mcl", { limit: 30 });
+    expect(microliters).toContain("10 mcL po qd");
+
+    const nanograms = suggestSig("2 ng", { limit: 30 });
+    expect(nanograms).toContain("2 ng po qd");
+
+    const liters = suggestSig("1 L", { limit: 30 });
+    expect(liters).toContain("1 L po qd");
+
+    const kilograms = suggestSig("0.5 kilogram", { limit: 30 });
+    expect(kilograms.some((value) => value.startsWith("0.5 kg") || value.startsWith("0.5 kilograms"))).toBe(true);
+  });
+
+  it("suggests household measure units", () => {
+    const teaspoons = suggestSig("1 teasp", { limit: 25 });
+    expect(teaspoons.some((value) => value.startsWith("1 teaspoon"))).toBe(true);
+
+    const tablespoons = suggestSig("2 tbsp", { limit: 25 });
+    expect(tablespoons).toContain("2 tbsp po qd");
+  });
+
+  it("disables household measure suggestions when requested", () => {
+    const suggestions = suggestSig("1 teasp", {
+      limit: 25,
+      allowHouseholdVolumeUnits: false,
+    });
+    expect(suggestions.some((value) => value.includes("teaspoon") || value.includes("tsp"))).toBe(
+      false,
+    );
+  });
 });

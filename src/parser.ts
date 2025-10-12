@@ -4,6 +4,7 @@ import {
   DEFAULT_UNIT_BY_ROUTE,
   DEFAULT_UNIT_SYNONYMS,
   EVENT_TIMING_TOKENS,
+  HOUSEHOLD_VOLUME_UNITS,
   MEAL_KEYWORDS,
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
@@ -99,6 +100,10 @@ const SITE_FILLER_WORDS = new Set([
   "their",
   "my"
 ]);
+
+const HOUSEHOLD_VOLUME_UNIT_SET = new Set(
+  HOUSEHOLD_VOLUME_UNITS.map((unit) => unit.toLowerCase()),
+);
 
 const OCULAR_DIRECTION_WORDS = new Set([
   "left",
@@ -1464,11 +1469,17 @@ export function parseInternal(
   }
 
   if (internal.unit === undefined) {
-    internal.unit = inferUnitFromContext(context);
+    internal.unit = enforceHouseholdUnitPolicy(
+      inferUnitFromContext(context),
+      options,
+    );
   }
 
   if (internal.unit === undefined) {
-    const fallbackUnit = inferUnitFromRouteHints(internal);
+    const fallbackUnit = enforceHouseholdUnitPolicy(
+      inferUnitFromRouteHints(internal),
+      options,
+    );
     if (fallbackUnit) {
       internal.unit = fallbackUnit;
     }
@@ -1623,15 +1634,32 @@ export function parseInternal(
 }
 
 function normalizeUnit(token: string, options?: ParseOptions): string | undefined {
-  const override = options?.unitMap?.[token];
+  const override = enforceHouseholdUnitPolicy(options?.unitMap?.[token], options);
   if (override) {
     return override;
   }
-  const defaultUnit = DEFAULT_UNIT_SYNONYMS[token];
+  const defaultUnit = enforceHouseholdUnitPolicy(
+    DEFAULT_UNIT_SYNONYMS[token],
+    options,
+  );
   if (defaultUnit) {
     return defaultUnit;
   }
   return undefined;
+}
+
+function enforceHouseholdUnitPolicy(
+  unit: string | undefined,
+  options?: ParseOptions,
+): string | undefined {
+  if (
+    unit &&
+    options?.allowHouseholdVolumeUnits === false &&
+    HOUSEHOLD_VOLUME_UNIT_SET.has(unit.toLowerCase())
+  ) {
+    return undefined;
+  }
+  return unit;
 }
 
 function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefined {

@@ -168,7 +168,114 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
   return map;
 })();
 
-export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = {
+type UnitSynonymMap = Record<string, string>;
+
+interface UnitPrefixDefinition {
+  canonical: string;
+  abbreviations: readonly string[];
+  names: readonly { singular: string; plural: string }[];
+}
+
+interface UnitBaseDefinition {
+  canonical: string;
+  abbreviations: readonly string[];
+  names: readonly { singular: string; plural: string }[];
+}
+
+const UNIT_PREFIXES: readonly UnitPrefixDefinition[] = [
+  { canonical: "", abbreviations: [""], names: [{ singular: "", plural: "" }] },
+  {
+    canonical: "m",
+    abbreviations: ["m"],
+    names: [{ singular: "milli", plural: "milli" }],
+  },
+  {
+    canonical: "mc",
+    abbreviations: ["mc", "µ", "μ", "u"],
+    names: [{ singular: "micro", plural: "micro" }],
+  },
+  {
+    canonical: "n",
+    abbreviations: ["n"],
+    names: [{ singular: "nano", plural: "nano" }],
+  },
+  {
+    canonical: "k",
+    abbreviations: ["k"],
+    names: [{ singular: "kilo", plural: "kilo" }],
+  },
+];
+
+const METRIC_UNIT_BASES: readonly UnitBaseDefinition[] = [
+  {
+    canonical: "g",
+    abbreviations: ["g"],
+    names: [
+      { singular: "gram", plural: "grams" },
+      { singular: "gramme", plural: "grammes" },
+    ],
+  },
+  {
+    canonical: "L",
+    abbreviations: ["l"],
+    names: [
+      { singular: "liter", plural: "liters" },
+      { singular: "litre", plural: "litres" },
+    ],
+  },
+];
+
+function assignUnitSynonym(map: UnitSynonymMap, key: string, canonical: string) {
+  const normalized = key.trim().toLowerCase();
+  if (!normalized || map[normalized]) {
+    return;
+  }
+  map[normalized] = canonical;
+}
+
+function addMetricUnitSynonyms(map: UnitSynonymMap) {
+  for (const prefix of UNIT_PREFIXES) {
+    for (const base of METRIC_UNIT_BASES) {
+      const canonical = `${prefix.canonical}${base.canonical}`;
+
+      for (const prefixAbbrev of prefix.abbreviations) {
+        for (const baseAbbrev of base.abbreviations) {
+          if (!baseAbbrev) {
+            continue;
+          }
+          const token = `${prefixAbbrev}${baseAbbrev}`;
+          assignUnitSynonym(map, token, canonical);
+          assignUnitSynonym(map, `${token}s`, canonical);
+          if (token.endsWith(".")) {
+            assignUnitSynonym(map, token.replace(/\.+$/, ""), canonical);
+          }
+        }
+      }
+
+      for (const prefixName of prefix.names) {
+        for (const baseName of base.names) {
+          const singular = `${prefixName.singular}${baseName.singular}`;
+          const plural = `${prefixName.singular}${baseName.plural}`;
+          const hyphenSingular = prefixName.singular
+            ? `${prefixName.singular}-${baseName.singular}`
+            : baseName.singular;
+          const hyphenPlural = prefixName.singular
+            ? `${prefixName.singular}-${baseName.plural}`
+            : baseName.plural;
+
+          assignUnitSynonym(map, singular, canonical);
+          assignUnitSynonym(map, plural, canonical);
+          assignUnitSynonym(map, hyphenSingular, canonical);
+          assignUnitSynonym(map, hyphenPlural, canonical);
+        }
+      }
+    }
+  }
+}
+
+export const HOUSEHOLD_VOLUME_UNITS = ["tsp", "tbsp"] as const;
+
+const STATIC_UNIT_SYNONYMS: UnitSynonymMap = {
   tab: "tab",
   tabs: "tab",
   tablet: "tab",
@@ -177,13 +284,6 @@ export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = {
   caps: "cap",
   capsule: "cap",
   capsules: "cap",
-  ml: "mL",
-  "milliliter": "mL",
-  "milliliters": "mL",
-  mg: "mg",
-  g: "g",
-  mcg: "mcg",
-  ug: "mcg",
   puff: "puff",
   puffs: "puff",
   spray: "spray",
@@ -194,8 +294,26 @@ export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = {
   patches: "patch",
   supp: "suppository",
   suppository: "suppository",
-  suppositories: "suppository"
+  suppositories: "suppository",
+  tsp: "tsp",
+  "tsp.": "tsp",
+  tsps: "tsp",
+  "tsps.": "tsp",
+  teaspoon: "tsp",
+  teaspoons: "tsp",
+  tbsp: "tbsp",
+  "tbsp.": "tbsp",
+  tbs: "tbsp",
+  "tbs.": "tbsp",
+  tablespoon: "tbsp",
+  tablespoons: "tbsp",
 };
+
+export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = (() => {
+  const map: UnitSynonymMap = { ...STATIC_UNIT_SYNONYMS };
+  addMetricUnitSynonyms(map);
+  return map;
+})();
 
 export interface FrequencyDescriptor {
   code?: string;
@@ -635,6 +753,8 @@ export const KNOWN_TMT_DOSAGE_FORM_TO_SNOMED_ROUTE: Record<
   collodion: SNOMEDCTRouteCodes["Oral route"],
   "powder for rectal solution": SNOMEDCTRouteCodes["Per rectum"],
   "eye drops, solution": SNOMEDCTRouteCodes["Ocular route (qualifier value)"],
+  "eye drops": SNOMEDCTRouteCodes["Ocular route (qualifier value)"],
+  "eye drop": SNOMEDCTRouteCodes["Ocular route (qualifier value)"],
   "oromucosal paste": SNOMEDCTRouteCodes["Oromucosal use"],
   "dental paste": SNOMEDCTRouteCodes["Dental use"],
   "solution for peritoneal dialysis": SNOMEDCTRouteCodes["Intradialytic route"],

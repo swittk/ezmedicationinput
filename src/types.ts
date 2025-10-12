@@ -335,6 +335,11 @@ export interface ParseOptions extends FormatOptions {
    * Defaults to "breakfast+dinner" to mirror common clinical practice.
    */
   twoPerDayPair?: "breakfast+dinner" | "breakfast+lunch";
+  /**
+   * Allows disabling recognition of household volume units such as teaspoon
+   * and tablespoon when set to false. Defaults to true.
+   */
+  allowHouseholdVolumeUnits?: boolean;
 }
 
 export interface ParseResult {

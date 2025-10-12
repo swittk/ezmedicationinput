@@ -49,6 +49,39 @@ Example output:
 }
 ```
 
+### Sig (directions) suggestions
+
+Use `suggestSig` to drive autocomplete experiences while the clinician is
+typing shorthand medication directions (sig = directions). It returns an array
+of canonical direction strings and accepts the same `ParseOptions` context plus
+a `limit` and custom PRN reasons.
+
+```ts
+import { suggestSig } from "ezmedicationinput";
+
+const suggestions = suggestSig("1 drop to od q2h", {
+  limit: 5,
+  context: { dosageForm: "ophthalmic solution" },
+});
+
+// → ["1 drop oph q2h", "1 drop oph q2h prn pain", ...]
+```
+
+Highlights:
+
+- Recognizes plural units and their singular counterparts (`tab`/`tabs`,
+  `puff`/`puffs`, `mL`/`millilitres`, etc.) and normalizes spelled-out metric,
+  SI-prefixed masses/volumes (`micrograms`, `microliters`, `nanograms`,
+  `liters`, `kilograms`, etc.) alongside household measures like `teaspoon`
+  and `tablespoons` (set `allowHouseholdVolumeUnits: false` to omit them).
+- Keeps matching even when intermediary words such as `to`, `in`, or ocular
+  site shorthand (`od`, `os`, `ou`) appear in the prefix.
+- Emits dynamic interval suggestions, including arbitrary `q<number>h` cadences
+  and common range patterns like `q4-6h`.
+- Supports multiple timing tokens in sequence (e.g. `1 tab po morn hs`).
+- Surfaces PRN reasons from built-ins or custom `prnReasons` entries while
+  preserving numeric doses pulled from the typed prefix.
+
 ## Dictionaries
 
 The library exposes default dictionaries in `maps.ts` for routes, units, frequencies (Timing abbreviations + repeat defaults), and event timing tokens. You can extend or override them via the `ParseOptions` argument.
@@ -82,6 +115,8 @@ Routes always include SNOMED CT codings. Every code from the SNOMED Route of Adm
   `null` to explicitly disable context-based inference.
 - `smartMealExpansion`: when `true`, generic AC/PC/C tokens expand into specific EventTiming combinations (e.g. `1x2 po ac` → `ACM` + `ACV`).
 - `twoPerDayPair`: controls whether 2× AC/PC/C doses expand to breakfast+dinner (default) or breakfast+lunch.
+- `allowHouseholdVolumeUnits`: defaults to `true`; set to `false` to ignore
+  teaspoon/tablespoon units during parsing and suggestions.
 - Custom `routeMap`, `unitMap`, `freqMap`, and `whenMap` let you augment the built-in dictionaries without mutating them.
 
 ### Next due dose generation
