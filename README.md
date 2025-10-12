@@ -86,7 +86,7 @@ Routes always include SNOMED CT codings. Every code from the SNOMED Route of Adm
 
 ### Next due dose generation
 
-`nextDueDoses` produces upcoming administration timestamps from an existing FHIR `Dosage`. Supply the order start, the reference window, and a clinic configuration that defines anchor times.
+`nextDueDoses` produces upcoming administration timestamps from an existing FHIR `Dosage`. Supply the evaluation window (`from`), optionally the order start (`orderedAt`), and clinic clock details such as a time zone and event timing anchors.
 
 ```ts
 import { EventTiming, nextDueDoses, parseSig } from "ezmedicationinput";
@@ -97,24 +97,22 @@ const schedule = nextDueDoses(fhir, {
   orderedAt: "2024-01-01T08:15:00Z",
   from: "2024-01-01T09:00:00Z",
   limit: 5,
-  config: {
-    timeZone: "Asia/Bangkok",
-    eventClock: {
-      [EventTiming.Morning]: "08:00",
-      [EventTiming.Noon]: "12:00",
-      [EventTiming.Evening]: "18:00",
-      [EventTiming["Before Sleep"]]: "22:00",
-      [EventTiming.Breakfast]: "08:00",
-      [EventTiming.Lunch]: "12:30",
-      [EventTiming.Dinner]: "18:30"
-    },
-    mealOffsets: {
-      [EventTiming["Before Meal"]]: -30,
-      [EventTiming["After Meal"]]: 30
-    },
-    frequencyDefaults: {
-      byCode: { BID: ["08:00", "20:00"] }
-    }
+  timeZone: "Asia/Bangkok",
+  eventClock: {
+    [EventTiming.Morning]: "08:00",
+    [EventTiming.Noon]: "12:00",
+    [EventTiming.Evening]: "18:00",
+    [EventTiming["Before Sleep"]]: "22:00",
+    [EventTiming.Breakfast]: "08:00",
+    [EventTiming.Lunch]: "12:30",
+    [EventTiming.Dinner]: "18:30"
+  },
+  mealOffsets: {
+    [EventTiming["Before Meal"]]: -30,
+    [EventTiming["After Meal"]]: 30
+  },
+  frequencyDefaults: {
+    byCode: { BID: ["08:00", "20:00"] }
   }
 });
 
@@ -127,6 +125,8 @@ Key rules:
 - Interval-based schedules (`repeat.period` + `periodUnit`) step forward from `orderedAt`, respecting `dayOfWeek` filters.
 - Pure frequency schedules (`BID`, `TID`, etc.) fall back to clinic-defined institution times.
 - All timestamps are emitted as ISO strings that include the clinic time-zone offset.
+
+`from` is required and marks the evaluation window. `orderedAt` is optional—when supplied it acts as the baseline for interval calculations; otherwise the `from` timestamp is reused. The options bag also accepts `timeZone`, `eventClock`, `mealOffsets`, and `frequencyDefaults` at the top level (mirroring the legacy `config` object). `limit` defaults to 10 when omitted.
 
 ### Ocular & intravitreal shortcuts
 

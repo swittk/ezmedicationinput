@@ -374,9 +374,9 @@ export interface FrequencyFallbackTimes {
  * Shared configuration required to generate next-due dose timestamps.
  */
 export interface NextDueDoseConfig {
-  timeZone: string;
-  eventClock: EventClockMap;
-  mealOffsets: MealOffsetMap;
+  timeZone?: string;
+  eventClock?: EventClockMap;
+  mealOffsets?: MealOffsetMap;
   frequencyDefaults?: FrequencyFallbackTimes;
 }
 
@@ -384,8 +384,12 @@ export interface NextDueDoseConfig {
  * Options bag for next-due dose generation.
  */
 export interface NextDueDoseOptions {
-  orderedAt: Date | string;
   from: Date | string;
-  limit: number;
-  config: NextDueDoseConfig;
+  orderedAt?: Date | string;
+  limit?: number;
+  timeZone?: string;
+  eventClock?: EventClockMap;
+  mealOffsets?: MealOffsetMap;
+  frequencyDefaults?: FrequencyFallbackTimes;
+  config?: NextDueDoseConfig;
 }

@@ -23,12 +23,10 @@ const MEAL_OFFSETS = {
 };
 
 const BASE_OPTIONS = {
-  config: {
-    timeZone: "UTC",
-    eventClock: EVENT_CLOCK,
-    mealOffsets: MEAL_OFFSETS
-  }
-} as const satisfies Pick<NextDueDoseOptions, "config">;
+  timeZone: "UTC",
+  eventClock: EVENT_CLOCK,
+  mealOffsets: MEAL_OFFSETS
+} as const satisfies Pick<NextDueDoseOptions, "timeZone" | "eventClock" | "mealOffsets">;
 
 describe("nextDueDoses", () => {
   it("anchors to explicit meal timings", () => {
@@ -173,10 +171,32 @@ describe("nextDueDoses", () => {
     const results = nextDueDoses(dosage, {
       ...BASE_OPTIONS,
       orderedAt: "2024-01-01T11:00:00Z",
-      from: "2024-01-01T09:00:00Z",
-      limit: 2
+      from: "2024-01-01T09:00:00Z"
     });
 
     expect(results).toEqual(["2024-01-01T11:00:00+00:00"]);
+  });
+
+  it("uses from as the baseline when orderedAt is omitted", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          period: 8,
+          periodUnit: "h"
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      from: "2024-01-01T00:00:00Z",
+      limit: 3
+    });
+
+    expect(results).toEqual([
+      "2024-01-01T00:00:00+00:00",
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T16:00:00+00:00"
+    ]);
   });
 });

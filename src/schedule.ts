@@ -1,5 +1,6 @@
 import {
   EventTiming,
+  EventClockMap,
   FhirDosage,
   FhirTiming,
   FhirTimingRepeat,
@@ -387,13 +388,14 @@ function expandTiming(
   repeat: FhirTimingRepeat
 ): ExpandedTime[] {
   const mealOffsets: MealOffsetMap = config.mealOffsets ?? {};
+  const eventClock = config.eventClock ?? {};
   const normalized: ExpandedTime[] = [];
-  const clockValue = config.eventClock[code];
+  const clockValue = eventClock[code];
   if (clockValue) {
     normalized.push({ time: normalizeClock(clockValue), dayShift: 0 });
   } else if (code === EventTiming["Before Meal"]) {
     for (const meal of getDefaultMealPairs(config)) {
-      const base = config.eventClock[meal];
+      const base = eventClock[meal];
       if (!base) {
         continue;
       }
@@ -401,7 +403,7 @@ function expandTiming(
     }
   } else if (code === EventTiming["After Meal"]) {
     for (const meal of getDefaultMealPairs(config)) {
-      const base = config.eventClock[meal];
+      const base = eventClock[meal];
       if (!base) {
         continue;
       }
@@ -409,7 +411,7 @@ function expandTiming(
     }
   } else if (code === EventTiming.Meal) {
     for (const meal of getDefaultMealPairs(config)) {
-      const base = config.eventClock[meal];
+      const base = eventClock[meal];
       if (!base) {
         continue;
       }
@@ -417,7 +419,7 @@ function expandTiming(
     }
   } else if (code in SPECIFIC_BEFORE_MEALS) {
     const mealCode = SPECIFIC_BEFORE_MEALS[code];
-    const base = config.eventClock[mealCode];
+    const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
       const offset =
@@ -426,7 +428,7 @@ function expandTiming(
     }
   } else if (code in SPECIFIC_AFTER_MEALS) {
     const mealCode = SPECIFIC_AFTER_MEALS[code];
-    const base = config.eventClock[mealCode];
+    const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
       const offset =
@@ -478,6 +480,23 @@ function expandWhenCodes(
   });
 }
 
+function mergeFrequencyDefaults(
+  base?: FrequencyFallbackTimes,
+  override?: FrequencyFallbackTimes
+): FrequencyFallbackTimes | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+  const merged: FrequencyFallbackTimes = {};
+  if (base?.byCode || override?.byCode) {
+    merged.byCode = { ...(base?.byCode ?? {}), ...(override?.byCode ?? {}) };
+  }
+  if (base?.byFrequency || override?.byFrequency) {
+    merged.byFrequency = { ...(base?.byFrequency ?? {}), ...(override?.byFrequency ?? {}) };
+  }
+  return merged;
+}
+
 /** Resolves fallback clock arrays for frequency-only schedules. */
 function resolveFrequencyClocks(
   timing: FhirTiming,
@@ -519,11 +538,6 @@ function resolveFrequencyClocks(
   return Array.from(collected).sort();
 }
 
-/** Determines the greater of orderedAt/from for baseline comparisons. */
-function computeBaseline(orderedAt: Date, from: Date): Date {
-  return orderedAt > from ? orderedAt : from;
-}
-
 /**
  * Produces the next dose timestamps in ascending order according to the
  * provided configuration and dosage metadata.
@@ -535,18 +549,42 @@ export function nextDueDoses(
   if (!options || typeof options !== "object") {
     throw new Error("Options argument is required for nextDueDoses");
   }
-  const { limit } = options;
+  if (options.from === undefined) {
+    throw new Error("The 'from' option is required for nextDueDoses");
+  }
+  const limit = options.limit ?? 10;
   if (!Number.isFinite(limit) || limit <= 0) {
     return [];
   }
 
-  const orderedAt = coerceDate(options.orderedAt, "orderedAt");
   const from = coerceDate(options.from, "from");
-  const { config } = options;
-  if (!config || !config.timeZone) {
+  const orderedAt =
+    options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
+  const baseTime = orderedAt ?? from;
+
+  const providedConfig = options.config;
+  const timeZone = options.timeZone ?? providedConfig?.timeZone;
+  if (!timeZone) {
     throw new Error("Configuration with a valid timeZone is required");
   }
-  const timeZone = config.timeZone;
+  const eventClock: EventClockMap = {
+    ...(providedConfig?.eventClock ?? {}),
+    ...(options.eventClock ?? {})
+  };
+  const mealOffsets: MealOffsetMap = {
+    ...(providedConfig?.mealOffsets ?? {}),
+    ...(options.mealOffsets ?? {})
+  };
+  const frequencyDefaults = mergeFrequencyDefaults(
+    providedConfig?.frequencyDefaults,
+    options.frequencyDefaults
+  );
+  const config: NextDueDoseConfig = {
+    timeZone,
+    eventClock,
+    mealOffsets,
+    frequencyDefaults
+  };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
 
@@ -554,7 +592,6 @@ export function nextDueDoses(
     return [];
   }
 
-  const baseline = computeBaseline(orderedAt, from);
   const results: string[] = [];
   const seen = new Set<string>();
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
@@ -576,10 +613,13 @@ export function nextDueDoses(
       });
     }
     const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
-    if (includesImmediate && orderedAt >= baseline) {
-      const instantIso = formatZonedIso(orderedAt, timeZone);
-      results.push(instantIso);
-      seen.add(instantIso);
+    if (includesImmediate) {
+      const immediateSource = orderedAt ?? from;
+      if (!orderedAt || orderedAt >= from) {
+        const instantIso = formatZonedIso(immediateSource, timeZone);
+        results.push(instantIso);
+        seen.add(instantIso);
+      }
     }
     if (expanded.length === 0) {
       return results.slice(0, limit);
@@ -598,10 +638,10 @@ export function nextDueDoses(
           if (!zoned) {
             continue;
           }
-          if (zoned < baseline) {
+          if (zoned < from) {
             continue;
           }
-          if (zoned < orderedAt) {
+          if (orderedAt && zoned < orderedAt) {
             continue;
           }
           const iso = formatZonedIso(zoned, timeZone);
@@ -631,13 +671,14 @@ export function nextDueDoses(
     // True interval schedules advance from the order start in fixed units. The
     // timing.code remains advisory so we only rely on the period/unit fields.
     const candidates = generateIntervalSeries(
-      orderedAt,
+      baseTime,
       from,
       limit,
       repeat,
       timeZone,
       dayFilter,
-      enforceDayFilter
+      enforceDayFilter,
+      orderedAt
     );
     return candidates;
   }
@@ -661,7 +702,10 @@ export function nextDueDoses(
           if (!zoned) {
             continue;
           }
-          if (zoned < baseline || zoned < orderedAt) {
+          if (zoned < from) {
+            continue;
+          }
+          if (orderedAt && zoned < orderedAt) {
             continue;
           }
           const iso = formatZonedIso(zoned, timeZone);
@@ -684,17 +728,18 @@ export function nextDueDoses(
 }
 
 /**
- * Generates an interval-based series by stepping forward from orderedAt until
- * the requested number of timestamps have been produced.
+ * Generates an interval-based series by stepping forward from the base time
+ * until the requested number of timestamps have been produced.
  */
 function generateIntervalSeries(
-  orderedAt: Date,
+  baseTime: Date,
   from: Date,
   limit: number,
   repeat: FhirTimingRepeat,
   timeZone: string,
   dayFilter: Set<string>,
-  enforceDayFilter: boolean
+  enforceDayFilter: boolean,
+  orderedAt: Date | null
 ): string[] {
   const increment = createIntervalStepper(repeat, timeZone);
   if (!increment) {
@@ -702,11 +747,10 @@ function generateIntervalSeries(
   }
   const results: string[] = [];
   const seen = new Set<string>();
-  let current = orderedAt;
-  const baseline = computeBaseline(orderedAt, from);
+  let current = baseTime;
   let guard = 0;
   const maxIterations = limit * 1000;
-  while (current < baseline && guard < maxIterations) {
+  while (current < from && guard < maxIterations) {
     const next = increment(current);
     if (!next || next.getTime() === current.getTime()) {
       break;
@@ -717,6 +761,25 @@ function generateIntervalSeries(
   while (results.length < limit && guard < maxIterations) {
     const weekday = getLocalWeekday(current, timeZone);
     if (!enforceDayFilter || dayFilter.has(weekday)) {
+      if (current < from) {
+        // Ensure the current candidate respects the evaluation window.
+        guard += 1;
+        const next = increment(current);
+        if (!next || next.getTime() === current.getTime()) {
+          break;
+        }
+        current = next;
+        continue;
+      }
+      if (orderedAt && current < orderedAt) {
+        guard += 1;
+        const next = increment(current);
+        if (!next || next.getTime() === current.getTime()) {
+          break;
+        }
+        current = next;
+        continue;
+      }
       const iso = formatZonedIso(current, timeZone);
       if (!seen.has(iso)) {
         seen.add(iso);
