@@ -11,6 +11,7 @@ import {
 } from "./maps";
 import { inferUnitFromContext } from "./context";
 import { checkDiscouraged } from "./safety";
+import { ParsedSigInternal, Token } from "./internal-types";
 import {
   EventTiming,
   FhirDayOfWeek,
@@ -21,37 +22,6 @@ import {
 } from "./types";
 import { objectEntries } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
-
-export interface Token {
-  original: string;
-  lower: string;
-  index: number;
-}
-
-export interface ParsedSigInternal {
-  input: string;
-  tokens: Token[];
-  consumed: Set<number>;
-  dose?: number;
-  doseRange?: { low: number; high: number };
-  unit?: string;
-  routeCode?: RouteCode;
-  routeText?: string;
-  frequency?: number;
-  frequencyMax?: number;
-  period?: number;
-  periodMax?: number;
-  periodUnit?: FhirPeriodUnit;
-  dayOfWeek: FhirDayOfWeek[];
-  when: EventTiming[];
-  timingCode?: string;
-  asNeeded?: boolean;
-  asNeededReason?: string;
-  warnings: string[];
-  siteText?: string;
-  siteSource?: "abbreviation" | "text";
-  siteTokenIndices: Set<number>;
-}
 
 const BODY_SITE_HINTS = new Set([
   "left",

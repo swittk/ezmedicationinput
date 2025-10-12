@@ -1,3 +1,5 @@
+import type { SigTranslationConfig } from "./i18n";
+
 export interface FhirCoding {
   system?: string;
   code?: string;
@@ -298,7 +300,12 @@ export interface MedicationContext {
   defaultUnit?: string;
 }
 
-export interface ParseOptions {
+export interface FormatOptions {
+  locale?: "en" | "th" | string;
+  i18n?: SigTranslationConfig;
+}
+
+export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
    * May be omitted or explicitly set to null when no contextual clues exist.
@@ -317,7 +324,6 @@ export interface ParseOptions {
   >;
   whenMap?: Record<string, EventTiming>;
   allowDiscouraged?: boolean;
-  locale?: "en" | "th" | string;
   /**
    * When enabled the parser will expand generic meal timing tokens (AC/PC/C)
    * into specific breakfast/lunch/dinner (and bedtime) EventTiming entries

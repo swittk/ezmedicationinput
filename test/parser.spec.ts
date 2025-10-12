@@ -641,6 +641,46 @@ describe("parseSig core scenarios", () => {
   });
 });
 
+describe("internationalization", () => {
+  it("produces Thai text for parseSig", () => {
+    const result = parseSig("1 tab po bid", { context: TAB_CONTEXT, locale: "th" });
+    expect(result.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
+    expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
+    expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
+  });
+
+  it("formats Thai text from FHIR dosage", () => {
+    const parsed = parseSig("1 tab po bid", { context: TAB_CONTEXT });
+    const fromFhir = fromFhirDosage(parsed.fhir, { locale: "th" });
+    expect(fromFhir.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
+    expect(fromFhir.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
+  });
+
+  it("allows custom translation overrides", () => {
+    const custom = parseSig("1 tab po bid", {
+      context: TAB_CONTEXT,
+      i18n: {
+        formatLong: () => "custom long",
+        formatShort: () => "custom short"
+      }
+    });
+    expect(custom.shortText).toBe("custom short");
+    expect(custom.longText).toBe("custom long");
+  });
+
+  it("translates eye site names in Thai", () => {
+    const result = parseSig("1 drop OD", { locale: "th" });
+    expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
+    expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
+  });
+
+  it("translates ear site names in Thai", () => {
+    const result = parseSig("1 drop right ear once daily", { locale: "th" });
+    expect(result.longText).toBe("ใช้ ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+    expect(result.fhir.text).toBe("ใช้ ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+  });
+});
+
 describe("unit normalization", () => {
   it("normalizes every default unit synonym", () => {
     for (const [input, canonical] of Object.entries(DEFAULT_UNIT_SYNONYMS)) {

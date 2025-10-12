@@ -1,17 +1,31 @@
 import { formatInternal } from "./format";
 import { internalFromFhir, toFhir } from "./fhir";
+import { resolveSigLocalization } from "./i18n";
 import { parseInternal } from "./parser";
-import { FhirDosage, ParseOptions, ParseResult } from "./types";
+import { FhirDosage, FormatOptions, ParseOptions, ParseResult } from "./types";
 
 export { parseInternal } from "./parser";
 export { suggestSig } from "./suggest";
 export * from "./types";
 export { nextDueDoses } from "./schedule";
+export {
+  getRegisteredSigLocalizations,
+  registerSigLocalization,
+  resolveSigLocalization,
+  resolveSigTranslation
+} from "./i18n";
+export type {
+  SigLocalization,
+  SigLocalizationConfig,
+  SigTranslation,
+  SigTranslationConfig
+} from "./i18n";
 
 export function parseSig(input: string, options?: ParseOptions): ParseResult {
   const internal = parseInternal(input, options);
-  const shortText = formatInternal(internal, "short");
-  const longText = formatInternal(internal, "long");
+  const localization = resolveSigLocalization(options?.locale, options?.i18n);
+  const shortText = formatInternal(internal, "short", localization);
+  const longText = formatInternal(internal, "long", localization);
   const fhir = toFhir(internal);
   if (longText) {
     fhir.text = longText;
@@ -42,15 +56,25 @@ export function parseSig(input: string, options?: ParseOptions): ParseResult {
   };
 }
 
-export function formatSig(dosage: FhirDosage, style: "short" | "long" = "short"): string {
+export function formatSig(
+  dosage: FhirDosage,
+  style: "short" | "long" = "short",
+  options?: FormatOptions
+): string {
   const internal = internalFromFhir(dosage);
-  return formatInternal(internal, style);
+  const localization = resolveSigLocalization(options?.locale, options?.i18n);
+  return formatInternal(internal, style, localization);
 }
 
-export function fromFhirDosage(dosage: FhirDosage): ParseResult {
+export function fromFhirDosage(
+  dosage: FhirDosage,
+  options?: FormatOptions
+): ParseResult {
   const internal = internalFromFhir(dosage);
-  const shortText = formatInternal(internal, "short");
-  const longText = dosage.text ?? formatInternal(internal, "long");
+  const localization = resolveSigLocalization(options?.locale, options?.i18n);
+  const shortText = formatInternal(internal, "short", localization);
+  const computedLong = formatInternal(internal, "long", localization);
+  const longText = localization ? computedLong : dosage.text ?? computedLong;
   return {
     fhir: dosage,
     shortText,
