@@ -1421,7 +1421,7 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
-    names: ["nausea", "queasiness"],
+    names: ["nausea", "queasiness", "vomiting", "n/v", "nausea and vomiting"],
     definition: {
       coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
       text: "Nausea"
