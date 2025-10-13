@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { fromFhirDosage, formatSig, parseSig, parseSigAsync } from "../src/index";
-import { DEFAULT_UNIT_SYNONYMS, EVENT_TIMING_TOKENS, ROUTE_TEXT } from "../src/maps";
+import {
+  DEFAULT_BODY_SITE_SNOMED,
+  DEFAULT_UNIT_SYNONYMS,
+  EVENT_TIMING_TOKENS,
+  ROUTE_TEXT
+} from "../src/maps";
 import {
   EventTiming,
   RouteCode,
@@ -383,6 +388,196 @@ describe("parseSig core scenarios", () => {
           text: undefined
         }
       ]);
+    });
+
+    it("allows explicit selections to keep default SNOMED codings", () => {
+      const result = parseSig("apply to {scalp}", {
+        siteCodeMap: {
+          scalp: {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "SCALP",
+              display: "Scalp custom"
+            },
+            text: "Scalp (custom)"
+          }
+        },
+        siteCodeSelections: {
+          canonical: "scalp",
+          resolution: DEFAULT_BODY_SITE_SNOMED["scalp"]!
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: "41695006",
+        display: "Scalp"
+      });
+      expect(result.fhir.site?.text).toBe("scalp");
+      expect(result.meta.siteLookups?.[0]?.suggestions).toEqual([
+        {
+          coding: {
+            system: "http://snomed.info/sct",
+            code: "41695006",
+            display: "Scalp"
+          },
+          text: undefined
+        },
+        {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "SCALP",
+            display: "Scalp custom"
+          },
+          text: "Scalp (custom)"
+        }
+      ]);
+    });
+
+    it("applies range-specific selections for probe lookups", () => {
+      const input = "apply to {scalp}";
+      const start = input.indexOf("scalp");
+      const end = start + "scalp".length;
+
+      const result = parseSig(input, {
+        siteCodeSelections: {
+          range: { start, end },
+          resolution: {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "ALT-SCALP",
+              display: "Alternate scalp"
+            },
+            text: "Alternate scalp"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "ALT-SCALP",
+        display: "Alternate scalp"
+      });
+      expect(result.fhir.site?.text).toBe("Alternate scalp");
+      expect(result.meta.siteLookups?.[0]?.request.range).toEqual({ start, end });
+      expect(result.meta.siteLookups?.[0]?.suggestions).toEqual([
+        {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "ALT-SCALP",
+            display: "Alternate scalp"
+          },
+          text: "Alternate scalp"
+        },
+        {
+          coding: {
+            system: "http://snomed.info/sct",
+            code: "41695006",
+            display: "Scalp"
+          },
+          text: undefined
+        }
+      ]);
+    });
+
+    it("prefers siteCodeMap definitions when overriding default anatomy", () => {
+      const result = parseSig("apply to left arm", {
+        siteCodeMap: {
+          "left arm": {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "LARM",
+              display: "Custom left arm"
+            },
+            text: "Left arm (custom override)"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "LARM",
+        display: "Custom left arm"
+      });
+      expect(result.fhir.site?.text).toBe("Left arm (custom override)");
+    });
+
+    it("handles custom non-lateral dental anatomy like 'middle molar'", () => {
+      const result = parseSig("apply to middle molar", {
+        siteCodeMap: {
+          "middle molar": {
+            coding: {
+              system: CUSTOM_SYSTEM,
+              code: "MIDMOLAR",
+              display: "Middle molar"
+            },
+            text: "Middle molar"
+          }
+        }
+      });
+
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: CUSTOM_SYSTEM,
+        code: "MIDMOLAR",
+        display: "Middle molar"
+      });
+      expect(result.fhir.site?.text).toBe("Middle molar");
+    });
+
+    it("supports aliases for directional dental phrases", () => {
+      const siteCodeMap = {
+        "left second molar": {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "L2MOLAR",
+            display: "Left second molar"
+          },
+          text: "Left second molar",
+          aliases: ["second molar left"]
+        },
+        "left first bicuspid": {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "L1BICUSPID",
+            display: "Left first bicuspid"
+          },
+          text: "Left first bicuspid",
+          aliases: [
+            "first bicuspid left",
+            "first bicuspid, left",
+            "first bicuspid (left)"
+          ]
+        },
+        "right first bicuspid": {
+          coding: {
+            system: CUSTOM_SYSTEM,
+            code: "R1BICUSPID",
+            display: "Right first bicuspid"
+          },
+          text: "Right first bicuspid",
+          aliases: [
+            "first bicuspid right",
+            "first bicuspid, right",
+            "first bicuspid (right)"
+          ]
+        }
+      } as const;
+
+      const cases: Array<{ input: string; code: string }> = [
+        { input: "apply to left second molar", code: "L2MOLAR" },
+        { input: "apply to second molar left", code: "L2MOLAR" },
+        { input: "apply to left first bicuspid", code: "L1BICUSPID" },
+        { input: "apply to first bicuspid left", code: "L1BICUSPID" },
+        { input: "apply to first bicuspid, left", code: "L1BICUSPID" },
+        { input: "apply to first bicuspid (left)", code: "L1BICUSPID" },
+        { input: "apply to first bicuspid (right)", code: "R1BICUSPID" }
+      ];
+
+      for (const { input, code } of cases) {
+        const result = parseSig(input, { siteCodeMap });
+        expect(result.fhir.site?.coding?.[0]?.code).toBe(code);
+        expect(result.fhir.site?.coding?.[0]?.system).toBe(CUSTOM_SYSTEM);
+      }
     });
   });
 

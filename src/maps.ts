@@ -197,7 +197,12 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
  * same logic to ensure consistent lookups.
  */
 export function normalizeBodySiteKey(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{

@@ -25,6 +25,7 @@ import {
   RouteCode,
   SiteCodeLookupRequest,
   SiteCodeResolver,
+  SiteCodeSelection,
   SiteCodeSuggestion,
   SiteCodeSuggestionResolver,
   SiteCodeSuggestionsResult,
@@ -42,17 +43,30 @@ function buildCustomSiteHints(
     return undefined;
   }
   const hints = new Set<string>();
-  for (const key of Object.keys(map)) {
-    const normalized = normalizeBodySiteKey(key);
+  const addPhraseHints = (phrase: string | undefined) => {
+    if (!phrase) {
+      return;
+    }
+    const normalized = normalizeBodySiteKey(phrase);
     if (!normalized) {
-      continue;
+      return;
     }
     for (const part of normalized.split(" ")) {
       if (part) {
         hints.add(part);
       }
     }
+  };
+
+  for (const [key, definition] of objectEntries(map)) {
+    addPhraseHints(key);
+    if (definition.aliases) {
+      for (const alias of definition.aliases) {
+        addPhraseHints(alias);
+      }
+    }
   }
+
   return hints;
 }
 
@@ -2234,8 +2248,9 @@ function runSiteCodingResolutionSync(
   }
 
   const canonical = request.canonical;
+  const selection = pickSiteSelection(options?.siteCodeSelections, request);
   const customDefinition = lookupBodySiteDefinition(options?.siteCodeMap, canonical);
-  let resolution = customDefinition;
+  let resolution = selection ?? customDefinition;
 
   if (!resolution) {
     // Allow synchronous resolver callbacks to claim the site.
@@ -2271,6 +2286,9 @@ function runSiteCodingResolutionSync(
   }
 
   const suggestionMap = new Map<string, SiteCodeSuggestion>();
+  if (selection) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(selection));
+  }
   if (customDefinition) {
     addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
   }
@@ -2311,8 +2329,9 @@ async function runSiteCodingResolutionAsync(
   }
 
   const canonical = request.canonical;
+  const selection = pickSiteSelection(options?.siteCodeSelections, request);
   const customDefinition = lookupBodySiteDefinition(options?.siteCodeMap, canonical);
-  let resolution = customDefinition;
+  let resolution = selection ?? customDefinition;
 
   if (!resolution) {
     // Await asynchronous resolver callbacks (e.g., HTTP terminology services).
@@ -2342,6 +2361,9 @@ async function runSiteCodingResolutionAsync(
   }
 
   const suggestionMap = new Map<string, SiteCodeSuggestion>();
+  if (selection) {
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(selection));
+  }
   if (customDefinition) {
     addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
   }
@@ -2380,6 +2402,62 @@ function lookupBodySiteDefinition(
   for (const [key, definition] of objectEntries(map)) {
     if (normalizeBodySiteKey(key) === canonical) {
       return definition;
+    }
+    if (definition.aliases) {
+      for (const alias of definition.aliases) {
+        if (normalizeBodySiteKey(alias) === canonical) {
+          return definition;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function pickSiteSelection(
+  selections: SiteCodeSelection | SiteCodeSelection[] | undefined,
+  request: SiteCodeLookupRequest
+): BodySiteDefinition | undefined {
+  if (!selections) {
+    return undefined;
+  }
+  const canonical = request.canonical;
+  const normalizedText = normalizeBodySiteKey(request.text);
+  const requestRange = request.range;
+  for (const selection of toArray(selections)) {
+    if (!selection) {
+      continue;
+    }
+    let matched = false;
+    if (selection.range) {
+      if (!requestRange) {
+        continue;
+      }
+      if (
+        selection.range.start !== requestRange.start ||
+        selection.range.end !== requestRange.end
+      ) {
+        continue;
+      }
+      matched = true;
+    }
+    if (selection.canonical) {
+      if (normalizeBodySiteKey(selection.canonical) !== canonical) {
+        continue;
+      }
+      matched = true;
+    } else if (selection.text) {
+      const normalizedSelection = normalizeBodySiteKey(selection.text);
+      if (normalizedSelection !== canonical && normalizedSelection !== normalizedText) {
+        continue;
+      }
+      matched = true;
+    }
+    if (!selection.range && !selection.canonical && !selection.text) {
+      continue;
+    }
+    if (matched) {
+      return selection.resolution;
     }
   }
   return undefined;

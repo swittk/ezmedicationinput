@@ -315,6 +315,12 @@ export interface BodySiteCode {
 export interface BodySiteDefinition {
   coding: BodySiteCode;
   text?: string;
+  /**
+   * Optional phrases that should resolve to the same coding as this entry.
+   * Aliases are normalized with the same logic as map keys so callers can
+   * provide punctuation-heavy variants such as "first bicuspid, left".
+   */
+  aliases?: string[];
 }
 
 export interface TextRange {
@@ -358,6 +364,25 @@ export interface SiteCodeSuggestion {
 
 export interface SiteCodeSuggestionsResult {
   suggestions: SiteCodeSuggestion[];
+}
+
+/**
+ * Allows callers to override the parser's automatic site resolution for a
+ * specific match. Matches can be scoped by the normalized phrase, the original
+ * sanitized text, or the exact character range that was detected.
+ */
+export interface SiteCodeSelection {
+  /** Canonical key (punctuation stripped, lower-case) that should trigger this selection. */
+  canonical?: string;
+  /**
+   * Human-friendly site text used to match the extracted phrase. It is
+   * normalized with the same logic as canonical keys.
+   */
+  text?: string;
+  /** Exact range of the detected phrase within the input string. */
+  range?: TextRange;
+  /** Desired coded definition to apply when the selection matches. */
+  resolution: SiteCodeResolution;
 }
 
 /**
@@ -432,6 +457,12 @@ export interface ParseOptions extends FormatOptions {
    * the default site dictionary (trimmed, lower-cased, collapsing whitespace).
    */
   siteCodeMap?: Record<string, BodySiteDefinition>;
+  /**
+   * Explicit selections that override automatic site resolution for matching
+   * phrases. Useful when custom dictionaries provide multiple options but a UI
+   * workflow needs to pin a particular coding for a given match or range.
+   */
+  siteCodeSelections?: SiteCodeSelection | SiteCodeSelection[];
   /**
    * Callback(s) that can translate detected site text into a coded body site.
    * Return a promise when using asynchronous terminology services.

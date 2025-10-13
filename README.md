@@ -138,9 +138,25 @@ const result = await parseSigAsync("apply to {left temple} nightly", {
         system: "http://example.org/custom",
         code: "LTEMP",
         display: "Left temple"
-      }
+      },
+      aliases: ["temporal region, left"],
+      text: "Left temple"
     }
   },
+  // any overrides that the user explicitly selected
+  siteCodeSelections: [
+    {
+      canonical: "scalp",
+      resolution: {
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "39937001",
+          display: "Scalp structure"
+        },
+        text: "Scalp"
+      }
+    }
+  ],
   siteCodeResolvers: async (request) => {
     if (request.canonical === "mole on scalp") {
       return {
@@ -171,11 +187,13 @@ result.meta.siteLookups;
 // → [{ request: { text: "left temple", isProbe: true, ... }, suggestions: [...] }]
 ```
 
-- `siteCodeMap` lets you supply deterministic overrides for normalized site phrases.
-- `siteCodeResolvers` (sync or async) can call external services to resolve sites on demand.
-- `siteCodeSuggestionResolvers` return candidate codes; their results populate `meta.siteLookups[0].suggestions`.
-- Each resolver receives the full `SiteCodeLookupRequest`, including the original input, the cleaned site text, and a `{ start, end }` range you can use to highlight the substring in UI workflows.
-- `parseSigAsync` behaves like `parseSig` but awaits asynchronous resolvers and suggestion providers.
+  - `siteCodeMap` lets you supply deterministic overrides for normalized site phrases.
+  - Entries accept an `aliases` array so punctuation-heavy variants (e.g., "first bicuspid, left") can resolve to the same coding.
+  - `siteCodeResolvers` (sync or async) can call external services to resolve sites on demand.
+  - `siteCodeSuggestionResolvers` return candidate codes; their results populate `meta.siteLookups[0].suggestions`.
+  - `siteCodeSelections` let callers override the automatic match for a detected phrase or range—helpful when a clinician chooses a bundled SNOMED option over a custom override.
+  - Each resolver receives the full `SiteCodeLookupRequest`, including the original input, the cleaned site text, and a `{ start, end }` range you can use to highlight the substring in UI workflows.
+  - `parseSigAsync` behaves like `parseSig` but awaits asynchronous resolvers and suggestion providers.
 
 #### Site resolver signatures
 
@@ -225,6 +243,7 @@ You can specify the number of times (total count) the medication is supposed to 
 - `allowHouseholdVolumeUnits`: defaults to `true`; set to `false` to ignore
   teaspoon/tablespoon units during parsing and suggestions.
 - Custom `routeMap`, `unitMap`, `freqMap`, and `whenMap` let you augment the built-in dictionaries without mutating them.
+- `siteCodeSelections` override automatic site resolution for matching phrases or ranges so user-picked suggestions stick when re-parsing a sig.
 
 ### Next due dose generation
 
