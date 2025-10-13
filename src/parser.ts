@@ -2303,11 +2303,23 @@ export function parseInternal(
           }
         }
       }
+      let canonicalPrefix: string | undefined;
       if (reasonTokens.length > 0) {
-        const suffixTokens = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
-        if (suffixTokens?.length) {
-          for (const token of suffixTokens) {
+        const suffixInfo = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
+        if (suffixInfo?.tokens?.length) {
+          for (const token of suffixInfo.tokens) {
             prnSiteSuffixIndices.add(token.index);
+          }
+        }
+        if (suffixInfo && suffixInfo.startIndex > 0) {
+          const prefixTokens = reasonObjects
+            .slice(0, suffixInfo.startIndex)
+            .map((token) => token.original)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (prefixTokens) {
+            canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
           }
         }
       }
@@ -2325,8 +2337,9 @@ export function parseInternal(
           const text = sanitized || joined;
           internal.asNeededReason = text;
           const normalized = text.toLowerCase();
-          const canonical = sanitized
-            ? normalizePrnReasonKey(sanitized)
+          const canonicalSource = canonicalPrefix || sanitized || text;
+          const canonical = canonicalSource
+            ? normalizePrnReasonKey(canonicalSource)
             : normalizePrnReasonKey(text);
           internal.prnReasonLookupRequest = {
             originalText: joined,
@@ -3341,11 +3354,16 @@ function findPrnReasonSeparator(sourceText: string): number | undefined {
   return undefined;
 }
 
+interface PrnSiteSuffixDetection {
+  tokens: Token[];
+  startIndex: number;
+}
+
 function findTrailingPrnSiteSuffix(
   tokens: Token[],
   internal: ParsedSigInternal,
   options?: ParseOptions
-): Token[] | undefined {
+): PrnSiteSuffixDetection | undefined {
   let suffixStart: number | undefined;
   let hasSiteHint = false;
   let hasConnector = false;
@@ -3420,7 +3438,10 @@ function findTrailingPrnSiteSuffix(
     return undefined;
   }
 
-  return siteHintTokens;
+  return {
+    tokens: siteHintTokens,
+    startIndex: suffixStart
+  };
 }
 
 function lookupPrnReasonDefinition(

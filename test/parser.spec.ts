@@ -971,10 +971,21 @@ describe("parseSig core scenarios", () => {
   it("retains rectal PRN location phrases inside the reason text", () => {
     const result = parseSig("1 mL rectal prn irritation at rectum");
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("irritation at rectum");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "257553007",
+      display: "Irritation"
+    });
     expect(result.fhir.site?.text).toBe("rectum");
     expect(result.fhir.site?.coding?.[0]?.system).toBe("http://snomed.info/sct");
     expect(result.fhir.site?.coding?.[0]?.code).toBe("34402009");
     expect(result.fhir.asNeededFor?.[0]?.text?.toLowerCase()).toContain("rectum");
+    expect(result.meta.normalized.prnReason?.text).toBe("irritation at rectum");
+    expect(result.meta.normalized.prnReason?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "257553007",
+      display: "Irritation"
+    });
     expect(result.longText.toLowerCase()).toContain("irritation at rectum");
   });
 

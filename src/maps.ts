@@ -1490,6 +1490,17 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
+    names: ["irritation", "irritated"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "257553007",
+        display: "Irritation"
+      },
+      text: "Irritation"
+    }
+  },
+  {
     names: ["dyspnea", "shortness of breath", "sob", "breathlessness"],
     definition: {
       coding: {
