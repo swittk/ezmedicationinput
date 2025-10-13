@@ -8,6 +8,7 @@
 - Emits timing abbreviations (`timing.code`) and repeat structures simultaneously where possible.
 - Maps meal/time blocks to the correct `Timing.repeat.when` **EventTiming** codes and can auto-expand AC/PC/C into specific meals.
 - Outputs SNOMED CT route codings (while providing friendly text) and round-trips known SNOMED routes back into the parser.
+- Auto-codes common PRN (as-needed) reasons and additional dosage instructions while keeping the raw text when no coding is available.
 - Understands ocular and intravitreal shorthand (OD/OS/OU, LE/RE/BE, IVT*, VOD/VOS, etc.) and warns when intravitreal instructions omit an eye side.
 - Parses fractional/ minute-based intervals (`q0.5h`, `q30 min`, `q1/4hr`) plus dose and timing ranges.
 - Supports extensible dictionaries for routes, units, frequency shorthands, and event timing tokens.
@@ -49,6 +50,59 @@ Example output:
   "doseAndRate": [{ "doseQuantity": { "value": 1, "unit": "tab" } }]
 }
 ```
+
+### PRN reasons & additional instructions
+
+`parseSig` identifies PRN (as-needed) clauses and trailing instructions, then
+codes them with SNOMED CT whenever possible.
+
+```ts
+const result = parseSig("1 tab po q4h prn headache; do not exceed 6 tabs/day");
+
+result.fhir.asNeededFor;
+// → [{
+//      text: "headache",
+//      coding: [{
+//        system: "http://snomed.info/sct",
+//        code: "25064002",
+//        display: "Headache"
+//      }]
+//    }]
+
+result.fhir.additionalInstruction;
+// → [{ text: "Do not exceed 6 tablets daily" }]
+```
+
+Customize the dictionaries and lookups through `ParseOptions`:
+
+```ts
+parseSig(input, {
+  prnReasonMap: {
+    migraine: {
+      text: "Migraine",
+      coding: {
+        system: "http://snomed.info/sct",
+        code: "37796009",
+        display: "Migraine"
+      }
+    }
+  },
+  prnReasonResolvers: async (request) => terminologyService.lookup(request),
+  prnReasonSuggestionResolvers: async (request) => terminologyService.suggest(request),
+});
+```
+
+Use `{reason}` in the sig string (e.g. `prn {migraine}`) to force a lookup even
+when a direct match exists. Additional instructions are sourced from a built-in
+set of SNOMED CT concepts under *419492006 – Additional dosage instructions* and
+fall back to plain text when no coding is available. Parsed instructions are
+also echoed in `ParseResult.meta.normalized.additionalInstructions` for quick UI
+rendering.
+
+When a PRN reason cannot be auto-resolved, any registered suggestion resolvers
+are invoked and their responses are surfaced through
+`ParseResult.meta.prnReasonLookups` so client applications can prompt the user
+to choose a coded concept.
 
 ### Sig (directions) suggestions
 
@@ -125,6 +179,8 @@ result.fhir.site?.coding?.[0];
 ```
 
 When the parser encounters an unfamiliar site, it leaves the text untouched and records nothing in `meta.siteLookups`. Wrapping the phrase in braces (e.g. `apply to {mole on scalp}`) preserves the same parsing behavior but flags the entry as a **probe** so `meta.siteLookups` always contains the request. This allows UIs to display lookup widgets even before a matching code exists. Braces are optional when the site is already recognized—they simply make the clinician's intent explicit.
+
+Unknown body sites still populate `Dosage.site.text` and `ParseResult.meta.normalized.site.text`, allowing UIs to echo the verbatim phrase while terminology lookups run asynchronously.
 
 You can extend or replace the built-in codings via `ParseOptions`:
 
