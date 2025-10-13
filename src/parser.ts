@@ -1741,6 +1741,7 @@ export function parseInternal(
 
   // PRN detection
   let prnReasonStart: number | undefined;
+  const prnSiteSuffixIndices = new Set<number>();
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token.lower === "prn") {
@@ -1828,6 +1829,9 @@ export function parseInternal(
 
   // Process tokens sequentially
   const tryRouteSynonym = (startIndex: number): boolean => {
+    if (prnReasonStart !== undefined && startIndex >= prnReasonStart) {
+      return false;
+    }
     const maxSpan = Math.min(24, tokens.length - startIndex);
     for (let span = maxSpan; span >= 1; span--) {
       const slice = tokens.slice(startIndex, startIndex + span);
@@ -2300,21 +2304,10 @@ export function parseInternal(
         }
       }
       if (reasonTokens.length > 0) {
-        const siteStart = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
-        if (siteStart !== undefined) {
-          for (let i = siteStart; i < reasonObjects.length; i++) {
-            internal.consumed.delete(reasonObjects[i].index);
-          }
-          reasonObjects.splice(siteStart);
-          reasonTokens.splice(siteStart);
-          reasonIndices.splice(siteStart);
-          if (reasonTokens.length > 0) {
-            sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
-            range = computeTokenRange(internal.input, tokens, sortedIndices);
-            sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
-          } else {
-            range = undefined;
-            sourceText = undefined;
+        const suffixTokens = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
+        if (suffixTokens?.length) {
+          for (const token of suffixTokens) {
+            prnSiteSuffixIndices.add(token.index);
           }
         }
       }
@@ -2355,21 +2348,31 @@ export function parseInternal(
   // Determine site text from leftover tokens (excluding PRN reason tokens)
   const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));
   const siteCandidateIndices = new Set<number>();
+  const leftoverSiteIndices = new Set<number>();
   for (const token of leftoverTokens) {
+    if (prnSiteSuffixIndices.has(token.index)) {
+      continue;
+    }
     const normalized = normalizeTokenLower(token);
     if (isBodySiteHint(normalized, internal.customSiteHints)) {
       siteCandidateIndices.add(token.index);
+      leftoverSiteIndices.add(token.index);
       continue;
     }
     if (SITE_CONNECTORS.has(normalized)) {
       const next = tokens[token.index + 1];
-      if (next && !internal.consumed.has(next.index)) {
+      if (next && !internal.consumed.has(next.index) && !prnSiteSuffixIndices.has(next.index)) {
         siteCandidateIndices.add(next.index);
       }
     }
   }
-  for (const idx of internal.siteTokenIndices) {
-    siteCandidateIndices.add(idx);
+  if (leftoverSiteIndices.size === 0) {
+    for (const idx of internal.siteTokenIndices) {
+      if (prnSiteSuffixIndices.has(idx)) {
+        continue;
+      }
+      siteCandidateIndices.add(idx);
+    }
   }
   if (siteCandidateIndices.size > 0) {
     const indicesToInclude = new Set<number>(siteCandidateIndices);
@@ -3342,7 +3345,7 @@ function findTrailingPrnSiteSuffix(
   tokens: Token[],
   internal: ParsedSigInternal,
   options?: ParseOptions
-): number | undefined {
+): Token[] | undefined {
   let suffixStart: number | undefined;
   let hasSiteHint = false;
   let hasConnector = false;
@@ -3383,6 +3386,7 @@ function findTrailingPrnSiteSuffix(
 
   const suffixTokens = tokens.slice(suffixStart);
   const siteWords: string[] = [];
+  const siteHintTokens: Token[] = [];
   for (const token of suffixTokens) {
     const trimmed = token.original.trim();
     if (!trimmed) {
@@ -3396,6 +3400,7 @@ function findTrailingPrnSiteSuffix(
     ) {
       continue;
     }
+    siteHintTokens.push(token);
     siteWords.push(trimmed);
   }
 
@@ -3415,7 +3420,7 @@ function findTrailingPrnSiteSuffix(
     return undefined;
   }
 
-  return suffixStart;
+  return siteHintTokens;
 }
 
 function lookupPrnReasonDefinition(
