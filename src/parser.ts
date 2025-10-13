@@ -219,6 +219,38 @@ const COUNT_CONNECTOR_WORDS = new Set([
   "extra"
 ]);
 
+const FREQUENCY_SIMPLE_WORDS: Record<string, number> = {
+  once: 1,
+  twice: 2,
+  thrice: 3
+};
+
+const FREQUENCY_NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12
+};
+
+const FREQUENCY_TIMES_WORDS = new Set(["time", "times", "x"]);
+
+const FREQUENCY_CONNECTOR_WORDS = new Set(["per", "a", "an", "each", "every"]);
+
+const FREQUENCY_ADVERB_UNITS: Record<string, FhirPeriodUnit> = {
+  daily: FhirPeriodUnit.Day,
+  weekly: FhirPeriodUnit.Week,
+  monthly: FhirPeriodUnit.Month,
+  hourly: FhirPeriodUnit.Hour
+};
+
 const ROUTE_DESCRIPTOR_FILLER_WORDS = new Set([
   "per",
   "by",
@@ -695,6 +727,135 @@ function tryParseNumericCadence(
   }
   mark(internal.consumed, unitToken);
   return true;
+}
+
+function tryParseCountBasedFrequency(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number,
+  options?: ParseOptions
+): boolean {
+  const token = tokens[index];
+  if (internal.consumed.has(token.index)) {
+    return false;
+  }
+  if (
+    internal.frequency !== undefined ||
+    internal.frequencyMax !== undefined ||
+    internal.period !== undefined ||
+    internal.periodMax !== undefined
+  ) {
+    return false;
+  }
+
+  const normalized = normalizeTokenLower(token);
+  let value: number | undefined;
+  let requiresPeriod = true;
+  let requiresCue = true;
+
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(normalized)) {
+    value = parseFloat(token.original);
+  } else {
+    const simple = FREQUENCY_SIMPLE_WORDS[normalized];
+    if (simple !== undefined) {
+      value = simple;
+      requiresPeriod = false;
+      requiresCue = false;
+    } else {
+      const wordValue = FREQUENCY_NUMBER_WORDS[normalized];
+      if (wordValue === undefined) {
+        return false;
+      }
+      value = wordValue;
+    }
+  }
+
+  if (!Number.isFinite(value) || value === undefined || value <= 0) {
+    return false;
+  }
+
+  const nextToken = tokens[index + 1];
+  if (
+    nextToken &&
+    !internal.consumed.has(nextToken.index) &&
+    normalizeUnit(normalizeTokenLower(nextToken), options)
+  ) {
+    return false;
+  }
+
+  const partsToConsume: Token[] = [];
+  let nextIndex = index + 1;
+  let periodUnit: FhirPeriodUnit | undefined;
+  let sawCue = !requiresCue;
+  let sawTimesWord = false;
+  let sawConnectorWord = false;
+
+  while (true) {
+    const candidate = tokens[nextIndex];
+    if (!candidate || internal.consumed.has(candidate.index)) {
+      break;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (FREQUENCY_TIMES_WORDS.has(lower)) {
+      partsToConsume.push(candidate);
+      sawCue = true;
+      sawTimesWord = true;
+      nextIndex += 1;
+      continue;
+    }
+    if (FREQUENCY_CONNECTOR_WORDS.has(lower)) {
+      partsToConsume.push(candidate);
+      sawCue = true;
+      sawConnectorWord = true;
+      nextIndex += 1;
+      continue;
+    }
+    const adverbUnit = mapFrequencyAdverb(lower);
+    if (adverbUnit) {
+      periodUnit = adverbUnit;
+      partsToConsume.push(candidate);
+      break;
+    }
+    const mappedUnit = mapIntervalUnit(lower);
+    if (mappedUnit) {
+      periodUnit = mappedUnit;
+      partsToConsume.push(candidate);
+      break;
+    }
+    break;
+  }
+
+  if (!periodUnit) {
+    if (requiresPeriod) {
+      return false;
+    }
+    periodUnit = FhirPeriodUnit.Day;
+  }
+
+  if (requiresCue && !sawCue) {
+    return false;
+  }
+
+  internal.frequency = value;
+  internal.period = 1;
+  internal.periodUnit = periodUnit;
+  if (value === 1 && periodUnit === FhirPeriodUnit.Day && !internal.timingCode) {
+    internal.timingCode = "QD";
+  }
+
+  let consumeCurrentToken = true;
+  if (value === 1 && !sawConnectorWord && sawTimesWord && periodUnit !== FhirPeriodUnit.Day) {
+    consumeCurrentToken = false;
+  }
+
+  if (consumeCurrentToken) {
+    mark(internal.consumed, token);
+  }
+  for (const part of partsToConsume) {
+    mark(internal.consumed, part);
+  }
+
+  return consumeCurrentToken;
 }
 
 const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
@@ -1489,6 +1650,10 @@ function mapIntervalUnit(token: string):
   return undefined;
 }
 
+function mapFrequencyAdverb(token: string): FhirPeriodUnit | undefined {
+  return FREQUENCY_ADVERB_UNITS[token];
+}
+
 function parseNumericRange(token: string): { low: number; high: number } | undefined {
   const rangeMatch = token.match(/^([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)$/);
   if (!rangeMatch) {
@@ -1915,6 +2080,9 @@ export function parseInternal(
     }
 
     // Numeric dose
+    if (tryParseCountBasedFrequency(internal, tokens, i, options)) {
+      continue;
+    }
     const rangeValue = parseNumericRange(token.lower);
     if (rangeValue) {
       if (!internal.doseRange) {

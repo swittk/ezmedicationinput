@@ -676,6 +676,51 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("parses thrice daily cadence phrases", () => {
+    const result = parseSig("apply to right arm thrice daily");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 3,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses numeric times-per-day cadence phrases", () => {
+    const result = parseSig("apply to right arm 4 times daily");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 4,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses numeric per-day cadence with articles", () => {
+    const result = parseSig("apply to right arm 5 a day");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 5,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses singular time daily cadence", () => {
+    const result = parseSig("apply to right arm 2 time per day");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses singular time daily cadence", () => {
+    const result = parseSig("apply to right arm 3 times per day");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 3,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
   it("infers inhalation units from respiratory route hints", () => {
     const result = parseSig("2 inh q4h");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
