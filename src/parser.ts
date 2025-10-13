@@ -2253,7 +2253,7 @@ export function parseInternal(
     for (let i = prnReasonStart; i < tokens.length; i++) {
       const token = tokens[i];
       if (internal.consumed.has(token.index)) {
-        continue;
+        internal.consumed.delete(token.index);
       }
       reasonTokens.push(token.original);
       reasonIndices.push(token.index);
@@ -2289,6 +2289,25 @@ export function parseInternal(
             }
             break;
           }
+          if (reasonTokens.length > 0) {
+            sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
+            range = computeTokenRange(internal.input, tokens, sortedIndices);
+            sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+          } else {
+            range = undefined;
+            sourceText = undefined;
+          }
+        }
+      }
+      if (reasonTokens.length > 0) {
+        const siteStart = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
+        if (siteStart !== undefined) {
+          for (let i = siteStart; i < reasonObjects.length; i++) {
+            internal.consumed.delete(reasonObjects[i].index);
+          }
+          reasonObjects.splice(siteStart);
+          reasonTokens.splice(siteStart);
+          reasonIndices.splice(siteStart);
           if (reasonTokens.length > 0) {
             sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
             range = computeTokenRange(internal.input, tokens, sortedIndices);
@@ -2925,29 +2944,67 @@ function normalizeSiteDisplayText(
   if (!trimmed) {
     return trimmed;
   }
+
   const canonicalInput = normalizeBodySiteKey(trimmed);
-  if (!canonicalInput || !isAdjectivalSitePhrase(canonicalInput)) {
+  if (!canonicalInput) {
     return trimmed;
   }
 
-  const definition =
-    lookupBodySiteDefinition(customSiteMap, canonicalInput) ??
-    DEFAULT_BODY_SITE_SNOMED[canonicalInput];
-  if (!definition) {
-    return trimmed;
+  const resolvePreferred = (
+    canonical: string
+  ): { text: string; canonical: string } | undefined => {
+    const definition =
+      lookupBodySiteDefinition(customSiteMap, canonical) ??
+      DEFAULT_BODY_SITE_SNOMED[canonical];
+    if (!definition) {
+      return undefined;
+    }
+    const preferred = pickPreferredBodySitePhrase(
+      canonical,
+      definition,
+      customSiteMap
+    );
+    const textValue = preferred ?? canonical;
+    const normalized = normalizeBodySiteKey(textValue);
+    if (!normalized) {
+      return undefined;
+    }
+    return { text: textValue, canonical: normalized };
+  };
+
+  if (isAdjectivalSitePhrase(canonicalInput)) {
+    const direct = resolvePreferred(canonicalInput);
+    return direct?.text ?? trimmed;
   }
 
-  const preferred = pickPreferredBodySitePhrase(
-    canonicalInput,
-    definition,
-    customSiteMap
-  );
-
-  if (!preferred) {
-    return trimmed;
+  const words = canonicalInput.split(/\s+/).filter((word) => word.length > 0);
+  for (let i = 1; i < words.length; i++) {
+    const prefix = words.slice(0, i);
+    if (!prefix.every((word) => isAdjectivalSitePhrase(word))) {
+      continue;
+    }
+    const candidateCanonical = words.slice(i).join(" ");
+    if (!candidateCanonical) {
+      continue;
+    }
+    const candidatePreferred = resolvePreferred(candidateCanonical);
+    if (!candidatePreferred) {
+      continue;
+    }
+    const prefixMatches = prefix.every((word) => {
+      const normalizedPrefix = resolvePreferred(word);
+      return (
+        normalizedPrefix !== undefined &&
+        normalizedPrefix.canonical === candidatePreferred.canonical
+      );
+    });
+    if (!prefixMatches) {
+      continue;
+    }
+    return candidatePreferred.text;
   }
 
-  return preferred;
+  return trimmed;
 }
 
 function pickPreferredBodySitePhrase(
@@ -2984,12 +3041,12 @@ function pickPreferredBodySitePhrase(
         if (normalizedKey) {
           synonyms.add(normalizedKey);
         }
-      }
-      if (candidate.aliases) {
-        for (const alias of candidate.aliases) {
-          const normalizedAlias = normalizeBodySiteKey(alias);
-          if (normalizedAlias) {
-            synonyms.add(normalizedAlias);
+        if (candidate.aliases) {
+          for (const alias of candidate.aliases) {
+            const normalizedAlias = normalizeBodySiteKey(alias);
+            if (normalizedAlias) {
+              synonyms.add(normalizedAlias);
+            }
           }
         }
       }
@@ -3279,6 +3336,86 @@ function findPrnReasonSeparator(sourceText: string): number | undefined {
   }
 
   return undefined;
+}
+
+function findTrailingPrnSiteSuffix(
+  tokens: Token[],
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): number | undefined {
+  let suffixStart: number | undefined;
+  let hasSiteHint = false;
+  let hasConnector = false;
+
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const token = tokens[i];
+    const lower = normalizeTokenLower(token);
+    if (!lower) {
+      if (suffixStart !== undefined && token.original.trim()) {
+        break;
+      }
+      continue;
+    }
+    if (isBodySiteHint(lower, internal.customSiteHints)) {
+      hasSiteHint = true;
+      suffixStart = i;
+      continue;
+    }
+    if (suffixStart !== undefined) {
+      if (SITE_CONNECTORS.has(lower)) {
+        hasConnector = true;
+        suffixStart = i;
+        continue;
+      }
+      if (SITE_FILLER_WORDS.has(lower) || ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)) {
+        suffixStart = i;
+        continue;
+      }
+    }
+    if (suffixStart !== undefined) {
+      break;
+    }
+  }
+
+  if (!hasSiteHint || !hasConnector || suffixStart === undefined || suffixStart === 0) {
+    return undefined;
+  }
+
+  const suffixTokens = tokens.slice(suffixStart);
+  const siteWords: string[] = [];
+  for (const token of suffixTokens) {
+    const trimmed = token.original.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const lower = normalizeTokenLower(token);
+    if (
+      SITE_CONNECTORS.has(lower) ||
+      SITE_FILLER_WORDS.has(lower) ||
+      ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
+    ) {
+      continue;
+    }
+    siteWords.push(trimmed);
+  }
+
+  if (!siteWords.length) {
+    return undefined;
+  }
+
+  const sitePhrase = siteWords.join(" ");
+  const canonical = normalizeBodySiteKey(sitePhrase);
+  if (!canonical) {
+    return undefined;
+  }
+
+  const definition =
+    lookupBodySiteDefinition(options?.siteCodeMap, canonical) ?? DEFAULT_BODY_SITE_SNOMED[canonical];
+  if (!definition) {
+    return undefined;
+  }
+
+  return suffixStart;
 }
 
 function lookupPrnReasonDefinition(

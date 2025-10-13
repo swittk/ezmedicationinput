@@ -968,6 +968,17 @@ describe("parseSig core scenarios", () => {
     );
   });
 
+  it("separates rectal sites from PRN reasons without explicit separators", () => {
+    const result = parseSig("1 mL rectal prn irritation at rectum");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("irritation");
+    expect(result.fhir.site?.text).toBe("rectum");
+    expect(result.fhir.site?.coding?.[0]?.system).toBe("http://snomed.info/sct");
+    expect(result.fhir.site?.coding?.[0]?.code).toBe("34402009");
+    expect(result.fhir.asNeededFor?.[0]?.text?.toLowerCase()).not.toContain("rectum");
+    expect(result.longText).toContain("as needed for irritation");
+    expect(result.longText.toLowerCase()).not.toContain("irritation at rectum");
+  });
+
   it("normalizes adjectival site phrases across shared body-site definitions", () => {
     const result = parseSig("1x2 vaginal prn infection; no alcohol");
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("infection");
