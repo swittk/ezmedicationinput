@@ -846,6 +846,16 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
     expect(result.fhir.asNeededBoolean).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("pain");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "22253000",
+      display: "Pain"
+    });
+    expect(result.meta.normalized.prnReason?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "22253000",
+      display: "Pain"
+    });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
   });
 
@@ -859,7 +869,60 @@ describe("parseSig core scenarios", () => {
     });
     expect(result.fhir.asNeededBoolean).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("constipation");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "14760008",
+      display: "Constipation"
+    });
+    expect(result.meta.normalized.prnReason?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "14760008",
+      display: "Constipation"
+    });
     expect(result.longText).toContain("every 6 to 8 hours");
+  });
+
+  it("codes PRN reason suggestions when unresolved", () => {
+    const result = parseSig("po prn {reason}");
+    const lookup = result.meta.prnReasonLookups?.[0];
+    expect(lookup?.request.isProbe).toBe(true);
+    expect(lookup?.suggestions.some((suggestion) => suggestion.coding?.code === "22253000")).toBe(
+      true
+    );
+  });
+
+  it("codes additional instructions using SNOMED when recognized", () => {
+    const result = parseSig("1 tab po daily - do not crush or chew", { context: TAB_CONTEXT });
+    expect(result.fhir.additionalInstruction?.[0]).toEqual({
+      text: "Swallow whole; do not crush or chew",
+      coding: [
+        {
+          system: "http://snomed.info/sct",
+          code: "418693002",
+          display: "Swallowed whole, not chewed (qualifier value)"
+        }
+      ]
+    });
+    expect(result.meta.normalized.additionalInstructions).toEqual([
+      {
+        text: "Swallow whole; do not crush or chew",
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "418693002",
+          display: "Swallowed whole, not chewed (qualifier value)"
+        }
+      }
+    ]);
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toContain("Swallow whole; do not crush or chew");
+  });
+
+  it("preserves free-form additional instructions when unmatched", () => {
+    const result = parseSig("1 tab po daily; use caution in storms");
+    expect(result.fhir.additionalInstruction?.[0]).toEqual({ text: "use caution in storms" });
+    expect(result.meta.normalized.additionalInstructions).toEqual([
+      { text: "use caution in storms", coding: undefined }
+    ]);
   });
 
   it("parses 1x2 subcutaneous", () => {
@@ -1158,6 +1221,13 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(
       SNOMEDCTRouteCodes["Intramuscular route"]
     );
+  });
+
+  it("keeps text-only body sites when coding unknown", () => {
+    const result = parseSig("1 mL to larynx daily");
+    expect(result.fhir.site?.text).toBe("larynx");
+    expect(result.fhir.site?.coding).toBeUndefined();
+    expect(result.meta.normalized.site).toEqual({ text: "larynx", coding: undefined });
   });
 
   it("codes recognized body sites with SNOMED", () => {

@@ -3,6 +3,8 @@ import {
   FhirCoding,
   FhirDayOfWeek,
   FhirPeriodUnit,
+  PrnReasonLookupRequest,
+  PrnReasonSuggestion,
   RouteCode,
   SiteCodeLookupRequest,
   SiteCodeSuggestion
@@ -11,6 +13,11 @@ import {
 export interface SiteLookupDetail {
   request: SiteCodeLookupRequest;
   suggestions: SiteCodeSuggestion[];
+}
+
+export interface PrnReasonLookupDetail {
+  request: PrnReasonLookupRequest;
+  suggestions: PrnReasonSuggestion[];
 }
 
 export interface Token {
@@ -39,6 +46,7 @@ export interface ParsedSigInternal {
   timingCode?: string;
   asNeeded?: boolean;
   asNeededReason?: string;
+  asNeededReasonCoding?: FhirCoding;
   warnings: string[];
   siteText?: string;
   siteSource?: "abbreviation" | "text";
@@ -47,4 +55,7 @@ export interface ParsedSigInternal {
   siteLookupRequest?: SiteCodeLookupRequest;
   siteLookups: SiteLookupDetail[];
   customSiteHints?: Set<string>;
+  prnReasonLookupRequest?: PrnReasonLookupRequest;
+  prnReasonLookups: PrnReasonLookupDetail[];
+  additionalInstructions: Array<{ text?: string; coding?: FhirCoding }>;
 }

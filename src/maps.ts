@@ -1,12 +1,16 @@
 import {
+  AdditionalInstructionDefinition,
   BodySiteDefinition,
   EventTiming,
   FhirDayOfWeek,
   FhirPeriodUnit,
+  PrnReasonDefinition,
   RouteCode,
   SNOMEDCTRouteCodes
 } from "./types";
 import { objectEntries, objectFromEntries } from "./utils/object";
+
+const SNOMED_SYSTEM = "http://snomed.info/sct";
 
 type RouteSnomedEntry = [
   RouteCode,
@@ -1386,3 +1390,355 @@ export const DEFAULT_UNIT_BY_ROUTE: Partial<Record<RouteCode, string>> = (() => 
 
   return resolved;
 })();
+
+export function normalizePrnReasonKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeAdditionalInstructionKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const DEFAULT_PRN_REASON_SOURCE: Array<{
+  names: string[];
+  definition: PrnReasonDefinition;
+}> = [
+  {
+    names: ["pain", "ache", "aches", "pains"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
+      text: "Pain"
+    }
+  },
+  {
+    names: ["nausea", "queasiness"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
+      text: "Nausea"
+    }
+  },
+  {
+    names: ["itch", "itching", "itchy"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418363000",
+        display: "Itching of skin"
+      },
+      text: "Itching"
+    }
+  },
+  {
+    names: ["anxiety", "nervousness"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
+      text: "Anxiety"
+    }
+  },
+  {
+    names: ["sleep", "sleeping", "insomnia", "sleep issues"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "193462001",
+        display: "Insomnia"
+      },
+      text: "Sleep"
+    }
+  },
+  {
+    names: ["cough", "coughing"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
+      text: "Cough"
+    }
+  },
+  {
+    names: ["fever", "temperature", "pyrexia"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
+      text: "Fever"
+    }
+  },
+  {
+    names: ["spasm", "spasms", "muscle spasm"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
+      text: "Spasm"
+    }
+  },
+  {
+    names: ["constipation"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "14760008",
+        display: "Constipation"
+      },
+      text: "Constipation"
+    }
+  },
+  {
+    names: ["dyspnea", "shortness of breath", "sob", "breathlessness"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "267036007",
+        display: "Dyspnea"
+      },
+      text: "Shortness of breath"
+    }
+  }
+];
+
+export interface PrnReasonDictionaryEntry {
+  canonical: string;
+  definition: PrnReasonDefinition;
+  terms: string[];
+}
+
+export const DEFAULT_PRN_REASON_ENTRIES: PrnReasonDictionaryEntry[] =
+  DEFAULT_PRN_REASON_SOURCE.map((source) => {
+    const canonicalTerm =
+      source.definition.text ?? source.definition.coding?.display ?? source.names[0];
+    return {
+      canonical: normalizePrnReasonKey(canonicalTerm ?? ""),
+      definition: source.definition,
+      terms: [...source.names]
+    };
+  });
+
+export const DEFAULT_PRN_REASON_DEFINITIONS = objectFromEntries(
+  DEFAULT_PRN_REASON_SOURCE.reduce<Array<[string, PrnReasonDefinition]>>(
+    (entries, source) => {
+      for (const name of source.names) {
+        const key = normalizePrnReasonKey(name);
+        if (!key) {
+          continue;
+        }
+        entries.push([key, source.definition]);
+      }
+      if (source.definition.aliases) {
+        for (const alias of source.definition.aliases) {
+          const key = normalizePrnReasonKey(alias);
+          if (!key) {
+            continue;
+          }
+          entries.push([key, source.definition]);
+        }
+      }
+      return entries;
+    },
+    []
+  )
+) as Record<string, PrnReasonDefinition>;
+
+const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
+  names: string[];
+  definition: AdditionalInstructionDefinition;
+}> = [
+  {
+    names: ["with food", "with meals", "with meal", "after food", "after meals"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "311504000",
+        display: "With or after food"
+      },
+      text: "Take with or after food"
+    }
+  },
+  {
+    names: ["before food", "before meals", "before meal", "1 hour before food"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "311501008",
+        display: "Half to one hour before food"
+      },
+      text: "Take before food"
+    }
+  },
+  {
+    names: ["empty stomach", "on empty stomach"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "717154004",
+        display: "Take on an empty stomach (qualifier value)"
+      },
+      text: "Take on an empty stomach"
+    }
+  },
+  {
+    names: ["with water", "with plenty of water", "drink water", "with lots of water"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "419303009",
+        display: "With plenty of water"
+      },
+      text: "Take with plenty of water"
+    }
+  },
+  {
+    names: ["dissolve in water", "mix with water", "mix in water"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "417995008",
+        display: "Dissolve or mix with water before taking"
+      },
+      text: "Dissolve or mix with water before taking"
+    }
+  },
+  {
+    names: ["avoid alcohol", "no alcohol", "no alc", "avoid alcoholic drink"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "419822006",
+        display: "Warning. Avoid alcoholic drink (qualifier value)"
+      },
+      text: "Avoid alcoholic drinks"
+    }
+  },
+  {
+    names: ["may cause drowsiness", "do not drive", "avoid driving", "no driving", "no drive"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418954008",
+        display:
+          "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)"
+      },
+      text: "May cause drowsiness; do not drive if affected"
+    }
+  },
+  {
+    names: [
+      "drowsiness avoid alcohol",
+      "may cause drowsiness avoid alcohol",
+      "do not drive avoid alcohol",
+      "drowsy avoid alc",
+      "drowsy avoid drive",
+      "drowsy avoid driving",
+      "drowsy no drive",
+      "drowsy no driving",
+      "drowsy no alc"
+    ],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418914006",
+        display:
+          "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
+      },
+      text: "May cause drowsiness; avoid driving or alcohol"
+    }
+  },
+  {
+    names: [
+      "drowsiness next day",
+      "drowsiness next day avoid alcohol",
+      "may cause drowsiness next day",
+      "may next day drowsy",
+      "may drowsy next day"
+    ],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418071006",
+        display:
+          "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
+      },
+      text: "May cause next-day drowsiness; avoid driving or alcohol"
+    }
+  },
+  {
+    names: ["avoid sun", "avoid sunlight", "avoid sun lamps"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418521000",
+        display: "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)"
+      },
+      text: "Avoid sunlight or sun lamps"
+    }
+  },
+  {
+    names: ["swallow whole", "do not chew", "do not crush", "do not crush or chew", "no chewing"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418693002",
+        display: "Swallowed whole, not chewed (qualifier value)"
+      },
+      text: "Swallow whole; do not crush or chew"
+    }
+  },
+  {
+    names: ["chew", "chewed", "sucked or chewed", "please chew", "must chew"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418991002",
+        display: "Sucked or chewed (qualifier value)"
+      },
+      text: "Suck or chew before swallowing"
+    }
+  }
+];
+
+export interface AdditionalInstructionDictionaryEntry {
+  canonical: string;
+  definition: AdditionalInstructionDefinition;
+  terms: string[];
+}
+
+export const DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES:
+  AdditionalInstructionDictionaryEntry[] = DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE.map(
+    (source) => {
+      const canonicalTerm =
+        source.definition.text ?? source.definition.coding?.display ?? source.names[0];
+      return {
+        canonical: normalizeAdditionalInstructionKey(canonicalTerm ?? ""),
+        definition: source.definition,
+        terms: [...source.names]
+      };
+    }
+  );
+
+export const DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS = objectFromEntries(
+  DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE.reduce<
+    Array<[string, AdditionalInstructionDefinition]>
+  >((entries, source) => {
+    for (const name of source.names) {
+      const key = normalizeAdditionalInstructionKey(name);
+      if (!key) {
+        continue;
+      }
+      entries.push([key, source.definition]);
+    }
+    if (source.definition.aliases) {
+      for (const alias of source.definition.aliases) {
+        const key = normalizeAdditionalInstructionKey(alias);
+        if (!key) {
+          continue;
+        }
+        entries.push([key, source.definition]);
+      }
+    }
+    return entries;
+  }, [])
+) as Record<string, AdditionalInstructionDefinition>;

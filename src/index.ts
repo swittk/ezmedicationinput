@@ -1,7 +1,13 @@
 import { formatInternal } from "./format";
 import { internalFromFhir, toFhir } from "./fhir";
 import { resolveSigLocalization } from "./i18n";
-import { applySiteCoding, applySiteCodingAsync, parseInternal } from "./parser";
+import {
+  applyPrnReasonCoding,
+  applyPrnReasonCodingAsync,
+  applySiteCoding,
+  applySiteCodingAsync,
+  parseInternal
+} from "./parser";
 import { FhirDosage, FormatOptions, ParseOptions, ParseResult } from "./types";
 
 export { parseInternal } from "./parser";
@@ -23,6 +29,7 @@ export type {
 
 export function parseSig(input: string, options?: ParseOptions): ParseResult {
   const internal = parseInternal(input, options);
+  applyPrnReasonCoding(internal, options);
   applySiteCoding(internal, options);
   return buildParseResult(internal, options);
 }
@@ -32,6 +39,7 @@ export async function parseSigAsync(
   options?: ParseOptions
 ): Promise<ParseResult> {
   const internal = parseInternal(input, options);
+  await applyPrnReasonCodingAsync(internal, options);
   await applySiteCodingAsync(internal, options);
   return buildParseResult(internal, options);
 }
@@ -76,6 +84,30 @@ export function fromFhirDosage(
                   }
                 : undefined
             }
+          : undefined,
+        prnReason: internal.asNeededReason || internal.asNeededReasonCoding?.code
+          ? {
+              text: internal.asNeededReason,
+              coding: internal.asNeededReasonCoding?.code
+                ? {
+                    code: internal.asNeededReasonCoding.code,
+                    display: internal.asNeededReasonCoding.display,
+                    system: internal.asNeededReasonCoding.system
+                  }
+                : undefined
+            }
+          : undefined,
+        additionalInstructions: internal.additionalInstructions?.length
+          ? internal.additionalInstructions.map((instruction) => ({
+              text: instruction.text,
+              coding: instruction.coding?.code
+                ? {
+                    code: instruction.coding.code,
+                    display: instruction.coding.display,
+                    system: instruction.coding.system
+                  }
+                : undefined
+            }))
           : undefined
       }
     }
@@ -109,6 +141,27 @@ function buildParseResult(
       }
     : undefined;
 
+  const prnReasonCoding = internal.asNeededReasonCoding?.code
+    ? {
+        code: internal.asNeededReasonCoding.code,
+        display: internal.asNeededReasonCoding.display,
+        system: internal.asNeededReasonCoding.system
+      }
+    : undefined;
+
+  const additionalInstructions = internal.additionalInstructions?.length
+    ? internal.additionalInstructions.map((instruction) => ({
+        text: instruction.text,
+        coding: instruction.coding?.code
+          ? {
+              code: instruction.coding.code,
+              display: instruction.coding.display,
+              system: instruction.coding.system
+            }
+          : undefined
+      }))
+    : undefined;
+
   const siteLookups = internal.siteLookups.length
     ? internal.siteLookups.map((entry) => ({
         request: entry.request,
@@ -118,6 +171,22 @@ function buildParseResult(
             display: suggestion.coding.display,
             system: suggestion.coding.system
           },
+          text: suggestion.text
+        }))
+      }))
+    : undefined;
+
+  const prnReasonLookups = internal.prnReasonLookups.length
+    ? internal.prnReasonLookups.map((entry) => ({
+        request: entry.request,
+        suggestions: entry.suggestions.map((suggestion) => ({
+          coding: suggestion.coding
+            ? {
+                code: suggestion.coding.code,
+                display: suggestion.coding.display,
+                system: suggestion.coding.system
+              }
+            : undefined,
           text: suggestion.text
         }))
       }))
@@ -142,9 +211,18 @@ function buildParseResult(
                 text: internal.siteText,
                 coding: siteCoding
               }
-            : undefined
+            : undefined,
+        prnReason:
+          internal.asNeededReason || prnReasonCoding
+            ? {
+                text: internal.asNeededReason,
+                coding: prnReasonCoding
+              }
+            : undefined,
+        additionalInstructions
       },
-      siteLookups
+      siteLookups,
+      prnReasonLookups
     }
   };
 }

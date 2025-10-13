@@ -283,6 +283,7 @@ export interface FhirDosage {
   timing?: FhirTiming;
   route?: FhirCodeableConcept;
   site?: FhirCodeableConcept;
+  additionalInstruction?: FhirCodeableConcept[];
   asNeededBoolean?: boolean;
   asNeededFor?: FhirCodeableConcept[];
   doseAndRate?: FhirDoseAndRate[];
@@ -313,7 +314,7 @@ export interface BodySiteCode {
 }
 
 export interface BodySiteDefinition {
-  coding: BodySiteCode;
+  coding?: BodySiteCode;
   text?: string;
   /**
    * Optional phrases that should resolve to the same coding as this entry.
@@ -322,6 +323,17 @@ export interface BodySiteDefinition {
    */
   aliases?: string[];
 }
+
+export interface CodeableConceptDefinition {
+  coding?: FhirCoding;
+  text?: string;
+  aliases?: string[];
+}
+
+export interface PrnReasonDefinition extends CodeableConceptDefinition {}
+
+export interface AdditionalInstructionDefinition
+  extends CodeableConceptDefinition {}
 
 export interface TextRange {
   /** Inclusive start index of the matched substring within the original input. */
@@ -365,6 +377,57 @@ export interface SiteCodeSuggestion {
 export interface SiteCodeSuggestionsResult {
   suggestions: SiteCodeSuggestion[];
 }
+
+export interface PrnReasonLookupRequest {
+  originalText: string;
+  text: string;
+  normalized: string;
+  canonical: string;
+  isProbe: boolean;
+  inputText: string;
+  sourceText?: string;
+  range?: TextRange;
+}
+
+export interface PrnReasonSelection {
+  canonical?: string;
+  text?: string;
+  range?: TextRange;
+  resolution: PrnReasonDefinition;
+}
+
+export interface PrnReasonSuggestion {
+  coding?: FhirCoding;
+  text?: string;
+}
+
+export interface PrnReasonSuggestionsResult {
+  suggestions: PrnReasonSuggestion[];
+}
+
+export type PrnReasonResolver = (
+  request: PrnReasonLookupRequest
+) =>
+  | PrnReasonDefinition
+  | null
+  | undefined
+  | Promise<PrnReasonDefinition | null | undefined>;
+
+export type PrnReasonSuggestionResolver = (
+  request: PrnReasonLookupRequest
+) =>
+  | PrnReasonSuggestionsResult
+  | PrnReasonSuggestion[]
+  | PrnReasonSuggestion
+  | null
+  | undefined
+  | Promise<
+      | PrnReasonSuggestionsResult
+      | PrnReasonSuggestion[]
+      | PrnReasonSuggestion
+      | null
+      | undefined
+    >;
 
 /**
  * Allows callers to override the parser's automatic site resolution for a
@@ -474,6 +537,25 @@ export interface ParseOptions extends FormatOptions {
    * requested a lookup via `{site}` placeholders.
    */
   siteCodeSuggestionResolvers?: SiteCodeSuggestionResolver | SiteCodeSuggestionResolver[];
+  /**
+   * Optional dictionary for translating PRN reason phrases into coded concepts.
+   */
+  prnReasonMap?: Record<string, PrnReasonDefinition>;
+  /**
+   * Explicit selections that override automatic PRN reason resolution.
+   */
+  prnReasonSelections?: PrnReasonSelection | PrnReasonSelection[];
+  /**
+   * Callback(s) that can translate PRN reason text into a coded concept.
+   */
+  prnReasonResolvers?: PrnReasonResolver | PrnReasonResolver[];
+  /**
+   * Callback(s) that provide PRN reason suggestions when automatic resolution
+   * fails or a `{reason}` placeholder explicitly requests lookup.
+   */
+  prnReasonSuggestionResolvers?:
+    | PrnReasonSuggestionResolver
+    | PrnReasonSuggestionResolver[];
 }
 
 export interface ParseResult {
@@ -488,10 +570,16 @@ export interface ParseResult {
       route?: RouteCode;
       unit?: string;
       site?: { text?: string; coding?: BodySiteCode };
+      prnReason?: { text?: string; coding?: FhirCoding };
+      additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
     };
     siteLookups?: Array<{
       request: SiteCodeLookupRequest;
       suggestions: SiteCodeSuggestion[];
+    }>;
+    prnReasonLookups?: Array<{
+      request: PrnReasonLookupRequest;
+      suggestions: PrnReasonSuggestion[];
     }>;
   };
 }

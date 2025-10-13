@@ -648,9 +648,33 @@ function formatLong(internal: ParsedSigInternal): string {
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   if (!body) {
-    return `${grammar.verb}.`;
+    const instructionText = formatAdditionalInstructions(internal);
+    if (!instructionText) {
+      return `${grammar.verb}.`;
+    }
+    return `${grammar.verb}. ${instructionText}`.trim();
   }
-  return `${grammar.verb} ${body}.`;
+  const instructionText = formatAdditionalInstructions(internal);
+  const baseSentence = `${grammar.verb} ${body}.`;
+  return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
+}
+
+function formatAdditionalInstructions(internal: ParsedSigInternal): string | undefined {
+  if (!internal.additionalInstructions?.length) {
+    return undefined;
+  }
+  const phrases = internal.additionalInstructions
+    .map((instruction) => instruction.text || instruction.coding?.display)
+    .filter((text): text is string => Boolean(text))
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+  if (!phrases.length) {
+    return undefined;
+  }
+  return phrases
+    .map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`))
+    .join(" ")
+    .trim();
 }
 
 function stripTrailingZero(value: number): string {

@@ -1,6 +1,10 @@
 import {
   DAY_OF_WEEK_TOKENS,
+  DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS,
+  DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES,
   DEFAULT_BODY_SITE_SNOMED,
+  DEFAULT_PRN_REASON_DEFINITIONS,
+  DEFAULT_PRN_REASON_ENTRIES,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
   DEFAULT_UNIT_SYNONYMS,
@@ -10,18 +14,29 @@ import {
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
   WORD_FREQUENCIES,
-  normalizeBodySiteKey
+  normalizeAdditionalInstructionKey,
+  normalizeBodySiteKey,
+  normalizePrnReasonKey
 } from "./maps";
 import { inferUnitFromContext } from "./context";
 import { checkDiscouraged } from "./safety";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
+  AdditionalInstructionDefinition,
   BodySiteDefinition,
   EventTiming,
+  FhirCoding,
   FhirDayOfWeek,
   FhirPeriodUnit,
   MedicationContext,
   ParseOptions,
+  PrnReasonDefinition,
+  PrnReasonLookupRequest,
+  PrnReasonResolver,
+  PrnReasonSelection,
+  PrnReasonSuggestion,
+  PrnReasonSuggestionResolver,
+  PrnReasonSuggestionsResult,
   RouteCode,
   SiteCodeLookupRequest,
   SiteCodeResolver,
@@ -362,7 +377,7 @@ const OPHTHALMIC_CONTEXT_TOKENS = new Set<string>([
 ]);
 
 function normalizeTokenLower(token: Token): string {
-  return token.lower.replace(/[.{}]/g, "");
+  return token.lower.replace(/[.{};]/g, "");
 }
 
 function hasOphthalmicContextHint(tokens: Token[], index: number): boolean {
@@ -901,8 +916,9 @@ const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
 ];
 
 export function tokenize(input: string): Token[] {
-  const separators = /[(),]/g;
+  const separators = /[(),;]/g;
   let normalized = input.trim().replace(separators, " ");
+  normalized = normalized.replace(/\s-\s/g, " ; ");
   normalized = normalized.replace(
     /(\d+(?:\.\d+)?)\s*\/\s*(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)\b/gi,
     (_match, value, unit) => `${value} per ${unit}`
@@ -944,7 +960,7 @@ export function tokenize(input: string): Token[] {
  * Locates the span of the detected site tokens within the caller's original
  * input so downstream consumers can highlight or replace the exact substring.
  */
-function computeSiteTextRange(
+function computeTokenRange(
   input: string,
   tokens: Token[],
   indices: number[]
@@ -1696,7 +1712,9 @@ export function parseInternal(
     warnings: [],
     siteTokenIndices: new Set<number>(),
     siteLookups: [],
-    customSiteHints: buildCustomSiteHints(options?.siteCodeMap)
+    customSiteHints: buildCustomSiteHints(options?.siteCodeMap),
+    prnReasonLookups: [],
+    additionalInstructions: []
   };
 
   const context = options?.context ?? undefined;
@@ -1816,12 +1834,19 @@ export function parseInternal(
       if (slice.some((part) => internal.consumed.has(part.index))) {
         continue;
       }
-      const phrase = slice.map((part) => part.lower).join(" ");
+      const normalizedParts = slice.filter((part) => !/^[;:(),]+$/.test(part.lower));
+      const phrase = normalizedParts.map((part) => part.lower).join(" ");
       const customCode = customRouteMap?.get(phrase);
       const synonym = customCode
         ? { code: customCode, text: ROUTE_TEXT[customCode] }
         : DEFAULT_ROUTE_SYNONYMS[phrase];
       if (synonym) {
+        if (phrase === "in" && slice.length === 1) {
+          const prevToken = tokens[startIndex - 1];
+          if (prevToken && !internal.consumed.has(prevToken.index)) {
+            continue;
+          }
+        }
         setRoute(internal, synonym.code, synonym.text);
         for (const part of slice) {
           mark(internal.consumed, part);
@@ -2143,7 +2168,6 @@ export function parseInternal(
       continue;
     }
   }
-
   // Units from trailing tokens if still undefined
   if (internal.unit === undefined) {
     for (const token of tokens) {
@@ -2221,6 +2245,53 @@ export function parseInternal(
 
   sortWhenValues(internal, options);
 
+  // PRN reason text
+  if (internal.asNeeded && prnReasonStart !== undefined) {
+    const reasonTokens: string[] = [];
+    const reasonIndices: number[] = [];
+    for (let i = prnReasonStart; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (internal.consumed.has(token.index)) {
+        continue;
+      }
+      reasonTokens.push(token.original);
+      reasonIndices.push(token.index);
+      mark(internal.consumed, token);
+    }
+    if (reasonTokens.length > 0) {
+      const joined = reasonTokens.join(" ").trim();
+      if (joined) {
+        const sortedIndices = reasonIndices.sort((a, b) => a - b);
+        const range = computeTokenRange(internal.input, tokens, sortedIndices);
+        const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+        let sanitized = joined.replace(/\s+/g, " ").trim();
+        let isProbe = false;
+        const probeMatch = sanitized.match(/^\{(.+)}$/);
+        if (probeMatch) {
+          isProbe = true;
+          sanitized = probeMatch[1];
+        }
+        sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+        const text = sanitized || joined;
+        internal.asNeededReason = text;
+        const normalized = text.toLowerCase();
+        const canonical = sanitized ? normalizePrnReasonKey(sanitized) : normalizePrnReasonKey(text);
+        internal.prnReasonLookupRequest = {
+          originalText: joined,
+          text,
+          normalized,
+          canonical: canonical ?? "",
+          isProbe,
+          inputText: internal.input,
+          sourceText,
+          range
+        };
+      }
+    }
+  }
+
+  collectAdditionalInstructions(internal, tokens);
+
   // Determine site text from leftover tokens (excluding PRN reason tokens)
   const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));
   const siteCandidateIndices = new Set<number>();
@@ -2228,6 +2299,13 @@ export function parseInternal(
     const normalized = normalizeTokenLower(token);
     if (isBodySiteHint(normalized, internal.customSiteHints)) {
       siteCandidateIndices.add(token.index);
+      continue;
+    }
+    if (SITE_CONNECTORS.has(normalized)) {
+      const next = tokens[token.index + 1];
+      if (next && !internal.consumed.has(next.index)) {
+        siteCandidateIndices.add(next.index);
+      }
     }
   }
   for (const idx of internal.siteTokenIndices) {
@@ -2293,7 +2371,7 @@ export function parseInternal(
       .join(" ")
       .trim();
     if (normalizedSite) {
-      const tokenRange = computeSiteTextRange(internal.input, tokens, sortedIndices);
+      const tokenRange = computeTokenRange(internal.input, tokens, sortedIndices);
       let sanitized = normalizedSite;
       let isProbe = false;
       const probeMatch = sanitized.match(/^\{(.+)}$/);
@@ -2350,22 +2428,6 @@ export function parseInternal(
     }
   }
 
-  // PRN reason text
-  if (internal.asNeeded && prnReasonStart !== undefined) {
-    const reasonTokens: string[] = [];
-    for (let i = prnReasonStart; i < tokens.length; i++) {
-      const token = tokens[i];
-      if (internal.consumed.has(token.index)) {
-        continue;
-      }
-      reasonTokens.push(token.original);
-      mark(internal.consumed, token);
-    }
-    if (reasonTokens.length > 0) {
-      internal.asNeededReason = reasonTokens.join(" ");
-    }
-  }
-
   if (
     internal.routeCode === RouteCode["Intravitreal route (qualifier value)"] &&
     (!internal.siteText || !/eye/i.test(internal.siteText))
@@ -2382,6 +2444,20 @@ export function parseInternal(
  * Resolves parsed site text against SNOMED dictionaries and synchronous
  * callbacks, applying the best match to the in-progress parse result.
  */
+export function applyPrnReasonCoding(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): void {
+  runPrnReasonResolutionSync(internal, options);
+}
+
+export async function applyPrnReasonCodingAsync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): Promise<void> {
+  await runPrnReasonResolutionAsync(internal, options);
+}
+
 export function applySiteCoding(
   internal: ParsedSigInternal,
   options?: ParseOptions
@@ -2637,13 +2713,17 @@ function pickSiteSelection(
  */
 function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDefinition) {
   const coding = definition.coding;
-  internal.siteCoding = {
-    code: coding.code,
-    display: coding.display,
-    system: coding.system ?? SNOMED_SYSTEM
-  };
+  internal.siteCoding = coding?.code
+    ? {
+        code: coding.code,
+        display: coding.display,
+        system: coding.system ?? SNOMED_SYSTEM
+      }
+    : undefined;
   if (definition.text) {
     internal.siteText = definition.text;
+  } else if (!internal.siteText && internal.siteLookupRequest?.text) {
+    internal.siteText = internal.siteLookupRequest.text;
   }
 }
 
@@ -2651,12 +2731,18 @@ function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDe
  * Converts a body-site definition into a suggestion payload so all suggestion
  * sources share consistent structure.
  */
-function definitionToSuggestion(definition: BodySiteDefinition): SiteCodeSuggestion {
+function definitionToSuggestion(
+  definition: BodySiteDefinition
+): SiteCodeSuggestion | undefined {
+  const coding = definition.coding;
+  if (!coding?.code) {
+    return undefined;
+  }
   return {
     coding: {
-      code: definition.coding.code,
-      display: definition.coding.display,
-      system: definition.coding.system ?? SNOMED_SYSTEM
+      code: coding.code,
+      display: coding.display,
+      system: coding.system ?? SNOMED_SYSTEM
     },
     text: definition.text
   };
@@ -2712,6 +2798,478 @@ function collectSuggestionResult(
     : [result];
   for (const suggestion of suggestions) {
     addSuggestionToMap(map, suggestion);
+  }
+}
+
+function findAdditionalInstructionDefinition(
+  text: string,
+  canonical: string
+): AdditionalInstructionDefinition | undefined {
+  if (!canonical) {
+    return undefined;
+  }
+  for (const entry of DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES) {
+    if (!entry.canonical) {
+      continue;
+    }
+    if (entry.canonical === canonical) {
+      return entry.definition;
+    }
+    if (canonical.includes(entry.canonical) || entry.canonical.includes(canonical)) {
+      return entry.definition;
+    }
+    for (const term of entry.terms) {
+      const normalizedTerm = normalizeAdditionalInstructionKey(term);
+      if (!normalizedTerm) {
+        continue;
+      }
+      if (canonical.includes(normalizedTerm) || normalizedTerm.includes(canonical)) {
+        return entry.definition;
+      }
+    }
+  }
+  return undefined;
+}
+
+function collectAdditionalInstructions(
+  internal: ParsedSigInternal,
+  tokens: Token[]
+): void {
+  if (internal.additionalInstructions.length) {
+    return;
+  }
+  const leftover = tokens.filter((token) => !internal.consumed.has(token.index));
+  if (!leftover.length) {
+    return;
+  }
+  const punctuationOnly = /^[;:.,-]+$/;
+  const contentTokens = leftover.filter((token) => !punctuationOnly.test(token.original));
+  if (!contentTokens.length) {
+    return;
+  }
+  const leftoverIndices = leftover.map((token) => token.index).sort((a, b) => a - b);
+  const contiguous = leftoverIndices.every(
+    (index, i) => i === 0 || index === leftoverIndices[i - 1] + 1
+  );
+  if (!contiguous) {
+    return;
+  }
+  const lastIndex = leftoverIndices[leftoverIndices.length - 1];
+  for (let i = lastIndex + 1; i < tokens.length; i++) {
+    const trailingToken = tokens[i];
+    if (!internal.consumed.has(trailingToken.index)) {
+      return;
+    }
+  }
+  const joined = contentTokens
+    .map((token) => token.original)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!joined) {
+    return;
+  }
+  const contentIndices = contentTokens.map((token) => token.index).sort((a, b) => a - b);
+  const range = computeTokenRange(internal.input, tokens, contentIndices);
+  let separatorDetected = false;
+  if (range) {
+    for (let cursor = range.start - 1; cursor >= 0; cursor--) {
+      const ch = internal.input[cursor];
+      if (ch === "\n" || ch === "\r") {
+        separatorDetected = true;
+        break;
+      }
+      if (/\s/.test(ch)) {
+        continue;
+      }
+      if (/-|;|:|\.|,/.test(ch)) {
+        separatorDetected = true;
+      }
+      break;
+    }
+  }
+  const sourceText = range
+    ? internal.input.slice(range.start, range.end)
+    : joined;
+  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
+    return;
+  }
+  const normalized = sourceText
+    .replace(/\s*[-:]+\s*/g, "; ")
+    .replace(/\s*(?:\r?\n)+\s*/g, "; ")
+    .replace(/\s+/g, " ");
+  const segments = normalized
+    .split(/(?:;|\.)/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  const phrases = segments.length ? segments : [joined];
+  const seen = new Set<string>();
+  const instructions: Array<{ text?: string; coding?: FhirCoding }> = [];
+  for (const phrase of phrases) {
+    const canonical = normalizeAdditionalInstructionKey(phrase);
+    const definition =
+      DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS[canonical] ??
+      findAdditionalInstructionDefinition(phrase, canonical);
+    const key = definition?.coding?.code
+      ? `code:${definition.coding.system ?? SNOMED_SYSTEM}|${definition.coding.code}`
+      : canonical
+      ? `text:${canonical}`
+      : phrase.toLowerCase();
+    if (key && seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    if (definition) {
+      instructions.push({
+        text: definition.text ?? phrase,
+        coding: definition.coding?.code
+          ? {
+              code: definition.coding.code,
+              display: definition.coding.display,
+              system: definition.coding.system ?? SNOMED_SYSTEM
+            }
+          : undefined
+      });
+    } else {
+      instructions.push({ text: phrase });
+    }
+  }
+  if (instructions.length) {
+    internal.additionalInstructions = instructions;
+    for (const token of leftover) {
+      mark(internal.consumed, token);
+    }
+  }
+}
+
+function lookupPrnReasonDefinition(
+  map: Record<string, PrnReasonDefinition> | undefined,
+  canonical: string
+): PrnReasonDefinition | undefined {
+  if (!map) {
+    return undefined;
+  }
+  const direct = map[canonical];
+  if (direct) {
+    return direct;
+  }
+  for (const [key, definition] of objectEntries(map)) {
+    if (normalizePrnReasonKey(key) === canonical) {
+      return definition;
+    }
+    if (definition.aliases) {
+      for (const alias of definition.aliases) {
+        if (normalizePrnReasonKey(alias) === canonical) {
+          return definition;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function pickPrnReasonSelection(
+  selections: PrnReasonSelection | PrnReasonSelection[] | undefined,
+  request: PrnReasonLookupRequest
+): PrnReasonDefinition | undefined {
+  if (!selections) {
+    return undefined;
+  }
+  const canonical = request.canonical;
+  const normalizedText = normalizePrnReasonKey(request.text);
+  const requestRange = request.range;
+  for (const selection of toArray(selections)) {
+    if (!selection) {
+      continue;
+    }
+    let matched = false;
+    if (selection.range) {
+      if (!requestRange) {
+        continue;
+      }
+      if (
+        selection.range.start !== requestRange.start ||
+        selection.range.end !== requestRange.end
+      ) {
+        continue;
+      }
+      matched = true;
+    }
+    if (selection.canonical) {
+      if (normalizePrnReasonKey(selection.canonical) !== canonical) {
+        continue;
+      }
+      matched = true;
+    } else if (selection.text) {
+      const normalizedSelection = normalizePrnReasonKey(selection.text);
+      if (normalizedSelection !== canonical && normalizedSelection !== normalizedText) {
+        continue;
+      }
+      matched = true;
+    }
+    if (!selection.range && !selection.canonical && !selection.text) {
+      continue;
+    }
+    if (matched) {
+      return selection.resolution;
+    }
+  }
+  return undefined;
+}
+
+function applyPrnReasonDefinition(
+  internal: ParsedSigInternal,
+  definition: PrnReasonDefinition
+) {
+  const coding = definition.coding;
+  internal.asNeededReasonCoding = coding?.code
+    ? {
+        code: coding.code,
+        display: coding.display,
+        system: coding.system ?? SNOMED_SYSTEM
+      }
+    : undefined;
+  if (definition.text && !internal.asNeededReason) {
+    internal.asNeededReason = definition.text;
+  }
+}
+
+function definitionToPrnSuggestion(
+  definition: PrnReasonDefinition
+): PrnReasonSuggestion {
+  return {
+    coding: definition.coding?.code
+      ? {
+          code: definition.coding.code,
+          display: definition.coding.display,
+          system: definition.coding.system ?? SNOMED_SYSTEM
+        }
+      : undefined,
+    text: definition.text ?? definition.coding?.display
+  };
+}
+
+function addReasonSuggestionToMap(
+  map: Map<string, PrnReasonSuggestion>,
+  suggestion: PrnReasonSuggestion | undefined
+) {
+  if (!suggestion) {
+    return;
+  }
+  const coding = suggestion.coding;
+  const key = coding?.code
+    ? `${coding.system ?? SNOMED_SYSTEM}|${coding.code}`
+    : suggestion.text
+    ? `text:${suggestion.text.toLowerCase()}`
+    : undefined;
+  if (!key || map.has(key)) {
+    return;
+  }
+  map.set(key, suggestion);
+}
+
+function collectReasonSuggestionResult(
+  map: Map<string, PrnReasonSuggestion>,
+  result:
+    | PrnReasonSuggestionsResult
+    | PrnReasonSuggestion[]
+    | PrnReasonSuggestion
+    | null
+    | undefined
+) {
+  if (!result) {
+    return;
+  }
+  const suggestions = Array.isArray(result)
+    ? result
+    : typeof result === "object" && "suggestions" in result
+    ? (result as PrnReasonSuggestionsResult).suggestions
+    : [result];
+  for (const suggestion of suggestions) {
+    addReasonSuggestionToMap(map, suggestion);
+  }
+}
+
+function collectDefaultPrnReasonDefinitions(
+  request: PrnReasonLookupRequest
+): PrnReasonDefinition[] {
+  const canonical = request.canonical;
+  const normalized = request.normalized;
+  const seen = new Set<PrnReasonDefinition>();
+  for (const entry of DEFAULT_PRN_REASON_ENTRIES) {
+    if (!entry.canonical) {
+      continue;
+    }
+    if (entry.canonical === canonical) {
+      seen.add(entry.definition);
+      continue;
+    }
+    if (canonical && (entry.canonical.includes(canonical) || canonical.includes(entry.canonical))) {
+      seen.add(entry.definition);
+      continue;
+    }
+    for (const term of entry.terms) {
+      const normalizedTerm = normalizePrnReasonKey(term);
+      if (!normalizedTerm) {
+        continue;
+      }
+      if (canonical && canonical.includes(normalizedTerm)) {
+        seen.add(entry.definition);
+        break;
+      }
+      if (normalized.includes(normalizedTerm)) {
+        seen.add(entry.definition);
+        break;
+      }
+    }
+  }
+  if (!seen.size) {
+    for (const entry of DEFAULT_PRN_REASON_ENTRIES) {
+      seen.add(entry.definition);
+    }
+  }
+  return Array.from(seen);
+}
+
+function runPrnReasonResolutionSync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): void {
+  internal.prnReasonLookups = [];
+  const request = internal.prnReasonLookupRequest;
+  if (!request) {
+    return;
+  }
+
+  const canonical = request.canonical;
+  const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  let resolution = selection ?? customDefinition;
+
+  if (!resolution) {
+    for (const resolver of toArray(options?.prnReasonResolvers)) {
+      const result = resolver(request);
+      if (isPromise(result)) {
+        throw new Error(
+          "PRN reason resolver returned a Promise; use parseSigAsync for asynchronous PRN reason resolution."
+        );
+      }
+      if (result) {
+        resolution = result;
+        break;
+      }
+    }
+  }
+
+  const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  if (!resolution && defaultDefinition) {
+    resolution = defaultDefinition;
+  }
+
+  if (resolution) {
+    applyPrnReasonDefinition(internal, resolution);
+  } else {
+    internal.asNeededReasonCoding = undefined;
+  }
+
+  const needsSuggestions = request.isProbe || !resolution;
+  if (!needsSuggestions) {
+    return;
+  }
+
+  const suggestionMap = new Map<string, PrnReasonSuggestion>();
+  if (selection) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(selection));
+  }
+  if (customDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(customDefinition));
+  }
+  if (defaultDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(defaultDefinition));
+  }
+  for (const definition of collectDefaultPrnReasonDefinitions(request)) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(definition));
+  }
+
+  for (const resolver of toArray(options?.prnReasonSuggestionResolvers)) {
+    const result = resolver(request);
+    if (isPromise(result)) {
+      throw new Error(
+        "PRN reason suggestion resolver returned a Promise; use parseSigAsync for asynchronous PRN reason suggestions."
+      );
+    }
+    collectReasonSuggestionResult(suggestionMap, result);
+  }
+
+  const suggestions = Array.from(suggestionMap.values());
+  if (suggestions.length || request.isProbe) {
+    internal.prnReasonLookups.push({ request, suggestions });
+  }
+}
+
+async function runPrnReasonResolutionAsync(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): Promise<void> {
+  internal.prnReasonLookups = [];
+  const request = internal.prnReasonLookupRequest;
+  if (!request) {
+    return;
+  }
+
+  const canonical = request.canonical;
+  const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  let resolution = selection ?? customDefinition;
+
+  if (!resolution) {
+    for (const resolver of toArray(options?.prnReasonResolvers)) {
+      const result = await resolver(request);
+      if (result) {
+        resolution = result;
+        break;
+      }
+    }
+  }
+
+  const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  if (!resolution && defaultDefinition) {
+    resolution = defaultDefinition;
+  }
+
+  if (resolution) {
+    applyPrnReasonDefinition(internal, resolution);
+  } else {
+    internal.asNeededReasonCoding = undefined;
+  }
+
+  const needsSuggestions = request.isProbe || !resolution;
+  if (!needsSuggestions) {
+    return;
+  }
+
+  const suggestionMap = new Map<string, PrnReasonSuggestion>();
+  if (selection) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(selection));
+  }
+  if (customDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(customDefinition));
+  }
+  if (defaultDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(defaultDefinition));
+  }
+  for (const definition of collectDefaultPrnReasonDefinitions(request)) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(definition));
+  }
+
+  for (const resolver of toArray(options?.prnReasonSuggestionResolvers)) {
+    const result = await resolver(request);
+    collectReasonSuggestionResult(suggestionMap, result);
+  }
+
+  const suggestions = Array.from(suggestionMap.values());
+  if (suggestions.length || request.isProbe) {
+    internal.prnReasonLookups.push({ request, suggestions });
   }
 }
 

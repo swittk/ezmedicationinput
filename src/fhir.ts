@@ -3,6 +3,7 @@ import { ParsedSigInternal } from "./internal-types";
 import { ROUTE_BY_SNOMED, ROUTE_SNOMED, ROUTE_TEXT } from "./maps";
 import {
   EventTiming,
+  FhirCodeableConcept,
   FhirDosage,
   FhirTimingRepeat,
   SNOMEDCTRouteCodes
@@ -127,10 +128,38 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     };
   }
 
+  if (internal.additionalInstructions?.length) {
+    dosage.additionalInstruction = internal.additionalInstructions.map((instruction) => ({
+      text: instruction.text,
+      coding: instruction.coding?.code
+        ? [
+            {
+              system: instruction.coding.system ?? SNOMED_SYSTEM,
+              code: instruction.coding.code,
+              display: instruction.coding.display
+            }
+          ]
+        : undefined
+    }));
+  }
+
   if (internal.asNeeded) {
     dosage.asNeededBoolean = true;
-    if (internal.asNeededReason) {
-      dosage.asNeededFor = [{ text: internal.asNeededReason }];
+    if (internal.asNeededReason || internal.asNeededReasonCoding?.code) {
+      const concept: FhirCodeableConcept = {};
+      if (internal.asNeededReason) {
+        concept.text = internal.asNeededReason;
+      }
+      if (internal.asNeededReasonCoding?.code) {
+        concept.coding = [
+          {
+            system: internal.asNeededReasonCoding.system ?? SNOMED_SYSTEM,
+            code: internal.asNeededReasonCoding.code,
+            display: internal.asNeededReasonCoding.display
+          }
+        ];
+      }
+      dosage.asNeededFor = [concept];
     }
   }
 
@@ -171,7 +200,9 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
     asNeeded: dosage.asNeededBoolean,
     asNeededReason: dosage.asNeededFor?.[0]?.text,
     siteTokenIndices: new Set(),
-    siteLookups: []
+    siteLookups: [],
+    prnReasonLookups: [],
+    additionalInstructions: []
   };
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
@@ -191,6 +222,28 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       display: siteCoding.display,
       system: siteCoding.system
     };
+  }
+
+  const reasonCoding = dosage.asNeededFor?.[0]?.coding?.[0];
+  if (reasonCoding?.code) {
+    internal.asNeededReasonCoding = {
+      code: reasonCoding.code,
+      display: reasonCoding.display,
+      system: reasonCoding.system
+    };
+  }
+
+  if (dosage.additionalInstruction?.length) {
+    internal.additionalInstructions = dosage.additionalInstruction.map((concept) => ({
+      text: concept.text,
+      coding: concept.coding?.[0]
+        ? {
+            code: concept.coding[0].code,
+            display: concept.coding[0].display,
+            system: concept.coding[0].system
+          }
+        : undefined
+    }));
   }
 
 
