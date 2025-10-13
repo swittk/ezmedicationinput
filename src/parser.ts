@@ -2249,6 +2249,7 @@ export function parseInternal(
   if (internal.asNeeded && prnReasonStart !== undefined) {
     const reasonTokens: string[] = [];
     const reasonIndices: number[] = [];
+    const reasonObjects: Token[] = [];
     for (let i = prnReasonStart; i < tokens.length; i++) {
       const token = tokens[i];
       if (internal.consumed.has(token.index)) {
@@ -2256,36 +2257,76 @@ export function parseInternal(
       }
       reasonTokens.push(token.original);
       reasonIndices.push(token.index);
+      reasonObjects.push(token);
       mark(internal.consumed, token);
     }
     if (reasonTokens.length > 0) {
-      const joined = reasonTokens.join(" ").trim();
-      if (joined) {
-        const sortedIndices = reasonIndices.sort((a, b) => a - b);
-        const range = computeTokenRange(internal.input, tokens, sortedIndices);
-        const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
-        let sanitized = joined.replace(/\s+/g, " ").trim();
-        let isProbe = false;
-        const probeMatch = sanitized.match(/^\{(.+)}$/);
-        if (probeMatch) {
-          isProbe = true;
-          sanitized = probeMatch[1];
+      let sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
+      let range = computeTokenRange(internal.input, tokens, sortedIndices);
+      let sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+      if (sourceText) {
+        const cutoff = determinePrnReasonCutoff(reasonObjects, sourceText);
+        if (cutoff !== undefined) {
+          for (let i = cutoff; i < reasonObjects.length; i++) {
+            internal.consumed.delete(reasonObjects[i].index);
+          }
+          reasonObjects.splice(cutoff);
+          reasonTokens.splice(cutoff);
+          reasonIndices.splice(cutoff);
+          while (reasonTokens.length > 0) {
+            const lastToken = reasonTokens[reasonTokens.length - 1];
+            if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
+              const removedObject = reasonObjects.pop();
+              if (removedObject) {
+                internal.consumed.delete(removedObject.index);
+              }
+              reasonTokens.pop();
+              const removedIndex = reasonIndices.pop();
+              if (removedIndex !== undefined) {
+                internal.consumed.delete(removedIndex);
+              }
+              continue;
+            }
+            break;
+          }
+          if (reasonTokens.length > 0) {
+            sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
+            range = computeTokenRange(internal.input, tokens, sortedIndices);
+            sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+          } else {
+            range = undefined;
+            sourceText = undefined;
+          }
         }
-        sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-        const text = sanitized || joined;
-        internal.asNeededReason = text;
-        const normalized = text.toLowerCase();
-        const canonical = sanitized ? normalizePrnReasonKey(sanitized) : normalizePrnReasonKey(text);
-        internal.prnReasonLookupRequest = {
-          originalText: joined,
-          text,
-          normalized,
-          canonical: canonical ?? "",
-          isProbe,
-          inputText: internal.input,
-          sourceText,
-          range
-        };
+      }
+      if (reasonTokens.length > 0) {
+        const joined = reasonTokens.join(" ").trim();
+        if (joined) {
+          let sanitized = joined.replace(/\s+/g, " ").trim();
+          let isProbe = false;
+          const probeMatch = sanitized.match(/^\{(.+)}$/);
+          if (probeMatch) {
+            isProbe = true;
+            sanitized = probeMatch[1];
+          }
+          sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+          const text = sanitized || joined;
+          internal.asNeededReason = text;
+          const normalized = text.toLowerCase();
+          const canonical = sanitized
+            ? normalizePrnReasonKey(sanitized)
+            : normalizePrnReasonKey(text);
+          internal.prnReasonLookupRequest = {
+            originalText: joined,
+            text,
+            normalized,
+            canonical: canonical ?? "",
+            isProbe,
+            inputText: internal.input,
+            sourceText,
+            range
+          };
+        }
       }
     }
   }
@@ -2386,20 +2427,23 @@ export function parseInternal(
       sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
       const range = refineSiteRange(internal.input, sanitized, tokenRange);
       const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+      const displayText = normalizeSiteDisplayText(sanitized, options?.siteCodeMap);
+      const displayLower = displayText.toLowerCase();
+      const canonical = displayText ? normalizeBodySiteKey(displayText) : "";
       internal.siteLookupRequest = {
         originalText: normalizedSite,
-        text: sanitized,
-        normalized: sanitized.toLowerCase(),
-        canonical: sanitized ? normalizeBodySiteKey(sanitized) : "",
+        text: displayText,
+        normalized: displayLower,
+        canonical,
         isProbe,
         inputText: internal.input,
         sourceText,
         range
       };
-      if (sanitized) {
+      if (displayText) {
         const normalizedLower = sanitized.toLowerCase();
         const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
-        const siteWords = normalizedLower.split(/\s+/).filter((word) => word.length > 0);
+        const siteWords = displayLower.split(/\s+/).filter((word) => word.length > 0);
         const hasNonSiteWords = siteWords.some(
           (word) => !isBodySiteHint(word, internal.customSiteHints)
         );
@@ -2410,7 +2454,7 @@ export function parseInternal(
         if (!appliedRouteDescriptor) {
           // Preserve the clean site text for FHIR output and resolver context
           // whenever we keep the original phrase.
-          internal.siteText = sanitized;
+          internal.siteText = displayText;
           if (!internal.siteSource) {
             internal.siteSource = "text";
           }
@@ -2831,6 +2875,184 @@ function findAdditionalInstructionDefinition(
   return undefined;
 }
 
+const BODY_SITE_ADJECTIVE_SUFFIXES = [
+  "al",
+  "ial",
+  "ual",
+  "ic",
+  "ous",
+  "ive",
+  "ary",
+  "ory",
+  "atic",
+  "etic",
+  "ular",
+  "otic",
+  "ile",
+  "eal",
+  "inal",
+  "aneal",
+  "enal"
+];
+
+const DEFAULT_SITE_SYNONYM_KEYS = (() => {
+  const map = new Map<BodySiteDefinition, string[]>();
+  for (const [key, definition] of objectEntries(DEFAULT_BODY_SITE_SNOMED)) {
+    if (!definition) {
+      continue;
+    }
+    const normalized = key.trim();
+    if (!normalized) {
+      continue;
+    }
+    const existing = map.get(definition);
+    if (existing) {
+      if (existing.indexOf(normalized) === -1) {
+        existing.push(normalized);
+      }
+    } else {
+      map.set(definition, [normalized]);
+    }
+  }
+  return map;
+})();
+
+function normalizeSiteDisplayText(
+  text: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  const canonicalInput = normalizeBodySiteKey(trimmed);
+  if (!canonicalInput || !isAdjectivalSitePhrase(canonicalInput)) {
+    return trimmed;
+  }
+
+  const definition =
+    lookupBodySiteDefinition(customSiteMap, canonicalInput) ??
+    DEFAULT_BODY_SITE_SNOMED[canonicalInput];
+  if (!definition) {
+    return trimmed;
+  }
+
+  const preferred = pickPreferredBodySitePhrase(
+    canonicalInput,
+    definition,
+    customSiteMap
+  );
+
+  if (!preferred) {
+    return trimmed;
+  }
+
+  return preferred;
+}
+
+function pickPreferredBodySitePhrase(
+  canonical: string,
+  definition: BodySiteDefinition,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): string | undefined {
+  const synonyms = new Set<string>();
+  synonyms.add(canonical);
+
+  if (definition.aliases) {
+    for (const alias of definition.aliases) {
+      const normalizedAlias = normalizeBodySiteKey(alias);
+      if (normalizedAlias) {
+        synonyms.add(normalizedAlias);
+      }
+    }
+  }
+
+  const defaultSynonyms = DEFAULT_SITE_SYNONYM_KEYS.get(definition);
+  if (defaultSynonyms) {
+    for (const synonym of defaultSynonyms) {
+      synonyms.add(synonym);
+    }
+  }
+
+  if (customSiteMap) {
+    for (const [key, candidate] of objectEntries(customSiteMap)) {
+      if (!candidate) {
+        continue;
+      }
+      if (candidate === definition) {
+        const normalizedKey = normalizeBodySiteKey(key);
+        if (normalizedKey) {
+          synonyms.add(normalizedKey);
+        }
+      }
+      if (candidate.aliases) {
+        for (const alias of candidate.aliases) {
+          const normalizedAlias = normalizeBodySiteKey(alias);
+          if (normalizedAlias) {
+            synonyms.add(normalizedAlias);
+          }
+        }
+      }
+    }
+  }
+
+  const candidates = Array.from(synonyms).filter(
+    (phrase) => phrase && !isAdjectivalSitePhrase(phrase)
+  );
+  if (!candidates.length) {
+    return undefined;
+  }
+
+  candidates.sort((a, b) => scoreBodySitePhrase(b) - scoreBodySitePhrase(a));
+  const best = candidates[0];
+  if (!best) {
+    return undefined;
+  }
+
+  if (normalizeBodySiteKey(best) === canonical) {
+    return undefined;
+  }
+
+  return best;
+}
+
+function scoreBodySitePhrase(phrase: string): number {
+  const lower = phrase.toLowerCase();
+  const words = lower.split(/\s+/).filter((part) => part.length > 0);
+  let score = 0;
+  if (!/(structure|region|entire|proper|body)/.test(lower)) {
+    score += 3;
+  }
+  if (!lower.includes(" of ")) {
+    score += 1;
+  }
+  if (words.length <= 2) {
+    score += 1;
+  }
+  if (words.length === 1) {
+    score += 0.5;
+  }
+  score -= words.length * 0.2;
+  score -= lower.length * 0.01;
+  return score;
+}
+
+function isAdjectivalSitePhrase(phrase: string): boolean {
+  const normalized = phrase.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const words = normalized.split(/\s+/).filter((word) => word.length > 0);
+  if (words.length !== 1) {
+    return false;
+  }
+  const last = words[words.length - 1];
+  if (last.length <= 3) {
+    return false;
+  }
+  return BODY_SITE_ADJECTIVE_SUFFIXES.some((suffix) => last.endsWith(suffix));
+}
+
 function collectAdditionalInstructions(
   internal: ParsedSigInternal,
   tokens: Token[]
@@ -2838,26 +3060,41 @@ function collectAdditionalInstructions(
   if (internal.additionalInstructions.length) {
     return;
   }
-  const leftover = tokens.filter((token) => !internal.consumed.has(token.index));
-  if (!leftover.length) {
+  const punctuationOnly = /^[;:.,-]+$/;
+  const trailing: Token[] = [];
+  let expectedIndex: number | undefined;
+  for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
+    const token = tokens[cursor];
+    if (!token) {
+      continue;
+    }
+    if (internal.consumed.has(token.index)) {
+      if (trailing.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (expectedIndex !== undefined && token.index !== expectedIndex - 1) {
+      break;
+    }
+    trailing.unshift(token);
+    expectedIndex = token.index;
+  }
+  if (!trailing.length) {
     return;
   }
-  const punctuationOnly = /^[;:.,-]+$/;
-  const contentTokens = leftover.filter((token) => !punctuationOnly.test(token.original));
+  const contentTokens = trailing.filter((token) => !punctuationOnly.test(token.original));
   if (!contentTokens.length) {
     return;
   }
-  const leftoverIndices = leftover.map((token) => token.index).sort((a, b) => a - b);
-  const contiguous = leftoverIndices.every(
-    (index, i) => i === 0 || index === leftoverIndices[i - 1] + 1
-  );
-  if (!contiguous) {
-    return;
-  }
-  const lastIndex = leftoverIndices[leftoverIndices.length - 1];
+  const trailingIndices = trailing.map((token) => token.index).sort((a, b) => a - b);
+  const lastIndex = trailingIndices[trailingIndices.length - 1];
   for (let i = lastIndex + 1; i < tokens.length; i++) {
-    const trailingToken = tokens[i];
-    if (!internal.consumed.has(trailingToken.index)) {
+    const nextToken = tokens[i];
+    if (!nextToken) {
+      continue;
+    }
+    if (!internal.consumed.has(nextToken.index)) {
       return;
     }
   }
@@ -2870,7 +3107,33 @@ function collectAdditionalInstructions(
     return;
   }
   const contentIndices = contentTokens.map((token) => token.index).sort((a, b) => a - b);
-  const range = computeTokenRange(internal.input, tokens, contentIndices);
+  const lowerInput = internal.input.toLowerCase();
+  let trailingRange: TextRange | undefined;
+  let searchEnd = lowerInput.length;
+  let rangeStart: number | undefined;
+  let rangeEnd: number | undefined;
+  for (let i = contentTokens.length - 1; i >= 0; i--) {
+    const fragment = contentTokens[i].original.trim();
+    if (!fragment) {
+      continue;
+    }
+    const lowerFragment = fragment.toLowerCase();
+    const foundIndex = lowerInput.lastIndexOf(lowerFragment, searchEnd - 1);
+    if (foundIndex === -1) {
+      rangeStart = undefined;
+      rangeEnd = undefined;
+      break;
+    }
+    rangeStart = foundIndex;
+    if (rangeEnd === undefined) {
+      rangeEnd = foundIndex + lowerFragment.length;
+    }
+    searchEnd = foundIndex;
+  }
+  if (rangeStart !== undefined && rangeEnd !== undefined) {
+    trailingRange = { start: rangeStart, end: rangeEnd };
+  }
+  const range = trailingRange ?? computeTokenRange(internal.input, tokens, contentIndices);
   let separatorDetected = false;
   if (range) {
     for (let cursor = range.start - 1; cursor >= 0; cursor--) {
@@ -2936,10 +3199,86 @@ function collectAdditionalInstructions(
   }
   if (instructions.length) {
     internal.additionalInstructions = instructions;
-    for (const token of leftover) {
+    for (const token of trailing) {
       mark(internal.consumed, token);
     }
   }
+}
+
+function determinePrnReasonCutoff(tokens: Token[], sourceText: string): number | undefined {
+  const separatorIndex = findPrnReasonSeparator(sourceText);
+  if (separatorIndex === undefined) {
+    return undefined;
+  }
+
+  const lowerSource = sourceText.toLowerCase();
+  let searchOffset = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const fragment = token.original.trim();
+    if (!fragment) {
+      continue;
+    }
+    const lowerFragment = fragment.toLowerCase();
+    const position = lowerSource.indexOf(lowerFragment, searchOffset);
+    if (position === -1) {
+      continue;
+    }
+    const end = position + lowerFragment.length;
+    searchOffset = end;
+    if (position >= separatorIndex) {
+      return i;
+    }
+  }
+
+  return undefined;
+}
+
+function findPrnReasonSeparator(sourceText: string): number | undefined {
+  for (let i = 0; i < sourceText.length; i++) {
+    const ch = sourceText[i];
+    if (ch === "\n" || ch === "\r") {
+      if (sourceText.slice(i + 1).trim().length > 0) {
+        return i;
+      }
+      continue;
+    }
+    if (ch === ";") {
+      if (sourceText.slice(i + 1).trim().length > 0) {
+        return i;
+      }
+      continue;
+    }
+    if (ch === "-") {
+      const prev = sourceText[i - 1];
+      const next = sourceText[i + 1];
+      const hasWhitespaceAround = (!prev || /\s/.test(prev)) && (!next || /\s/.test(next));
+      if (hasWhitespaceAround && sourceText.slice(i + 1).trim().length > 0) {
+        return i;
+      }
+      continue;
+    }
+    if (ch === ":" || ch === ".") {
+      const rest = sourceText.slice(i + 1);
+      if (!rest.trim().length) {
+        continue;
+      }
+      const nextChar = rest.replace(/^\s+/, "")[0];
+      if (!nextChar) {
+        continue;
+      }
+      if (
+        ch === "." &&
+        /[0-9]/.test(sourceText[i - 1] ?? "") &&
+        /[0-9]/.test(nextChar)
+      ) {
+        continue;
+      }
+      return i;
+    }
+  }
+
+  return undefined;
 }
 
 function lookupPrnReasonDefinition(

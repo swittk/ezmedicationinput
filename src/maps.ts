@@ -1387,6 +1387,7 @@ export const DEFAULT_UNIT_BY_ROUTE: Partial<Record<RouteCode, string>> = (() => 
   ensure(RouteCode["Otic route"], "drop");
   ensure(RouteCode["Respiratory tract route (qualifier value)"], "puff");
   ensure(RouteCode["Transdermal route"], "patch");
+  ensure(RouteCode["Per rectum"], "suppository");
 
   return resolved;
 })();

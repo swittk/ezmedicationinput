@@ -79,6 +79,11 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "into the eye"),
     sitePreposition: "into"
   },
+  [RouteCode["Per rectum"]]: {
+    verb: "Use",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "rectally"),
+    sitePreposition: "into"
+  },
   [RouteCode["Topical route"]]: {
     verb: "Apply",
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "topically"),
@@ -147,6 +152,9 @@ function grammarFromRouteText(text: string | undefined): RouteGrammar | undefine
   }
   if (normalized.includes("intravenous") || normalized === "iv") {
     return ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
+  }
+  if (normalized.includes("rectal") || normalized.includes("rectum")) {
+    return ROUTE_GRAMMAR[RouteCode["Per rectum"]];
   }
   if (normalized.includes("nasal")) {
     return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
@@ -435,6 +443,11 @@ function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string 
     return undefined;
   }
   const lower = text.toLowerCase();
+  if (internal.routeCode === RouteCode["Per rectum"]) {
+    if (lower === "rectum" || lower === "rectal") {
+      return undefined;
+    }
+  }
   let preposition = grammar.sitePreposition;
   if (!preposition) {
     if (lower.includes("eye")) {

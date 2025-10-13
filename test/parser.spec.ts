@@ -925,6 +925,67 @@ describe("parseSig core scenarios", () => {
     ]);
   });
 
+  it("stops PRN reason text at trailing additional instructions", () => {
+    const result = parseSig("1x3 po prn vomiting; no alcohol", { context: TAB_CONTEXT });
+    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("vomiting");
+    expect(result.fhir.additionalInstruction?.[0]).toEqual({
+      text: "Avoid alcoholic drinks",
+      coding: [
+        {
+          system: "http://snomed.info/sct",
+          code: "419822006",
+          display: "Warning. Avoid alcoholic drink (qualifier value)"
+        }
+      ]
+    });
+    expect(result.meta.normalized.prnReason?.text).toBe("vomiting");
+    expect(result.meta.normalized.additionalInstructions?.[0]?.text).toBe(
+      "Avoid alcoholic drinks"
+    );
+  });
+
+  it("preserves PRN coding when semicolons separate additional instructions", () => {
+    const result = parseSig("1x3 suppository prn constipation; no alcohol");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("constipation");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "14760008",
+      display: "Constipation"
+    });
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Avoid alcoholic drinks");
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("419822006");
+  });
+
+  it("formats rectal PRN sigs without swallowing trailing instructions", () => {
+    const result = parseSig("1x3 rectal prn constipation; no alcohol");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("constipation");
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Avoid alcoholic drinks");
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("419822006");
+    expect(result.fhir.site?.text).toBe("rectum");
+    expect(result.longText).toBe(
+      "Use 1 suppository rectally three times daily as needed for constipation. Avoid alcoholic drinks."
+    );
+  });
+
+  it("normalizes adjectival site phrases across shared body-site definitions", () => {
+    const result = parseSig("1x2 vaginal prn infection; no alcohol");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("infection");
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Avoid alcoholic drinks");
+    expect(result.fhir.site?.text).toBe("vagina");
+    expect(result.longText).toContain("Avoid alcoholic drinks.");
+    expect(result.longText).not.toMatch(/vaginal[^.]*no alcohol/i);
+  });
+
+  it("separates nasal PRN reasons from trailing additional instructions", () => {
+    const result = parseSig("1 mg to nose prn congestion; no alcohol");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("congestion");
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Avoid alcoholic drinks");
+    expect(result.longText).toBe(
+      "Use 1 mg as needed for congestion into the nose. Avoid alcoholic drinks."
+    );
+  });
+
   it("parses 1x2 subcutaneous", () => {
     const result = parseSig("1x2 subcutaneous");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1 });
