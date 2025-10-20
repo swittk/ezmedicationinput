@@ -1786,6 +1786,56 @@ describe("smart meal expansion", () => {
     const result = parseSig("po ac q6h", { smartMealExpansion: true });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Meal"]]);
   });
+
+  it("expands default with-meal timings for twice-daily frequency", () => {
+    const result = parseSig("1x2", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Dinner
+    ]);
+  });
+
+  it("expands default with-meal timings for thrice-daily frequency", () => {
+    const result = parseSig("1x3", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Lunch,
+      EventTiming.Dinner
+    ]);
+  });
+
+  it("expands default with-meal timings for four daily doses", () => {
+    const result = parseSig("1x4", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Lunch,
+      EventTiming.Dinner,
+      EventTiming["Before Sleep"]
+    ]);
+  });
+
+  it("respects meal relation from context during default expansion", () => {
+    const result = parseSig("1x3", {
+      smartMealExpansion: true,
+      context: { mealRelation: EventTiming["After Meal"] }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"]
+    ]);
+  });
+
+  it("supports before-meal relation from context during default expansion", () => {
+    const result = parseSig("1x2", {
+      smartMealExpansion: true,
+      context: { mealRelation: EventTiming["Before Meal"] }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["Before Breakfast"],
+      EventTiming["Before Dinner"]
+    ]);
+  });
 });
 
 describe("when ordering", () => {

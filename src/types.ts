@@ -300,6 +300,10 @@ export interface MedicationContext {
   containerValue?: number;
   containerUnit?: string;
   defaultUnit?: string;
+  mealRelation?:
+    | (typeof EventTiming)["Before Meal"]
+    | (typeof EventTiming)["After Meal"]
+    | (typeof EventTiming)["Meal"];
 }
 
 export interface FormatOptions {

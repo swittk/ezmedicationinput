@@ -1,6 +1,6 @@
 {
   "name": "ezmedicationinput",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Parse concise medication sigs into FHIR R5 Dosage JSON",
   "type": "module",
   "main": "dist/index.js",

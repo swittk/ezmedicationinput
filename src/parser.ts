@@ -1274,15 +1274,22 @@ function expandMealTimings(
   if (!options?.smartMealExpansion) {
     return;
   }
-  if (!internal.when.length) {
-    return;
-  }
   if (internal.when.some((code) => SPECIFIC_MEAL_TIMINGS.has(code))) {
     return;
   }
 
   const frequency = internal.frequency;
   if (!frequency || frequency < 1 || frequency > 4) {
+    return;
+  }
+
+  const hasGeneralMealToken =
+    arrayIncludes(internal.when, EventTiming["Before Meal"]) ||
+    arrayIncludes(internal.when, EventTiming["After Meal"]) ||
+    arrayIncludes(internal.when, EventTiming.Meal);
+  const needsDefaultExpansion = internal.when.length === 0 && frequency >= 2;
+
+  if (!hasGeneralMealToken && !needsDefaultExpansion) {
     return;
   }
 
@@ -1309,29 +1316,48 @@ function expandMealTimings(
 
   const pairPreference = options.twoPerDayPair ?? "breakfast+dinner";
 
-  const replacements: Array<{ general: EventTiming; specifics: EventTiming[] }> = [];
+  const replacements: Array<{
+    general: EventTiming;
+    specifics: EventTiming[];
+    removeGeneral: boolean;
+  }> = [];
+
+  const addReplacement = (
+    general: EventTiming,
+    base: "before" | "after" | "with",
+    removeGeneral: boolean
+  ) => {
+    const specifics = computeMealExpansions(base, frequency, pairPreference);
+    if (specifics) {
+      replacements.push({ general, specifics, removeGeneral });
+    }
+  };
 
   if (arrayIncludes(internal.when, EventTiming["Before Meal"])) {
-    const specifics = computeMealExpansions("before", frequency, pairPreference);
-    if (specifics) {
-      replacements.push({ general: EventTiming["Before Meal"], specifics });
-    }
+    addReplacement(EventTiming["Before Meal"], "before", true);
   }
   if (arrayIncludes(internal.when, EventTiming["After Meal"])) {
-    const specifics = computeMealExpansions("after", frequency, pairPreference);
-    if (specifics) {
-      replacements.push({ general: EventTiming["After Meal"], specifics });
-    }
+    addReplacement(EventTiming["After Meal"], "after", true);
   }
   if (arrayIncludes(internal.when, EventTiming.Meal)) {
-    const specifics = computeMealExpansions("with", frequency, pairPreference);
-    if (specifics) {
-      replacements.push({ general: EventTiming.Meal, specifics });
-    }
+    addReplacement(EventTiming.Meal, "with", true);
   }
 
-  for (const { general, specifics } of replacements) {
-    removeWhen(internal.when, general);
+  if (needsDefaultExpansion) {
+    const relation = options?.context?.mealRelation ?? EventTiming.Meal;
+    const base =
+      relation === EventTiming["Before Meal"]
+        ? "before"
+        : relation === EventTiming["After Meal"]
+        ? "after"
+        : "with";
+    addReplacement(relation, base, false);
+  }
+
+  for (const { general, specifics, removeGeneral } of replacements) {
+    if (removeGeneral) {
+      removeWhen(internal.when, general);
+    }
     for (const specific of specifics) {
       addWhen(internal.when, specific);
     }
