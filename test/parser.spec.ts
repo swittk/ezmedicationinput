@@ -1772,6 +1772,43 @@ describe("smart meal expansion", () => {
     ]);
   });
 
+  it("expands after-meal abbreviations for twice-daily cadences", () => {
+    const result = parseSig("1 tab bid pc", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Dinner"]
+    ]);
+  });
+
+  it("translates after-meal tokens using detected frequency when enabled", () => {
+    const result = parseSig("1 tab tid pc", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"]
+    ]);
+  });
+
+  it("expands after-meal abbreviations for four daily doses", () => {
+    const result = parseSig("1 tab qid pc", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"],
+      EventTiming["Before Sleep"]
+    ]);
+  });
+
+  it("expands after-meal tokens with additional bedtime events", () => {
+    const result = parseSig("1 tab qid pc hs", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"],
+      EventTiming["Before Sleep"]
+    ]);
+  });
+
   it("adds bedtime for four with-meal doses", () => {
     const result = parseSig("1x4 po wm", { smartMealExpansion: true });
     expect(result.fhir.timing?.repeat?.when).toEqual([
@@ -1812,6 +1849,18 @@ describe("smart meal expansion", () => {
       EventTiming.Dinner,
       EventTiming["Before Sleep"]
     ]);
+  });
+
+  it("avoids default expansion when more than four daily doses are requested", () => {
+    const result = parseSig("1x5", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.frequency).toBe(5);
+  });
+
+  it("preserves generic meal timing for high-frequency after-meal dosing", () => {
+    const result = parseSig("1 tab 5 times daily pc", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
+    expect(result.fhir.timing?.repeat?.frequency).toBe(5);
   });
 
   it("respects meal relation from context during default expansion", () => {
@@ -1870,4 +1919,27 @@ describe("event timing token coverage", () => {
       expect(result.fhir.timing?.repeat?.when).toEqual([expected]);
     });
   }
+});
+
+describe("assume single discrete dose", () => {
+  it("does not assume a dose when disabled", () => {
+    const result = parseSig("po tid", { context: { dosageForm: "tablet" } });
+    expect(result.fhir.doseAndRate).toBeUndefined();
+  });
+
+  it("defaults to one unit when enabled", () => {
+    const result = parseSig("po tid", {
+      context: { dosageForm: "tablet" },
+      assumeSingleDiscreteDose: true
+    });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+  });
+
+  it("ignores non-discrete units", () => {
+    const result = parseSig("po tid", {
+      context: { defaultUnit: "mg" },
+      assumeSingleDiscreteDose: true
+    });
+    expect(result.fhir.doseAndRate).toBeUndefined();
+  });
 });

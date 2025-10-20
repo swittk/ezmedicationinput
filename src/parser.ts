@@ -174,6 +174,37 @@ const HOUSEHOLD_VOLUME_UNIT_SET = new Set(
   HOUSEHOLD_VOLUME_UNITS.map((unit) => unit.toLowerCase()),
 );
 
+const DISCRETE_UNIT_SET = new Set([
+  "tab",
+  "tabs",
+  "tablet",
+  "tablets",
+  "cap",
+  "caps",
+  "capsule",
+  "capsules",
+  "puff",
+  "puffs",
+  "spray",
+  "sprays",
+  "drop",
+  "drops",
+  "patch",
+  "patches",
+  "suppository",
+  "suppositories",
+  "implant",
+  "implants",
+  "piece",
+  "pieces",
+  "stick",
+  "sticks",
+  "pessary",
+  "pessaries",
+  "lozenge",
+  "lozenges"
+]);
+
 const OCULAR_DIRECTION_WORDS = new Set([
   "left",
   "right",
@@ -1266,14 +1297,17 @@ function reconcileMealTimingSpecificity(internal: ParsedSigInternal) {
 }
 
 // Optionally replace generic meal tokens with concrete breakfast/lunch/dinner
-// EventTiming codes when the cadence makes the intent obvious.
+// EventTiming codes when the cadence or explicit meal abbreviations make the
+// intent obvious.
 function expandMealTimings(
   internal: ParsedSigInternal,
   options?: ParseOptions
 ) {
-  if (!options?.smartMealExpansion) {
+  const allowSmartExpansion = options?.smartMealExpansion === true;
+  if (!allowSmartExpansion) {
     return;
   }
+
   if (internal.when.some((code) => SPECIFIC_MEAL_TIMINGS.has(code))) {
     return;
   }
@@ -1283,11 +1317,13 @@ function expandMealTimings(
     return;
   }
 
-  const hasGeneralMealToken =
-    arrayIncludes(internal.when, EventTiming["Before Meal"]) ||
-    arrayIncludes(internal.when, EventTiming["After Meal"]) ||
-    arrayIncludes(internal.when, EventTiming.Meal);
-  const needsDefaultExpansion = internal.when.length === 0 && frequency >= 2;
+  const needsDefaultExpansion =
+    internal.when.length === 0 && frequency >= 2;
+
+  const hasBeforeMeal = arrayIncludes(internal.when, EventTiming["Before Meal"]);
+  const hasAfterMeal = arrayIncludes(internal.when, EventTiming["After Meal"]);
+  const hasWithMeal = arrayIncludes(internal.when, EventTiming.Meal);
+  const hasGeneralMealToken = hasBeforeMeal || hasAfterMeal || hasWithMeal;
 
   if (!hasGeneralMealToken && !needsDefaultExpansion) {
     return;
@@ -1314,7 +1350,7 @@ function expandMealTimings(
     return;
   }
 
-  const pairPreference = options.twoPerDayPair ?? "breakfast+dinner";
+  const pairPreference = options?.twoPerDayPair ?? "breakfast+dinner";
 
   const replacements: Array<{
     general: EventTiming;
@@ -1333,13 +1369,13 @@ function expandMealTimings(
     }
   };
 
-  if (arrayIncludes(internal.when, EventTiming["Before Meal"])) {
+  if (hasBeforeMeal) {
     addReplacement(EventTiming["Before Meal"], "before", true);
   }
-  if (arrayIncludes(internal.when, EventTiming["After Meal"])) {
+  if (hasAfterMeal) {
     addReplacement(EventTiming["After Meal"], "after", true);
   }
-  if (arrayIncludes(internal.when, EventTiming.Meal)) {
+  if (hasWithMeal) {
     addReplacement(EventTiming.Meal, "with", true);
   }
 
@@ -2226,6 +2262,16 @@ export function parseInternal(
     if (fallbackUnit) {
       internal.unit = fallbackUnit;
     }
+  }
+
+  if (
+    options?.assumeSingleDiscreteDose &&
+    internal.dose === undefined &&
+    internal.doseRange === undefined &&
+    internal.unit !== undefined &&
+    isDiscreteUnit(internal.unit)
+  ) {
+    internal.dose = 1;
   }
 
   // Frequency defaults when timing code implies it
@@ -3846,6 +3892,13 @@ function enforceHouseholdUnitPolicy(
     return undefined;
   }
   return unit;
+}
+
+function isDiscreteUnit(unit: string): boolean {
+  if (!unit) {
+    return false;
+  }
+  return DISCRETE_UNIT_SET.has(unit.trim().toLowerCase());
 }
 
 function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefined {

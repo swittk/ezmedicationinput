@@ -503,9 +503,17 @@ export interface ParseOptions extends FormatOptions {
   eventClock?: EventClockMap;
   allowDiscouraged?: boolean;
   /**
-   * When enabled the parser will expand generic meal timing tokens (AC/PC/C)
-   * into specific breakfast/lunch/dinner (and bedtime) EventTiming entries
-   * based on the detected daily frequency.
+   * When enabled the parser will assume a single discrete unit (e.g., one
+   * tablet/capsule) when no explicit dose is provided and the inferred unit is
+   * countable.
+   */
+  assumeSingleDiscreteDose?: boolean;
+  /**
+   * Enables inferring with-meal timings when explicit meal language is present
+   * or implied by cadence alone. Generic meal abbreviations (AC/PC/C) and
+   * cadence-only instructions expand into specific breakfast/lunch/dinner (and
+   * bedtime) EventTiming entries. Works in conjunction with
+   * `context.mealRelation` when provided.
    */
   smartMealExpansion?: boolean;
   /**

@@ -293,8 +293,15 @@ You can specify the number of times (total count) the medication is supposed to 
 - `context`: optional medication context (dosage form, strength, container
   metadata) used to infer default units when a sig omits explicit units. Pass
   `null` to explicitly disable context-based inference.
-- `smartMealExpansion`: when `true`, generic AC/PC/C tokens expand into specific EventTiming combinations (e.g. `1x2 po ac` → `ACM` + `ACV`).
+- `smartMealExpansion`: when `true`, generic AC/PC/C meal abbreviations and
+  cadence-only instructions expand into concrete with-meal EventTiming
+  combinations (e.g. `1x3` → breakfast/lunch/dinner). This also respects
+  `context.mealRelation` when provided and only applies to schedules with four
+  or fewer daily doses.
 - `twoPerDayPair`: controls whether 2× AC/PC/C doses expand to breakfast+dinner (default) or breakfast+lunch.
+- `assumeSingleDiscreteDose`: when `true`, missing discrete doses (such as
+  tablets or capsules) default to a single unit when the parser can infer a
+  countable unit from context.
 - `eventClock`: optional map of `EventTiming` codes to HH:mm strings that drives chronological ordering of parsed `when` values.
 - `allowHouseholdVolumeUnits`: defaults to `true`; set to `false` to ignore
   teaspoon/tablespoon units during parsing and suggestions.
