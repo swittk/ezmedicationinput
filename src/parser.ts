@@ -1827,12 +1827,13 @@ export function parseInternal(
   }
 
   // Multiplicative tokens like 1x3
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
     if (internal.consumed.has(token.index)) continue;
-    const match = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
-    if (match) {
-      const dose = parseFloat(match[1]);
-      const freq = parseFloat(match[2]);
+    const combined = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
+    if (combined) {
+      const dose = parseFloat(combined[1]);
+      const freq = parseFloat(combined[2]);
       if (internal.dose === undefined) {
         internal.dose = dose;
       }
@@ -1840,6 +1841,60 @@ export function parseInternal(
       internal.period = 1;
       internal.periodUnit = FhirPeriodUnit.Day;
       mark(internal.consumed, token);
+      continue;
+    }
+
+    const hasNumericDoseBefore = (): boolean => {
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = tokens[j];
+        if (!prev) {
+          continue;
+        }
+        if (internal.consumed.has(prev.index)) {
+          continue;
+        }
+        if (/^[0-9]+(?:\.[0-9]+)?$/.test(prev.lower)) {
+          return true;
+        }
+        if (normalizeUnit(prev.lower, options)) {
+          continue;
+        }
+        break;
+      }
+      return false;
+    };
+
+    if (internal.frequency === undefined && hasNumericDoseBefore()) {
+      const prefix = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+      if (prefix) {
+        const freq = parseFloat(prefix[1]);
+        if (Number.isFinite(freq)) {
+          internal.frequency = freq;
+          internal.period = 1;
+          internal.periodUnit = FhirPeriodUnit.Day;
+          mark(internal.consumed, token);
+          continue;
+        }
+      }
+
+      if (token.lower === "x" || token.lower === "*") {
+        const next = tokens[i + 1];
+        if (
+          next &&
+          !internal.consumed.has(next.index) &&
+          /^[0-9]+(?:\.[0-9]+)?$/.test(next.lower)
+        ) {
+          const freq = parseFloat(next.original);
+          if (Number.isFinite(freq)) {
+            internal.frequency = freq;
+            internal.period = 1;
+            internal.periodUnit = FhirPeriodUnit.Day;
+            mark(internal.consumed, token);
+            mark(internal.consumed, next);
+            continue;
+          }
+        }
+      }
     }
   }
 

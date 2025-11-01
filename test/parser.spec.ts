@@ -35,6 +35,34 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
   });
 
+  it("parses decimal multiplicative tokens", () => {
+    const result = parseSig("1.5x3", { context: TAB_CONTEXT });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 3,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.shortText).toBe("1.5 tab TID");
+    expect(result.longText).toBe("Use 1.5 tablets three times daily.");
+  });
+
+  it("parses spaced decimal multiplicative tokens", () => {
+    const result = parseSig("1.5 x3", { context: TAB_CONTEXT });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 3,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.shortText).toBe("1.5 tab TID");
+    expect(result.longText).toBe("Use 1.5 tablets three times daily.");
+  });
+
   it("parses adverbial route descriptors", () => {
     const cases: Array<{ input: string; code: SNOMEDCTRouteCodes }> = [
       { input: "1x2 orally bid", code: SNOMEDCTRouteCodes["Oral route"] },
