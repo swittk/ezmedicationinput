@@ -1059,6 +1059,84 @@ function refineSiteRange(
   return { start: startIndex, end: startIndex + lowerSanitized.length };
 }
 
+export function findUnparsedTokenGroups(
+  internal: ParsedSigInternal
+): Array<{ tokens: Token[]; range?: TextRange }> {
+  const leftoverTokens = internal.tokens
+    .filter((token) => !internal.consumed.has(token.index))
+    .sort((a, b) => a.index - b.index);
+
+  if (leftoverTokens.length === 0) {
+    return [];
+  }
+
+  const groups: Array<{ tokens: Token[]; range?: TextRange }> = [];
+  let currentGroup: Token[] = [];
+  let previousIndex: number | undefined;
+  let minimumStart = 0;
+
+  const locateRange = (
+    tokensToLocate: Token[],
+    initial: TextRange | undefined
+  ): TextRange | undefined => {
+    const lowerInput = internal.input.toLowerCase();
+    let searchStart = minimumStart;
+    let rangeStart: number | undefined;
+    let rangeEnd: number | undefined;
+
+    for (const token of tokensToLocate) {
+      const segment = token.original.trim();
+      if (!segment) {
+        continue;
+      }
+      const lowerSegment = segment.toLowerCase();
+      const foundIndex = lowerInput.indexOf(lowerSegment, searchStart);
+      if (foundIndex === -1) {
+        return initial;
+      }
+      if (rangeStart === undefined) {
+        rangeStart = foundIndex;
+      }
+      const segmentEnd = foundIndex + lowerSegment.length;
+      rangeEnd = rangeEnd === undefined ? segmentEnd : Math.max(rangeEnd, segmentEnd);
+      searchStart = segmentEnd;
+    }
+
+    if (rangeStart === undefined || rangeEnd === undefined) {
+      return initial;
+    }
+
+    return { start: rangeStart, end: rangeEnd };
+  };
+
+  const flush = () => {
+    if (!currentGroup.length) {
+      return;
+    }
+    const indices = currentGroup.map((token) => token.index);
+    const initialRange = computeTokenRange(internal.input, internal.tokens, indices);
+    const range = locateRange(currentGroup, initialRange);
+    groups.push({ tokens: currentGroup, range });
+    if (range) {
+      minimumStart = Math.max(minimumStart, range.end);
+    }
+    currentGroup = [];
+    previousIndex = undefined;
+  };
+
+  for (const token of leftoverTokens) {
+    if (previousIndex !== undefined && token.index !== previousIndex + 1) {
+      flush();
+    }
+    currentGroup.push(token);
+    previousIndex = token.index;
+  }
+
+  flush();
+
+  return groups;
+}
+
 function splitToken(token: string): string[] {
   if (/^[0-9]+(?:\.[0-9]+)?$/.test(token)) {
     return [token];

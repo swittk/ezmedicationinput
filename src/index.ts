@@ -6,9 +6,17 @@ import {
   applyPrnReasonCodingAsync,
   applySiteCoding,
   applySiteCodingAsync,
+  findUnparsedTokenGroups,
   parseInternal
 } from "./parser";
-import { FhirDosage, FormatOptions, ParseOptions, ParseResult } from "./types";
+import {
+  FhirDosage,
+  FormatOptions,
+  LintIssue,
+  LintResult,
+  ParseOptions,
+  ParseResult
+} from "./types";
 
 export { parseInternal } from "./parser";
 export { suggestSig } from "./suggest";
@@ -32,6 +40,26 @@ export function parseSig(input: string, options?: ParseOptions): ParseResult {
   applyPrnReasonCoding(internal, options);
   applySiteCoding(internal, options);
   return buildParseResult(internal, options);
+}
+
+export function lintSig(input: string, options?: ParseOptions): LintResult {
+  const internal = parseInternal(input, options);
+  applyPrnReasonCoding(internal, options);
+  applySiteCoding(internal, options);
+  const result = buildParseResult(internal, options);
+  const groups = findUnparsedTokenGroups(internal);
+  const issues: LintIssue[] = groups.map((group) => {
+    const text = group.range
+      ? internal.input.slice(group.range.start, group.range.end)
+      : group.tokens.map((token) => token.original).join(" ");
+    return {
+      message: "Unrecognized text",
+      text: text.trim() || text,
+      tokens: group.tokens.map((token) => token.original),
+      range: group.range
+    };
+  });
+  return { result, issues };
 }
 
 export async function parseSigAsync(

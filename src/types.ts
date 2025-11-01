@@ -596,6 +596,24 @@ export interface ParseResult {
   };
 }
 
+export interface LintIssue {
+  /** Human-readable description of why the segment could not be parsed. */
+  message: string;
+  /** Original substring that triggered the issue. */
+  text: string;
+  /** Tokens contributing to the unparsed segment. */
+  tokens: string[];
+  /** Location of {@link text} relative to the caller's original input. */
+  range?: TextRange;
+}
+
+export interface LintResult {
+  /** Standard parse output including FHIR representation and metadata. */
+  result: ParseResult;
+  /** Segments of the input that could not be interpreted. */
+  issues: LintIssue[];
+}
+
 /**
  * Maps EventTiming codes (or other institution-specific timing strings) to
  * 24-hour clock representations such as "08:00".
