@@ -338,6 +338,8 @@ export interface CodeableConceptDefinition {
   coding?: FhirCoding;
   text?: string;
   aliases?: string[];
+  /** Optional translations for different locales (e.g., { "th": "ปวด" }) */
+  i18n?: Record<string, string>;
 }
 
 export interface PrnReasonDefinition extends CodeableConceptDefinition { }

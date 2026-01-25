@@ -171,17 +171,6 @@ const WHEN_TEXT_THAI: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "ทันที"
 };
 
-const INSTRUCTION_TEXT_THAI: Record<string, string> = {
-  "Take with or after food": "รับประทานพร้อมหรือหลังอาหาร",
-  "With or after food": "พร้อมหรือหลังอาหาร",
-  "Take before food": "รับประทานก่อนอาหาร",
-  "Take on an empty stomach": "รับประทานขณะท้องว่าง",
-  "Take with plenty of water": "รับประทานพร้อมน้ำดื่มจำนวนมาก",
-  "Dissolve or mix with water before taking": "ละลายหรือผสมน้ำก่อนรับประทาน",
-  "Avoid alcoholic drinks": "หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์",
-  "May cause drowsiness; do not drive if affected": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ",
-};
-
 const DAY_NAMES_THAI: Record<string, string> = {
   mon: "วันจันทร์",
   tue: "วันอังคาร",
@@ -726,7 +715,8 @@ function formatAsNeededThai(internal: ParsedSigInternal): string | undefined {
     return undefined;
   }
   if (internal.asNeededReason) {
-    return `ใช้เมื่อจำเป็นสำหรับ ${internal.asNeededReason}`;
+    const translation = internal.asNeededReasonCoding?.i18n?.th;
+    return `ใช้เมื่อจำเป็นสำหรับ ${translation || internal.asNeededReason}`;
   }
   return "ใช้เมื่อจำเป็น";
 }
@@ -857,10 +847,11 @@ function formatAdditionalInstructionsThai(internal: ParsedSigInternal): string |
   }
   const phrases = internal.additionalInstructions
     .map((instruction) => {
+      const translation = instruction.coding?.i18n?.th;
+      if (translation) return translation;
       const original = instruction.text || instruction.coding?.display;
       if (!original) return undefined;
-      const normalized = original.trim();
-      return INSTRUCTION_TEXT_THAI[normalized] || normalized;
+      return original.trim();
     })
     .filter((text): text is string => Boolean(text))
     .map((text) => text.trim())

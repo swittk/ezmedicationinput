@@ -1629,10 +1629,10 @@ describe("internationalization", () => {
     it("combines frequency, event timing, and as-needed phrasing in Thai", () => {
       const result = parseSig("1 tab po bid ac prn pain", { locale: "th" });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ pain."
+        "รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด."
       );
       expect(result.shortText).toBe(
-        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ pain"
+        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด"
       );
     });
 
@@ -2110,6 +2110,18 @@ describe("issue regression tests", () => {
       const result = parseSig(input, { locale: "th" });
       expect(result.fhir.timing?.repeat?.when).toContain("C");
       expect(result.longText).toContain("พร้อมอาหาร");
+    }
+  });
+
+  it("translates common PRN reasons to Thai", () => {
+    const cases = [
+      { input: "1 tab prn pain", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด." },
+      { input: "1 tab prn fever", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ไข้." },
+      { input: "1 tab prn sleep", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ นอนหลับ." }
+    ];
+    for (const { input, expected } of cases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.longText).toBe(expected);
     }
   });
 

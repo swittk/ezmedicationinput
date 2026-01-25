@@ -1429,14 +1429,16 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       names: ["pain", "ache", "aches", "pains"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
-        text: "Pain"
+        text: "Pain",
+        i18n: { th: "ปวด" }
       }
     },
     {
       names: ["nausea", "queasiness", "vomiting", "n/v", "nausea and vomiting"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
-        text: "Nausea"
+        text: "Nausea",
+        i18n: { th: "คลื่นไส้" }
       }
     },
     {
@@ -1447,14 +1449,16 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           code: "418363000",
           display: "Itching of skin"
         },
-        text: "Itching"
+        text: "Itching",
+        i18n: { th: "คัน" }
       }
     },
     {
       names: ["anxiety", "nervousness"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
-        text: "Anxiety"
+        text: "Anxiety",
+        i18n: { th: "วิตกกังวล" }
       }
     },
     {
@@ -1465,28 +1469,32 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           code: "193462001",
           display: "Insomnia"
         },
-        text: "Sleep"
+        text: "Sleep",
+        i18n: { th: "นอนหลับ" }
       }
     },
     {
       names: ["cough", "coughing"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
-        text: "Cough"
+        text: "Cough",
+        i18n: { th: "ไอ" }
       }
     },
     {
       names: ["fever", "temperature", "pyrexia"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
-        text: "Fever"
+        text: "Fever",
+        i18n: { th: "ไข้" }
       }
     },
     {
       names: ["spasm", "spasms", "muscle spasm"],
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
-        text: "Spasm"
+        text: "Spasm",
+        i18n: { th: "ตะคริวหรือเกร็ง" }
       }
     },
     {
@@ -1497,7 +1505,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           code: "14760008",
           display: "Constipation"
         },
-        text: "Constipation"
+        text: "Constipation",
+        i18n: { th: "ท้องผูก" }
       }
     },
     {
@@ -1508,7 +1517,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           code: "257553007",
           display: "Irritation"
         },
-        text: "Irritation"
+        text: "Irritation",
+        i18n: { th: "ระคายเคือง" }
       }
     },
     {
@@ -1519,7 +1529,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           code: "267036007",
           display: "Dyspnea"
         },
-        text: "Shortness of breath"
+        text: "Shortness of breath",
+        i18n: { th: "เหนื่อยหรือหายใจลำบาก" }
       }
     }
   ];
@@ -1578,7 +1589,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "311504000",
           display: "With or after food"
         },
-        text: "Take with or after food"
+        text: "Take with or after food",
+        i18n: { th: "รับประทานพร้อมหรือหลังอาหาร" }
       }
     },
     {
@@ -1589,7 +1601,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "311501008",
           display: "Half to one hour before food"
         },
-        text: "Take before food"
+        text: "Take before food",
+        i18n: { th: "รับประทานก่อนอาหาร" }
       }
     },
     {
@@ -1600,7 +1613,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "717154004",
           display: "Take on an empty stomach (qualifier value)"
         },
-        text: "Take on an empty stomach"
+        text: "Take on an empty stomach",
+        i18n: { th: "รับประทานขณะท้องว่าง" }
       }
     },
     {
@@ -1611,7 +1625,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "419303009",
           display: "With plenty of water"
         },
-        text: "Take with plenty of water"
+        text: "Take with plenty of water",
+        i18n: { th: "รับประทานพร้อมน้ำดื่มจำนวนมาก" }
       }
     },
     {
@@ -1622,7 +1637,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "417995008",
           display: "Dissolve or mix with water before taking"
         },
-        text: "Dissolve or mix with water before taking"
+        text: "Dissolve or mix with water before taking",
+        i18n: { th: "ละลายหรือผสมน้ำก่อนรับประทาน" }
       }
     },
     {
@@ -1633,7 +1649,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "419822006",
           display: "Warning. Avoid alcoholic drink (qualifier value)"
         },
-        text: "Avoid alcoholic drinks"
+        text: "Avoid alcoholic drinks",
+        i18n: { th: "หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์" }
       }
     },
     {
@@ -1645,7 +1662,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           display:
             "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)"
         },
-        text: "May cause drowsiness; do not drive if affected"
+        text: "May cause drowsiness; do not drive if affected",
+        i18n: { th: "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ" }
       }
     },
     {
@@ -1667,7 +1685,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           display:
             "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
         },
-        text: "May cause drowsiness; avoid driving or alcohol"
+        text: "May cause drowsiness; avoid driving or alcohol",
+        i18n: { th: "อาจทำให้ง่วงซึม; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์" }
       }
     },
     {
@@ -1685,7 +1704,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           display:
             "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
         },
-        text: "May cause next-day drowsiness; avoid driving or alcohol"
+        text: "May cause next-day drowsiness; avoid driving or alcohol",
+        i18n: { th: "อาจทำให้ง่วงซึมในวันถัดมา; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์" }
       }
     },
     {
@@ -1696,7 +1716,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "418521000",
           display: "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)"
         },
-        text: "Avoid sunlight or sun lamps"
+        text: "Avoid sunlight or sun lamps",
+        i18n: { th: "หลีกเลี่ยงแสงแดดหรือหลอดไฟแสงยูวี" }
       }
     },
     {
@@ -1707,7 +1728,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "418693002",
           display: "Swallowed whole, not chewed (qualifier value)"
         },
-        text: "Swallow whole; do not crush or chew"
+        text: "Swallow whole; do not crush or chew",
+        i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
       }
     },
     {
@@ -1718,7 +1740,8 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
           code: "418991002",
           display: "Sucked or chewed (qualifier value)"
         },
-        text: "Suck or chew before swallowing"
+        text: "Suck or chew before swallowing",
+        i18n: { th: "เคี้ยวหรืออมให้ละลายก่อนกลืน" }
       }
     }
   ];

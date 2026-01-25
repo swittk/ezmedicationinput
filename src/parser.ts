@@ -3681,7 +3681,7 @@ function collectAdditionalInstructions(
     .filter((segment) => segment.length > 0);
   const phrases = segments.length ? segments : [joined];
   const seen = new Set<string>();
-  const instructions: Array<{ text?: string; coding?: FhirCoding }> = [];
+  const instructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }> = [];
   for (const phrase of phrases) {
     const canonical = normalizeAdditionalInstructionKey(phrase);
     const definition =
@@ -3703,7 +3703,8 @@ function collectAdditionalInstructions(
           ? {
             code: definition.coding.code,
             display: definition.coding.display,
-            system: definition.coding.system ?? SNOMED_SYSTEM
+            system: definition.coding.system ?? SNOMED_SYSTEM,
+            i18n: definition.i18n
           }
           : undefined
       });
@@ -3969,7 +3970,8 @@ function applyPrnReasonDefinition(
     ? {
       code: coding.code,
       display: coding.display,
-      system: coding.system ?? SNOMED_SYSTEM
+      system: coding.system ?? SNOMED_SYSTEM,
+      i18n: definition.i18n
     }
     : undefined;
   if (definition.text && !internal.asNeededReason) {
