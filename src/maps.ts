@@ -773,6 +773,7 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   night: EventTiming.Night,
   hs: EventTiming["Before Sleep"],
   bedtime: EventTiming["Before Sleep"],
+  bed: EventTiming["Before Sleep"],
   wake: EventTiming.Wake,
   waking: EventTiming.Wake,
   stat: EventTiming.Immediate

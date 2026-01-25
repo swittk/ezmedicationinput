@@ -232,6 +232,9 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "early evening": EventTiming["Early Evening"],
   "late evening": EventTiming["Late Evening"],
   "after sleep": EventTiming["After Sleep"],
+  "before bed": EventTiming["Before Sleep"],
+  "before bedtime": EventTiming["Before Sleep"],
+  "before sleep": EventTiming["Before Sleep"],
   "upon waking": EventTiming.Wake
 };
 
@@ -943,40 +946,18 @@ function tryParseTimeBasedSchedule(
   const token = tokens[index];
   if (internal.consumed.has(token.index)) return false;
 
-  // Handle connectors like "and at" or just "and" before a time.
-  // This prevents rogue "and" from leaking into Additional Instructions
-  // when it serves as a connector between schedule parts.
-  let isAndPrefix = false;
   let isAtPrefix = token.lower === "@" || token.lower === "at";
-
-  if (token.lower === "and" && !isAtPrefix) {
-    const next = tokens[index + 1];
-    if (next && !internal.consumed.has(next.index)) {
-      const nextLower = next.lower;
-      // If "and" is followed by "at", "@", or a number, it's a connector for this time block
-      if (nextLower === "@" || nextLower === "at" || /^\d/.test(nextLower)) {
-        isAndPrefix = true;
-        if (nextLower === "@" || nextLower === "at") {
-          isAtPrefix = true;
-        }
-      }
-    }
-  }
-
-  if (!isAtPrefix && !isAndPrefix && !/^\d/.test(token.lower)) return false;
+  if (!isAtPrefix && !/^\d/.test(token.lower)) return false;
 
   let nextIndex = index;
-  if (isAndPrefix) nextIndex++;
   if (isAtPrefix) nextIndex++;
 
   const times: string[] = [];
   const consumedIndices: number[] = [];
   const timeTokens: string[] = [];
 
-  if (isAndPrefix) consumedIndices.push(index);
   if (isAtPrefix) {
-    // If we have "and at", at is the second token (index + 1)
-    consumedIndices.push(isAndPrefix ? index + 1 : index);
+    consumedIndices.push(index);
   }
 
   while (nextIndex < tokens.length) {
@@ -1829,6 +1810,26 @@ function applyWhenToken(
   mark(internal.consumed, token);
 }
 
+function isTimingAnchorOrPrefix(
+  tokens: Token[],
+  index: number
+): boolean {
+  const token = tokens[index];
+  if (!token) return false;
+  const lower = token.lower;
+  const nextToken = tokens[index + 1];
+  const comboKey = nextToken ? `${lower} ${nextToken.lower}` : undefined;
+
+  return Boolean(
+    EVENT_TIMING_TOKENS[lower] ||
+    TIMING_ABBREVIATIONS[lower] ||
+    (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
+    (lower === "pc" || lower === "ac" || lower === "after" || lower === "before") ||
+    (lower === "at" || lower === "@" || lower === "on" || lower === "with") ||
+    /^\d/.test(lower)
+  );
+}
+
 function parseAnchorSequence(
   internal: ParsedSigInternal,
   tokens: Token[],
@@ -2308,7 +2309,27 @@ export function parseInternal(
       continue;
     }
 
+    // Skip connectors if they are followed by recognized timing tokens or prefixes
+    if (MEAL_CONTEXT_CONNECTORS.has(token.lower) || token.lower === ",") {
+      if (isTimingAnchorOrPrefix(tokens, i + 1)) {
+        mark(internal.consumed, token);
+        continue;
+      }
+    }
+
     // Event timing tokens
+    const nextToken = tokens[i + 1];
+    if (nextToken && !internal.consumed.has(nextToken.index)) {
+      const lowerNext = nextToken.lower;
+      const combo = `${token.lower} ${lowerNext}`;
+      const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
+      if (comboWhen) {
+        applyWhenToken(internal, token, comboWhen);
+        mark(internal.consumed, nextToken);
+        continue;
+      }
+    }
+
     if (token.lower === "pc" || token.lower === "ac" || token.lower === "after" || token.lower === "before") {
       parseAnchorSequence(
         internal,
@@ -2331,17 +2352,6 @@ export function parseInternal(
       // but only if it's not "with" which might be part of other phrases later.
       if (token.lower !== "with") {
         mark(internal.consumed, token);
-        continue;
-      }
-    }
-    const nextToken = tokens[i + 1];
-    if (nextToken && !internal.consumed.has(nextToken.index)) {
-      const lowerNext = nextToken.lower;
-      const combo = `${token.lower} ${lowerNext}`;
-      const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
-      if (comboWhen) {
-        applyWhenToken(internal, token, comboWhen);
-        mark(internal.consumed, nextToken);
         continue;
       }
     }
@@ -3721,7 +3731,7 @@ function collectAdditionalInstructions(
           }
           : undefined
       });
-    } else {
+    } else if (!MEAL_CONTEXT_CONNECTORS.has(phrase.toLowerCase())) {
       instructions.push({ text: phrase });
     }
   }
