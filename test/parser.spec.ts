@@ -2049,3 +2049,29 @@ describe("time-based schedules", () => {
     expect(result.longText).toContain("at 10:00 pm");
   });
 });
+
+describe("issue regression tests", () => {
+  it("excludes already consumed frequency from PRN reason (Issue 1)", () => {
+    const result = parseSig("1 tab po q4-6hr prn for pain", { locale: "th" });
+    expect(result.meta.normalized.prnReason?.text).toBe("for pain");
+    expect(result.fhir.timing?.repeat?.period).toBe(4);
+    expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
+  });
+
+  it("handles PRN before frequency (Issue 1 fallback)", () => {
+    const result = parseSig("1 tab po prn q4-6hr for pain", { locale: "th" });
+    expect(result.meta.normalized.prnReason?.text).toBe("for pain");
+    expect(result.fhir.timing?.repeat?.period).toBe(4);
+    expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
+  });
+
+  it("supports 'with meal' and 'with food' instructions (Issue 2)", () => {
+    const mealCases = ["1 tab po with meal", "1 tab po with meals", "1 tab po with food", "1 tab po cc"];
+    for (const input of mealCases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.fhir.timing?.repeat?.when).toContain("C");
+      expect(result.longText).toContain("พร้อมอาหาร");
+    }
+  });
+});
+

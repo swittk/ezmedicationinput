@@ -213,270 +213,270 @@ const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
   names: string[];
   definition: BodySiteDefinition;
 }> = [
-  {
-    names: ["eye", "eyes"],
-    definition: { coding: { code: "81745001", display: "Eye" } }
-  },
-  {
-    names: ["left eye"],
-    definition: {
-      coding: { code: "1290031003", display: "Structure of left eye proper" }
-    }
-  },
-  {
-    names: ["right eye"],
-    definition: {
-      coding: { code: "1290032005", display: "Structure of right eye proper" }
-    }
-  },
-  {
-    names: ["both eyes", "bilateral eyes"],
-    definition: { coding: { code: "362508001", display: "Both eyes, entire" } }
-  },
-  {
-    names: ["ear", "ears"],
-    definition: { coding: { code: "117590005", display: "Ear-related structure" } }
-  },
-  {
-    names: ["left ear"],
-    definition: { coding: { code: "89644007", display: "Left ear" } }
-  },
-  {
-    names: ["right ear"],
-    definition: { coding: { code: "25577004", display: "Right ear" } }
-  },
-  {
-    names: ["both ears", "bilateral ears"],
-    definition: { coding: { code: "34338003", display: "Both ears" } }
-  },
-  {
-    names: ["nostril", "nostrils"],
-    definition: { coding: { code: "1797002", display: "Naris" } }
-  },
-  {
-    names: ["left nostril", "left naris"],
-    definition: {
-      coding: { code: "723608007", display: "Structure of left anterior naris" }
-    }
-  },
-  {
-    names: ["right nostril", "right naris"],
-    definition: {
-      coding: { code: "723609004", display: "Structure of right anterior naris" }
-    }
-  },
-  {
-    names: ["nares", "anterior nares"],
-    definition: { coding: { code: "244506005", display: "Anterior nares" } }
-  },
-  {
-    names: ["nose"],
-    definition: { coding: { code: "181195007", display: "Entire nose" } }
-  },
-  {
-    names: ["mouth"],
-    definition: { coding: { code: "123851003", display: "Mouth region" } }
-  },
-  {
-    names: ["tongue", "tongues"],
-    definition: { coding: { code: "21974007", display: "Tongue" } }
-  },
-  {
-    names: ["cheek", "cheeks"],
-    definition: {
-      coding: { code: "60819002", display: "Buccal region of face" }
-    }
-  },
-  {
-    names: ["gum", "gums"],
-    definition: {
-      coding: {
-        code: "362116001",
-        display: "Entire gum and supporting structure of tooth"
+    {
+      names: ["eye", "eyes"],
+      definition: { coding: { code: "81745001", display: "Eye" } }
+    },
+    {
+      names: ["left eye"],
+      definition: {
+        coding: { code: "1290031003", display: "Structure of left eye proper" }
+      }
+    },
+    {
+      names: ["right eye"],
+      definition: {
+        coding: { code: "1290032005", display: "Structure of right eye proper" }
+      }
+    },
+    {
+      names: ["both eyes", "bilateral eyes"],
+      definition: { coding: { code: "362508001", display: "Both eyes, entire" } }
+    },
+    {
+      names: ["ear", "ears"],
+      definition: { coding: { code: "117590005", display: "Ear-related structure" } }
+    },
+    {
+      names: ["left ear"],
+      definition: { coding: { code: "89644007", display: "Left ear" } }
+    },
+    {
+      names: ["right ear"],
+      definition: { coding: { code: "25577004", display: "Right ear" } }
+    },
+    {
+      names: ["both ears", "bilateral ears"],
+      definition: { coding: { code: "34338003", display: "Both ears" } }
+    },
+    {
+      names: ["nostril", "nostrils"],
+      definition: { coding: { code: "1797002", display: "Naris" } }
+    },
+    {
+      names: ["left nostril", "left naris"],
+      definition: {
+        coding: { code: "723608007", display: "Structure of left anterior naris" }
+      }
+    },
+    {
+      names: ["right nostril", "right naris"],
+      definition: {
+        coding: { code: "723609004", display: "Structure of right anterior naris" }
+      }
+    },
+    {
+      names: ["nares", "anterior nares"],
+      definition: { coding: { code: "244506005", display: "Anterior nares" } }
+    },
+    {
+      names: ["nose"],
+      definition: { coding: { code: "181195007", display: "Entire nose" } }
+    },
+    {
+      names: ["mouth"],
+      definition: { coding: { code: "123851003", display: "Mouth region" } }
+    },
+    {
+      names: ["tongue", "tongues"],
+      definition: { coding: { code: "21974007", display: "Tongue" } }
+    },
+    {
+      names: ["cheek", "cheeks"],
+      definition: {
+        coding: { code: "60819002", display: "Buccal region of face" }
+      }
+    },
+    {
+      names: ["gum", "gums"],
+      definition: {
+        coding: {
+          code: "362116001",
+          display: "Entire gum and supporting structure of tooth"
+        }
+      }
+    },
+    {
+      names: ["tooth"],
+      definition: { coding: { code: "38199008", display: "Tooth" } }
+    },
+    {
+      names: ["teeth"],
+      definition: { coding: { code: "1162715001", display: "All teeth" } }
+    },
+    {
+      names: ["arm", "upper arm"],
+      definition: { coding: { code: "302538001", display: "Entire upper arm" } }
+    },
+    {
+      names: ["left arm", "left upper arm"],
+      definition: {
+        coding: { code: "368208006", display: "Left upper arm structure" }
+      }
+    },
+    {
+      names: ["right arm", "right upper arm"],
+      definition: { coding: { code: "368209003", display: "Right upper arm" } }
+    },
+    {
+      names: ["both arms", "bilateral arms"],
+      definition: { coding: { code: "69273007", display: "Both arms" } }
+    },
+    {
+      names: ["forearm"],
+      definition: { coding: { code: "14975008", display: "Forearm" } }
+    },
+    {
+      names: ["left forearm"],
+      definition: { coding: { code: "66480008", display: "Left forearm" } }
+    },
+    {
+      names: ["right forearm"],
+      definition: { coding: { code: "64262003", display: "Right forearm" } }
+    },
+    {
+      names: ["leg", "lower leg"],
+      definition: {
+        coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" }
+      }
+    },
+    {
+      names: ["left leg", "left lower leg"],
+      definition: { coding: { code: "213384005", display: "Entire left lower leg" } }
+    },
+    {
+      names: ["right leg", "right lower leg"],
+      definition: { coding: { code: "213289002", display: "Entire right lower leg" } }
+    },
+    {
+      names: ["both legs", "bilateral legs"],
+      definition: { coding: { code: "40927001", display: "Both legs" } }
+    },
+    {
+      names: ["thigh"],
+      definition: { coding: { code: "68367000", display: "Thigh" } }
+    },
+    {
+      names: ["left thigh"],
+      definition: { coding: { code: "61396006", display: "Left thigh" } }
+    },
+    {
+      names: ["right thigh"],
+      definition: { coding: { code: "11207009", display: "Right thigh" } }
+    },
+    {
+      names: ["hand", "hands"],
+      definition: { coding: { code: "85562004", display: "Hand" } }
+    },
+    {
+      names: ["left hand"],
+      definition: { coding: { code: "85151006", display: "Left hand" } }
+    },
+    {
+      names: ["right hand"],
+      definition: { coding: { code: "78791008", display: "Right hand" } }
+    },
+    {
+      names: ["foot", "feet"],
+      definition: { coding: { code: "56459004", display: "Foot" } }
+    },
+    {
+      names: ["left foot"],
+      definition: { coding: { code: "22335008", display: "Left foot" } }
+    },
+    {
+      names: ["right foot"],
+      definition: { coding: { code: "7769000", display: "Right foot" } }
+    },
+    {
+      names: ["abdomen", "abdominal", "belly"],
+      definition: { coding: { code: "302553009", display: "Entire abdomen" } }
+    },
+    {
+      names: ["back"],
+      definition: { coding: { code: "77568009", display: "Back" } }
+    },
+    {
+      names: ["scalp"],
+      definition: { coding: { code: "41695006", display: "Scalp" } }
+    },
+    {
+      names: ["face"],
+      definition: { coding: { code: "89545001", display: "Face" } }
+    },
+    {
+      names: ["forehead"],
+      definition: { coding: { code: "52795006", display: "Forehead" } }
+    },
+    {
+      names: ["chin"],
+      definition: {
+        coding: {
+          code: "897081006",
+          display: "Skin and/or subcutaneous tissue of chin"
+        }
+      }
+    },
+    {
+      names: ["neck"],
+      definition: { coding: { code: "45048000", display: "Neck" } }
+    },
+    {
+      names: ["buttock", "buttocks", "gluteal", "glute"],
+      definition: { coding: { code: "46862004", display: "Buttock" } }
+    },
+    {
+      names: ["left buttock", "left gluteal"],
+      definition: { coding: { code: "723979003", display: "Structure of left buttock" } }
+    },
+    {
+      names: ["right buttock", "right gluteal"],
+      definition: { coding: { code: "723980000", display: "Structure of right buttock" } }
+    },
+    {
+      names: ["muscle", "muscles"],
+      definition: {
+        coding: {
+          code: "362876008",
+          display: "All skeletal and smooth muscles of the body"
+        }
+      }
+    },
+    {
+      names: ["vein", "veins"],
+      definition: { coding: { code: "181367001", display: "Entire vein" } }
+    },
+    {
+      names: ["vagina", "vaginal"],
+      definition: { coding: { code: "76784001", display: "Vagina" } }
+    },
+    {
+      names: ["penis", "penile"],
+      definition: { coding: { code: "18911002", display: "Penis structure" } }
+    },
+    {
+      names: ["rectum", "rectal"],
+      definition: { coding: { code: "34402009", display: "Rectum" } }
+    },
+    {
+      names: ["anus"],
+      definition: { coding: { code: "181262009", display: "Entire anus" } }
+    },
+    {
+      names: ["perineum"],
+      definition: { coding: { code: "243990009", display: "Entire perineum" } }
+    },
+    {
+      names: ["skin"],
+      definition: { coding: { code: "181469002", display: "Entire skin" } }
+    },
+    {
+      names: ["hair"],
+      definition: {
+        coding: { code: "386045008", display: "Hair structure (body structure)" }
       }
     }
-  },
-  {
-    names: ["tooth"],
-    definition: { coding: { code: "38199008", display: "Tooth" } }
-  },
-  {
-    names: ["teeth"],
-    definition: { coding: { code: "1162715001", display: "All teeth" } }
-  },
-  {
-    names: ["arm", "upper arm"],
-    definition: { coding: { code: "302538001", display: "Entire upper arm" } }
-  },
-  {
-    names: ["left arm", "left upper arm"],
-    definition: {
-      coding: { code: "368208006", display: "Left upper arm structure" }
-    }
-  },
-  {
-    names: ["right arm", "right upper arm"],
-    definition: { coding: { code: "368209003", display: "Right upper arm" } }
-  },
-  {
-    names: ["both arms", "bilateral arms"],
-    definition: { coding: { code: "69273007", display: "Both arms" } }
-  },
-  {
-    names: ["forearm"],
-    definition: { coding: { code: "14975008", display: "Forearm" } }
-  },
-  {
-    names: ["left forearm"],
-    definition: { coding: { code: "66480008", display: "Left forearm" } }
-  },
-  {
-    names: ["right forearm"],
-    definition: { coding: { code: "64262003", display: "Right forearm" } }
-  },
-  {
-    names: ["leg", "lower leg"],
-    definition: {
-      coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" }
-    }
-  },
-  {
-    names: ["left leg", "left lower leg"],
-    definition: { coding: { code: "213384005", display: "Entire left lower leg" } }
-  },
-  {
-    names: ["right leg", "right lower leg"],
-    definition: { coding: { code: "213289002", display: "Entire right lower leg" } }
-  },
-  {
-    names: ["both legs", "bilateral legs"],
-    definition: { coding: { code: "40927001", display: "Both legs" } }
-  },
-  {
-    names: ["thigh"],
-    definition: { coding: { code: "68367000", display: "Thigh" } }
-  },
-  {
-    names: ["left thigh"],
-    definition: { coding: { code: "61396006", display: "Left thigh" } }
-  },
-  {
-    names: ["right thigh"],
-    definition: { coding: { code: "11207009", display: "Right thigh" } }
-  },
-  {
-    names: ["hand", "hands"],
-    definition: { coding: { code: "85562004", display: "Hand" } }
-  },
-  {
-    names: ["left hand"],
-    definition: { coding: { code: "85151006", display: "Left hand" } }
-  },
-  {
-    names: ["right hand"],
-    definition: { coding: { code: "78791008", display: "Right hand" } }
-  },
-  {
-    names: ["foot", "feet"],
-    definition: { coding: { code: "56459004", display: "Foot" } }
-  },
-  {
-    names: ["left foot"],
-    definition: { coding: { code: "22335008", display: "Left foot" } }
-  },
-  {
-    names: ["right foot"],
-    definition: { coding: { code: "7769000", display: "Right foot" } }
-  },
-  {
-    names: ["abdomen", "abdominal", "belly"],
-    definition: { coding: { code: "302553009", display: "Entire abdomen" } }
-  },
-  {
-    names: ["back"],
-    definition: { coding: { code: "77568009", display: "Back" } }
-  },
-  {
-    names: ["scalp"],
-    definition: { coding: { code: "41695006", display: "Scalp" } }
-  },
-  {
-    names: ["face"],
-    definition: { coding: { code: "89545001", display: "Face" } }
-  },
-  {
-    names: ["forehead"],
-    definition: { coding: { code: "52795006", display: "Forehead" } }
-  },
-  {
-    names: ["chin"],
-    definition: {
-      coding: {
-        code: "897081006",
-        display: "Skin and/or subcutaneous tissue of chin"
-      }
-    }
-  },
-  {
-    names: ["neck"],
-    definition: { coding: { code: "45048000", display: "Neck" } }
-  },
-  {
-    names: ["buttock", "buttocks", "gluteal", "glute"],
-    definition: { coding: { code: "46862004", display: "Buttock" } }
-  },
-  {
-    names: ["left buttock", "left gluteal"],
-    definition: { coding: { code: "723979003", display: "Structure of left buttock" } }
-  },
-  {
-    names: ["right buttock", "right gluteal"],
-    definition: { coding: { code: "723980000", display: "Structure of right buttock" } }
-  },
-  {
-    names: ["muscle", "muscles"],
-    definition: {
-      coding: {
-        code: "362876008",
-        display: "All skeletal and smooth muscles of the body"
-      }
-    }
-  },
-  {
-    names: ["vein", "veins"],
-    definition: { coding: { code: "181367001", display: "Entire vein" } }
-  },
-  {
-    names: ["vagina", "vaginal"],
-    definition: { coding: { code: "76784001", display: "Vagina" } }
-  },
-  {
-    names: ["penis", "penile"],
-    definition: { coding: { code: "18911002", display: "Penis structure" } }
-  },
-  {
-    names: ["rectum", "rectal"],
-    definition: { coding: { code: "34402009", display: "Rectum" } }
-  },
-  {
-    names: ["anus"],
-    definition: { coding: { code: "181262009", display: "Entire anus" } }
-  },
-  {
-    names: ["perineum"],
-    definition: { coding: { code: "243990009", display: "Entire perineum" } }
-  },
-  {
-    names: ["skin"],
-    definition: { coding: { code: "181469002", display: "Entire skin" } }
-  },
-  {
-    names: ["hair"],
-    definition: {
-      coding: { code: "386045008", display: "Hair structure (body structure)" }
-    }
-  }
-];
+  ];
 
 export const DEFAULT_BODY_SITE_SNOMED = objectFromEntries(
   DEFAULT_BODY_SITE_SNOMED_SOURCE.reduce<Array<[
@@ -738,6 +738,9 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   pcv: EventTiming["After Dinner"],
   wm: EventTiming.Meal,
   "with meals": EventTiming.Meal,
+  "with meal": EventTiming.Meal,
+  "with food": EventTiming.Meal,
+  cc: EventTiming.Meal,
   "@m": EventTiming.Meal,
   "@meal": EventTiming.Meal,
   "@meals": EventTiming.Meal,
@@ -1414,104 +1417,104 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
   names: string[];
   definition: PrnReasonDefinition;
 }> = [
-  {
-    names: ["pain", "ache", "aches", "pains"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
-      text: "Pain"
+    {
+      names: ["pain", "ache", "aches", "pains"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
+        text: "Pain"
+      }
+    },
+    {
+      names: ["nausea", "queasiness", "vomiting", "n/v", "nausea and vomiting"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
+        text: "Nausea"
+      }
+    },
+    {
+      names: ["itch", "itching", "itchy"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418363000",
+          display: "Itching of skin"
+        },
+        text: "Itching"
+      }
+    },
+    {
+      names: ["anxiety", "nervousness"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
+        text: "Anxiety"
+      }
+    },
+    {
+      names: ["sleep", "sleeping", "insomnia", "sleep issues"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "193462001",
+          display: "Insomnia"
+        },
+        text: "Sleep"
+      }
+    },
+    {
+      names: ["cough", "coughing"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
+        text: "Cough"
+      }
+    },
+    {
+      names: ["fever", "temperature", "pyrexia"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
+        text: "Fever"
+      }
+    },
+    {
+      names: ["spasm", "spasms", "muscle spasm"],
+      definition: {
+        coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
+        text: "Spasm"
+      }
+    },
+    {
+      names: ["constipation"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "14760008",
+          display: "Constipation"
+        },
+        text: "Constipation"
+      }
+    },
+    {
+      names: ["irritation", "irritated"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "257553007",
+          display: "Irritation"
+        },
+        text: "Irritation"
+      }
+    },
+    {
+      names: ["dyspnea", "shortness of breath", "sob", "breathlessness"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "267036007",
+          display: "Dyspnea"
+        },
+        text: "Shortness of breath"
+      }
     }
-  },
-  {
-    names: ["nausea", "queasiness", "vomiting", "n/v", "nausea and vomiting"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
-      text: "Nausea"
-    }
-  },
-  {
-    names: ["itch", "itching", "itchy"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418363000",
-        display: "Itching of skin"
-      },
-      text: "Itching"
-    }
-  },
-  {
-    names: ["anxiety", "nervousness"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
-      text: "Anxiety"
-    }
-  },
-  {
-    names: ["sleep", "sleeping", "insomnia", "sleep issues"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "193462001",
-        display: "Insomnia"
-      },
-      text: "Sleep"
-    }
-  },
-  {
-    names: ["cough", "coughing"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
-      text: "Cough"
-    }
-  },
-  {
-    names: ["fever", "temperature", "pyrexia"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
-      text: "Fever"
-    }
-  },
-  {
-    names: ["spasm", "spasms", "muscle spasm"],
-    definition: {
-      coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
-      text: "Spasm"
-    }
-  },
-  {
-    names: ["constipation"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "14760008",
-        display: "Constipation"
-      },
-      text: "Constipation"
-    }
-  },
-  {
-    names: ["irritation", "irritated"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "257553007",
-        display: "Irritation"
-      },
-      text: "Irritation"
-    }
-  },
-  {
-    names: ["dyspnea", "shortness of breath", "sob", "breathlessness"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "267036007",
-        display: "Dyspnea"
-      },
-      text: "Shortness of breath"
-    }
-  }
-];
+  ];
 
 export interface PrnReasonDictionaryEntry {
   canonical: string;
@@ -1559,158 +1562,158 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
   names: string[];
   definition: AdditionalInstructionDefinition;
 }> = [
-  {
-    names: ["with food", "with meals", "with meal", "after food", "after meals"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "311504000",
-        display: "With or after food"
-      },
-      text: "Take with or after food"
+    {
+      names: ["with food", "with meals", "with meal", "after food", "after meals"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "311504000",
+          display: "With or after food"
+        },
+        text: "Take with or after food"
+      }
+    },
+    {
+      names: ["before food", "before meals", "before meal", "1 hour before food"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "311501008",
+          display: "Half to one hour before food"
+        },
+        text: "Take before food"
+      }
+    },
+    {
+      names: ["empty stomach", "on empty stomach"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "717154004",
+          display: "Take on an empty stomach (qualifier value)"
+        },
+        text: "Take on an empty stomach"
+      }
+    },
+    {
+      names: ["with water", "with plenty of water", "drink water", "with lots of water"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "419303009",
+          display: "With plenty of water"
+        },
+        text: "Take with plenty of water"
+      }
+    },
+    {
+      names: ["dissolve in water", "mix with water", "mix in water"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "417995008",
+          display: "Dissolve or mix with water before taking"
+        },
+        text: "Dissolve or mix with water before taking"
+      }
+    },
+    {
+      names: ["avoid alcohol", "no alcohol", "no alc", "avoid alcoholic drink"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "419822006",
+          display: "Warning. Avoid alcoholic drink (qualifier value)"
+        },
+        text: "Avoid alcoholic drinks"
+      }
+    },
+    {
+      names: ["may cause drowsiness", "do not drive", "avoid driving", "no driving", "no drive"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418954008",
+          display:
+            "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)"
+        },
+        text: "May cause drowsiness; do not drive if affected"
+      }
+    },
+    {
+      names: [
+        "drowsiness avoid alcohol",
+        "may cause drowsiness avoid alcohol",
+        "do not drive avoid alcohol",
+        "drowsy avoid alc",
+        "drowsy avoid drive",
+        "drowsy avoid driving",
+        "drowsy no drive",
+        "drowsy no driving",
+        "drowsy no alc"
+      ],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418914006",
+          display:
+            "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
+        },
+        text: "May cause drowsiness; avoid driving or alcohol"
+      }
+    },
+    {
+      names: [
+        "drowsiness next day",
+        "drowsiness next day avoid alcohol",
+        "may cause drowsiness next day",
+        "may next day drowsy",
+        "may drowsy next day"
+      ],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418071006",
+          display:
+            "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
+        },
+        text: "May cause next-day drowsiness; avoid driving or alcohol"
+      }
+    },
+    {
+      names: ["avoid sun", "avoid sunlight", "avoid sun lamps"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418521000",
+          display: "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)"
+        },
+        text: "Avoid sunlight or sun lamps"
+      }
+    },
+    {
+      names: ["swallow whole", "do not chew", "do not crush", "do not crush or chew", "no chewing"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418693002",
+          display: "Swallowed whole, not chewed (qualifier value)"
+        },
+        text: "Swallow whole; do not crush or chew"
+      }
+    },
+    {
+      names: ["chew", "chewed", "sucked or chewed", "please chew", "must chew"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "418991002",
+          display: "Sucked or chewed (qualifier value)"
+        },
+        text: "Suck or chew before swallowing"
+      }
     }
-  },
-  {
-    names: ["before food", "before meals", "before meal", "1 hour before food"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "311501008",
-        display: "Half to one hour before food"
-      },
-      text: "Take before food"
-    }
-  },
-  {
-    names: ["empty stomach", "on empty stomach"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "717154004",
-        display: "Take on an empty stomach (qualifier value)"
-      },
-      text: "Take on an empty stomach"
-    }
-  },
-  {
-    names: ["with water", "with plenty of water", "drink water", "with lots of water"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "419303009",
-        display: "With plenty of water"
-      },
-      text: "Take with plenty of water"
-    }
-  },
-  {
-    names: ["dissolve in water", "mix with water", "mix in water"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "417995008",
-        display: "Dissolve or mix with water before taking"
-      },
-      text: "Dissolve or mix with water before taking"
-    }
-  },
-  {
-    names: ["avoid alcohol", "no alcohol", "no alc", "avoid alcoholic drink"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "419822006",
-        display: "Warning. Avoid alcoholic drink (qualifier value)"
-      },
-      text: "Avoid alcoholic drinks"
-    }
-  },
-  {
-    names: ["may cause drowsiness", "do not drive", "avoid driving", "no driving", "no drive"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418954008",
-        display:
-          "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)"
-      },
-      text: "May cause drowsiness; do not drive if affected"
-    }
-  },
-  {
-    names: [
-      "drowsiness avoid alcohol",
-      "may cause drowsiness avoid alcohol",
-      "do not drive avoid alcohol",
-      "drowsy avoid alc",
-      "drowsy avoid drive",
-      "drowsy avoid driving",
-      "drowsy no drive",
-      "drowsy no driving",
-      "drowsy no alc"
-    ],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418914006",
-        display:
-          "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
-      },
-      text: "May cause drowsiness; avoid driving or alcohol"
-    }
-  },
-  {
-    names: [
-      "drowsiness next day",
-      "drowsiness next day avoid alcohol",
-      "may cause drowsiness next day",
-      "may next day drowsy",
-      "may drowsy next day"
-    ],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418071006",
-        display:
-          "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)"
-      },
-      text: "May cause next-day drowsiness; avoid driving or alcohol"
-    }
-  },
-  {
-    names: ["avoid sun", "avoid sunlight", "avoid sun lamps"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418521000",
-        display: "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)"
-      },
-      text: "Avoid sunlight or sun lamps"
-    }
-  },
-  {
-    names: ["swallow whole", "do not chew", "do not crush", "do not crush or chew", "no chewing"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418693002",
-        display: "Swallowed whole, not chewed (qualifier value)"
-      },
-      text: "Swallow whole; do not crush or chew"
-    }
-  },
-  {
-    names: ["chew", "chewed", "sucked or chewed", "please chew", "must chew"],
-    definition: {
-      coding: {
-        system: SNOMED_SYSTEM,
-        code: "418991002",
-        display: "Sucked or chewed (qualifier value)"
-      },
-      text: "Suck or chew before swallowing"
-    }
-  }
-];
+  ];
 
 export interface AdditionalInstructionDictionaryEntry {
   canonical: string;

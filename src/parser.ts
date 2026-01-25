@@ -2301,10 +2301,17 @@ export function parseInternal(
     }
     const nextToken = tokens[i + 1];
     if (nextToken && !internal.consumed.has(nextToken.index)) {
-      const combo = `${token.lower} ${nextToken.lower}`;
+      const lowerNext = nextToken.lower;
+      const combo = `${token.lower} ${lowerNext}`;
       const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
       if (comboWhen) {
         applyWhenToken(internal, token, comboWhen);
+        mark(internal.consumed, nextToken);
+        continue;
+      }
+      // Issue 2: Support "with meal" and "with food" combos explicitly if needed
+      if (token.lower === "with" && (lowerNext === "meal" || lowerNext === "food")) {
+        applyWhenToken(internal, token, EventTiming.Meal);
         mark(internal.consumed, nextToken);
         continue;
       }
@@ -2631,10 +2638,19 @@ export function parseInternal(
     const reasonTokens: string[] = [];
     const reasonIndices: number[] = [];
     const reasonObjects: Token[] = [];
+    const PRN_RECLAIMABLE_CONNECTORS = new Set(["at", "to", "in", "into", "on", "onto"]);
     for (let i = prnReasonStart; i < tokens.length; i++) {
       const token = tokens[i];
       if (internal.consumed.has(token.index)) {
-        internal.consumed.delete(token.index);
+        // We only allow reclaiming certain generic connectors if they were used
+        // as standalone markers (like 'at' or 'to') and not if they were clearly
+        // part of a frequency/period instruction (which would be skipped here
+        // if they were consumed by those specific logic paths).
+        if (!PRN_RECLAIMABLE_CONNECTORS.has(token.lower)) {
+          continue;
+        }
+        // If it is a reclaimable connector, we can pull it back into the reason
+        // if it helps form a coherent phrase like 'irritation at rectum'.
       }
       reasonTokens.push(token.original);
       reasonIndices.push(token.index);
