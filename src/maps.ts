@@ -748,6 +748,9 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   breakfast: EventTiming.Breakfast,
   bfast: EventTiming.Breakfast,
   brkfst: EventTiming.Breakfast,
+  meal: EventTiming.Meal,
+  meals: EventTiming.Meal,
+  food: EventTiming.Meal,
   brk: EventTiming.Breakfast,
   cd: EventTiming.Lunch,
   lunch: EventTiming.Lunch,
@@ -804,6 +807,11 @@ registerMealKeywords(["lunch", "lunchtime"], {
 registerMealKeywords(["dinner", "dinnertime", "supper", "suppertime"], {
   pc: EventTiming["After Dinner"],
   ac: EventTiming["Before Dinner"]
+});
+
+registerMealKeywords(["meal", "meals", "food"], {
+  pc: EventTiming["After Meal"],
+  ac: EventTiming["Before Meal"]
 });
 
 export const MEAL_KEYWORDS = objectFromEntries(

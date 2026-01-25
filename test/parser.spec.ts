@@ -2045,8 +2045,47 @@ describe("time-based schedules", () => {
 
   it("formats timeOfDay in long text", () => {
     const result = parseSig("at 9:00, 10:00 pm");
-    expect(result.longText).toContain("at 9:00 am");
-    expect(result.longText).toContain("at 10:00 pm");
+    expect(result.longText).toContain("at 9:00 am, 10:00 pm");
+  });
+
+  it("formats multiple meals and times in English", () => {
+    const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
+    expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
+  });
+
+  it("formats generic 'with meals' and specific times in English", () => {
+    const result = parseSig("1 tab with meals and @ 10:00");
+    expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
+  });
+
+  it("formats complex mixed schedules in Thai", () => {
+    const cases = [
+      {
+        input: "1 tab with breakfast, with lunch, and at 9 am, 5 pm",
+        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
+      },
+      {
+        input: "1 tab with meals and @ 10:00",
+        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
+      },
+      {
+        input: "1 tab ac and @ 8:00",
+        expected: "ใช้ ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
+      }
+    ];
+
+    for (const { input, expected } of cases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.longText).toBe(expected);
+    }
+  });
+
+  it("consumes 'and' connector between schedule blocks to prevent leakage", () => {
+    const result = parseSig("1 tab with meals and at 9:00");
+    // Ensure "and" is not in additional instructions
+    expect(result.fhir.additionalInstruction).toBeUndefined();
+    expect(result.longText).not.toContain("and.");
+    expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
   });
 });
 

@@ -943,15 +943,41 @@ function tryParseTimeBasedSchedule(
   const token = tokens[index];
   if (internal.consumed.has(token.index)) return false;
 
-  const isAtPrefix = token.lower === "@" || token.lower === "at";
-  if (!isAtPrefix && !/^\d/.test(token.lower)) return false;
+  // Handle connectors like "and at" or just "and" before a time.
+  // This prevents rogue "and" from leaking into Additional Instructions
+  // when it serves as a connector between schedule parts.
+  let isAndPrefix = false;
+  let isAtPrefix = token.lower === "@" || token.lower === "at";
 
-  let nextIndex = isAtPrefix ? index + 1 : index;
+  if (token.lower === "and" && !isAtPrefix) {
+    const next = tokens[index + 1];
+    if (next && !internal.consumed.has(next.index)) {
+      const nextLower = next.lower;
+      // If "and" is followed by "at", "@", or a number, it's a connector for this time block
+      if (nextLower === "@" || nextLower === "at" || /^\d/.test(nextLower)) {
+        isAndPrefix = true;
+        if (nextLower === "@" || nextLower === "at") {
+          isAtPrefix = true;
+        }
+      }
+    }
+  }
+
+  if (!isAtPrefix && !isAndPrefix && !/^\d/.test(token.lower)) return false;
+
+  let nextIndex = index;
+  if (isAndPrefix) nextIndex++;
+  if (isAtPrefix) nextIndex++;
 
   const times: string[] = [];
   const consumedIndices: number[] = [];
   const timeTokens: string[] = [];
-  if (isAtPrefix) consumedIndices.push(index);
+
+  if (isAndPrefix) consumedIndices.push(index);
+  if (isAtPrefix) {
+    // If we have "and at", at is the second token (index + 1)
+    consumedIndices.push(isAndPrefix ? index + 1 : index);
+  }
 
   while (nextIndex < tokens.length) {
     const nextToken = tokens[nextIndex];
@@ -2294,15 +2320,19 @@ export function parseInternal(
       );
       continue;
     }
-    if (token.lower === "at" || token.lower === "@" || token.lower === "on") {
+    if (token.lower === "at" || token.lower === "@" || token.lower === "on" || token.lower === "with") {
       if (parseAnchorSequence(internal, tokens, i)) {
         continue;
       }
       if (tryParseTimeBasedSchedule(internal, tokens, i)) {
         continue;
       }
-      mark(internal.consumed, token);
-      continue;
+      // If none of the above consume it, and it's a known anchor prefix, mark it
+      // but only if it's not "with" which might be part of other phrases later.
+      if (token.lower !== "with") {
+        mark(internal.consumed, token);
+        continue;
+      }
     }
     const nextToken = tokens[i + 1];
     if (nextToken && !internal.consumed.has(nextToken.index)) {
@@ -2311,12 +2341,6 @@ export function parseInternal(
       const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
       if (comboWhen) {
         applyWhenToken(internal, token, comboWhen);
-        mark(internal.consumed, nextToken);
-        continue;
-      }
-      // Issue 2: Support "with meal" and "with food" combos explicitly if needed
-      if (token.lower === "with" && (lowerNext === "meal" || lowerNext === "food")) {
-        applyWhenToken(internal, token, EventTiming.Meal);
         mark(internal.consumed, nextToken);
         continue;
       }
@@ -3308,12 +3332,12 @@ function findAdditionalInstructionDefinition(
     if (!entry.canonical) {
       continue;
     }
+    // Check for exact canonical match first
     if (entry.canonical === canonical) {
       return entry.definition;
     }
-    if (canonical.includes(entry.canonical) || entry.canonical.includes(canonical)) {
-      return entry.definition;
-    }
+    // Avoid broad includes checks (like "with" matching "with meal") 
+    // to prevent leakage of common connectors into additional instructions.
     for (const term of entry.terms) {
       const normalizedTerm = normalizeAdditionalInstructionKey(term);
       if (!normalizedTerm) {

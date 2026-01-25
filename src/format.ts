@@ -630,6 +630,7 @@ function formatLong(internal: ParsedSigInternal): string {
   const frequencyPart = describeFrequency(internal);
   const eventParts = collectWhenPhrases(internal);
   if (internal.timeOfDay?.length) {
+    const timeStrings: string[] = [];
     for (const time of internal.timeOfDay) {
       const parts = time.split(":");
       const h = parseInt(parts[0], 10);
@@ -637,7 +638,10 @@ function formatLong(internal: ParsedSigInternal): string {
       const isAm = h < 12;
       const displayH = h % 12 || 12;
       const displayM = m < 10 ? `0${m}` : `${m}`;
-      eventParts.push(`at ${displayH}:${displayM}${isAm ? " am" : " pm"}`);
+      timeStrings.push(`${displayH}:${displayM}${isAm ? " am" : " pm"}`);
+    }
+    if (timeStrings.length > 0) {
+      eventParts.push(`at ${timeStrings.join(", ")}`);
     }
   }
   const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
