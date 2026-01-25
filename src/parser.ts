@@ -904,6 +904,131 @@ function tryParseCountBasedFrequency(
   return consumeCurrentToken;
 }
 
+function parseTimeToFhir(timeStr: string): string | undefined {
+  const clean = timeStr.toLowerCase().trim();
+  // Match 9:00, 9.00, 9:00am, 9pm, 9 am, 9
+  const match =
+    clean.match(/^(\d{1,2})[:.](\d{2})\s*(am|pm)?$/) ||
+    clean.match(/^(\d{1,2})\s*(am|pm)$/) ||
+    clean.match(/^(\d{1,2})$/);
+
+  if (!match) return undefined;
+
+  let hour = parseInt(match[1], 10);
+  let minute = 0;
+  let ampm: string | undefined;
+
+  if (match[2] && !isNaN(parseInt(match[2], 10))) {
+    minute = parseInt(match[2], 10);
+    ampm = match[3];
+  } else {
+    ampm = match[2];
+  }
+
+  if (ampm === "pm" && hour < 12) hour += 12;
+  if (ampm === "am" && hour === 12) hour = 0;
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
+
+  const h = hour < 10 ? `0${hour}` : `${hour}`;
+  const m = minute < 10 ? `0${minute}` : `${minute}`;
+  return `${h}:${m}:00`;
+}
+
+function tryParseTimeBasedSchedule(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): boolean {
+  const token = tokens[index];
+  if (internal.consumed.has(token.index)) return false;
+
+  const isAtPrefix = token.lower === "@" || token.lower === "at";
+  if (!isAtPrefix && !/^\d/.test(token.lower)) return false;
+
+  let nextIndex = isAtPrefix ? index + 1 : index;
+
+  const times: string[] = [];
+  const consumedIndices: number[] = [];
+  const timeTokens: string[] = [];
+  if (isAtPrefix) consumedIndices.push(index);
+
+  while (nextIndex < tokens.length) {
+    const nextToken = tokens[nextIndex];
+    if (!nextToken || internal.consumed.has(nextToken.index)) break;
+
+    let timeStr = nextToken.lower;
+    let lookaheadIndices: number[] = [];
+
+    // Look ahead for am/pm if current token is just a number or doesn't have am/pm
+    if (!timeStr.includes("am") && !timeStr.includes("pm")) {
+      const nextNext = tokens[nextIndex + 1];
+      if (nextNext && !internal.consumed.has(nextNext.index) && (nextNext.lower === "am" || nextNext.lower === "pm")) {
+        timeStr += nextNext.lower;
+        lookaheadIndices.push(nextIndex + 1);
+      }
+    }
+
+    const time = parseTimeToFhir(timeStr);
+    if (time) {
+      times.push(time);
+      timeTokens.push(timeStr);
+      consumedIndices.push(nextIndex);
+      for (const idx of lookaheadIndices) {
+        consumedIndices.push(idx);
+      }
+      nextIndex += 1 + lookaheadIndices.length;
+
+      // Support comma or space separated times
+      const separatorToken = tokens[nextIndex];
+      // Check if there is another time after the separator
+      if (separatorToken && (separatorToken.lower === "," || separatorToken.lower === "and")) {
+        // Peek for next time
+        let peekIndex = nextIndex + 1;
+        let peekToken = tokens[peekIndex];
+        if (peekToken) {
+          let peekStr = peekToken.lower;
+          let peekNext = tokens[peekIndex + 1];
+          if (peekNext && !internal.consumed.has(peekNext.index) && (peekNext.lower === "am" || peekNext.lower === "pm")) {
+            peekStr += peekNext.lower;
+          }
+          if (parseTimeToFhir(peekStr)) {
+            consumedIndices.push(nextIndex);
+            nextIndex++;
+            continue;
+          }
+        }
+      }
+      continue;
+    }
+    break;
+  }
+
+  if (times.length > 0) {
+    if (!isAtPrefix) {
+      const hasClearTimeFormat = timeTokens.some(
+        (t) => t.includes(":") || t.includes("am") || t.includes("pm")
+      );
+      if (!hasClearTimeFormat) {
+        return false;
+      }
+    }
+
+    internal.timeOfDay = internal.timeOfDay || [];
+    for (const time of times) {
+      if (!arrayIncludes(internal.timeOfDay, time)) {
+        internal.timeOfDay.push(time);
+      }
+    }
+    for (const idx of consumedIndices) {
+      mark(internal.consumed, tokens[idx]);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
   { pattern: /\beye(s)?\b/i, route: RouteCode["Ophthalmic route"] },
   { pattern: /\beyelid(s)?\b/i, route: RouteCode["Ophthalmic route"] },
@@ -1463,8 +1588,8 @@ function expandMealTimings(
       relation === EventTiming["Before Meal"]
         ? "before"
         : relation === EventTiming["After Meal"]
-        ? "after"
-        : "with";
+          ? "after"
+          : "with";
     addReplacement(relation, base, false);
   }
 
@@ -1678,11 +1803,11 @@ function applyWhenToken(
   mark(internal.consumed, token);
 }
 
-function parseMealContext(
+function parseAnchorSequence(
   internal: ParsedSigInternal,
   tokens: Token[],
   index: number,
-  code: EventTiming
+  prefixCode?: EventTiming
 ) {
   const token = tokens[index];
   let converted = 0;
@@ -1691,32 +1816,65 @@ function parseMealContext(
     if (internal.consumed.has(nextToken.index)) {
       continue;
     }
-    if (MEAL_CONTEXT_CONNECTORS.has(nextToken.lower)) {
+
+    const lower = nextToken.lower;
+    if (MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
       mark(internal.consumed, nextToken);
       continue;
     }
-    const meal = MEAL_KEYWORDS[nextToken.lower];
-    if (!meal) {
-      break;
+
+    const day = DAY_OF_WEEK_TOKENS[lower];
+    if (day) {
+      if (!arrayIncludes(internal.dayOfWeek, day)) {
+        internal.dayOfWeek.push(day);
+      }
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
     }
-    const whenCode =
-      code === EventTiming["After Meal"]
-        ? meal.pc
-        : code === EventTiming["Before Meal"]
-        ? meal.ac
-        : code;
-    addWhen(internal.when, whenCode);
-    mark(internal.consumed, nextToken);
-    converted++;
+
+    const meal = MEAL_KEYWORDS[lower];
+    if (meal) {
+      const whenCode =
+        prefixCode === EventTiming["After Meal"]
+          ? meal.pc
+          : prefixCode === EventTiming["Before Meal"]
+            ? meal.ac
+            : (EVENT_TIMING_TOKENS[lower] ?? meal.pc); // fallback to general or conservative default
+      addWhen(internal.when, whenCode);
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
+    }
+
+    const whenCode = EVENT_TIMING_TOKENS[lower];
+    if (whenCode) {
+      if (prefixCode && !meal) {
+        // if we have pc/ac, we only want to follow it with explicit meals
+        // to avoid over-consuming anchors that should be separate (like 'pc hs')
+        break;
+      }
+      addWhen(internal.when, whenCode);
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
+    }
+
+    break;
   }
+
   if (converted > 0) {
     mark(internal.consumed, token);
-    return;
+    return true;
   }
-  applyWhenToken(internal, token, code);
+  if (prefixCode) {
+    applyWhenToken(internal, token, prefixCode);
+    return true;
+  }
+  return false;
 }
 
-function parseSeparatedQ(
+function parseSeparatedInterval(
   internal: ParsedSigInternal,
   tokens: Token[],
   index: number,
@@ -1860,19 +2018,19 @@ export function parseInternal(
   const context = options?.context ?? undefined;
   const customRouteMap = options?.routeMap
     ? new Map(
-        objectEntries(options.routeMap).map(([key, value]) => [
-          key.toLowerCase(),
-          value
-        ])
-      )
+      objectEntries(options.routeMap).map(([key, value]) => [
+        key.toLowerCase(),
+        value
+      ])
+    )
     : undefined;
 
   const customRouteDescriptorMap = customRouteMap
     ? new Map(
-        Array.from(customRouteMap.entries())
-          .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
-          .filter(([normalized]) => normalized.length > 0)
-      )
+      Array.from(customRouteMap.entries())
+        .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
+        .filter(([normalized]) => normalized.length > 0)
+    )
     : undefined;
 
   if (tokens.length === 0) {
@@ -2075,10 +2233,14 @@ export function parseInternal(
       continue;
     }
 
-    if (token.lower === "q") {
-      if (parseSeparatedQ(internal, tokens, i, options)) {
+    if (token.lower === "q" || token.lower === "every" || token.lower === "each") {
+      if (parseSeparatedInterval(internal, tokens, i, options)) {
         continue;
       }
+    }
+
+    if (tryParseTimeBasedSchedule(internal, tokens, i)) {
+      continue;
     }
 
     if (tryParseNumericCadence(internal, tokens, i)) {
@@ -2116,15 +2278,25 @@ export function parseInternal(
     }
 
     // Event timing tokens
-    if (token.lower === "pc" || token.lower === "ac") {
-      parseMealContext(
+    if (token.lower === "pc" || token.lower === "ac" || token.lower === "after" || token.lower === "before") {
+      parseAnchorSequence(
         internal,
         tokens,
         i,
-        token.lower === "pc"
+        (token.lower === "pc" || token.lower === "after")
           ? EventTiming["After Meal"]
           : EventTiming["Before Meal"]
       );
+      continue;
+    }
+    if (token.lower === "at" || token.lower === "@" || token.lower === "on") {
+      if (parseAnchorSequence(internal, tokens, i)) {
+        continue;
+      }
+      if (tryParseTimeBasedSchedule(internal, tokens, i)) {
+        continue;
+      }
+      mark(internal.consumed, token);
       continue;
     }
     const nextToken = tokens[i + 1];
@@ -2999,10 +3171,10 @@ function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDe
   const coding = definition.coding;
   internal.siteCoding = coding?.code
     ? {
-        code: coding.code,
-        display: coding.display,
-        system: coding.system ?? SNOMED_SYSTEM
-      }
+      code: coding.code,
+      display: coding.display,
+      system: coding.system ?? SNOMED_SYSTEM
+    }
     : undefined;
   if (definition.text) {
     internal.siteText = definition.text;
@@ -3078,8 +3250,8 @@ function collectSuggestionResult(
   const suggestions = Array.isArray(result)
     ? result
     : typeof result === "object" && "suggestions" in result
-    ? (result as SiteCodeSuggestionsResult).suggestions
-    : [result];
+      ? (result as SiteCodeSuggestionsResult).suggestions
+      : [result];
   for (const suggestion of suggestions) {
     addSuggestionToMap(map, suggestion);
   }
@@ -3454,8 +3626,8 @@ function collectAdditionalInstructions(
     const key = definition?.coding?.code
       ? `code:${definition.coding.system ?? SNOMED_SYSTEM}|${definition.coding.code}`
       : canonical
-      ? `text:${canonical}`
-      : phrase.toLowerCase();
+        ? `text:${canonical}`
+        : phrase.toLowerCase();
     if (key && seen.has(key)) {
       continue;
     }
@@ -3465,10 +3637,10 @@ function collectAdditionalInstructions(
         text: definition.text ?? phrase,
         coding: definition.coding?.code
           ? {
-              code: definition.coding.code,
-              display: definition.coding.display,
-              system: definition.coding.system ?? SNOMED_SYSTEM
-            }
+            code: definition.coding.code,
+            display: definition.coding.display,
+            system: definition.coding.system ?? SNOMED_SYSTEM
+          }
           : undefined
       });
     } else {
@@ -3731,10 +3903,10 @@ function applyPrnReasonDefinition(
   const coding = definition.coding;
   internal.asNeededReasonCoding = coding?.code
     ? {
-        code: coding.code,
-        display: coding.display,
-        system: coding.system ?? SNOMED_SYSTEM
-      }
+      code: coding.code,
+      display: coding.display,
+      system: coding.system ?? SNOMED_SYSTEM
+    }
     : undefined;
   if (definition.text && !internal.asNeededReason) {
     internal.asNeededReason = definition.text;
@@ -3747,10 +3919,10 @@ function definitionToPrnSuggestion(
   return {
     coding: definition.coding?.code
       ? {
-          code: definition.coding.code,
-          display: definition.coding.display,
-          system: definition.coding.system ?? SNOMED_SYSTEM
-        }
+        code: definition.coding.code,
+        display: definition.coding.display,
+        system: definition.coding.system ?? SNOMED_SYSTEM
+      }
       : undefined,
     text: definition.text ?? definition.coding?.display
   };
@@ -3767,8 +3939,8 @@ function addReasonSuggestionToMap(
   const key = coding?.code
     ? `${coding.system ?? SNOMED_SYSTEM}|${coding.code}`
     : suggestion.text
-    ? `text:${suggestion.text.toLowerCase()}`
-    : undefined;
+      ? `text:${suggestion.text.toLowerCase()}`
+      : undefined;
   if (!key || map.has(key)) {
     return;
   }
@@ -3790,8 +3962,8 @@ function collectReasonSuggestionResult(
   const suggestions = Array.isArray(result)
     ? result
     : typeof result === "object" && "suggestions" in result
-    ? (result as PrnReasonSuggestionsResult).suggestions
-    : [result];
+      ? (result as PrnReasonSuggestionsResult).suggestions
+      : [result];
   for (const suggestion of suggestions) {
     addReasonSuggestionToMap(map, suggestion);
   }

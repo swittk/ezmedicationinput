@@ -43,6 +43,7 @@ export interface ParsedSigInternal {
   periodUnit?: FhirPeriodUnit;
   dayOfWeek: FhirDayOfWeek[];
   when: EventTiming[];
+  timeOfDay?: string[];
   timingCode?: string;
   asNeeded?: boolean;
   asNeededReason?: string;

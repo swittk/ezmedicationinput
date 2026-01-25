@@ -47,6 +47,10 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     repeat.when = [...internal.when];
     hasRepeat = true;
   }
+  if (internal.timeOfDay?.length) {
+    repeat.timeOfDay = [...internal.timeOfDay];
+    hasRepeat = true;
+  }
 
   if (hasRepeat) {
     dosage.timing = { repeat };
@@ -115,12 +119,12 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
   if (internal.siteText || internal.siteCoding?.code) {
     const coding = internal.siteCoding?.code
       ? [
-          {
-            system: internal.siteCoding.system ?? SNOMED_SYSTEM,
-            code: internal.siteCoding.code,
-            display: internal.siteCoding.display
-          }
-        ]
+        {
+          system: internal.siteCoding.system ?? SNOMED_SYSTEM,
+          code: internal.siteCoding.code,
+          display: internal.siteCoding.display
+        }
+      ]
       : undefined;
     dosage.site = {
       text: internal.siteText,
@@ -133,12 +137,12 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
       text: instruction.text,
       coding: instruction.coding?.code
         ? [
-            {
-              system: instruction.coding.system ?? SNOMED_SYSTEM,
-              code: instruction.coding.code,
-              display: instruction.coding.display
-            }
-          ]
+          {
+            system: instruction.coding.system ?? SNOMED_SYSTEM,
+            code: instruction.coding.code,
+            display: instruction.coding.display
+          }
+        ]
         : undefined
     }));
   }
@@ -181,11 +185,14 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       : [],
     when: dosage.timing?.repeat?.when
       ? dosage.timing.repeat.when.filter((value): value is EventTiming =>
-          arrayIncludes(
-            objectValues(EventTiming) as EventTiming[],
-            value as EventTiming
-          )
+        arrayIncludes(
+          objectValues(EventTiming) as EventTiming[],
+          value as EventTiming
         )
+      )
+      : [],
+    timeOfDay: dosage.timing?.repeat?.timeOfDay
+      ? [...dosage.timing.repeat.timeOfDay]
       : [],
     warnings: [],
     timingCode: dosage.timing?.code?.coding?.[0]?.code,
@@ -238,10 +245,10 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       text: concept.text,
       coding: concept.coding?.[0]
         ? {
-            code: concept.coding[0].code,
-            display: concept.coding[0].display,
-            system: concept.coding[0].system
-          }
+          code: concept.coding[0].code,
+          display: concept.coding[0].display,
+          system: concept.coding[0].system
+        }
         : undefined
     }));
   }

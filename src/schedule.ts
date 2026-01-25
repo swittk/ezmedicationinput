@@ -7,9 +7,13 @@ import {
   FrequencyFallbackTimes,
   MealOffsetMap,
   NextDueDoseConfig,
-  NextDueDoseOptions
+  NextDueDoseOptions,
+  TotalUnitsOptions,
+  TotalUnitsResult
 } from "./types";
 import { arrayIncludes } from "./utils/array";
+import { getUnitCategory, convertValue } from "./utils/units";
+import { parseStrengthIntoRatio } from "./utils/strength";
 
 /**
  * Default institution times used when a dosage only specifies frequency without
@@ -282,7 +286,10 @@ function makeZonedDate(
 /** Convenience wrapper around makeZonedDate for day-level math. */
 function makeZonedDateFromDay(base: Date, timeZone: string, clock: string): Date | null {
   const { year, month, day } = getTimeParts(base, timeZone);
-  const [hour, minute, second] = clock.split(":").map((value) => Number(value));
+  const parts = clock.split(":").map((value) => Number(value));
+  const hour = parts[0] ?? 0;
+  const minute = parts[1] ?? 0;
+  const second = parts[2] ?? 0;
   return makeZonedDate(timeZone, year, month, day, hour, minute, second);
 }
 
@@ -299,7 +306,16 @@ function startOfLocalDay(date: Date, timeZone: string): Date {
 /** Adds a number of calendar days while remaining aligned to the time zone. */
 function addLocalDays(date: Date, days: number, timeZone: string): Date {
   const { year, month, day } = getTimeParts(date, timeZone);
-  const zoned = makeZonedDate(timeZone, year, month, day + days, 0, 0, 0);
+  const rollover = new Date(Date.UTC(year, month - 1, day + days));
+  const zoned = makeZonedDate(
+    timeZone,
+    rollover.getUTCFullYear(),
+    rollover.getUTCMonth() + 1,
+    rollover.getUTCDate(),
+    0,
+    0,
+    0
+  );
   if (!zoned) {
     throw new Error("Unable to shift local day – invalid calendar combination");
   }
@@ -1076,4 +1092,245 @@ function addCalendarMonths(date: Date, months: number, timeZone: string): Date {
     throw new Error("Unable to resolve monthly advancement – invalid calendar date");
   }
   return final;
+}
+
+
+
+
+/**
+ * Internal helper to count dose events within a time range.
+ */
+function countScheduleEvents(
+  dosage: FhirDosage,
+  from: Date,
+  to: Date,
+  config: NextDueDoseConfig,
+  baseTime: Date,
+  orderedAt: Date | null,
+  limit?: number
+): number {
+  const timing = dosage.timing;
+  const repeat = timing?.repeat;
+  if (!timing || !repeat) return 0;
+
+  const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
+  const enforceDayFilter = dayFilter.size > 0;
+  const seen = new Set<string>();
+  let count = 0;
+  const timeZone = config.timeZone!;
+
+  const recordCandidate = (candidate: Date | null) => {
+    if (!candidate) return false;
+    if (candidate < from || candidate >= to) return false;
+    const iso = formatZonedIso(candidate, timeZone);
+    if (seen.has(iso)) return false;
+    seen.add(iso);
+    count += 1;
+    return true;
+  };
+
+  const whenCodes = repeat.when ?? [];
+  const timeOfDayEntries = repeat.timeOfDay ?? [];
+
+  if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
+    const expanded = expandWhenCodes(whenCodes, config, repeat);
+    if (timeOfDayEntries.length > 0) {
+      for (const clock of timeOfDayEntries) {
+        expanded.push({ time: normalizeClock(clock), dayShift: 0 });
+      }
+      expanded.sort((a, b) => {
+        if (a.dayShift !== b.dayShift) return a.dayShift - b.dayShift;
+        return a.time.localeCompare(b.time);
+      });
+    }
+
+    if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
+      const immediateSource = orderedAt ?? from;
+      if (!orderedAt || orderedAt >= from) {
+        recordCandidate(immediateSource);
+      }
+    }
+
+    if (expanded.length === 0) return count;
+
+    let currentDay = startOfLocalDay(from, timeZone);
+    let iterations = 0;
+    const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
+    while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
+      const weekday = getLocalWeekday(currentDay, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        for (const entry of expanded) {
+          const targetDay = entry.dayShift === 0
+            ? currentDay
+            : addLocalDays(currentDay, entry.dayShift, timeZone);
+          const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+          if (zoned) recordCandidate(zoned);
+        }
+      }
+      currentDay = addLocalDays(currentDay, 1, timeZone);
+      iterations += 1;
+    }
+    return count;
+  }
+
+  const treatAsInterval =
+    !!repeat.period &&
+    !!repeat.periodUnit &&
+    (!repeat.frequency ||
+      repeat.periodUnit !== "d" ||
+      (repeat.frequency === 1 && repeat.period > 1)) &&
+    !enforceDayFilter;
+
+  if (treatAsInterval) {
+    const increment = createIntervalStepper(repeat, timeZone);
+    if (!increment) return count;
+
+    let current = baseTime;
+    let guard = 0;
+    const maxIterations = limit !== undefined ? limit * 1000 : 10000;
+
+    // Advance to "from"
+    while (current < from && guard < maxIterations) {
+      const next = increment(current);
+      if (!next || next.getTime() === current.getTime()) break;
+      current = next;
+      guard++;
+    }
+
+    while (current < to && count < (limit ?? Infinity) && guard < maxIterations) {
+      const weekday = getLocalWeekday(current, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        recordCandidate(current);
+      }
+      const next = increment(current);
+      if (!next || next.getTime() === current.getTime()) break;
+      current = next;
+      guard += 1;
+    }
+    return count;
+  }
+
+  if (repeat.frequency && repeat.period && repeat.periodUnit) {
+    const clocks = resolveFrequencyClocks(timing, config);
+    if (clocks.length === 0) return count;
+
+    let currentDay = startOfLocalDay(from, timeZone);
+    let iterations = 0;
+    const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
+    while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
+      const weekday = getLocalWeekday(currentDay, timeZone);
+      if (!enforceDayFilter || dayFilter.has(weekday)) {
+        for (const clock of clocks) {
+          const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
+          if (zoned) recordCandidate(zoned);
+        }
+      }
+      currentDay = addLocalDays(currentDay, 1, timeZone);
+      iterations += 1;
+    }
+  }
+
+  // Fallback for dayOfWeek with period/periodUnit but no explicit frequency/clocks
+  if (enforceDayFilter && repeat.period && repeat.periodUnit) {
+    const clocks = ["08:00:00"]; // Default to morning if no times specified
+    let currentDayIter = startOfLocalDay(from, timeZone);
+    let iter = 0;
+    const maxIter = limit !== undefined ? limit * 31 : 365 * 31;
+    while (count < (limit ?? Infinity) && currentDayIter < to && iter < maxIter) {
+      const weekday = getLocalWeekday(currentDayIter, timeZone);
+      if (dayFilter.has(weekday)) {
+        for (const clock of clocks) {
+          const zoned = makeZonedDateFromDay(currentDayIter, timeZone, clock);
+          if (zoned) recordCandidate(zoned);
+        }
+      }
+      currentDayIter = addLocalDays(currentDayIter, 1, timeZone);
+      iter += 1;
+    }
+    return count;
+  }
+
+  return count;
+}
+
+export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
+  const { dosage, durationValue, durationUnit, roundToMultiple, context } = options;
+  const from = coerceDate(options.from, "from");
+  const providedConfig = options.config;
+  const timeZone = options.timeZone ?? providedConfig?.timeZone;
+  if (!timeZone) {
+    throw new Error("timeZone is required for calculateTotalUnits");
+  }
+
+  const eventClock: EventClockMap = {
+    ...(providedConfig?.eventClock ?? {}),
+    ...(options.eventClock ?? {})
+  };
+  const mealOffsets: MealOffsetMap = {
+    ...(providedConfig?.mealOffsets ?? {}),
+    ...(options.mealOffsets ?? {})
+  };
+  const frequencyDefaults = mergeFrequencyDefaults(
+    providedConfig?.frequencyDefaults,
+    options.frequencyDefaults
+  );
+
+  const config: NextDueDoseConfig = {
+    timeZone,
+    eventClock,
+    mealOffsets,
+    frequencyDefaults
+  };
+
+  // Calculate end date based on duration
+  let endDay: Date;
+  const dummyRepeat: FhirTimingRepeat = { period: durationValue, periodUnit: durationUnit };
+  const stepper = createIntervalStepper(dummyRepeat, timeZone);
+  if (stepper) {
+    endDay = stepper(from) || from;
+  } else {
+    endDay = from;
+  }
+
+  const count = countScheduleEvents(
+    dosage,
+    from,
+    endDay,
+    config,
+    options.orderedAt ? coerceDate(options.orderedAt, "orderedAt") : from,
+    options.orderedAt ? coerceDate(options.orderedAt, "orderedAt") : null,
+    2000
+  );
+
+  const doseQuantity = dosage.doseAndRate?.[0]?.doseQuantity?.value ?? 0;
+  let totalUnits = count * doseQuantity;
+
+  if (roundToMultiple && roundToMultiple > 0) {
+    totalUnits = Math.ceil(totalUnits / roundToMultiple) * roundToMultiple;
+  }
+
+  const result: TotalUnitsResult = { totalUnits };
+
+  // Handle containers
+  const containerValue = context?.containerValue;
+  const containerUnit = context?.containerUnit;
+  const doseUnit = dosage.doseAndRate?.[0]?.doseQuantity?.unit;
+
+  if (containerValue && containerValue > 0) {
+    let effectiveUnits = totalUnits;
+    if (containerUnit && doseUnit && containerUnit !== doseUnit) {
+      let strength = context?.strengthRatio;
+      if (!strength && context?.strength) {
+        strength = parseStrengthIntoRatio(context.strength, context) || undefined;
+      }
+
+      const converted = convertValue(totalUnits, doseUnit, containerUnit, strength as any);
+      if (converted !== null) {
+        effectiveUnits = converted;
+      }
+    }
+    result.totalContainers = Math.ceil(effectiveUnits / containerValue);
+  }
+
+  return result;
 }

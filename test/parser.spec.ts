@@ -1112,6 +1112,46 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toContain("once weekly on Wednesday");
   });
 
+  it("parses every X days with multiple times", () => {
+    const result = parseSig("every 2 days at 9:00, 12:00, 18:00");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 2,
+      periodUnit: "d",
+      timeOfDay: ["09:00:00", "12:00:00", "18:00:00"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses q X days with multiple anchors", () => {
+    const result = parseSig("q 3 days before lunch");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 3,
+      periodUnit: "d",
+      when: [EventTiming["Before Lunch"]]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses multi-anchor intervals with connectors", () => {
+    const result = parseSig("2 tabs q 2 days at morning, dinner", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 2,
+      periodUnit: "d",
+      when: ["MORN", "CV"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses weekly with on connector", () => {
+    const result = parseSig("weekly on Monday and Friday");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "fri"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
   it("parses q1mo", () => {
     const result = parseSig("q1mo");
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("MO");
@@ -1969,5 +2009,43 @@ describe("assume single discrete dose", () => {
       assumeSingleDiscreteDose: true
     });
     expect(result.fhir.doseAndRate).toBeUndefined();
+  });
+});
+
+describe("time-based schedules", () => {
+  it("parses single 24h time", () => {
+    const result = parseSig("at 9:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
+  });
+
+  it("parses multiple comma-separated times", () => {
+    const result = parseSig("at 9:00, 10:00, 22:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "10:00:00", "22:00:00"]);
+  });
+
+  it("parses times with am/pm", () => {
+    const result = parseSig("@ 9 am, 2 pm, 10:30 pm");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "14:00:00", "22:30:00"]);
+  });
+
+  it("parses dot-separated times", () => {
+    const result = parseSig("at 14.00, 16.30");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["14:00:00", "16:30:00"]);
+  });
+
+  it("parses times without prefix", () => {
+    const result = parseSig("9:00 10:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "10:00:00"]);
+  });
+
+  it("formats timeOfDay in short text", () => {
+    const result = parseSig("at 9:00, 22:00");
+    expect(result.shortText).toContain("09:00,22:00");
+  });
+
+  it("formats timeOfDay in long text", () => {
+    const result = parseSig("at 9:00, 10:00 pm");
+    expect(result.longText).toContain("at 9:00 am");
+    expect(result.longText).toContain("at 10:00 pm");
   });
 });

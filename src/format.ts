@@ -606,6 +606,9 @@ function formatShort(internal: ParsedSigInternal): string {
         .join(",")
     );
   }
+  if (internal.timeOfDay?.length) {
+    parts.push(internal.timeOfDay.map(t => t.slice(0, 5)).join(","));
+  }
   if (internal.count !== undefined) {
     parts.push(`x${stripTrailingZero(internal.count)}`);
   }
@@ -626,6 +629,17 @@ function formatLong(internal: ParsedSigInternal): string {
   const routePart = buildRoutePhrase(internal, grammar, Boolean(sitePart));
   const frequencyPart = describeFrequency(internal);
   const eventParts = collectWhenPhrases(internal);
+  if (internal.timeOfDay?.length) {
+    for (const time of internal.timeOfDay) {
+      const parts = time.split(":");
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const isAm = h < 12;
+      const displayH = h % 12 || 12;
+      const displayM = m < 10 ? `0${m}` : `${m}`;
+      eventParts.push(`at ${displayH}:${displayM}${isAm ? " am" : " pm"}`);
+    }
+  }
   const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
   const dayPart = describeDayOfWeek(internal);
   const countPart = internal.count
