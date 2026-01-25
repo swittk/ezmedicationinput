@@ -2053,14 +2053,14 @@ describe("time-based schedules", () => {
 describe("issue regression tests", () => {
   it("excludes already consumed frequency from PRN reason (Issue 1)", () => {
     const result = parseSig("1 tab po q4-6hr prn for pain", { locale: "th" });
-    expect(result.meta.normalized.prnReason?.text).toBe("for pain");
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
     expect(result.fhir.timing?.repeat?.period).toBe(4);
     expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
   });
 
   it("handles PRN before frequency (Issue 1 fallback)", () => {
     const result = parseSig("1 tab po prn q4-6hr for pain", { locale: "th" });
-    expect(result.meta.normalized.prnReason?.text).toBe("for pain");
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
     expect(result.fhir.timing?.repeat?.period).toBe(4);
     expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
   });
@@ -2071,6 +2071,28 @@ describe("issue regression tests", () => {
       const result = parseSig(input, { locale: "th" });
       expect(result.fhir.timing?.repeat?.when).toContain("C");
       expect(result.longText).toContain("พร้อมอาหาร");
+    }
+  });
+
+  it("consumes optional 'for' after 'prn' to avoid duplication", () => {
+    const result = parseSig("1 tab po prn for pain");
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
+    expect(result.longText).toBe("Take 1 tablet by mouth as needed for pain.");
+  });
+
+  it("consumes other introductory PRN connectors", () => {
+    const cases = [
+      { input: "1 tab prn if pain", reason: "pain" },
+      { input: "1 tab prn when pain", reason: "pain" },
+      { input: "1 tab prn upon pain", reason: "pain" },
+      { input: "1 tab prn due to pain", reason: "pain" },
+      { input: "1 tab prn to pain", reason: "pain" }
+    ];
+
+    for (const { input, reason } of cases) {
+      const result = parseSig(input);
+      expect(result.meta.normalized.prnReason?.text).toBe(reason);
+      expect(result.longText).toContain(`as needed for ${reason}`);
     }
   });
 });

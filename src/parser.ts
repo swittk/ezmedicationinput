@@ -2045,7 +2045,12 @@ export function parseInternal(
     if (token.lower === "prn") {
       internal.asNeeded = true;
       mark(internal.consumed, token);
-      prnReasonStart = i + 1;
+      let reasonIndex = i + 1;
+      if (tokens[reasonIndex]?.lower === "for") {
+        mark(internal.consumed, tokens[reasonIndex]);
+        reasonIndex += 1;
+      }
+      prnReasonStart = reasonIndex;
       break;
     }
     if (token.lower === "as" && tokens[i + 1]?.lower === "needed") {
@@ -2652,6 +2657,25 @@ export function parseInternal(
         // If it is a reclaimable connector, we can pull it back into the reason
         // if it helps form a coherent phrase like 'irritation at rectum'.
       }
+
+      // If we haven't started collecting the reason yet, we should skip introductory
+      // connectors to avoid phrases like "as needed for if pain".
+      const PRN_INTRODUCTIONS = new Set(["for", "if", "when", "upon", "due", "to"]);
+      if (reasonTokens.length === 0 && PRN_INTRODUCTIONS.has(token.lower)) {
+        // Special handling for "due to" - if we skipped "due", we should also skip "to"
+        if (token.lower === "due") {
+          const next = tokens[i + 1];
+          if (next && next.lower === "to") {
+            mark(internal.consumed, token);
+            mark(internal.consumed, next);
+            i++; // skip next token in loop
+            continue;
+          }
+        }
+        mark(internal.consumed, token);
+        continue;
+      }
+
       reasonTokens.push(token.original);
       reasonIndices.push(token.index);
       reasonObjects.push(token);
