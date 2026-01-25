@@ -3659,7 +3659,7 @@ function collectAdditionalInstructions(
       if (/\s/.test(ch)) {
         continue;
       }
-      if (/-|;|:|\.|,/.test(ch)) {
+      if (/-|;|:|\.|\,/.test(ch)) {
         separatorDetected = true;
       }
       break;
@@ -3668,9 +3668,6 @@ function collectAdditionalInstructions(
   const sourceText = range
     ? internal.input.slice(range.start, range.end)
     : joined;
-  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
-    return;
-  }
   const normalized = sourceText
     .replace(/\s*[-:]+\s*/g, "; ")
     .replace(/\s*(?:\r?\n)+\s*/g, "; ")
@@ -3679,6 +3676,22 @@ function collectAdditionalInstructions(
     .split(/(?:;|\.)/)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
+
+  // If no punctuation was detected, we only collect if at least one segment matches a known definition.
+  // This avoids capturing random trailing text as instructions unless it's codified.
+  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
+    const hasKnownDefinition = segments.some((phrase) => {
+      const canonical = normalizeAdditionalInstructionKey(phrase);
+      return (
+        DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS[canonical] ||
+        findAdditionalInstructionDefinition(phrase, canonical)
+      );
+    });
+    if (!hasKnownDefinition) {
+      return;
+    }
+  }
+
   const phrases = segments.length ? segments : [joined];
   const seen = new Set<string>();
   const instructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }> = [];

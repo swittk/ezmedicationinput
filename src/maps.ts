@@ -1788,3 +1788,29 @@ export const DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS = objectFromEntries(
     return entries;
   }, [])
 ) as Record<string, AdditionalInstructionDefinition>;
+
+/**
+ * Finds a default PRN reason definition by its SNOMED coding.
+ */
+export function findPrnReasonDefinitionByCoding(
+  system: string,
+  code: string
+): PrnReasonDefinition | undefined {
+  return DEFAULT_PRN_REASON_SOURCE.find(
+    (source) =>
+      source.definition.coding?.system === system && source.definition.coding?.code === code
+  )?.definition;
+}
+
+/**
+ * Finds a default additional instruction definition by its SNOMED coding.
+ */
+export function findAdditionalInstructionDefinitionByCoding(
+  system: string,
+  code: string
+): AdditionalInstructionDefinition | undefined {
+  return DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE.find(
+    (source) =>
+      source.definition.coding?.system === system && source.definition.coding?.code === code
+  )?.definition;
+}

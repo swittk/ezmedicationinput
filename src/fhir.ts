@@ -1,6 +1,12 @@
 import { formatInternal } from "./format";
 import { ParsedSigInternal } from "./internal-types";
-import { ROUTE_BY_SNOMED, ROUTE_SNOMED, ROUTE_TEXT } from "./maps";
+import {
+  ROUTE_BY_SNOMED,
+  ROUTE_SNOMED,
+  ROUTE_TEXT,
+  findAdditionalInstructionDefinitionByCoding,
+  findPrnReasonDefinitionByCoding
+} from "./maps";
 import {
   EventTiming,
   FhirCodeableConcept,
@@ -233,24 +239,40 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
 
   const reasonCoding = dosage.asNeededFor?.[0]?.coding?.[0];
   if (reasonCoding?.code) {
+    const defaultDef = findPrnReasonDefinitionByCoding(
+      reasonCoding.system ?? SNOMED_SYSTEM,
+      reasonCoding.code
+    );
     internal.asNeededReasonCoding = {
       code: reasonCoding.code,
       display: reasonCoding.display,
-      system: reasonCoding.system
+      system: reasonCoding.system,
+      i18n: defaultDef?.i18n
     };
   }
 
   if (dosage.additionalInstruction?.length) {
-    internal.additionalInstructions = dosage.additionalInstruction.map((concept) => ({
-      text: concept.text,
-      coding: concept.coding?.[0]
-        ? {
-          code: concept.coding[0].code,
-          display: concept.coding[0].display,
-          system: concept.coding[0].system
-        }
-        : undefined
-    }));
+    internal.additionalInstructions = dosage.additionalInstruction.map((concept) => {
+      const coding = concept.coding?.[0];
+      const defaultDef = coding?.code
+        ? findAdditionalInstructionDefinitionByCoding(
+          coding.system ?? SNOMED_SYSTEM,
+          coding.code
+        )
+        : undefined;
+
+      return {
+        text: concept.text,
+        coding: coding?.code
+          ? {
+            code: coding.code,
+            display: coding.display,
+            system: coding.system,
+            i18n: defaultDef?.i18n
+          }
+          : undefined
+      };
+    });
   }
 
 
