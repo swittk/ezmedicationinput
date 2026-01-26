@@ -774,6 +774,7 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   hs: EventTiming["Before Sleep"],
   bedtime: EventTiming["Before Sleep"],
   bed: EventTiming["Before Sleep"],
+  sleep: EventTiming["Before Sleep"],
   wake: EventTiming.Wake,
   waking: EventTiming.Wake,
   stat: EventTiming.Immediate
@@ -1472,6 +1473,18 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
         },
         text: "Sleep",
         i18n: { th: "นอนหลับ" }
+      }
+    },
+    {
+      names: ["sleepiness", "sleepy", "drowsiness", "drowsy"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "79519003",
+          display: "Drowsiness"
+        },
+        text: "Sleepiness",
+        i18n: { th: "ง่วงนอน" }
       }
     },
     {

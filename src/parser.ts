@@ -1812,10 +1812,17 @@ function applyWhenToken(
 
 function isTimingAnchorOrPrefix(
   tokens: Token[],
-  index: number
+  index: number,
+  prnReasonStart?: number
 ): boolean {
   const token = tokens[index];
   if (!token) return false;
+
+  // Cautious handling of "sleep" in PRN zone
+  if (prnReasonStart !== undefined && index >= prnReasonStart && token.lower === "sleep") {
+    return false;
+  }
+
   const lower = token.lower;
   const nextToken = tokens[index + 1];
   const comboKey = nextToken ? `${lower} ${nextToken.lower}` : undefined;
@@ -2311,7 +2318,7 @@ export function parseInternal(
 
     // Skip connectors if they are followed by recognized timing tokens or prefixes
     if (MEAL_CONTEXT_CONNECTORS.has(token.lower) || token.lower === ",") {
-      if (isTimingAnchorOrPrefix(tokens, i + 1)) {
+      if (isTimingAnchorOrPrefix(tokens, i + 1, prnReasonStart)) {
         mark(internal.consumed, token);
         continue;
       }
@@ -2362,8 +2369,14 @@ export function parseInternal(
     }
     const whenCode = EVENT_TIMING_TOKENS[token.lower];
     if (whenCode) {
-      applyWhenToken(internal, token, whenCode);
-      continue;
+      // If we are in the PRN zone, be cautious about common reason words like "sleep"
+      // unless they were already handled by combo/anchor logic (which happens above).
+      if (prnReasonStart !== undefined && i >= prnReasonStart && token.lower === "sleep") {
+        // Leave for PRN reason
+      } else {
+        applyWhenToken(internal, token, whenCode);
+        continue;
+      }
     }
 
     // Day of week
