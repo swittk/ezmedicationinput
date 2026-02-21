@@ -114,4 +114,17 @@ describe("suggestSig", () => {
       false,
     );
   });
+
+  it("supports time-based suggestions", () => {
+    const suggestions = suggestSig("at 9");
+    // Should suggest 9:00 am and 9:00 pm at least
+    expect(suggestions.some(s => s.includes("at 9:00 am"))).toBe(true);
+    expect(suggestions.some(s => s.includes("at 9:00 pm"))).toBe(true);
+  });
+
+  it("completes partial times", () => {
+    const suggestions = suggestSig("at 14:3");
+    expect(suggestions.some(s => s.includes("at 14:30"))).toBe(true);
+  });
 });
+

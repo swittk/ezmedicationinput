@@ -715,7 +715,8 @@ function formatAsNeededThai(internal: ParsedSigInternal): string | undefined {
     return undefined;
   }
   if (internal.asNeededReason) {
-    return `ใช้เมื่อจำเป็นสำหรับ ${internal.asNeededReason}`;
+    const translation = internal.asNeededReasonCoding?.i18n?.th;
+    return `ใช้เมื่อจำเป็นสำหรับ ${translation || internal.asNeededReason}`;
   }
   return "ใช้เมื่อจำเป็น";
 }
@@ -755,6 +756,10 @@ function formatShortThai(internal: ParsedSigInternal): string {
       parts.push(events.join(" "));
     }
   }
+  if (internal.timeOfDay?.length) {
+    const times = internal.timeOfDay.map((t) => t.slice(0, 5)).join(",");
+    parts.push(times);
+  }
   if (internal.dayOfWeek.length) {
     const days = internal.dayOfWeek
       .map((d) => DAY_NAMES_THAI[d]?.replace(/^วัน/, "") ?? d)
@@ -778,6 +783,20 @@ function formatLongThai(internal: ParsedSigInternal): string {
   const routePart = buildRoutePhraseThai(internal, grammar, Boolean(sitePart));
   const frequencyPart = describeFrequencyThai(internal);
   const eventParts = collectWhenPhrasesThai(internal);
+  if (internal.timeOfDay?.length) {
+    const timeStrings: string[] = [];
+    for (const time of internal.timeOfDay) {
+      const parts = time.split(":");
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const displayM = m < 10 ? `0${m}` : `${m}`;
+      const displayH = h < 10 ? `0${h}` : `${h}`;
+      timeStrings.push(`${displayH}:${displayM}`);
+    }
+    if (timeStrings.length > 0) {
+      eventParts.push(`เวลา ${timeStrings.join(", ")}`);
+    }
+  }
   const timing = combineFrequencyAndEventsThai(frequencyPart, eventParts);
   const dayPart = describeDayOfWeekThai(internal);
   const countPart =
@@ -811,9 +830,39 @@ function formatLongThai(internal: ParsedSigInternal): string {
 
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   if (!body) {
-    return `${grammar.verb}.`;
+    const instructionText = formatAdditionalInstructionsThai(internal);
+    if (!instructionText) {
+      return `${grammar.verb}.`;
+    }
+    return `${grammar.verb}. ${instructionText}`.trim();
   }
-  return `${grammar.verb} ${body}.`;
+  const instructionText = formatAdditionalInstructionsThai(internal);
+  const baseSentence = `${grammar.verb} ${body}.`;
+  return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
+}
+
+function formatAdditionalInstructionsThai(internal: ParsedSigInternal): string | undefined {
+  if (!internal.additionalInstructions?.length) {
+    return undefined;
+  }
+  const phrases = internal.additionalInstructions
+    .map((instruction) => {
+      const translation = instruction.coding?.i18n?.th;
+      if (translation) return translation;
+      const original = instruction.text || instruction.coding?.display;
+      if (!original) return undefined;
+      return original.trim();
+    })
+    .filter((text): text is string => Boolean(text))
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+  if (!phrases.length) {
+    return undefined;
+  }
+  return phrases
+    .map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`))
+    .join(" ")
+    .trim();
 }
 
 function stripTrailingZero(value: number): string {

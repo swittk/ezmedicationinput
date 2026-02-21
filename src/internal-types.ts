@@ -43,19 +43,20 @@ export interface ParsedSigInternal {
   periodUnit?: FhirPeriodUnit;
   dayOfWeek: FhirDayOfWeek[];
   when: EventTiming[];
+  timeOfDay?: string[];
   timingCode?: string;
   asNeeded?: boolean;
   asNeededReason?: string;
-  asNeededReasonCoding?: FhirCoding;
+  asNeededReasonCoding?: FhirCoding & { i18n?: Record<string, string> };
   warnings: string[];
   siteText?: string;
   siteSource?: "abbreviation" | "text";
   siteTokenIndices: Set<number>;
-  siteCoding?: FhirCoding;
+  siteCoding?: FhirCoding & { i18n?: Record<string, string> };
   siteLookupRequest?: SiteCodeLookupRequest;
   siteLookups: SiteLookupDetail[];
   customSiteHints?: Set<string>;
   prnReasonLookupRequest?: PrnReasonLookupRequest;
   prnReasonLookups: PrnReasonLookupDetail[];
-  additionalInstructions: Array<{ text?: string; coding?: FhirCoding }>;
+  additionalInstructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }>;
 }

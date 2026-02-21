@@ -352,6 +352,58 @@ Key rules:
 
 `from` is required and marks the evaluation window. `orderedAt` is optional—when supplied it acts as the baseline for interval calculations; otherwise the `from` timestamp is reused. The options bag also accepts `timeZone`, `eventClock`, `mealOffsets`, and `frequencyDefaults` at the top level (mirroring the legacy `config` object). `limit` defaults to 10 when omitted.
 
+### Medication amount calculation
+
+`calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges (using the high value), and unit conversions between doses and containers.
+
+```ts
+import { calculateTotalUnits, parseSig } from "ezmedicationinput";
+
+const { fhir } = parseSig("1x3 po pc");
+
+const result = calculateTotalUnits({
+  dosage: fhir,
+  from: "2024-01-01T08:00:00Z",
+  durationValue: 7,
+  durationUnit: "d",
+  timeZone: "Asia/Bangkok",
+  context: {
+    containerValue: 30, // 30 tabs per bottle
+    containerUnit: "tab"
+  }
+});
+
+// → { totalUnits: 21, totalContainers: 1 }
+```
+
+It can also handle strength-based conversions (e.g. calculating how many 100mL bottles are needed for a 500mg TID dose of a 250mg/5mL suspension).
+
+### Strength parsing
+
+Use `parseStrength` to normalize medication strength strings into FHIR-compliant **Quantity** or **Ratio** structures. It understands percentages, ratios, and composite strengths.
+
+```ts
+import { parseStrength } from "ezmedicationinput";
+
+// Percentage (infers g/100mL for liquids or g/100g for solids)
+parseStrength("1%", { dosageForm: "cream" }); 
+// → { strengthRatio: { numerator: { value: 1, unit: "g" }, denominator: { value: 100, unit: "g" } } }
+
+// Ratios
+parseStrength("250mg/5mL");
+// → { strengthRatio: { numerator: { value: 250, unit: "mg" }, denominator: { value: 5, unit: "mL" } } }
+
+// Composite (sums components into a single ratio)
+parseStrength("875mg + 125mg");
+// → { strengthQuantity: { value: 1000, unit: "mg" } }
+
+// Simple Quantity
+parseStrength("500mg");
+// → { strengthQuantity: { value: 500, unit: "mg" } }
+```
+
+`parseStrengthIntoRatio` is also available if you specifically need a FHIR Ratio object regardless of the denominator.
+
 ### Ocular & intravitreal shortcuts
 
 The parser recognizes ophthalmic shorthands such as `OD`, `OS`, `OU`, `LE`, `RE`, and `BE`, as well as intravitreal-specific tokens including `IVT`, `IVTOD`, `IVTOS`, `IVTLE`, `IVTBE`, `VOD`, and `VOS`. Intravitreal sigs require an eye side; the parser surfaces a warning if one is missing so downstream workflows can prompt the clinician for clarification.

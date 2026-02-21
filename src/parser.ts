@@ -232,6 +232,9 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "early evening": EventTiming["Early Evening"],
   "late evening": EventTiming["Late Evening"],
   "after sleep": EventTiming["After Sleep"],
+  "before bed": EventTiming["Before Sleep"],
+  "before bedtime": EventTiming["Before Sleep"],
+  "before sleep": EventTiming["Before Sleep"],
   "upon waking": EventTiming.Wake
 };
 
@@ -904,6 +907,135 @@ function tryParseCountBasedFrequency(
   return consumeCurrentToken;
 }
 
+function parseTimeToFhir(timeStr: string): string | undefined {
+  const clean = timeStr.toLowerCase().trim();
+  // Match 9:00, 9.00, 9:00am, 9pm, 9 am, 9
+  const match =
+    clean.match(/^(\d{1,2})[:.](\d{2})\s*(am|pm)?$/) ||
+    clean.match(/^(\d{1,2})\s*(am|pm)$/) ||
+    clean.match(/^(\d{1,2})$/);
+
+  if (!match) return undefined;
+
+  let hour = parseInt(match[1], 10);
+  let minute = 0;
+  let ampm: string | undefined;
+
+  if (match[2] && !isNaN(parseInt(match[2], 10))) {
+    minute = parseInt(match[2], 10);
+    ampm = match[3];
+  } else {
+    ampm = match[2];
+  }
+
+  if (ampm === "pm" && hour < 12) hour += 12;
+  if (ampm === "am" && hour === 12) hour = 0;
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
+
+  const h = hour < 10 ? `0${hour}` : `${hour}`;
+  const m = minute < 10 ? `0${minute}` : `${minute}`;
+  return `${h}:${m}:00`;
+}
+
+function tryParseTimeBasedSchedule(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): boolean {
+  const token = tokens[index];
+  if (internal.consumed.has(token.index)) return false;
+
+  let isAtPrefix = token.lower === "@" || token.lower === "at";
+  if (!isAtPrefix && !/^\d/.test(token.lower)) return false;
+
+  let nextIndex = index;
+  if (isAtPrefix) nextIndex++;
+
+  const times: string[] = [];
+  const consumedIndices: number[] = [];
+  const timeTokens: string[] = [];
+
+  if (isAtPrefix) {
+    consumedIndices.push(index);
+  }
+
+  while (nextIndex < tokens.length) {
+    const nextToken = tokens[nextIndex];
+    if (!nextToken || internal.consumed.has(nextToken.index)) break;
+
+    let timeStr = nextToken.lower;
+    let lookaheadIndices: number[] = [];
+
+    // Look ahead for am/pm if current token is just a number or doesn't have am/pm
+    if (!timeStr.includes("am") && !timeStr.includes("pm")) {
+      const nextNext = tokens[nextIndex + 1];
+      if (nextNext && !internal.consumed.has(nextNext.index) && (nextNext.lower === "am" || nextNext.lower === "pm")) {
+        timeStr += nextNext.lower;
+        lookaheadIndices.push(nextIndex + 1);
+      }
+    }
+
+    const time = parseTimeToFhir(timeStr);
+    if (time) {
+      times.push(time);
+      timeTokens.push(timeStr);
+      consumedIndices.push(nextIndex);
+      for (const idx of lookaheadIndices) {
+        consumedIndices.push(idx);
+      }
+      nextIndex += 1 + lookaheadIndices.length;
+
+      // Support comma or space separated times
+      const separatorToken = tokens[nextIndex];
+      // Check if there is another time after the separator
+      if (separatorToken && (separatorToken.lower === "," || separatorToken.lower === "and")) {
+        // Peek for next time
+        let peekIndex = nextIndex + 1;
+        let peekToken = tokens[peekIndex];
+        if (peekToken) {
+          let peekStr = peekToken.lower;
+          let peekNext = tokens[peekIndex + 1];
+          if (peekNext && !internal.consumed.has(peekNext.index) && (peekNext.lower === "am" || peekNext.lower === "pm")) {
+            peekStr += peekNext.lower;
+          }
+          if (parseTimeToFhir(peekStr)) {
+            consumedIndices.push(nextIndex);
+            nextIndex++;
+            continue;
+          }
+        }
+      }
+      continue;
+    }
+    break;
+  }
+
+  if (times.length > 0) {
+    if (!isAtPrefix) {
+      const hasClearTimeFormat = timeTokens.some(
+        (t) => t.includes(":") || t.includes("am") || t.includes("pm")
+      );
+      if (!hasClearTimeFormat) {
+        return false;
+      }
+    }
+
+    internal.timeOfDay = internal.timeOfDay || [];
+    for (const time of times) {
+      if (!arrayIncludes(internal.timeOfDay, time)) {
+        internal.timeOfDay.push(time);
+      }
+    }
+    for (const idx of consumedIndices) {
+      mark(internal.consumed, tokens[idx]);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
   { pattern: /\beye(s)?\b/i, route: RouteCode["Ophthalmic route"] },
   { pattern: /\beyelid(s)?\b/i, route: RouteCode["Ophthalmic route"] },
@@ -1463,8 +1595,8 @@ function expandMealTimings(
       relation === EventTiming["Before Meal"]
         ? "before"
         : relation === EventTiming["After Meal"]
-        ? "after"
-        : "with";
+          ? "after"
+          : "with";
     addReplacement(relation, base, false);
   }
 
@@ -1678,11 +1810,38 @@ function applyWhenToken(
   mark(internal.consumed, token);
 }
 
-function parseMealContext(
+function isTimingAnchorOrPrefix(
+  tokens: Token[],
+  index: number,
+  prnReasonStart?: number
+): boolean {
+  const token = tokens[index];
+  if (!token) return false;
+
+  // Cautious handling of "sleep" in PRN zone
+  if (prnReasonStart !== undefined && index >= prnReasonStart && token.lower === "sleep") {
+    return false;
+  }
+
+  const lower = token.lower;
+  const nextToken = tokens[index + 1];
+  const comboKey = nextToken ? `${lower} ${nextToken.lower}` : undefined;
+
+  return Boolean(
+    EVENT_TIMING_TOKENS[lower] ||
+    TIMING_ABBREVIATIONS[lower] ||
+    (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
+    (lower === "pc" || lower === "ac" || lower === "after" || lower === "before") ||
+    (lower === "at" || lower === "@" || lower === "on" || lower === "with") ||
+    /^\d/.test(lower)
+  );
+}
+
+function parseAnchorSequence(
   internal: ParsedSigInternal,
   tokens: Token[],
   index: number,
-  code: EventTiming
+  prefixCode?: EventTiming
 ) {
   const token = tokens[index];
   let converted = 0;
@@ -1691,32 +1850,65 @@ function parseMealContext(
     if (internal.consumed.has(nextToken.index)) {
       continue;
     }
-    if (MEAL_CONTEXT_CONNECTORS.has(nextToken.lower)) {
+
+    const lower = nextToken.lower;
+    if (MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
       mark(internal.consumed, nextToken);
       continue;
     }
-    const meal = MEAL_KEYWORDS[nextToken.lower];
-    if (!meal) {
-      break;
+
+    const day = DAY_OF_WEEK_TOKENS[lower];
+    if (day) {
+      if (!arrayIncludes(internal.dayOfWeek, day)) {
+        internal.dayOfWeek.push(day);
+      }
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
     }
-    const whenCode =
-      code === EventTiming["After Meal"]
-        ? meal.pc
-        : code === EventTiming["Before Meal"]
-        ? meal.ac
-        : code;
-    addWhen(internal.when, whenCode);
-    mark(internal.consumed, nextToken);
-    converted++;
+
+    const meal = MEAL_KEYWORDS[lower];
+    if (meal) {
+      const whenCode =
+        prefixCode === EventTiming["After Meal"]
+          ? meal.pc
+          : prefixCode === EventTiming["Before Meal"]
+            ? meal.ac
+            : (EVENT_TIMING_TOKENS[lower] ?? meal.pc); // fallback to general or conservative default
+      addWhen(internal.when, whenCode);
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
+    }
+
+    const whenCode = EVENT_TIMING_TOKENS[lower];
+    if (whenCode) {
+      if (prefixCode && !meal) {
+        // if we have pc/ac, we only want to follow it with explicit meals
+        // to avoid over-consuming anchors that should be separate (like 'pc hs')
+        break;
+      }
+      addWhen(internal.when, whenCode);
+      mark(internal.consumed, nextToken);
+      converted++;
+      continue;
+    }
+
+    break;
   }
+
   if (converted > 0) {
     mark(internal.consumed, token);
-    return;
+    return true;
   }
-  applyWhenToken(internal, token, code);
+  if (prefixCode) {
+    applyWhenToken(internal, token, prefixCode);
+    return true;
+  }
+  return false;
 }
 
-function parseSeparatedQ(
+function parseSeparatedInterval(
   internal: ParsedSigInternal,
   tokens: Token[],
   index: number,
@@ -1860,19 +2052,19 @@ export function parseInternal(
   const context = options?.context ?? undefined;
   const customRouteMap = options?.routeMap
     ? new Map(
-        objectEntries(options.routeMap).map(([key, value]) => [
-          key.toLowerCase(),
-          value
-        ])
-      )
+      objectEntries(options.routeMap).map(([key, value]) => [
+        key.toLowerCase(),
+        value
+      ])
+    )
     : undefined;
 
   const customRouteDescriptorMap = customRouteMap
     ? new Map(
-        Array.from(customRouteMap.entries())
-          .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
-          .filter(([normalized]) => normalized.length > 0)
-      )
+      Array.from(customRouteMap.entries())
+        .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
+        .filter(([normalized]) => normalized.length > 0)
+    )
     : undefined;
 
   if (tokens.length === 0) {
@@ -1887,7 +2079,12 @@ export function parseInternal(
     if (token.lower === "prn") {
       internal.asNeeded = true;
       mark(internal.consumed, token);
-      prnReasonStart = i + 1;
+      let reasonIndex = i + 1;
+      if (tokens[reasonIndex]?.lower === "for") {
+        mark(internal.consumed, tokens[reasonIndex]);
+        reasonIndex += 1;
+      }
+      prnReasonStart = reasonIndex;
       break;
     }
     if (token.lower === "as" && tokens[i + 1]?.lower === "needed") {
@@ -2075,10 +2272,14 @@ export function parseInternal(
       continue;
     }
 
-    if (token.lower === "q") {
-      if (parseSeparatedQ(internal, tokens, i, options)) {
+    if (token.lower === "q" || token.lower === "every" || token.lower === "each") {
+      if (parseSeparatedInterval(internal, tokens, i, options)) {
         continue;
       }
+    }
+
+    if (tryParseTimeBasedSchedule(internal, tokens, i)) {
+      continue;
     }
 
     if (tryParseNumericCadence(internal, tokens, i)) {
@@ -2115,25 +2316,49 @@ export function parseInternal(
       continue;
     }
 
+    // Skip connectors if they are followed by recognized timing tokens or prefixes
+    if (MEAL_CONTEXT_CONNECTORS.has(token.lower) || token.lower === ",") {
+      if (isTimingAnchorOrPrefix(tokens, i + 1, prnReasonStart)) {
+        mark(internal.consumed, token);
+        continue;
+      }
+    }
+
     // Event timing tokens
-    if (token.lower === "pc" || token.lower === "ac") {
-      parseMealContext(
+    const nextToken = tokens[i + 1];
+    if (nextToken && !internal.consumed.has(nextToken.index)) {
+      const lowerNext = nextToken.lower;
+      const combo = `${token.lower} ${lowerNext}`;
+      const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
+      if (comboWhen) {
+        applyWhenToken(internal, token, comboWhen);
+        mark(internal.consumed, nextToken);
+        continue;
+      }
+    }
+
+    if (token.lower === "pc" || token.lower === "ac" || token.lower === "after" || token.lower === "before") {
+      parseAnchorSequence(
         internal,
         tokens,
         i,
-        token.lower === "pc"
+        (token.lower === "pc" || token.lower === "after")
           ? EventTiming["After Meal"]
           : EventTiming["Before Meal"]
       );
       continue;
     }
-    const nextToken = tokens[i + 1];
-    if (nextToken && !internal.consumed.has(nextToken.index)) {
-      const combo = `${token.lower} ${nextToken.lower}`;
-      const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
-      if (comboWhen) {
-        applyWhenToken(internal, token, comboWhen);
-        mark(internal.consumed, nextToken);
+    if (token.lower === "at" || token.lower === "@" || token.lower === "on" || token.lower === "with") {
+      if (parseAnchorSequence(internal, tokens, i)) {
+        continue;
+      }
+      if (tryParseTimeBasedSchedule(internal, tokens, i)) {
+        continue;
+      }
+      // If none of the above consume it, and it's a known anchor prefix, mark it
+      // but only if it's not "with" which might be part of other phrases later.
+      if (token.lower !== "with") {
+        mark(internal.consumed, token);
         continue;
       }
     }
@@ -2144,8 +2369,14 @@ export function parseInternal(
     }
     const whenCode = EVENT_TIMING_TOKENS[token.lower];
     if (whenCode) {
-      applyWhenToken(internal, token, whenCode);
-      continue;
+      // If we are in the PRN zone, be cautious about common reason words like "sleep"
+      // unless they were already handled by combo/anchor logic (which happens above).
+      if (prnReasonStart !== undefined && i >= prnReasonStart && token.lower === "sleep") {
+        // Leave for PRN reason
+      } else {
+        applyWhenToken(internal, token, whenCode);
+        continue;
+      }
     }
 
     // Day of week
@@ -2459,11 +2690,39 @@ export function parseInternal(
     const reasonTokens: string[] = [];
     const reasonIndices: number[] = [];
     const reasonObjects: Token[] = [];
+    const PRN_RECLAIMABLE_CONNECTORS = new Set(["at", "to", "in", "into", "on", "onto"]);
     for (let i = prnReasonStart; i < tokens.length; i++) {
       const token = tokens[i];
       if (internal.consumed.has(token.index)) {
-        internal.consumed.delete(token.index);
+        // We only allow reclaiming certain generic connectors if they were used
+        // as standalone markers (like 'at' or 'to') and not if they were clearly
+        // part of a frequency/period instruction (which would be skipped here
+        // if they were consumed by those specific logic paths).
+        if (!PRN_RECLAIMABLE_CONNECTORS.has(token.lower)) {
+          continue;
+        }
+        // If it is a reclaimable connector, we can pull it back into the reason
+        // if it helps form a coherent phrase like 'irritation at rectum'.
       }
+
+      // If we haven't started collecting the reason yet, we should skip introductory
+      // connectors to avoid phrases like "as needed for if pain".
+      const PRN_INTRODUCTIONS = new Set(["for", "if", "when", "upon", "due", "to"]);
+      if (reasonTokens.length === 0 && PRN_INTRODUCTIONS.has(token.lower)) {
+        // Special handling for "due to" - if we skipped "due", we should also skip "to"
+        if (token.lower === "due") {
+          const next = tokens[i + 1];
+          if (next && next.lower === "to") {
+            mark(internal.consumed, token);
+            mark(internal.consumed, next);
+            i++; // skip next token in loop
+            continue;
+          }
+        }
+        mark(internal.consumed, token);
+        continue;
+      }
+
       reasonTokens.push(token.original);
       reasonIndices.push(token.index);
       reasonObjects.push(token);
@@ -2999,10 +3258,10 @@ function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDe
   const coding = definition.coding;
   internal.siteCoding = coding?.code
     ? {
-        code: coding.code,
-        display: coding.display,
-        system: coding.system ?? SNOMED_SYSTEM
-      }
+      code: coding.code,
+      display: coding.display,
+      system: coding.system ?? SNOMED_SYSTEM
+    }
     : undefined;
   if (definition.text) {
     internal.siteText = definition.text;
@@ -3078,8 +3337,8 @@ function collectSuggestionResult(
   const suggestions = Array.isArray(result)
     ? result
     : typeof result === "object" && "suggestions" in result
-    ? (result as SiteCodeSuggestionsResult).suggestions
-    : [result];
+      ? (result as SiteCodeSuggestionsResult).suggestions
+      : [result];
   for (const suggestion of suggestions) {
     addSuggestionToMap(map, suggestion);
   }
@@ -3096,12 +3355,12 @@ function findAdditionalInstructionDefinition(
     if (!entry.canonical) {
       continue;
     }
+    // Check for exact canonical match first
     if (entry.canonical === canonical) {
       return entry.definition;
     }
-    if (canonical.includes(entry.canonical) || entry.canonical.includes(canonical)) {
-      return entry.definition;
-    }
+    // Avoid broad includes checks (like "with" matching "with meal") 
+    // to prevent leakage of common connectors into additional instructions.
     for (const term of entry.terms) {
       const normalizedTerm = normalizeAdditionalInstructionKey(term);
       if (!normalizedTerm) {
@@ -3423,7 +3682,7 @@ function collectAdditionalInstructions(
       if (/\s/.test(ch)) {
         continue;
       }
-      if (/-|;|:|\.|,/.test(ch)) {
+      if (/-|;|:|\.|\,/.test(ch)) {
         separatorDetected = true;
       }
       break;
@@ -3432,9 +3691,6 @@ function collectAdditionalInstructions(
   const sourceText = range
     ? internal.input.slice(range.start, range.end)
     : joined;
-  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
-    return;
-  }
   const normalized = sourceText
     .replace(/\s*[-:]+\s*/g, "; ")
     .replace(/\s*(?:\r?\n)+\s*/g, "; ")
@@ -3443,9 +3699,25 @@ function collectAdditionalInstructions(
     .split(/(?:;|\.)/)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
+
+  // If no punctuation was detected, we only collect if at least one segment matches a known definition.
+  // This avoids capturing random trailing text as instructions unless it's codified.
+  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
+    const hasKnownDefinition = segments.some((phrase) => {
+      const canonical = normalizeAdditionalInstructionKey(phrase);
+      return (
+        DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS[canonical] ||
+        findAdditionalInstructionDefinition(phrase, canonical)
+      );
+    });
+    if (!hasKnownDefinition) {
+      return;
+    }
+  }
+
   const phrases = segments.length ? segments : [joined];
   const seen = new Set<string>();
-  const instructions: Array<{ text?: string; coding?: FhirCoding }> = [];
+  const instructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }> = [];
   for (const phrase of phrases) {
     const canonical = normalizeAdditionalInstructionKey(phrase);
     const definition =
@@ -3454,8 +3726,8 @@ function collectAdditionalInstructions(
     const key = definition?.coding?.code
       ? `code:${definition.coding.system ?? SNOMED_SYSTEM}|${definition.coding.code}`
       : canonical
-      ? `text:${canonical}`
-      : phrase.toLowerCase();
+        ? `text:${canonical}`
+        : phrase.toLowerCase();
     if (key && seen.has(key)) {
       continue;
     }
@@ -3465,13 +3737,14 @@ function collectAdditionalInstructions(
         text: definition.text ?? phrase,
         coding: definition.coding?.code
           ? {
-              code: definition.coding.code,
-              display: definition.coding.display,
-              system: definition.coding.system ?? SNOMED_SYSTEM
-            }
+            code: definition.coding.code,
+            display: definition.coding.display,
+            system: definition.coding.system ?? SNOMED_SYSTEM,
+            i18n: definition.i18n
+          }
           : undefined
       });
-    } else {
+    } else if (!MEAL_CONTEXT_CONNECTORS.has(phrase.toLowerCase())) {
       instructions.push({ text: phrase });
     }
   }
@@ -3731,10 +4004,11 @@ function applyPrnReasonDefinition(
   const coding = definition.coding;
   internal.asNeededReasonCoding = coding?.code
     ? {
-        code: coding.code,
-        display: coding.display,
-        system: coding.system ?? SNOMED_SYSTEM
-      }
+      code: coding.code,
+      display: coding.display,
+      system: coding.system ?? SNOMED_SYSTEM,
+      i18n: definition.i18n
+    }
     : undefined;
   if (definition.text && !internal.asNeededReason) {
     internal.asNeededReason = definition.text;
@@ -3747,10 +4021,10 @@ function definitionToPrnSuggestion(
   return {
     coding: definition.coding?.code
       ? {
-          code: definition.coding.code,
-          display: definition.coding.display,
-          system: definition.coding.system ?? SNOMED_SYSTEM
-        }
+        code: definition.coding.code,
+        display: definition.coding.display,
+        system: definition.coding.system ?? SNOMED_SYSTEM
+      }
       : undefined,
     text: definition.text ?? definition.coding?.display
   };
@@ -3767,8 +4041,8 @@ function addReasonSuggestionToMap(
   const key = coding?.code
     ? `${coding.system ?? SNOMED_SYSTEM}|${coding.code}`
     : suggestion.text
-    ? `text:${suggestion.text.toLowerCase()}`
-    : undefined;
+      ? `text:${suggestion.text.toLowerCase()}`
+      : undefined;
   if (!key || map.has(key)) {
     return;
   }
@@ -3790,8 +4064,8 @@ function collectReasonSuggestionResult(
   const suggestions = Array.isArray(result)
     ? result
     : typeof result === "object" && "suggestions" in result
-    ? (result as PrnReasonSuggestionsResult).suggestions
-    : [result];
+      ? (result as PrnReasonSuggestionsResult).suggestions
+      : [result];
   for (const suggestion of suggestions) {
     addReasonSuggestionToMap(map, suggestion);
   }

@@ -442,6 +442,44 @@ function canonicalizeForMatching(value: string): string {
   return canonicalizeLowercaseForMatching(value.toLowerCase());
 }
 
+function buildTimeTokens(input: string): string[] {
+  const tokens = new Set<string>();
+
+  // Add common times
+  for (let i = 1; i <= 12; i++) {
+    tokens.add(`at ${i}:00 am`);
+    tokens.add(`at ${i}:00 pm`);
+  }
+
+  // Analyze input for specific time requests to provide more granular suggestions
+  const match = input.match(/(?:at|@)\s*(\d{1,2})(?::(\d{0,2}))?/i);
+  if (match) {
+    const h = parseInt(match[1], 10);
+    if (h >= 1 && h <= 12) {
+      const m = match[2] || "00";
+      if (m.length === 1) {
+        tokens.add(`at ${h}:${m}0 am`);
+        tokens.add(`at ${h}:${m}0 pm`);
+      } else {
+        tokens.add(`at ${h}:${m} am`);
+        tokens.add(`at ${h}:${m} pm`);
+      }
+    } else if (h > 12 && h < 24) {
+      // Input seems to be 24h, but we format as am/pm usually.
+      // Let's add the 24h format as well if that's what they are typing?
+      // Or convert to am/pm? Let's add both for robustness.
+      const m = match[2] || "00";
+      if (m.length === 1) {
+        tokens.add(`at ${h}:${m}0`);
+      } else {
+        tokens.add(`at ${h}:${m}`);
+      }
+    }
+  }
+
+  return [...tokens];
+}
+
 function tokensMatch(
   prefixTokens: readonly string[],
   candidateTokens: readonly string[],
@@ -622,6 +660,7 @@ function generateCandidateDirections(
   doseValues: readonly string[],
   prnReasons: readonly string[],
   intervalTokens: readonly string[],
+  timeTokens: readonly string[],
   whenSequences: readonly string[][],
   limit: number,
   matcher: CandidateMatcher,
@@ -669,6 +708,7 @@ function generateCandidateDirections(
     whenSequences === PRECOMPUTED_WHEN_SEQUENCES
       ? PRECOMPUTED_WHEN_SEQUENCE_SUFFIXES
       : whenSequences.map((sequence) => ` ${sequence.join(" ")}`);
+  const timeSuffixes = timeTokens.map((token) => ` ${token}`);
 
   for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
     const pair = pairs[pairIndex];
@@ -763,6 +803,22 @@ function generateCandidateDirections(
         }
       }
       if (push(route + whenSuffix, routeLower + whenSuffix)) {
+        return suggestions;
+      }
+    }
+
+    for (let timeIndex = 0; timeIndex < timeSuffixes.length; timeIndex += 1) {
+      const timeSuffix = timeSuffixes[timeIndex];
+      for (let unitIndex = 0; unitIndex < unitDoseVariants.length; unitIndex += 1) {
+        const doseBases = unitDoseVariants[unitIndex];
+        for (let doseIndex = 0; doseIndex < doseBases.length; doseIndex += 1) {
+          const base = doseBases[doseIndex];
+          if (push(base.value + timeSuffix, base.lower + timeSuffix)) {
+            return suggestions;
+          }
+        }
+      }
+      if (push(route + timeSuffix, routeLower + timeSuffix)) {
         return suggestions;
       }
     }
@@ -907,6 +963,7 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const doseValues = buildDoseValues(input);
   const prnReasons = buildPrnReasons(options?.prnReasons);
   const intervalTokens = buildIntervalTokens(input);
+  const timeTokens = buildTimeTokens(input);
   const whenSequences = PRECOMPUTED_WHEN_SEQUENCES;
   const matcher: CandidateMatcher = (candidate, candidateLower) =>
     matchesPrefix(candidate, candidateLower, prefixContext);
@@ -915,6 +972,7 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
     doseValues,
     prnReasons,
     intervalTokens,
+    timeTokens,
     whenSequences,
     limit,
     matcher,

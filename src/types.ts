@@ -294,6 +294,12 @@ export const RouteCode = SNOMEDCTRouteCodes;
 
 export interface MedicationContext {
   dosageForm?: string;
+  /** "Simple" strength string; might be the only way strength is provided
+   * for discrete units this is the amount of medication for unit e.g. "500 mg" (1 tablet), or for mixed tablets might be like "400 mg + 80 mg"
+   * for things like creams or fluids or syrupsit might be "2%", 5 g/100g, 100mg/ 100 g, 262 mg/15 mL, 200 mg/2 mL, 1 mg/dL, or "400 mg/5mL + 80 mg/5mL"
+   * In the "x + y" case, the strengthQuantity/strengthRatio will be the sum of the two ingredients.
+   */
+  strength?: string;
   strengthQuantity?: FhirQuantity;
   strengthRatio?: FhirRatio;
   strengthCodeableConcept?: FhirCodeableConcept;
@@ -301,9 +307,9 @@ export interface MedicationContext {
   containerUnit?: string;
   defaultUnit?: string;
   mealRelation?:
-    | (typeof EventTiming)["Before Meal"]
-    | (typeof EventTiming)["After Meal"]
-    | (typeof EventTiming)["Meal"];
+  | (typeof EventTiming)["Before Meal"]
+  | (typeof EventTiming)["After Meal"]
+  | (typeof EventTiming)["Meal"];
 }
 
 export interface FormatOptions {
@@ -332,12 +338,14 @@ export interface CodeableConceptDefinition {
   coding?: FhirCoding;
   text?: string;
   aliases?: string[];
+  /** Optional translations for different locales (e.g., { "th": "ปวด" }) */
+  i18n?: Record<string, string>;
 }
 
-export interface PrnReasonDefinition extends CodeableConceptDefinition {}
+export interface PrnReasonDefinition extends CodeableConceptDefinition { }
 
 export interface AdditionalInstructionDefinition
-  extends CodeableConceptDefinition {}
+  extends CodeableConceptDefinition { }
 
 export interface TextRange {
   /** Inclusive start index of the matched substring within the original input. */
@@ -371,7 +379,7 @@ export interface SiteCodeLookupRequest {
   range?: TextRange;
 }
 
-export interface SiteCodeResolution extends BodySiteDefinition {}
+export interface SiteCodeResolution extends BodySiteDefinition { }
 
 export interface SiteCodeSuggestion {
   coding: BodySiteCode;
@@ -426,12 +434,12 @@ export type PrnReasonSuggestionResolver = (
   | null
   | undefined
   | Promise<
-      | PrnReasonSuggestionsResult
-      | PrnReasonSuggestion[]
-      | PrnReasonSuggestion
-      | null
-      | undefined
-    >;
+    | PrnReasonSuggestionsResult
+    | PrnReasonSuggestion[]
+    | PrnReasonSuggestion
+    | null
+    | undefined
+  >;
 
 /**
  * Allows callers to override the parser's automatic site resolution for a
@@ -566,8 +574,8 @@ export interface ParseOptions extends FormatOptions {
    * fails or a `{reason}` placeholder explicitly requests lookup.
    */
   prnReasonSuggestionResolvers?:
-    | PrnReasonSuggestionResolver
-    | PrnReasonSuggestionResolver[];
+  | PrnReasonSuggestionResolver
+  | PrnReasonSuggestionResolver[];
 }
 
 export interface ParseResult {
@@ -658,4 +666,17 @@ export interface NextDueDoseOptions {
   mealOffsets?: MealOffsetMap;
   frequencyDefaults?: FrequencyFallbackTimes;
   config?: NextDueDoseConfig;
+}
+
+export interface TotalUnitsResult {
+  totalUnits: number;
+  totalContainers?: number;
+}
+
+export interface TotalUnitsOptions extends NextDueDoseOptions {
+  dosage: FhirDosage;
+  durationValue: number;
+  durationUnit: FhirPeriodUnit;
+  roundToMultiple?: number;
+  context?: MedicationContext;
 }

@@ -21,7 +21,8 @@ import {
 export { parseInternal } from "./parser";
 export { suggestSig } from "./suggest";
 export * from "./types";
-export { nextDueDoses } from "./schedule";
+export { nextDueDoses, calculateTotalUnits } from "./schedule";
+export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
 export {
   getRegisteredSigLocalizations,
   registerSigLocalization,
@@ -110,39 +111,39 @@ export function fromFhirDosage(
         unit: internal.unit,
         site: internal.siteText || internal.siteCoding?.code
           ? {
-              text: internal.siteText,
-              coding: internal.siteCoding?.code
-                ? {
-                    code: internal.siteCoding.code,
-                    display: internal.siteCoding.display,
-                    system: internal.siteCoding.system
-                  }
-                : undefined
-            }
+            text: internal.siteText,
+            coding: internal.siteCoding?.code
+              ? {
+                code: internal.siteCoding.code,
+                display: internal.siteCoding.display,
+                system: internal.siteCoding.system
+              }
+              : undefined
+          }
           : undefined,
         prnReason: internal.asNeededReason || internal.asNeededReasonCoding?.code
           ? {
-              text: internal.asNeededReason,
-              coding: internal.asNeededReasonCoding?.code
-                ? {
-                    code: internal.asNeededReasonCoding.code,
-                    display: internal.asNeededReasonCoding.display,
-                    system: internal.asNeededReasonCoding.system
-                  }
-                : undefined
-            }
+            text: internal.asNeededReason,
+            coding: internal.asNeededReasonCoding?.code
+              ? {
+                code: internal.asNeededReasonCoding.code,
+                display: internal.asNeededReasonCoding.display,
+                system: internal.asNeededReasonCoding.system
+              }
+              : undefined
+          }
           : undefined,
         additionalInstructions: internal.additionalInstructions?.length
           ? internal.additionalInstructions.map((instruction) => ({
-              text: instruction.text,
-              coding: instruction.coding?.code
-                ? {
-                    code: instruction.coding.code,
-                    display: instruction.coding.display,
-                    system: instruction.coding.system
-                  }
-                : undefined
-            }))
+            text: instruction.text,
+            coding: instruction.coding?.code
+              ? {
+                code: instruction.coding.code,
+                display: instruction.coding.display,
+                system: instruction.coding.system
+              }
+              : undefined
+          }))
           : undefined
       }
     }
@@ -170,61 +171,61 @@ function buildParseResult(
 
   const siteCoding = internal.siteCoding?.code
     ? {
-        code: internal.siteCoding.code,
-        display: internal.siteCoding.display,
-        system: internal.siteCoding.system
-      }
+      code: internal.siteCoding.code,
+      display: internal.siteCoding.display,
+      system: internal.siteCoding.system
+    }
     : undefined;
 
   const prnReasonCoding = internal.asNeededReasonCoding?.code
     ? {
-        code: internal.asNeededReasonCoding.code,
-        display: internal.asNeededReasonCoding.display,
-        system: internal.asNeededReasonCoding.system
-      }
+      code: internal.asNeededReasonCoding.code,
+      display: internal.asNeededReasonCoding.display,
+      system: internal.asNeededReasonCoding.system
+    }
     : undefined;
 
   const additionalInstructions = internal.additionalInstructions?.length
     ? internal.additionalInstructions.map((instruction) => ({
-        text: instruction.text,
-        coding: instruction.coding?.code
-          ? {
-              code: instruction.coding.code,
-              display: instruction.coding.display,
-              system: instruction.coding.system
-            }
-          : undefined
-      }))
+      text: instruction.text,
+      coding: instruction.coding?.code
+        ? {
+          code: instruction.coding.code,
+          display: instruction.coding.display,
+          system: instruction.coding.system
+        }
+        : undefined
+    }))
     : undefined;
 
   const siteLookups = internal.siteLookups.length
     ? internal.siteLookups.map((entry) => ({
-        request: entry.request,
-        suggestions: entry.suggestions.map((suggestion) => ({
-          coding: {
-            code: suggestion.coding.code,
-            display: suggestion.coding.display,
-            system: suggestion.coding.system
-          },
-          text: suggestion.text
-        }))
+      request: entry.request,
+      suggestions: entry.suggestions.map((suggestion) => ({
+        coding: {
+          code: suggestion.coding.code,
+          display: suggestion.coding.display,
+          system: suggestion.coding.system
+        },
+        text: suggestion.text
       }))
+    }))
     : undefined;
 
   const prnReasonLookups = internal.prnReasonLookups.length
     ? internal.prnReasonLookups.map((entry) => ({
-        request: entry.request,
-        suggestions: entry.suggestions.map((suggestion) => ({
-          coding: suggestion.coding
-            ? {
-                code: suggestion.coding.code,
-                display: suggestion.coding.display,
-                system: suggestion.coding.system
-              }
-            : undefined,
-          text: suggestion.text
-        }))
+      request: entry.request,
+      suggestions: entry.suggestions.map((suggestion) => ({
+        coding: suggestion.coding
+          ? {
+            code: suggestion.coding.code,
+            display: suggestion.coding.display,
+            system: suggestion.coding.system
+          }
+          : undefined,
+        text: suggestion.text
       }))
+    }))
     : undefined;
 
   return {
@@ -243,16 +244,16 @@ function buildParseResult(
         site:
           internal.siteText || siteCoding
             ? {
-                text: internal.siteText,
-                coding: siteCoding
-              }
+              text: internal.siteText,
+              coding: siteCoding
+            }
             : undefined,
         prnReason:
           internal.asNeededReason || prnReasonCoding
             ? {
-                text: internal.asNeededReason,
-                coding: prnReasonCoding
-              }
+              text: internal.asNeededReason,
+              coding: prnReasonCoding
+            }
             : undefined,
         additionalInstructions
       },

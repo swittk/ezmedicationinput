@@ -1112,6 +1112,46 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toContain("once weekly on Wednesday");
   });
 
+  it("parses every X days with multiple times", () => {
+    const result = parseSig("every 2 days at 9:00, 12:00, 18:00");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 2,
+      periodUnit: "d",
+      timeOfDay: ["09:00:00", "12:00:00", "18:00:00"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses q X days with multiple anchors", () => {
+    const result = parseSig("q 3 days before lunch");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 3,
+      periodUnit: "d",
+      when: [EventTiming["Before Lunch"]]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses multi-anchor intervals with connectors", () => {
+    const result = parseSig("2 tabs q 2 days at morning, dinner", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 2,
+      periodUnit: "d",
+      when: ["MORN", "CV"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses weekly with on connector", () => {
+    const result = parseSig("weekly on Monday and Friday");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "fri"]
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
   it("parses q1mo", () => {
     const result = parseSig("q1mo");
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("MO");
@@ -1589,10 +1629,10 @@ describe("internationalization", () => {
     it("combines frequency, event timing, and as-needed phrasing in Thai", () => {
       const result = parseSig("1 tab po bid ac prn pain", { locale: "th" });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ pain."
+        "รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด."
       );
       expect(result.shortText).toBe(
-        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ pain"
+        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด"
       );
     });
 
@@ -1971,3 +2011,140 @@ describe("assume single discrete dose", () => {
     expect(result.fhir.doseAndRate).toBeUndefined();
   });
 });
+
+describe("time-based schedules", () => {
+  it("parses single 24h time", () => {
+    const result = parseSig("at 9:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
+  });
+
+  it("parses multiple comma-separated times", () => {
+    const result = parseSig("at 9:00, 10:00, 22:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "10:00:00", "22:00:00"]);
+  });
+
+  it("parses times with am/pm", () => {
+    const result = parseSig("@ 9 am, 2 pm, 10:30 pm");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "14:00:00", "22:30:00"]);
+  });
+
+  it("parses dot-separated times", () => {
+    const result = parseSig("at 14.00, 16.30");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["14:00:00", "16:30:00"]);
+  });
+
+  it("parses times without prefix", () => {
+    const result = parseSig("9:00 10:00");
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "10:00:00"]);
+  });
+
+  it("formats timeOfDay in short text", () => {
+    const result = parseSig("at 9:00, 22:00");
+    expect(result.shortText).toContain("09:00,22:00");
+  });
+
+  it("formats timeOfDay in long text", () => {
+    const result = parseSig("at 9:00, 10:00 pm");
+    expect(result.longText).toContain("at 9:00 am, 10:00 pm");
+  });
+
+  it("formats multiple meals and times in English", () => {
+    const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
+    expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
+  });
+
+  it("formats generic 'with meals' and specific times in English", () => {
+    const result = parseSig("1 tab with meals and @ 10:00");
+    expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
+  });
+
+  it("formats complex mixed schedules in Thai", () => {
+    const cases = [
+      {
+        input: "1 tab with breakfast, with lunch, and at 9 am, 5 pm",
+        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
+      },
+      {
+        input: "1 tab with meals and @ 10:00",
+        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
+      },
+      {
+        input: "1 tab ac and @ 8:00",
+        expected: "ใช้ ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
+      }
+    ];
+
+    for (const { input, expected } of cases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.longText).toBe(expected);
+    }
+  });
+
+  it("consumes 'and' connector between schedule blocks to prevent leakage", () => {
+    const result = parseSig("1 tab with meals and at 9:00");
+    // Ensure "and" is not in additional instructions
+    expect(result.fhir.additionalInstruction).toBeUndefined();
+    expect(result.longText).not.toContain("and.");
+    expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
+  });
+});
+
+describe("issue regression tests", () => {
+  it("excludes already consumed frequency from PRN reason (Issue 1)", () => {
+    const result = parseSig("1 tab po q4-6hr prn for pain", { locale: "th" });
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
+    expect(result.fhir.timing?.repeat?.period).toBe(4);
+    expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
+  });
+
+  it("handles PRN before frequency (Issue 1 fallback)", () => {
+    const result = parseSig("1 tab po prn q4-6hr for pain", { locale: "th" });
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
+    expect(result.fhir.timing?.repeat?.period).toBe(4);
+    expect(result.fhir.timing?.repeat?.periodMax).toBe(6);
+  });
+
+  it("supports 'with meal' and 'with food' instructions (Issue 2)", () => {
+    const mealCases = ["1 tab po with meal", "1 tab po with meals", "1 tab po with food", "1 tab po cc"];
+    for (const input of mealCases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.fhir.timing?.repeat?.when).toContain("C");
+      expect(result.longText).toContain("พร้อมอาหาร");
+    }
+  });
+
+  it("translates common PRN reasons to Thai", () => {
+    const cases = [
+      { input: "1 tab prn pain", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด." },
+      { input: "1 tab prn fever", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ไข้." },
+      { input: "1 tab prn sleep", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ นอนหลับ." }
+    ];
+    for (const { input, expected } of cases) {
+      const result = parseSig(input, { locale: "th" });
+      expect(result.longText).toBe(expected);
+    }
+  });
+
+  it("consumes optional 'for' after 'prn' to avoid duplication", () => {
+    const result = parseSig("1 tab po prn for pain");
+    expect(result.meta.normalized.prnReason?.text).toBe("pain");
+    expect(result.longText).toBe("Take 1 tablet by mouth as needed for pain.");
+  });
+
+  it("consumes other introductory PRN connectors", () => {
+    const cases = [
+      { input: "1 tab prn if pain", reason: "pain" },
+      { input: "1 tab prn when pain", reason: "pain" },
+      { input: "1 tab prn upon pain", reason: "pain" },
+      { input: "1 tab prn due to pain", reason: "pain" },
+      { input: "1 tab prn to pain", reason: "pain" }
+    ];
+
+    for (const { input, reason } of cases) {
+      const result = parseSig(input);
+      expect(result.meta.normalized.prnReason?.text).toBe(reason);
+      expect(result.longText).toContain(`as needed for ${reason}`);
+    }
+  });
+});
+

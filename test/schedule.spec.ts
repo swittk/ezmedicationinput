@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses } from "../src/index";
-import { EventTiming, FhirDosage, NextDueDoseOptions } from "../src/types";
+import { nextDueDoses, calculateTotalUnits } from "../src/index";
+import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 const EVENT_CLOCK = {
   [EventTiming.Morning]: "08:00",
@@ -63,7 +63,7 @@ describe("nextDueDoses", () => {
       timing: {
         repeat: {
           period: 6,
-          periodUnit: "h"
+          periodUnit: FhirPeriodUnit.Hour
         }
       }
     };
@@ -88,7 +88,7 @@ describe("nextDueDoses", () => {
       timing: {
         repeat: {
           period: 1,
-          periodUnit: "h",
+          periodUnit: FhirPeriodUnit.Hour,
           count: 3
         }
       }
@@ -113,7 +113,7 @@ describe("nextDueDoses", () => {
       timing: {
         repeat: {
           period: 1,
-          periodUnit: "d",
+          periodUnit: FhirPeriodUnit.Day,
           count: 5
         }
       }
@@ -150,7 +150,6 @@ describe("nextDueDoses", () => {
       limit: 5
     });
 
-    // Should only have only 3 entries because 5 prior ones should have passed with count limit of 8
     expect(results).toEqual([
       "2024-01-03T16:00:00+00:00",
       "2024-01-04T08:00:00+00:00",
@@ -175,7 +174,6 @@ describe("nextDueDoses", () => {
       limit: 5
     });
 
-    // Should be empty because all prior ones should have passed with count limit of 8
     expect(results).toEqual([]);
   });
 
@@ -186,8 +184,8 @@ describe("nextDueDoses", () => {
         repeat: {
           frequency: 2,
           period: 1,
-          periodUnit: "d",
-          dayOfWeek: ["mon", "tue"]
+          periodUnit: FhirPeriodUnit.Day,
+          dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday]
         }
       }
     };
@@ -258,8 +256,8 @@ describe("nextDueDoses", () => {
       timing: {
         repeat: {
           period: 1,
-          periodUnit: "wk",
-          dayOfWeek: ["mon"]
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: [FhirDayOfWeek.Monday]
         }
       }
     };
@@ -301,7 +299,7 @@ describe("nextDueDoses", () => {
       timing: {
         repeat: {
           period: 8,
-          periodUnit: "h"
+          periodUnit: FhirPeriodUnit.Hour
         }
       }
     };
@@ -317,5 +315,170 @@ describe("nextDueDoses", () => {
       "2024-01-01T08:00:00+00:00",
       "2024-01-01T16:00:00+00:00"
     ]);
+  });
+});
+
+describe("calculateTotalUnits", () => {
+  const dosageBID: FhirDosage = {
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+    timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+  };
+
+  it("calculates total for cream (weight/weight)", () => {
+    const res = calculateTotalUnits({
+      dosage: dosageBID,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 7,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        dosageForm: "cream",
+        strength: "1%",
+        containerValue: 30,
+        containerUnit: "g"
+      }
+    });
+    expect(res.totalUnits).toBe(14);
+    expect(res.totalContainers).toBe(1);
+  });
+
+  it("calculates total for solution (weight/volume bridge)", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 500, unit: "mg" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 10,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        dosageForm: "oral solution",
+        strength: "2%",
+        containerValue: 100,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(10000);
+    expect(res.totalContainers).toBe(5);
+  });
+
+  it("handles composite strengths in context", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 480, unit: "mg" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        strength: "400 mg/5mL + 80 mg/5mL",
+        containerValue: 100,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(480);
+    expect(res.totalContainers).toBe(1);
+  });
+
+  it("handles complex interval stepping (q3d) for 10 days", () => {
+    // Doses at: d0, d3, d6, d9 -> 4 doses total
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { period: 3, periodUnit: FhirPeriodUnit.Day } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 10,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+    expect(res.totalUnits).toBe(4);
+  });
+
+  it("handles complex weekly schedules with dayOfWeek", () => {
+    // Mon, Wed, Fri for 2 weeks = 6 doses
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: {
+        repeat: {
+          period: 1,
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday, FhirDayOfWeek.Friday]
+        }
+      }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z", // Monday
+      durationValue: 2,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC"
+    });
+    expect(res.totalUnits).toBe(6);
+  });
+
+  it("handles anchored event timings (Breakfast + Dinner) for 5 days", () => {
+    // 2 doses/day * 5 days = 10 doses
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [EventTiming.Breakfast, EventTiming.Dinner] } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 5,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      eventClock: EVENT_CLOCK
+    });
+    expect(res.totalUnits).toBe(10);
+  });
+
+  it("handles PRN (asNeededBoolean)", () => {
+    const dosage: FhirDosage = {
+      asNeededBoolean: true,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+    expect(res.totalUnits).toBe(6); // 24/4 = 6 doses
+  });
+
+  it("handles very complex percentage strength with different units", () => {
+    // 500mg/dL = 5mg/mL
+    // 5mg/mL + 5mg/mL = 10mg/mL
+    // Dose 20mg BID for 5 days = 200mg total.
+    // 200mg @ 10mg/mL = 20mL.
+    // Container 15mL -> 2 containers.
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 20, unit: "mg" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 5,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        strength: "500 mg/dL + 5 mg/mL",
+        containerValue: 15,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(200);
+    expect(res.totalContainers).toBe(2);
   });
 });
