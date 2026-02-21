@@ -34,6 +34,13 @@ export type {
   SigTranslation,
   SigTranslationConfig
 } from "./i18n";
+export {
+  DEFAULT_BODY_SITE_SNOMED,
+  DEFAULT_BODY_SITE_SNOMED_SOURCE,
+  DEFAULT_ROUTE_SYNONYMS,
+  DEFAULT_UNIT_BY_ROUTE,
+  KNOWN_DOSAGE_FORMS_TO_DOSE
+} from './maps';
 
 export function parseSig(input: string, options?: ParseOptions): ParseResult {
   const internal = parseInternal(input, options);

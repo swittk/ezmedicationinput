@@ -209,7 +209,7 @@ export function normalizeBodySiteKey(value: string): string {
     .trim();
 }
 
-const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
+export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
   names: string[];
   definition: BodySiteDefinition;
 }> = [
@@ -231,7 +231,7 @@ const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
   },
   {
     names: ["both eyes", "bilateral eyes"],
-    definition: { coding: { code: "362508001", display: "Both eyes, entire" } }
+    definition: { coding: { code: "40638003", display: "Structure of both eyes" } }
   },
   {
     names: ["ear", "ears"],
