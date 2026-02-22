@@ -317,6 +317,14 @@ export interface FormatOptions {
   i18n?: SigTranslationConfig;
 }
 
+export interface FormatBatchOptions extends FormatOptions {
+  /**
+   * String inserted between formatted clauses. Defaults to ", " so output can
+   * be fed back into `parseSig` as a multi-clause instruction.
+   */
+  separator?: string;
+}
+
 export interface BodySiteCode {
   code: string;
   display?: string;
@@ -604,6 +612,54 @@ export interface ParseResult {
   };
 }
 
+export interface ParseBatchSegmentMeta {
+  index: number;
+  text: string;
+  range: TextRange;
+}
+
+export interface ParseBatchResult {
+  input: string;
+  count: number;
+  items: ParseResult[];
+  /**
+   * Legacy compatibility field mirroring the first parsed item so existing
+   * single-sig integrations can migrate incrementally.
+   */
+  fhir: FhirDosage;
+  /**
+   * Legacy compatibility field mirroring the first parsed item so existing
+   * single-sig integrations can migrate incrementally.
+   */
+  shortText: string;
+  /**
+   * Legacy compatibility field mirroring the first parsed item so existing
+   * single-sig integrations can migrate incrementally.
+   */
+  longText: string;
+  warnings: string[];
+  meta: {
+    consumedTokens: string[];
+    leftoverText?: string;
+    normalized: {
+      route?: RouteCode;
+      unit?: string;
+      site?: { text?: string; coding?: BodySiteCode };
+      prnReason?: { text?: string; coding?: FhirCoding };
+      additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
+    };
+    siteLookups?: Array<{
+      request: SiteCodeLookupRequest;
+      suggestions: SiteCodeSuggestion[];
+    }>;
+    prnReasonLookups?: Array<{
+      request: PrnReasonLookupRequest;
+      suggestions: PrnReasonSuggestion[];
+    }>;
+    segments: ParseBatchSegmentMeta[];
+  };
+}
+
 export interface LintIssue {
   /** Human-readable description of why the segment could not be parsed. */
   message: string;
@@ -620,6 +676,21 @@ export interface LintResult {
   result: ParseResult;
   /** Segments of the input that could not be interpreted. */
   issues: LintIssue[];
+}
+
+export interface LintBatchResult {
+  input: string;
+  count: number;
+  items: LintResult[];
+  /**
+   * Legacy compatibility fields mirroring the first parsed item so existing
+   * consumers of `lintSig` can migrate incrementally.
+   */
+  result: ParseResult;
+  issues: LintIssue[];
+  meta: {
+    segments: ParseBatchSegmentMeta[];
+  };
 }
 
 /**

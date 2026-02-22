@@ -5,6 +5,7 @@
 ## Features
 
 - Converts shorthand strings (e.g. `1x3 po pc`, `500 mg po q6h prn pain`) into FHIR-compliant dosage JSON.
+- Parses multi-clause sigs into multiple dosage items (e.g. `OD ... , OS ...`) while preserving a first-item compatibility shape for legacy single-dose consumers.
 - Emits timing abbreviations (`timing.code`) and repeat structures simultaneously where possible.
 - Maps meal/time blocks to the correct `Timing.repeat.when` **EventTiming** codes and can auto-expand AC/PC/C into specific meals.
 - Outputs SNOMED CT route codings (while providing friendly text) and round-trips known SNOMED routes back into the parser.
@@ -28,28 +29,56 @@ npm install ezmedicationinput
 ```ts
 import { parseSig } from "ezmedicationinput";
 
-const result = parseSig("1x3 po pc", { context: { dosageForm: "tab" } });
-console.log(result.fhir);
+const batch = parseSig("1x3 po pc", { context: { dosageForm: "tab" } });
+
+// New API
+console.log(batch.count);      // 1
+console.log(batch.items[0].fhir);
+
+// Legacy compatibility (first parsed item)
+console.log(batch.fhir);
 ```
 
 Example output:
 
 ```json
 {
-  "text": "1 tablet by mouth three times daily after meals",
-  "timing": {
-    "code": { "coding": [{ "code": "TID" }], "text": "TID" },
-    "repeat": {
-      "frequency": 3,
-      "period": 1,
-      "periodUnit": "d",
-      "when": ["PC"]
+  "count": 1,
+  "items": [
+    {
+      "fhir": {
+        "text": "Take 1 tablet by mouth three times daily after meals.",
+        "timing": {
+          "code": { "coding": [{ "code": "TID" }], "text": "TID" },
+          "repeat": {
+            "frequency": 3,
+            "period": 1,
+            "periodUnit": "d",
+            "when": ["PC"]
+          }
+        },
+        "route": { "text": "by mouth" },
+        "doseAndRate": [{ "doseQuantity": { "value": 1, "unit": "tab" } }]
+      }
     }
-  },
-  "route": { "text": "by mouth" },
-  "doseAndRate": [{ "doseQuantity": { "value": 1, "unit": "tab" } }]
+  ],
+  "fhir": { "...": "same as items[0].fhir for compatibility" }
 }
 ```
+
+### Multi-clause parsing and legacy compatibility
+
+`parseSig` / `parseSigAsync` return a **batch** object:
+
+- `count`: number of parsed dosage clauses
+- `items`: array of full parse results (one per clause)
+- `meta.segments`: source ranges for each clause
+
+For single-dose integrations that haven't migrated yet, the batch also keeps legacy first-item fields:
+
+- `fhir`, `shortText`, `longText`, `warnings`, `meta`, and for linting `result`/`issues`
+
+So existing code that expects one result can continue using first-item compatibility while newer code uses `items[]`.
 
 ### PRN reasons & additional instructions
 
@@ -101,8 +130,27 @@ rendering.
 
 When a PRN reason cannot be auto-resolved, any registered suggestion resolvers
 are invoked and their responses are surfaced through
-`ParseResult.meta.prnReasonLookups` so client applications can prompt the user
+`ParseBatchResult.items[n].meta.prnReasonLookups` so client applications can prompt the user
 to choose a coded concept.
+
+### Formatting multi-item results back to sig text
+
+Use either helper depending on your source:
+
+- `formatParseBatch(batch, style?, separator?)` when you already have `parseSig` output.
+- `formatSigBatch(dosages, style?, { separator })` when you have an array of FHIR `Dosage` entries.
+
+```ts
+import { formatParseBatch, formatSigBatch, parseSig } from "ezmedicationinput";
+
+const batch = parseSig("1 tab po @ 8:00, 2 tabs po with lunch, 1 tab before dinner, 4 tabs po hs");
+
+const shortSig = formatParseBatch(batch, "short");
+// => "1 tab PO 08:00, 2 tab PO CD, 1 tab PO ACV, 4 tab PO HS"
+
+const shortFromFhir = formatSigBatch(batch.items.map((item) => item.fhir), "short");
+// => same combined short sig text
+```
 
 ### Sig (directions) suggestions
 

@@ -1,6 +1,7 @@
 import { formatInternal } from "./format";
 import { internalFromFhir, toFhir } from "./fhir";
 import { resolveSigLocalization } from "./i18n";
+import { ParsedSigInternal } from "./internal-types";
 import {
   applyPrnReasonCoding,
   applyPrnReasonCodingAsync,
@@ -9,13 +10,19 @@ import {
   findUnparsedTokenGroups,
   parseInternal
 } from "./parser";
+import { splitSigSegments } from "./segment";
 import {
   FhirDosage,
+  FormatBatchOptions,
   FormatOptions,
   LintIssue,
+  LintBatchResult,
   LintResult,
+  ParseBatchResult,
+  ParseBatchSegmentMeta,
   ParseOptions,
-  ParseResult
+  ParseResult,
+  TextRange
 } from "./types";
 
 export { parseInternal } from "./parser";
@@ -43,41 +50,131 @@ export {
   KNOWN_DOSAGE_FORMS_TO_DOSE
 } from './maps';
 
-export function parseSig(input: string, options?: ParseOptions): ParseResult {
-  const internal = parseInternal(input, options);
-  applyPrnReasonCoding(internal, options);
-  applySiteCoding(internal, options);
-  return buildParseResult(internal, options);
+interface SegmentCarry {
+  routeCode?: ParsedSigInternal["routeCode"];
+  routeText?: ParsedSigInternal["routeText"];
+  unit?: string;
+  dose?: number;
 }
 
-export function lintSig(input: string, options?: ParseOptions): LintResult {
-  const internal = parseInternal(input, options);
-  applyPrnReasonCoding(internal, options);
-  applySiteCoding(internal, options);
-  const result = buildParseResult(internal, options);
-  const groups = findUnparsedTokenGroups(internal);
-  const issues: LintIssue[] = groups.map((group) => {
-    const text = group.range
-      ? internal.input.slice(group.range.start, group.range.end)
-      : group.tokens.map((token) => token.original).join(" ");
-    return {
-      message: "Unrecognized text",
-      text: text.trim() || text,
-      tokens: group.tokens.map((token) => token.original),
-      range: group.range
-    };
-  });
-  return { result, issues };
+function toSegmentMeta(segments: ReturnType<typeof splitSigSegments>): ParseBatchSegmentMeta[] {
+  return segments.map((segment, index) => ({
+    index,
+    text: segment.text,
+    range: { start: segment.start, end: segment.end }
+  }));
+}
+
+export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
+  const segments = splitSigSegments(input);
+  const carry: SegmentCarry = {};
+  const results: ParseResult[] = [];
+
+  for (const segment of segments) {
+    const internal = parseInternal(segment.text, options);
+    applyCarryForward(internal, carry);
+    applyPrnReasonCoding(internal, options);
+    applySiteCoding(internal, options);
+    const result = buildParseResult(internal, options);
+    rebaseParseResult(result, input, segment.start);
+    results.push(result);
+    updateCarryForward(carry, internal);
+  }
+
+  const legacy = resolveLegacyParseResult(results, input, options);
+
+  return {
+    input,
+    count: results.length,
+    items: results,
+    fhir: legacy.fhir,
+    shortText: legacy.shortText,
+    longText: legacy.longText,
+    warnings: legacy.warnings,
+    meta: {
+      ...legacy.meta,
+      segments: toSegmentMeta(segments)
+    }
+  };
+}
+
+export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
+  const segments = splitSigSegments(input);
+  const carry: SegmentCarry = {};
+  const results: LintResult[] = [];
+
+  for (const segment of segments) {
+    const internal = parseInternal(segment.text, options);
+    applyCarryForward(internal, carry);
+    applyPrnReasonCoding(internal, options);
+    applySiteCoding(internal, options);
+    const result = buildParseResult(internal, options);
+    rebaseParseResult(result, input, segment.start);
+    const groups = findUnparsedTokenGroups(internal);
+    const issues: LintIssue[] = groups.map((group) => {
+      const shiftedRange = shiftRange(group.range, segment.start);
+      const text = shiftedRange
+        ? input.slice(shiftedRange.start, shiftedRange.end)
+        : group.tokens.map((token) => token.original).join(" ");
+      return {
+        message: "Unrecognized text",
+        text: text.trim() || text,
+        tokens: group.tokens.map((token) => token.original),
+        range: shiftedRange
+      };
+    });
+    results.push({ result, issues });
+    updateCarryForward(carry, internal);
+  }
+
+  const legacy = resolveLegacyLintResult(results, input, options);
+
+  return {
+    input,
+    count: results.length,
+    items: results,
+    result: legacy.result,
+    issues: legacy.issues,
+    meta: {
+      segments: toSegmentMeta(segments)
+    }
+  };
 }
 
 export async function parseSigAsync(
   input: string,
   options?: ParseOptions
-): Promise<ParseResult> {
-  const internal = parseInternal(input, options);
-  await applyPrnReasonCodingAsync(internal, options);
-  await applySiteCodingAsync(internal, options);
-  return buildParseResult(internal, options);
+): Promise<ParseBatchResult> {
+  const segments = splitSigSegments(input);
+  const carry: SegmentCarry = {};
+  const results: ParseResult[] = [];
+
+  for (const segment of segments) {
+    const internal = parseInternal(segment.text, options);
+    applyCarryForward(internal, carry);
+    await applyPrnReasonCodingAsync(internal, options);
+    await applySiteCodingAsync(internal, options);
+    const result = buildParseResult(internal, options);
+    rebaseParseResult(result, input, segment.start);
+    results.push(result);
+    updateCarryForward(carry, internal);
+  }
+
+  const legacy = resolveLegacyParseResult(results, input, options);
+
+  return {
+    input,
+    count: results.length,
+    items: results,
+    fhir: legacy.fhir,
+    shortText: legacy.shortText,
+    longText: legacy.longText,
+    warnings: legacy.warnings,
+    meta: {
+      ...legacy.meta,
+      segments: toSegmentMeta(segments)
+    }
+  };
 }
 
 export function formatSig(
@@ -88,6 +185,33 @@ export function formatSig(
   const internal = internalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   return formatInternal(internal, style, localization);
+}
+
+export function formatSigBatch(
+  dosages: FhirDosage[],
+  style: "short" | "long" = "short",
+  options?: FormatBatchOptions
+): string {
+  const separator = options?.separator ?? ", ";
+  const formatted: string[] = [];
+  for (const dosage of dosages) {
+    const text = formatSig(dosage, style, options);
+    if (text.trim()) {
+      formatted.push(text);
+    }
+  }
+  return formatted.join(separator);
+}
+
+export function formatParseBatch(
+  batch: ParseBatchResult,
+  style: "short" | "long" = "short",
+  separator = ", "
+): string {
+  const texts = batch.items
+    .map((item) => (style === "short" ? item.shortText : item.longText))
+    .filter((text) => typeof text === "string" && text.trim().length > 0);
+  return texts.join(separator);
 }
 
 export function fromFhirDosage(
@@ -261,4 +385,120 @@ function buildParseResult(
       prnReasonLookups
     }
   };
+}
+
+function applyCarryForward(internal: ParsedSigInternal, carry: SegmentCarry): void {
+  if (!internal.routeCode && !internal.routeText) {
+    if (carry.routeCode) {
+      internal.routeCode = carry.routeCode;
+    }
+    if (!internal.routeText && carry.routeText) {
+      internal.routeText = carry.routeText;
+    }
+  }
+
+  if (!internal.unit && carry.unit) {
+    internal.unit = carry.unit;
+  }
+
+  if (
+    internal.dose === undefined &&
+    internal.doseRange === undefined &&
+    carry.dose !== undefined &&
+    internal.unit &&
+    internal.unit === carry.unit
+  ) {
+    internal.dose = carry.dose;
+  }
+}
+
+function updateCarryForward(carry: SegmentCarry, internal: ParsedSigInternal): void {
+  if (internal.routeCode) {
+    carry.routeCode = internal.routeCode;
+  }
+  if (internal.routeText) {
+    carry.routeText = internal.routeText;
+  }
+  if (internal.unit) {
+    carry.unit = internal.unit;
+  }
+  if (internal.dose !== undefined) {
+    carry.dose = internal.dose;
+  }
+}
+
+function rebaseParseResult(result: ParseResult, fullInput: string, offset: number): void {
+  const rebaseRequest = <T extends { inputText: string; sourceText?: string; range?: TextRange }>(
+    request: T
+  ) => {
+    request.inputText = fullInput;
+    if (request.range) {
+      request.range = shiftRange(request.range, offset);
+      if (request.range) {
+        request.sourceText = fullInput.slice(request.range.start, request.range.end);
+      }
+    }
+  };
+
+  if (result.meta.siteLookups) {
+    for (const lookup of result.meta.siteLookups) {
+      rebaseRequest(lookup.request);
+    }
+  }
+  if (result.meta.prnReasonLookups) {
+    for (const lookup of result.meta.prnReasonLookups) {
+      rebaseRequest(lookup.request);
+    }
+  }
+}
+
+function shiftRange(range: TextRange | undefined, offset: number): TextRange | undefined {
+  if (!range) {
+    return undefined;
+  }
+  return {
+    start: range.start + offset,
+    end: range.end + offset
+  };
+}
+
+function resolveLegacyParseResult(
+  results: ParseResult[],
+  input: string,
+  options?: ParseOptions
+): ParseResult {
+  if (results.length > 0) {
+    return results[0];
+  }
+  const internal = parseInternal(input, options);
+  applyPrnReasonCoding(internal, options);
+  applySiteCoding(internal, options);
+  return buildParseResult(internal, options);
+}
+
+function resolveLegacyLintResult(
+  results: LintResult[],
+  input: string,
+  options?: ParseOptions
+): LintResult {
+  if (results.length > 0) {
+    return results[0];
+  }
+  const internal = parseInternal(input, options);
+  applyPrnReasonCoding(internal, options);
+  applySiteCoding(internal, options);
+  const result = buildParseResult(internal, options);
+  const groups = findUnparsedTokenGroups(internal);
+  const issues: LintIssue[] = groups.map((group) => {
+    const text = group.range
+      ? internal.input.slice(group.range.start, group.range.end)
+      : group.tokens.map((token) => token.original).join(" ");
+    return {
+      message: "Unrecognized text",
+      text: text.trim() || text,
+      tokens: group.tokens.map((token) => token.original),
+      range: group.range
+    };
+  });
+  return { result, issues };
 }

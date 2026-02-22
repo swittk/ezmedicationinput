@@ -2238,6 +2238,9 @@ export function parseInternal(
         : DEFAULT_ROUTE_SYNONYMS[phrase];
       if (synonym) {
         if (phrase === "in" && slice.length === 1) {
+          if (internal.routeCode) {
+            continue;
+          }
           const prevToken = tokens[startIndex - 1];
           if (prevToken && !internal.consumed.has(prevToken.index)) {
             continue;
