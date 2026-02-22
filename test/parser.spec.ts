@@ -807,6 +807,26 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
   });
 
+  it("keeps tablet units while mapping trailing suppository text to rectal route", () => {
+    const result = parseSig("1 tab suppository");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "tab"
+    });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per rectum"]);
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("keeps tablet plurals while mapping shortened suppository tokens to rectal route", () => {
+    const result = parseSig("11 tabs suppo");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 11,
+      unit: "tab"
+    });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per rectum"]);
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
   it("parses household teaspoon and tablespoon measures", () => {
     const teaspoon = parseSig("1 teaspoon po q6h");
     expect(teaspoon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tsp" });
@@ -2147,4 +2167,3 @@ describe("issue regression tests", () => {
     }
   });
 });
-

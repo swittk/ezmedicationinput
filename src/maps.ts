@@ -168,6 +168,10 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
   registerVariants("transdermal", RouteCode["Transdermal route"]);
   registerVariants("pr", RouteCode["Per rectum"]);
   registerVariants("rectal", RouteCode["Per rectum"]);
+  registerVariants("supp", RouteCode["Per rectum"]);
+  registerVariants("suppo", RouteCode["Per rectum"]);
+  registerVariants("suppository", RouteCode["Per rectum"]);
+  registerVariants("suppositories", RouteCode["Per rectum"]);
   registerVariants("pv", RouteCode["Per vagina"]);
   registerVariants("vaginal", RouteCode["Per vagina"]);
   registerVariants("oph", RouteCode["Ophthalmic route"]);
