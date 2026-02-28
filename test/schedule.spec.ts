@@ -205,6 +205,89 @@ describe("nextDueDoses", () => {
     ]);
   });
 
+  it("infers default clocks for unsupported daily frequency schedules", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          frequency: 5,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-01T05:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T11:00:00+00:00",
+      "2024-01-01T14:00:00+00:00",
+      "2024-01-01T17:00:00+00:00",
+      "2024-01-01T20:00:00+00:00"
+    ]);
+  });
+
+  it("falls back to frequency defaults when when anchors cannot be resolved", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        code: { coding: [{ code: "BID" }] },
+        repeat: {
+          frequency: 2,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day,
+          when: [EventTiming["After Breakfast"], EventTiming["After Dinner"]]
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      timeZone: "utc",
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-01T05:00:00Z",
+      limit: 4
+    });
+
+    expect(results).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T20:00:00+00:00",
+      "2024-01-02T08:00:00+00:00",
+      "2024-01-02T20:00:00+00:00"
+    ]);
+  });
+
+  it("derives prior count from frequency defaults when when anchors cannot be resolved", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        code: { coding: [{ code: "BID" }] },
+        repeat: {
+          count: 8,
+          frequency: 2,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day,
+          when: [EventTiming["After Breakfast"], EventTiming["After Dinner"]]
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      timeZone: "utc",
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-03T12:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual([
+      "2024-01-03T20:00:00+00:00",
+      "2024-01-04T08:00:00+00:00",
+      "2024-01-04T20:00:00+00:00"
+    ]);
+  });
+
   it("expands generic AC tokens using meal offsets", () => {
     const dosage: FhirDosage = {
       timing: {

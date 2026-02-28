@@ -745,7 +745,7 @@ export interface TotalUnitsResult {
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
-  dosage: FhirDosage;
+  dosage: FhirDosage | FhirDosage[];
   durationValue: number;
   durationUnit: FhirPeriodUnit;
   roundToMultiple?: number;

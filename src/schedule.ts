@@ -513,6 +513,26 @@ function mergeFrequencyDefaults(
   return merged;
 }
 
+function inferDailyFrequencyClocks(frequency: number): string[] {
+  if (!Number.isFinite(frequency) || frequency <= 0) {
+    return [];
+  }
+  if (frequency === 1) {
+    return ["09:00:00"];
+  }
+  const startMinutes = 8 * 60;
+  const endMinutes = 20 * 60;
+  const spanMinutes = endMinutes - startMinutes;
+  const clocks = new Set<string>();
+  for (let index = 0; index < frequency; index += 1) {
+    const minutes = startMinutes + Math.round((spanMinutes * index) / (frequency - 1));
+    const hour = Math.floor(minutes / SECONDS_PER_MINUTE);
+    const minute = minutes % SECONDS_PER_MINUTE;
+    clocks.add(`${pad(hour)}:${pad(minute)}:00`);
+  }
+  return Array.from(clocks).sort();
+}
+
 /** Resolves fallback clock arrays for frequency-only schedules. */
 function resolveFrequencyClocks(
   timing: FhirTiming,
@@ -548,6 +568,11 @@ function resolveFrequencyClocks(
     if (defaults.byFrequency?.[perPeriodKey]) {
       for (const clock of defaults.byFrequency[perPeriodKey]) {
         collected.add(normalizeClock(clock));
+      }
+    }
+    if (collected.size === 0 && repeat.period === 1 && repeat.periodUnit === "d") {
+      for (const clock of inferDailyFrequencyClocks(repeat.frequency)) {
+        collected.add(clock);
       }
     }
   }
@@ -681,46 +706,55 @@ export function nextDueDoses(
     if (results.length >= effectiveLimit) {
       return results.slice(0, effectiveLimit);
     }
-    if (expanded.length === 0) {
-      return results.slice(0, effectiveLimit);
-    }
-    let currentDay = startOfLocalDay(from, timeZone);
-    let iterations = 0;
-    const maxIterations = effectiveLimit * 31;
-    while (results.length < effectiveLimit && iterations < maxIterations) {
-      const weekday = getLocalWeekday(currentDay, timeZone);
-      if (!enforceDayFilter || dayFilter.has(weekday)) {
-        for (const entry of expanded) {
-          const targetDay = entry.dayShift === 0
-            ? currentDay
-            : addLocalDays(currentDay, entry.dayShift, timeZone);
-          const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
-          if (!zoned) {
-            continue;
-          }
-          if (zoned < from) {
-            continue;
-          }
-          if (orderedAt && zoned < orderedAt) {
-            continue;
-          }
-          const iso = formatZonedIso(zoned, timeZone);
-          if (!seen.has(iso)) {
-            seen.add(iso);
-            results.push(iso);
-            if (results.length === effectiveLimit) {
-              break;
+    const canFallbackToFrequency =
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      !!repeat.frequency &&
+      !!repeat.period &&
+      !!repeat.periodUnit;
+
+    if (!canFallbackToFrequency) {
+      if (expanded.length === 0) {
+        return results.slice(0, effectiveLimit);
+      }
+      let currentDay = startOfLocalDay(from, timeZone);
+      let iterations = 0;
+      const maxIterations = effectiveLimit * 31;
+      while (results.length < effectiveLimit && iterations < maxIterations) {
+        const weekday = getLocalWeekday(currentDay, timeZone);
+        if (!enforceDayFilter || dayFilter.has(weekday)) {
+          for (const entry of expanded) {
+            const targetDay = entry.dayShift === 0
+              ? currentDay
+              : addLocalDays(currentDay, entry.dayShift, timeZone);
+            const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+            if (!zoned) {
+              continue;
+            }
+            if (zoned < from) {
+              continue;
+            }
+            if (orderedAt && zoned < orderedAt) {
+              continue;
+            }
+            const iso = formatZonedIso(zoned, timeZone);
+            if (!seen.has(iso)) {
+              seen.add(iso);
+              results.push(iso);
+              if (results.length === effectiveLimit) {
+                break;
+              }
             }
           }
         }
+        if (results.length >= effectiveLimit) {
+          break;
+        }
+        currentDay = addLocalDays(currentDay, 1, timeZone);
+        iterations += 1;
       }
-      if (results.length >= effectiveLimit) {
-        break;
-      }
-      currentDay = addLocalDays(currentDay, 1, timeZone);
-      iterations += 1;
+      return results.slice(0, effectiveLimit);
     }
-    return results.slice(0, effectiveLimit);
   }
 
   const treatAsInterval =
@@ -854,37 +888,46 @@ function derivePriorCountFromHistory(
       }
     }
 
-    if (expanded.length === 0) {
-      return count;
-    }
+    const canFallbackToFrequency =
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      !!repeat.frequency &&
+      !!repeat.period &&
+      !!repeat.periodUnit;
 
-    let currentDay = startOfLocalDay(orderedAt, timeZone);
-    let iterations = 0;
-    const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
-    while (currentDay < from && iterations < maxIterations) {
-      const weekday = getLocalWeekday(currentDay, timeZone);
-      if (!enforceDayFilter || dayFilter.has(weekday)) {
-        for (const entry of expanded) {
-          const targetDay = entry.dayShift === 0
-            ? currentDay
-            : addLocalDays(currentDay, entry.dayShift, timeZone);
-          const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
-          if (!zoned) {
-            continue;
-          }
-          if (zoned < orderedAt || zoned >= from) {
-            continue;
-          }
-          if (recordCandidate(zoned) && normalizedCount !== undefined && seen.size >= normalizedCount) {
-            return count;
+    if (!canFallbackToFrequency) {
+      if (expanded.length === 0) {
+        return count;
+      }
+
+      let currentDay = startOfLocalDay(orderedAt, timeZone);
+      let iterations = 0;
+      const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
+      while (currentDay < from && iterations < maxIterations) {
+        const weekday = getLocalWeekday(currentDay, timeZone);
+        if (!enforceDayFilter || dayFilter.has(weekday)) {
+          for (const entry of expanded) {
+            const targetDay = entry.dayShift === 0
+              ? currentDay
+              : addLocalDays(currentDay, entry.dayShift, timeZone);
+            const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+            if (!zoned) {
+              continue;
+            }
+            if (zoned < orderedAt || zoned >= from) {
+              continue;
+            }
+            if (recordCandidate(zoned) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+              return count;
+            }
           }
         }
+        currentDay = addLocalDays(currentDay, 1, timeZone);
+        iterations += 1;
       }
-      currentDay = addLocalDays(currentDay, 1, timeZone);
-      iterations += 1;
-    }
 
-    return count;
+      return count;
+    }
   }
 
   const treatAsInterval =
@@ -1151,26 +1194,35 @@ function countScheduleEvents(
       }
     }
 
-    if (expanded.length === 0) return count;
+    const canFallbackToFrequency =
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      !!repeat.frequency &&
+      !!repeat.period &&
+      !!repeat.periodUnit;
 
-    let currentDay = startOfLocalDay(from, timeZone);
-    let iterations = 0;
-    const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
-    while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
-      const weekday = getLocalWeekday(currentDay, timeZone);
-      if (!enforceDayFilter || dayFilter.has(weekday)) {
-        for (const entry of expanded) {
-          const targetDay = entry.dayShift === 0
-            ? currentDay
-            : addLocalDays(currentDay, entry.dayShift, timeZone);
-          const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
-          if (zoned) recordCandidate(zoned);
+    if (!canFallbackToFrequency) {
+      if (expanded.length === 0) return count;
+
+      let currentDay = startOfLocalDay(from, timeZone);
+      let iterations = 0;
+      const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
+      while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
+        const weekday = getLocalWeekday(currentDay, timeZone);
+        if (!enforceDayFilter || dayFilter.has(weekday)) {
+          for (const entry of expanded) {
+            const targetDay = entry.dayShift === 0
+              ? currentDay
+              : addLocalDays(currentDay, entry.dayShift, timeZone);
+            const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+            if (zoned) recordCandidate(zoned);
+          }
         }
+        currentDay = addLocalDays(currentDay, 1, timeZone);
+        iterations += 1;
       }
-      currentDay = addLocalDays(currentDay, 1, timeZone);
-      iterations += 1;
+      return count;
     }
-    return count;
   }
 
   const treatAsInterval =
@@ -1253,7 +1305,9 @@ function countScheduleEvents(
   return count;
 }
 
-export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
+function calculateTotalUnitsSingle(
+  options: Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage }
+): TotalUnitsResult {
   const { dosage, durationValue, durationUnit, roundToMultiple, context } = options;
   const from = coerceDate(options.from, "from");
   const providedConfig = options.config;
@@ -1333,4 +1387,29 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
   }
 
   return result;
+}
+
+export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
+  if (Array.isArray(options.dosage)) {
+    const hasAnyDosage = options.dosage.length > 0;
+    if (!hasAnyDosage) {
+      return { totalUnits: 0 };
+    }
+    let totalUnits = 0;
+    let totalContainers = 0;
+    let sawContainers = false;
+    for (const dosage of options.dosage) {
+      const result = calculateTotalUnitsSingle({
+        ...options,
+        dosage
+      });
+      totalUnits += result.totalUnits;
+      if (result.totalContainers !== undefined) {
+        totalContainers += result.totalContainers;
+        sawContainers = true;
+      }
+    }
+    return sawContainers ? { totalUnits, totalContainers } : { totalUnits };
+  }
+  return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
 }

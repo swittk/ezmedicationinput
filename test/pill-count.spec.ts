@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits } from "../src/index";
-import { FhirDosage, FhirPeriodUnit } from "../src/types";
+import { calculateTotalUnits, parseSig } from "../src/index";
+import { EventTiming, FhirDosage, FhirPeriodUnit } from "../src/types";
 
 describe("calculateTotalUnits", () => {
     const BASE_OPTIONS = {
@@ -159,5 +159,148 @@ describe("calculateTotalUnits", () => {
             ...BASE_OPTIONS
         });
         expect(result.totalUnits).toBe(4);
+    });
+
+    it("falls back to frequency defaults when when anchors are present but clinic clocks are not provided", () => {
+        const dosage: FhirDosage = {
+            doseAndRate: [{ doseQuantity: { value: 4, unit: "cap" } }],
+            timing: {
+                code: {
+                    coding: [{ code: "BID" }],
+                    text: "BID"
+                },
+                repeat: {
+                    frequency: 2,
+                    period: 1,
+                    periodUnit: FhirPeriodUnit.Day,
+                    when: [EventTiming["After Breakfast"], EventTiming["After Dinner"]]
+                }
+            }
+        };
+        const result = calculateTotalUnits({
+            dosage,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "utc"
+        });
+        expect(result.totalUnits).toBe(56);
+    });
+
+    it("falls back to frequency defaults for generic PC anchors when clinic clocks are not provided", () => {
+        const dosage: FhirDosage = {
+            doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+            timing: {
+                repeat: {
+                    frequency: 2,
+                    period: 1,
+                    periodUnit: FhirPeriodUnit.Day,
+                    when: [EventTiming["After Meal"]]
+                }
+            }
+        };
+        const result = calculateTotalUnits({
+            dosage,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 3,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "utc"
+        });
+        expect(result.totalUnits).toBe(12);
+    });
+
+    it("calculates totals from parsed sig: 1x5 pc", () => {
+        const parsed = parseSig("1x5 pc", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 3,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC"
+        });
+        expect(result.totalUnits).toBe(15);
+    });
+
+    it("calculates totals from parsed sig: 1 tab po morning, hs", () => {
+        const parsed = parseSig("1 tab po morning, hs", { context: { dosageForm: "tab" } });
+        const totalUnits = parsed.items.reduce((sum, item) => {
+            const res = calculateTotalUnits({
+                dosage: item.fhir,
+                from: "2024-01-01T00:00:00Z",
+                durationValue: 2,
+                durationUnit: FhirPeriodUnit.Day,
+                timeZone: "UTC",
+                eventClock: {
+                    [EventTiming.Morning]: "08:00",
+                    [EventTiming["Before Sleep"]]: "22:00"
+                }
+            });
+            return sum + res.totalUnits;
+        }, 0);
+        expect(totalUnits).toBe(4);
+    });
+
+    it("calculates totals from parsed multi-clause sig: 2 tabs po @ 8:00, 1 tab hs", () => {
+        const parsed = parseSig("2 tabs po @ 8:00, 1 tab hs", { context: { dosageForm: "tab" } });
+        const totalUnits = parsed.items.reduce((sum, item) => {
+            const res = calculateTotalUnits({
+                dosage: item.fhir,
+                from: "2024-01-01T00:00:00Z",
+                durationValue: 1,
+                durationUnit: FhirPeriodUnit.Day,
+                timeZone: "UTC",
+                eventClock: {
+                    [EventTiming["Before Sleep"]]: "22:00"
+                }
+            });
+            return sum + res.totalUnits;
+        }, 0);
+        expect(totalUnits).toBe(3);
+    });
+
+    it("calculates totals directly from dosage arrays", () => {
+        const parsed = parseSig("2 tabs po @ 8:00, 1 tab hs", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.items.map((item) => item.fhir),
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 1,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC",
+            eventClock: {
+                [EventTiming["Before Sleep"]]: "22:00"
+            }
+        });
+        expect(result.totalUnits).toBe(3);
+    });
+
+    it("calculates totals from parsed multi-clause sig in a single dosage[] call: 1 tab po morning, hs", () => {
+        const parsed = parseSig("1 tab po morning, hs", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.items.map((item) => item.fhir),
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC",
+            eventClock: {
+                [EventTiming.Morning]: "08:00",
+                [EventTiming["Before Sleep"]]: "22:00"
+            }
+        });
+        expect(result.totalUnits).toBe(4);
+    });
+
+    it("calculates totals from parsed mixed inferred+anchored multi-clause sig: 1x5 pc, 1 tab hs", () => {
+        const parsed = parseSig("1x5 pc, 1 tab hs", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.items.map((item) => item.fhir),
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC",
+            eventClock: {
+                [EventTiming["Before Sleep"]]: "22:00"
+            }
+        });
+        expect(result.totalUnits).toBe(12);
     });
 });
