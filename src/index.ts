@@ -8,7 +8,8 @@ import {
   applySiteCoding,
   applySiteCodingAsync,
   findUnparsedTokenGroups,
-  parseInternal
+  parseInternal,
+  tokenize
 } from "./parser";
 import { splitSigSegments } from "./segment";
 import {
@@ -57,6 +58,114 @@ interface SegmentCarry {
   dose?: number;
 }
 
+type MealDashRelation = "meal" | "ac" | "pc";
+
+function parseMealDashValues(token: string): number[] | undefined {
+  if (!/^[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?){2,3}$/.test(token)) {
+    return undefined;
+  }
+  const values = token.split("-").map((part) => Number(part));
+  if (values.length !== 3 && values.length !== 4) {
+    return undefined;
+  }
+  if (!values.every((value) => Number.isFinite(value) && value >= 0)) {
+    return undefined;
+  }
+  return values;
+}
+
+function mealDashEvents(length: number, relation: MealDashRelation): string[] {
+  const base =
+    relation === "ac"
+      ? ["ACM", "ACD", "ACV"]
+      : relation === "pc"
+        ? ["PCM", "PCD", "PCV"]
+        : ["CM", "CD", "CV"];
+  if (length === 4) {
+    return [...base, "HS"];
+  }
+  return base;
+}
+
+function formatMealDashAmount(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return String(value).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+function expandMealDashSegment(
+  segment: ReturnType<typeof splitSigSegments>[number]
+): ReturnType<typeof splitSigSegments> {
+  const tokens = tokenize(segment.text);
+  if (tokens.length === 0) {
+    return [segment];
+  }
+
+  const firstToken = tokens[0];
+  const values = parseMealDashValues(firstToken.lower);
+  if (!values) {
+    return [segment];
+  }
+
+  let relation: MealDashRelation = "meal";
+  let relationIndex = -1;
+  for (let i = 1; i < tokens.length; i += 1) {
+    const lower = tokens[i].lower.replace(/[.,;:]/g, "");
+    if (lower === "ac") {
+      relation = "ac";
+      relationIndex = i;
+      break;
+    }
+    if (lower === "pc") {
+      relation = "pc";
+      relationIndex = i;
+      break;
+    }
+  }
+
+  const suffixTokens = tokens
+    .filter((token, index) => index !== 0 && index !== relationIndex)
+    .map((token) => token.original);
+  const events = mealDashEvents(values.length, relation);
+
+  const expanded = values
+    .map((value, index) => ({ value, event: events[index] }))
+    .filter(({ value }) => value > 0)
+    .map(({ value, event }) => {
+      const text = [formatMealDashAmount(value), ...suffixTokens, event]
+        .filter((part) => part && part.trim().length > 0)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return {
+        text,
+        start: segment.start,
+        end: segment.end
+      };
+    })
+    .filter((item) => item.text.length > 0);
+
+  if (expanded.length === 0) {
+    return [segment];
+  }
+  return expanded;
+}
+
+function expandMealDashSegments(
+  segments: ReturnType<typeof splitSigSegments>,
+  options?: ParseOptions
+): ReturnType<typeof splitSigSegments> {
+  if (!options?.enableMealDashSyntax) {
+    return segments;
+  }
+  const expanded: ReturnType<typeof splitSigSegments> = [];
+  for (const segment of segments) {
+    expanded.push(...expandMealDashSegment(segment));
+  }
+  return expanded;
+}
+
 function toSegmentMeta(segments: ReturnType<typeof splitSigSegments>): ParseBatchSegmentMeta[] {
   return segments.map((segment, index) => ({
     index,
@@ -66,7 +175,7 @@ function toSegmentMeta(segments: ReturnType<typeof splitSigSegments>): ParseBatc
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const segments = splitSigSegments(input);
+  const segments = expandMealDashSegments(splitSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -99,7 +208,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
-  const segments = splitSigSegments(input);
+  const segments = expandMealDashSegments(splitSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: LintResult[] = [];
 
@@ -145,7 +254,7 @@ export async function parseSigAsync(
   input: string,
   options?: ParseOptions
 ): Promise<ParseBatchResult> {
-  const segments = splitSigSegments(input);
+  const segments = expandMealDashSegments(splitSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 

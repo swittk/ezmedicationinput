@@ -533,6 +533,13 @@ export interface ParseOptions extends FormatOptions {
    */
   smartMealExpansion?: boolean;
   /**
+   * Enables parsing meal dash shorthand like `1-0-1` / `1-0-0-1` into
+   * multiple dosage clauses aligned to breakfast/lunch/dinner/(bedtime).
+   * Optional trailing `ac` / `pc` maps meal anchors to before/after meal
+   * variants.
+   */
+  enableMealDashSyntax?: boolean;
+  /**
    * Controls which meal pair is assumed for twice-daily meal expansions.
    * Defaults to "breakfast+dinner" to mirror common clinical practice.
    */

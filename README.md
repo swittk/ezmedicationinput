@@ -346,6 +346,10 @@ You can specify the number of times (total count) the medication is supposed to 
   combinations (e.g. `1x3` → breakfast/lunch/dinner). This also respects
   `context.mealRelation` when provided and only applies to schedules with four
   or fewer daily doses.
+- `enableMealDashSyntax`: when `true`, enables shorthand meal-dose patterns
+  such as `1-0-1`, `1-0-1 pc`, `10-12-0 ac`, and `1-0-0-1 ac`. The parser
+  expands them into multiple dosage clauses aligned to breakfast/lunch/dinner
+  (plus bedtime for a 4th slot).
 - `twoPerDayPair`: controls whether 2× AC/PC/C doses expand to breakfast+dinner (default) or breakfast+lunch.
 - `assumeSingleDiscreteDose`: when `true`, missing discrete doses (such as
   tablets or capsules) default to a single unit when the parser can infer a

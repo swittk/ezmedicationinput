@@ -63,6 +63,56 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Use 1.5 tablets three times daily.");
   });
 
+  it("keeps meal dash syntax disabled by default", () => {
+    const result = parseSig("1-0-1 ac", { context: TAB_CONTEXT });
+    expect(result.count).toBe(1);
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Meal"]]);
+  });
+
+  it("parses meal dash syntax into breakfast and dinner clauses", () => {
+    const result = parseSig("1-0-1", {
+      context: TAB_CONTEXT,
+      enableMealDashSyntax: true
+    });
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming.Dinner]);
+  });
+
+  it("applies PC mapping for meal dash syntax", () => {
+    const result = parseSig("1-0-1 pc", {
+      context: TAB_CONTEXT,
+      enableMealDashSyntax: true
+    });
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["After Breakfast"]]);
+    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["After Dinner"]]);
+  });
+
+  it("supports asymmetric AC meal dash doses", () => {
+    const result = parseSig("10-12-0 ac", {
+      context: TAB_CONTEXT,
+      enableMealDashSyntax: true
+    });
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "tab" });
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"]]);
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 12, unit: "tab" });
+    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Lunch"]]);
+  });
+
+  it("maps fourth meal dash slot to bedtime", () => {
+    const result = parseSig("1-0-0-1 ac", {
+      context: TAB_CONTEXT,
+      enableMealDashSyntax: true
+    });
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"]]);
+    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
+  });
+
   it("parses adverbial route descriptors", () => {
     const cases: Array<{ input: string; code: SNOMEDCTRouteCodes }> = [
       { input: "1x2 orally bid", code: SNOMEDCTRouteCodes["Oral route"] },
