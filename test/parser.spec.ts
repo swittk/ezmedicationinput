@@ -1295,6 +1295,167 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.leftoverText).toBeUndefined();
   });
 
+  it("parses weekday ranges written as mon-fri", () => {
+    const cases = [
+      "1 tab po once daily mon-fri",
+      "1 tab po once daily mon - fri",
+      "1 tab po once daily mon to fri"
+    ];
+    for (const input of cases) {
+      const result = parseSig(input, { context: TAB_CONTEXT });
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("parses arbitrary day-to-day ranges including wrap-around", () => {
+    const tuesdayToThursday = parseSig("1 tab po once daily tuesday to thursday", { context: TAB_CONTEXT });
+    expect(tuesdayToThursday.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["tue", "wed", "thu"]
+    });
+    expect(tuesdayToThursday.meta.leftoverText).toBeUndefined();
+
+    const fridayToMonday = parseSig("1 tab po once daily fri to mon", { context: TAB_CONTEXT });
+    expect(fridayToMonday.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["fri", "sat", "sun", "mon"]
+    });
+    expect(fridayToMonday.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses weekend expressions", () => {
+    const cases = [
+      "1.5 tabs po once daily on weekends",
+      "1.5 tabs po once daily sat-sun",
+      "1.5 tabs po once daily weekend"
+    ];
+    for (const input of cases) {
+      const result = parseSig(input, { context: TAB_CONTEXT });
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        dayOfWeek: ["sat", "sun"]
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("parses Thai weekday and weekend variants", () => {
+    const weekdayCases = [
+      "1 tab po once daily จ-ศ",
+      "1 tab po once daily จัน-ศุก",
+      "1 tab po once daily จันทร์-ศุกร์",
+      "1 tab po once daily วันธรรมดา",
+      "1 tab po once daily จันทร์ถึงศุกร์"
+    ];
+    for (const input of weekdayCases) {
+      const result = parseSig(input, { context: TAB_CONTEXT });
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+
+    const thaiRangeCases = [
+      "1 tab po once daily อังคาร ถึง พฤหัสบดี",
+      "1 tab po once daily อังคารถึงพฤหัสบดี",
+      "1 tab po once daily เสาร์ถึงอังคาร"
+    ];
+    const expectedRanges = [
+      ["tue", "wed", "thu"],
+      ["tue", "wed", "thu"],
+      ["sat", "sun", "mon", "tue"]
+    ];
+    for (let i = 0; i < thaiRangeCases.length; i += 1) {
+      const result = parseSig(thaiRangeCases[i], { context: TAB_CONTEXT });
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        dayOfWeek: expectedRanges[i]
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+
+    const weekendCases = [
+      "1.5 tabs po once daily เสา-อา",
+      "1.5 tabs po once daily เสา อา",
+      "1.5 tabs po once daily เสาร์ อาทิตย์",
+      "1.5 tabs po once daily สุดสัปดาห์",
+      "1.5 tabs po once daily วันหยุด"
+    ];
+    for (const input of weekendCases) {
+      const result = parseSig(input, { context: TAB_CONTEXT });
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        dayOfWeek: ["sat", "sun"]
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("supports methimazole-style split daily doses by weekday vs weekend", () => {
+    const result = parseSig(
+      "1 tab po once daily mon-fri, 1.5 tabs po once daily on weekends",
+      { context: TAB_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
+    });
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.items[1].fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["sat", "sun"]
+    });
+  });
+
+  it("supports methimazole-style split doses with Thai day ranges", () => {
+    const result = parseSig(
+      "1 tab po once daily จ-ศ, 1.5 tabs po once daily เสา-อา",
+      { context: TAB_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
+    });
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.items[1].fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      dayOfWeek: ["sat", "sun"]
+    });
+  });
+
   it("parses q1mo", () => {
     const result = parseSig("q1mo");
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("MO");

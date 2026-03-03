@@ -238,6 +238,16 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "upon waking": EventTiming.Wake
 };
 
+const DAY_RANGE_PART_PATTERN = Object.keys(DAY_OF_WEEK_TOKENS)
+  .sort((a, b) => b.length - a.length)
+  .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+
+const DAY_RANGE_SPACED_HYPHEN_REGEX = new RegExp(
+  `(^|\\s)(${DAY_RANGE_PART_PATTERN})\\s*-\\s*(${DAY_RANGE_PART_PATTERN})(?=\\s|$)`,
+  "giu"
+);
+
 const MEAL_CONTEXT_CONNECTORS = new Set(["and", "or", "&", "+", "plus"]);
 
 const COUNT_KEYWORDS = new Set([
@@ -1145,6 +1155,10 @@ const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
 export function tokenize(input: string): Token[] {
   const separators = /[(),;]/g;
   let normalized = input.trim().replace(separators, " ");
+  normalized = normalized.replace(
+    DAY_RANGE_SPACED_HYPHEN_REGEX,
+    (_match, prefix: string, start: string, end: string) => `${prefix}${start}-${end}`
+  );
   normalized = normalized.replace(/\s-\s/g, " ; ");
   normalized = normalized.replace(
     /(\d+(?:\.\d+)?)\s*\/\s*(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)\b/gi,
@@ -1911,6 +1925,168 @@ function isTimingAnchorOrPrefix(
   );
 }
 
+const DAY_SEQUENCE: readonly FhirDayOfWeek[] = [
+  FhirDayOfWeek.Monday,
+  FhirDayOfWeek.Tuesday,
+  FhirDayOfWeek.Wednesday,
+  FhirDayOfWeek.Thursday,
+  FhirDayOfWeek.Friday,
+  FhirDayOfWeek.Saturday,
+  FhirDayOfWeek.Sunday
+];
+
+const DAY_GROUP_TOKENS: Record<string, FhirDayOfWeek[]> = {
+  weekend: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  weekends: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  wknd: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  weekdays: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  weekday: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  workday: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  workdays: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  วันธรรมดา: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  วันทำงาน: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ],
+  วันหยุด: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  สุดสัปดาห์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  เสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  จันทร์ถึงศุกร์: [
+    FhirDayOfWeek.Monday,
+    FhirDayOfWeek.Tuesday,
+    FhirDayOfWeek.Wednesday,
+    FhirDayOfWeek.Thursday,
+    FhirDayOfWeek.Friday
+  ]
+};
+
+const DAY_RANGE_CONNECTOR_TOKENS = new Set(["-", "to", "through", "thru", "ถึง", "จนถึง"]);
+
+function addDayOfWeek(internal: ParsedSigInternal, day: FhirDayOfWeek) {
+  if (!arrayIncludes(internal.dayOfWeek, day)) {
+    internal.dayOfWeek.push(day);
+  }
+}
+
+function addDayOfWeekList(internal: ParsedSigInternal, days: FhirDayOfWeek[]) {
+  for (const day of days) {
+    addDayOfWeek(internal, day);
+  }
+}
+
+function expandDayRange(start: FhirDayOfWeek, end: FhirDayOfWeek): FhirDayOfWeek[] {
+  const startIndex = DAY_SEQUENCE.indexOf(start);
+  const endIndex = DAY_SEQUENCE.indexOf(end);
+  if (startIndex < 0 || endIndex < 0) {
+    return [start, end];
+  }
+  if (startIndex <= endIndex) {
+    return DAY_SEQUENCE.slice(startIndex, endIndex + 1);
+  }
+  return [...DAY_SEQUENCE.slice(startIndex), ...DAY_SEQUENCE.slice(0, endIndex + 1)];
+}
+
+function resolveDayTokenDays(tokenLower: string): FhirDayOfWeek[] | undefined {
+  const normalized = tokenLower.replace(/[.,;:]/g, "");
+  const direct = DAY_OF_WEEK_TOKENS[normalized];
+  if (direct) {
+    return [direct];
+  }
+  const grouped = DAY_GROUP_TOKENS[normalized];
+  if (grouped) {
+    return grouped.slice();
+  }
+  const rangeMatch = normalized.match(/^([^-–—~]+)[-–—~]([^-–—~]+)$/);
+  if (rangeMatch) {
+    const start = DAY_OF_WEEK_TOKENS[rangeMatch[1]];
+    const end = DAY_OF_WEEK_TOKENS[rangeMatch[2]];
+    if (start && end) {
+      return expandDayRange(start, end);
+    }
+  }
+  const compactConnectorRange = normalized.match(/^(.+?)(ถึง|จนถึง|to|through|thru)(.+)$/u);
+  if (compactConnectorRange) {
+    const start = DAY_OF_WEEK_TOKENS[compactConnectorRange[1]];
+    const end = DAY_OF_WEEK_TOKENS[compactConnectorRange[3]];
+    if (start && end) {
+      return expandDayRange(start, end);
+    }
+  }
+  return undefined;
+}
+
+function tryConsumeDayRangeTokens(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number
+): number {
+  const startToken = tokens[index];
+  if (!startToken || internal.consumed.has(startToken.index)) {
+    return 0;
+  }
+  const startDays = resolveDayTokenDays(normalizeTokenLower(startToken));
+  if (!startDays || startDays.length !== 1) {
+    return 0;
+  }
+  const connectorToken = tokens[index + 1];
+  const endToken = tokens[index + 2];
+  if (
+    !connectorToken ||
+    !endToken ||
+    internal.consumed.has(connectorToken.index) ||
+    internal.consumed.has(endToken.index)
+  ) {
+    return 0;
+  }
+  const connector = normalizeTokenLower(connectorToken);
+  if (!DAY_RANGE_CONNECTOR_TOKENS.has(connector)) {
+    return 0;
+  }
+  const endDays = resolveDayTokenDays(normalizeTokenLower(endToken));
+  if (!endDays || endDays.length !== 1) {
+    return 0;
+  }
+  const expanded = expandDayRange(startDays[0], endDays[0]);
+  addDayOfWeekList(internal, expanded);
+  mark(internal.consumed, startToken);
+  mark(internal.consumed, connectorToken);
+  mark(internal.consumed, endToken);
+  return 3;
+}
+
 function parseAnchorSequence(
   internal: ParsedSigInternal,
   tokens: Token[],
@@ -1925,17 +2101,22 @@ function parseAnchorSequence(
       continue;
     }
 
-    const lower = nextToken.lower;
+    const lower = normalizeTokenLower(nextToken);
     if (MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
       mark(internal.consumed, nextToken);
       continue;
     }
 
-    const day = DAY_OF_WEEK_TOKENS[lower];
-    if (day) {
-      if (!arrayIncludes(internal.dayOfWeek, day)) {
-        internal.dayOfWeek.push(day);
-      }
+    const rangeConsumed = tryConsumeDayRangeTokens(internal, tokens, lookahead);
+    if (rangeConsumed > 0) {
+      converted++;
+      lookahead += rangeConsumed - 1;
+      continue;
+    }
+
+    const days = resolveDayTokenDays(lower);
+    if (days) {
+      addDayOfWeekList(internal, days);
       mark(internal.consumed, nextToken);
       converted++;
       continue;
@@ -2540,11 +2721,13 @@ export function parseInternal(
     }
 
     // Day of week
-    const day = DAY_OF_WEEK_TOKENS[token.lower];
-    if (day) {
-      if (!arrayIncludes(internal.dayOfWeek, day)) {
-        internal.dayOfWeek.push(day);
-      }
+    const rangeConsumed = tryConsumeDayRangeTokens(internal, tokens, i);
+    if (rangeConsumed > 0) {
+      continue;
+    }
+    const days = resolveDayTokenDays(normalizeTokenLower(token));
+    if (days) {
+      addDayOfWeekList(internal, days);
       mark(internal.consumed, token);
       continue;
     }

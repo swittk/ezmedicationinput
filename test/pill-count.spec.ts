@@ -339,4 +339,51 @@ describe("calculateTotalUnits", () => {
         });
         expect(result.totalUnits).toBe(4);
     });
+
+    it("calculates split weekday/weekend regimen totals from weekdays nomenclature", () => {
+        const parsed = parseSig(
+            "1 tab po once daily weekdays, 1.5 tabs po once daily weekends",
+            { context: { dosageForm: "tab" } }
+        );
+        const result = calculateTotalUnits({
+            dosage: parsed.items.map((item) => item.fhir),
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 4,
+            durationUnit: FhirPeriodUnit.Week,
+            timeZone: "UTC"
+        });
+        // 4 weeks from Monday: 20 weekdays * 1 + 8 weekend days * 1.5 = 32 tabs
+        expect(result.totalUnits).toBe(32);
+    });
+
+    it("calculates split weekday/weekend regimen totals from Thai nomenclature", () => {
+        const parsed = parseSig(
+            "1 tab po once daily วันธรรมดา, 1.5 tabs po once daily สุดสัปดาห์",
+            { context: { dosageForm: "tab" } }
+        );
+        const result = calculateTotalUnits({
+            dosage: parsed.items.map((item) => item.fhir),
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Week,
+            timeZone: "UTC"
+        });
+        // 2 weeks from Monday: 10 weekdays * 1 + 4 weekend days * 1.5 = 16 tabs
+        expect(result.totalUnits).toBe(16);
+    });
+
+    it("calculates totals for wrap-around day ranges", () => {
+        const parsed = parseSig("1 tab po once daily fri to mon", {
+            context: { dosageForm: "tab" }
+        });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Week,
+            timeZone: "UTC"
+        });
+        // 2 weeks include Fri/Sat/Sun/Mon twice = 8 doses
+        expect(result.totalUnits).toBe(8);
+    });
 });
