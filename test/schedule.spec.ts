@@ -28,6 +28,61 @@ const BASE_OPTIONS = {
   mealOffsets: MEAL_OFFSETS
 } as const satisfies Pick<NextDueDoseOptions, "timeZone" | "eventClock" | "mealOffsets">;
 
+/**
+ * Adds a duration to an ISO timestamp in UTC for deterministic test windows.
+ *
+ * @param fromIso ISO timestamp baseline.
+ * @param value Duration magnitude.
+ * @param unit Duration unit.
+ * @returns End timestamp in UTC.
+ */
+function addDurationUtc(fromIso: string, value: number, unit: FhirPeriodUnit): Date {
+  const from = new Date(fromIso);
+  const next = new Date(from.getTime());
+  if (unit === FhirPeriodUnit.Second) next.setUTCSeconds(next.getUTCSeconds() + value);
+  else if (unit === FhirPeriodUnit.Minute) next.setUTCMinutes(next.getUTCMinutes() + value);
+  else if (unit === FhirPeriodUnit.Hour) next.setUTCHours(next.getUTCHours() + value);
+  else if (unit === FhirPeriodUnit.Day) next.setUTCDate(next.getUTCDate() + value);
+  else if (unit === FhirPeriodUnit.Week) next.setUTCDate(next.getUTCDate() + value * 7);
+  else if (unit === FhirPeriodUnit.Month) next.setUTCMonth(next.getUTCMonth() + value);
+  else if (unit === FhirPeriodUnit.Year) next.setUTCFullYear(next.getUTCFullYear() + value);
+  return next;
+}
+
+/**
+ * Uses `nextDueDoses` as a generation oracle to count doses within a finite window.
+ *
+ * @param dosage Dosage schedule to expand.
+ * @param from Inclusive window start.
+ * @param durationValue Window size magnitude.
+ * @param durationUnit Window size unit.
+ * @returns Number of generated doses inside `[from, end)`.
+ */
+function expectedCountFromGenerator(
+  dosage: FhirDosage,
+  from: string,
+  durationValue: number,
+  durationUnit: FhirPeriodUnit
+): number {
+  const start = new Date(from);
+  const end = addDurationUtc(from, durationValue, durationUnit);
+  const windowDays = Math.max(
+    1,
+    Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+  );
+  const limit = Math.min(2000, Math.max(256, windowDays * 24));
+  const generated = nextDueDoses(dosage, {
+    ...BASE_OPTIONS,
+    orderedAt: from,
+    from,
+    limit
+  });
+  return generated.filter((iso) => {
+    const at = new Date(iso);
+    return at >= start && at < end;
+  }).length;
+}
+
 describe("nextDueDoses", () => {
   it("anchors to explicit meal timings", () => {
     const dosage: FhirDosage = {
@@ -506,6 +561,72 @@ describe("calculateTotalUnits", () => {
     expect(res.totalUnits).toBe(6);
   });
 
+  it("respects multi-week cadence when dayOfWeek is present", () => {
+    // Every 2 weeks on Monday for 8 weeks = 4 doses
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: {
+        repeat: {
+          period: 2,
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: [FhirDayOfWeek.Monday]
+        }
+      }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z", // Monday
+      durationValue: 8,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC"
+    });
+    expect(res.totalUnits).toBe(4);
+  });
+
+  it("respects hourly intervals constrained by dayOfWeek", () => {
+    // q6h on Tuesdays only over 2 weeks:
+    // Tue Jan 2 + Tue Jan 9 => 2 days * 4 doses/day = 8 doses
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: {
+        repeat: {
+          period: 6,
+          periodUnit: FhirPeriodUnit.Hour,
+          dayOfWeek: [FhirDayOfWeek.Tuesday]
+        }
+      }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 2,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC"
+    });
+    expect(res.totalUnits).toBe(8);
+  });
+
+  it("calculates syrup bottles for non-daily weekly schedules", () => {
+    // 10 mL weekly for 10 weeks = 100 mL total; 60 mL bottle => 2 bottles
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 10, unit: "mL" } }],
+      timing: { repeat: { period: 1, periodUnit: FhirPeriodUnit.Week } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 10,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC",
+      context: {
+        containerValue: 60,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(100);
+    expect(res.totalContainers).toBe(2);
+  });
+
   it("handles anchored event timings (Breakfast + Dinner) for 5 days", () => {
     // 2 doses/day * 5 days = 10 doses
     const dosage: FhirDosage = {
@@ -562,6 +683,250 @@ describe("calculateTotalUnits", () => {
       }
     });
     expect(res.totalUnits).toBe(200);
+    expect(res.totalContainers).toBe(2);
+  });
+
+  it("matches generated schedules for weird non-daily timing combinations", () => {
+    const scenarios: Array<{
+      name: string;
+      from: string;
+      durationValue: number;
+      durationUnit: FhirPeriodUnit;
+      dosage: FhirDosage;
+      doseValue: number;
+    }> = [
+      {
+        name: "q6h",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 2,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { period: 6, periodUnit: FhirPeriodUnit.Hour } }
+        }
+      },
+      {
+        name: "q6h Tuesday only",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 2,
+        durationUnit: FhirPeriodUnit.Week,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              period: 6,
+              periodUnit: FhirPeriodUnit.Hour,
+              dayOfWeek: [FhirDayOfWeek.Tuesday]
+            }
+          }
+        }
+      },
+      {
+        name: "q36h",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 12,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { period: 36, periodUnit: FhirPeriodUnit.Hour } }
+        }
+      },
+      {
+        name: "q2d monday wednesday friday only",
+        from: "2024-01-01T08:00:00Z",
+        durationValue: 28,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              period: 2,
+              periodUnit: FhirPeriodUnit.Day,
+              dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday, FhirDayOfWeek.Friday]
+            }
+          }
+        }
+      },
+      {
+        name: "weekly mon wed fri",
+        from: "2024-01-01T08:00:00Z",
+        durationValue: 3,
+        durationUnit: FhirPeriodUnit.Week,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              period: 1,
+              periodUnit: FhirPeriodUnit.Week,
+              dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday, FhirDayOfWeek.Friday]
+            }
+          }
+        }
+      },
+      {
+        name: "every 2 weeks monday",
+        from: "2024-01-01T08:00:00Z",
+        durationValue: 10,
+        durationUnit: FhirPeriodUnit.Week,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              period: 2,
+              periodUnit: FhirPeriodUnit.Week,
+              dayOfWeek: [FhirDayOfWeek.Monday]
+            }
+          }
+        }
+      },
+      {
+        name: "monthly monday",
+        from: "2024-01-01T08:00:00Z",
+        durationValue: 6,
+        durationUnit: FhirPeriodUnit.Month,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              period: 1,
+              periodUnit: FhirPeriodUnit.Month,
+              dayOfWeek: [FhirDayOfWeek.Monday]
+            }
+          }
+        }
+      },
+      {
+        name: "timeOfDay + day filter",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 14,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              dayOfWeek: [FhirDayOfWeek.Tuesday, FhirDayOfWeek.Thursday],
+              timeOfDay: ["08:00", "20:00"]
+            }
+          }
+        }
+      },
+      {
+        name: "when before meal",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 5,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { when: [EventTiming["Before Meal"]] } }
+        }
+      },
+      {
+        name: "when before sleep",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 5,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { when: [EventTiming["Before Sleep"]] } }
+        }
+      },
+      {
+        name: "TID with explicit day filter",
+        from: "2024-01-01T00:00:00Z",
+        durationValue: 10,
+        durationUnit: FhirPeriodUnit.Day,
+        doseValue: 1,
+        dosage: {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: {
+            repeat: {
+              frequency: 3,
+              period: 1,
+              periodUnit: FhirPeriodUnit.Day,
+              dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday, FhirDayOfWeek.Wednesday]
+            }
+          }
+        }
+      }
+    ];
+
+    for (const scenario of scenarios) {
+      const expectedCount = expectedCountFromGenerator(
+        scenario.dosage,
+        scenario.from,
+        scenario.durationValue,
+        scenario.durationUnit
+      );
+      const actual = calculateTotalUnits({
+        dosage: scenario.dosage,
+        from: scenario.from,
+        durationValue: scenario.durationValue,
+        durationUnit: scenario.durationUnit,
+        ...BASE_OPTIONS
+      });
+      expect(actual.totalUnits / scenario.doseValue, scenario.name).toBe(expectedCount);
+    }
+  });
+
+  it("calculates liquid containers for monthly cadence with strength conversion", () => {
+    // 250 mg monthly x3 months = 750 mg total.
+    // Strength 125 mg/5 mL = 25 mg/mL -> total 30 mL.
+    // 15 mL bottles => 2 bottles.
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 250, unit: "mg" } }],
+      timing: { repeat: { period: 1, periodUnit: FhirPeriodUnit.Month } }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 3,
+      durationUnit: FhirPeriodUnit.Month,
+      timeZone: "UTC",
+      context: {
+        strength: "125 mg/5 mL",
+        containerValue: 15,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(750);
+    expect(res.totalContainers).toBe(2);
+  });
+
+  it("calculates liquid containers for filtered biweekly cadence", () => {
+    // 10 mL every 2 weeks on Monday for 9 weeks => 5 doses => 50 mL.
+    // 30 mL bottle => 2 bottles.
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 10, unit: "mL" } }],
+      timing: {
+        repeat: {
+          period: 2,
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: [FhirDayOfWeek.Monday]
+        }
+      }
+    };
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T08:00:00Z",
+      durationValue: 9,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC",
+      context: {
+        containerValue: 30,
+        containerUnit: "mL"
+      }
+    });
+    expect(res.totalUnits).toBe(50);
     expect(res.totalContainers).toBe(2);
   });
 });

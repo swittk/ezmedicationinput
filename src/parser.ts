@@ -938,6 +938,25 @@ function parseTimeToFhir(timeStr: string): string | undefined {
   return `${h}:${m}:00`;
 }
 
+function extractAttachedAtTimeToken(lower: string): string | undefined {
+  if (lower.length <= 1) {
+    return undefined;
+  }
+  if (lower.charAt(0) === "@") {
+    const candidate = lower.slice(1);
+    return parseTimeToFhir(candidate) ? candidate : undefined;
+  }
+  if (lower.startsWith("at") && lower.length > 2 && /^\d/.test(lower.charAt(2))) {
+    const candidate = lower.slice(2);
+    return parseTimeToFhir(candidate) ? candidate : undefined;
+  }
+  return undefined;
+}
+
+function isAtPrefixToken(lower: string): boolean {
+  return lower === "@" || lower === "at" || extractAttachedAtTimeToken(lower) !== undefined;
+}
+
 function tryParseTimeBasedSchedule(
   internal: ParsedSigInternal,
   tokens: Token[],
@@ -946,23 +965,68 @@ function tryParseTimeBasedSchedule(
   const token = tokens[index];
   if (internal.consumed.has(token.index)) return false;
 
-  let isAtPrefix = token.lower === "@" || token.lower === "at";
+  const attachedAtTime = extractAttachedAtTimeToken(token.lower);
+  const isAtPrefix = isAtPrefixToken(token.lower);
   if (!isAtPrefix && !/^\d/.test(token.lower)) return false;
 
   let nextIndex = index;
-  if (isAtPrefix) nextIndex++;
-
   const times: string[] = [];
   const consumedIndices: number[] = [];
   const timeTokens: string[] = [];
 
-  if (isAtPrefix) {
+  if (token.lower === "@" || token.lower === "at") {
     consumedIndices.push(index);
+    nextIndex++;
+  } else if (attachedAtTime) {
+    let timeStr = attachedAtTime;
+    const lookaheadIndices: number[] = [];
+    if (!timeStr.includes("am") && !timeStr.includes("pm")) {
+      const ampmToken = tokens[index + 1];
+      if (
+        ampmToken &&
+        !internal.consumed.has(ampmToken.index) &&
+        (ampmToken.lower === "am" || ampmToken.lower === "pm")
+      ) {
+        timeStr += ampmToken.lower;
+        lookaheadIndices.push(index + 1);
+      }
+    }
+    const compactTime = parseTimeToFhir(timeStr);
+    if (!compactTime) {
+      return false;
+    }
+    times.push(compactTime);
+    timeTokens.push(timeStr);
+    consumedIndices.push(index);
+    for (const idx of lookaheadIndices) {
+      consumedIndices.push(idx);
+    }
+    nextIndex = index + 1 + lookaheadIndices.length;
   }
 
   while (nextIndex < tokens.length) {
     const nextToken = tokens[nextIndex];
     if (!nextToken || internal.consumed.has(nextToken.index)) break;
+
+    if ((nextToken.lower === "," || nextToken.lower === "and") && times.length > 0) {
+      const peekToken = tokens[nextIndex + 1];
+      if (peekToken && !internal.consumed.has(peekToken.index)) {
+        let peekStr = peekToken.lower;
+        const ampmToken = tokens[nextIndex + 2];
+        if (
+          ampmToken &&
+          !internal.consumed.has(ampmToken.index) &&
+          (ampmToken.lower === "am" || ampmToken.lower === "pm")
+        ) {
+          peekStr += ampmToken.lower;
+        }
+        if (parseTimeToFhir(peekStr)) {
+          consumedIndices.push(nextIndex);
+          nextIndex++;
+          continue;
+        }
+      }
+    }
 
     let timeStr = nextToken.lower;
     let lookaheadIndices: number[] = [];
@@ -1842,7 +1906,7 @@ function isTimingAnchorOrPrefix(
     TIMING_ABBREVIATIONS[lower] ||
     (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
     (lower === "pc" || lower === "ac" || lower === "after" || lower === "before") ||
-    (lower === "at" || lower === "@" || lower === "on" || lower === "with") ||
+    (isAtPrefixToken(lower) || lower === "on" || lower === "with") ||
     /^\d/.test(lower)
   );
 }
@@ -2361,11 +2425,11 @@ export function parseInternal(
       );
       continue;
     }
-    if (token.lower === "at" || token.lower === "@" || token.lower === "on" || token.lower === "with") {
-      if (parseAnchorSequence(internal, tokens, i)) {
+    if (isAtPrefixToken(token.lower) || token.lower === "on" || token.lower === "with") {
+      if (tryParseTimeBasedSchedule(internal, tokens, i)) {
         continue;
       }
-      if (tryParseTimeBasedSchedule(internal, tokens, i)) {
+      if (parseAnchorSequence(internal, tokens, i)) {
         continue;
       }
       // If none of the above consume it, and it's a known anchor prefix, mark it

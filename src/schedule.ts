@@ -345,6 +345,53 @@ function getLocalWeekday(date: Date, timeZone: string): string {
   }
 }
 
+function getLocalDayNumber(date: Date, timeZone: string): number {
+  const { year, month, day } = getTimeParts(date, timeZone);
+  return Math.floor(Date.UTC(year, month - 1, day) / (24 * 60 * 60 * 1000));
+}
+
+function getLocalMonthIndex(date: Date, timeZone: string): number {
+  const { year, month } = getTimeParts(date, timeZone);
+  return year * 12 + (month - 1);
+}
+
+function isDateAlignedToPeriodCycle(
+  candidateDay: Date,
+  anchorDay: Date,
+  repeat: FhirTimingRepeat,
+  timeZone: string
+): boolean {
+  const period = repeat.period;
+  const periodUnit = repeat.periodUnit;
+  if (!period || period <= 0 || !periodUnit) {
+    return true;
+  }
+
+  if (periodUnit === "d") {
+    const deltaDays = getLocalDayNumber(candidateDay, timeZone) - getLocalDayNumber(anchorDay, timeZone);
+    return deltaDays >= 0 && deltaDays % period === 0;
+  }
+  if (periodUnit === "wk") {
+    const deltaDays = getLocalDayNumber(candidateDay, timeZone) - getLocalDayNumber(anchorDay, timeZone);
+    if (deltaDays < 0) {
+      return false;
+    }
+    const deltaWeeks = Math.floor(deltaDays / 7);
+    return deltaWeeks % period === 0;
+  }
+  if (periodUnit === "mo") {
+    const deltaMonths = getLocalMonthIndex(candidateDay, timeZone) - getLocalMonthIndex(anchorDay, timeZone);
+    return deltaMonths >= 0 && deltaMonths % period === 0;
+  }
+  if (periodUnit === "a") {
+    const candidateYear = getTimeParts(candidateDay, timeZone).year;
+    const anchorYear = getTimeParts(anchorDay, timeZone).year;
+    const deltaYears = candidateYear - anchorYear;
+    return deltaYears >= 0 && deltaYears % period === 0;
+  }
+  return true;
+}
+
 /** Parses arbitrary string/Date inputs into a valid Date instance. */
 function coerceDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
@@ -841,7 +888,12 @@ export function nextDueDoses(
       repeat.periodUnit !== "d" ||
       (repeat.frequency === 1 && repeat.period > 1));
 
-  if (treatAsInterval) {
+  const supportsDayFilteredInterval = isDayFilteredIntervalSupported(
+    repeat,
+    enforceDayFilter
+  );
+
+  if (treatAsInterval && supportsDayFilteredInterval) {
     // True interval schedules advance from the order start in fixed units. The
     // timing.code remains advisory so we only rely on the period/unit fields.
     const candidates = generateIntervalSeries(
@@ -855,6 +907,25 @@ export function nextDueDoses(
       orderedAt
     );
     return candidates;
+  }
+
+  if (
+    enforceDayFilter &&
+    repeat.period &&
+    repeat.periodUnit &&
+    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
+  ) {
+    return generateDayFilteredPeriodSeries({
+      repeat,
+      timeZone,
+      dayFilter,
+      anchorDay: startOfLocalDay(baseTime, timeZone),
+      startDay: from,
+      from,
+      orderedAt,
+      limit: effectiveLimit,
+      defaultClock: toLocalClock(baseTime, timeZone)
+    }).slice(0, effectiveLimit);
   }
 
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
@@ -1021,7 +1092,12 @@ function derivePriorCountFromHistory(
       repeat.periodUnit !== "d" ||
       (repeat.frequency === 1 && repeat.period > 1));
 
-  if (treatAsInterval) {
+  const supportsDayFilteredInterval = isDayFilteredIntervalSupported(
+    repeat,
+    enforceDayFilter
+  );
+
+  if (treatAsInterval && supportsDayFilteredInterval) {
     const increment = createIntervalStepper(repeat, timeZone);
     if (!increment) {
       return count;
@@ -1046,6 +1122,27 @@ function derivePriorCountFromHistory(
     }
 
     return count;
+  }
+
+  if (
+    enforceDayFilter &&
+    repeat.period &&
+    repeat.periodUnit &&
+    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
+  ) {
+    const generated = generateDayFilteredPeriodSeries({
+      repeat,
+      timeZone,
+      dayFilter,
+      anchorDay: startOfLocalDay(orderedAt, timeZone),
+      startDay: orderedAt,
+      from: orderedAt,
+      to: from,
+      orderedAt,
+      limit: normalizedCount ?? 31 * 365,
+      defaultClock: toLocalClock(orderedAt, timeZone)
+    });
+    return count + generated.length;
   }
 
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
@@ -1152,6 +1249,10 @@ function generateIntervalSeries(
 
 /**
  * Builds a function that advances a Date according to repeat.period/unit.
+ *
+ * @param repeat FHIR repeat object containing `period` and `periodUnit`.
+ * @param timeZone IANA timezone used for calendar-aware month/year stepping.
+ * @returns Stepper function advancing one interval, or `null` when unsupported.
  */
 function createIntervalStepper(
   repeat: FhirTimingRepeat,
@@ -1183,7 +1284,14 @@ function createIntervalStepper(
   return null;
 }
 
-/** Adds calendar months while respecting varying month lengths and DST. */
+/**
+ * Adds calendar months while respecting varying month lengths and DST.
+ *
+ * @param date Starting instant.
+ * @param months Number of calendar months to add.
+ * @param timeZone IANA timezone used for wall-clock preservation.
+ * @returns Shifted date preserving local clock and clamped day-of-month.
+ */
 function addCalendarMonths(date: Date, months: number, timeZone: string): Date {
   const { year, month, day, hour, minute, second } = getTimeParts(date, timeZone);
   const targetMonthIndex = month - 1 + months;
@@ -1221,11 +1329,161 @@ function addCalendarMonths(date: Date, months: number, timeZone: string): Date {
   return final;
 }
 
+/**
+ * Determines whether interval stepping can safely combine with a day-of-week filter.
+ *
+ * @param repeat FHIR timing repeat object containing period unit metadata.
+ * @param enforceDayFilter Whether a `dayOfWeek` filter is active for this schedule.
+ * @returns `true` when interval stepping should be used directly; otherwise fallback logic is required.
+ */
+function isDayFilteredIntervalSupported(
+  repeat: FhirTimingRepeat,
+  enforceDayFilter: boolean
+): boolean {
+  if (!enforceDayFilter) {
+    return true;
+  }
+  return (
+    repeat.periodUnit === "s" ||
+    repeat.periodUnit === "min" ||
+    repeat.periodUnit === "h" ||
+    repeat.periodUnit === "d"
+  );
+}
+
+type DayFilteredPeriodSeriesOptions = {
+  repeat: FhirTimingRepeat;
+  timeZone: string;
+  dayFilter: Set<string>;
+  anchorDay: Date;
+  startDay: Date;
+  from: Date;
+  to?: Date;
+  orderedAt?: Date | null;
+  limit: number;
+  defaultClock?: string;
+};
+
+/**
+ * Expands weekly/monthly/yearly day-filtered schedules into concrete dose timestamps.
+ *
+ * @param options Configuration describing bounds, cadence, and clock defaults.
+ * @param options.repeat FHIR repeat block driving cadence and cycle alignment.
+ * @param options.timeZone IANA timezone used for local weekday and clock resolution.
+ * @param options.dayFilter Set of lowercased weekdays that are allowed (e.g. `mon`, `tue`).
+ * @param options.anchorDay Cycle anchor day used to determine period alignment.
+ * @param options.startDay First local day to begin scanning.
+ * @param options.from Inclusive lower bound for candidate timestamps.
+ * @param options.to Optional exclusive upper bound for candidate timestamps.
+ * @param options.orderedAt Optional lower bound representing the order start.
+ * @param options.limit Maximum number of timestamps to emit.
+ * @param options.defaultClock Default local clock (`HH:MM:SS`) when no explicit clock is provided.
+ * @returns Sorted zoned ISO timestamps matching the requested cadence and bounds.
+ */
+function generateDayFilteredPeriodSeries(
+  options: DayFilteredPeriodSeriesOptions
+): string[] {
+  const {
+    repeat,
+    timeZone,
+    dayFilter,
+    anchorDay,
+    startDay,
+    from,
+    to,
+    orderedAt,
+    limit,
+    defaultClock
+  } = options;
+  if (limit <= 0) {
+    return [];
+  }
+
+  const results: string[] = [];
+  const seen = new Set<string>();
+  const clocks = [defaultClock ?? "08:00:00"];
+  let currentDay = startOfLocalDay(startDay, timeZone);
+  let iterations = 0;
+  const startMs = currentDay.getTime();
+  const estimatedDays = to
+    ? Math.max(1, Math.ceil((to.getTime() - startMs) / (24 * 60 * 60 * 1000)))
+    : limit * 31;
+  const maxIterations = Math.max(limit * 31, estimatedDays + 31);
+
+  while (
+    results.length < limit &&
+    iterations < maxIterations &&
+    (!to || currentDay < to)
+  ) {
+    const weekday = getLocalWeekday(currentDay, timeZone);
+    const inPeriodCycle = isDateAlignedToPeriodCycle(
+      currentDay,
+      anchorDay,
+      repeat,
+      timeZone
+    );
+    if (inPeriodCycle && dayFilter.has(weekday)) {
+      for (const clock of clocks) {
+        const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
+        if (!zoned) {
+          continue;
+        }
+        if (zoned < from) {
+          continue;
+        }
+        if (to && zoned >= to) {
+          continue;
+        }
+        if (orderedAt && zoned < orderedAt) {
+          continue;
+        }
+        const iso = formatZonedIso(zoned, timeZone);
+        if (!seen.has(iso)) {
+          seen.add(iso);
+          results.push(iso);
+          if (results.length === limit) {
+            break;
+          }
+        }
+      }
+    }
+    currentDay = addLocalDays(currentDay, 1, timeZone);
+    iterations += 1;
+  }
+
+  return results;
+}
+
+/**
+ * Formats a date into a local `HH:MM:SS` clock for the supplied timezone.
+ *
+ * @param date Source instant.
+ * @param timeZone IANA timezone to interpret the instant.
+ * @returns Local wall-clock time in `HH:MM:SS` format.
+ */
+function toLocalClock(date: Date, timeZone: string): string {
+  const parts = getTimeParts(date, timeZone);
+  const twoDigits = (value: number): string => (value < 10 ? `0${value}` : `${value}`);
+  const h = twoDigits(parts.hour);
+  const m = twoDigits(parts.minute);
+  const s = twoDigits(parts.second);
+  return `${h}:${m}:${s}`;
+}
+
 
 
 
 /**
  * Internal helper to count dose events within a time range.
+ *
+ * @param dosage Dosage definition with timing metadata.
+ * @param from Inclusive lower time bound for counting.
+ * @param to Exclusive upper time bound for counting.
+ * @param config Scheduling configuration (timezone, clocks, offsets).
+ * @param baseTime Anchor instant used for interval alignment.
+ * @param orderedAt Optional order timestamp used as an additional lower bound.
+ * @param limit Optional hard cap on emitted candidates to avoid runaway loops.
+ * @returns Number of unique dose events in the requested window.
  */
 function countScheduleEvents(
   dosage: FhirDosage,
@@ -1321,10 +1579,14 @@ function countScheduleEvents(
     !!repeat.periodUnit &&
     (!repeat.frequency ||
       repeat.periodUnit !== "d" ||
-      (repeat.frequency === 1 && repeat.period > 1)) &&
-    !enforceDayFilter;
+      (repeat.frequency === 1 && repeat.period > 1));
 
-  if (treatAsInterval) {
+  const supportsDayFilteredInterval = isDayFilteredIntervalSupported(
+    repeat,
+    enforceDayFilter
+  );
+
+  if (treatAsInterval && supportsDayFilteredInterval) {
     const increment = createIntervalStepper(repeat, timeZone);
     if (!increment) return count;
 
@@ -1374,23 +1636,25 @@ function countScheduleEvents(
   }
 
   // Fallback for dayOfWeek with period/periodUnit but no explicit frequency/clocks
-  if (enforceDayFilter && repeat.period && repeat.periodUnit) {
-    const clocks = ["08:00:00"]; // Default to morning if no times specified
-    let currentDayIter = startOfLocalDay(from, timeZone);
-    let iter = 0;
-    const maxIter = limit !== undefined ? limit * 31 : 365 * 31;
-    while (count < (limit ?? Infinity) && currentDayIter < to && iter < maxIter) {
-      const weekday = getLocalWeekday(currentDayIter, timeZone);
-      if (dayFilter.has(weekday)) {
-        for (const clock of clocks) {
-          const zoned = makeZonedDateFromDay(currentDayIter, timeZone, clock);
-          if (zoned) recordCandidate(zoned);
-        }
-      }
-      currentDayIter = addLocalDays(currentDayIter, 1, timeZone);
-      iter += 1;
-    }
-    return count;
+  if (
+    enforceDayFilter &&
+    repeat.period &&
+    repeat.periodUnit &&
+    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
+  ) {
+    const generated = generateDayFilteredPeriodSeries({
+      repeat,
+      timeZone,
+      dayFilter,
+      anchorDay: startOfLocalDay(baseTime, timeZone),
+      startDay: from,
+      from,
+      to,
+      orderedAt,
+      limit: limit ?? 365 * 31,
+      defaultClock: toLocalClock(baseTime, timeZone)
+    });
+    return count + generated.length;
   }
 
   return count;

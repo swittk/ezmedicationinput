@@ -327,4 +327,16 @@ describe("calculateTotalUnits", () => {
         });
         expect(result.totalUnits).toBe(12);
     });
+
+    it("calculates totals from compact @time with weekend filters", () => {
+        const parsed = parseSig("1 tab po @12:00 sat/sun", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Week,
+            timeZone: "UTC"
+        });
+        expect(result.totalUnits).toBe(4);
+    });
 });

@@ -2118,6 +2118,14 @@ describe("time-based schedules", () => {
     expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "14:00:00", "22:30:00"]);
   });
 
+  it("parses compact @time with day filters", () => {
+    const result = parseSig("1 tab po @12:00 sat/sun");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      timeOfDay: ["12:00:00"],
+      dayOfWeek: ["sat", "sun"]
+    });
+  });
+
   it("parses dot-separated times", () => {
     const result = parseSig("at 14.00, 16.30");
     expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["14:00:00", "16:30:00"]);
