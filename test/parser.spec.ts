@@ -69,16 +69,17 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Meal"]]);
   });
 
-  it("parses meal dash syntax into breakfast and dinner clauses", () => {
+  it("parses meal dash syntax into a single clause when dosage context matches", () => {
     const result = parseSig("1-0-1", {
       context: TAB_CONTEXT,
       enableMealDashSyntax: true
     });
-    expect(result.count).toBe(2);
+    expect(result.count).toBe(1);
     expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
-    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
-    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
-    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming.Dinner]);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Dinner
+    ]);
   });
 
   it("applies PC mapping for meal dash syntax", () => {
@@ -86,9 +87,11 @@ describe("parseSig core scenarios", () => {
       context: TAB_CONTEXT,
       enableMealDashSyntax: true
     });
-    expect(result.count).toBe(2);
-    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["After Breakfast"]]);
-    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["After Dinner"]]);
+    expect(result.count).toBe(1);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Dinner"]
+    ]);
   });
 
   it("supports asymmetric AC meal dash doses", () => {
@@ -108,9 +111,20 @@ describe("parseSig core scenarios", () => {
       context: TAB_CONTEXT,
       enableMealDashSyntax: true
     });
-    expect(result.count).toBe(2);
-    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"]]);
-    expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
+    expect(result.count).toBe(1);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([
+      EventTiming["Before Breakfast"],
+      EventTiming["Before Sleep"]
+    ]);
+  });
+
+  it("keeps split timing clauses in one item when dosage context is identical", () => {
+    const result = parseSig("1 tab po @ 8:00, 1 tab po hs", { context: TAB_CONTEXT });
+    expect(result.count).toBe(1);
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+    expect(result.items[0].fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
   });
 
   it("treats standalone c as with meals", () => {

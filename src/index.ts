@@ -14,6 +14,7 @@ import {
 import { splitSigSegments } from "./segment";
 import {
   FhirDosage,
+  FhirTimingRepeat,
   FormatBatchOptions,
   FormatOptions,
   LintIssue,
@@ -59,6 +60,16 @@ interface SegmentCarry {
 }
 
 type MealDashRelation = "meal" | "ac" | "pc";
+
+const REPEAT_NON_ANCHOR_KEYS: Array<keyof FhirTimingRepeat> = [
+  "count",
+  "frequency",
+  "frequencyMax",
+  "period",
+  "periodMax",
+  "periodUnit",
+  "offset"
+];
 
 function parseMealDashValues(token: string): number[] | undefined {
   if (!/^[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?){2,3}$/.test(token)) {
@@ -174,6 +185,225 @@ function toSegmentMeta(segments: ReturnType<typeof splitSigSegments>): ParseBatc
   }));
 }
 
+/**
+ * Deep equality helper for plain JSON-like parser output objects.
+ *
+ * @param left Left-side value.
+ * @param right Right-side value.
+ * @returns `true` when both values are structurally equal.
+ */
+function deepEqual(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left === null || right === null) {
+    return left === right;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) {
+      return false;
+    }
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (let i = 0; i < left.length; i += 1) {
+      if (!deepEqual(left[i], right[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).filter((key) => leftRecord[key] !== undefined);
+  const rightKeys = Object.keys(rightRecord).filter((key) => rightRecord[key] !== undefined);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  for (const key of leftKeys) {
+    if (!Object.prototype.hasOwnProperty.call(rightRecord, key)) {
+      return false;
+    }
+    if (!deepEqual(leftRecord[key], rightRecord[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Compares two string arrays as sets.
+ *
+ * @param left Left array.
+ * @param right Right array.
+ * @returns `true` when both arrays contain the same unique values.
+ */
+function sameStringSet(left?: string[], right?: string[]): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  if (a.length !== b.length) {
+    return false;
+  }
+  const set = new Set(a);
+  if (set.size !== b.length) {
+    return false;
+  }
+  for (const value of b) {
+    if (!set.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Determines whether a repeat block only uses merge-safe anchor fields.
+ *
+ * @param repeat FHIR timing repeat payload.
+ * @returns `true` when repeat contains only `when`/`timeOfDay`/`dayOfWeek`.
+ */
+function isMergeableAnchorRepeat(repeat?: FhirTimingRepeat): boolean {
+  if (!repeat) {
+    return true;
+  }
+  for (const key of REPEAT_NON_ANCHOR_KEYS) {
+    if (repeat[key] !== undefined) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks whether two parsed items can be merged without changing semantics.
+ *
+ * @param base Existing merged item candidate.
+ * @param next Incoming parsed item.
+ * @returns `true` when both items differ only by merge-safe timing anchors.
+ */
+function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
+  const baseTiming = base.fhir.timing;
+  const nextTiming = next.fhir.timing;
+  const baseRepeat = baseTiming?.repeat;
+  const nextRepeat = nextTiming?.repeat;
+
+  if (!baseRepeat || !nextRepeat) {
+    return false;
+  }
+  if (!isMergeableAnchorRepeat(baseRepeat) || !isMergeableAnchorRepeat(nextRepeat)) {
+    return false;
+  }
+  if (!sameStringSet(baseRepeat.dayOfWeek, nextRepeat.dayOfWeek)) {
+    return false;
+  }
+  if (!deepEqual(baseTiming?.code, nextTiming?.code)) {
+    return false;
+  }
+  if (!deepEqual(baseTiming?.event, nextTiming?.event)) {
+    return false;
+  }
+
+  return (
+    deepEqual(base.fhir.doseAndRate, next.fhir.doseAndRate) &&
+    deepEqual(base.fhir.route, next.fhir.route) &&
+    deepEqual(base.fhir.site, next.fhir.site) &&
+    deepEqual(base.fhir.additionalInstruction, next.fhir.additionalInstruction) &&
+    deepEqual(base.fhir.asNeededBoolean, next.fhir.asNeededBoolean) &&
+    deepEqual(base.fhir.asNeededFor, next.fhir.asNeededFor)
+  );
+}
+
+/**
+ * Returns a stable unique list preserving first-seen order.
+ *
+ * @param values Input values.
+ * @returns Deduplicated values in insertion order.
+ */
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value);
+      output.push(value);
+    }
+  }
+  return output;
+}
+
+/**
+ * Merges two parse results that are known to be timing-compatible.
+ *
+ * @param base Existing merged result.
+ * @param next Next result to fold into `base`.
+ * @param options Parse options used to render localized text.
+ * @returns New merged parse result.
+ */
+function mergeParseResults(base: ParseResult, next: ParseResult, options?: ParseOptions): ParseResult {
+  const baseRepeat = base.fhir.timing?.repeat ?? {};
+  const nextRepeat = next.fhir.timing?.repeat ?? {};
+  const mergedWhen = uniqueStrings([...(baseRepeat.when ?? []), ...(nextRepeat.when ?? [])]);
+  const mergedTimeOfDay = uniqueStrings([...(baseRepeat.timeOfDay ?? []), ...(nextRepeat.timeOfDay ?? [])]).sort();
+  const mergedRepeat: FhirTimingRepeat = {
+    ...baseRepeat,
+    ...(nextRepeat.dayOfWeek ? { dayOfWeek: nextRepeat.dayOfWeek } : {}),
+    ...(mergedWhen.length ? { when: mergedWhen as any } : {}),
+    ...(mergedTimeOfDay.length ? { timeOfDay: mergedTimeOfDay } : {})
+  };
+  const mergedFhir: FhirDosage = {
+    ...base.fhir,
+    timing: {
+      ...(base.fhir.timing ?? {}),
+      repeat: mergedRepeat
+    }
+  };
+
+  const shortText = formatSig(mergedFhir, "short", options);
+  const longText = formatSig(mergedFhir, "long", options);
+  mergedFhir.text = longText;
+
+  return {
+    fhir: mergedFhir,
+    shortText,
+    longText,
+    warnings: uniqueStrings([...(base.warnings ?? []), ...(next.warnings ?? [])]),
+    meta: {
+      ...base.meta,
+      consumedTokens: uniqueStrings([...(base.meta.consumedTokens ?? []), ...(next.meta.consumedTokens ?? [])]),
+      leftoverText: uniqueStrings(
+        [base.meta.leftoverText, next.meta.leftoverText].filter((value): value is string => !!value)
+      ).join(" ").trim() || undefined,
+      siteLookups: [...(base.meta.siteLookups ?? []), ...(next.meta.siteLookups ?? [])],
+      prnReasonLookups: [...(base.meta.prnReasonLookups ?? []), ...(next.meta.prnReasonLookups ?? [])]
+    }
+  };
+}
+
+/**
+ * Appends a parsed segment result to the batch, reusing the current item when
+ * timing-only expansion can be represented as a single dosage element.
+ *
+ * @param items Accumulated batch items.
+ * @param next Newly parsed segment result.
+ * @param options Parse options used to format merged text.
+ */
+function appendParseResult(
+  items: ParseResult[],
+  next: ParseResult,
+  options?: ParseOptions
+): void {
+  const previous = items[items.length - 1];
+  if (previous && canMergeTimingOnly(previous, next)) {
+    items[items.length - 1] = mergeParseResults(previous, next, options);
+    return;
+  }
+  items.push(next);
+}
+
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const segments = expandMealDashSegments(splitSigSegments(input), options);
   const carry: SegmentCarry = {};
@@ -186,7 +416,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applySiteCoding(internal, options);
     const result = buildParseResult(internal, options);
     rebaseParseResult(result, input, segment.start);
-    results.push(result);
+    appendParseResult(results, result, options);
     updateCarryForward(carry, internal);
   }
 
@@ -265,7 +495,7 @@ export async function parseSigAsync(
     await applySiteCodingAsync(internal, options);
     const result = buildParseResult(internal, options);
     rebaseParseResult(result, input, segment.start);
-    results.push(result);
+    appendParseResult(results, result, options);
     updateCarryForward(carry, internal);
   }
 
