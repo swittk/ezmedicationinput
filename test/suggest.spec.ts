@@ -58,6 +58,21 @@ describe("suggestSig", () => {
     expect(suggestions).toContain("1 tab po morn hs");
   });
 
+  it("supports compact oral meal timing shortcuts", () => {
+    expect(suggestSig("1 poc", { limit: 10 })).toContain("1 po c");
+    expect(suggestSig("1 popc", { limit: 10 })).toContain("1 po pc");
+    expect(suggestSig("1 poac", { limit: 10 })).toContain("1 po ac");
+    expect(suggestSig("1 po c", { limit: 10 })).toContain("1 po c");
+  });
+
+  it("only emits meal-dash suggestions when dash syntax is actively typed", () => {
+    const noDash = suggestSig("1", { limit: 10, enableMealDashSyntax: true });
+    expect(noDash.some((value) => value.includes("-"))).toBe(false);
+
+    const dash = suggestSig("1-", { limit: 10, enableMealDashSyntax: true });
+    expect(dash.some((value) => value.startsWith("1-0-1"))).toBe(true);
+  });
+
   it("keeps matching when connectors and eye tokens are present", () => {
     const suggestions = suggestSig("1 drop to od q2h", { limit: 20 });
     expect(
@@ -127,4 +142,3 @@ describe("suggestSig", () => {
     expect(suggestions.some(s => s.includes("at 14:30"))).toBe(true);
   });
 });
-

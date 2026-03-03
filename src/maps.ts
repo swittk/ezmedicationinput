@@ -741,6 +741,7 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   pcd: EventTiming["After Lunch"],
   pcv: EventTiming["After Dinner"],
   wm: EventTiming.Meal,
+  c: EventTiming.Meal,
   "with meals": EventTiming.Meal,
   "with meal": EventTiming.Meal,
   "with food": EventTiming.Meal,

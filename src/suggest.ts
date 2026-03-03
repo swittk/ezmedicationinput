@@ -925,6 +925,160 @@ function matchesPrefix(
   return false;
 }
 
+function collectMatchedCandidates(
+  candidates: readonly string[],
+  limit: number,
+  matcher: CandidateMatcher,
+): string[] {
+  const suggestions: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const value = normalizeSpacing(candidate);
+    if (!value) {
+      continue;
+    }
+    const lower = value.toLowerCase();
+    if (seen.has(lower)) {
+      continue;
+    }
+    if (!matcher(value, lower)) {
+      continue;
+    }
+    seen.add(lower);
+    suggestions.push(value);
+    if (suggestions.length >= limit) {
+      break;
+    }
+  }
+  return suggestions;
+}
+
+function buildMealDashCoreVariants(prefixCore: string): string[] {
+  if (!prefixCore.includes("-") || prefixCore.includes("--")) {
+    return [];
+  }
+  const slots = prefixCore.split("-");
+  if (slots.length < 2 || slots.length > 4) {
+    return [];
+  }
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(slots[0] ?? "")) {
+    return [];
+  }
+  for (let i = 1; i < slots.length; i += 1) {
+    const slot = slots[i];
+    if (slot.length === 0) {
+      continue;
+    }
+    if (!/^[0-9]+(?:\.[0-9]+)?$/.test(slot)) {
+      return [];
+    }
+  }
+
+  const variants: string[] = [];
+  const seen = new Set<string>();
+  const addVariant = (value: string) => {
+    if (!seen.has(value)) {
+      seen.add(value);
+      variants.push(value);
+    }
+  };
+  const first = slots[0];
+
+  const fillBase = (targetLength: 3 | 4): string[] => {
+    const values = new Array<string>(targetLength).fill("0");
+    values[0] = first;
+    for (let i = 1; i < targetLength; i += 1) {
+      if (i < slots.length && slots[i] !== "") {
+        values[i] = slots[i];
+      }
+    }
+    return values;
+  };
+
+  const base3 = fillBase(3);
+  const missingThird = slots.length < 3 || slots[2] === "";
+  if (missingThird && (slots.length === 1 || slots[1] === "" || slots[1] === "0")) {
+    const mirror = [...base3];
+    mirror[2] = first;
+    addVariant(mirror.join("-"));
+  }
+  addVariant(base3.join("-"));
+
+  const base4 = fillBase(4);
+  const missingFourth = slots.length < 4 || slots[3] === "";
+  if (
+    missingFourth &&
+    (
+      slots.length === 1 ||
+      slots[1] === "" ||
+      (slots[1] === "0" && (slots.length < 3 || slots[2] === "" || slots[2] === "0"))
+    )
+  ) {
+    const mirror = [...base4];
+    mirror[3] = first;
+    addVariant(mirror.join("-"));
+  }
+  addVariant(base4.join("-"));
+
+  return variants;
+}
+
+function suggestMealDashSyntax(
+  prefix: string,
+  limit: number,
+  matcher: CandidateMatcher,
+): string[] | undefined {
+  if (!prefix.includes("-")) {
+    return undefined;
+  }
+  const match = prefix.match(/^(\d+(?:-\d*){0,3})(?:\s+(ac|pc))?$/);
+  if (!match) {
+    return undefined;
+  }
+  const core = match[1];
+  const relation = match[2];
+  const coreVariants = buildMealDashCoreVariants(core);
+  if (coreVariants.length === 0) {
+    return undefined;
+  }
+
+  const suffixes = relation ? [` ${relation}`] : ["", " ac", " pc"];
+  const candidates: string[] = [];
+  for (const variant of coreVariants) {
+    for (const suffix of suffixes) {
+      candidates.push(`${variant}${suffix}`);
+    }
+  }
+
+  return collectMatchedCandidates(candidates, limit, matcher);
+}
+
+function suggestCompactOralMealTiming(
+  prefix: string,
+  limit: number,
+  matcher: CandidateMatcher,
+): string[] | undefined {
+  const match = prefix.match(
+    /^(\d+(?:\.\d+)?)\s*(?:po\s*(c|ac|pc)|po(c|ac|pc))$/,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const dose = normalizeSpacing(match[1]);
+  const timing = (match[2] ?? match[3] ?? "").toLowerCase();
+  const orderedTimings =
+    timing === "c"
+      ? ["c", "ac", "pc"]
+      : timing === "ac"
+        ? ["ac", "c", "pc"]
+        : timing === "pc"
+          ? ["pc", "c", "ac"]
+          : ["c", "ac", "pc"];
+  const candidates = orderedTimings.map((token) => `${dose} po ${token}`);
+  return collectMatchedCandidates(candidates, limit, matcher);
+}
+
 export function suggestSig(input: string, options?: SuggestSigOptions): string[] {
   const limit = options?.limit ?? DEFAULT_LIMIT;
   if (limit <= 0) {
@@ -967,6 +1121,19 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const whenSequences = PRECOMPUTED_WHEN_SEQUENCES;
   const matcher: CandidateMatcher = (candidate, candidateLower) =>
     matchesPrefix(candidate, candidateLower, prefixContext);
+
+  const compactOralSuggestions = suggestCompactOralMealTiming(prefix, limit, matcher);
+  if (compactOralSuggestions && compactOralSuggestions.length > 0) {
+    return compactOralSuggestions;
+  }
+
+  if (options?.enableMealDashSyntax) {
+    const mealDashSuggestions = suggestMealDashSyntax(prefix, limit, matcher);
+    if (mealDashSuggestions && mealDashSuggestions.length > 0) {
+      return mealDashSuggestions;
+    }
+  }
+
   return generateCandidateDirections(
     pairs,
     doseValues,

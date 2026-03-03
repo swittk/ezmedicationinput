@@ -113,6 +113,26 @@ describe("parseSig core scenarios", () => {
     expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
   });
 
+  it("treats standalone c as with meals", () => {
+    const result = parseSig("1 po c", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Meal]);
+    expect(result.longText).toContain("with meals");
+  });
+
+  it("parses compact oral+meal tokens", () => {
+    const withMeal = parseSig("1 poc", { context: TAB_CONTEXT });
+    expect(withMeal.fhir.timing?.repeat?.when).toEqual([EventTiming.Meal]);
+    expect(withMeal.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+
+    const afterMeal = parseSig("1 popc", { context: TAB_CONTEXT });
+    expect(afterMeal.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
+    expect(afterMeal.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+
+    const beforeMeal = parseSig("1 poac", { context: TAB_CONTEXT });
+    expect(beforeMeal.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Meal"]]);
+    expect(beforeMeal.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
+  });
+
   it("parses adverbial route descriptors", () => {
     const cases: Array<{ input: string; code: SNOMEDCTRouteCodes }> = [
       { input: "1x2 orally bid", code: SNOMEDCTRouteCodes["Oral route"] },

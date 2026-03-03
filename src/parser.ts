@@ -1273,6 +1273,11 @@ function splitToken(token: string): string[] {
   if (/^[0-9]+(?:\.[0-9]+)?$/.test(token)) {
     return [token];
   }
+  const compactPoMeal = token.match(/^(po)(ac|pc|c)$/i);
+  if (compactPoMeal) {
+    const [, po, meal] = compactPoMeal;
+    return [po, meal];
+  }
   if (/^[A-Za-z]+$/.test(token)) {
     return [token];
   }
@@ -1284,6 +1289,11 @@ function splitToken(token: string): string[] {
   const match = token.match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/);
   if (match) {
     const [, num, unit] = match;
+    const compactPoMealUnit = unit.match(/^(po)(ac|pc|c)$/i);
+    if (compactPoMealUnit) {
+      const [, po, meal] = compactPoMealUnit;
+      return [num, po, meal];
+    }
     if (!/^x\d+/i.test(unit) && !/^q\d+/i.test(unit)) {
       return [num, unit];
     }

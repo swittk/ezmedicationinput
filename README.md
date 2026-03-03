@@ -184,6 +184,8 @@ Highlights:
 - Supports multiple timing tokens in sequence (e.g. `1 tab po morn hs`).
 - Surfaces PRN reasons from built-ins or custom `prnReasons` entries while
   preserving numeric doses pulled from the typed prefix.
+- When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
+  (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
 
 ## Dictionaries
 
