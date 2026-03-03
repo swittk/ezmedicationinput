@@ -891,6 +891,45 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
   });
 
+  it("persists insulin shorthand units", () => {
+    const result = parseSig("20 U sc hs");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 20, unit: "U" });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Subcutaneous route"]);
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
+    expect(result.fhir.additionalInstruction).toBeUndefined();
+  });
+
+  it("keeps unit token in meal-dash expansion", () => {
+    const result = parseSig("10-0-10 units sc ac", {
+      enableMealDashSyntax: true,
+      context: { dosageForm: "vial" }
+    });
+    expect(result.count).toBe(1);
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "U" });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"], EventTiming["Before Dinner"]]);
+  });
+
+  it("parses million IU notation", () => {
+    const result = parseSig("2.4M IU IM once");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("parses million IU notation with weekly cadence", () => {
+    const result = parseSig("2.4M IU IM Q1week");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "wk"
+    });
+  });
+
   it("keeps tablet units while mapping trailing suppository text to rectal route", () => {
     const result = parseSig("1 tab suppository");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({

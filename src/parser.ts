@@ -2104,6 +2104,89 @@ function applyCountLimit(internal: ParsedSigInternal, value: number | undefined)
   return true;
 }
 
+const DOSE_SCALE_MULTIPLIERS: Record<string, number> = {
+  k: 1_000,
+  thousand: 1_000,
+  m: 1_000_000,
+  mn: 1_000_000,
+  mio: 1_000_000,
+  million: 1_000_000,
+  b: 1_000_000_000,
+  bn: 1_000_000_000,
+  billion: 1_000_000_000
+};
+
+function resolveUnitTokenAt(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>,
+  options?: ParseOptions
+): { unit: string; consumedIndices: number[] } | undefined {
+  const token = tokens[index];
+  if (!token || consumed.has(token.index)) {
+    return undefined;
+  }
+  const normalized = normalizeTokenLower(token);
+  const direct = normalizeUnit(normalized, options);
+  if (direct) {
+    return { unit: direct, consumedIndices: [index] };
+  }
+  if (normalized === "international") {
+    const nextToken = tokens[index + 1];
+    if (!nextToken || consumed.has(nextToken.index)) {
+      return undefined;
+    }
+    const nextNormalized = normalizeTokenLower(nextToken);
+    if (
+      nextNormalized === "unit" ||
+      nextNormalized === "units" ||
+      nextNormalized === "u" ||
+      nextNormalized === "iu" ||
+      nextNormalized === "ius"
+    ) {
+      return { unit: "IU", consumedIndices: [index, index + 1] };
+    }
+  }
+  return undefined;
+}
+
+function resolveNumericDoseUnit(
+  tokens: Token[],
+  numberIndex: number,
+  value: number,
+  consumed: Set<number>,
+  options?: ParseOptions
+): { doseValue: number; unit?: string; consumedIndices: number[] } {
+  const directUnit = resolveUnitTokenAt(tokens, numberIndex + 1, consumed, options);
+  if (directUnit) {
+    return {
+      doseValue: value,
+      unit: directUnit.unit,
+      consumedIndices: directUnit.consumedIndices
+    };
+  }
+
+  const scaleToken = tokens[numberIndex + 1];
+  if (!scaleToken || consumed.has(scaleToken.index)) {
+    return { doseValue: value, consumedIndices: [] };
+  }
+  const multiplier = DOSE_SCALE_MULTIPLIERS[normalizeTokenLower(scaleToken)];
+  if (!multiplier) {
+    return { doseValue: value, consumedIndices: [] };
+  }
+
+  const scaledUnit = resolveUnitTokenAt(tokens, numberIndex + 2, consumed, options);
+  if (!scaledUnit) {
+    return { doseValue: value, consumedIndices: [] };
+  }
+
+  return {
+    doseValue: value * multiplier,
+    unit: scaledUnit.unit,
+    consumedIndices: [numberIndex + 1, ...scaledUnit.consumedIndices]
+  };
+}
+
 export function parseInternal(
   input: string,
   options?: ParseOptions
@@ -2621,29 +2704,27 @@ export function parseInternal(
         internal.doseRange = rangeValue;
       }
       mark(internal.consumed, token);
-      const unitToken = tokens[i + 1];
-      if (unitToken && !internal.consumed.has(unitToken.index)) {
-        const unit = normalizeUnit(unitToken.lower, options);
-        if (unit) {
-          internal.unit = unit;
-          mark(internal.consumed, unitToken);
+      const resolvedUnit = resolveUnitTokenAt(tokens, i + 1, internal.consumed, options);
+      if (resolvedUnit) {
+        internal.unit = resolvedUnit.unit;
+        for (const consumedIndex of resolvedUnit.consumedIndices) {
+          mark(internal.consumed, tokens[consumedIndex]);
         }
       }
       continue;
     }
     if (/^[0-9]+(?:\.[0-9]+)?$/.test(token.lower)) {
       const value = parseFloat(token.original);
+      const resolvedDose = resolveNumericDoseUnit(tokens, i, value, internal.consumed, options);
       if (internal.dose === undefined) {
-        internal.dose = value;
+        internal.dose = resolvedDose.doseValue;
       }
       mark(internal.consumed, token);
-      const unitToken = tokens[i + 1];
-      if (unitToken && !internal.consumed.has(unitToken.index)) {
-        const unit = normalizeUnit(unitToken.lower, options);
-        if (unit) {
-          internal.unit = unit;
-          mark(internal.consumed, unitToken);
-        }
+      if (resolvedDose.unit) {
+        internal.unit = resolvedDose.unit;
+      }
+      for (const consumedIndex of resolvedDose.consumedIndices) {
+        mark(internal.consumed, tokens[consumedIndex]);
       }
       continue;
     }

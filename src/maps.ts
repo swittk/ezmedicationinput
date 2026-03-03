@@ -607,6 +607,13 @@ function addMetricUnitSynonyms(map: UnitSynonymMap) {
 export const HOUSEHOLD_VOLUME_UNITS = ["tsp", "tbsp"] as const;
 
 const STATIC_UNIT_SYNONYMS: UnitSynonymMap = {
+  u: "U",
+  unit: "U",
+  units: "U",
+  iu: "IU",
+  "i.u": "IU",
+  "i.u.": "IU",
+  ius: "IU",
   tab: "tab",
   tabs: "tab",
   tablet: "tab",
