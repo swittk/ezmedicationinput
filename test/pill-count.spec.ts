@@ -209,6 +209,30 @@ describe("calculateTotalUnits", () => {
         expect(result.totalUnits).toBe(12);
     });
 
+    it("infers nightly fallback timing for when-only HS schedules", () => {
+        const parsed = parseSig("1 tab po hs", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC"
+        });
+        expect(result.totalUnits).toBe(7);
+    });
+
+    it("infers meal-based fallback timing for when-only AC schedules", () => {
+        const parsed = parseSig("1 cap po ac", { context: { dosageForm: "cap" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            from: "2024-01-01T00:00:00Z",
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Day,
+            timeZone: "UTC"
+        });
+        expect(result.totalUnits).toBe(6);
+    });
+
     it("calculates totals from parsed sig: 1x5 pc", () => {
         const parsed = parseSig("1x5 pc", { context: { dosageForm: "tab" } });
         const result = calculateTotalUnits({

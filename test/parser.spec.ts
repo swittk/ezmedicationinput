@@ -1609,15 +1609,15 @@ describe("internationalization", () => {
     it("produces Thai text for parseSig", () => {
       const result = parseSig("1 tab po bid", { context: TAB_CONTEXT, locale: "th" });
       expect(result.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
-      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
+      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
+      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
     });
 
     it("formats Thai text from FHIR dosage", () => {
       const parsed = parseSig("1 tab po bid", { context: TAB_CONTEXT });
       const fromFhir = fromFhirDosage(parsed.fhir, { locale: "th" });
       expect(fromFhir.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
-      expect(fromFhir.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง.");
+      expect(fromFhir.longText).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
     });
 
     it("translates eye site names in Thai", () => {
@@ -1649,7 +1649,7 @@ describe("internationalization", () => {
     it("combines frequency, event timing, and as-needed phrasing in Thai", () => {
       const result = parseSig("1 tab po bid ac prn pain", { locale: "th" });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด ทางปาก วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด."
+        "รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด."
       );
       expect(result.shortText).toBe(
         "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด"
@@ -1662,13 +1662,13 @@ describe("internationalization", () => {
         locale: "th"
       });
       expect(result.shortText).toBe("1 เม็ด PO ทุก 1 ชั่วโมง x10");
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
-      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
     });
 
     it("describes day-of-week schedules in Thai", () => {
       const result = parseSig("1 tab po every monday", { locale: "th" });
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทางปาก ในวันจันทร์.");
+      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ในวันจันทร์.");
     });
   });
 

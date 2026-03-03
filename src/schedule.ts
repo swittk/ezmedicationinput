@@ -496,6 +496,76 @@ function expandWhenCodes(
   });
 }
 
+const DEFAULT_WHEN_FALLBACK_CLOCKS: Record<string, string[]> = {
+  [EventTiming.Wake]: ["06:00:00"],
+  [EventTiming["Early Morning"]]: ["06:00:00"],
+  [EventTiming.Morning]: ["08:00:00"],
+  [EventTiming["Late Morning"]]: ["10:00:00"],
+  [EventTiming.Breakfast]: ["08:00:00"],
+  [EventTiming["Before Breakfast"]]: ["07:30:00"],
+  [EventTiming["After Breakfast"]]: ["08:30:00"],
+  [EventTiming.Noon]: ["12:00:00"],
+  [EventTiming.Lunch]: ["12:30:00"],
+  [EventTiming["Before Lunch"]]: ["12:00:00"],
+  [EventTiming["After Lunch"]]: ["13:00:00"],
+  [EventTiming["Early Afternoon"]]: ["14:00:00"],
+  [EventTiming.Afternoon]: ["15:00:00"],
+  [EventTiming["Late Afternoon"]]: ["16:00:00"],
+  [EventTiming["Early Evening"]]: ["18:00:00"],
+  [EventTiming.Evening]: ["19:00:00"],
+  [EventTiming["Late Evening"]]: ["20:00:00"],
+  [EventTiming.Dinner]: ["18:30:00"],
+  [EventTiming["Before Dinner"]]: ["18:00:00"],
+  [EventTiming["After Dinner"]]: ["19:00:00"],
+  [EventTiming.Night]: ["21:00:00"],
+  [EventTiming["Before Sleep"]]: ["22:00:00"],
+  [EventTiming["After Sleep"]]: ["06:30:00"],
+  [EventTiming.Meal]: ["08:00:00", "12:30:00", "18:30:00"],
+  [EventTiming["Before Meal"]]: ["07:30:00", "12:00:00", "18:00:00"],
+  [EventTiming["After Meal"]]: ["08:30:00", "13:00:00", "19:00:00"]
+};
+
+function inferWhenFallbackEntries(
+  whenCodes: string[],
+  repeat: FhirTimingRepeat
+): ExpandedTime[] {
+  const entries: ExpandedTime[] = [];
+  const seen = new Set<string>();
+
+  const addClock = (clock: string) => {
+    const normalized = normalizeClock(clock);
+    const adjusted = repeat.offset
+      ? applyOffset(normalized, repeat.offset ?? 0)
+      : { time: normalized, dayShift: 0 };
+    const key = `${adjusted.dayShift}|${adjusted.time}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    entries.push(adjusted);
+  };
+
+  for (const code of whenCodes) {
+    if (code === EventTiming.Immediate) {
+      continue;
+    }
+    const fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
+    if (!fallbackClocks) {
+      continue;
+    }
+    for (const clock of fallbackClocks) {
+      addClock(clock);
+    }
+  }
+
+  return entries.sort((a, b) => {
+    if (a.dayShift !== b.dayShift) {
+      return a.dayShift - b.dayShift;
+    }
+    return a.time.localeCompare(b.time);
+  });
+}
+
 function mergeFrequencyDefaults(
   base?: FrequencyFallbackTimes,
   override?: FrequencyFallbackTimes
@@ -692,6 +762,13 @@ export function nextDueDoses(
         return a.time.localeCompare(b.time);
       });
     }
+    if (
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
+    ) {
+      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
+    }
     const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
     if (includesImmediate) {
       const immediateSource = orderedAt ?? from;
@@ -880,6 +957,13 @@ function derivePriorCountFromHistory(
         }
         return a.time.localeCompare(b.time);
       });
+    }
+    if (
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
+    ) {
+      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
     }
 
     if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
@@ -1185,6 +1269,13 @@ function countScheduleEvents(
         if (a.dayShift !== b.dayShift) return a.dayShift - b.dayShift;
         return a.time.localeCompare(b.time);
       });
+    }
+    if (
+      expanded.length === 0 &&
+      timeOfDayEntries.length === 0 &&
+      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
+    ) {
+      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
     }
 
     if (arrayIncludes(whenCodes, EventTiming.Immediate)) {

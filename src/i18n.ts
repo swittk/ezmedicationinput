@@ -632,11 +632,30 @@ function combineFrequencyAndEventsThai(
   return { frequency, event: joinWithAndThai(events) };
 }
 
+function isOralRouteThai(internal: ParsedSigInternal): boolean {
+  if (internal.routeCode === RouteCode["Oral route"]) {
+    return true;
+  }
+  const text = internal.routeText?.trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+  return (
+    text === "po" ||
+    text === "oral" ||
+    text.includes("mouth") ||
+    text.includes("per os")
+  );
+}
+
 function buildRoutePhraseThai(
   internal: ParsedSigInternal,
   grammar: ThaiRouteGrammar,
   hasSite: boolean
 ): string | undefined {
+  if (grammar.verb === "รับประทาน" && isOralRouteThai(internal)) {
+    return undefined;
+  }
   if (typeof grammar.routePhrase === "function") {
     return grammar.routePhrase({ hasSite, internal });
   }
