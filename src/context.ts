@@ -1,8 +1,11 @@
 import {
+  DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_NORMALIZED_FORM,
-  KNOWN_DOSAGE_FORMS_TO_DOSE
+  KNOWN_DOSAGE_FORMS_TO_DOSE,
+  KNOWN_TMT_DOSAGE_FORM_TO_SNOMED_ROUTE,
+  ROUTE_BY_SNOMED
 } from "./maps";
-import { MedicationContext } from "./types";
+import { MedicationContext, RouteCode } from "./types";
 
 export function normalizeDosageForm(
   form: string | undefined
@@ -34,4 +37,21 @@ export function inferUnitFromContext(ctx: MedicationContext | undefined): string
     return ctx.containerUnit;
   }
   return undefined;
+}
+
+export function inferRouteFromContext(
+  ctx: MedicationContext | undefined
+): RouteCode | undefined {
+  if (!ctx?.dosageForm) {
+    return undefined;
+  }
+  const normalized = normalizeDosageForm(ctx.dosageForm);
+  if (!normalized) {
+    return undefined;
+  }
+  const snomed = KNOWN_TMT_DOSAGE_FORM_TO_SNOMED_ROUTE[normalized];
+  if (!snomed) {
+    return DEFAULT_ROUTE_SYNONYMS[normalized]?.code;
+  }
+  return ROUTE_BY_SNOMED[snomed];
 }

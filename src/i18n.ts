@@ -295,7 +295,6 @@ const THAI_ROUTE_GRAMMAR: Partial<Record<RouteCode, ThaiRouteGrammar>> = {
   [RouteCode["Buccal route"]]: { verb: "อมกระพุ้งแก้ม", routePhrase: "ที่กระพุ้งแก้ม" },
   [RouteCode["Respiratory tract route (qualifier value)"]]: {
     verb: "สูด",
-    routePhrase: ({ hasSite }) => (hasSite ? undefined : "โดยการสูดดม"),
     sitePreposition: "ที่"
   },
   [RouteCode["Nasal route"]]: {
@@ -360,7 +359,14 @@ function resolveRouteGrammarThai(internal: ParsedSigInternal): ThaiRouteGrammar 
     return THAI_ROUTE_GRAMMAR[internal.routeCode] ?? DEFAULT_THAI_ROUTE_GRAMMAR;
   }
   const grammar = grammarFromRouteTextThai(internal.routeText);
-  return grammar ?? DEFAULT_THAI_ROUTE_GRAMMAR;
+  if (grammar) {
+    return grammar;
+  }
+  if (internal.unit?.trim().toLowerCase() === "puff") {
+    return THAI_ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]] ??
+      DEFAULT_THAI_ROUTE_GRAMMAR;
+  }
+  return DEFAULT_THAI_ROUTE_GRAMMAR;
 }
 
 function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | undefined {
@@ -692,7 +698,7 @@ function buildRoutePhraseThai(
     return "ทางจมูก";
   }
   if (normalized.includes("inhal")) {
-    return "โดยการสูดดม";
+    return undefined;
   }
   return text;
 }

@@ -249,6 +249,16 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.code).toBeUndefined();
   });
 
+  it("treats OD as once daily for inhalation dosage-form context", () => {
+    const result = parseSig("1 od", { context: { dosageForm: "inhalation" } });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "puff" });
+    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QD");
+    expect(result.fhir.site).toBeUndefined();
+    expect(result.fhir.route?.coding?.[0]?.code).not.toBe(
+      SNOMEDCTRouteCodes["Ophthalmic route"]
+    );
+  });
+
   it("interprets ophthalmic double OD as right eye once daily", () => {
     const result = parseSig("1 drop OD OD");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
@@ -1908,6 +1918,18 @@ describe("internationalization", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
       expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
       expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
+    });
+
+    it("uses inhaler phrasing in Thai without สูดดม", () => {
+      const result = parseSig("2 puff inhalation hs", { locale: "th" });
+      expect(result.longText).toBe("สูด ครั้งละ 2 พัฟ ก่อนนอน.");
+      expect(result.fhir.text).toBe("สูด ครั้งละ 2 พัฟ ก่อนนอน.");
+    });
+
+    it("uses inhaler phrasing in Thai for puff-only sigs", () => {
+      const result = parseSig("1 puff od", { locale: "th" });
+      expect(result.longText).toBe("สูด ครั้งละ 1 พัฟ วันละครั้ง.");
+      expect(result.fhir.text).toBe("สูด ครั้งละ 1 พัฟ วันละครั้ง.");
     });
 
     it("translates ear site names in Thai", () => {

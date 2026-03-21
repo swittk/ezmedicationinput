@@ -18,7 +18,7 @@ import {
   normalizeBodySiteKey,
   normalizePrnReasonKey
 } from "./maps";
-import { inferUnitFromContext } from "./context";
+import { inferRouteFromContext, inferUnitFromContext } from "./context";
 import { checkDiscouraged } from "./safety";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
@@ -397,6 +397,7 @@ const EYE_SITE_TOKENS: Record<string, { site: string; route?: RouteCode }> = {
 
 const OPHTHALMIC_ROUTE_CODES = new Set<RouteCode>([
   RouteCode["Ophthalmic route"],
+  RouteCode["Ocular route (qualifier value)"],
   RouteCode["Intravitreal route (qualifier value)"]
 ]);
 
@@ -650,8 +651,13 @@ function shouldTreatEyeTokenAsSite(
   const currentToken = tokens[index];
   const normalizedSelf = normalizeTokenLower(currentToken);
   const eyeMeta = EYE_SITE_TOKENS[normalizedSelf];
+  const contextRoute = inferRouteFromContext(context ?? undefined);
 
   if (internal.routeCode && !OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) {
+    return false;
+  }
+
+  if (contextRoute && !OPHTHALMIC_ROUTE_CODES.has(contextRoute)) {
     return false;
   }
 
@@ -664,9 +670,9 @@ function shouldTreatEyeTokenAsSite(
   }
 
   const dosageForm = context?.dosageForm?.toLowerCase();
-  const contextImpliesOphthalmic = Boolean(
-    dosageForm && /(eye|ophth|ocular|intravit)/i.test(dosageForm)
-  );
+  const contextImpliesOphthalmic = contextRoute
+    ? OPHTHALMIC_ROUTE_CODES.has(contextRoute)
+    : Boolean(dosageForm && /(eye|ophth|ocular|intravit)/i.test(dosageForm));
   const eyeRouteImpliesOphthalmic =
     eyeMeta?.route === RouteCode["Intravitreal route (qualifier value)"];
   const ophthalmicContext =
