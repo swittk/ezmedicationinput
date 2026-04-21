@@ -22,14 +22,15 @@ The fix is to make those layers explicit.
 
 ## Current Direction
 
-The current parser still produces `ParsedSigInternal` directly and then lowers to FHIR. That remains the compatibility path.
+The parser now assembles a canonical-clause-backed `ParserState` directly and then lowers to FHIR/text from canonical outputs.
 
-This pass introduces a minimal canonical IR surface on top of the existing parser:
-
+Public outputs now already depend on canonical structure:
 - `ParseResult.meta.canonical.clauses`
 - `ParseBatchResult.meta.canonical.clauses`
+- FHIR lowering
+- localized formatting
 
-Right now this is an adapter, not a new parser. Each parsed segment becomes one `CanonicalSigClause` with:
+Each parsed segment becomes one `CanonicalSigClause` with:
 - `dose`
 - `route`
 - `site`
@@ -39,7 +40,15 @@ Right now this is an adapter, not a new parser. Each parsed segment becomes one 
 - `warnings`
 - clause `span`
 
-That gives us a stable place to migrate semantics without forcing consumers onto FHIR-shaped intermediate data.
+That means canonical is now the parser’s semantic working surface, not just metadata hung off the side.
+
+For the grammar layer, this repo is currently choosing an in-repo recursive-descent parser over a new runtime dependency such as Chevrotain.
+
+Reasoning:
+- the project already has its own lexer and canonical semantic model
+- keeping runtime size and compatibility simple still matters for this package
+- the current clause language is narrow enough that a local grammar is maintainable
+- suggestions can still be derived later from grammar productions without committing the package to a larger parser toolkit today
 
 ## Target Pipeline
 
@@ -182,7 +191,7 @@ Done or in progress:
 Definition of done:
 - exact source spans are authoritative in the token path
 - compatibility parser remains behaviorally stable against the locked test corpus
-- canonical clause adapter exists as an honest post-parse migration scaffold
+- canonical clause storage exists as the parser’s real semantic state, not only a post-parse scaffold
 
 ### Stage 2
 
@@ -205,19 +214,25 @@ Definition of done:
 ### Stage 3
 
 Then:
-- parse into canonical clause candidates directly
-- use the current parser as fallback until parity is reached
+- finish moving clause assembly into explicit collectors and native canonical state
+- keep removing mutation-heavy inline precedence blobs from the parser entrypoint
 
 Definition of done:
-- at least one meaningful vertical slice parses natively into canonical clause structures before `ParsedSigInternal` finalization
-- that slice preserves spans, leftovers, evidence, and unresolved text without reconstructing them post hoc
-- compatibility parser can still be used as fallback outside the migrated slice
+- `parseClauseState()` is an explicit ordered collector pipeline rather than one giant inline mutation loop
+- canonical clause fields are written directly during parsing
+- leftover collection, warnings, and advice/site resolution remain post-collectors rather than inline branch clutter
+- no parser step reconstructs semantic truth from an older duplicate shell
 
 Current native slice:
 - additional-instruction/advice parsing now runs through `src/advice.ts`
 - vocabulary lives in `src/advice-terminology.json`
 - advice is parsed into `AdviceFrame[]` first and then coded by rule matching
 - the old `maps.ts` additional-instruction phrase bag has been removed
+- `parseClauseState()` now runs through a recursive-descent clause grammar
+- `CoreTerm` is split into schedule / route / site / count / dose / connector productions
+- phrase-level schedule grammar now owns cases like `twice daily`
+- multiplicative cadence like `1x3` / `1.5 x3` is now a grammar term rather than a parser pre-scan
+- custom route phrase/descriptor lookup is built once up front instead of inside the main token loop
 
 ### Stage 4
 

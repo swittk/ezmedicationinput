@@ -440,3 +440,59 @@ Desired behavior:
 5. Current remaining debt after this parser-core cutover.
    - the main sequential token scan in `parseClauseState()` is still heuristic-heavy and remains the biggest blob
    - the next true endgame step is replacing that main scan with more explicit collector/scoring stages for dose/route/schedule/site ambiguity, not just more helper extraction
+
+### 2026-04-22 Parser Core Collector Rewrite
+
+1. Replaced the giant inline `parseClauseState()` token loop with an explicit collector pipeline.
+   - introduced `ClauseParseContext`
+   - introduced a named `CLAUSE_COLLECTORS` precedence list
+   - parser entrypoint now does:
+     - tokenize
+     - detect PRN prelude
+     - collect multiplicative cadence
+     - run clause collectors
+     - apply defaults
+     - collect PRN tail
+     - collect site/advice/warnings
+     - finalize canonical clause
+
+2. Route lookup setup is now built once up front.
+   - custom route phrase lookup and normalized descriptor lookup are created by dedicated helpers
+   - `parseClauseState()` no longer builds these through inline array transforms
+
+3. The collector rewrite moved the main precedence decisions into named units.
+   - timing / anchor collectors
+   - route synonym collector
+   - site abbreviation collector
+   - count collector
+   - dose collectors
+   - generic connector collector
+
+4. The parser core is materially cleaner now, but not mathematically “full CFG” yet.
+   - precedence is now explicit and auditable in the collector list instead of buried in one long loop
+   - the next true endgame step is still ambiguity scoring and more phrase-level collectors so hard cases stop depending only on collector order
+
+### 2026-04-22 Recursive-Descent Clause Grammar
+
+1. Replaced the collector list with real clause productions in `src/parser.ts`.
+   - `parseClauseGrammar()`
+   - `parseCoreTerm()`
+   - `parseScheduleTerm()`
+   - `parseRouteTerm()`
+   - `parseSiteTerm()`
+   - `parseCountTerm()`
+   - `parseDoseTerm()`
+   - `parseConnectorTerm()`
+
+2. Added grammar evidence recording.
+   - successful productions now append rule evidence onto the canonical clause
+   - this gives the parser an auditable semantic trace instead of “it happened because branch order”
+
+3. Moved more formerly heuristic patterns into grammar terms.
+   - phrase-level schedule parsing such as `twice daily`
+   - multiplicative cadence such as `1x3` / `1.5 x3`
+   - PRN schedule peel-off for suffixes like `tid` / `hs`
+
+4. Chose not to add Chevrotain at this stage.
+   - researched it as the obvious JS grammar toolkit candidate
+   - rejected it for now because this repo already has a lexer, wants a small runtime footprint, and the local recursive-descent grammar is enough for the current clause language without adding a new runtime/parser dependency

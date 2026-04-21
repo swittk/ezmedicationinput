@@ -118,6 +118,17 @@ function isBodySiteHint(word: string, customSiteHints?: Set<string>): boolean {
 }
 
 const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
+const BLD_TOKENS = new Set(["bld", "b-l-d"]);
+const EVERY_INTERVAL_TOKENS = new Set(["q", "every", "each"]);
+const COUNT_MARKER_TOKENS = new Set(["x", "*"]);
+const AT_PREFIX_TOKENS = new Set(["@", "at"]);
+const AM_PM_TOKENS = new Set(["am", "pm"]);
+const TIME_LIST_SEPARATORS = new Set([",", "and"]);
+const MEAL_ANCHOR_TOKENS = new Set(["pc", "ac"]);
+const BEFORE_AFTER_TOKENS = new Set(["before", "after"]);
+const GENERIC_ANCHOR_TOKENS = new Set(["on", "with"]);
+const GENERIC_CONNECTOR_TOKENS = new Set(["per", "a", "every", "each"]);
+const PRN_INTRO_TOKENS = new Set(["for", "if", "when", "upon", "due", "to"]);
 
 const DURATION_UNIT_WORDS = new Set([
   "second",
@@ -694,7 +705,7 @@ function tryParseNumericCadence(
       break;
     }
     const normalized = normalizeTokenLower(connector);
-    if (normalized === "per" || normalized === "a" || normalized === "each" || normalized === "every") {
+    if (GENERIC_CONNECTOR_TOKENS.has(normalized)) {
       connectors.push(connector);
       nextIndex += 1;
       continue;
@@ -924,7 +935,7 @@ function extractAttachedAtTimeToken(lower: string): string | undefined {
 }
 
 function isAtPrefixToken(lower: string): boolean {
-  return lower === "@" || lower === "at" || extractAttachedAtTimeToken(lower) !== undefined;
+  return AT_PREFIX_TOKENS.has(lower) || extractAttachedAtTimeToken(lower) !== undefined;
 }
 
 function tryParseTimeBasedSchedule(
@@ -944,7 +955,7 @@ function tryParseTimeBasedSchedule(
   const consumedIndices: number[] = [];
   const timeTokens: string[] = [];
 
-  if (token.lower === "@" || token.lower === "at") {
+  if (AT_PREFIX_TOKENS.has(token.lower)) {
     consumedIndices.push(index);
     nextIndex++;
   } else if (attachedAtTime) {
@@ -955,7 +966,7 @@ function tryParseTimeBasedSchedule(
       if (
         ampmToken &&
         !internal.consumed.has(ampmToken.index) &&
-        (ampmToken.lower === "am" || ampmToken.lower === "pm")
+        AM_PM_TOKENS.has(ampmToken.lower)
       ) {
         timeStr += ampmToken.lower;
         lookaheadIndices.push(index + 1);
@@ -978,7 +989,7 @@ function tryParseTimeBasedSchedule(
     const nextToken = tokens[nextIndex];
     if (!nextToken || internal.consumed.has(nextToken.index)) break;
 
-    if ((nextToken.lower === "," || nextToken.lower === "and") && times.length > 0) {
+    if (TIME_LIST_SEPARATORS.has(nextToken.lower) && times.length > 0) {
       const peekToken = tokens[nextIndex + 1];
       if (peekToken && !internal.consumed.has(peekToken.index)) {
         let peekStr = peekToken.lower;
@@ -986,7 +997,7 @@ function tryParseTimeBasedSchedule(
         if (
           ampmToken &&
           !internal.consumed.has(ampmToken.index) &&
-          (ampmToken.lower === "am" || ampmToken.lower === "pm")
+          AM_PM_TOKENS.has(ampmToken.lower)
         ) {
           peekStr += ampmToken.lower;
         }
@@ -1004,7 +1015,7 @@ function tryParseTimeBasedSchedule(
     // Look ahead for am/pm if current token is just a number or doesn't have am/pm
     if (!timeStr.includes("am") && !timeStr.includes("pm")) {
       const nextNext = tokens[nextIndex + 1];
-      if (nextNext && !internal.consumed.has(nextNext.index) && (nextNext.lower === "am" || nextNext.lower === "pm")) {
+      if (nextNext && !internal.consumed.has(nextNext.index) && AM_PM_TOKENS.has(nextNext.lower)) {
         timeStr += nextNext.lower;
         lookaheadIndices.push(nextIndex + 1);
       }
@@ -1023,14 +1034,14 @@ function tryParseTimeBasedSchedule(
       // Support comma or space separated times
       const separatorToken = tokens[nextIndex];
       // Check if there is another time after the separator
-      if (separatorToken && (separatorToken.lower === "," || separatorToken.lower === "and")) {
+      if (separatorToken && TIME_LIST_SEPARATORS.has(separatorToken.lower)) {
         // Peek for next time
         let peekIndex = nextIndex + 1;
         let peekToken = tokens[peekIndex];
         if (peekToken) {
           let peekStr = peekToken.lower;
           let peekNext = tokens[peekIndex + 1];
-          if (peekNext && !internal.consumed.has(peekNext.index) && (peekNext.lower === "am" || peekNext.lower === "pm")) {
+          if (peekNext && !internal.consumed.has(peekNext.index) && AM_PM_TOKENS.has(peekNext.lower)) {
             peekStr += peekNext.lower;
           }
           if (parseTimeToFhir(peekStr)) {
@@ -1191,87 +1202,6 @@ function detectPrnPrelude(
     }
   }
   return undefined;
-}
-
-function collectMultiplicativeCadence(
-  state: ParserState,
-  tokens: Token[],
-  options?: ParseOptions
-): void {
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index];
-    if (state.consumed.has(token.index)) {
-      continue;
-    }
-    const combined = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
-    if (combined) {
-      const dose = parseFloat(combined[1]);
-      const frequency = parseFloat(combined[2]);
-      if (state.dose === undefined) {
-        state.dose = dose;
-      }
-      state.frequency = frequency;
-      state.period = 1;
-      state.periodUnit = FhirPeriodUnit.Day;
-      mark(state.consumed, token);
-      continue;
-    }
-
-    const hasNumericDoseBefore = (): boolean => {
-      for (let cursor = index - 1; cursor >= 0; cursor--) {
-        const previous = tokens[cursor];
-        if (!previous) {
-          continue;
-        }
-        if (state.consumed.has(previous.index)) {
-          continue;
-        }
-        if (/^[0-9]+(?:\.[0-9]+)?$/.test(previous.lower)) {
-          return true;
-        }
-        if (normalizeUnit(previous.lower, options)) {
-          continue;
-        }
-        break;
-      }
-      return false;
-    };
-
-    if (state.frequency !== undefined || !hasNumericDoseBefore()) {
-      continue;
-    }
-
-    const prefix = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
-    if (prefix) {
-      const frequency = parseFloat(prefix[1]);
-      if (Number.isFinite(frequency)) {
-        state.frequency = frequency;
-        state.period = 1;
-        state.periodUnit = FhirPeriodUnit.Day;
-        mark(state.consumed, token);
-        continue;
-      }
-    }
-
-    if (token.lower !== "x" && token.lower !== "*") {
-      continue;
-    }
-    const next = tokens[index + 1];
-    if (
-      next &&
-      !state.consumed.has(next.index) &&
-      /^[0-9]+(?:\.[0-9]+)?$/.test(next.lower)
-    ) {
-      const frequency = parseFloat(next.original);
-      if (Number.isFinite(frequency)) {
-        state.frequency = frequency;
-        state.period = 1;
-        state.periodUnit = FhirPeriodUnit.Day;
-        mark(state.consumed, token);
-        mark(state.consumed, next);
-      }
-    }
-  }
 }
 
 function applyClauseDefaultsAfterTokenScan(
@@ -1468,6 +1398,77 @@ function collectPrnReasonText(
         .trim();
       if (prefixTokens) {
         canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+      }
+    }
+  }
+
+  if (reasonObjects.length > 0) {
+    const leadingScheduleLength = findLeadingPrnSchedulePrefix(state, reasonObjects, options);
+    if (leadingScheduleLength !== undefined && leadingScheduleLength > 0) {
+      reasonObjects.splice(0, leadingScheduleLength);
+      reasonTokens.splice(0, leadingScheduleLength);
+      reasonIndices.splice(0, leadingScheduleLength);
+      while (reasonTokens.length > 0) {
+        const firstToken = reasonTokens[0];
+        if (!firstToken || /^[;:.,-]+$/.test(firstToken.trim())) {
+          reasonTokens.shift();
+          reasonIndices.shift();
+          reasonObjects.shift();
+          continue;
+        }
+        const lowerFirstToken = firstToken.trim().toLowerCase();
+        if (PRN_INTRO_TOKENS.has(lowerFirstToken)) {
+          reasonTokens.shift();
+          reasonIndices.shift();
+          reasonObjects.shift();
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  if (reasonObjects.length > 0) {
+    let trailingScheduleStart = findTrailingPrnScheduleSuffix(state, reasonObjects, options);
+    if (trailingScheduleStart === undefined && reasonObjects.length > 1) {
+      const trailingToken = reasonObjects[reasonObjects.length - 1];
+      const trailingLower = normalizeTokenLower(trailingToken);
+      if (trailingLower !== "sleep") {
+        const trailingTimingAbbreviation = getTimingAbbreviationMeaning(trailingToken);
+        if (trailingTimingAbbreviation && trailingLower !== "od") {
+          applyFrequencyDescriptor(state, trailingToken, trailingTimingAbbreviation, options);
+          trailingScheduleStart = reasonObjects.length - 1;
+        } else {
+          const trailingEventTiming = getEventTimingMeaning(trailingToken);
+          if (trailingEventTiming) {
+            applyWhenToken(state, trailingToken, trailingEventTiming);
+            trailingScheduleStart = reasonObjects.length - 1;
+          } else {
+            const trailingWordFrequency = WORD_FREQUENCIES[trailingLower];
+            if (trailingWordFrequency) {
+              state.frequency = trailingWordFrequency.frequency;
+              state.period = 1;
+              state.periodUnit = trailingWordFrequency.periodUnit;
+              mark(state.consumed, trailingToken);
+              trailingScheduleStart = reasonObjects.length - 1;
+            }
+          }
+        }
+      }
+    }
+    if (trailingScheduleStart !== undefined) {
+      reasonObjects.splice(trailingScheduleStart);
+      reasonTokens.splice(trailingScheduleStart);
+      reasonIndices.splice(trailingScheduleStart);
+      while (reasonTokens.length > 0) {
+        const lastToken = reasonTokens[reasonTokens.length - 1];
+        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
+          reasonTokens.pop();
+          reasonIndices.pop();
+          reasonObjects.pop();
+          continue;
+        }
+        break;
       }
     }
   }
@@ -2830,8 +2831,10 @@ function isTimingAnchorOrPrefix(
     getEventTimingMeaning(token) ||
     getTimingAbbreviationMeaning(token) ||
     (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
-    (lower === "pc" || lower === "ac" || lower === "after" || lower === "before") ||
-    (isAtPrefixToken(lower) || lower === "on" || lower === "with") ||
+    MEAL_ANCHOR_TOKENS.has(lower) ||
+    BEFORE_AFTER_TOKENS.has(lower) ||
+    isAtPrefixToken(lower) ||
+    GENERIC_ANCHOR_TOKENS.has(lower) ||
     /^\d/.test(lower)
   );
 }
@@ -3029,28 +3032,35 @@ function mapIntervalUnit(token: string):
   | FhirPeriodUnit.Week
   | FhirPeriodUnit.Month
   | undefined {
-  if (
-    token === "min" ||
-    token === "mins" ||
-    token === "minute" ||
-    token === "minutes" ||
-    token === "m"
-  ) {
-    return FhirPeriodUnit.Minute;
+  switch (token) {
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+    case "m":
+      return FhirPeriodUnit.Minute;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return FhirPeriodUnit.Hour;
+    case "d":
+    case "day":
+    case "days":
+      return FhirPeriodUnit.Day;
+    case "wk":
+    case "w":
+    case "week":
+    case "weeks":
+      return FhirPeriodUnit.Week;
+    case "mo":
+    case "month":
+    case "months":
+      return FhirPeriodUnit.Month;
+    default:
+      return undefined;
   }
-  if (token === "h" || token === "hr" || token === "hrs" || token === "hour" || token === "hours") {
-    return FhirPeriodUnit.Hour;
-  }
-  if (token === "d" || token === "day" || token === "days") {
-    return FhirPeriodUnit.Day;
-  }
-  if (token === "wk" || token === "w" || token === "week" || token === "weeks") {
-    return FhirPeriodUnit.Week;
-  }
-  if (token === "mo" || token === "month" || token === "months") {
-    return FhirPeriodUnit.Month;
-  }
-  return undefined;
 }
 
 function mapFrequencyAdverb(token: string): FhirPeriodUnit | undefined {
@@ -3118,14 +3128,15 @@ function resolveUnitTokenAt(
       return undefined;
     }
     const nextNormalized = normalizeTokenLower(nextToken);
-    if (
-      nextNormalized === "unit" ||
-      nextNormalized === "units" ||
-      nextNormalized === "u" ||
-      nextNormalized === "iu" ||
-      nextNormalized === "ius"
-    ) {
-      return { unit: "IU", consumedIndices: [index, index + 1] };
+    switch (nextNormalized) {
+      case "unit":
+      case "units":
+      case "u":
+      case "iu":
+      case "ius":
+        return { unit: "IU", consumedIndices: [index, index + 1] };
+      default:
+        break;
     }
   }
   return undefined;
@@ -3168,519 +3179,1267 @@ function resolveNumericDoseUnit(
   };
 }
 
+interface ClauseParseContext {
+  state: ParserState;
+  tokens: Token[];
+  options?: ParseOptions;
+  medicationContext?: MedicationContext;
+  prnReasonStart?: number;
+  prnSiteSuffixIndices: Set<number>;
+  customRouteMap?: Map<string, RouteCode>;
+  customRouteDescriptorMap?: Map<string, RouteCode>;
+}
+
+interface TokenSemanticContext {
+  siteCandidate: ReturnType<typeof getPrimarySiteMeaningCandidate>;
+  treatSiteCandidateAsSite: boolean;
+  timingAbbreviation: ReturnType<typeof getTimingAbbreviationMeaning>;
+}
+
+type TerminalMatcher = (
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+) => boolean;
+
+type GrammarProduction = (
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+) => number | undefined;
+
+function buildCustomRouteMap(
+  routeMap: ParseOptions["routeMap"] | undefined
+): Map<string, RouteCode> | undefined {
+  if (!routeMap) {
+    return undefined;
+  }
+  const entries = new Map<string, RouteCode>();
+  for (const [key, value] of objectEntries(routeMap)) {
+    const normalized = key.toLowerCase();
+    if (normalized) {
+      entries.set(normalized, value);
+    }
+  }
+  return entries.size ? entries : undefined;
+}
+
+function buildCustomRouteDescriptorMap(
+  routeMap: Map<string, RouteCode> | undefined
+): Map<string, RouteCode> | undefined {
+  if (!routeMap) {
+    return undefined;
+  }
+  const entries = new Map<string, RouteCode>();
+  for (const [key, value] of routeMap.entries()) {
+    const normalized = normalizeRouteDescriptorPhrase(key);
+    if (normalized) {
+      entries.set(normalized, value);
+    }
+  }
+  return entries.size ? entries : undefined;
+}
+
+function createClauseParseContext(
+  state: ParserState,
+  tokens: Token[],
+  options?: ParseOptions
+): ClauseParseContext {
+  const customRouteMap = buildCustomRouteMap(options?.routeMap);
+  return {
+    state,
+    tokens,
+    options,
+    medicationContext: options?.context ?? undefined,
+    prnSiteSuffixIndices: new Set<number>(),
+    customRouteMap,
+    customRouteDescriptorMap: buildCustomRouteDescriptorMap(customRouteMap)
+  };
+}
+
+function tryApplyRouteDescriptor(
+  state: ParserState,
+  code: RouteCode,
+  text?: string
+): boolean {
+  if (state.routeCode && state.routeCode !== code) {
+    return false;
+  }
+  setRoute(state, code, text);
+  return true;
+}
+
+function maybeApplyRouteDescriptorFromPhrase(
+  context: ClauseParseContext,
+  phrase: string | undefined
+): boolean {
+  if (!phrase) {
+    return false;
+  }
+  const normalized = phrase.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const customCode = context.customRouteMap?.get(normalized);
+  if (customCode) {
+    if (tryApplyRouteDescriptor(context.state, customCode)) {
+      return true;
+    }
+  }
+  const synonym = DEFAULT_ROUTE_SYNONYMS[normalized];
+  if (synonym) {
+    if (tryApplyRouteDescriptor(context.state, synonym.code, synonym.text)) {
+      return true;
+    }
+  }
+  const normalizedDescriptor = normalizeRouteDescriptorPhrase(normalized);
+  if (!normalizedDescriptor) {
+    return false;
+  }
+  const customDescriptorCode = context.customRouteDescriptorMap?.get(normalizedDescriptor);
+  if (customDescriptorCode) {
+    if (tryApplyRouteDescriptor(context.state, customDescriptorCode)) {
+      return true;
+    }
+  }
+  const fallbackSynonym = DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS.get(normalizedDescriptor);
+  if (!fallbackSynonym) {
+    return false;
+  }
+  return tryApplyRouteDescriptor(
+    context.state,
+    fallbackSynonym.code,
+    fallbackSynonym.text
+  );
+}
+
+function buildTokenSemanticContext(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): TokenSemanticContext {
+  const siteCandidate = getPrimarySiteMeaningCandidate(token);
+  const treatSiteCandidateAsSite = siteCandidate
+    ? shouldTreatAbbreviatedSiteCandidateAsSite(
+      context.state,
+      context.tokens,
+      index,
+      context.medicationContext
+    )
+    : false;
+  return {
+    siteCandidate,
+    treatSiteCandidateAsSite,
+    timingAbbreviation: getTimingAbbreviationMeaning(token)
+  };
+}
+
+function buildEvidenceFromTokenWindow(
+  state: ParserState,
+  startIndex: number,
+  endIndex: number
+): CanonicalSigClause["evidence"][number]["spans"] {
+  const indices: number[] = [];
+  for (let index = startIndex; index <= endIndex; index++) {
+    indices.push(index);
+  }
+  const range = computeTokenRange(state.input, state.tokens, indices);
+  if (!range) {
+    return [];
+  }
+  return [buildCanonicalSourceSpan(state.input, range, indices)];
+}
+
+function recordClauseEvidence(
+  state: ParserState,
+  rule: string,
+  startIndex: number,
+  endIndex: number
+): void {
+  const spans = buildEvidenceFromTokenWindow(state, startIndex, endIndex);
+  if (!spans.length) {
+    return;
+  }
+  state.primaryClause.evidence.push({ rule, spans });
+}
+
+function applyGrammarTerminal(
+  context: ClauseParseContext,
+  index: number,
+  token: Token,
+  rule: string,
+  matcher: TerminalMatcher
+): number | undefined {
+  const beforeConsumed = new Set<number>();
+  for (const consumedIndex of context.state.consumed) {
+    beforeConsumed.add(consumedIndex);
+  }
+  if (!matcher(context, index, token)) {
+    return undefined;
+  }
+  let endIndex = index;
+  for (const consumedIndex of context.state.consumed) {
+    if (!beforeConsumed.has(consumedIndex) && consumedIndex > endIndex) {
+      endIndex = consumedIndex;
+    }
+  }
+  recordClauseEvidence(context.state, rule, index, endIndex);
+  return endIndex + 1;
+}
+
+function tryCollectRouteSynonym(
+  context: ClauseParseContext,
+  startIndex: number
+): boolean {
+  if (context.prnReasonStart !== undefined && startIndex >= context.prnReasonStart) {
+    return false;
+  }
+  const state = context.state;
+  const tokens = context.tokens;
+  const maxSpan = Math.min(24, tokens.length - startIndex);
+  for (let span = maxSpan; span >= 1; span--) {
+    const slice: Token[] = [];
+    const phraseParts: string[] = [];
+    let blocked = false;
+    for (let offset = 0; offset < span; offset++) {
+      const part = tokens[startIndex + offset];
+      if (!part) {
+        blocked = true;
+        break;
+      }
+      if (state.consumed.has(part.index)) {
+        blocked = true;
+        break;
+      }
+      slice.push(part);
+      if (!/^[;:(),]+$/.test(part.lower)) {
+        phraseParts.push(part.lower);
+      }
+    }
+    if (blocked) {
+      continue;
+    }
+    const phrase = phraseParts.join(" ");
+    const customCode = context.customRouteMap?.get(phrase);
+    const annotatedRoute = span === 1 ? getRouteMeaning(slice[0]) : undefined;
+    const synonym = customCode
+      ? { code: customCode, text: ROUTE_TEXT[customCode] }
+      : annotatedRoute ?? DEFAULT_ROUTE_SYNONYMS[phrase];
+    if (!synonym) {
+      continue;
+    }
+    if (phrase === "top" && slice.length === 1) {
+      const nextToken = tokens[startIndex + 1];
+      if (nextToken && normalizeTokenLower(nextToken) === "of") {
+        continue;
+      }
+    }
+    if (phrase === "in" && slice.length === 1) {
+      if (state.routeCode) {
+        continue;
+      }
+      const prevToken = tokens[startIndex - 1];
+      if (prevToken && !state.consumed.has(prevToken.index)) {
+        continue;
+      }
+    }
+    setRoute(state, synonym.code, synonym.text);
+    for (const part of slice) {
+      mark(state.consumed, part);
+      if (isBodySiteHint(part.lower, state.customSiteHints)) {
+        state.siteTokenIndices.add(part.index);
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function skipCountConnectors(
+  tokens: Token[],
+  consumed: Set<number>,
+  startIndex: number,
+  bucket: Token[]
+): number {
+  let cursor = startIndex;
+  while (cursor < tokens.length) {
+    const candidate = tokens[cursor];
+    if (!candidate) {
+      break;
+    }
+    if (consumed.has(candidate.index)) {
+      cursor += 1;
+      continue;
+    }
+    if (!COUNT_CONNECTOR_WORDS.has(candidate.lower)) {
+      break;
+    }
+    bucket.push(candidate);
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function collectBldMealTiming(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  if (!BLD_TOKENS.has(token.lower)) {
+    return false;
+  }
+  const check = checkDiscouraged(token.original, context.options);
+  if (check.warning) {
+    context.state.warnings.push(check.warning);
+  }
+  applyWhenToken(context.state, token, EventTiming.Meal);
+  return true;
+}
+
+function collectSeparatedInterval(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (!EVERY_INTERVAL_TOKENS.has(token.lower)) {
+    return false;
+  }
+  return parseSeparatedInterval(context.state, context.tokens, index, context.options);
+}
+
+function collectTimeBasedSchedule(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryParseTimeBasedSchedule(context.state, context.tokens, index);
+}
+
+function collectNumericCadence(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryParseNumericCadence(context.state, context.tokens, index);
+}
+
+function hasImmediateDoseSyntaxBefore(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const candidate = context.tokens[cursor];
+    if (!candidate) {
+      continue;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (!lower || /^[;:(),]+$/.test(lower)) {
+      continue;
+    }
+    if (
+      isNumericToken(lower) ||
+      parseNumericRange(lower) !== undefined ||
+      normalizeUnit(lower, context.options) !== undefined ||
+      /^[0-9]+(?:\.[0-9]+)?[x*]$/.test(lower)
+    ) {
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function collectMultiplicativeCadenceTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const combined = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (combined) {
+    const dose = parseFloat(combined[1]);
+    const frequency = parseFloat(combined[2]);
+    if (!Number.isFinite(dose) || !Number.isFinite(frequency)) {
+      return false;
+    }
+    if (context.state.dose === undefined) {
+      context.state.dose = dose;
+    }
+    context.state.frequency = frequency;
+    context.state.period = 1;
+    context.state.periodUnit = FhirPeriodUnit.Day;
+    mark(context.state.consumed, token);
+    return true;
+  }
+
+  if (
+    context.state.frequency !== undefined ||
+    context.state.frequencyMax !== undefined ||
+    context.state.period !== undefined ||
+    context.state.periodMax !== undefined ||
+    context.state.dose === undefined
+  ) {
+    return false;
+  }
+  if (!hasImmediateDoseSyntaxBefore(context, index)) {
+    return false;
+  }
+
+  const prefix = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (prefix) {
+    const frequency = parseFloat(prefix[1]);
+    if (!Number.isFinite(frequency)) {
+      return false;
+    }
+    context.state.frequency = frequency;
+    context.state.period = 1;
+    context.state.periodUnit = FhirPeriodUnit.Day;
+    mark(context.state.consumed, token);
+    return true;
+  }
+
+  if (!COUNT_MARKER_TOKENS.has(token.lower)) {
+    return false;
+  }
+  const next = context.tokens[index + 1];
+  if (
+    !next ||
+    context.state.consumed.has(next.index) ||
+    !/^[0-9]+(?:\.[0-9]+)?$/.test(next.lower)
+  ) {
+    return false;
+  }
+  const frequency = parseFloat(next.original);
+  if (!Number.isFinite(frequency)) {
+    return false;
+  }
+  context.state.frequency = frequency;
+  context.state.period = 1;
+  context.state.periodUnit = FhirPeriodUnit.Day;
+  mark(context.state.consumed, token);
+  mark(context.state.consumed, next);
+  return true;
+}
+
+function collectOdTimingAbbreviation(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const normalizedLower = normalizeTokenLower(token);
+  if (normalizedLower !== "od") {
+    return false;
+  }
+  const semantics = buildTokenSemanticContext(context, index, token);
+  if (
+    !semantics.timingAbbreviation ||
+    !shouldInterpretOdAsOnceDaily(
+      context.state,
+      context.tokens,
+      index,
+      semantics.treatSiteCandidateAsSite
+    )
+  ) {
+    return false;
+  }
+  applyFrequencyDescriptor(
+    context.state,
+    token,
+    semantics.timingAbbreviation,
+    context.options
+  );
+  return true;
+}
+
+function collectTimingAbbreviation(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const normalizedLower = normalizeTokenLower(token);
+  if (normalizedLower === "od") {
+    return false;
+  }
+  const semantics = buildTokenSemanticContext(context, index, token);
+  if (!semantics.timingAbbreviation) {
+    return false;
+  }
+  applyFrequencyDescriptor(
+    context.state,
+    token,
+    semantics.timingAbbreviation,
+    context.options
+  );
+  return true;
+}
+
+function collectCompactInterval(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryParseCompactQ(context.state, context.tokens, index);
+}
+
+function collectTimingConnector(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (
+    !(isMealContextConnectorWord(token.lower) || token.lower === ",") ||
+    !isTimingAnchorOrPrefix(context.tokens, index + 1, context.prnReasonStart)
+  ) {
+    return false;
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectComboEventTiming(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const nextToken = context.tokens[index + 1];
+  if (!nextToken || context.state.consumed.has(nextToken.index)) {
+    return false;
+  }
+  const combo = `${token.lower} ${nextToken.lower}`;
+  const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
+  if (!comboWhen) {
+    return false;
+  }
+  applyWhenToken(context.state, token, comboWhen);
+  mark(context.state.consumed, nextToken);
+  return true;
+}
+
+function collectPcAcAnchor(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (!MEAL_ANCHOR_TOKENS.has(token.lower)) {
+    return false;
+  }
+  return parseAnchorSequence(
+    context.state,
+    context.tokens,
+    index,
+    token.lower === "pc"
+      ? EventTiming["After Meal"]
+      : EventTiming["Before Meal"]
+  );
+}
+
+function collectBeforeAfterAnchor(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (!BEFORE_AFTER_TOKENS.has(token.lower)) {
+    return false;
+  }
+  if (!isLikelyMealAnchorUsage(context.tokens, index, context.state.consumed)) {
+    return false;
+  }
+  return parseAnchorSequence(
+    context.state,
+    context.tokens,
+    index,
+    token.lower === "after"
+      ? EventTiming["After Meal"]
+      : EventTiming["Before Meal"]
+  );
+}
+
+function collectGenericAnchor(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (
+    !isAtPrefixToken(token.lower) &&
+    !GENERIC_ANCHOR_TOKENS.has(token.lower)
+  ) {
+    return false;
+  }
+  if (tryParseTimeBasedSchedule(context.state, context.tokens, index)) {
+    return true;
+  }
+  if (parseAnchorSequence(context.state, context.tokens, index)) {
+    return true;
+  }
+  if (token.lower === "on") {
+    const previous = getPreviousActiveToken(
+      context.tokens,
+      index,
+      context.state.consumed
+    );
+    if (previous && hasTokenWordClass(previous, TokenWordClass.WorkflowInstruction)) {
+      return false;
+    }
+  }
+  if (token.lower === "with") {
+    return false;
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectCustomWhen(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  const customWhen = context.options?.whenMap?.[token.lower];
+  if (!customWhen) {
+    return false;
+  }
+  applyWhenToken(context.state, token, customWhen);
+  return true;
+}
+
+function collectEventTiming(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const whenCode = getEventTimingMeaning(token);
+  if (!whenCode) {
+    return false;
+  }
+  if (
+    context.prnReasonStart !== undefined &&
+    index >= context.prnReasonStart &&
+    token.lower === "sleep"
+  ) {
+    return false;
+  }
+  if (isWorkflowInstructionContext(context.tokens, index, context.state.consumed)) {
+    return false;
+  }
+  applyWhenToken(context.state, token, whenCode);
+  return true;
+}
+
+function collectDayRange(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryConsumeDayRangeTokens(context.state, context.tokens, index) > 0;
+}
+
+function collectDayOfWeek(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  const days = getDayOfWeekMeaning(token);
+  if (!days) {
+    return false;
+  }
+  addDayOfWeekList(context.state, days);
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectRouteSynonym(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryCollectRouteSynonym(context, index);
+}
+
+function collectSiteAbbreviation(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const semantics = buildTokenSemanticContext(context, index, token);
+  const siteCandidate = semantics.siteCandidate;
+  if (!siteCandidate || !semantics.treatSiteCandidateAsSite) {
+    return false;
+  }
+  context.state.siteText = siteCandidate.text;
+  context.state.siteSource = "abbreviation";
+  if (siteCandidate.route && !context.state.routeCode) {
+    setRoute(context.state, siteCandidate.route);
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectCountLimit(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const state = context.state;
+  const tokens = context.tokens;
+  if (state.count !== undefined) {
+    return false;
+  }
+  const countMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (countMatch) {
+    if (applyCountLimit(state, parseFloat(countMatch[1]))) {
+      mark(state.consumed, token);
+      const nextToken = tokens[index + 1];
+      if (nextToken && isCountKeywordWord(nextToken.lower)) {
+        mark(state.consumed, nextToken);
+      }
+      return true;
+    }
+  }
+  if (COUNT_MARKER_TOKENS.has(token.lower)) {
+    const numericToken = tokens[index + 1];
+    if (
+      numericToken &&
+      !state.consumed.has(numericToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower) &&
+      applyCountLimit(state, parseFloat(numericToken.original))
+    ) {
+      mark(state.consumed, token);
+      mark(state.consumed, numericToken);
+      const afterToken = tokens[index + 2];
+      if (afterToken && isCountKeywordWord(afterToken.lower)) {
+        mark(state.consumed, afterToken);
+      }
+      return true;
+    }
+  }
+  if (token.lower === "for") {
+    const preConnectors: Token[] = [];
+    let lookaheadIndex = skipCountConnectors(
+      tokens,
+      state.consumed,
+      index + 1,
+      preConnectors
+    );
+    const numericToken = tokens[lookaheadIndex];
+    if (
+      numericToken &&
+      !state.consumed.has(numericToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
+    ) {
+      const postConnectors: Token[] = [];
+      lookaheadIndex = skipCountConnectors(
+        tokens,
+        state.consumed,
+        lookaheadIndex + 1,
+        postConnectors
+      );
+      const keywordToken = tokens[lookaheadIndex];
+      if (
+        keywordToken &&
+        !state.consumed.has(keywordToken.index) &&
+        isCountKeywordWord(keywordToken.lower) &&
+        applyCountLimit(state, parseFloat(numericToken.original))
+      ) {
+        mark(state.consumed, token);
+        for (const connector of preConnectors) {
+          mark(state.consumed, connector);
+        }
+        mark(state.consumed, numericToken);
+        for (const connector of postConnectors) {
+          mark(state.consumed, connector);
+        }
+        mark(state.consumed, keywordToken);
+        return true;
+      }
+    }
+  }
+  if (!isCountKeywordWord(token.lower)) {
+    return false;
+  }
+  const partsToMark: Token[] = [token];
+  let value: number | undefined;
+  const prevToken = tokens[index - 1];
+  if (prevToken && !state.consumed.has(prevToken.index)) {
+    const prevLower = prevToken.lower;
+    const suffixMatch = prevLower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
+    const prefixMatch = prevLower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+    if (suffixMatch) {
+      value = parseFloat(suffixMatch[1]);
+      partsToMark.push(prevToken);
+    } else if (prefixMatch) {
+      value = parseFloat(prefixMatch[1]);
+      partsToMark.push(prevToken);
+    } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(prevLower)) {
+      const maybeX = tokens[index - 2];
+      if (
+        maybeX &&
+        !state.consumed.has(maybeX.index) &&
+        COUNT_MARKER_TOKENS.has(maybeX.lower)
+      ) {
+        value = parseFloat(prevToken.original);
+        partsToMark.push(maybeX, prevToken);
+      }
+    }
+  }
+  if (value === undefined) {
+    const nextToken = tokens[index + 1];
+    if (
+      nextToken &&
+      !state.consumed.has(nextToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(nextToken.lower)
+    ) {
+      value = parseFloat(nextToken.original);
+      partsToMark.push(nextToken);
+    }
+  }
+  if (!applyCountLimit(state, value)) {
+    return false;
+  }
+  for (const part of partsToMark) {
+    mark(state.consumed, part);
+  }
+  return true;
+}
+
+function collectCountBasedFrequency(
+  context: ClauseParseContext,
+  index: number
+): boolean {
+  return tryParseCountBasedFrequency(
+    context.state,
+    context.tokens,
+    index,
+    context.options
+  );
+}
+
+function collectDoseRange(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const rangeValue = parseNumericRange(token.lower);
+  if (!rangeValue) {
+    return false;
+  }
+  if (!context.state.doseRange) {
+    context.state.doseRange = rangeValue;
+  }
+  mark(context.state.consumed, token);
+  const resolvedUnit = resolveUnitTokenAt(
+    context.tokens,
+    index + 1,
+    context.state.consumed,
+    context.options
+  );
+  if (resolvedUnit) {
+    context.state.unit = resolvedUnit.unit;
+    for (const consumedIndex of resolvedUnit.consumedIndices) {
+      mark(context.state.consumed, context.tokens[consumedIndex]);
+    }
+  }
+  return true;
+}
+
+function collectNumericDose(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  if (!isNumericToken(token.lower)) {
+    return false;
+  }
+  if (isDurationPhraseNumber(context.tokens, index, context.state.consumed)) {
+    return false;
+  }
+  const value = parseFloat(token.original);
+  const resolvedDose = resolveNumericDoseUnit(
+    context.tokens,
+    index,
+    value,
+    context.state.consumed,
+    context.options
+  );
+  if (context.state.dose === undefined) {
+    context.state.dose = resolvedDose.doseValue;
+  }
+  mark(context.state.consumed, token);
+  if (resolvedDose.unit) {
+    context.state.unit = resolvedDose.unit;
+  }
+  for (const consumedIndex of resolvedDose.consumedIndices) {
+    mark(context.state.consumed, context.tokens[consumedIndex]);
+  }
+  return true;
+}
+
+function collectTimesDose(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  const timesMatch = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
+  if (!timesMatch) {
+    return false;
+  }
+  const value = parseFloat(timesMatch[1]);
+  if (context.state.dose === undefined) {
+    context.state.dose = value;
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectWordFrequency(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  const wordFreq = WORD_FREQUENCIES[token.lower];
+  if (!wordFreq) {
+    return false;
+  }
+  context.state.frequency = wordFreq.frequency;
+  context.state.period = 1;
+  context.state.periodUnit = wordFreq.periodUnit;
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function collectPhraseWordFrequency(
+  context: ClauseParseContext,
+  index: number,
+  _token: Token
+): boolean {
+  const maxSpan = Math.min(3, context.tokens.length - index);
+  for (let span = maxSpan; span >= 2; span--) {
+    let blocked = false;
+    const phraseParts: string[] = [];
+    const matchedTokens: Token[] = [];
+    for (let offset = 0; offset < span; offset++) {
+      const candidate = context.tokens[index + offset];
+      if (!candidate) {
+        blocked = true;
+        break;
+      }
+      if (context.state.consumed.has(candidate.index)) {
+        blocked = true;
+        break;
+      }
+      matchedTokens.push(candidate);
+      phraseParts.push(candidate.lower);
+    }
+    if (blocked) {
+      continue;
+    }
+    const descriptor = WORD_FREQUENCIES[phraseParts.join(" ")];
+    if (!descriptor) {
+      continue;
+    }
+    context.state.frequency = descriptor.frequency;
+    context.state.period = 1;
+    context.state.periodUnit = descriptor.periodUnit;
+    for (const matchedToken of matchedTokens) {
+      mark(context.state.consumed, matchedToken);
+    }
+    return true;
+  }
+  return false;
+}
+
+function collectGenericConnector(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  if (!GENERIC_CONNECTOR_TOKENS.has(token.lower)) {
+    return false;
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function parseScheduleTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return (
+    applyGrammarTerminal(context, index, token, "schedule.bldMeal", collectBldMealTiming) ??
+    applyGrammarTerminal(context, index, token, "schedule.separatedInterval", collectSeparatedInterval) ??
+    applyGrammarTerminal(context, index, token, "schedule.timeBased", collectTimeBasedSchedule) ??
+    applyGrammarTerminal(context, index, token, "schedule.numericCadence", collectNumericCadence) ??
+    applyGrammarTerminal(context, index, token, "schedule.multiplicativeCadence", collectMultiplicativeCadenceTerm) ??
+    applyGrammarTerminal(context, index, token, "schedule.odTimingAbbreviation", collectOdTimingAbbreviation) ??
+    applyGrammarTerminal(context, index, token, "schedule.timingAbbreviation", collectTimingAbbreviation) ??
+    applyGrammarTerminal(context, index, token, "schedule.compactInterval", collectCompactInterval) ??
+    applyGrammarTerminal(context, index, token, "schedule.timingConnector", collectTimingConnector) ??
+    applyGrammarTerminal(context, index, token, "schedule.comboEventTiming", collectComboEventTiming) ??
+    applyGrammarTerminal(context, index, token, "schedule.pcAcAnchor", collectPcAcAnchor) ??
+    applyGrammarTerminal(context, index, token, "schedule.beforeAfterAnchor", collectBeforeAfterAnchor) ??
+    applyGrammarTerminal(context, index, token, "schedule.genericAnchor", collectGenericAnchor) ??
+    applyGrammarTerminal(context, index, token, "schedule.customWhen", collectCustomWhen) ??
+    applyGrammarTerminal(context, index, token, "schedule.eventTiming", collectEventTiming) ??
+    applyGrammarTerminal(context, index, token, "schedule.dayRange", collectDayRange) ??
+    applyGrammarTerminal(context, index, token, "schedule.dayOfWeek", collectDayOfWeek) ??
+    applyGrammarTerminal(context, index, token, "schedule.phraseWordFrequency", collectPhraseWordFrequency) ??
+    applyGrammarTerminal(context, index, token, "schedule.wordFrequency", collectWordFrequency)
+  );
+}
+
+function parseRouteTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return applyGrammarTerminal(context, index, token, "route.synonym", collectRouteSynonym);
+}
+
+function parseSiteTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return applyGrammarTerminal(context, index, token, "site.abbreviation", collectSiteAbbreviation);
+}
+
+function parseCountTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return applyGrammarTerminal(context, index, token, "count.limit", collectCountLimit);
+}
+
+function parseDoseTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return (
+    applyGrammarTerminal(context, index, token, "dose.countBasedFrequency", collectCountBasedFrequency) ??
+    applyGrammarTerminal(context, index, token, "dose.range", collectDoseRange) ??
+    applyGrammarTerminal(context, index, token, "dose.numeric", collectNumericDose) ??
+    applyGrammarTerminal(context, index, token, "dose.times", collectTimesDose)
+  );
+}
+
+function parseConnectorTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return applyGrammarTerminal(context, index, token, "connector.generic", collectGenericConnector);
+}
+
+function parseCoreTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return (
+    parseScheduleTerm(context, index, token) ??
+    parseRouteTerm(context, index, token) ??
+    parseSiteTerm(context, index, token) ??
+    parseCountTerm(context, index, token) ??
+    parseDoseTerm(context, index, token) ??
+    parseConnectorTerm(context, index, token)
+  );
+}
+
+/**
+ * Core grammar:
+ *
+ * Clause        ::= CoreSequence
+ * CoreSequence  ::= CoreTerm*
+ * CoreTerm      ::= ScheduleTerm
+ *                 | RouteTerm
+ *                 | SiteTerm
+ *                 | CountTerm
+ *                 | DoseTerm
+ *                 | ConnectorTerm
+ */
+function parseClauseGrammar(context: ClauseParseContext): void {
+  const limit =
+    context.prnReasonStart === undefined
+      ? context.tokens.length
+      : context.prnReasonStart;
+  let index = 0;
+  while (index < limit) {
+    const token = context.tokens[index];
+    if (!token || context.state.consumed.has(token.index)) {
+      index += 1;
+      continue;
+    }
+    const nextIndex = parseCoreTerm(context, index, token);
+    if (nextIndex !== undefined && nextIndex > index) {
+      index = nextIndex;
+      continue;
+    }
+    index += 1;
+  }
+}
+
+function stateHasConsumedAllTokens(state: ParserState, tokens: Token[]): boolean {
+  for (const token of tokens) {
+    if (!state.consumed.has(token.index)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function mergeScheduleState(target: ParserState, source: ParserState): void {
+  if (source.timingCode !== undefined) {
+    target.timingCode = source.timingCode;
+  }
+  if (source.count !== undefined) {
+    target.count = source.count;
+  }
+  if (source.frequency !== undefined) {
+    target.frequency = source.frequency;
+  }
+  if (source.frequencyMax !== undefined) {
+    target.frequencyMax = source.frequencyMax;
+  }
+  if (source.period !== undefined) {
+    target.period = source.period;
+  }
+  if (source.periodMax !== undefined) {
+    target.periodMax = source.periodMax;
+  }
+  if (source.periodUnit !== undefined) {
+    target.periodUnit = source.periodUnit;
+  }
+  if (source.timeOfDay?.length) {
+    target.timeOfDay = [...source.timeOfDay];
+  }
+  for (const whenCode of source.when) {
+    addWhen(target.when, whenCode);
+  }
+  addDayOfWeekList(target, source.dayOfWeek);
+}
+
+function shouldPreserveStandalonePrnReasonToken(tokens: Token[]): boolean {
+  return tokens.length === 1 && normalizeTokenLower(tokens[0]) === "sleep";
+}
+
+function tryApplyScheduleOnlyTokens(
+  internal: ParserState,
+  tokens: Token[],
+  options?: ParseOptions
+): boolean {
+  if (!tokens.length || shouldPreserveStandalonePrnReasonToken(tokens)) {
+    return false;
+  }
+  const probe = createClauseBackedInternal(
+    internal.input,
+    tokens,
+    internal.customSiteHints
+  );
+  const probeContext = createClauseParseContext(probe, tokens, options);
+  parseClauseGrammar(probeContext);
+  applyClauseDefaultsAfterTokenScan(
+    probe,
+    tokens,
+    probeContext.medicationContext,
+    options
+  );
+  if (
+    probe.dose !== undefined ||
+    probe.doseRange !== undefined ||
+    probe.unit !== undefined ||
+    probe.routeCode !== undefined ||
+    probe.siteText !== undefined ||
+    probe.asNeeded
+  ) {
+    return false;
+  }
+  if (
+    probe.frequency === undefined &&
+    probe.frequencyMax === undefined &&
+    probe.period === undefined &&
+    probe.periodMax === undefined &&
+    probe.periodUnit === undefined &&
+    probe.timingCode === undefined &&
+    probe.when.length === 0 &&
+    probe.dayOfWeek.length === 0 &&
+    !(probe.timeOfDay?.length)
+  ) {
+    return false;
+  }
+  if (!stateHasConsumedAllTokens(probe, tokens)) {
+    return false;
+  }
+  mergeScheduleState(internal, probe);
+  return true;
+}
+
+function findLeadingPrnSchedulePrefix(
+  internal: ParserState,
+  tokens: Token[],
+  options?: ParseOptions
+): number | undefined {
+  const maxSpan = Math.min(4, tokens.length);
+  for (let span = maxSpan; span >= 1; span--) {
+    const prefixTokens = tokens.slice(0, span);
+    if (!prefixTokens.length || prefixTokens.length === tokens.length) {
+      continue;
+    }
+    if (tryApplyScheduleOnlyTokens(internal, prefixTokens, options)) {
+      return span;
+    }
+  }
+  return undefined;
+}
+
+function findTrailingPrnScheduleSuffix(
+  internal: ParserState,
+  tokens: Token[],
+  options?: ParseOptions
+): number | undefined {
+  const maxSpan = Math.min(4, tokens.length);
+  for (let span = maxSpan; span >= 1; span--) {
+    const startIndex = tokens.length - span;
+    if (startIndex < 0 || startIndex === 0) {
+      continue;
+    }
+    const suffixTokens = tokens.slice(startIndex);
+    if (tryApplyScheduleOnlyTokens(internal, suffixTokens, options)) {
+      return startIndex;
+    }
+  }
+  return undefined;
+}
+
 export function parseClauseState(
   input: string,
   options?: ParseOptions
 ): ParserState {
   const tokens = tokenize(input);
-  const internal = createClauseBackedInternal(
+  const state = createClauseBackedInternal(
     input,
     tokens,
     buildCustomSiteHints(options?.siteCodeMap)
   );
-
-  const context = options?.context ?? undefined;
-  const customRouteMap = options?.routeMap
-    ? new Map(
-      objectEntries(options.routeMap).map(([key, value]) => [
-        key.toLowerCase(),
-        value
-      ])
-    )
-    : undefined;
-
-  const customRouteDescriptorMap = customRouteMap
-    ? new Map(
-      Array.from(customRouteMap.entries())
-        .map(([key, value]) => [normalizeRouteDescriptorPhrase(key), value] as const)
-        .filter(([normalized]) => normalized.length > 0)
-    )
-    : undefined;
-
+  const parseContext = createClauseParseContext(state, tokens, options);
   if (tokens.length === 0) {
-    finalizeCanonicalClause(internal);
-    return internal;
+    finalizeCanonicalClause(state);
+    return state;
   }
-
-  const prnSiteSuffixIndices = new Set<number>();
-  const prnReasonStart = detectPrnPrelude(internal, tokens);
-  collectMultiplicativeCadence(internal, tokens, options);
-
-  const applyRouteDescriptor = (code: RouteCode, text?: string): boolean => {
-    if (internal.routeCode && internal.routeCode !== code) {
-      return false;
-    }
-    setRoute(internal, code, text);
-    return true;
-  };
-
-  const maybeApplyRouteDescriptor = (phrase: string | undefined): boolean => {
-    if (!phrase) {
-      return false;
-    }
-    const normalized = phrase.trim().toLowerCase();
-    if (!normalized) {
-      return false;
-    }
-    const customCode = customRouteMap?.get(normalized);
-    if (customCode) {
-      if (applyRouteDescriptor(customCode as RouteCode)) {
-        return true;
-      }
-    }
-    const synonym = DEFAULT_ROUTE_SYNONYMS[normalized];
-    if (synonym) {
-      if (applyRouteDescriptor(synonym.code, synonym.text)) {
-        return true;
-      }
-    }
-    const normalizedDescriptor = normalizeRouteDescriptorPhrase(normalized);
-    if (normalizedDescriptor) {
-      const customDescriptorCode = customRouteDescriptorMap?.get(normalizedDescriptor);
-      if (customDescriptorCode) {
-        if (applyRouteDescriptor(customDescriptorCode as RouteCode)) {
-          return true;
-        }
-      }
-      const fallbackSynonym = DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS.get(normalizedDescriptor);
-      if (fallbackSynonym) {
-        if (applyRouteDescriptor(fallbackSynonym.code, fallbackSynonym.text)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  // Process tokens sequentially
-  const tryRouteSynonym = (startIndex: number): boolean => {
-    if (prnReasonStart !== undefined && startIndex >= prnReasonStart) {
-      return false;
-    }
-    const maxSpan = Math.min(24, tokens.length - startIndex);
-    for (let span = maxSpan; span >= 1; span--) {
-      const slice = tokens.slice(startIndex, startIndex + span);
-      if (slice.some((part) => internal.consumed.has(part.index))) {
-        continue;
-      }
-      const normalizedParts = slice.filter((part) => !/^[;:(),]+$/.test(part.lower));
-      const phrase = normalizedParts.map((part) => part.lower).join(" ");
-      const customCode = customRouteMap?.get(phrase);
-      const annotatedRoute = span === 1 ? getRouteMeaning(slice[0]) : undefined;
-      const synonym = customCode
-        ? { code: customCode, text: ROUTE_TEXT[customCode] }
-        : annotatedRoute ?? DEFAULT_ROUTE_SYNONYMS[phrase];
-      if (synonym) {
-        if (phrase === "top" && slice.length === 1) {
-          const nextToken = tokens[startIndex + 1];
-          if (nextToken && normalizeTokenLower(nextToken) === "of") {
-            continue;
-          }
-        }
-        if (phrase === "in" && slice.length === 1) {
-          if (internal.routeCode) {
-            continue;
-          }
-          const prevToken = tokens[startIndex - 1];
-          if (prevToken && !internal.consumed.has(prevToken.index)) {
-            continue;
-          }
-        }
-        setRoute(internal, synonym.code, synonym.text);
-        for (const part of slice) {
-          mark(internal.consumed, part);
-          if (isBodySiteHint(part.lower, internal.customSiteHints)) {
-            internal.siteTokenIndices.add(part.index);
-          }
-        }
-        return true;
-      }
-    }
-    return false;
-  };
-
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (internal.consumed.has(token.index)) {
-      continue;
-    }
-    const normalizedLower = normalizeTokenLower(token);
-
-    if (token.lower === "bld" || token.lower === "b-l-d") {
-      const check = checkDiscouraged(token.original, options);
-      if (check.warning) {
-        internal.warnings.push(check.warning);
-      }
-      applyWhenToken(internal, token, EventTiming.Meal);
-      continue;
-    }
-
-    if (token.lower === "q" || token.lower === "every" || token.lower === "each") {
-      if (parseSeparatedInterval(internal, tokens, i, options)) {
-        continue;
-      }
-    }
-
-    if (tryParseTimeBasedSchedule(internal, tokens, i)) {
-      continue;
-    }
-
-    if (tryParseNumericCadence(internal, tokens, i)) {
-      continue;
-    }
-
-    const siteCandidate = getPrimarySiteMeaningCandidate(token);
-    const treatSiteCandidateAsSite = siteCandidate
-      ? shouldTreatAbbreviatedSiteCandidateAsSite(internal, tokens, i, context)
-      : false;
-
-    const timingAbbreviation = getTimingAbbreviationMeaning(token);
-
-    if (normalizedLower === "od") {
-      if (
-        timingAbbreviation &&
-        shouldInterpretOdAsOnceDaily(internal, tokens, i, treatSiteCandidateAsSite)
-      ) {
-        applyFrequencyDescriptor(internal, token, timingAbbreviation, options);
-        continue;
-      }
-    }
-
-    // Frequency abbreviation map
-    const freqDescriptor =
-      normalizedLower === "od" || !timingAbbreviation
-        ? undefined
-        : timingAbbreviation;
-    if (freqDescriptor) {
-      applyFrequencyDescriptor(internal, token, freqDescriptor, options);
-      continue;
-    }
-
-    if (tryParseCompactQ(internal, tokens, i)) {
-      continue;
-    }
-
-    // Skip connectors if they are followed by recognized timing tokens or prefixes
-    if (isMealContextConnectorWord(token.lower) || token.lower === ",") {
-      if (isTimingAnchorOrPrefix(tokens, i + 1, prnReasonStart)) {
-        mark(internal.consumed, token);
-        continue;
-      }
-    }
-
-    // Event timing tokens
-    const nextToken = tokens[i + 1];
-    if (nextToken && !internal.consumed.has(nextToken.index)) {
-      const lowerNext = nextToken.lower;
-      const combo = `${token.lower} ${lowerNext}`;
-      const comboWhen = COMBO_EVENT_TIMINGS[combo] ?? EVENT_TIMING_TOKENS[combo];
-      if (comboWhen) {
-        applyWhenToken(internal, token, comboWhen);
-        mark(internal.consumed, nextToken);
-        continue;
-      }
-    }
-
-    if (token.lower === "pc" || token.lower === "ac") {
-      parseAnchorSequence(
-        internal,
-        tokens,
-        i,
-        token.lower === "pc"
-          ? EventTiming["After Meal"]
-          : EventTiming["Before Meal"]
-      );
-      continue;
-    }
-    if (token.lower === "after" || token.lower === "before") {
-      if (isLikelyMealAnchorUsage(tokens, i, internal.consumed)) {
-        parseAnchorSequence(
-          internal,
-          tokens,
-          i,
-          token.lower === "after"
-            ? EventTiming["After Meal"]
-            : EventTiming["Before Meal"]
-        );
-        continue;
-      }
-    }
-    if (isAtPrefixToken(token.lower) || token.lower === "on" || token.lower === "with") {
-      if (tryParseTimeBasedSchedule(internal, tokens, i)) {
-        continue;
-      }
-      if (parseAnchorSequence(internal, tokens, i)) {
-        continue;
-      }
-      if (token.lower === "on") {
-        const previous = getPreviousActiveToken(tokens, i, internal.consumed);
-        if (previous && hasTokenWordClass(previous, TokenWordClass.WorkflowInstruction)) {
-          continue;
-        }
-      }
-      // If none of the above consume it, and it's a known anchor prefix, mark it
-      // but only if it's not "with" which might be part of other phrases later.
-      if (token.lower !== "with") {
-        mark(internal.consumed, token);
-        continue;
-      }
-    }
-    const customWhen = options?.whenMap?.[token.lower];
-    if (customWhen) {
-      applyWhenToken(internal, token, customWhen);
-      continue;
-    }
-    const whenCode = getEventTimingMeaning(token);
-    if (whenCode) {
-      // If we are in the PRN zone, be cautious about common reason words like "sleep"
-      // unless they were already handled by combo/anchor logic (which happens above).
-      if (prnReasonStart !== undefined && i >= prnReasonStart && token.lower === "sleep") {
-        // Leave for PRN reason
-      } else if (isWorkflowInstructionContext(tokens, i, internal.consumed)) {
-        // Keep topical workflow phrases like "rinse in the morning" intact instead
-        // of converting their time reference into the medication schedule.
-      } else {
-        applyWhenToken(internal, token, whenCode);
-        continue;
-      }
-    }
-
-    // Day of week
-    const rangeConsumed = tryConsumeDayRangeTokens(internal, tokens, i);
-    if (rangeConsumed > 0) {
-      continue;
-    }
-    const days = getDayOfWeekMeaning(token);
-    if (days) {
-      addDayOfWeekList(internal, days);
-      mark(internal.consumed, token);
-      continue;
-    }
-
-    // Units following numbers handled later
-
-    if (tryRouteSynonym(i)) {
-      continue;
-    }
-
-    if (siteCandidate && treatSiteCandidateAsSite) {
-      internal.siteText = siteCandidate.text;
-      internal.siteSource = "abbreviation";
-      if (siteCandidate.route && !internal.routeCode) {
-        setRoute(internal, siteCandidate.route);
-      }
-      mark(internal.consumed, token);
-      continue;
-    }
-
-    if (internal.count === undefined) {
-      const countMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
-      if (countMatch) {
-        if (applyCountLimit(internal, parseFloat(countMatch[1]))) {
-          mark(internal.consumed, token);
-          const nextToken = tokens[i + 1];
-          if (nextToken && isCountKeywordWord(nextToken.lower)) {
-            mark(internal.consumed, nextToken);
-          }
-          continue;
-        }
-      }
-      if (token.lower === "x" || token.lower === "*") {
-        const numericToken = tokens[i + 1];
-        if (
-          numericToken &&
-          !internal.consumed.has(numericToken.index) &&
-          /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower) &&
-          applyCountLimit(internal, parseFloat(numericToken.original))
-        ) {
-          mark(internal.consumed, token);
-          mark(internal.consumed, numericToken);
-          const afterToken = tokens[i + 2];
-          if (afterToken && isCountKeywordWord(afterToken.lower)) {
-            mark(internal.consumed, afterToken);
-          }
-          continue;
-        }
-      }
-      if (token.lower === "for") {
-        const skipConnectors = (
-          startIndex: number,
-          bucket: Token[],
-        ): number => {
-          let cursor = startIndex;
-          while (cursor < tokens.length) {
-            const candidate = tokens[cursor];
-            if (!candidate) {
-              break;
-            }
-            if (internal.consumed.has(candidate.index)) {
-              cursor += 1;
-              continue;
-            }
-            if (!COUNT_CONNECTOR_WORDS.has(candidate.lower)) {
-              break;
-            }
-            bucket.push(candidate);
-            cursor += 1;
-          }
-          return cursor;
-        };
-
-        const preConnectors: Token[] = [];
-        let lookaheadIndex = skipConnectors(i + 1, preConnectors);
-        const numericToken = tokens[lookaheadIndex];
-        if (
-          numericToken &&
-          !internal.consumed.has(numericToken.index) &&
-          /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
-        ) {
-          const postConnectors: Token[] = [];
-          lookaheadIndex = skipConnectors(lookaheadIndex + 1, postConnectors);
-          const keywordToken = tokens[lookaheadIndex];
-          if (
-            keywordToken &&
-            !internal.consumed.has(keywordToken.index) &&
-            isCountKeywordWord(keywordToken.lower) &&
-            applyCountLimit(internal, parseFloat(numericToken.original))
-          ) {
-            mark(internal.consumed, token);
-            for (const connector of preConnectors) {
-              mark(internal.consumed, connector);
-            }
-            mark(internal.consumed, numericToken);
-            for (const connector of postConnectors) {
-              mark(internal.consumed, connector);
-            }
-            mark(internal.consumed, keywordToken);
-            continue;
-          }
-        }
-      }
-      if (isCountKeywordWord(token.lower)) {
-        const partsToMark: Token[] = [token];
-        let value: number | undefined;
-        const prevToken = tokens[i - 1];
-        if (prevToken && !internal.consumed.has(prevToken.index)) {
-          const prevLower = prevToken.lower;
-          const suffixMatch = prevLower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
-          const prefixMatch = prevLower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
-          if (suffixMatch) {
-            value = parseFloat(suffixMatch[1]);
-            partsToMark.push(prevToken);
-          } else if (prefixMatch) {
-            value = parseFloat(prefixMatch[1]);
-            partsToMark.push(prevToken);
-          } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(prevLower)) {
-            const maybeX = tokens[i - 2];
-            if (
-              maybeX &&
-              !internal.consumed.has(maybeX.index) &&
-              (maybeX.lower === "x" || maybeX.lower === "*")
-            ) {
-              value = parseFloat(prevToken.original);
-              partsToMark.push(maybeX, prevToken);
-            }
-          }
-        }
-        if (value === undefined) {
-          const nextToken = tokens[i + 1];
-          if (
-            nextToken &&
-            !internal.consumed.has(nextToken.index) &&
-            /^[0-9]+(?:\.[0-9]+)?$/.test(nextToken.lower)
-          ) {
-            value = parseFloat(nextToken.original);
-            partsToMark.push(nextToken);
-          }
-        }
-        if (applyCountLimit(internal, value)) {
-          for (const part of partsToMark) {
-            mark(internal.consumed, part);
-          }
-          continue;
-        }
-      }
-    }
-
-    // Numeric dose
-    if (tryParseCountBasedFrequency(internal, tokens, i, options)) {
-      continue;
-    }
-    const rangeValue = parseNumericRange(token.lower);
-    if (rangeValue) {
-      if (!internal.doseRange) {
-        internal.doseRange = rangeValue;
-      }
-      mark(internal.consumed, token);
-      const resolvedUnit = resolveUnitTokenAt(tokens, i + 1, internal.consumed, options);
-      if (resolvedUnit) {
-        internal.unit = resolvedUnit.unit;
-        for (const consumedIndex of resolvedUnit.consumedIndices) {
-          mark(internal.consumed, tokens[consumedIndex]);
-        }
-      }
-      continue;
-    }
-    if (isNumericToken(token.lower)) {
-      if (isDurationPhraseNumber(tokens, i, internal.consumed)) {
-        continue;
-      }
-      const value = parseFloat(token.original);
-      const resolvedDose = resolveNumericDoseUnit(tokens, i, value, internal.consumed, options);
-      if (internal.dose === undefined) {
-        internal.dose = resolvedDose.doseValue;
-      }
-      mark(internal.consumed, token);
-      if (resolvedDose.unit) {
-        internal.unit = resolvedDose.unit;
-      }
-      for (const consumedIndex of resolvedDose.consumedIndices) {
-        mark(internal.consumed, tokens[consumedIndex]);
-      }
-      continue;
-    }
-
-    // Patterns like 1x or 2x
-    const timesMatch = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
-    if (timesMatch) {
-      const val = parseFloat(timesMatch[1]);
-      if (internal.dose === undefined) {
-        internal.dose = val;
-      }
-      mark(internal.consumed, token);
-      continue;
-    }
-
-    // Words for frequency
-    const wordFreq = WORD_FREQUENCIES[token.lower];
-    if (wordFreq) {
-      internal.frequency = wordFreq.frequency;
-      internal.period = 1;
-      internal.periodUnit = wordFreq.periodUnit;
-      mark(internal.consumed, token);
-      continue;
-    }
-
-    // Skip generic connectors
-    if (token.lower === "per" || token.lower === "a" || token.lower === "every" || token.lower === "each") {
-      mark(internal.consumed, token);
-      continue;
-    }
-  }
-  applyClauseDefaultsAfterTokenScan(internal, tokens, context, options);
-  collectPrnReasonText(internal, tokens, prnReasonStart, prnSiteSuffixIndices, options);
-  collectSiteAdviceAndWarnings(
-    internal,
+  parseContext.prnReasonStart = detectPrnPrelude(state, tokens);
+  parseClauseGrammar(parseContext);
+  applyClauseDefaultsAfterTokenScan(state, tokens, parseContext.medicationContext, options);
+  collectPrnReasonText(
+    state,
     tokens,
-    prnReasonStart,
-    prnSiteSuffixIndices,
-    options,
-    maybeApplyRouteDescriptor
+    parseContext.prnReasonStart,
+    parseContext.prnSiteSuffixIndices,
+    options
   );
-
-  finalizeCanonicalClause(internal);
-
-  return internal;
+  collectSiteAdviceAndWarnings(
+    state,
+    tokens,
+    parseContext.prnReasonStart,
+    parseContext.prnSiteSuffixIndices,
+    options,
+    (phrase) => maybeApplyRouteDescriptorFromPhrase(parseContext, phrase)
+  );
+  finalizeCanonicalClause(state);
+  return state;
 }
 
 /**
