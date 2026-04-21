@@ -295,3 +295,28 @@ Desired behavior:
 - Do not rely on partial n-gram site matching for external-surface phrases.
 - Prefer preserving a full unresolved site phrase over producing a wrong route/site.
 - Keep SNOMED-based Thai translation as the primary path for coded sites.
+
+### 2026-04-22 Addendum
+
+1. Moved token meaning toward generic annotation buckets.
+   - `lexInput()` stays purely lexical.
+   - parser-facing `tokenize()` now applies semantic annotations on top of lexical tokens.
+   - token annotations now use generic `siteCandidates` and `routeCandidates` instead of specialty-specific fields.
+
+2. Stopped re-deriving hot-path token meaning inside the parser.
+   - timing abbreviation lookup now reads token annotations first
+   - event timing lookup now reads token annotations first
+   - day-of-week lookup and day-range expansion now use the shared meaning layer
+   - single-token route lookup now reads route candidates from annotations
+
+3. Centralized several parser word classes into shared meaning helpers.
+   - workflow instruction words
+   - application verbs
+   - count keywords
+   - site anchors/list connectors/surface modifiers
+   - meal-context connectors
+
+4. Important architecture correction:
+   - no dedicated `eyeSite` annotation field
+   - ocular abbreviations are now just one producer of generic site/route candidates
+   - future specialty shorthand should extend candidate producers, not mutate the token schema

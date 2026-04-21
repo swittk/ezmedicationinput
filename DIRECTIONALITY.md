@@ -153,6 +153,12 @@ Next:
 - centralize token class predicates and synonym normalization
 - reduce repeated string-set checks across parser passes
 
+Current footing:
+- `lexInput()` remains lexical only
+- parser-facing `tokenize()` now adds a semantic annotation layer on top
+- annotations use generic candidate buckets such as `siteCandidates` and `routeCandidates`
+- specialty shorthand like ocular abbreviations is now one producer of generic candidates, not a dedicated schema slot
+
 ### Stage 3
 
 Then:

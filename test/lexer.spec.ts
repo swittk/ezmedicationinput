@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { normalizeBodySiteKey } from "../src/maps";
 import { lexInput } from "../src/lexer/lex";
+import { annotateLexTokens, TokenWordClass } from "../src/lexer/meaning";
 import { scanSurfaceTokens } from "../src/lexer/surface";
 import { LexKind, SurfaceTokenKind } from "../src/lexer/token-types";
+import { RouteCode } from "../src/types";
 
 describe("surface tokenization", () => {
   it("preserves exact source spans and separators", () => {
@@ -82,5 +84,36 @@ describe("loose phrase normalization", () => {
   it("preserves thai text while stripping punctuation without unicode property regexes", () => {
     expect(normalizeBodySiteKey("  ศีรษะ/head  ")).toBe("ศีรษะ head");
     expect(normalizeBodySiteKey("บริเวณ-ที่เป็น")).toBe("บริเวณ ที่เป็น");
+  });
+});
+
+describe("semantic annotations", () => {
+  it("preserves ambiguous specialty abbreviations as generic candidates", () => {
+    const tokens = annotateLexTokens(lexInput("OD qam"));
+
+    expect(tokens[0].annotations?.siteCandidates).toEqual([
+      {
+        text: "right eye",
+        route: RouteCode["Ophthalmic route"],
+        source: "abbreviation"
+      }
+    ]);
+    expect(tokens[0].annotations?.timingAbbreviation).toMatchObject({
+      frequency: 1,
+      period: 1
+    });
+  });
+
+  it("classifies workflow verbs and route tokens without semantic token kinds", () => {
+    const tokens = annotateLexTokens(lexInput("wash po"));
+
+    expect(tokens[0].annotations?.wordClasses).toContain(TokenWordClass.WorkflowInstruction);
+    expect(tokens[1].annotations?.routeCandidates).toEqual([
+      {
+        code: RouteCode["Oral route"],
+        text: "by mouth",
+        source: "synonym"
+      }
+    ]);
   });
 });

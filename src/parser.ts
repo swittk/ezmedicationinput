@@ -53,9 +53,23 @@ import {
 import { objectEntries } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 import {
-  hasDayOfWeekMeaning,
-  hasEventTimingMeaning,
-  hasTimingAbbreviationMeaning
+  annotateLexTokens,
+  expandDayMeaningRange,
+  getDayOfWeekMeaning,
+  getEventTimingMeaning,
+  getPrimarySiteMeaningCandidate,
+  getRouteMeaning,
+  getTimingAbbreviationMeaning,
+  hasTokenWordClass,
+  isApplicationVerbWord,
+  isCountKeywordWord,
+  isDayRangeConnectorWord,
+  isMealContextConnectorWord,
+  isSiteAnchorWord,
+  isSiteListConnectorWord,
+  isSiteSurfaceModifierWord,
+  isWorkflowInstructionWord,
+  TokenWordClass
 } from "./lexer/meaning";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -99,82 +113,6 @@ function isBodySiteHint(word: string, customSiteHints?: Set<string>): boolean {
 }
 
 const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
-
-const EXPLICIT_SITE_ANCHORS = new Set([
-  "to",
-  "in",
-  "into",
-  "on",
-  "onto",
-  "at",
-  "under",
-  "around",
-  "behind",
-  "above",
-  "below",
-  "beneath",
-  "near"
-]);
-
-const SITE_LIST_CONNECTORS = new Set(["and", "or", "&", "+"]);
-
-const SITE_SURFACE_MODIFIER_WORDS = new Set([
-  "left",
-  "right",
-  "both",
-  "bilateral",
-  "upper",
-  "lower",
-  "middle",
-  "mid",
-  "front",
-  "back",
-  "behind",
-  "around",
-  "under",
-  "above",
-  "below",
-  "beneath",
-  "near",
-  "side",
-  "top",
-  "external",
-  "internal",
-  "big",
-  "great",
-  "affected",
-  "intact",
-  "of"
-]);
-
-const WORKFLOW_INSTRUCTION_WORDS = new Set([
-  "wash",
-  "washing",
-  "shower",
-  "showering",
-  "bath",
-  "bathing",
-  "shampoo",
-  "shampooing",
-  "rinse",
-  "rinsing",
-  "cover",
-  "dressing",
-  "leave",
-  "clean",
-  "dry",
-  "off",
-  "then"
-]);
-
-const APPLICATION_ROUTE_VERBS = new Set([
-  "apply",
-  "rub",
-  "massage",
-  "spread",
-  "dab",
-  "lather"
-]);
 
 const DURATION_UNIT_WORDS = new Set([
   "second",
@@ -280,19 +218,6 @@ const DAY_RANGE_SPACED_HYPHEN_REGEX = new RegExp(
   "giu"
 );
 
-const MEAL_CONTEXT_CONNECTORS = new Set(["and", "or", "&", "+", "plus"]);
-
-const COUNT_KEYWORDS = new Set([
-  "time",
-  "times",
-  "dose",
-  "doses",
-  "application",
-  "applications",
-  "use",
-  "uses"
-]);
-
 const COUNT_CONNECTOR_WORDS = new Set([
   "a",
   "an",
@@ -390,53 +315,23 @@ const SPECIFIC_MEAL_TIMINGS = new Set<EventTiming>([
   EventTiming.Dinner
 ]);
 
-// Ocular shorthand tokens commonly used in ophthalmic sigs.
-const EYE_SITE_TOKENS: Record<string, { site: string; route?: RouteCode }> = {
-  od: { site: "right eye", route: RouteCode["Ophthalmic route"] },
-  re: { site: "right eye", route: RouteCode["Ophthalmic route"] },
-  os: { site: "left eye", route: RouteCode["Ophthalmic route"] },
-  le: { site: "left eye", route: RouteCode["Ophthalmic route"] },
-  ou: { site: "both eyes", route: RouteCode["Ophthalmic route"] },
-  be: { site: "both eyes", route: RouteCode["Ophthalmic route"] },
-  vod: {
-    site: "right eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  vos: {
-    site: "left eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtod: {
-    site: "right eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtre: {
-    site: "right eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtos: {
-    site: "left eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtle: {
-    site: "left eye",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtou: {
-    site: "both eyes",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  },
-  ivtbe: {
-    site: "both eyes",
-    route: RouteCode["Intravitreal route (qualifier value)"]
-  }
-};
-
 const OPHTHALMIC_ROUTE_CODES = new Set<RouteCode>([
   RouteCode["Ophthalmic route"],
   RouteCode["Ocular route (qualifier value)"],
   RouteCode["Intravitreal route (qualifier value)"]
 ]);
+
+function isOphthalmicSiteCandidate(
+  candidate: { text: string; route?: RouteCode } | undefined
+): boolean {
+  if (!candidate) {
+    return false;
+  }
+  return (
+    /eye/i.test(candidate.text) ||
+    (candidate.route !== undefined && OPHTHALMIC_ROUTE_CODES.has(candidate.route))
+  );
+}
 
 const OPHTHALMIC_CONTEXT_TOKENS = new Set<string>([
   "drop",
@@ -509,11 +404,15 @@ function shouldInterpretOdAsOnceDaily(
     return true;
   }
 
-  const previousEyeToken =
+  const previousSiteCandidate =
     previousNormalized && previousNormalized !== "od"
-      ? EYE_SITE_TOKENS[previousNormalized]
+      ? getPrimarySiteMeaningCandidate(previous)
       : undefined;
-  if (previousEyeToken && internal.consumed.has(previous.index)) {
+  if (
+    previousSiteCandidate &&
+    isOphthalmicSiteCandidate(previousSiteCandidate) &&
+    internal.consumed.has(previous.index)
+  ) {
     return true;
   }
 
@@ -602,7 +501,7 @@ function hasBodySiteContextBefore(
     if (isBodySiteHint(normalized, internal.customSiteHints)) {
       return true;
     }
-    if (EYE_SITE_TOKENS[normalized]) {
+    if (getPrimarySiteMeaningCandidate(token)) {
       return true;
     }
   }
@@ -679,7 +578,7 @@ function hasSpelledOcularSiteBefore(tokens: Token[], index: number): boolean {
   return false;
 }
 
-function shouldTreatEyeTokenAsSite(
+function shouldTreatAbbreviatedSiteCandidateAsSite(
   internal: ParsedSigInternal,
   tokens: Token[],
   index: number,
@@ -687,7 +586,7 @@ function shouldTreatEyeTokenAsSite(
 ): boolean {
   const currentToken = tokens[index];
   const normalizedSelf = normalizeTokenLower(currentToken);
-  const eyeMeta = EYE_SITE_TOKENS[normalizedSelf];
+  const siteCandidate = getPrimarySiteMeaningCandidate(currentToken);
   const contextRoute = inferRouteFromContext(context ?? undefined);
 
   if (internal.routeCode && !OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) {
@@ -711,7 +610,7 @@ function shouldTreatEyeTokenAsSite(
     ? OPHTHALMIC_ROUTE_CODES.has(contextRoute)
     : Boolean(dosageForm && /(eye|ophth|ocular|intravit)/i.test(dosageForm));
   const eyeRouteImpliesOphthalmic =
-    eyeMeta?.route === RouteCode["Intravitreal route (qualifier value)"];
+    siteCandidate?.route === RouteCode["Intravitreal route (qualifier value)"];
   const ophthalmicContext =
     hasOphthalmicContextHint(tokens, index) ||
     (internal.routeCode !== undefined && OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) ||
@@ -753,7 +652,7 @@ function shouldTreatEyeTokenAsSite(
     if (isBodySiteHint(normalized, internal.customSiteHints)) {
       return false;
     }
-    if (EYE_SITE_TOKENS[normalized]) {
+    if (isOphthalmicSiteCandidate(getPrimarySiteMeaningCandidate(candidate))) {
       return false;
     }
     if (DEFAULT_ROUTE_SYNONYMS[normalized]) {
@@ -1167,7 +1066,7 @@ function tryParseTimeBasedSchedule(
 }
 
 export function tokenize(input: string): Token[] {
-  return lexInput(input);
+  return annotateLexTokens(lexInput(input));
 }
 
 /**
@@ -1267,18 +1166,6 @@ function parseNumericRangeToken(token: Token | undefined): { low: number; high: 
   return { low: token.low!, high: token.high! };
 }
 
-function hasEventTimingSignal(token: Token | undefined): boolean {
-  return hasEventTimingMeaning(token);
-}
-
-function hasTimingAbbreviationSignal(token: Token | undefined): boolean {
-  return hasTimingAbbreviationMeaning(token);
-}
-
-function hasDayOfWeekSignal(token: Token | undefined): boolean {
-  return hasDayOfWeekMeaning(token);
-}
-
 function getPreviousActiveToken(
   tokens: Token[],
   index: number,
@@ -1321,10 +1208,10 @@ function hasApplicationVerbBefore(
       continue;
     }
     const lower = normalizeTokenLower(candidate);
-    if (APPLICATION_ROUTE_VERBS.has(lower)) {
+    if (hasTokenWordClass(candidate, TokenWordClass.ApplicationVerb)) {
       return true;
     }
-    if (!SITE_FILLER_WORDS.has(lower) && !SITE_LIST_CONNECTORS.has(lower)) {
+    if (!SITE_FILLER_WORDS.has(lower) && !isSiteListConnectorWord(lower)) {
       inspected += 1;
     }
   }
@@ -1379,10 +1266,10 @@ function isWorkflowInstructionContext(
       continue;
     }
     const lower = normalizeTokenLower(candidate);
-    if (WORKFLOW_INSTRUCTION_WORDS.has(lower)) {
+    if (hasTokenWordClass(candidate, TokenWordClass.WorkflowInstruction)) {
       return true;
     }
-    if (!SITE_FILLER_WORDS.has(lower) && !SITE_LIST_CONNECTORS.has(lower)) {
+    if (!SITE_FILLER_WORDS.has(lower) && !isSiteListConnectorWord(lower)) {
       inspected += 1;
     }
   }
@@ -1393,7 +1280,7 @@ function isWorkflowInstructionContext(
       (previousLower === "after" || previousLower === "before" || previousLower === "during") &&
       (() => {
         const next = getNextActiveToken(tokens, index, consumed);
-        return next ? WORKFLOW_INSTRUCTION_WORDS.has(normalizeTokenLower(next)) : false;
+        return next ? hasTokenWordClass(next, TokenWordClass.WorkflowInstruction) : false;
       })()
     ) {
       return true;
@@ -1430,7 +1317,7 @@ function isLikelyMealAnchorUsage(
       continue;
     }
     const lower = normalizeTokenLower(candidate);
-    if (SITE_FILLER_WORDS.has(lower) || MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
+    if (SITE_FILLER_WORDS.has(lower) || isMealContextConnectorWord(lower) || lower === ",") {
       continue;
     }
     return Boolean(MEAL_KEYWORDS[lower]);
@@ -1445,7 +1332,7 @@ function isExplicitSiteBoundaryToken(
   if (!lower) {
     return true;
   }
-  if (WORKFLOW_INSTRUCTION_WORDS.has(lower)) {
+  if (isWorkflowInstructionWord(lower)) {
     return true;
   }
   if (
@@ -1454,7 +1341,7 @@ function isExplicitSiteBoundaryToken(
     WORD_FREQUENCIES[lower] ||
     FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
     FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
-    COUNT_KEYWORDS.has(lower) ||
+    isCountKeywordWord(lower) ||
     mapFrequencyAdverb(lower) ||
     mapIntervalUnit(lower) ||
     MEAL_KEYWORDS[lower]
@@ -1464,7 +1351,7 @@ function isExplicitSiteBoundaryToken(
   if (DEFAULT_ROUTE_SYNONYMS[lower] || normalizeUnit(lower, options)) {
     return true;
   }
-  if (APPLICATION_ROUTE_VERBS.has(lower)) {
+  if (isApplicationVerbWord(lower)) {
     return true;
   }
   if (lower === "prn" || lower === "as" || lower === "needed" || lower === "for") {
@@ -1502,7 +1389,7 @@ function hasExternalSurfaceModifier(siteText: string): boolean {
   const words = normalizeBodySiteKey(siteText)
     .split(/\s+/)
     .filter((word) => word.length > 0);
-  return words.some((word) => SITE_SURFACE_MODIFIER_WORDS.has(word));
+  return words.some((word) => isSiteSurfaceModifierWord(word));
 }
 
 function extractExplicitSiteCandidate(
@@ -1516,7 +1403,7 @@ function extractExplicitSiteCandidate(
     return undefined;
   }
   const anchorLower = normalizeTokenLower(anchor);
-  if (!EXPLICIT_SITE_ANCHORS.has(anchorLower)) {
+  if (!isSiteAnchorWord(anchorLower)) {
     return undefined;
   }
   if (!hasExplicitSiteIntroduction(internal, tokens, startIndex, options)) {
@@ -1540,7 +1427,7 @@ function extractExplicitSiteCandidate(
       collected.push(candidate.index);
       continue;
     }
-    if (SITE_LIST_CONNECTORS.has(lower) || lower === ",") {
+    if (isSiteListConnectorWord(lower) || lower === ",") {
       let hasFollowingContent = false;
       for (let lookahead = cursor + 1; lookahead < tokens.length; lookahead += 1) {
         const lookaheadToken = tokens[lookahead];
@@ -1577,7 +1464,7 @@ function extractExplicitSiteCandidate(
       contentWords.push(lower);
       if (
         isBodySiteHint(lower, internal.customSiteHints) ||
-        SITE_SURFACE_MODIFIER_WORDS.has(lower) ||
+        isSiteSurfaceModifierWord(lower) ||
         isOrdinalToken(lower)
       ) {
         hasSiteHint = true;
@@ -2437,87 +2324,14 @@ function isTimingAnchorOrPrefix(
   const comboKey = nextToken ? `${lower} ${nextToken.lower}` : undefined;
 
   return Boolean(
-    hasEventTimingSignal(token) ||
-    hasTimingAbbreviationSignal(token) ||
-    EVENT_TIMING_TOKENS[lower] ||
-    TIMING_ABBREVIATIONS[lower] ||
+    getEventTimingMeaning(token) ||
+    getTimingAbbreviationMeaning(token) ||
     (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
     (lower === "pc" || lower === "ac" || lower === "after" || lower === "before") ||
     (isAtPrefixToken(lower) || lower === "on" || lower === "with") ||
     /^\d/.test(lower)
   );
 }
-
-const DAY_SEQUENCE: readonly FhirDayOfWeek[] = [
-  FhirDayOfWeek.Monday,
-  FhirDayOfWeek.Tuesday,
-  FhirDayOfWeek.Wednesday,
-  FhirDayOfWeek.Thursday,
-  FhirDayOfWeek.Friday,
-  FhirDayOfWeek.Saturday,
-  FhirDayOfWeek.Sunday
-];
-
-const DAY_GROUP_TOKENS: Record<string, FhirDayOfWeek[]> = {
-  weekend: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  weekends: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  wknd: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  weekdays: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  weekday: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  workday: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  workdays: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันธรรมดา: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันทำงาน: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันหยุด: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  วันเสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  สุดสัปดาห์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  เสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  จันทร์ถึงศุกร์: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ]
-};
-
-const DAY_RANGE_CONNECTOR_TOKENS = new Set(["-", "to", "through", "thru", "ถึง", "จนถึง"]);
 
 function addDayOfWeek(internal: ParsedSigInternal, day: FhirDayOfWeek) {
   if (!arrayIncludes(internal.dayOfWeek, day)) {
@@ -2531,47 +2345,6 @@ function addDayOfWeekList(internal: ParsedSigInternal, days: FhirDayOfWeek[]) {
   }
 }
 
-function expandDayRange(start: FhirDayOfWeek, end: FhirDayOfWeek): FhirDayOfWeek[] {
-  const startIndex = DAY_SEQUENCE.indexOf(start);
-  const endIndex = DAY_SEQUENCE.indexOf(end);
-  if (startIndex < 0 || endIndex < 0) {
-    return [start, end];
-  }
-  if (startIndex <= endIndex) {
-    return DAY_SEQUENCE.slice(startIndex, endIndex + 1);
-  }
-  return [...DAY_SEQUENCE.slice(startIndex), ...DAY_SEQUENCE.slice(0, endIndex + 1)];
-}
-
-function resolveDayTokenDays(tokenLower: string): FhirDayOfWeek[] | undefined {
-  const normalized = tokenLower.replace(/[.,;:]/g, "");
-  const direct = DAY_OF_WEEK_TOKENS[normalized];
-  if (direct) {
-    return [direct];
-  }
-  const grouped = DAY_GROUP_TOKENS[normalized];
-  if (grouped) {
-    return grouped.slice();
-  }
-  const rangeMatch = normalized.match(/^([^-–—~/]+)[-–—~/]([^-–—~/]+)$/);
-  if (rangeMatch) {
-    const start = DAY_OF_WEEK_TOKENS[rangeMatch[1]];
-    const end = DAY_OF_WEEK_TOKENS[rangeMatch[2]];
-    if (start && end) {
-      return expandDayRange(start, end);
-    }
-  }
-  const compactConnectorRange = normalized.match(/^(.+?)(ถึง|จนถึง|to|through|thru)(.+)$/u);
-  if (compactConnectorRange) {
-    const start = DAY_OF_WEEK_TOKENS[compactConnectorRange[1]];
-    const end = DAY_OF_WEEK_TOKENS[compactConnectorRange[3]];
-    if (start && end) {
-      return expandDayRange(start, end);
-    }
-  }
-  return undefined;
-}
-
 function tryConsumeDayRangeTokens(
   internal: ParsedSigInternal,
   tokens: Token[],
@@ -2581,7 +2354,7 @@ function tryConsumeDayRangeTokens(
   if (!startToken || internal.consumed.has(startToken.index)) {
     return 0;
   }
-  const startDays = resolveDayTokenDays(normalizeTokenLower(startToken));
+  const startDays = getDayOfWeekMeaning(startToken);
   if (!startDays || startDays.length !== 1) {
     return 0;
   }
@@ -2596,15 +2369,15 @@ function tryConsumeDayRangeTokens(
     return 0;
   }
   const connector = normalizeTokenLower(connectorToken);
-  if (!DAY_RANGE_CONNECTOR_TOKENS.has(connector)) {
+  if (!isDayRangeConnectorWord(connector)) {
     return 0;
   }
-  const endDays = resolveDayTokenDays(normalizeTokenLower(endToken));
+  const endDays = getDayOfWeekMeaning(endToken);
   if (!endDays || endDays.length !== 1) {
     return 0;
   }
-  const expanded = expandDayRange(startDays[0], endDays[0]);
-  addDayOfWeekList(internal, expanded);
+  const days = expandDayMeaningRange(startDays[0], endDays[0]);
+  addDayOfWeekList(internal, days);
   mark(internal.consumed, startToken);
   mark(internal.consumed, connectorToken);
   mark(internal.consumed, endToken);
@@ -2626,7 +2399,7 @@ function parseAnchorSequence(
     }
 
     const lower = normalizeTokenLower(nextToken);
-    if (MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
+    if (isMealContextConnectorWord(lower) || lower === ",") {
       mark(internal.consumed, nextToken);
       continue;
     }
@@ -2638,7 +2411,7 @@ function parseAnchorSequence(
       continue;
     }
 
-    const days = resolveDayTokenDays(lower);
+    const days = getDayOfWeekMeaning(nextToken);
     if (days) {
       addDayOfWeekList(internal, days);
       mark(internal.consumed, nextToken);
@@ -3095,9 +2868,10 @@ export function parseInternal(
       const normalizedParts = slice.filter((part) => !/^[;:(),]+$/.test(part.lower));
       const phrase = normalizedParts.map((part) => part.lower).join(" ");
       const customCode = customRouteMap?.get(phrase);
+      const annotatedRoute = span === 1 ? getRouteMeaning(slice[0]) : undefined;
       const synonym = customCode
         ? { code: customCode, text: ROUTE_TEXT[customCode] }
-        : DEFAULT_ROUTE_SYNONYMS[phrase];
+        : annotatedRoute ?? DEFAULT_ROUTE_SYNONYMS[phrase];
       if (synonym) {
         if (phrase === "top" && slice.length === 1) {
           const nextToken = tokens[startIndex + 1];
@@ -3157,27 +2931,28 @@ export function parseInternal(
       continue;
     }
 
-    const eyeSite = EYE_SITE_TOKENS[normalizedLower];
-    const treatEyeTokenAsSite = eyeSite
-      ? shouldTreatEyeTokenAsSite(internal, tokens, i, context)
+    const siteCandidate = getPrimarySiteMeaningCandidate(token);
+    const treatSiteCandidateAsSite = siteCandidate
+      ? shouldTreatAbbreviatedSiteCandidateAsSite(internal, tokens, i, context)
       : false;
 
+    const timingAbbreviation = getTimingAbbreviationMeaning(token);
+
     if (normalizedLower === "od") {
-      const descriptor = TIMING_ABBREVIATIONS.od;
       if (
-        descriptor &&
-        shouldInterpretOdAsOnceDaily(internal, tokens, i, treatEyeTokenAsSite)
+        timingAbbreviation &&
+        shouldInterpretOdAsOnceDaily(internal, tokens, i, treatSiteCandidateAsSite)
       ) {
-        applyFrequencyDescriptor(internal, token, descriptor, options);
+        applyFrequencyDescriptor(internal, token, timingAbbreviation, options);
         continue;
       }
     }
 
     // Frequency abbreviation map
     const freqDescriptor =
-      normalizedLower === "od" || !hasTimingAbbreviationSignal(token)
+      normalizedLower === "od" || !timingAbbreviation
         ? undefined
-        : TIMING_ABBREVIATIONS[token.lower] ?? TIMING_ABBREVIATIONS[normalizedLower];
+        : timingAbbreviation;
     if (freqDescriptor) {
       applyFrequencyDescriptor(internal, token, freqDescriptor, options);
       continue;
@@ -3188,7 +2963,7 @@ export function parseInternal(
     }
 
     // Skip connectors if they are followed by recognized timing tokens or prefixes
-    if (MEAL_CONTEXT_CONNECTORS.has(token.lower) || token.lower === ",") {
+    if (isMealContextConnectorWord(token.lower) || token.lower === ",") {
       if (isTimingAnchorOrPrefix(tokens, i + 1, prnReasonStart)) {
         mark(internal.consumed, token);
         continue;
@@ -3241,7 +3016,7 @@ export function parseInternal(
       }
       if (token.lower === "on") {
         const previous = getPreviousActiveToken(tokens, i, internal.consumed);
-        if (previous && WORKFLOW_INSTRUCTION_WORDS.has(normalizeTokenLower(previous))) {
+        if (previous && hasTokenWordClass(previous, TokenWordClass.WorkflowInstruction)) {
           continue;
         }
       }
@@ -3257,7 +3032,7 @@ export function parseInternal(
       applyWhenToken(internal, token, customWhen);
       continue;
     }
-    const whenCode = hasEventTimingSignal(token) ? EVENT_TIMING_TOKENS[token.lower] : undefined;
+    const whenCode = getEventTimingMeaning(token);
     if (whenCode) {
       // If we are in the PRN zone, be cautious about common reason words like "sleep"
       // unless they were already handled by combo/anchor logic (which happens above).
@@ -3277,9 +3052,7 @@ export function parseInternal(
     if (rangeConsumed > 0) {
       continue;
     }
-    const days = hasDayOfWeekSignal(token)
-      ? resolveDayTokenDays(normalizeTokenLower(token))
-      : undefined;
+    const days = getDayOfWeekMeaning(token);
     if (days) {
       addDayOfWeekList(internal, days);
       mark(internal.consumed, token);
@@ -3292,11 +3065,11 @@ export function parseInternal(
       continue;
     }
 
-    if (eyeSite && treatEyeTokenAsSite) {
-      internal.siteText = eyeSite.site;
+    if (siteCandidate && treatSiteCandidateAsSite) {
+      internal.siteText = siteCandidate.text;
       internal.siteSource = "abbreviation";
-      if (eyeSite.route && !internal.routeCode) {
-        setRoute(internal, eyeSite.route);
+      if (siteCandidate.route && !internal.routeCode) {
+        setRoute(internal, siteCandidate.route);
       }
       mark(internal.consumed, token);
       continue;
@@ -3308,7 +3081,7 @@ export function parseInternal(
         if (applyCountLimit(internal, parseFloat(countMatch[1]))) {
           mark(internal.consumed, token);
           const nextToken = tokens[i + 1];
-          if (nextToken && COUNT_KEYWORDS.has(nextToken.lower)) {
+          if (nextToken && isCountKeywordWord(nextToken.lower)) {
             mark(internal.consumed, nextToken);
           }
           continue;
@@ -3325,7 +3098,7 @@ export function parseInternal(
           mark(internal.consumed, token);
           mark(internal.consumed, numericToken);
           const afterToken = tokens[i + 2];
-          if (afterToken && COUNT_KEYWORDS.has(afterToken.lower)) {
+          if (afterToken && isCountKeywordWord(afterToken.lower)) {
             mark(internal.consumed, afterToken);
           }
           continue;
@@ -3369,7 +3142,7 @@ export function parseInternal(
           if (
             keywordToken &&
             !internal.consumed.has(keywordToken.index) &&
-            COUNT_KEYWORDS.has(keywordToken.lower) &&
+            isCountKeywordWord(keywordToken.lower) &&
             applyCountLimit(internal, parseFloat(numericToken.original))
           ) {
             mark(internal.consumed, token);
@@ -3385,7 +3158,7 @@ export function parseInternal(
           }
         }
       }
-      if (COUNT_KEYWORDS.has(token.lower)) {
+      if (isCountKeywordWord(token.lower)) {
         const partsToMark: Token[] = [token];
         let value: number | undefined;
         const prevToken = tokens[i - 1];
@@ -3749,13 +3522,13 @@ export function parseInternal(
             word.length > 0 &&
             !SITE_CONNECTORS.has(word) &&
             !SITE_FILLER_WORDS.has(word) &&
-            !SITE_LIST_CONNECTORS.has(word) &&
+            !isSiteListConnectorWord(word) &&
             word !== ","
         );
       if (!contentWords.length || isTimingOnlyPhrase(contentWords)) {
         continue;
       }
-      if (contentWords.some((word) => WORKFLOW_INSTRUCTION_WORDS.has(word))) {
+      if (contentWords.some((word) => isWorkflowInstructionWord(word))) {
         continue;
       }
       const startsWithApplicationContext = hasApplicationVerbBefore(
@@ -3767,7 +3540,7 @@ export function parseInternal(
         isBodySiteHint(word, internal.customSiteHints)
       ).length;
       const modifierCount = contentWords.filter(
-        (word) => SITE_SURFACE_MODIFIER_WORDS.has(word) || isOrdinalToken(word)
+        (word) => isSiteSurfaceModifierWord(word) || isOrdinalToken(word)
       ).length;
       const previous = getPreviousActiveToken(
         tokens,
@@ -3775,7 +3548,7 @@ export function parseInternal(
         internal.consumed
       );
       const anchoredBySiteConnector = previous
-        ? EXPLICIT_SITE_ANCHORS.has(normalizeTokenLower(previous))
+        ? isSiteAnchorWord(normalizeTokenLower(previous))
         : false;
       if (
         knownWordCount === 0 &&
@@ -4537,7 +4310,7 @@ function collectAdditionalInstructions(
     .filter((word) => word.length > 0 && !SITE_FILLER_WORDS.has(word));
   if (
     joinedWords.length > 0 &&
-    joinedWords.every((word) => APPLICATION_ROUTE_VERBS.has(word))
+    joinedWords.every((word) => isApplicationVerbWord(word))
   ) {
     return;
   }
@@ -4642,7 +4415,7 @@ function collectAdditionalInstructions(
           }
           : undefined
       });
-    } else if (!MEAL_CONTEXT_CONNECTORS.has(phrase.toLowerCase())) {
+    } else if (!isMealContextConnectorWord(phrase.toLowerCase())) {
       instructions.push({ text: phrase });
     }
   }
