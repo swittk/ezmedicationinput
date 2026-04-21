@@ -23,6 +23,12 @@ import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from
 import { lexInput } from "./lexer/lex";
 import { LexKind } from "./lexer/token-types";
 import { checkDiscouraged } from "./safety";
+import {
+  extractExplicitSiteCandidate,
+  inferRouteHintFromSitePhrase as inferRouteHintFromSitePhraseFromModule,
+  selectBestResidualSiteGroup,
+  SitePhraseServices
+} from "./site-phrases";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
   AdditionalInstructionDefinition,
@@ -1325,165 +1331,35 @@ function isLikelyMealAnchorUsage(
   return false;
 }
 
-function isExplicitSiteBoundaryToken(
-  lower: string,
-  options?: ParseOptions
-): boolean {
-  if (!lower) {
-    return true;
-  }
-  if (isWorkflowInstructionWord(lower)) {
-    return true;
-  }
-  if (
-    EVENT_TIMING_TOKENS[lower] ||
-    TIMING_ABBREVIATIONS[lower] ||
-    WORD_FREQUENCIES[lower] ||
-    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
-    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
-    isCountKeywordWord(lower) ||
-    mapFrequencyAdverb(lower) ||
-    mapIntervalUnit(lower) ||
-    MEAL_KEYWORDS[lower]
-  ) {
-    return true;
-  }
-  if (DEFAULT_ROUTE_SYNONYMS[lower] || normalizeUnit(lower, options)) {
-    return true;
-  }
-  if (isApplicationVerbWord(lower)) {
-    return true;
-  }
-  if (lower === "prn" || lower === "as" || lower === "needed" || lower === "for") {
-    return true;
-  }
-  if (isNumericToken(lower) && !isOrdinalToken(lower)) {
-    return true;
-  }
-  return false;
-}
-
-function isTimingOnlyPhrase(words: string[]): boolean {
-  if (!words.length) {
-    return true;
-  }
-  const phrase = words.join(" ");
-  if (
-    COMBO_EVENT_TIMINGS[phrase] ||
-    EVENT_TIMING_TOKENS[phrase] ||
-    TIMING_ABBREVIATIONS[phrase] ||
-    MEAL_KEYWORDS[phrase]
-  ) {
-    return true;
-  }
-  return words.every((word) =>
-    Boolean(
-      EVENT_TIMING_TOKENS[word] ||
-      TIMING_ABBREVIATIONS[word] ||
-      MEAL_KEYWORDS[word]
-    )
-  );
-}
-
-function hasExternalSurfaceModifier(siteText: string): boolean {
-  const words = normalizeBodySiteKey(siteText)
-    .split(/\s+/)
-    .filter((word) => word.length > 0);
-  return words.some((word) => isSiteSurfaceModifierWord(word));
-}
-
-function extractExplicitSiteCandidate(
+function buildSitePhraseServices(
   internal: ParsedSigInternal,
   tokens: Token[],
-  startIndex: number,
   options?: ParseOptions
-): number[] | undefined {
-  const anchor = tokens[startIndex];
-  if (!anchor || internal.consumed.has(anchor.index)) {
-    return undefined;
-  }
-  const anchorLower = normalizeTokenLower(anchor);
-  if (!isSiteAnchorWord(anchorLower)) {
-    return undefined;
-  }
-  if (!hasExplicitSiteIntroduction(internal, tokens, startIndex, options)) {
-    return undefined;
-  }
-
-  const collected: number[] = [anchor.index];
-  const contentWords: string[] = [];
-  let hasSiteHint = false;
-
-  for (let cursor = startIndex + 1; cursor < tokens.length; cursor += 1) {
-    const candidate = tokens[cursor];
-    if (!candidate || internal.consumed.has(candidate.index)) {
-      break;
-    }
-    const lower = normalizeTokenLower(candidate);
-    if (/^[;:(),]+$/.test(lower)) {
-      break;
-    }
-    if (SITE_FILLER_WORDS.has(lower) && contentWords.length === 0) {
-      collected.push(candidate.index);
-      continue;
-    }
-    if (isSiteListConnectorWord(lower) || lower === ",") {
-      let hasFollowingContent = false;
-      for (let lookahead = cursor + 1; lookahead < tokens.length; lookahead += 1) {
-        const lookaheadToken = tokens[lookahead];
-        if (!lookaheadToken || internal.consumed.has(lookaheadToken.index)) {
-          break;
-        }
-        const lookaheadLower = normalizeTokenLower(lookaheadToken);
-        if (SITE_FILLER_WORDS.has(lookaheadLower)) {
-          continue;
-        }
-        hasFollowingContent = !isExplicitSiteBoundaryToken(lookaheadLower, options);
-        break;
-      }
-      if (!hasFollowingContent) {
-        break;
-      }
-      collected.push(candidate.index);
-      continue;
-    }
-    if (isExplicitSiteBoundaryToken(lower, options)) {
-      if (lower === "top") {
-        const nextToken = getNextActiveToken(tokens, cursor, internal.consumed);
-        if (nextToken && normalizeTokenLower(nextToken) === "of") {
-          collected.push(candidate.index);
-          contentWords.push(lower);
-          hasSiteHint = true;
-          continue;
-        }
-      }
-      break;
-    }
-    collected.push(candidate.index);
-    if (!SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
-      contentWords.push(lower);
-      if (
-        isBodySiteHint(lower, internal.customSiteHints) ||
-        isSiteSurfaceModifierWord(lower) ||
-        isOrdinalToken(lower)
-      ) {
-        hasSiteHint = true;
-      }
-    }
-  }
-
-  if (!contentWords.length || isTimingOnlyPhrase(contentWords)) {
-    return undefined;
-  }
-  if (
-    !hasSiteHint &&
-    contentWords.length === 1 &&
-    contentWords[0] !== "area" &&
-    anchorLower === "in"
-  ) {
-    return undefined;
-  }
-  return collected;
+): SitePhraseServices {
+  return {
+    customSiteHints: internal.customSiteHints,
+    siteConnectors: SITE_CONNECTORS,
+    siteFillerWords: SITE_FILLER_WORDS,
+    normalizeTokenLower,
+    isBodySiteHint,
+    hasExplicitSiteIntroduction: (startIndex: number) =>
+      hasExplicitSiteIntroduction(internal, tokens, startIndex, options),
+    isNumericToken,
+    isOrdinalToken,
+    mapFrequencyAdverb,
+    mapIntervalUnit,
+    normalizeUnit,
+    hasRouteLikeWord: (value: string, parseOptions?: ParseOptions) =>
+      Boolean(DEFAULT_ROUTE_SYNONYMS[value] || normalizeUnit(value, parseOptions)),
+    hasFrequencyLikeWord: (value: string) =>
+      FREQUENCY_SIMPLE_WORDS[value] !== undefined ||
+      FREQUENCY_NUMBER_WORDS[value] !== undefined,
+    getNextActiveToken: (index: number) => getNextActiveToken(tokens, index, internal.consumed),
+    getPreviousActiveToken: (index: number) =>
+      getPreviousActiveToken(tokens, index, internal.consumed),
+    hasApplicationVerbBefore: (index: number) =>
+      hasApplicationVerbBefore(tokens, index, internal.consumed)
+  };
 }
 
 function applySitePhrase(
@@ -1564,10 +1440,16 @@ function applySitePhrase(
   const displayLower = displayText.toLowerCase();
   const normalizedLower = sanitized.toLowerCase();
   const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
-  const siteWords = displayLower.split(/\s+/).filter((word) => word.length > 0);
-  const hasNonSiteWords = siteWords.some(
-    (word) => !isBodySiteHint(word, internal.customSiteHints)
-  );
+  let hasNonSiteWords = false;
+  for (const word of displayLower.split(/\s+/)) {
+    if (!word) {
+      continue;
+    }
+    if (!isBodySiteHint(word, internal.customSiteHints)) {
+      hasNonSiteWords = true;
+      break;
+    }
+  }
   const shouldAttemptRouteDescriptor =
     strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
   const appliedRouteDescriptor =
@@ -3492,11 +3374,18 @@ export function parseInternal(
   }
 
   if (!internal.siteText) {
+    const sitePhraseServices = buildSitePhraseServices(internal, tokens, options);
     for (let i = 0; i < tokens.length; i++) {
       if (prnReasonStart !== undefined && i >= prnReasonStart) {
         break;
       }
-      const indices = extractExplicitSiteCandidate(internal, tokens, i, options);
+      const indices = extractExplicitSiteCandidate(
+        tokens,
+        internal.consumed,
+        i,
+        options,
+        sitePhraseServices
+      );
       if (indices && applySitePhrase(internal, tokens, indices, options, maybeApplyRouteDescriptor)) {
         break;
       }
@@ -3505,70 +3394,12 @@ export function parseInternal(
 
   if (!internal.siteText) {
     const groups = findUnparsedTokenGroups(internal);
-    let bestGroup: Token[] | undefined;
-    let bestScore = Number.NEGATIVE_INFINITY;
-
-    for (const group of groups) {
-      const filteredTokens = group.tokens.filter(
-        (token) => !prnSiteSuffixIndices.has(token.index)
-      );
-      if (!filteredTokens.length) {
-        continue;
-      }
-      const contentWords = filteredTokens
-        .map((token) => normalizeTokenLower(token))
-        .filter(
-          (word) =>
-            word.length > 0 &&
-            !SITE_CONNECTORS.has(word) &&
-            !SITE_FILLER_WORDS.has(word) &&
-            !isSiteListConnectorWord(word) &&
-            word !== ","
-        );
-      if (!contentWords.length || isTimingOnlyPhrase(contentWords)) {
-        continue;
-      }
-      if (contentWords.some((word) => isWorkflowInstructionWord(word))) {
-        continue;
-      }
-      const startsWithApplicationContext = hasApplicationVerbBefore(
-        tokens,
-        filteredTokens[0].index,
-        internal.consumed
-      );
-      const knownWordCount = contentWords.filter((word) =>
-        isBodySiteHint(word, internal.customSiteHints)
-      ).length;
-      const modifierCount = contentWords.filter(
-        (word) => isSiteSurfaceModifierWord(word) || isOrdinalToken(word)
-      ).length;
-      const previous = getPreviousActiveToken(
-        tokens,
-        filteredTokens[0].index,
-        internal.consumed
-      );
-      const anchoredBySiteConnector = previous
-        ? isSiteAnchorWord(normalizeTokenLower(previous))
-        : false;
-      if (
-        knownWordCount === 0 &&
-        modifierCount === 0 &&
-        !anchoredBySiteConnector
-      ) {
-        continue;
-      }
-      const score =
-        knownWordCount * 5 +
-        modifierCount * 2 +
-        (startsWithApplicationContext ? 2 : 0) +
-        (anchoredBySiteConnector ? 2 : 0) -
-        filteredTokens.length * 0.2 +
-        filteredTokens[0].index * 0.001;
-      if (score > bestScore) {
-        bestScore = score;
-        bestGroup = filteredTokens;
-      }
-    }
+    const sitePhraseServices = buildSitePhraseServices(internal, tokens, options);
+    const bestGroup = selectBestResidualSiteGroup(
+      groups,
+      prnSiteSuffixIndices,
+      sitePhraseServices
+    );
 
     if (bestGroup) {
       applySitePhrase(
@@ -3582,7 +3413,9 @@ export function parseInternal(
   }
 
   if (!internal.routeCode && internal.siteText) {
-    const routeHint = inferRouteHintFromSitePhrase(internal.siteText, options);
+    const routeHint = inferRouteHintFromSitePhraseFromModule(internal.siteText, options, {
+      lookupBodySiteDefinition
+    });
     if (routeHint) {
       setRoute(internal, routeHint);
     }
@@ -3823,42 +3656,6 @@ function lookupBodySiteDefinition(
       }
     }
   }
-  return undefined;
-}
-
-function inferRouteHintFromSitePhrase(
-  siteText: string,
-  options?: ParseOptions
-): RouteCode | undefined {
-  const canonical = normalizeBodySiteKey(siteText);
-  if (!canonical) {
-    return undefined;
-  }
-
-  const exact =
-    lookupBodySiteDefinition(options?.siteCodeMap, canonical) ??
-    DEFAULT_BODY_SITE_SNOMED[canonical];
-  if (exact?.routeHint) {
-    return exact.routeHint;
-  }
-
-  if (hasExternalSurfaceModifier(siteText)) {
-    return undefined;
-  }
-
-  const words = canonical.split(/\s+/).filter((word) => word.length > 0);
-  for (let length = words.length; length >= 1; length -= 1) {
-    for (let start = 0; start + length <= words.length; start += 1) {
-      const candidate = words.slice(start, start + length).join(" ");
-      const definition =
-        lookupBodySiteDefinition(options?.siteCodeMap, candidate) ??
-        DEFAULT_BODY_SITE_SNOMED[candidate];
-      if (definition?.routeHint) {
-        return definition.routeHint;
-      }
-    }
-  }
-
   return undefined;
 }
 
@@ -4281,11 +4078,18 @@ function collectAdditionalInstructions(
   if (!trailing.length) {
     return;
   }
-  const contentTokens = trailing.filter((token) => !punctuationOnly.test(token.original));
+  const contentTokens: Token[] = [];
+  const trailingIndices: number[] = [];
+  for (const token of trailing) {
+    trailingIndices.push(token.index);
+    if (!punctuationOnly.test(token.original)) {
+      contentTokens.push(token);
+    }
+  }
   if (!contentTokens.length) {
     return;
   }
-  const trailingIndices = trailing.map((token) => token.index).sort((a, b) => a - b);
+  trailingIndices.sort((a, b) => a - b);
   const lastIndex = trailingIndices[trailingIndices.length - 1];
   for (let i = lastIndex + 1; i < tokens.length; i++) {
     const nextToken = tokens[i];
@@ -4296,25 +4100,38 @@ function collectAdditionalInstructions(
       return;
     }
   }
-  const joined = contentTokens
-    .map((token) => token.original)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let joined = "";
+  for (const token of contentTokens) {
+    if (joined) {
+      joined += " ";
+    }
+    joined += token.original;
+  }
+  joined = joined.replace(/\s+/g, " ").trim();
   if (!joined) {
     return;
   }
-  const joinedWords = joined
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((word) => word.length > 0 && !SITE_FILLER_WORDS.has(word));
-  if (
-    joinedWords.length > 0 &&
-    joinedWords.every((word) => isApplicationVerbWord(word))
-  ) {
+  const joinedWords = joined.toLowerCase().split(/\s+/);
+  let hasJoinedWord = false;
+  let allApplicationVerbs = true;
+  for (const word of joinedWords) {
+    if (!word || SITE_FILLER_WORDS.has(word)) {
+      continue;
+    }
+    hasJoinedWord = true;
+    if (!isApplicationVerbWord(word)) {
+      allApplicationVerbs = false;
+      break;
+    }
+  }
+  if (hasJoinedWord && allApplicationVerbs) {
     return;
   }
-  const contentIndices = contentTokens.map((token) => token.index).sort((a, b) => a - b);
+  const contentIndices: number[] = [];
+  for (const token of contentTokens) {
+    contentIndices.push(token.index);
+  }
+  contentIndices.sort((a, b) => a - b);
   const lowerInput = internal.input.toLowerCase();
   let trailingRange: TextRange | undefined;
   let searchEnd = lowerInput.length;
@@ -5009,7 +4826,9 @@ function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefine
 }
 
 function inferUnitFromSiteText(siteText: string): string | undefined {
-  const route = inferRouteHintFromSitePhrase(siteText);
+  const route = inferRouteHintFromSitePhraseFromModule(siteText, undefined, {
+    lookupBodySiteDefinition
+  });
   if (route) {
     const unit = DEFAULT_UNIT_BY_ROUTE[route];
     if (unit) {

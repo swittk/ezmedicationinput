@@ -4,10 +4,12 @@
 
 Move `ezmedicationinput` from a single mutation-heavy parser pass toward an explicit pipeline:
 
-1. lexer / normalizer
-2. clause parser
-3. ambiguity scorer
-4. semantic lowering to FHIR and human-readable text
+1. surface scan
+2. lexical normalization / expansion
+3. semantic annotation
+4. clause parsing
+5. ambiguity scoring
+6. semantic lowering to FHIR and human-readable text
 
 The maintenance problem in this project is no longer raw recognition coverage. It is precedence drift:
 - route vs site
@@ -41,35 +43,66 @@ That gives us a stable place to migrate semantics without forcing consumers onto
 
 ## Target Pipeline
 
-### 1. Lexer / Normalizer
+### 1. Surface Scan
 
 Responsibility:
-- tokenize raw text with spans
-- normalize Thai/English shorthand
-- classify tokens into lexical categories
-- keep raw text lossless
+- scan raw text directly
+- emit exact tokens with exact spans
+- preserve separators and punctuation as structural surface facts
+- keep raw text lossless and authoritative
 
-Examples of token classes:
-- `NUMBER`
-- `ORDINAL`
-- `UNIT`
-- `ROUTE_TERM`
-- `SITE_TERM`
-- `SITE_MODIFIER`
-- `WHEN_TERM`
-- `INTERVAL_TERM`
-- `PRN_TERM`
-- `WORKFLOW_VERB`
-- `CLAUSE_CONNECTOR`
+Examples of surface token kinds:
+- `TEXT`
+- `SEPARATOR`
+- `PUNCTUATION`
 
 Important rule:
-- lexical inventories should be centralized and declarative
-- parser behavior should consume token classes, not repeat string checks everywhere
+- source spans come from scanning, not from rematching rewritten text
+- no medication-domain semantics belong in surface token kinds
 
-### 2. Clause Parser
+### 2. Lexical Normalization / Expansion
 
 Responsibility:
-- convert token streams into clause-shaped candidates
+- classify surface text into coarse lexical kinds
+- split compact forms while preserving provenance
+- keep lexical kinds generic and non-domain-specific
+
+Examples of lexical kinds:
+- `WORD`
+- `NUMBER`
+- `NUMBER_RANGE`
+- `ORDINAL`
+- `TIME_LIKE`
+- `SEPARATOR`
+- `PUNCTUATION`
+
+Important rule:
+- lexical kinds stay coarse
+- no irreversible semantic decisions happen here
+
+### 3. Semantic Annotation
+
+Responsibility:
+- attach medication meaning as reusable candidates and word classes
+- preserve ambiguity instead of collapsing it early
+- centralize domain lexicons so parser passes stop repeating ad hoc string checks
+
+Examples of current annotation buckets:
+- `routeCandidates`
+- `siteCandidates`
+- `timingAbbreviation`
+- `eventTiming`
+- `dayOfWeek`
+- connector roles
+- workflow / application / count word classes
+
+Important rule:
+- specialty knowledge should be one producer of generic candidates, not a dedicated schema branch
+
+### 4. Clause Parser
+
+Responsibility:
+- convert annotated token streams into clause-shaped candidates
 - produce explicit semantic structure instead of mutating FHIR fields directly
 
 Core IR:
@@ -94,7 +127,7 @@ Each clause should preserve:
 - parsed structure
 - unresolved text when present
 
-### 3. Ambiguity Scorer
+### 5. Ambiguity Scorer
 
 Responsibility:
 - rank competing interpretations
@@ -114,7 +147,7 @@ Useful scoring principles:
 - improbable clinical combinations get penalties
 - preserve raw free text even when structure is uncertain
 
-### 4. Semantic Lowering
+### 6. Semantic Lowering
 
 Responsibility:
 - convert canonical clauses into:
@@ -146,11 +179,16 @@ Done or in progress:
 - add `canonical.clauses` adapter on parse results
 - keep existing parser as the source of truth
 
+Definition of done:
+- exact source spans are authoritative in the token path
+- compatibility parser remains behaviorally stable against the locked test corpus
+- canonical clause adapter exists as an honest post-parse migration scaffold
+
 ### Stage 2
 
 Next:
-- extract lexical classification into a dedicated layer
-- centralize token class predicates and synonym normalization
+- finish moving parser hot paths to shared annotation helpers first
+- centralize token class predicates and semantic lexicons
 - reduce repeated string-set checks across parser passes
 
 Current footing:
@@ -159,11 +197,21 @@ Current footing:
 - annotations use generic candidate buckets such as `siteCandidates` and `routeCandidates`
 - specialty shorthand like ocular abbreviations is now one producer of generic candidates, not a dedicated schema slot
 
+Definition of done:
+- parser hot paths no longer reach directly into timing/route/day raw maps when a shared annotation helper exists
+- repeated connector / workflow / site-modifier / count-word string sets are removed from the compatibility parser
+- ambiguity such as `od` remains preserved in annotations until parser/scoring time
+
 ### Stage 3
 
 Then:
 - parse into canonical clause candidates directly
 - use the current parser as fallback until parity is reached
+
+Definition of done:
+- at least one meaningful vertical slice parses natively into canonical clause structures before `ParsedSigInternal` finalization
+- that slice preserves spans, leftovers, evidence, and unresolved text without reconstructing them post hoc
+- compatibility parser can still be used as fallback outside the migrated slice
 
 ### Stage 4
 
@@ -171,11 +219,20 @@ After that:
 - introduce an ambiguity scorer
 - move precedence decisions out of ordered heuristic branches
 
+Definition of done:
+- `od` ocular vs once-daily is resolved through explicit candidate/scoring logic
+- `after` / `before` meal-vs-workflow handling is resolved through explicit candidate/scoring logic
+- PRN tail attachment and clause carry-forward stop depending primarily on branch order
+
 ### Stage 5
 
 Later:
 - rebuild suggestions from grammar/parser state
 - optionally add tiny ML only as reranker/classifier, not as the core parser
+
+Definition of done:
+- suggestions come from parser/clause state, not broad phrase permutation products
+- any learned component is optional, local, and constrained to reranking/classification
 
 ## Immediate Design Constraint
 

@@ -320,3 +320,14 @@ Desired behavior:
    - no dedicated `eyeSite` annotation field
    - ocular abbreviations are now just one producer of generic site/route candidates
    - future specialty shorthand should extend candidate producers, not mutate the token schema
+
+5. Midpoint audit follow-up:
+   - `DIRECTIONALITY.md` now matches the real layered pipeline:
+     `surface scan -> lexical normalization/expansion -> semantic annotation -> clause parsing -> ambiguity scoring -> lowering`
+   - stage sections now include explicit definition-of-done criteria instead of only directional notes
+
+6. Extracted site phrase decision logic into a dedicated module.
+   - new `src/site-phrases.ts`
+   - explicit-site capture and residual site-group selection now live outside `parser.ts`
+   - route-hint inference from site text now also lives in the site module
+   - `parser.ts` still owns mutation/application for compatibility, but the site detection logic is no longer buried inline in the main pass
