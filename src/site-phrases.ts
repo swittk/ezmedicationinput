@@ -43,6 +43,11 @@ export interface SiteLookupServices {
   ) => BodySiteDefinition | undefined;
 }
 
+export interface SitePhraseCandidate {
+  tokenIndices: number[];
+  source: "explicit" | "residual";
+}
+
 function isExplicitSiteBoundaryToken(
   lower: string,
   options: ParseOptions | undefined,
@@ -131,7 +136,7 @@ export function extractExplicitSiteCandidate(
   startIndex: number,
   options: ParseOptions | undefined,
   services: SitePhraseServices
-): number[] | undefined {
+): SitePhraseCandidate | undefined {
   const anchor = tokens[startIndex];
   if (!anchor || consumed.has(anchor.index)) {
     return undefined;
@@ -217,15 +222,18 @@ export function extractExplicitSiteCandidate(
   ) {
     return undefined;
   }
-  return collected;
+  return {
+    tokenIndices: collected,
+    source: "explicit"
+  };
 }
 
-export function selectBestResidualSiteGroup(
+export function selectBestResidualSiteCandidate(
   groups: Array<{ tokens: Token[] }>,
   prnSiteSuffixIndices: Set<number>,
   services: SitePhraseServices
-): Token[] | undefined {
-  let bestGroup: Token[] | undefined;
+): SitePhraseCandidate | undefined {
+  let bestTokenIndices: number[] | undefined;
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const group of groups) {
@@ -294,11 +302,20 @@ export function selectBestResidualSiteGroup(
       filteredTokens[0].index * 0.001;
     if (score > bestScore) {
       bestScore = score;
-      bestGroup = filteredTokens;
+      bestTokenIndices = [];
+      for (const token of filteredTokens) {
+        bestTokenIndices.push(token.index);
+      }
     }
   }
 
-  return bestGroup;
+  if (!bestTokenIndices || !bestTokenIndices.length) {
+    return undefined;
+  }
+  return {
+    tokenIndices: bestTokenIndices,
+    source: "residual"
+  };
 }
 
 export function inferRouteHintFromSitePhrase(

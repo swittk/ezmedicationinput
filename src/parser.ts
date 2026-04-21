@@ -26,7 +26,8 @@ import { checkDiscouraged } from "./safety";
 import {
   extractExplicitSiteCandidate,
   inferRouteHintFromSitePhrase as inferRouteHintFromSitePhraseFromModule,
-  selectBestResidualSiteGroup,
+  selectBestResidualSiteCandidate,
+  SitePhraseCandidate,
   SitePhraseServices
 } from "./site-phrases";
 import { ParsedSigInternal, Token } from "./internal-types";
@@ -1491,6 +1492,22 @@ function applySitePhrase(
     }
   }
   return true;
+}
+
+function applySitePhraseCandidate(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  candidate: SitePhraseCandidate,
+  options?: ParseOptions,
+  routeDescriptorApplier?: (phrase: string | undefined) => boolean
+): boolean {
+  return applySitePhrase(
+    internal,
+    tokens,
+    candidate.tokenIndices,
+    options,
+    routeDescriptorApplier
+  );
 }
 
 function seedSiteFromRoute(
@@ -3379,14 +3396,23 @@ export function parseInternal(
       if (prnReasonStart !== undefined && i >= prnReasonStart) {
         break;
       }
-      const indices = extractExplicitSiteCandidate(
+      const candidate = extractExplicitSiteCandidate(
         tokens,
         internal.consumed,
         i,
         options,
         sitePhraseServices
       );
-      if (indices && applySitePhrase(internal, tokens, indices, options, maybeApplyRouteDescriptor)) {
+      if (
+        candidate &&
+        applySitePhraseCandidate(
+          internal,
+          tokens,
+          candidate,
+          options,
+          maybeApplyRouteDescriptor
+        )
+      ) {
         break;
       }
     }
@@ -3395,17 +3421,17 @@ export function parseInternal(
   if (!internal.siteText) {
     const groups = findUnparsedTokenGroups(internal);
     const sitePhraseServices = buildSitePhraseServices(internal, tokens, options);
-    const bestGroup = selectBestResidualSiteGroup(
+    const siteCandidate = selectBestResidualSiteCandidate(
       groups,
       prnSiteSuffixIndices,
       sitePhraseServices
     );
 
-    if (bestGroup) {
-      applySitePhrase(
+    if (siteCandidate) {
+      applySitePhraseCandidate(
         internal,
         tokens,
-        bestGroup.map((token) => token.index),
+        siteCandidate,
         options,
         maybeApplyRouteDescriptor
       );

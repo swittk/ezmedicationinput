@@ -1,6 +1,17 @@
-import { ParsedSigInternal } from "./internal-types";
-import { DEFAULT_BODY_SITE_SNOMED_SOURCE, normalizeBodySiteKey } from "./maps";
-import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
+import {
+  DEFAULT_BODY_SITE_SNOMED_SOURCE,
+  findAdditionalInstructionDefinitionByCoding,
+  findPrnReasonDefinitionByCoding,
+  normalizeBodySiteKey
+} from "./maps";
+import {
+  CanonicalDoseExpr,
+  CanonicalScheduleExpr,
+  CanonicalSigClause,
+  EventTiming,
+  FhirPeriodUnit,
+  RouteCode
+} from "./types";
 import {
   getMealTimingGroup,
   inferDailyOccurrenceCount,
@@ -10,7 +21,7 @@ import {
 
 export interface SigFormatContext {
   readonly style: "short" | "long";
-  readonly internal: ParsedSigInternal;
+  readonly clause: CanonicalSigClause;
   readonly defaultText: string;
   readonly groupMealTimingsByRelation: boolean;
   readonly includeTimesPerDaySummary: boolean;
@@ -124,13 +135,13 @@ export function resolveSigTranslation(
 function createThaiLocalization(): SigLocalization {
   return {
     locale: "th",
-    formatShort: ({ internal }) => formatShortThai(internal),
+    formatShort: ({ clause }) => formatShortThai(clause),
     formatLong: ({
-      internal,
+      clause,
       groupMealTimingsByRelation,
       includeTimesPerDaySummary
     }) =>
-      formatLongThai(internal, {
+      formatLongThai(clause, {
         groupMealTimingsByRelation,
         includeTimesPerDaySummary
       })
@@ -390,7 +401,7 @@ const THAI_SITE_CODE_TRANSLATIONS: Record<string, string> = (() => {
 
 interface ThaiRouteGrammar {
   verb: string;
-  routePhrase?: string | ((context: { hasSite: boolean; internal: ParsedSigInternal }) => string | undefined);
+  routePhrase?: string | ((context: { hasSite: boolean; clause: CanonicalSigClause }) => string | undefined);
   sitePreposition?: string;
 }
 
@@ -461,25 +472,36 @@ const THAI_ROUTE_GRAMMAR: Partial<Record<RouteCode, ThaiRouteGrammar>> = {
   }
 };
 
-function resolveRouteGrammarThai(internal: ParsedSigInternal): ThaiRouteGrammar {
-  if (internal.routeCode && THAI_ROUTE_GRAMMAR[internal.routeCode]) {
-    return THAI_ROUTE_GRAMMAR[internal.routeCode] ?? DEFAULT_THAI_ROUTE_GRAMMAR;
+function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
+  return clause.schedule ?? {};
+}
+
+function resolveRouteGrammarThai(clause: CanonicalSigClause): ThaiRouteGrammar {
+  const routeCode = clause.route?.code;
+  if (routeCode && THAI_ROUTE_GRAMMAR[routeCode]) {
+    return THAI_ROUTE_GRAMMAR[routeCode] ?? DEFAULT_THAI_ROUTE_GRAMMAR;
   }
-  const grammar = grammarFromRouteTextThai(internal.routeText);
+  const grammar = grammarFromRouteTextThai(clause.route?.text);
   if (grammar) {
     return grammar;
   }
-  if (internal.unit?.trim().toLowerCase() === "puff") {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]] ??
-      DEFAULT_THAI_ROUTE_GRAMMAR;
+  if (clause.dose?.unit?.trim().toLowerCase() === "puff") {
+    return (
+      THAI_ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]] ??
+      DEFAULT_THAI_ROUTE_GRAMMAR
+    );
   }
   return DEFAULT_THAI_ROUTE_GRAMMAR;
 }
 
 function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | undefined {
-  if (!text) return undefined;
+  if (!text) {
+    return undefined;
+  }
   const normalized = text.trim().toLowerCase();
-  if (!normalized) return undefined;
+  if (!normalized) {
+    return undefined;
+  }
   if (normalized.includes("mouth") || normalized.includes("oral")) {
     return THAI_ROUTE_GRAMMAR[RouteCode["Oral route"]];
   }
@@ -513,47 +535,51 @@ function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | 
   return undefined;
 }
 
-function formatDoseThaiShort(internal: ParsedSigInternal): string | undefined {
-  if (internal.doseRange) {
-    const { low, high } = internal.doseRange;
-    const base = `${stripTrailingZero(low)}-${stripTrailingZero(high)}`;
-    if (internal.unit) {
-      return `${base} ${formatUnitThai(internal.unit, high, "short")}`;
+function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | undefined {
+  if (!dose) {
+    return undefined;
+  }
+  if (dose.range) {
+    const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
+    if (dose.unit) {
+      return `${base} ${formatUnitThai(dose.unit, dose.range.high, "short")}`;
     }
     return base;
   }
-  if (internal.dose !== undefined) {
-    const amount = stripTrailingZero(internal.dose);
-    if (internal.unit) {
-      return `${amount} ${formatUnitThai(internal.unit, internal.dose, "short")}`;
+  if (dose.value !== undefined) {
+    if (dose.unit) {
+      return `${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "short")}`;
     }
-    return amount;
+    return stripTrailingZero(dose.value);
   }
   return undefined;
 }
 
-function formatDoseThaiLong(internal: ParsedSigInternal): string | undefined {
-  if (internal.doseRange) {
-    const { low, high } = internal.doseRange;
-    if (internal.unit) {
-      const unit = formatUnitThai(internal.unit, high, "long");
-      return `ครั้งละ ${stripTrailingZero(low)} ถึง ${stripTrailingZero(high)} ${unit}`;
-    }
-    return `ครั้งละ ${stripTrailingZero(low)} ถึง ${stripTrailingZero(high)}`;
+function formatDoseThaiLong(dose: CanonicalDoseExpr | undefined): string | undefined {
+  if (!dose) {
+    return undefined;
   }
-  if (internal.dose !== undefined) {
-    if (internal.unit) {
-      const unit = formatUnitThai(internal.unit, internal.dose, "long");
-      return `ครั้งละ ${stripTrailingZero(internal.dose)} ${unit}`;
+  if (dose.range) {
+    if (dose.unit) {
+      return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)} ${formatUnitThai(
+        dose.unit,
+        dose.range.high,
+        "long"
+      )}`;
     }
-    return `ครั้งละ ${stripTrailingZero(internal.dose)}`;
+    return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)}`;
+  }
+  if (dose.value !== undefined) {
+    if (dose.unit) {
+      return `ครั้งละ ${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "long")}`;
+    }
+    return `ครั้งละ ${stripTrailingZero(dose.value)}`;
   }
   return undefined;
 }
 
-function formatUnitThai(unit: string, value: number, style: "short" | "long"): string {
+function formatUnitThai(unit: string, _value: number, style: "short" | "long"): string {
   const lower = unit.toLowerCase();
-  const quantity = Math.abs(value);
   const mapping: Record<string, { short: string; long: string }> = {
     tab: { short: "เม็ด", long: "เม็ด" },
     tablet: { short: "เม็ด", long: "เม็ด" },
@@ -576,16 +602,18 @@ function formatUnitThai(unit: string, value: number, style: "short" | "long"): s
     suppository: { short: "ยาเหน็บ", long: "ยาเหน็บ" },
     suppositories: { short: "ยาเหน็บ", long: "ยาเหน็บ" }
   };
-
   const entry = mapping[lower];
-  if (entry) {
-    return style === "short" ? entry.short : entry.long;
-  }
-  return unit;
+  return entry ? entry[style] : unit;
 }
 
-function describeFrequencyThai(internal: ParsedSigInternal): string | undefined {
-  const { frequency, frequencyMax, period, periodMax, periodUnit, timingCode } = internal;
+function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const frequency = schedule?.frequency;
+  const frequencyMax = schedule?.frequencyMax;
+  const period = schedule?.period;
+  const periodMax = schedule?.periodMax;
+  const periodUnit = schedule?.periodUnit;
+  const timingCode = schedule?.timingCode;
+
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
@@ -601,11 +629,7 @@ function describeFrequencyThai(internal: ParsedSigInternal): string | undefined 
     return `วันละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
   }
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
-    const dailyText = TH_TIMES_PER_DAY[frequency];
-    if (dailyText) {
-      return dailyText;
-    }
-    return `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
+    return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
@@ -658,7 +682,9 @@ function describeFrequencyThai(internal: ParsedSigInternal): string | undefined 
     }
   }
   if (frequency && periodUnit === undefined && period === undefined) {
-    if (frequency === 1) return "ครั้งเดียว";
+    if (frequency === 1) {
+      return "ครั้งเดียว";
+    }
     return `${stripTrailingZero(frequency)} ครั้ง`;
   }
   return undefined;
@@ -668,15 +694,11 @@ function describeFrequencyCountThai(count: number | undefined): string | undefin
   if (!count || count <= 0) {
     return undefined;
   }
-  const dailyText = TH_TIMES_PER_DAY[count];
-  if (dailyText) {
-    return dailyText;
-  }
-  return `วันละ ${stripTrailingZero(count)} ครั้ง`;
+  return TH_TIMES_PER_DAY[count] ?? `วันละ ${stripTrailingZero(count)} ครั้ง`;
 }
 
 function joinMealNamesThai(parts: string[]): string {
-  if (parts.length === 0) {
+  if (!parts.length) {
     return "";
   }
   if (parts.length === 1) {
@@ -704,17 +726,18 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
     dinner: "เย็น"
   } as const;
   const meals: string[] = [];
-  for (let i = 0; i < group.meals.length; i += 1) {
-    meals.push(mealText[group.meals[i]]);
+  for (const meal of group.meals) {
+    meals.push(mealText[meal]);
   }
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
 function collectWhenPhrasesThai(
-  internal: ParsedSigInternal,
+  schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  if (!internal.when.length) {
+  const when = schedule?.when ?? [];
+  if (!when.length) {
     return [];
   }
   const unique: EventTiming[] = [];
@@ -722,7 +745,8 @@ function collectWhenPhrasesThai(
   let hasSpecificAfter = false;
   let hasSpecificBefore = false;
   let hasSpecificWith = false;
-  for (const code of internal.when) {
+
+  for (const code of when) {
     if (!seen.has(code)) {
       seen.add(code);
       unique.push(code);
@@ -740,18 +764,14 @@ function collectWhenPhrasesThai(
       ) {
         hasSpecificBefore = true;
       }
-      if (
-        code === EventTiming.Breakfast ||
-        code === EventTiming.Lunch ||
-        code === EventTiming.Dinner
-      ) {
+      if (code === EventTiming.Breakfast || code === EventTiming.Lunch || code === EventTiming.Dinner) {
         hasSpecificWith = true;
       }
     }
   }
+
   const filtered: EventTiming[] = [];
-  for (let i = 0; i < unique.length; i += 1) {
-    const code = unique[i];
+  for (const code of unique) {
     if (code === EventTiming["After Meal"] && hasSpecificAfter) {
       continue;
     }
@@ -765,19 +785,9 @@ function collectWhenPhrasesThai(
   }
 
   const mealGroup = getMealTimingGroup(filtered, options);
-  if (mealGroup) {
-    const groupedCodes = new Set<EventTiming>(mealGroup.codes);
+  if (!mealGroup) {
     const phrases: string[] = [];
-    let insertedGroup = false;
-    for (let i = 0; i < filtered.length; i += 1) {
-      const code = filtered[i];
-      if (groupedCodes.has(code)) {
-        if (!insertedGroup) {
-          phrases.push(summarizeMealTimingGroupThai(mealGroup));
-          insertedGroup = true;
-        }
-        continue;
-      }
+    for (const code of filtered) {
       const text = WHEN_TEXT_THAI[code];
       if (text) {
         phrases.push(text);
@@ -786,9 +796,18 @@ function collectWhenPhrasesThai(
     return phrases;
   }
 
+  const groupedCodes = new Set<EventTiming>(mealGroup.codes);
   const phrases: string[] = [];
-  for (let i = 0; i < filtered.length; i += 1) {
-    const text = WHEN_TEXT_THAI[filtered[i]];
+  let insertedGroup = false;
+  for (const code of filtered) {
+    if (groupedCodes.has(code)) {
+      if (!insertedGroup) {
+        phrases.push(summarizeMealTimingGroupThai(mealGroup));
+        insertedGroup = true;
+      }
+      continue;
+    }
+    const text = WHEN_TEXT_THAI[code];
     if (text) {
       phrases.push(text);
     }
@@ -822,45 +841,38 @@ function combineFrequencyAndEventsThai(
   if (!events.length) {
     return { frequency };
   }
-  if (events.length === 1 && events[0] === "ก่อนนอน") {
-    if (frequency.includes("วันละ")) {
-      return { frequency: `${frequency} และ ${events[0]}` };
-    }
+  if (events.length === 1 && events[0] === "ก่อนนอน" && frequency.includes("วันละ")) {
+    return { frequency: `${frequency} และ ${events[0]}` };
   }
   return { frequency, event: joinWithAndThai(events) };
 }
 
-function isOralRouteThai(internal: ParsedSigInternal): boolean {
-  if (internal.routeCode === RouteCode["Oral route"]) {
+function isOralRouteThai(clause: CanonicalSigClause): boolean {
+  if (clause.route?.code === RouteCode["Oral route"]) {
     return true;
   }
-  const text = internal.routeText?.trim().toLowerCase();
+  const text = clause.route?.text?.trim().toLowerCase();
   if (!text) {
     return false;
   }
-  return (
-    text === "po" ||
-    text === "oral" ||
-    text.includes("mouth") ||
-    text.includes("per os")
-  );
+  return text === "po" || text === "oral" || text.includes("mouth") || text.includes("per os");
 }
 
 function buildRoutePhraseThai(
-  internal: ParsedSigInternal,
+  clause: CanonicalSigClause,
   grammar: ThaiRouteGrammar,
   hasSite: boolean
 ): string | undefined {
-  if (grammar.verb === "รับประทาน" && isOralRouteThai(internal)) {
+  if (grammar.verb === "รับประทาน" && isOralRouteThai(clause)) {
     return undefined;
   }
   if (typeof grammar.routePhrase === "function") {
-    return grammar.routePhrase({ hasSite, internal });
+    return grammar.routePhrase({ hasSite, clause });
   }
   if (typeof grammar.routePhrase === "string") {
     return grammar.routePhrase;
   }
-  const text = internal.routeText?.trim();
+  const text = clause.route?.text?.trim();
   if (!text) {
     return undefined;
   }
@@ -895,9 +907,9 @@ function buildRoutePhraseThai(
   return text;
 }
 
-function formatSiteThai(internal: ParsedSigInternal, grammar: ThaiRouteGrammar): string | undefined {
-  const text = internal.siteText?.trim() || internal.siteCoding?.display?.trim();
-  const translated = translateSiteThai(text, internal.siteCoding?.code);
+function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): string | undefined {
+  const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
+  const translated = translateSiteThai(text, clause.site?.coding?.code);
   if (!translated) {
     return undefined;
   }
@@ -913,92 +925,103 @@ function translateSiteThai(site: string | undefined, code?: string): string | un
       return translatedByCode;
     }
   }
-
   if (!site) {
     return undefined;
   }
-
   const normalized = normalizeBodySiteKey(site);
   if (!normalized) {
     return site;
   }
-
   return THAI_SITE_TRANSLATIONS[normalized] ?? site;
 }
 
-function describeDayOfWeekThai(internal: ParsedSigInternal): string | undefined {
-  if (!internal.dayOfWeek.length) {
+function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const dayOfWeek = schedule?.dayOfWeek ?? [];
+  if (!dayOfWeek.length) {
     return undefined;
   }
-  const days = internal.dayOfWeek
-    .map((d) => DAY_NAMES_THAI[d] ?? undefined)
-    .filter((d): d is string => Boolean(d));
-  if (!days.length) {
-    return undefined;
+  const days: string[] = [];
+  for (const day of dayOfWeek) {
+    const text = DAY_NAMES_THAI[day];
+    if (text) {
+      days.push(text);
+    }
   }
-  return `ใน${joinWithAndThai(days)}`;
+  return days.length ? `ใน${joinWithAndThai(days)}` : undefined;
 }
 
-function formatAsNeededThai(internal: ParsedSigInternal): string | undefined {
-  if (!internal.asNeeded) {
+function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
+  if (!clause.prn?.enabled) {
     return undefined;
   }
-  if (internal.asNeededReason) {
-    const translation = internal.asNeededReasonCoding?.i18n?.th;
-    return `ใช้เมื่อจำเป็นสำหรับ ${translation || internal.asNeededReason}`;
+  let translation: string | undefined;
+  const coding = clause.prn.reason?.coding;
+  if (coding?.code) {
+    const definition = findPrnReasonDefinitionByCoding(
+      coding.system ?? "http://snomed.info/sct",
+      coding.code
+    );
+    translation = definition?.i18n?.th;
+  }
+  const reason = translation ?? clause.prn.reason?.text ?? coding?.display;
+  if (reason) {
+    return `ใช้เมื่อจำเป็นสำหรับ ${reason}`;
   }
   return "ใช้เมื่อจำเป็น";
 }
 
-function formatShortThai(internal: ParsedSigInternal): string {
+function formatShortThai(clause: CanonicalSigClause): string {
+  const schedule = scheduleOf(clause);
   const parts: string[] = [];
-  const dose = formatDoseThaiShort(internal);
+  const dose = formatDoseThaiShort(clause.dose);
   if (dose) {
     parts.push(dose);
   }
-  if (internal.routeCode) {
-    const short = ROUTE_SHORT[internal.routeCode];
+  if (clause.route?.code) {
+    const short = ROUTE_SHORT[clause.route.code];
     if (short) {
       parts.push(short);
-    } else if (internal.routeText) {
-      parts.push(internal.routeText);
+    } else if (clause.route.text) {
+      parts.push(clause.route.text);
     }
-  } else if (internal.routeText) {
-    parts.push(internal.routeText);
+  } else if (clause.route?.text) {
+    parts.push(clause.route.text);
   }
-  const timing = describeFrequencyThai(internal);
+  const timing = describeFrequencyThai(schedule);
   if (timing) {
     parts.push(timing);
-  } else if (internal.timingCode) {
-    parts.push(internal.timingCode);
-  } else if (internal.period && internal.periodUnit) {
-    const base = stripTrailingZero(internal.period);
+  } else if (schedule.timingCode) {
+    parts.push(schedule.timingCode);
+  } else if (schedule.period && schedule.periodUnit) {
+    const base = stripTrailingZero(schedule.period);
     const qualifier =
-      internal.periodMax && internal.periodMax !== internal.period
-        ? `${base}-${stripTrailingZero(internal.periodMax)}`
+      schedule.periodMax && schedule.periodMax !== schedule.period
+        ? `${base}-${stripTrailingZero(schedule.periodMax)}`
         : base;
-    parts.push(`Q${qualifier}${internal.periodUnit.toUpperCase()}`);
+    parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
-  if (internal.when.length) {
-    const events = collectWhenPhrasesThai(internal);
-    if (events.length) {
-      parts.push(events.join(" "));
+  const events = collectWhenPhrasesThai(schedule);
+  if (events.length) {
+    parts.push(events.join(" "));
+  }
+  if (schedule.timeOfDay?.length) {
+    const times: string[] = [];
+    for (const time of schedule.timeOfDay) {
+      times.push(time.slice(0, 5));
     }
+    parts.push(times.join(","));
   }
-  if (internal.timeOfDay?.length) {
-    const times = internal.timeOfDay.map((t) => t.slice(0, 5)).join(",");
-    parts.push(times);
+  if (schedule.dayOfWeek?.length) {
+    const days: string[] = [];
+    for (const day of schedule.dayOfWeek) {
+      days.push(DAY_NAMES_THAI[day]?.replace(/^วัน/, "") ?? day);
+    }
+    parts.push(days.join(","));
   }
-  if (internal.dayOfWeek.length) {
-    const days = internal.dayOfWeek
-      .map((d) => DAY_NAMES_THAI[d]?.replace(/^วัน/, "") ?? d)
-      .join(",");
-    parts.push(days);
+  if (schedule.count !== undefined) {
+    parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (internal.count !== undefined) {
-    parts.push(`x${stripTrailingZero(internal.count)}`);
-  }
-  const asNeeded = formatAsNeededThai(internal);
+  const asNeeded = formatAsNeededThai(clause);
   if (asNeeded) {
     parts.push(asNeeded);
   }
@@ -1006,38 +1029,40 @@ function formatShortThai(internal: ParsedSigInternal): string {
 }
 
 function formatLongThai(
-  internal: ParsedSigInternal,
+  clause: CanonicalSigClause,
   options?: TimingSummaryOptions
 ): string {
-  const grammar = resolveRouteGrammarThai(internal);
-  const dosePart = formatDoseThaiLong(internal) ?? "ยา";
-  const sitePart = formatSiteThai(internal, grammar);
-  const routePart = buildRoutePhraseThai(internal, grammar, Boolean(sitePart));
+  const schedule = scheduleOf(clause);
+  const grammar = resolveRouteGrammarThai(clause);
+  const dosePart = formatDoseThaiLong(clause.dose) ?? "ยา";
+  const sitePart = formatSiteThai(clause, grammar);
+  const routePart = buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
   const frequencyPart =
-    describeFrequencyThai(internal) ??
-    describeFrequencyCountThai(inferDailyOccurrenceCount(internal, options));
-  const eventParts = collectWhenPhrasesThai(internal, options);
-  if (internal.timeOfDay?.length) {
+    describeFrequencyThai(schedule) ??
+    describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
+  const eventParts = collectWhenPhrasesThai(schedule, options);
+  if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
-    for (const time of internal.timeOfDay) {
+    for (const time of schedule.timeOfDay) {
       const parts = time.split(":");
-      const h = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10);
-      const displayM = m < 10 ? `0${m}` : `${m}`;
-      const displayH = h < 10 ? `0${h}` : `${h}`;
-      timeStrings.push(`${displayH}:${displayM}`);
+      const hours = Number(parts[0]);
+      const minutes = Number(parts[1]);
+      if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+        continue;
+      }
+      const displayMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`;
+      const displayHours = hours < 10 ? `0${hours}` : `${hours}`;
+      timeStrings.push(`${displayHours}:${displayMinutes}`);
     }
-    if (timeStrings.length > 0) {
+    if (timeStrings.length) {
       eventParts.push(`เวลา ${timeStrings.join(", ")}`);
     }
   }
   const timing = combineFrequencyAndEventsThai(frequencyPart, eventParts);
-  const dayPart = describeDayOfWeekThai(internal);
+  const dayPart = describeDayOfWeekThai(schedule);
   const countPart =
-    internal.count !== undefined
-      ? `จำนวน ${stripTrailingZero(internal.count)} ครั้ง`
-      : undefined;
-  const asNeeded = formatAsNeededThai(internal);
+    schedule.count !== undefined ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง` : undefined;
+  const asNeeded = formatAsNeededThai(clause);
 
   const segments: string[] = [dosePart];
   if (routePart) {
@@ -1061,42 +1086,45 @@ function formatLongThai(
   if (sitePart) {
     segments.push(sitePart);
   }
-
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const instructionText = formatAdditionalInstructionsThai(clause);
   if (!body) {
-    const instructionText = formatAdditionalInstructionsThai(internal);
     if (!instructionText) {
       return `${grammar.verb}.`;
     }
     return `${grammar.verb}. ${instructionText}`.trim();
   }
-  const instructionText = formatAdditionalInstructionsThai(internal);
   const baseSentence = `${grammar.verb} ${body}.`;
   return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
 }
 
-function formatAdditionalInstructionsThai(internal: ParsedSigInternal): string | undefined {
-  if (!internal.additionalInstructions?.length) {
+function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | undefined {
+  const instructions = clause.additionalInstructions ?? [];
+  if (!instructions.length) {
     return undefined;
   }
-  const phrases = internal.additionalInstructions
-    .map((instruction) => {
-      const translation = instruction.coding?.i18n?.th;
-      if (translation) return translation;
-      const original = instruction.text || instruction.coding?.display;
-      if (!original) return undefined;
-      return original.trim();
-    })
-    .filter((text): text is string => Boolean(text))
-    .map((text) => text.trim())
-    .filter((text) => text.length > 0);
+  const phrases: string[] = [];
+  for (const instruction of instructions) {
+    let text = instruction.text ?? instruction.coding?.display;
+    if (instruction.coding?.code) {
+      const definition = findAdditionalInstructionDefinitionByCoding(
+        instruction.coding.system ?? "http://snomed.info/sct",
+        instruction.coding.code
+      );
+      text = definition?.i18n?.th ?? text;
+    }
+    if (!text) {
+      continue;
+    }
+    const trimmed = text.trim();
+    if (trimmed) {
+      phrases.push(trimmed);
+    }
+  }
   if (!phrases.length) {
     return undefined;
   }
-  return phrases
-    .map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`))
-    .join(" ")
-    .trim();
+  return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
 }
 
 function stripTrailingZero(value: number): string {

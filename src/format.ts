@@ -1,6 +1,14 @@
+import { buildCanonicalSigClauses } from "./ir";
 import { ParsedSigInternal } from "./internal-types";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
-import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
+import {
+  CanonicalDoseExpr,
+  CanonicalScheduleExpr,
+  CanonicalSigClause,
+  EventTiming,
+  FhirPeriodUnit,
+  RouteCode
+} from "./types";
 import {
   getMealTimingGroup,
   inferDailyOccurrenceCount,
@@ -74,7 +82,7 @@ const EN_TIMES_PER_DAY: Record<number, string> = {
 
 interface RouteGrammar {
   verb: string;
-  routePhrase?: string | ((context: { hasSite: boolean; internal: ParsedSigInternal }) => string | undefined);
+  routePhrase?: string | ((context: { hasSite: boolean; clause: CanonicalSigClause }) => string | undefined);
   sitePreposition?: string;
 }
 
@@ -134,6 +142,10 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
   }
 };
 
+function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
+  return clause.schedule ?? {};
+}
+
 function grammarFromRouteText(text: string | undefined): RouteGrammar | undefined {
   if (!text) {
     return undefined;
@@ -178,11 +190,12 @@ function grammarFromRouteText(text: string | undefined): RouteGrammar | undefine
   return undefined;
 }
 
-function resolveRouteGrammar(internal: ParsedSigInternal): RouteGrammar {
-  if (internal.routeCode && ROUTE_GRAMMAR[internal.routeCode]) {
-    return ROUTE_GRAMMAR[internal.routeCode] ?? DEFAULT_ROUTE_GRAMMAR;
+function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
+  const routeCode = clause.route?.code;
+  if (routeCode && ROUTE_GRAMMAR[routeCode]) {
+    return ROUTE_GRAMMAR[routeCode] ?? DEFAULT_ROUTE_GRAMMAR;
   }
-  return grammarFromRouteText(internal.routeText) ?? DEFAULT_ROUTE_GRAMMAR;
+  return grammarFromRouteText(clause.route?.text) ?? DEFAULT_ROUTE_GRAMMAR;
 }
 
 function pluralize(unit: string, value: number): string {
@@ -202,8 +215,14 @@ function pluralize(unit: string, value: number): string {
   return unit;
 }
 
-function describeFrequency(internal: ParsedSigInternal): string | undefined {
-  const { frequency, frequencyMax, period, periodMax, periodUnit, timingCode } = internal;
+function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const frequency = schedule?.frequency;
+  const frequencyMax = schedule?.frequencyMax;
+  const period = schedule?.period;
+  const periodMax = schedule?.periodMax;
+  const periodUnit = schedule?.periodUnit;
+  const timingCode = schedule?.timingCode;
+
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
@@ -216,9 +235,7 @@ function describeFrequency(internal: ParsedSigInternal): string | undefined {
     if (frequency === 1 && frequencyMax === 2) {
       return "one to two times daily";
     }
-    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(
-      frequencyMax
-    )} times daily`;
+    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times daily`;
   }
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
     const dailyText = EN_TIMES_PER_DAY[frequency];
@@ -281,7 +298,9 @@ function describeFrequency(internal: ParsedSigInternal): string | undefined {
     }
   }
   if (frequency && periodUnit === undefined && period === undefined) {
-    if (frequency === 1) return "once";
+    if (frequency === 1) {
+      return "once";
+    }
     return `${stripTrailingZero(frequency)} times`;
   }
   return undefined;
@@ -298,40 +317,44 @@ function describeFrequencyCount(count: number | undefined): string | undefined {
   return `${stripTrailingZero(count)} times daily`;
 }
 
-function formatDoseShort(internal: ParsedSigInternal): string | undefined {
-  if (internal.doseRange) {
-    const { low, high } = internal.doseRange;
-    const base = `${stripTrailingZero(low)}-${stripTrailingZero(high)}`;
-    if (internal.unit) {
-      return `${base} ${internal.unit}`;
+function formatDoseShort(dose: CanonicalDoseExpr | undefined): string | undefined {
+  if (!dose) {
+    return undefined;
+  }
+  if (dose.range) {
+    const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
+    if (dose.unit) {
+      return `${base} ${dose.unit}`;
     }
     return base;
   }
-  if (internal.dose !== undefined) {
-    const dosePart = internal.unit
-      ? `${stripTrailingZero(internal.dose)} ${internal.unit}`
-      : `${stripTrailingZero(internal.dose)}`;
-    return dosePart.trim();
+  if (dose.value !== undefined) {
+    if (dose.unit) {
+      return `${stripTrailingZero(dose.value)} ${dose.unit}`;
+    }
+    return `${stripTrailingZero(dose.value)}`;
   }
   return undefined;
 }
 
-function formatDoseLong(internal: ParsedSigInternal): string | undefined {
-  if (internal.doseRange) {
-    const { low, high } = internal.doseRange;
-    if (internal.unit) {
-      return `${stripTrailingZero(low)} to ${stripTrailingZero(high)} ${pluralize(
-        internal.unit,
-        high
+function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined {
+  if (!dose) {
+    return undefined;
+  }
+  if (dose.range) {
+    if (dose.unit) {
+      return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)} ${pluralize(
+        dose.unit,
+        dose.range.high
       )}`;
     }
-    return `${stripTrailingZero(low)} to ${stripTrailingZero(high)}`;
+    return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)}`;
   }
-  if (internal.dose !== undefined) {
-    if (internal.unit) {
-      return `${stripTrailingZero(internal.dose)} ${pluralize(internal.unit, internal.dose)}`;
+  if (dose.value !== undefined) {
+    if (dose.unit) {
+      return `${stripTrailingZero(dose.value)} ${pluralize(dose.unit, dose.value)}`;
     }
-    return `${stripTrailingZero(internal.dose)}`;
+    return `${stripTrailingZero(dose.value)}`;
   }
   return undefined;
 }
@@ -347,10 +370,11 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
 }
 
 function collectWhenPhrases(
-  internal: ParsedSigInternal,
+  schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  if (!internal.when.length) {
+  const when = schedule?.when ?? [];
+  if (!when.length) {
     return [];
   }
   const unique: EventTiming[] = [];
@@ -358,7 +382,8 @@ function collectWhenPhrases(
   let hasSpecificAfter = false;
   let hasSpecificBefore = false;
   let hasSpecificWith = false;
-  for (const code of internal.when) {
+
+  for (const code of when) {
     if (!seen.has(code)) {
       seen.add(code);
       unique.push(code);
@@ -376,18 +401,14 @@ function collectWhenPhrases(
       ) {
         hasSpecificBefore = true;
       }
-      if (
-        code === EventTiming.Breakfast ||
-        code === EventTiming.Lunch ||
-        code === EventTiming.Dinner
-      ) {
+      if (code === EventTiming.Breakfast || code === EventTiming.Lunch || code === EventTiming.Dinner) {
         hasSpecificWith = true;
       }
     }
   }
+
   const filtered: EventTiming[] = [];
-  for (let i = 0; i < unique.length; i += 1) {
-    const code = unique[i];
+  for (const code of unique) {
     if (code === EventTiming["After Meal"] && hasSpecificAfter) {
       continue;
     }
@@ -401,19 +422,9 @@ function collectWhenPhrases(
   }
 
   const mealGroup = getMealTimingGroup(filtered, options);
-  if (mealGroup) {
-    const groupedCodes = new Set<EventTiming>(mealGroup.codes);
+  if (!mealGroup) {
     const phrases: string[] = [];
-    let insertedGroup = false;
-    for (let i = 0; i < filtered.length; i += 1) {
-      const code = filtered[i];
-      if (groupedCodes.has(code)) {
-        if (!insertedGroup) {
-          phrases.push(summarizeMealTimingGroup(mealGroup));
-          insertedGroup = true;
-        }
-        continue;
-      }
+    for (const code of filtered) {
       const text = WHEN_TEXT[code] ?? code;
       if (text) {
         phrases.push(text);
@@ -422,9 +433,18 @@ function collectWhenPhrases(
     return phrases;
   }
 
+  const groupedCodes = new Set<EventTiming>(mealGroup.codes);
   const phrases: string[] = [];
-  for (let i = 0; i < filtered.length; i += 1) {
-    const text = WHEN_TEXT[filtered[i]] ?? filtered[i];
+  let insertedGroup = false;
+  for (const code of filtered) {
+    if (groupedCodes.has(code)) {
+      if (!insertedGroup) {
+        phrases.push(summarizeMealTimingGroup(mealGroup));
+        insertedGroup = true;
+      }
+      continue;
+    }
+    const text = WHEN_TEXT[code] ?? code;
     if (text) {
       phrases.push(text);
     }
@@ -447,7 +467,7 @@ function joinWithAnd(parts: string[]): string {
 
 function combineFrequencyAndEvents(
   frequency: string | undefined,
-  events: string[],
+  events: string[]
 ): { frequency?: string; event?: string } {
   if (!frequency) {
     if (!events.length) {
@@ -460,7 +480,11 @@ function combineFrequencyAndEvents(
   }
   if (events.length === 1 && events[0] === "at bedtime") {
     const lowerFrequency = frequency.toLowerCase();
-    if (lowerFrequency === "twice daily" || lowerFrequency === "three times daily" || lowerFrequency === "four times daily") {
+    if (
+      lowerFrequency === "twice daily" ||
+      lowerFrequency === "three times daily" ||
+      lowerFrequency === "four times daily"
+    ) {
       return { frequency: `${frequency} and ${events[0]}` };
     }
   }
@@ -468,17 +492,17 @@ function combineFrequencyAndEvents(
 }
 
 function buildRoutePhrase(
-  internal: ParsedSigInternal,
+  clause: CanonicalSigClause,
   grammar: RouteGrammar,
-  hasSite: boolean,
+  hasSite: boolean
 ): string | undefined {
   if (typeof grammar.routePhrase === "function") {
-    return grammar.routePhrase({ hasSite, internal });
+    return grammar.routePhrase({ hasSite, clause });
   }
   if (typeof grammar.routePhrase === "string") {
     return grammar.routePhrase;
   }
-  const text = internal.routeText?.trim();
+  const text = clause.route?.text?.trim();
   if (!text) {
     return undefined;
   }
@@ -513,16 +537,14 @@ function buildRoutePhrase(
   return `via ${text}`;
 }
 
-function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string | undefined {
-  const text = internal.siteText?.trim();
+function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string | undefined {
+  const text = clause.site?.text?.trim();
   if (!text) {
     return undefined;
   }
   const lower = text.toLowerCase();
-  if (internal.routeCode === RouteCode["Per rectum"]) {
-    if (lower === "rectum" || lower === "rectal") {
-      return undefined;
-    }
+  if (clause.route?.code === RouteCode["Per rectum"] && (lower === "rectum" || lower === "rectal")) {
+    return undefined;
   }
   let preposition = grammar.sitePreposition;
   if (!preposition) {
@@ -536,7 +558,7 @@ function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string 
       preposition = "in";
     } else if (
       /(skin|head|temple|arm|leg|thigh|abdomen|shoulder|elbow|wrist|ankle|knee|hand|foot|cheek|forearm|back|chest|breast|axilla|armpit|groin|lip|buttock|hip|face|hair|scalp|forehead|eyelid|chin|neck)/.test(
-        lower,
+        lower
       )
     ) {
       preposition = "to";
@@ -551,151 +573,100 @@ function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string 
 function formatSiteNoun(site: string, preposition: string): string {
   const trimmed = site.trim();
   const lower = trimmed.toLowerCase();
-  const skipArticlePrefixes = [
-    "the ",
-    "both ",
-    "each ",
-    "either ",
-    "every ",
-    "all ",
-    "bilateral ",
-  ];
+  const skipArticlePrefixes = ["the ", "both ", "each ", "either ", "every ", "all ", "bilateral "];
   for (const prefix of skipArticlePrefixes) {
     if (lower.startsWith(prefix)) {
       return trimmed;
     }
   }
-  const needsArticle = /^(left|right|upper|lower|inner|outer|mid|middle|posterior|anterior|proximal|distal|medial|lateral|dorsal|ventral)\b/.test(
-    lower,
-  );
+  const needsArticle =
+    /^(left|right|upper|lower|inner|outer|mid|middle|posterior|anterior|proximal|distal|medial|lateral|dorsal|ventral)\b/.test(
+      lower
+    );
   if (needsArticle || preposition === "at") {
-    return `the ${trimmed}`;
-  }
-  if (
-    /(eye|nostril|ear|arm|leg|thigh|abdomen|hand|foot|cheek|skin|back)/.test(lower)
-  ) {
     return `the ${trimmed}`;
   }
   return `the ${trimmed}`;
 }
 
-function describeDayOfWeek(internal: ParsedSigInternal): string | undefined {
-  if (!internal.dayOfWeek.length) {
+function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const dayOfWeek = schedule?.dayOfWeek ?? [];
+  if (!dayOfWeek.length) {
     return undefined;
   }
-  const days = internal.dayOfWeek.map((d) => DAY_NAMES[d] ?? d);
-  if (!days.length) {
-    return undefined;
+  const days: string[] = [];
+  for (const day of dayOfWeek) {
+    days.push(DAY_NAMES[day] ?? day);
   }
-  return `on ${joinWithAnd(days)}`;
+  return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
 
-export function formatInternal(
-  internal: ParsedSigInternal,
-  style: "short" | "long",
-  localization?: SigLocalization,
-  options?: TimingSummaryOptions
-): string {
-  const defaults = {
-    short: formatShort(internal),
-    long: formatLong(internal, options)
-  } as const;
-
-  if (!localization) {
-    return defaults[style];
-  }
-
-  const formatDefault = (target: "short" | "long") => defaults[target];
-
-  if (style === "short" && localization.formatShort) {
-    const context: SigShortContext = {
-      style: "short",
-      internal,
-      defaultText: defaults.short,
-      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
-      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
-      formatDefault
-    };
-    return localization.formatShort(context);
-  }
-
-  if (style === "long" && localization.formatLong) {
-    const context: SigLongContext = {
-      style: "long",
-      internal,
-      defaultText: defaults.long,
-      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
-      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
-      formatDefault
-    };
-    return localization.formatLong(context);
-  }
-
-  return defaults[style];
-}
-
-function formatShort(internal: ParsedSigInternal): string {
+function formatShort(clause: CanonicalSigClause): string {
+  const schedule = scheduleOf(clause);
   const parts: string[] = [];
-  const dosePart = formatDoseShort(internal);
+  const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
     parts.push(dosePart);
   }
-  if (internal.routeCode) {
-    const short = ROUTE_SHORT[internal.routeCode];
+  const routeCode = clause.route?.code;
+  const routeText = clause.route?.text;
+  if (routeCode) {
+    const short = ROUTE_SHORT[routeCode];
     if (short) {
       parts.push(short);
-    } else if (internal.routeText) {
-      parts.push(internal.routeText);
+    } else if (routeText) {
+      parts.push(routeText);
     }
-  } else if (internal.routeText) {
-    parts.push(internal.routeText);
+  } else if (routeText) {
+    parts.push(routeText);
   }
-  if (internal.timingCode) {
-    parts.push(internal.timingCode);
+  if (schedule.timingCode) {
+    parts.push(schedule.timingCode);
   } else if (
-    internal.frequency !== undefined &&
-    internal.frequencyMax !== undefined &&
-    internal.periodUnit === FhirPeriodUnit.Day &&
-    (!internal.period || internal.period === 1)
+    schedule.frequency !== undefined &&
+    schedule.frequencyMax !== undefined &&
+    schedule.periodUnit === FhirPeriodUnit.Day &&
+    (!schedule.period || schedule.period === 1)
   ) {
-    parts.push(
-      `${stripTrailingZero(internal.frequency)}-${stripTrailingZero(
-        internal.frequencyMax
-      )}x/d`
-    );
+    parts.push(`${stripTrailingZero(schedule.frequency)}-${stripTrailingZero(schedule.frequencyMax)}x/d`);
   } else if (
-    internal.frequency &&
-    internal.periodUnit === FhirPeriodUnit.Day &&
-    (!internal.period || internal.period === 1)
+    schedule.frequency &&
+    schedule.periodUnit === FhirPeriodUnit.Day &&
+    (!schedule.period || schedule.period === 1)
   ) {
-    parts.push(`${stripTrailingZero(internal.frequency)}x/d`);
-  } else if (internal.period && internal.periodUnit) {
-    const base = stripTrailingZero(internal.period);
+    parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
+  } else if (schedule.period && schedule.periodUnit) {
+    const base = stripTrailingZero(schedule.period);
     const qualifier =
-      internal.periodMax && internal.periodMax !== internal.period
-        ? `${base}-${stripTrailingZero(internal.periodMax)}`
+      schedule.periodMax && schedule.periodMax !== schedule.period
+        ? `${base}-${stripTrailingZero(schedule.periodMax)}`
         : base;
-    parts.push(`Q${qualifier}${internal.periodUnit.toUpperCase()}`);
+    parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
-  if (internal.when.length) {
-    parts.push(internal.when.join(" "));
+  if (schedule.when?.length) {
+    parts.push(schedule.when.join(" "));
   }
-  if (internal.dayOfWeek.length) {
-    parts.push(
-      internal.dayOfWeek
-        .map((d) => d.charAt(0).toUpperCase() + d.slice(1, 3))
-        .join(",")
-    );
+  if (schedule.dayOfWeek?.length) {
+    const days: string[] = [];
+    for (const day of schedule.dayOfWeek) {
+      days.push(day.charAt(0).toUpperCase() + day.slice(1, 3));
+    }
+    parts.push(days.join(","));
   }
-  if (internal.timeOfDay?.length) {
-    parts.push(internal.timeOfDay.map(t => t.slice(0, 5)).join(","));
+  if (schedule.timeOfDay?.length) {
+    const times: string[] = [];
+    for (const time of schedule.timeOfDay) {
+      times.push(time.slice(0, 5));
+    }
+    parts.push(times.join(","));
   }
-  if (internal.count !== undefined) {
-    parts.push(`x${stripTrailingZero(internal.count)}`);
+  if (schedule.count !== undefined) {
+    parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (internal.asNeeded) {
-    if (internal.asNeededReason) {
-      parts.push(`PRN ${internal.asNeededReason}`);
+  if (clause.prn?.enabled) {
+    const reason = clause.prn.reason?.text ?? clause.prn.reason?.coding?.display;
+    if (reason) {
+      parts.push(`PRN ${reason}`);
     } else {
       parts.push("PRN");
     }
@@ -703,43 +674,42 @@ function formatShort(internal: ParsedSigInternal): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function formatLong(
-  internal: ParsedSigInternal,
-  options?: TimingSummaryOptions
-): string {
-  const grammar = resolveRouteGrammar(internal);
-  const dosePart = formatDoseLong(internal) ?? "the medication";
-  const sitePart = formatSite(internal, grammar);
-  const routePart = buildRoutePhrase(internal, grammar, Boolean(sitePart));
+function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
+  const schedule = scheduleOf(clause);
+  const grammar = resolveRouteGrammar(clause);
+  const dosePart = formatDoseLong(clause.dose) ?? "the medication";
+  const sitePart = formatSite(clause, grammar);
+  const routePart = buildRoutePhrase(clause, grammar, Boolean(sitePart));
   const frequencyPart =
-    describeFrequency(internal) ??
-    describeFrequencyCount(inferDailyOccurrenceCount(internal, options));
-  const eventParts = collectWhenPhrases(internal, options);
-  if (internal.timeOfDay?.length) {
+    describeFrequency(schedule) ??
+    describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
+  const eventParts = collectWhenPhrases(schedule, options);
+  if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
-    for (const time of internal.timeOfDay) {
+    for (const time of schedule.timeOfDay) {
       const parts = time.split(":");
-      const h = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10);
-      const isAm = h < 12;
-      const displayH = h % 12 || 12;
-      const displayM = m < 10 ? `0${m}` : `${m}`;
-      timeStrings.push(`${displayH}:${displayM}${isAm ? " am" : " pm"}`);
+      const hours = Number(parts[0]);
+      const minutes = Number(parts[1]);
+      if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+        continue;
+      }
+      const isAm = hours < 12;
+      const displayHours = hours % 12 || 12;
+      const displayMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`;
+      timeStrings.push(`${displayHours}:${displayMinutes}${isAm ? " am" : " pm"}`);
     }
-    if (timeStrings.length > 0) {
+    if (timeStrings.length) {
       eventParts.push(`at ${timeStrings.join(", ")}`);
     }
   }
   const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
-  const dayPart = describeDayOfWeek(internal);
-  const countPart = internal.count
-    ? `for ${stripTrailingZero(internal.count)} ${internal.count === 1 ? "dose" : "doses"}`
-    : undefined;
-  const asNeededPart = internal.asNeeded
-    ? internal.asNeededReason
-      ? `as needed for ${internal.asNeededReason}`
-      : "as needed"
-    : undefined;
+  const dayPart = describeDayOfWeek(schedule);
+  const countPart =
+    schedule.count !== undefined
+      ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
+      : undefined;
+  const reason = clause.prn?.reason?.text ?? clause.prn?.reason?.coding?.display;
+  const asNeededPart = clause.prn?.enabled ? (reason ? `as needed for ${reason}` : "as needed") : undefined;
 
   const segments: string[] = [dosePart];
   if (routePart) {
@@ -764,34 +734,105 @@ function formatLong(
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const instructionText = formatAdditionalInstructions(clause);
   if (!body) {
-    const instructionText = formatAdditionalInstructions(internal);
     if (!instructionText) {
       return `${grammar.verb}.`;
     }
     return `${grammar.verb}. ${instructionText}`.trim();
   }
-  const instructionText = formatAdditionalInstructions(internal);
   const baseSentence = `${grammar.verb} ${body}.`;
   return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
 }
 
-function formatAdditionalInstructions(internal: ParsedSigInternal): string | undefined {
-  if (!internal.additionalInstructions?.length) {
+function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
+  const instructions = clause.additionalInstructions ?? [];
+  if (!instructions.length) {
     return undefined;
   }
-  const phrases = internal.additionalInstructions
-    .map((instruction) => instruction.text || instruction.coding?.display)
-    .filter((text): text is string => Boolean(text))
-    .map((text) => text.trim())
-    .filter((text) => text.length > 0);
+  const phrases: string[] = [];
+  for (const instruction of instructions) {
+    const text = instruction.text ?? instruction.coding?.display;
+    if (!text) {
+      continue;
+    }
+    const trimmed = text.trim();
+    if (trimmed) {
+      phrases.push(trimmed);
+    }
+  }
   if (!phrases.length) {
     return undefined;
   }
-  return phrases
-    .map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`))
-    .join(" ")
-    .trim();
+  return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
+}
+
+function firstCanonicalClause(internal: ParsedSigInternal): CanonicalSigClause {
+  const clauses = buildCanonicalSigClauses(internal);
+  if (clauses.length > 0) {
+    return clauses[0];
+  }
+  return {
+    kind: "administration",
+    rawText: internal.input,
+    raw: { start: 0, end: internal.input.length, text: internal.input },
+    leftovers: [],
+    evidence: [],
+    confidence: 0
+  };
+}
+
+export function formatCanonicalClause(
+  clause: CanonicalSigClause,
+  style: "short" | "long",
+  localization?: SigLocalization,
+  options?: TimingSummaryOptions
+): string {
+  const defaults = {
+    short: formatShort(clause),
+    long: formatLong(clause, options)
+  } as const;
+
+  if (!localization) {
+    return defaults[style];
+  }
+
+  const formatDefault = (target: "short" | "long") => defaults[target];
+
+  if (style === "short" && localization.formatShort) {
+    const context: SigShortContext = {
+      style: "short",
+      clause,
+      defaultText: defaults.short,
+      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
+      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
+      formatDefault
+    };
+    return localization.formatShort(context);
+  }
+
+  if (style === "long" && localization.formatLong) {
+    const context: SigLongContext = {
+      style: "long",
+      clause,
+      defaultText: defaults.long,
+      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
+      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
+      formatDefault
+    };
+    return localization.formatLong(context);
+  }
+
+  return defaults[style];
+}
+
+export function formatInternal(
+  internal: ParsedSigInternal,
+  style: "short" | "long",
+  localization?: SigLocalization,
+  options?: TimingSummaryOptions
+): string {
+  return formatCanonicalClause(firstCanonicalClause(internal), style, localization, options);
 }
 
 function stripTrailingZero(value: number): string {

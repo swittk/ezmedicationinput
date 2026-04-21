@@ -331,3 +331,36 @@ Desired behavior:
    - explicit-site capture and residual site-group selection now live outside `parser.ts`
    - route-hint inference from site text now also lives in the site module
    - `parser.ts` still owns mutation/application for compatibility, but the site detection logic is no longer buried inline in the main pass
+
+7. Tightened the site slice one step closer to native clause assembly.
+   - the site module now returns structured `SitePhraseCandidate` objects instead of forcing parser call sites to rebuild token-index arrays ad hoc
+   - compatibility parser now applies site candidates, rather than treating the site module as raw token-index plumbing
+
+### 2026-04-22 Canonical Cutover
+
+1. Public parse outputs are no longer built from `ParsedSigInternal`.
+   - `parseSig()` / `parseSigAsync()` now still use the compatibility parser for token consumption and lookup collection, but `fhir`, `shortText`, `longText`, and `meta.normalized` are derived from canonical clauses.
+   - `buildParseResult()` now computes canonical clauses first, then formats and lowers from the primary canonical clause.
+
+2. Canonical clauses are now the public formatting source of truth.
+   - `src/format.ts` was rewritten so `formatCanonicalClause()` is the real formatter.
+   - `formatInternal()` now only adapts internal parser state into the first canonical clause for compatibility.
+   - localization context now exposes `clause`, not `internal`.
+
+3. Canonical clauses are now the public FHIR lowering source of truth.
+   - `src/fhir.ts` now exposes `canonicalToFhir()` and `canonicalFromFhir()`.
+   - `toFhir()` is now only a compatibility adapter that canonicalizes first and then lowers.
+   - `formatSig()` / `fromFhirDosage()` now round-trip through canonical clauses instead of `internalFromFhir()`.
+
+4. Removed the wrong-way bridge.
+   - deleted the unused canonical-to-internal lowering bridge from `src/ir.ts`
+   - this keeps the migration moving toward deleting `ParsedSigInternal`, not preserving it
+
+5. Hard cleanup rules enforced in the touched cutover path.
+   - removed the remaining touched-file `as any` cast from `src/index.ts`
+   - no `as any` / `as unknown` / `as never` remain in the rewritten public path modules
+
+6. Current boundary after the cutover.
+   - `ParsedSigInternal` still exists inside `src/parser.ts`, carry-forward handling, and internal compatibility helpers
+   - public parse semantics now flow through canonical clauses
+   - next real deletion target is shrinking or replacing `ParsedSigInternal` inside the parser itself, not in public output assembly

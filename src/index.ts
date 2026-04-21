@@ -1,5 +1,5 @@
-import { formatInternal } from "./format";
-import { internalFromFhir, toFhir } from "./fhir";
+import { formatCanonicalClause } from "./format";
+import { canonicalFromFhir, canonicalToFhir } from "./fhir";
 import { buildCanonicalSigClauses, shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization } from "./i18n";
 import { ParsedSigInternal } from "./internal-types";
@@ -14,6 +14,7 @@ import {
 } from "./parser";
 import { splitSigSegments } from "./segment";
 import {
+  BodySiteCode,
   FhirDosage,
   FhirTimingRepeat,
   FormatBatchOptions,
@@ -25,10 +26,9 @@ import {
   ParseBatchSegmentMeta,
   ParseOptions,
   ParseResult,
+  CanonicalSigClause,
   TextRange
 } from "./types";
-
-export { parseInternal } from "./parser";
 export { suggestSig } from "./suggest";
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
@@ -324,9 +324,9 @@ function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
  * @param values Input values.
  * @returns Deduplicated values in insertion order.
  */
-function uniqueStrings(values: string[]): string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
+function uniqueStrings<T extends string>(values: T[]): T[] {
+  const seen = new Set<T>();
+  const output: T[] = [];
   for (const value of values) {
     if (!seen.has(value)) {
       seen.add(value);
@@ -352,7 +352,7 @@ function mergeParseResults(base: ParseResult, next: ParseResult, options?: Parse
   const mergedRepeat: FhirTimingRepeat = {
     ...baseRepeat,
     ...(nextRepeat.dayOfWeek ? { dayOfWeek: nextRepeat.dayOfWeek } : {}),
-    ...(mergedWhen.length ? { when: mergedWhen as any } : {}),
+    ...(mergedWhen.length ? { when: mergedWhen } : {}),
     ...(mergedTimeOfDay.length ? { timeOfDay: mergedTimeOfDay } : {})
   };
   const mergedFhir: FhirDosage = {
@@ -543,9 +543,9 @@ export function formatSig(
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
-  const internal = internalFromFhir(dosage);
+  const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  return formatInternal(internal, style, localization, options);
+  return formatCanonicalClause(clause, style, localization, options);
 }
 
 export function formatSigBatch(
@@ -579,63 +579,105 @@ export function fromFhirDosage(
   dosage: FhirDosage,
   options?: FormatOptions
 ): ParseResult {
-  const internal = internalFromFhir(dosage);
+  const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatInternal(internal, "short", localization, options);
-  const computedLong = formatInternal(internal, "long", localization, options);
+  const shortText = formatCanonicalClause(clause, "short", localization, options);
+  const computedLong = formatCanonicalClause(clause, "long", localization, options);
   const longText = computedLong || dosage.text || "";
   dosage.text = longText;
   return {
     fhir: dosage,
     shortText,
     longText,
-    warnings: [],
+    warnings: clause.warnings ?? [],
     meta: {
       consumedTokens: [],
-      normalized: {
-        route: internal.routeCode,
-        unit: internal.unit,
-        site: internal.siteText || internal.siteCoding?.code
-          ? {
-            text: internal.siteText,
-            coding: internal.siteCoding?.code
-              ? {
-                code: internal.siteCoding.code,
-                display: internal.siteCoding.display,
-                system: internal.siteCoding.system
-              }
-              : undefined
-          }
-          : undefined,
-        prnReason: internal.asNeededReason || internal.asNeededReasonCoding?.code
-          ? {
-            text: internal.asNeededReason,
-            coding: internal.asNeededReasonCoding?.code
-              ? {
-                code: internal.asNeededReasonCoding.code,
-                display: internal.asNeededReasonCoding.display,
-                system: internal.asNeededReasonCoding.system
-              }
-              : undefined
-          }
-          : undefined,
-        additionalInstructions: internal.additionalInstructions?.length
-          ? internal.additionalInstructions.map((instruction) => ({
-            text: instruction.text,
-            coding: instruction.coding?.code
-              ? {
-                code: instruction.coding.code,
-                display: instruction.coding.display,
-                system: instruction.coding.system
-              }
-              : undefined
-          }))
-          : undefined
-      },
+      normalized: buildNormalizedMetaFromClause(clause),
       canonical: {
-        clauses: buildCanonicalSigClauses(internal)
+        clauses: [clause]
       }
     }
+  };
+}
+
+function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
+  return {
+    kind: "administration",
+    rawText,
+    raw: {
+      start: 0,
+      end: rawText.length,
+      text: rawText
+    },
+    leftovers: [],
+    evidence: [],
+    confidence: 1
+  };
+}
+
+function getPrimaryClause(
+  clauses: CanonicalSigClause[],
+  rawText: string
+): CanonicalSigClause {
+  return clauses[0] ?? createEmptyCanonicalClause(rawText);
+}
+
+function cloneCoding(
+  coding?: { code?: string; display?: string; system?: string }
+): { code?: string; display?: string; system?: string } | undefined {
+  if (!coding?.code && !coding?.display && !coding?.system) {
+    return undefined;
+  }
+  return {
+    code: coding.code,
+    display: coding.display,
+    system: coding.system
+  };
+}
+
+function cloneBodySiteCoding(coding?: {
+  code?: string;
+  display?: string;
+  system?: string;
+}): BodySiteCode | undefined {
+  if (!coding?.code) {
+    return undefined;
+  }
+  return {
+    code: coding.code,
+    display: coding.display,
+    system: coding.system
+  };
+}
+
+function buildNormalizedMetaFromClause(
+  clause: CanonicalSigClause
+): ParseResult["meta"]["normalized"] {
+  const additionalInstructions = clause.additionalInstructions?.length
+    ? clause.additionalInstructions.map((instruction) => ({
+      text: instruction.text,
+      coding: cloneCoding(instruction.coding)
+    }))
+    : undefined;
+
+  return {
+    route: clause.route?.code,
+    unit: clause.dose?.unit,
+    site:
+      clause.site?.text || clause.site?.coding?.code
+        ? {
+          text: clause.site?.text,
+          coding: cloneBodySiteCoding(clause.site?.coding)
+        }
+        : undefined,
+    prnReason:
+      clause.prn?.reason?.text || clause.prn?.reason?.coding?.code
+        ? {
+          text: clause.prn?.reason?.text,
+          coding: cloneCoding(clause.prn?.reason?.coding)
+        }
+        : undefined,
+    additionalInstructions
   };
 }
 
@@ -643,79 +685,62 @@ function buildParseResult(
   internal: ReturnType<typeof parseInternal>,
   options?: ParseOptions
 ): ParseResult {
+  const canonicalClauses = buildCanonicalSigClauses(internal);
+  const clause = getPrimaryClause(canonicalClauses, internal.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatInternal(internal, "short", localization, options);
-  const longText = formatInternal(internal, "long", localization, options);
-  const fhir = toFhir(internal);
-  if (longText) {
-    fhir.text = longText;
+  const shortText = formatCanonicalClause(clause, "short", localization, options);
+  const longText = formatCanonicalClause(clause, "long", localization, options);
+  const fhir = canonicalToFhir(clause, longText);
+
+  const consumedTokens: string[] = [];
+  const leftoverParts: string[] = [];
+  for (const token of internal.tokens) {
+    if (internal.consumed.has(token.index)) {
+      consumedTokens.push(token.original);
+    } else {
+      leftoverParts.push(token.original);
+    }
   }
 
-  const consumedTokens = internal.tokens
-    .filter((token) => internal.consumed.has(token.index))
-    .map((token) => token.original);
-  const leftoverTokens = internal.tokens.filter(
-    (token) => !internal.consumed.has(token.index)
-  );
-
-  const siteCoding = internal.siteCoding?.code
-    ? {
-      code: internal.siteCoding.code,
-      display: internal.siteCoding.display,
-      system: internal.siteCoding.system
-    }
-    : undefined;
-
-  const prnReasonCoding = internal.asNeededReasonCoding?.code
-    ? {
-      code: internal.asNeededReasonCoding.code,
-      display: internal.asNeededReasonCoding.display,
-      system: internal.asNeededReasonCoding.system
-    }
-    : undefined;
-
-  const additionalInstructions = internal.additionalInstructions?.length
-    ? internal.additionalInstructions.map((instruction) => ({
-      text: instruction.text,
-      coding: instruction.coding?.code
-        ? {
-          code: instruction.coding.code,
-          display: instruction.coding.display,
-          system: instruction.coding.system
-        }
-        : undefined
-    }))
-    : undefined;
-
-  const siteLookups = internal.siteLookups.length
-    ? internal.siteLookups.map((entry) => ({
-      request: entry.request,
-      suggestions: entry.suggestions.map((suggestion) => ({
-        coding: {
-          code: suggestion.coding.code,
-          display: suggestion.coding.display,
-          system: suggestion.coding.system
-        },
-        text: suggestion.text
-      }))
-    }))
-    : undefined;
-
-  const prnReasonLookups = internal.prnReasonLookups.length
-    ? internal.prnReasonLookups.map((entry) => ({
-      request: entry.request,
-      suggestions: entry.suggestions.map((suggestion) => ({
-        coding: suggestion.coding
-          ? {
+  const siteLookups: ParseResult["meta"]["siteLookups"] =
+    internal.siteLookups.length ? [] : undefined;
+  if (siteLookups) {
+    for (const entry of internal.siteLookups) {
+      const suggestions: Array<{ coding: BodySiteCode; text?: string }> = [];
+      for (const suggestion of entry.suggestions) {
+        suggestions.push({
+          coding: {
             code: suggestion.coding.code,
             display: suggestion.coding.display,
             system: suggestion.coding.system
-          }
-          : undefined,
-        text: suggestion.text
-      }))
-    }))
-    : undefined;
+          },
+          text: suggestion.text
+        });
+      }
+      siteLookups.push({
+        request: entry.request,
+        suggestions
+      });
+    }
+  }
+
+  const prnReasonLookups: ParseResult["meta"]["prnReasonLookups"] =
+    internal.prnReasonLookups.length ? [] : undefined;
+  if (prnReasonLookups) {
+    for (const entry of internal.prnReasonLookups) {
+      const suggestions: Array<{ coding?: { code?: string; display?: string; system?: string }; text?: string }> = [];
+      for (const suggestion of entry.suggestions) {
+        suggestions.push({
+          coding: cloneCoding(suggestion.coding),
+          text: suggestion.text
+        });
+      }
+      prnReasonLookups.push({
+        request: entry.request,
+        suggestions
+      });
+    }
+  }
 
   return {
     fhir,
@@ -724,30 +749,10 @@ function buildParseResult(
     warnings: internal.warnings,
     meta: {
       consumedTokens,
-      leftoverText: leftoverTokens.length
-        ? leftoverTokens.map((t) => t.original).join(" ")
-        : undefined,
-      normalized: {
-        route: internal.routeCode,
-        unit: internal.unit,
-        site:
-          internal.siteText || siteCoding
-            ? {
-              text: internal.siteText,
-              coding: siteCoding
-            }
-            : undefined,
-        prnReason:
-          internal.asNeededReason || prnReasonCoding
-            ? {
-              text: internal.asNeededReason,
-              coding: prnReasonCoding
-            }
-            : undefined,
-        additionalInstructions
-      },
+      leftoverText: leftoverParts.length ? leftoverParts.join(" ") : undefined,
+      normalized: buildNormalizedMetaFromClause(clause),
       canonical: {
-        clauses: buildCanonicalSigClauses(internal)
+        clauses: canonicalClauses
       },
       siteLookups,
       prnReasonLookups

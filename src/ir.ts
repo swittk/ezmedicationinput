@@ -2,6 +2,7 @@ import { DEFAULT_ROUTE_SYNONYMS } from "./maps";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
   CanonicalEvidence,
+  CanonicalAdditionalInstructionExpr,
   CanonicalSigClause,
   CanonicalSourceSpan,
   FhirCoding,
@@ -41,6 +42,15 @@ function cloneCoding(coding?: FhirCoding): FhirCoding | undefined {
     code: coding.code,
     display: coding.display,
     system: coding.system
+  };
+}
+
+function cloneAdditionalInstruction(
+  instruction: CanonicalAdditionalInstructionExpr
+): { text?: string; coding?: FhirCoding } {
+  return {
+    text: instruction.text,
+    coding: cloneCoding(instruction.coding)
   };
 }
 
@@ -335,7 +345,7 @@ export function buildCanonicalSigClauses(
     clause.evidence.push(...evidence);
   }
 
-  if (internal.additionalInstructions.length) {
+  if (internal.additionalInstructions?.length) {
     clause.additionalInstructions = internal.additionalInstructions.map((instruction) => ({
       text: instruction.text,
       coding: cloneCoding(instruction.coding),

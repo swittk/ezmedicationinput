@@ -1,4 +1,5 @@
-import { formatInternal } from "./format";
+import { formatCanonicalClause } from "./format";
+import { buildCanonicalSigClauses } from "./ir";
 import { ParsedSigInternal } from "./internal-types";
 import {
   ROUTE_BY_SNOMED,
@@ -8,10 +9,12 @@ import {
   findPrnReasonDefinitionByCoding
 } from "./maps";
 import {
+  CanonicalSigClause,
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
   FhirTimingRepeat,
+  RouteCode,
   SNOMEDCTRouteCodes
 } from "./types";
 import { objectValues } from "./utils/object";
@@ -19,42 +22,61 @@ import { arrayIncludes } from "./utils/array";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
-export function toFhir(internal: ParsedSigInternal): FhirDosage {
+function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
+  return {
+    kind: "administration",
+    rawText,
+    raw: {
+      start: 0,
+      end: rawText.length,
+      text: rawText
+    },
+    leftovers: [],
+    evidence: [],
+    confidence: 1
+  };
+}
+
+export function canonicalToFhir(
+  clause: CanonicalSigClause,
+  textOverride?: string
+): FhirDosage {
   const dosage: FhirDosage = {};
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
+  const schedule = clause.schedule;
 
-  if (internal.frequency !== undefined) {
-    repeat.frequency = internal.frequency;
+  if (schedule?.frequency !== undefined) {
+    repeat.frequency = schedule.frequency;
     hasRepeat = true;
   }
-  if (internal.count !== undefined) {
-    repeat.count = internal.count;
+  if (schedule?.count !== undefined) {
+    repeat.count = schedule.count;
     hasRepeat = true;
   }
-  if (internal.frequencyMax !== undefined) {
-    repeat.frequencyMax = internal.frequencyMax;
+  if (schedule?.frequencyMax !== undefined) {
+    repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;
   }
-  if (internal.period !== undefined && internal.periodUnit) {
-    repeat.period = internal.period;
-    repeat.periodUnit = internal.periodUnit;
+  if (schedule?.period !== undefined && schedule.periodUnit) {
+    repeat.period = schedule.period;
+    repeat.periodUnit = schedule.periodUnit;
     hasRepeat = true;
   }
-  if (internal.periodMax !== undefined) {
-    repeat.periodMax = internal.periodMax;
+  if (schedule?.periodMax !== undefined) {
+    repeat.periodMax = schedule.periodMax;
     hasRepeat = true;
   }
-  if (internal.dayOfWeek.length) {
-    repeat.dayOfWeek = [...internal.dayOfWeek];
+  if (schedule?.dayOfWeek?.length) {
+    repeat.dayOfWeek = [...schedule.dayOfWeek];
     hasRepeat = true;
   }
-  if (internal.when.length) {
-    repeat.when = [...internal.when];
+  if (schedule?.when?.length) {
+    repeat.when = [...schedule.when];
     hasRepeat = true;
   }
-  if (internal.timeOfDay?.length) {
-    repeat.timeOfDay = [...internal.timeOfDay];
+  if (schedule?.timeOfDay?.length) {
+    repeat.timeOfDay = [...schedule.timeOfDay];
     hasRepeat = true;
   }
 
@@ -64,49 +86,40 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     dosage.timing = {};
   }
 
-  if (internal.timingCode) {
+  if (schedule?.timingCode) {
     dosage.timing = dosage.timing ?? {};
     dosage.timing.code = {
-      coding: [{ code: internal.timingCode }],
-      text: internal.timingCode
+      coding: [{ code: schedule.timingCode }],
+      text: schedule.timingCode
     };
   }
 
-  if (internal.doseRange) {
+  if (clause.dose?.range) {
     dosage.doseAndRate = [
       {
         doseRange: {
-          low:
-            internal.doseRange.low !== undefined
-              ? { value: internal.doseRange.low, unit: internal.unit }
-              : undefined,
-          high:
-            internal.doseRange.high !== undefined
-              ? { value: internal.doseRange.high, unit: internal.unit }
-              : undefined
+          low: { value: clause.dose.range.low, unit: clause.dose.unit },
+          high: { value: clause.dose.range.high, unit: clause.dose.unit }
         }
       }
     ];
-  } else if (internal.dose !== undefined) {
+  } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
         doseQuantity: {
-          value: internal.dose,
-          unit: internal.unit
+          value: clause.dose.value,
+          unit: clause.dose.unit
         }
       }
     ];
   }
 
-  // Emit SNOMED-coded routes whenever we have parsed or inferred route data.
-  if (internal.routeCode || internal.routeText) {
-    const coding = internal.routeCode ? ROUTE_SNOMED[internal.routeCode] : undefined;
-    const text =
-      internal.routeText ??
-      (internal.routeCode ? ROUTE_TEXT[internal.routeCode] : undefined);
+  if (clause.route?.code || clause.route?.text) {
+    const routeCode = clause.route?.code;
+    const coding = routeCode ? ROUTE_SNOMED[routeCode] : undefined;
+    const text = clause.route?.text ?? (routeCode ? ROUTE_TEXT[routeCode] : undefined);
 
     if (coding) {
-      // Provide both text and coding so human-readable and coded systems align.
       dosage.route = {
         text,
         coding: [
@@ -122,50 +135,53 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     }
   }
 
-  if (internal.siteText || internal.siteCoding?.code) {
-    const coding = internal.siteCoding?.code
+  if (clause.site?.text || clause.site?.coding?.code) {
+    const coding = clause.site?.coding?.code
       ? [
         {
-          system: internal.siteCoding.system ?? SNOMED_SYSTEM,
-          code: internal.siteCoding.code,
-          display: internal.siteCoding.display
+          system: clause.site.coding.system ?? SNOMED_SYSTEM,
+          code: clause.site.coding.code,
+          display: clause.site.coding.display
         }
       ]
       : undefined;
     dosage.site = {
-      text: internal.siteText,
+      text: clause.site?.text,
       coding
     };
   }
 
-  if (internal.additionalInstructions?.length) {
-    dosage.additionalInstruction = internal.additionalInstructions.map((instruction) => ({
-      text: instruction.text,
-      coding: instruction.coding?.code
-        ? [
-          {
-            system: instruction.coding.system ?? SNOMED_SYSTEM,
-            code: instruction.coding.code,
-            display: instruction.coding.display
-          }
-        ]
-        : undefined
-    }));
+  if (clause.additionalInstructions?.length) {
+    dosage.additionalInstruction = [];
+    for (const instruction of clause.additionalInstructions) {
+      dosage.additionalInstruction.push({
+        text: instruction.text,
+        coding: instruction.coding?.code
+          ? [
+            {
+              system: instruction.coding.system ?? SNOMED_SYSTEM,
+              code: instruction.coding.code,
+              display: instruction.coding.display
+            }
+          ]
+          : undefined
+      });
+    }
   }
 
-  if (internal.asNeeded) {
+  if (clause.prn?.enabled) {
     dosage.asNeededBoolean = true;
-    if (internal.asNeededReason || internal.asNeededReasonCoding?.code) {
+    if (clause.prn.reason?.text || clause.prn.reason?.coding?.code) {
       const concept: FhirCodeableConcept = {};
-      if (internal.asNeededReason) {
-        concept.text = internal.asNeededReason;
+      if (clause.prn.reason?.text) {
+        concept.text = clause.prn.reason.text;
       }
-      if (internal.asNeededReasonCoding?.code) {
+      if (clause.prn.reason?.coding?.code) {
         concept.coding = [
           {
-            system: internal.asNeededReasonCoding.system ?? SNOMED_SYSTEM,
-            code: internal.asNeededReasonCoding.code,
-            display: internal.asNeededReasonCoding.display
+            system: clause.prn.reason.coding.system ?? SNOMED_SYSTEM,
+            code: clause.prn.reason.coding.code,
+            display: clause.prn.reason.coding.display
           }
         ];
       }
@@ -173,12 +189,133 @@ export function toFhir(internal: ParsedSigInternal): FhirDosage {
     }
   }
 
-  const longText = formatInternal(internal, "long");
+  const longText = textOverride ?? formatCanonicalClause(clause, "long");
   if (longText) {
     dosage.text = longText;
   }
 
   return dosage;
+}
+
+export function toFhir(internal: ParsedSigInternal): FhirDosage {
+  const clauses = buildCanonicalSigClauses(internal);
+  const clause = clauses[0] ?? createEmptyCanonicalClause(internal.input);
+  return canonicalToFhir(clause);
+}
+
+export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
+  const rawText = dosage.text ?? "";
+  const clause = createEmptyCanonicalClause(rawText);
+  let routeCode: RouteCode | undefined;
+
+  const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
+  if (routeCoding?.code) {
+    routeCode = ROUTE_BY_SNOMED[routeCoding.code as SNOMEDCTRouteCodes];
+  }
+  if (routeCode || dosage.route?.text) {
+    clause.route = {
+      code: routeCode,
+      text: dosage.route?.text ?? (routeCode ? ROUTE_TEXT[routeCode] : undefined)
+    };
+  }
+
+  const siteCoding = dosage.site?.coding?.find((code) => code.system === SNOMED_SYSTEM);
+  if (dosage.site?.text || siteCoding?.code) {
+    clause.site = {
+      text: dosage.site?.text,
+      coding: siteCoding?.code
+        ? {
+          code: siteCoding.code,
+          display: siteCoding.display,
+          system: siteCoding.system
+        }
+        : undefined,
+      source: "text"
+    };
+  }
+
+  const repeat = dosage.timing?.repeat;
+  if (
+    dosage.timing?.code?.coding?.[0]?.code ||
+    repeat?.count !== undefined ||
+    repeat?.frequency !== undefined ||
+    repeat?.frequencyMax !== undefined ||
+    repeat?.period !== undefined ||
+    repeat?.periodMax !== undefined ||
+    repeat?.periodUnit ||
+    repeat?.dayOfWeek?.length ||
+    repeat?.when?.length ||
+    repeat?.timeOfDay?.length
+  ) {
+    clause.schedule = {
+      timingCode: dosage.timing?.code?.coding?.[0]?.code,
+      count: repeat?.count,
+      frequency: repeat?.frequency,
+      frequencyMax: repeat?.frequencyMax,
+      period: repeat?.period,
+      periodMax: repeat?.periodMax,
+      periodUnit: repeat?.periodUnit,
+      dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
+      when: repeat?.when ? [...repeat.when] : undefined,
+      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
+    };
+  }
+
+  const doseAndRate = dosage.doseAndRate?.[0];
+  if (doseAndRate?.doseRange) {
+    const low = doseAndRate.doseRange.low?.value;
+    const high = doseAndRate.doseRange.high?.value;
+    if (low !== undefined && high !== undefined) {
+      clause.dose = {
+        range: { low, high },
+        unit: doseAndRate.doseRange.low?.unit ?? doseAndRate.doseRange.high?.unit
+      };
+    }
+  } else if (doseAndRate?.doseQuantity?.value !== undefined) {
+    clause.dose = {
+      value: doseAndRate.doseQuantity.value,
+      unit: doseAndRate.doseQuantity.unit
+    };
+  }
+
+  const reasonCoding = dosage.asNeededFor?.[0]?.coding?.find((code) => Boolean(code.code));
+  if (dosage.asNeededBoolean || dosage.asNeededFor?.[0]?.text || reasonCoding?.code) {
+    clause.prn = {
+      enabled: Boolean(dosage.asNeededBoolean || dosage.asNeededFor?.[0]?.text || reasonCoding?.code),
+      reason:
+        dosage.asNeededFor?.[0]?.text || reasonCoding?.code
+          ? {
+            text: dosage.asNeededFor?.[0]?.text,
+            coding: reasonCoding?.code
+              ? {
+                code: reasonCoding.code,
+                display: reasonCoding.display,
+                system: reasonCoding.system
+              }
+              : undefined
+          }
+          : undefined
+    };
+  }
+
+  if (dosage.additionalInstruction?.length) {
+    clause.additionalInstructions = [];
+    for (const instruction of dosage.additionalInstruction) {
+      const coding = instruction.coding?.find((code) => Boolean(code.code));
+      clause.additionalInstructions.push({
+        text: instruction.text,
+        coding: coding?.code
+          ? {
+            code: coding.code,
+            display: coding.display,
+            system: coding.system
+          }
+          : undefined
+      });
+    }
+  }
+
+  return clause;
 }
 
 export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {

@@ -1,5 +1,4 @@
-import { ParsedSigInternal } from "./internal-types";
-import { EventTiming } from "./types";
+import { EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "./types";
 
 export interface TimingSummaryOptions {
   groupMealTimingsByRelation?: boolean;
@@ -13,6 +12,18 @@ export interface MealTimingGroup {
   relation: MealRelation;
   meals: MealName[];
   codes: EventTiming[];
+}
+
+export interface TimingSummaryInput {
+  frequency?: number;
+  frequencyMax?: number;
+  period?: number;
+  periodMax?: number;
+  periodUnit?: FhirPeriodUnit;
+  timingCode?: string;
+  dayOfWeek?: FhirDayOfWeek[];
+  when?: EventTiming[];
+  timeOfDay?: string[];
 }
 
 const MEAL_TIMING_DETAILS: Partial<Record<EventTiming, { relation: MealRelation; meal: MealName }>> = {
@@ -135,31 +146,31 @@ export function getMealTimingGroup(
 }
 
 export function inferDailyOccurrenceCount(
-  internal: ParsedSigInternal,
+  input: TimingSummaryInput,
   options?: TimingSummaryOptions
 ): number | undefined {
   if (!options?.includeTimesPerDaySummary) {
     return undefined;
   }
 
-  if (internal.frequency !== undefined || internal.frequencyMax !== undefined || internal.timingCode) {
+  if (input.frequency !== undefined || input.frequencyMax !== undefined || input.timingCode) {
     return undefined;
   }
-  if (internal.period !== undefined || internal.periodMax !== undefined || internal.periodUnit !== undefined) {
+  if (input.period !== undefined || input.periodMax !== undefined || input.periodUnit !== undefined) {
     return undefined;
   }
-  if (internal.dayOfWeek.length > 0) {
+  if ((input.dayOfWeek?.length ?? 0) > 0) {
     return undefined;
   }
 
-  const uniqueWhen = uniqueValues(internal.when);
+  const uniqueWhen = uniqueValues(input.when ?? []);
   for (let i = 0; i < uniqueWhen.length; i += 1) {
     if (!INFERABLE_DAILY_EVENT_TIMINGS.has(uniqueWhen[i])) {
       return undefined;
     }
   }
 
-  const uniqueTimes = uniqueValues(internal.timeOfDay ?? []);
+  const uniqueTimes = uniqueValues(input.timeOfDay ?? []);
   const occurrences = uniqueWhen.length + uniqueTimes.length;
   if (occurrences === 0) {
     return undefined;
