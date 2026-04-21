@@ -523,7 +523,7 @@ export function formatSig(
 ): string {
   const internal = internalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  return formatInternal(internal, style, localization);
+  return formatInternal(internal, style, localization, options);
 }
 
 export function formatSigBatch(
@@ -559,8 +559,8 @@ export function fromFhirDosage(
 ): ParseResult {
   const internal = internalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatInternal(internal, "short", localization);
-  const computedLong = formatInternal(internal, "long", localization);
+  const shortText = formatInternal(internal, "short", localization, options);
+  const computedLong = formatInternal(internal, "long", localization, options);
   const longText = localization ? computedLong : dosage.text ?? computedLong;
   return {
     fhir: dosage,
@@ -618,8 +618,8 @@ function buildParseResult(
   options?: ParseOptions
 ): ParseResult {
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatInternal(internal, "short", localization);
-  const longText = formatInternal(internal, "long", localization);
+  const shortText = formatInternal(internal, "short", localization, options);
+  const longText = formatInternal(internal, "long", localization, options);
   const fhir = toFhir(internal);
   if (longText) {
     fhir.text = longText;

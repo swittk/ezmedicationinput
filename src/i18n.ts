@@ -1,10 +1,18 @@
 import { ParsedSigInternal } from "./internal-types";
 import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
+import {
+  getMealTimingGroup,
+  inferDailyOccurrenceCount,
+  type MealTimingGroup,
+  type TimingSummaryOptions
+} from "./timing-summary";
 
 export interface SigFormatContext {
   readonly style: "short" | "long";
   readonly internal: ParsedSigInternal;
   readonly defaultText: string;
+  readonly groupMealTimingsByRelation: boolean;
+  readonly includeTimesPerDaySummary: boolean;
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -116,7 +124,15 @@ function createThaiLocalization(): SigLocalization {
   return {
     locale: "th",
     formatShort: ({ internal }) => formatShortThai(internal),
-    formatLong: ({ internal }) => formatLongThai(internal)
+    formatLong: ({
+      internal,
+      groupMealTimingsByRelation,
+      includeTimesPerDaySummary
+    }) =>
+      formatLongThai(internal, {
+        groupMealTimingsByRelation,
+        includeTimesPerDaySummary
+      })
   };
 }
 
@@ -179,6 +195,13 @@ const DAY_NAMES_THAI: Record<string, string> = {
   fri: "วันศุกร์",
   sat: "วันเสาร์",
   sun: "วันอาทิตย์"
+};
+
+const TH_TIMES_PER_DAY: Record<number, string> = {
+  1: "วันละครั้ง",
+  2: "วันละ 2 ครั้ง",
+  3: "วันละ 3 ครั้ง",
+  4: "วันละ 4 ครั้ง"
 };
 
 export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
@@ -494,10 +517,10 @@ function describeFrequencyThai(internal: ParsedSigInternal): string | undefined 
     return `วันละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
   }
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
-    if (frequency === 1) return "วันละครั้ง";
-    if (frequency === 2) return "วันละ 2 ครั้ง";
-    if (frequency === 3) return "วันละ 3 ครั้ง";
-    if (frequency === 4) return "วันละ 4 ครั้ง";
+    const dailyText = TH_TIMES_PER_DAY[frequency];
+    if (dailyText) {
+      return dailyText;
+    }
     return `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
@@ -557,51 +580,136 @@ function describeFrequencyThai(internal: ParsedSigInternal): string | undefined 
   return undefined;
 }
 
-function collectWhenPhrasesThai(internal: ParsedSigInternal): string[] {
+function describeFrequencyCountThai(count: number | undefined): string | undefined {
+  if (!count || count <= 0) {
+    return undefined;
+  }
+  const dailyText = TH_TIMES_PER_DAY[count];
+  if (dailyText) {
+    return dailyText;
+  }
+  return `วันละ ${stripTrailingZero(count)} ครั้ง`;
+}
+
+function joinMealNamesThai(parts: string[]): string {
+  if (parts.length === 0) {
+    return "";
+  }
+  if (parts.length === 1) {
+    return parts[0];
+  }
+  if (parts.length === 2) {
+    return `${parts[0]} และ${parts[1]}`;
+  }
+  let text = parts[0];
+  for (let i = 1; i < parts.length - 1; i += 1) {
+    text += ` ${parts[i]}`;
+  }
+  return `${text} และ${parts[parts.length - 1]}`;
+}
+
+function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
+  const relationText = {
+    before: "ก่อนอาหาร",
+    after: "หลังอาหาร",
+    with: "พร้อมอาหาร"
+  } as const;
+  const mealText = {
+    breakfast: "เช้า",
+    lunch: "กลางวัน",
+    dinner: "เย็น"
+  } as const;
+  const meals: string[] = [];
+  for (let i = 0; i < group.meals.length; i += 1) {
+    meals.push(mealText[group.meals[i]]);
+  }
+  return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
+}
+
+function collectWhenPhrasesThai(
+  internal: ParsedSigInternal,
+  options?: TimingSummaryOptions
+): string[] {
   if (!internal.when.length) {
     return [];
   }
   const unique: EventTiming[] = [];
   const seen = new Set<EventTiming>();
+  let hasSpecificAfter = false;
+  let hasSpecificBefore = false;
+  let hasSpecificWith = false;
   for (const code of internal.when) {
     if (!seen.has(code)) {
       seen.add(code);
       unique.push(code);
+      if (
+        code === EventTiming["After Breakfast"] ||
+        code === EventTiming["After Lunch"] ||
+        code === EventTiming["After Dinner"]
+      ) {
+        hasSpecificAfter = true;
+      }
+      if (
+        code === EventTiming["Before Breakfast"] ||
+        code === EventTiming["Before Lunch"] ||
+        code === EventTiming["Before Dinner"]
+      ) {
+        hasSpecificBefore = true;
+      }
+      if (
+        code === EventTiming.Breakfast ||
+        code === EventTiming.Lunch ||
+        code === EventTiming.Dinner
+      ) {
+        hasSpecificWith = true;
+      }
     }
   }
-  const hasSpecificAfter = unique.some(
-    (code) =>
-      code === EventTiming["After Breakfast"] ||
-      code === EventTiming["After Lunch"] ||
-      code === EventTiming["After Dinner"]
-  );
-  const hasSpecificBefore = unique.some(
-    (code) =>
-      code === EventTiming["Before Breakfast"] ||
-      code === EventTiming["Before Lunch"] ||
-      code === EventTiming["Before Dinner"]
-  );
-  const hasSpecificWith = unique.some(
-    (code) =>
-      code === EventTiming.Breakfast ||
-      code === EventTiming.Lunch ||
-      code === EventTiming.Dinner
-  );
-  return unique
-    .filter((code) => {
-      if (code === EventTiming["After Meal"] && hasSpecificAfter) {
-        return false;
+  const filtered: EventTiming[] = [];
+  for (let i = 0; i < unique.length; i += 1) {
+    const code = unique[i];
+    if (code === EventTiming["After Meal"] && hasSpecificAfter) {
+      continue;
+    }
+    if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
+      continue;
+    }
+    if (code === EventTiming.Meal && hasSpecificWith) {
+      continue;
+    }
+    filtered.push(code);
+  }
+
+  const mealGroup = getMealTimingGroup(filtered, options);
+  if (mealGroup) {
+    const groupedCodes = new Set<EventTiming>(mealGroup.codes);
+    const phrases: string[] = [];
+    let insertedGroup = false;
+    for (let i = 0; i < filtered.length; i += 1) {
+      const code = filtered[i];
+      if (groupedCodes.has(code)) {
+        if (!insertedGroup) {
+          phrases.push(summarizeMealTimingGroupThai(mealGroup));
+          insertedGroup = true;
+        }
+        continue;
       }
-      if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
-        return false;
+      const text = WHEN_TEXT_THAI[code];
+      if (text) {
+        phrases.push(text);
       }
-      if (code === EventTiming.Meal && hasSpecificWith) {
-        return false;
-      }
-      return true;
-    })
-    .map((code) => WHEN_TEXT_THAI[code] ?? undefined)
-    .filter((text): text is string => Boolean(text));
+    }
+    return phrases;
+  }
+
+  const phrases: string[] = [];
+  for (let i = 0; i < filtered.length; i += 1) {
+    const text = WHEN_TEXT_THAI[filtered[i]];
+    if (text) {
+      phrases.push(text);
+    }
+  }
+  return phrases;
 }
 
 function joinWithAndThai(parts: string[]): string {
@@ -801,13 +909,18 @@ function formatShortThai(internal: ParsedSigInternal): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function formatLongThai(internal: ParsedSigInternal): string {
+function formatLongThai(
+  internal: ParsedSigInternal,
+  options?: TimingSummaryOptions
+): string {
   const grammar = resolveRouteGrammarThai(internal);
   const dosePart = formatDoseThaiLong(internal) ?? "ยา";
   const sitePart = formatSiteThai(internal, grammar);
   const routePart = buildRoutePhraseThai(internal, grammar, Boolean(sitePart));
-  const frequencyPart = describeFrequencyThai(internal);
-  const eventParts = collectWhenPhrasesThai(internal);
+  const frequencyPart =
+    describeFrequencyThai(internal) ??
+    describeFrequencyCountThai(inferDailyOccurrenceCount(internal, options));
+  const eventParts = collectWhenPhrasesThai(internal, options);
   if (internal.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of internal.timeOfDay) {

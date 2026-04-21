@@ -1976,6 +1976,55 @@ describe("internationalization", () => {
       const result = parseSig("1 tab po every monday", { locale: "th" });
       expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ในวันจันทร์.");
     });
+
+    it("groups Thai meal timings by relation without forcing a daily count", () => {
+      const result = parseSig("1 tab po pc breakfast lunch dinner", {
+        locale: "th",
+        groupMealTimingsByRelation: true
+      });
+      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด หลังอาหารเช้า กลางวัน และเย็น.");
+    });
+
+    it("adds a Thai daily count summary independently from meal grouping", () => {
+      const result = parseSig("1 tab po pc breakfast lunch dinner", {
+        locale: "th",
+        includeTimesPerDaySummary: true
+      });
+      expect(result.longText).toBe(
+        "รับประทาน ครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า, หลังอาหารกลางวัน และ หลังอาหารเย็น."
+      );
+    });
+
+    it("supports grouped Thai meal timings together with a daily count summary", () => {
+      const result = parseSig("1 tab po pc breakfast lunch dinner", {
+        locale: "th",
+        groupMealTimingsByRelation: true,
+        includeTimesPerDaySummary: true
+      });
+      expect(result.longText).toBe(
+        "รับประทาน ครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
+      );
+    });
+  });
+
+  it("supports grouped English meal timings together with a daily count summary", () => {
+    const result = parseSig("1 tab po pc breakfast lunch dinner", {
+      groupMealTimingsByRelation: true,
+      includeTimesPerDaySummary: true
+    });
+    expect(result.longText).toBe(
+      "Take 1 tablet by mouth three times daily after breakfast, lunch and dinner."
+    );
+  });
+
+  it("groups the meal subset while keeping bedtime natural in English", () => {
+    const result = parseSig("1 tab po ac breakfast lunch dinner hs", {
+      groupMealTimingsByRelation: true,
+      includeTimesPerDaySummary: true
+    });
+    expect(result.longText).toBe(
+      "Take 1 tablet by mouth four times daily before breakfast, lunch and dinner and at bedtime."
+    );
   });
 
   it("allows custom translation overrides", () => {

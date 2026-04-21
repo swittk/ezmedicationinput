@@ -139,6 +139,8 @@ Use either helper depending on your source:
 
 - `formatParseBatch(batch, style?, separator?)` when you already have `parseSig` output.
 - `formatSigBatch(dosages, style?, { separator })` when you have an array of FHIR `Dosage` entries.
+- `formatSig(dosage, style?, options?)` / `fromFhirDosage(dosage, options?)` when you want
+  locale-aware long-text rendering controls for a single dosage.
 
 ```ts
 import { formatParseBatch, formatSigBatch, parseSig } from "ezmedicationinput";
@@ -151,6 +153,31 @@ const shortSig = formatParseBatch(batch, "short");
 const shortFromFhir = formatSigBatch(batch.items.map((item) => item.fhir), "short");
 // => same combined short sig text
 ```
+
+Formatting options:
+
+- `locale`: selects the registered localization, such as `"en"` or `"th"`.
+- `i18n`: overrides or augments the registered localization callbacks.
+- `groupMealTimingsByRelation`: compacts repeated meal relation phrases when all
+  meal anchors share the same relation.
+  Example EN: `after breakfast, lunch and dinner`
+  Example TH: `หลังอาหารเช้า กลางวัน และเย็น`
+- `includeTimesPerDaySummary`: prepends a daily count when the formatter can
+  safely infer one from explicit daily anchors and no cadence already exists.
+  Example EN: `three times daily after breakfast, lunch and dinner`
+  Example TH: `วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น`
+
+Notes:
+
+- `groupMealTimingsByRelation` only applies to homogeneous specific meal anchors
+  (`before breakfast/lunch/dinner`, `after breakfast/lunch/dinner`, or `with breakfast/lunch/dinner`).
+  When additional non-meal daily anchors exist, the formatter groups the meal
+  subset and leaves the extra anchors explicit.
+  Example EN: `before breakfast, lunch and dinner and at bedtime`
+  Example TH: `ก่อนอาหารเช้า กลางวัน และเย็น และก่อนนอน`
+- `includeTimesPerDaySummary` is independent from meal grouping. It counts
+  explicit daily anchors only when no `frequency`, `timingCode`, interval, or
+  day-of-week cadence is already present.
 
 ### Sig (directions) suggestions
 

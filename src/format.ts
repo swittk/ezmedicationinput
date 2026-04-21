@@ -1,6 +1,12 @@
 import { ParsedSigInternal } from "./internal-types";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
+import {
+  getMealTimingGroup,
+  inferDailyOccurrenceCount,
+  type MealTimingGroup,
+  type TimingSummaryOptions
+} from "./timing-summary";
 
 const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {
   [RouteCode["Oral route"]]: "PO",
@@ -57,6 +63,13 @@ const DAY_NAMES: Record<string, string> = {
   fri: "Friday",
   sat: "Saturday",
   sun: "Sunday"
+};
+
+const EN_TIMES_PER_DAY: Record<number, string> = {
+  1: "once daily",
+  2: "twice daily",
+  3: "three times daily",
+  4: "four times daily"
 };
 
 interface RouteGrammar {
@@ -208,10 +221,10 @@ function describeFrequency(internal: ParsedSigInternal): string | undefined {
     )} times daily`;
   }
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
-    if (frequency === 1) return "once daily";
-    if (frequency === 2) return "twice daily";
-    if (frequency === 3) return "three times daily";
-    if (frequency === 4) return "four times daily";
+    const dailyText = EN_TIMES_PER_DAY[frequency];
+    if (dailyText) {
+      return dailyText;
+    }
     return `${stripTrailingZero(frequency)} times daily`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
@@ -274,6 +287,17 @@ function describeFrequency(internal: ParsedSigInternal): string | undefined {
   return undefined;
 }
 
+function describeFrequencyCount(count: number | undefined): string | undefined {
+  if (!count || count <= 0) {
+    return undefined;
+  }
+  const dailyText = EN_TIMES_PER_DAY[count];
+  if (dailyText) {
+    return dailyText;
+  }
+  return `${stripTrailingZero(count)} times daily`;
+}
+
 function formatDoseShort(internal: ParsedSigInternal): string | undefined {
   if (internal.doseRange) {
     const { low, high } = internal.doseRange;
@@ -312,48 +336,100 @@ function formatDoseLong(internal: ParsedSigInternal): string | undefined {
   return undefined;
 }
 
-function collectWhenPhrases(internal: ParsedSigInternal): string[] {
+function summarizeMealTimingGroup(group: MealTimingGroup): string {
+  let relationText = "with";
+  if (group.relation === "before") {
+    relationText = "before";
+  } else if (group.relation === "after") {
+    relationText = "after";
+  }
+  return `${relationText} ${joinWithAnd(group.meals)}`;
+}
+
+function collectWhenPhrases(
+  internal: ParsedSigInternal,
+  options?: TimingSummaryOptions
+): string[] {
   if (!internal.when.length) {
     return [];
   }
   const unique: EventTiming[] = [];
   const seen = new Set<EventTiming>();
+  let hasSpecificAfter = false;
+  let hasSpecificBefore = false;
+  let hasSpecificWith = false;
   for (const code of internal.when) {
     if (!seen.has(code)) {
       seen.add(code);
       unique.push(code);
+      if (
+        code === EventTiming["After Breakfast"] ||
+        code === EventTiming["After Lunch"] ||
+        code === EventTiming["After Dinner"]
+      ) {
+        hasSpecificAfter = true;
+      }
+      if (
+        code === EventTiming["Before Breakfast"] ||
+        code === EventTiming["Before Lunch"] ||
+        code === EventTiming["Before Dinner"]
+      ) {
+        hasSpecificBefore = true;
+      }
+      if (
+        code === EventTiming.Breakfast ||
+        code === EventTiming.Lunch ||
+        code === EventTiming.Dinner
+      ) {
+        hasSpecificWith = true;
+      }
     }
   }
-  const hasSpecificAfter = unique.some((code) =>
-    code === EventTiming["After Breakfast"] ||
-    code === EventTiming["After Lunch"] ||
-    code === EventTiming["After Dinner"]
-  );
-  const hasSpecificBefore = unique.some((code) =>
-    code === EventTiming["Before Breakfast"] ||
-    code === EventTiming["Before Lunch"] ||
-    code === EventTiming["Before Dinner"]
-  );
-  const hasSpecificWith = unique.some((code) =>
-    code === EventTiming.Breakfast ||
-    code === EventTiming.Lunch ||
-    code === EventTiming.Dinner
-  );
-  return unique
-    .filter((code) => {
-      if (code === EventTiming["After Meal"] && hasSpecificAfter) {
-        return false;
+  const filtered: EventTiming[] = [];
+  for (let i = 0; i < unique.length; i += 1) {
+    const code = unique[i];
+    if (code === EventTiming["After Meal"] && hasSpecificAfter) {
+      continue;
+    }
+    if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
+      continue;
+    }
+    if (code === EventTiming.Meal && hasSpecificWith) {
+      continue;
+    }
+    filtered.push(code);
+  }
+
+  const mealGroup = getMealTimingGroup(filtered, options);
+  if (mealGroup) {
+    const groupedCodes = new Set<EventTiming>(mealGroup.codes);
+    const phrases: string[] = [];
+    let insertedGroup = false;
+    for (let i = 0; i < filtered.length; i += 1) {
+      const code = filtered[i];
+      if (groupedCodes.has(code)) {
+        if (!insertedGroup) {
+          phrases.push(summarizeMealTimingGroup(mealGroup));
+          insertedGroup = true;
+        }
+        continue;
       }
-      if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
-        return false;
+      const text = WHEN_TEXT[code] ?? code;
+      if (text) {
+        phrases.push(text);
       }
-      if (code === EventTiming.Meal && hasSpecificWith) {
-        return false;
-      }
-      return true;
-    })
-    .map((code) => WHEN_TEXT[code] ?? code)
-    .filter((text): text is string => Boolean(text));
+    }
+    return phrases;
+  }
+
+  const phrases: string[] = [];
+  for (let i = 0; i < filtered.length; i += 1) {
+    const text = WHEN_TEXT[filtered[i]] ?? filtered[i];
+    if (text) {
+      phrases.push(text);
+    }
+  }
+  return phrases;
 }
 
 function joinWithAnd(parts: string[]): string {
@@ -517,11 +593,12 @@ function describeDayOfWeek(internal: ParsedSigInternal): string | undefined {
 export function formatInternal(
   internal: ParsedSigInternal,
   style: "short" | "long",
-  localization?: SigLocalization
+  localization?: SigLocalization,
+  options?: TimingSummaryOptions
 ): string {
   const defaults = {
     short: formatShort(internal),
-    long: formatLong(internal)
+    long: formatLong(internal, options)
   } as const;
 
   if (!localization) {
@@ -535,6 +612,8 @@ export function formatInternal(
       style: "short",
       internal,
       defaultText: defaults.short,
+      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
+      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       formatDefault
     };
     return localization.formatShort(context);
@@ -545,6 +624,8 @@ export function formatInternal(
       style: "long",
       internal,
       defaultText: defaults.long,
+      groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
+      includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       formatDefault
     };
     return localization.formatLong(context);
@@ -622,13 +703,18 @@ function formatShort(internal: ParsedSigInternal): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function formatLong(internal: ParsedSigInternal): string {
+function formatLong(
+  internal: ParsedSigInternal,
+  options?: TimingSummaryOptions
+): string {
   const grammar = resolveRouteGrammar(internal);
   const dosePart = formatDoseLong(internal) ?? "the medication";
   const sitePart = formatSite(internal, grammar);
   const routePart = buildRoutePhrase(internal, grammar, Boolean(sitePart));
-  const frequencyPart = describeFrequency(internal);
-  const eventParts = collectWhenPhrases(internal);
+  const frequencyPart =
+    describeFrequency(internal) ??
+    describeFrequencyCount(inferDailyOccurrenceCount(internal, options));
+  const eventParts = collectWhenPhrases(internal, options);
   if (internal.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of internal.timeOfDay) {

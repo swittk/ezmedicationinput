@@ -315,6 +315,17 @@ export interface MedicationContext {
 export interface FormatOptions {
   locale?: "en" | "th" | string;
   i18n?: SigTranslationConfig;
+  /**
+   * Collapses repeated meal relation phrases into a grouped phrase when all
+   * meal anchors share the same relation (for example, "after breakfast,
+   * lunch and dinner" instead of repeating "after" for each meal).
+   */
+  groupMealTimingsByRelation?: boolean;
+  /**
+   * Adds a per-day frequency summary when it can be derived safely from the
+   * schedule (for example, "three times daily" or "วันละ 3 ครั้ง").
+   */
+  includeTimesPerDaySummary?: boolean;
 }
 
 export interface FormatBatchOptions extends FormatOptions {
