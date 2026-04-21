@@ -1,0 +1,311 @@
+import { AnnotatedLexToken } from "./lexer/meaning";
+import {
+  CanonicalAdditionalInstructionExpr,
+  CanonicalSigClause,
+  EventTiming,
+  FhirCoding,
+  FhirDayOfWeek,
+  FhirPeriodUnit,
+  PrnReasonLookupRequest,
+  PrnReasonSuggestion,
+  RouteCode,
+  SiteCodeLookupRequest,
+  SiteCodeSuggestion
+} from "./types";
+
+export interface SiteLookupDetail {
+  request: SiteCodeLookupRequest;
+  suggestions: SiteCodeSuggestion[];
+}
+
+export interface PrnReasonLookupDetail {
+  request: PrnReasonLookupRequest;
+  suggestions: PrnReasonSuggestion[];
+}
+
+export interface Token extends AnnotatedLexToken {}
+
+type LocalizedCoding = FhirCoding & { i18n?: Record<string, string> };
+
+export class ParserState {
+  input: string;
+  tokens: Token[];
+  consumed: Set<number>;
+  warnings: string[];
+  siteTokenIndices: Set<number>;
+  siteLookupRequest?: SiteCodeLookupRequest;
+  siteLookups: SiteLookupDetail[];
+  customSiteHints?: Set<string>;
+  prnReasonLookupRequest?: PrnReasonLookupRequest;
+  prnReasonLookups: PrnReasonLookupDetail[];
+  clauses: CanonicalSigClause[];
+  private clause: CanonicalSigClause;
+
+  constructor(input: string, tokens: Token[], customSiteHints?: Set<string>) {
+    const dayOfWeek: FhirDayOfWeek[] = [];
+    const when: EventTiming[] = [];
+    this.clause = {
+      kind: "administration",
+      rawText: input,
+      raw: {
+        start: 0,
+        end: input.length,
+        text: input
+      },
+      schedule: {
+        dayOfWeek,
+        when
+      },
+      leftovers: [],
+      evidence: [],
+      confidence: 1
+    };
+    this.input = input;
+    this.tokens = tokens;
+    this.consumed = new Set<number>();
+    this.warnings = [];
+    this.siteTokenIndices = new Set<number>();
+    this.siteLookups = [];
+    this.customSiteHints = customSiteHints;
+    this.prnReasonLookups = [];
+    this.clauses = [this.clause];
+  }
+
+  get primaryClause(): CanonicalSigClause {
+    return this.clause;
+  }
+
+  get dose(): number | undefined {
+    return this.clause.dose?.value;
+  }
+
+  set dose(value: number | undefined) {
+    this.ensureDose().value = value;
+  }
+
+  get doseRange(): { low: number; high: number } | undefined {
+    return this.clause.dose?.range;
+  }
+
+  set doseRange(value: { low: number; high: number } | undefined) {
+    this.ensureDose().range = value;
+  }
+
+  get unit(): string | undefined {
+    return this.clause.dose?.unit;
+  }
+
+  set unit(value: string | undefined) {
+    this.ensureDose().unit = value;
+  }
+
+  get routeCode(): RouteCode | undefined {
+    return this.clause.route?.code;
+  }
+
+  set routeCode(value: RouteCode | undefined) {
+    this.ensureRoute().code = value;
+  }
+
+  get routeText(): string | undefined {
+    return this.clause.route?.text;
+  }
+
+  set routeText(value: string | undefined) {
+    this.ensureRoute().text = value;
+  }
+
+  get count(): number | undefined {
+    return this.clause.schedule?.count;
+  }
+
+  set count(value: number | undefined) {
+    this.ensureSchedule().count = value;
+  }
+
+  get frequency(): number | undefined {
+    return this.clause.schedule?.frequency;
+  }
+
+  set frequency(value: number | undefined) {
+    this.ensureSchedule().frequency = value;
+  }
+
+  get frequencyMax(): number | undefined {
+    return this.clause.schedule?.frequencyMax;
+  }
+
+  set frequencyMax(value: number | undefined) {
+    this.ensureSchedule().frequencyMax = value;
+  }
+
+  get period(): number | undefined {
+    return this.clause.schedule?.period;
+  }
+
+  set period(value: number | undefined) {
+    this.ensureSchedule().period = value;
+  }
+
+  get periodMax(): number | undefined {
+    return this.clause.schedule?.periodMax;
+  }
+
+  set periodMax(value: number | undefined) {
+    this.ensureSchedule().periodMax = value;
+  }
+
+  get periodUnit(): FhirPeriodUnit | undefined {
+    return this.clause.schedule?.periodUnit;
+  }
+
+  set periodUnit(value: FhirPeriodUnit | undefined) {
+    this.ensureSchedule().periodUnit = value;
+  }
+
+  get dayOfWeek(): FhirDayOfWeek[] {
+    const schedule = this.ensureSchedule();
+    if (!schedule.dayOfWeek) {
+      schedule.dayOfWeek = [];
+    }
+    return schedule.dayOfWeek;
+  }
+
+  get when(): EventTiming[] {
+    const schedule = this.ensureSchedule();
+    if (!schedule.when) {
+      schedule.when = [];
+    }
+    return schedule.when;
+  }
+
+  get timeOfDay(): string[] | undefined {
+    return this.clause.schedule?.timeOfDay;
+  }
+
+  set timeOfDay(value: string[] | undefined) {
+    this.ensureSchedule().timeOfDay = value;
+  }
+
+  get timingCode(): string | undefined {
+    return this.clause.schedule?.timingCode;
+  }
+
+  set timingCode(value: string | undefined) {
+    this.ensureSchedule().timingCode = value;
+  }
+
+  get asNeeded(): boolean | undefined {
+    return this.clause.prn?.enabled;
+  }
+
+  set asNeeded(value: boolean | undefined) {
+    this.ensurePrn().enabled = Boolean(value);
+  }
+
+  get asNeededReason(): string | undefined {
+    return this.clause.prn?.reason?.text;
+  }
+
+  set asNeededReason(value: string | undefined) {
+    const prn = this.ensurePrn();
+    if (!prn.reason) {
+      prn.reason = {};
+    }
+    prn.reason.text = value;
+  }
+
+  get asNeededReasonCoding(): LocalizedCoding | undefined {
+    return this.clause.prn?.reason?.coding as LocalizedCoding | undefined;
+  }
+
+  set asNeededReasonCoding(value: LocalizedCoding | undefined) {
+    const prn = this.ensurePrn();
+    if (!prn.reason) {
+      prn.reason = {};
+    }
+    prn.reason.coding = value?.code
+      ? {
+        code: value.code,
+        display: value.display,
+        system: value.system
+      }
+      : undefined;
+  }
+
+  get siteText(): string | undefined {
+    return this.clause.site?.text;
+  }
+
+  set siteText(value: string | undefined) {
+    this.ensureSite().text = value;
+  }
+
+  get siteSource(): "abbreviation" | "text" | "selection" | "resolver" | undefined {
+    return this.clause.site?.source;
+  }
+
+  set siteSource(value: "abbreviation" | "text" | "selection" | "resolver" | undefined) {
+    this.ensureSite().source = value;
+  }
+
+  get siteCoding(): LocalizedCoding | undefined {
+    return this.clause.site?.coding as LocalizedCoding | undefined;
+  }
+
+  set siteCoding(value: LocalizedCoding | undefined) {
+    this.ensureSite().coding = value?.code
+      ? {
+        code: value.code,
+        display: value.display,
+        system: value.system
+      }
+      : undefined;
+  }
+
+  get additionalInstructions(): CanonicalAdditionalInstructionExpr[] {
+    if (!this.clause.additionalInstructions) {
+      this.clause.additionalInstructions = [];
+    }
+    return this.clause.additionalInstructions;
+  }
+
+  set additionalInstructions(value: CanonicalAdditionalInstructionExpr[]) {
+    this.clause.additionalInstructions = value;
+  }
+
+  private ensureDose(): NonNullable<CanonicalSigClause["dose"]> {
+    if (!this.clause.dose) {
+      this.clause.dose = {};
+    }
+    return this.clause.dose;
+  }
+
+  private ensureRoute(): NonNullable<CanonicalSigClause["route"]> {
+    if (!this.clause.route) {
+      this.clause.route = {};
+    }
+    return this.clause.route;
+  }
+
+  private ensureSite(): NonNullable<CanonicalSigClause["site"]> {
+    if (!this.clause.site) {
+      this.clause.site = {};
+    }
+    return this.clause.site;
+  }
+
+  private ensureSchedule(): NonNullable<CanonicalSigClause["schedule"]> {
+    if (!this.clause.schedule) {
+      this.clause.schedule = {};
+    }
+    return this.clause.schedule;
+  }
+
+  private ensurePrn(): NonNullable<CanonicalSigClause["prn"]> {
+    if (!this.clause.prn) {
+      this.clause.prn = { enabled: false };
+    }
+    return this.clause.prn;
+  }
+}

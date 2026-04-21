@@ -1,15 +1,15 @@
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir } from "./fhir";
-import { buildCanonicalSigClauses, shiftCanonicalSigClauses } from "./ir";
+import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization } from "./i18n";
-import { ParsedSigInternal } from "./internal-types";
+import { ParserState } from "./parser-state";
 import {
   applyPrnReasonCoding,
   applyPrnReasonCodingAsync,
   applySiteCoding,
   applySiteCodingAsync,
   findUnparsedTokenGroups,
-  parseInternal,
+  parseClauseState,
   tokenize
 } from "./parser";
 import { splitSigSegments } from "./segment";
@@ -54,8 +54,8 @@ export {
 } from './maps';
 
 interface SegmentCarry {
-  routeCode?: ParsedSigInternal["routeCode"];
-  routeText?: ParsedSigInternal["routeText"];
+  routeCode?: ParserState["routeCode"];
+  routeText?: ParserState["routeText"];
   unit?: string;
   dose?: number;
 }
@@ -422,14 +422,14 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   const results: ParseResult[] = [];
 
   for (const segment of segments) {
-    const internal = parseInternal(segment.text, options);
-    applyCarryForward(internal, carry);
-    applyPrnReasonCoding(internal, options);
-    applySiteCoding(internal, options);
-    const result = buildParseResult(internal, options);
+    const state = parseClauseState(segment.text, options);
+    applyCarryForward(state, carry);
+    applyPrnReasonCoding(state, options);
+    applySiteCoding(state, options);
+    const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
-    updateCarryForward(carry, internal);
+    updateCarryForward(carry, state);
   }
 
   const legacy = resolveLegacyParseResult(results, input, options);
@@ -460,13 +460,13 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   const results: LintResult[] = [];
 
   for (const segment of segments) {
-    const internal = parseInternal(segment.text, options);
-    applyCarryForward(internal, carry);
-    applyPrnReasonCoding(internal, options);
-    applySiteCoding(internal, options);
-    const result = buildParseResult(internal, options);
+    const state = parseClauseState(segment.text, options);
+    applyCarryForward(state, carry);
+    applyPrnReasonCoding(state, options);
+    applySiteCoding(state, options);
+    const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
-    const groups = findUnparsedTokenGroups(internal);
+    const groups = findUnparsedTokenGroups(state);
     const issues: LintIssue[] = groups.map((group) => {
       const shiftedRange = shiftRange(group.range, segment.start);
       const text = shiftedRange
@@ -480,7 +480,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       };
     });
     results.push({ result, issues });
-    updateCarryForward(carry, internal);
+    updateCarryForward(carry, state);
   }
 
   const legacy = resolveLegacyLintResult(results, input, options);
@@ -506,14 +506,14 @@ export async function parseSigAsync(
   const results: ParseResult[] = [];
 
   for (const segment of segments) {
-    const internal = parseInternal(segment.text, options);
-    applyCarryForward(internal, carry);
-    await applyPrnReasonCodingAsync(internal, options);
-    await applySiteCodingAsync(internal, options);
-    const result = buildParseResult(internal, options);
+    const state = parseClauseState(segment.text, options);
+    applyCarryForward(state, carry);
+    await applyPrnReasonCodingAsync(state, options);
+    await applySiteCodingAsync(state, options);
+    const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
-    updateCarryForward(carry, internal);
+    updateCarryForward(carry, state);
   }
 
   const legacy = resolveLegacyParseResult(results, input, options);
@@ -682,11 +682,11 @@ function buildNormalizedMetaFromClause(
 }
 
 function buildParseResult(
-  internal: ReturnType<typeof parseInternal>,
+  state: ReturnType<typeof parseClauseState>,
   options?: ParseOptions
 ): ParseResult {
-  const canonicalClauses = buildCanonicalSigClauses(internal);
-  const clause = getPrimaryClause(canonicalClauses, internal.input);
+  const canonicalClauses = state.clauses;
+  const clause = getPrimaryClause(canonicalClauses, state.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const shortText = formatCanonicalClause(clause, "short", localization, options);
   const longText = formatCanonicalClause(clause, "long", localization, options);
@@ -694,8 +694,8 @@ function buildParseResult(
 
   const consumedTokens: string[] = [];
   const leftoverParts: string[] = [];
-  for (const token of internal.tokens) {
-    if (internal.consumed.has(token.index)) {
+  for (const token of state.tokens) {
+    if (state.consumed.has(token.index)) {
       consumedTokens.push(token.original);
     } else {
       leftoverParts.push(token.original);
@@ -703,9 +703,9 @@ function buildParseResult(
   }
 
   const siteLookups: ParseResult["meta"]["siteLookups"] =
-    internal.siteLookups.length ? [] : undefined;
+    state.siteLookups.length ? [] : undefined;
   if (siteLookups) {
-    for (const entry of internal.siteLookups) {
+    for (const entry of state.siteLookups) {
       const suggestions: Array<{ coding: BodySiteCode; text?: string }> = [];
       for (const suggestion of entry.suggestions) {
         suggestions.push({
@@ -725,9 +725,9 @@ function buildParseResult(
   }
 
   const prnReasonLookups: ParseResult["meta"]["prnReasonLookups"] =
-    internal.prnReasonLookups.length ? [] : undefined;
+    state.prnReasonLookups.length ? [] : undefined;
   if (prnReasonLookups) {
-    for (const entry of internal.prnReasonLookups) {
+    for (const entry of state.prnReasonLookups) {
       const suggestions: Array<{ coding?: { code?: string; display?: string; system?: string }; text?: string }> = [];
       for (const suggestion of entry.suggestions) {
         suggestions.push({
@@ -746,7 +746,7 @@ function buildParseResult(
     fhir,
     shortText,
     longText,
-    warnings: internal.warnings,
+    warnings: state.warnings,
     meta: {
       consumedTokens,
       leftoverText: leftoverParts.length ? leftoverParts.join(" ") : undefined,
@@ -760,7 +760,7 @@ function buildParseResult(
   };
 }
 
-function applyCarryForward(internal: ParsedSigInternal, carry: SegmentCarry): void {
+function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
   if (!internal.routeCode && !internal.routeText) {
     if (carry.routeCode) {
       internal.routeCode = carry.routeCode;
@@ -785,7 +785,7 @@ function applyCarryForward(internal: ParsedSigInternal, carry: SegmentCarry): vo
   }
 }
 
-function updateCarryForward(carry: SegmentCarry, internal: ParsedSigInternal): void {
+function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
   if (internal.routeCode) {
     carry.routeCode = internal.routeCode;
   }
@@ -844,10 +844,10 @@ function resolveLegacyParseResult(
   if (results.length > 0) {
     return results[0];
   }
-  const internal = parseInternal(input, options);
-  applyPrnReasonCoding(internal, options);
-  applySiteCoding(internal, options);
-  return buildParseResult(internal, options);
+  const state = parseClauseState(input, options);
+  applyPrnReasonCoding(state, options);
+  applySiteCoding(state, options);
+  return buildParseResult(state, options);
 }
 
 function resolveLegacyLintResult(
@@ -858,14 +858,14 @@ function resolveLegacyLintResult(
   if (results.length > 0) {
     return results[0];
   }
-  const internal = parseInternal(input, options);
-  applyPrnReasonCoding(internal, options);
-  applySiteCoding(internal, options);
-  const result = buildParseResult(internal, options);
-  const groups = findUnparsedTokenGroups(internal);
+  const state = parseClauseState(input, options);
+  applyPrnReasonCoding(state, options);
+  applySiteCoding(state, options);
+  const result = buildParseResult(state, options);
+  const groups = findUnparsedTokenGroups(state);
   const issues: LintIssue[] = groups.map((group) => {
     const text = group.range
-      ? internal.input.slice(group.range.start, group.range.end)
+      ? state.input.slice(group.range.start, group.range.end)
       : group.tokens.map((token) => token.original).join(" ");
     return {
       message: "Unrecognized text",

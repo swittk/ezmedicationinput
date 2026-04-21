@@ -28,7 +28,7 @@ import {
   SitePhraseCandidate,
   SitePhraseServices
 } from "./site-phrases";
-import { ParsedSigInternal, Token } from "./internal-types";
+import { ParserState, Token } from "./parser-state";
 import {
   BodySiteDefinition,
   CanonicalSigClause,
@@ -380,7 +380,7 @@ function hasOphthalmicContextHint(tokens: Token[], index: number): boolean {
 }
 
 function shouldInterpretOdAsOnceDaily(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   treatAsSite: boolean
@@ -474,7 +474,7 @@ function shouldInterpretOdAsOnceDaily(
 }
 
 function hasBodySiteContextBefore(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): boolean {
@@ -515,7 +515,7 @@ function hasBodySiteContextBefore(
 }
 
 function hasBodySiteContextAfter(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): boolean {
@@ -584,7 +584,7 @@ function hasSpelledOcularSiteBefore(tokens: Token[], index: number): boolean {
 }
 
 function shouldTreatAbbreviatedSiteCandidateAsSite(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   context?: MedicationContext | null
@@ -669,7 +669,7 @@ function shouldTreatAbbreviatedSiteCandidateAsSite(
 }
 
 function tryParseNumericCadence(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): boolean {
@@ -736,7 +736,7 @@ function tryParseNumericCadence(
 }
 
 function tryParseCountBasedFrequency(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   options?: ParseOptions
@@ -928,7 +928,7 @@ function isAtPrefixToken(lower: string): boolean {
 }
 
 function tryParseTimeBasedSchedule(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): boolean {
@@ -1104,7 +1104,7 @@ function buildCanonicalSourceSpan(
 }
 
 function collectCanonicalLeftovers(
-  internal: ParsedSigInternal
+  internal: ParserState
 ): CanonicalSigClause["leftovers"] {
   const groups: CanonicalSigClause["leftovers"] = [];
   let current: number[] = [];
@@ -1136,7 +1136,7 @@ function collectCanonicalLeftovers(
 }
 
 function computeClauseConfidence(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   leftovers: CanonicalSigClause["leftovers"]
 ): number {
   let confidence = 1;
@@ -1158,261 +1158,438 @@ function createClauseBackedInternal(
   input: string,
   tokens: Token[],
   customSiteHints?: Set<string>
-): ParsedSigInternal {
-  const dayOfWeek: FhirDayOfWeek[] = [];
-  const when: EventTiming[] = [];
-  const warnings: string[] = [];
-  const additionalInstructions: ParsedSigInternal["additionalInstructions"] = [];
-  const clause: CanonicalSigClause = {
-    kind: "administration",
-    rawText: input,
-    raw: {
-      start: 0,
-      end: input.length,
-      text: input
-    },
-    schedule: {
-      dayOfWeek,
-      when
-    },
-    leftovers: [],
-    evidence: [],
-    confidence: 1
-  };
-
-  const internal: ParsedSigInternal = {
-    input,
-    tokens,
-    consumed: new Set<number>(),
-    dayOfWeek,
-    when,
-    warnings,
-    siteTokenIndices: new Set<number>(),
-    siteLookups: [],
-    customSiteHints,
-    prnReasonLookups: [],
-    additionalInstructions,
-    canonicalClauses: [clause]
-  };
-
-  const ensureDose = () => {
-    if (!clause.dose) {
-      clause.dose = {};
-    }
-    return clause.dose;
-  };
-
-  const ensureRoute = () => {
-    if (!clause.route) {
-      clause.route = {};
-    }
-    return clause.route;
-  };
-
-  const ensureSite = () => {
-    if (!clause.site) {
-      clause.site = {};
-    }
-    return clause.site;
-  };
-
-  const ensureSchedule = () => {
-    if (!clause.schedule) {
-      clause.schedule = {};
-    }
-    if (!clause.schedule.dayOfWeek) {
-      clause.schedule.dayOfWeek = dayOfWeek;
-    }
-    if (!clause.schedule.when) {
-      clause.schedule.when = when;
-    }
-    return clause.schedule;
-  };
-
-  const ensurePrn = () => {
-    if (!clause.prn) {
-      clause.prn = { enabled: false };
-    }
-    return clause.prn;
-  };
-
-  Object.defineProperties(internal, {
-    dose: {
-      get: () => clause.dose?.value,
-      set: (value: number | undefined) => {
-        ensureDose().value = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    doseRange: {
-      get: () => clause.dose?.range,
-      set: (value: { low: number; high: number } | undefined) => {
-        ensureDose().range = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    unit: {
-      get: () => clause.dose?.unit,
-      set: (value: string | undefined) => {
-        ensureDose().unit = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    routeCode: {
-      get: () => clause.route?.code,
-      set: (value: RouteCode | undefined) => {
-        ensureRoute().code = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    routeText: {
-      get: () => clause.route?.text,
-      set: (value: string | undefined) => {
-        ensureRoute().text = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    count: {
-      get: () => clause.schedule?.count,
-      set: (value: number | undefined) => {
-        ensureSchedule().count = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    frequency: {
-      get: () => clause.schedule?.frequency,
-      set: (value: number | undefined) => {
-        ensureSchedule().frequency = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    frequencyMax: {
-      get: () => clause.schedule?.frequencyMax,
-      set: (value: number | undefined) => {
-        ensureSchedule().frequencyMax = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    period: {
-      get: () => clause.schedule?.period,
-      set: (value: number | undefined) => {
-        ensureSchedule().period = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    periodMax: {
-      get: () => clause.schedule?.periodMax,
-      set: (value: number | undefined) => {
-        ensureSchedule().periodMax = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    periodUnit: {
-      get: () => clause.schedule?.periodUnit,
-      set: (value: FhirPeriodUnit | undefined) => {
-        ensureSchedule().periodUnit = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    timingCode: {
-      get: () => clause.schedule?.timingCode,
-      set: (value: string | undefined) => {
-        ensureSchedule().timingCode = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    timeOfDay: {
-      get: () => clause.schedule?.timeOfDay,
-      set: (value: string[] | undefined) => {
-        ensureSchedule().timeOfDay = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    asNeeded: {
-      get: () => clause.prn?.enabled,
-      set: (value: boolean | undefined) => {
-        ensurePrn().enabled = Boolean(value);
-      },
-      configurable: true,
-      enumerable: true
-    },
-    asNeededReason: {
-      get: () => clause.prn?.reason?.text,
-      set: (value: string | undefined) => {
-        const prn = ensurePrn();
-        if (!prn.reason) {
-          prn.reason = {};
-        }
-        prn.reason.text = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    asNeededReasonCoding: {
-      get: () => clause.prn?.reason?.coding,
-      set: (value: (FhirCoding & { i18n?: Record<string, string> }) | undefined) => {
-        const prn = ensurePrn();
-        if (!prn.reason) {
-          prn.reason = {};
-        }
-        prn.reason.coding = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    siteText: {
-      get: () => clause.site?.text,
-      set: (value: string | undefined) => {
-        ensureSite().text = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    siteSource: {
-      get: () => clause.site?.source,
-      set: (value: "abbreviation" | "text" | undefined) => {
-        ensureSite().source = value;
-      },
-      configurable: true,
-      enumerable: true
-    },
-    siteCoding: {
-      get: () => clause.site?.coding,
-      set: (value: (FhirCoding & { i18n?: Record<string, string> }) | undefined) => {
-        ensureSite().coding = value?.code
-          ? {
-            code: value.code,
-            display: value.display,
-            system: value.system
-          }
-          : undefined;
-      },
-      configurable: true,
-      enumerable: true
-    }
-  });
-
-  return internal;
+): ParserState {
+  return new ParserState(input, tokens, customSiteHints);
 }
 
-function finalizeCanonicalClause(internal: ParsedSigInternal): void {
-  const clause = internal.canonicalClauses?.[0];
-  if (!clause) {
+function detectPrnPrelude(
+  state: ParserState,
+  tokens: Token[]
+): number | undefined {
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.lower === "prn") {
+      state.asNeeded = true;
+      mark(state.consumed, token);
+      let reasonIndex = index + 1;
+      if (tokens[reasonIndex]?.lower === "for") {
+        mark(state.consumed, tokens[reasonIndex]);
+        reasonIndex += 1;
+      }
+      return reasonIndex;
+    }
+    if (token.lower === "as" && tokens[index + 1]?.lower === "needed") {
+      state.asNeeded = true;
+      mark(state.consumed, token);
+      mark(state.consumed, tokens[index + 1]);
+      let reasonIndex = index + 2;
+      if (tokens[reasonIndex]?.lower === "for") {
+        mark(state.consumed, tokens[reasonIndex]);
+        reasonIndex += 1;
+      }
+      return reasonIndex;
+    }
+  }
+  return undefined;
+}
+
+function collectMultiplicativeCadence(
+  state: ParserState,
+  tokens: Token[],
+  options?: ParseOptions
+): void {
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (state.consumed.has(token.index)) {
+      continue;
+    }
+    const combined = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
+    if (combined) {
+      const dose = parseFloat(combined[1]);
+      const frequency = parseFloat(combined[2]);
+      if (state.dose === undefined) {
+        state.dose = dose;
+      }
+      state.frequency = frequency;
+      state.period = 1;
+      state.periodUnit = FhirPeriodUnit.Day;
+      mark(state.consumed, token);
+      continue;
+    }
+
+    const hasNumericDoseBefore = (): boolean => {
+      for (let cursor = index - 1; cursor >= 0; cursor--) {
+        const previous = tokens[cursor];
+        if (!previous) {
+          continue;
+        }
+        if (state.consumed.has(previous.index)) {
+          continue;
+        }
+        if (/^[0-9]+(?:\.[0-9]+)?$/.test(previous.lower)) {
+          return true;
+        }
+        if (normalizeUnit(previous.lower, options)) {
+          continue;
+        }
+        break;
+      }
+      return false;
+    };
+
+    if (state.frequency !== undefined || !hasNumericDoseBefore()) {
+      continue;
+    }
+
+    const prefix = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+    if (prefix) {
+      const frequency = parseFloat(prefix[1]);
+      if (Number.isFinite(frequency)) {
+        state.frequency = frequency;
+        state.period = 1;
+        state.periodUnit = FhirPeriodUnit.Day;
+        mark(state.consumed, token);
+        continue;
+      }
+    }
+
+    if (token.lower !== "x" && token.lower !== "*") {
+      continue;
+    }
+    const next = tokens[index + 1];
+    if (
+      next &&
+      !state.consumed.has(next.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(next.lower)
+    ) {
+      const frequency = parseFloat(next.original);
+      if (Number.isFinite(frequency)) {
+        state.frequency = frequency;
+        state.period = 1;
+        state.periodUnit = FhirPeriodUnit.Day;
+        mark(state.consumed, token);
+        mark(state.consumed, next);
+      }
+    }
+  }
+}
+
+function applyClauseDefaultsAfterTokenScan(
+  state: ParserState,
+  tokens: Token[],
+  context: MedicationContext | undefined,
+  options?: ParseOptions
+): void {
+  if (state.unit === undefined) {
+    for (const token of tokens) {
+      if (state.consumed.has(token.index)) {
+        continue;
+      }
+      const unit = normalizeUnit(token.lower, options);
+      if (unit) {
+        state.unit = unit;
+        mark(state.consumed, token);
+        break;
+      }
+    }
+  }
+
+  if (state.unit === undefined) {
+    state.unit = enforceHouseholdUnitPolicy(
+      inferUnitFromContext(context),
+      options
+    );
+  }
+
+  if (state.unit === undefined) {
+    const fallbackUnit = enforceHouseholdUnitPolicy(
+      inferUnitFromRouteHints(state),
+      options
+    );
+    if (fallbackUnit) {
+      state.unit = fallbackUnit;
+    }
+  }
+
+  if (
+    options?.assumeSingleDiscreteDose &&
+    state.dose === undefined &&
+    state.doseRange === undefined &&
+    state.unit !== undefined &&
+    isDiscreteUnit(state.unit)
+  ) {
+    state.dose = 1;
+  }
+
+  if (
+    state.frequency === undefined &&
+    state.period === undefined &&
+    state.timingCode
+  ) {
+    const descriptor = TIMING_ABBREVIATIONS[state.timingCode.toLowerCase()];
+    if (descriptor) {
+      if (descriptor.frequency !== undefined) {
+        state.frequency = descriptor.frequency;
+      }
+      if (descriptor.period !== undefined) {
+        state.period = descriptor.period;
+      }
+      if (descriptor.periodUnit) {
+        state.periodUnit = descriptor.periodUnit;
+      }
+      if (descriptor.when) {
+        for (const whenCode of descriptor.when) {
+          addWhen(state.when, whenCode);
+        }
+      }
+    }
+  }
+
+  if (
+    !state.timingCode &&
+    state.frequency !== undefined &&
+    state.periodUnit === FhirPeriodUnit.Day &&
+    (state.period === undefined || state.period === 1)
+  ) {
+    if (state.frequency === 2) {
+      state.timingCode = "BID";
+    } else if (state.frequency === 3) {
+      state.timingCode = "TID";
+    } else if (state.frequency === 4) {
+      state.timingCode = "QID";
+    }
+  }
+
+  reconcileMealTimingSpecificity(state);
+  expandMealTimings(state, options);
+  sortWhenValues(state, options);
+}
+
+function collectPrnReasonText(
+  state: ParserState,
+  tokens: Token[],
+  prnReasonStart: number | undefined,
+  prnSiteSuffixIndices: Set<number>,
+  options?: ParseOptions
+): void {
+  if (!state.asNeeded || prnReasonStart === undefined) {
     return;
   }
+  const reasonTokens: string[] = [];
+  const reasonIndices: number[] = [];
+  const reasonObjects: Token[] = [];
+  const PRN_RECLAIMABLE_CONNECTORS = new Set(["at", "to", "in", "into", "on", "onto"]);
+  for (let index = prnReasonStart; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (state.consumed.has(token.index)) {
+      if (!PRN_RECLAIMABLE_CONNECTORS.has(token.lower)) {
+        continue;
+      }
+    }
+
+    const PRN_INTRODUCTIONS = new Set(["for", "if", "when", "upon", "due", "to"]);
+    if (reasonTokens.length === 0 && PRN_INTRODUCTIONS.has(token.lower)) {
+      if (token.lower === "due") {
+        const next = tokens[index + 1];
+        if (next && next.lower === "to") {
+          mark(state.consumed, token);
+          mark(state.consumed, next);
+          index += 1;
+          continue;
+        }
+      }
+      mark(state.consumed, token);
+      continue;
+    }
+
+    reasonTokens.push(token.original);
+    reasonIndices.push(token.index);
+    reasonObjects.push(token);
+    mark(state.consumed, token);
+  }
+
+  if (!reasonTokens.length) {
+    return;
+  }
+
+  let sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
+  let range = computeTokenRange(state.input, tokens, sortedIndices);
+  let sourceText = range ? state.input.slice(range.start, range.end) : undefined;
+  if (sourceText) {
+    const cutoff = determinePrnReasonCutoff(reasonObjects, sourceText);
+    if (cutoff !== undefined) {
+      for (let index = cutoff; index < reasonObjects.length; index++) {
+        state.consumed.delete(reasonObjects[index].index);
+      }
+      reasonObjects.splice(cutoff);
+      reasonTokens.splice(cutoff);
+      reasonIndices.splice(cutoff);
+      while (reasonTokens.length > 0) {
+        const lastToken = reasonTokens[reasonTokens.length - 1];
+        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
+          const removedObject = reasonObjects.pop();
+          if (removedObject) {
+            state.consumed.delete(removedObject.index);
+          }
+          reasonTokens.pop();
+          const removedIndex = reasonIndices.pop();
+          if (removedIndex !== undefined) {
+            state.consumed.delete(removedIndex);
+          }
+          continue;
+        }
+        break;
+      }
+      if (reasonTokens.length > 0) {
+        sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
+        range = computeTokenRange(state.input, tokens, sortedIndices);
+        sourceText = range ? state.input.slice(range.start, range.end) : undefined;
+      } else {
+        range = undefined;
+        sourceText = undefined;
+      }
+    }
+  }
+
+  let canonicalPrefix: string | undefined;
+  if (reasonTokens.length > 0) {
+    const suffixInfo = findTrailingPrnSiteSuffix(reasonObjects, state, options);
+    if (suffixInfo?.tokens?.length) {
+      for (const token of suffixInfo.tokens) {
+        prnSiteSuffixIndices.add(token.index);
+      }
+    }
+    if (suffixInfo && suffixInfo.startIndex > 0) {
+      const prefixTokens = reasonObjects
+        .slice(0, suffixInfo.startIndex)
+        .map((token) => token.original)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (prefixTokens) {
+        canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+      }
+    }
+  }
+
+  if (!reasonTokens.length) {
+    return;
+  }
+  const joined = reasonTokens.join(" ").trim();
+  if (!joined) {
+    return;
+  }
+  let sanitized = joined.replace(/\s+/g, " ").trim();
+  let isProbe = false;
+  const probeMatch = sanitized.match(/^\{(.+)}$/);
+  if (probeMatch) {
+    isProbe = true;
+    sanitized = probeMatch[1];
+  }
+  sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+  const text = sanitized || joined;
+  state.asNeededReason = text;
+  const normalized = text.toLowerCase();
+  const canonicalSource = canonicalPrefix || sanitized || text;
+  const canonical = canonicalSource
+    ? normalizePrnReasonKey(canonicalSource)
+    : normalizePrnReasonKey(text);
+  state.prnReasonLookupRequest = {
+    originalText: joined,
+    text,
+    normalized,
+    canonical: canonical ?? "",
+    isProbe,
+    inputText: state.input,
+    sourceText,
+    range
+  };
+}
+
+function collectSiteAdviceAndWarnings(
+  state: ParserState,
+  tokens: Token[],
+  prnReasonStart: number | undefined,
+  prnSiteSuffixIndices: Set<number>,
+  options: ParseOptions | undefined,
+  maybeApplyRouteDescriptor: (phrase: string | undefined) => boolean
+): void {
+  if (!state.siteText) {
+    const sitePhraseServices = buildSitePhraseServices(state, tokens, options);
+    for (let index = 0; index < tokens.length; index++) {
+      if (prnReasonStart !== undefined && index >= prnReasonStart) {
+        break;
+      }
+      const candidate = extractExplicitSiteCandidate(
+        tokens,
+        state.consumed,
+        index,
+        options,
+        sitePhraseServices
+      );
+      if (
+        candidate &&
+        applySitePhraseCandidate(
+          state,
+          tokens,
+          candidate,
+          options,
+          maybeApplyRouteDescriptor
+        )
+      ) {
+        break;
+      }
+    }
+  }
+
+  if (!state.siteText) {
+    const groups = findUnparsedTokenGroups(state);
+    const sitePhraseServices = buildSitePhraseServices(state, tokens, options);
+    const siteCandidate = selectBestResidualSiteCandidate(
+      groups,
+      prnSiteSuffixIndices,
+      sitePhraseServices
+    );
+    if (siteCandidate) {
+      applySitePhraseCandidate(
+        state,
+        tokens,
+        siteCandidate,
+        options,
+        maybeApplyRouteDescriptor
+      );
+    }
+  }
+
+  if (!state.routeCode && state.siteText) {
+    const routeHint = inferRouteHintFromSitePhraseFromModule(state.siteText, options, {
+      lookupBodySiteDefinition
+    });
+    if (routeHint) {
+      setRoute(state, routeHint);
+    }
+  }
+
+  seedSiteFromRoute(state, options);
+
+  if (!state.routeCode && state.siteText && hasApplicationVerbBefore(tokens, tokens.length, state.consumed)) {
+    setRoute(state, RouteCode["Topical route"]);
+  }
+
+  collectAdditionalInstructions(state, tokens);
+
+  if (
+    state.routeCode === RouteCode["Intravitreal route (qualifier value)"] &&
+    (!state.siteText || !/eye/i.test(state.siteText))
+  ) {
+    state.warnings.push(
+      "Intravitreal administrations require an eye site (e.g., OD/OS/OU)."
+    );
+  }
+}
+
+function finalizeCanonicalClause(internal: ParserState): void {
+  const clause = internal.primaryClause;
 
   clause.rawText = internal.input;
   const trimmedRange = computeTrimmedInputRange(internal.input);
@@ -1479,9 +1656,13 @@ function finalizeCanonicalClause(internal: ParsedSigInternal): void {
     }
   }
 
-  if (internal.additionalInstructions.length) {
+  const existingInstructions = internal.additionalInstructions.length
+    ? [...internal.additionalInstructions]
+    : [];
+
+  if (existingInstructions.length) {
     clause.additionalInstructions = [];
-    for (const instruction of internal.additionalInstructions) {
+    for (const instruction of existingInstructions) {
       clause.additionalInstructions.push({
         text: instruction.text,
         coding: instruction.coding?.code
@@ -1533,7 +1714,7 @@ function computeTokenRange(
 }
 
 export function findUnparsedTokenGroups(
-  internal: ParsedSigInternal
+  internal: ParserState
 ): Array<{ tokens: Token[]; range?: TextRange }> {
   const leftoverTokens = internal.tokens
     .filter((token) => !internal.consumed.has(token.index))
@@ -1649,7 +1830,7 @@ function hasApplicationVerbBefore(
 }
 
 function hasExplicitSiteIntroduction(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   options?: ParseOptions
@@ -1756,7 +1937,7 @@ function isLikelyMealAnchorUsage(
 }
 
 function buildSitePhraseServices(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   options?: ParseOptions
 ): SitePhraseServices {
@@ -1787,7 +1968,7 @@ function buildSitePhraseServices(
 }
 
 function applySitePhrase(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   indices: number[],
   options?: ParseOptions,
@@ -1918,7 +2099,7 @@ function applySitePhrase(
 }
 
 function applySitePhraseCandidate(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   candidate: SitePhraseCandidate,
   options?: ParseOptions,
@@ -1934,7 +2115,7 @@ function applySitePhraseCandidate(
 }
 
 function seedSiteFromRoute(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): void {
   if (internal.siteText || !internal.routeCode) {
@@ -2045,7 +2226,7 @@ function computeWhenWeight(code: EventTiming, options?: ParseOptions): number {
   return DEFAULT_EVENT_TIMING_WEIGHTS[code] ?? 10000;
 }
 
-function sortWhenValues(internal: ParsedSigInternal, options?: ParseOptions) {
+function sortWhenValues(internal: ParserState, options?: ParseOptions) {
   if (internal.when.length < 2) {
     return;
   }
@@ -2137,7 +2318,7 @@ function computeMealExpansions(
   return [EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner, bedtime];
 }
 
-function reconcileMealTimingSpecificity(internal: ParsedSigInternal) {
+function reconcileMealTimingSpecificity(internal: ParserState) {
   if (!internal.when.length) {
     return;
   }
@@ -2200,7 +2381,7 @@ const MEAL_COMPATIBLE_ROUTE_CODES = new Set<RouteCode>([
 ]);
 
 function resolveMealExpansionRoute(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): RouteCode | undefined {
   if (internal.routeCode) {
@@ -2218,7 +2399,7 @@ function resolveMealExpansionRoute(
   return inferRouteFromContext(options?.context ?? undefined);
 }
 
-function hasPendingSiteCue(internal: ParsedSigInternal): boolean {
+function hasPendingSiteCue(internal: ParserState): boolean {
   for (const token of internal.tokens) {
     if (internal.consumed.has(token.index)) {
       continue;
@@ -2263,7 +2444,7 @@ function matchesSmartMealExpansionForm(
 }
 
 function resolveSmartMealExpansionScopeDecision(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): boolean | undefined {
   const scope: SmartMealExpansionScope | undefined = options?.smartMealExpansionScope;
@@ -2298,7 +2479,7 @@ function resolveSmartMealExpansionScopeDecision(
 }
 
 function shouldExpandMealTimings(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): boolean {
   const scopeDecision = resolveSmartMealExpansionScopeDecision(internal, options);
@@ -2324,7 +2505,7 @@ function shouldExpandMealTimings(
 // EventTiming codes when the cadence or explicit meal abbreviations make the
 // intent obvious.
 function expandMealTimings(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ) {
   const allowSmartExpansion = options?.smartMealExpansion === true;
@@ -2429,7 +2610,7 @@ function expandMealTimings(
 }
 
 function setRoute(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   code: RouteCode,
   text?: string
 ) {
@@ -2490,7 +2671,7 @@ function periodUnitSuffix(unit: FhirPeriodUnit): string | undefined {
 }
 
 function maybeAssignTimingCode(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   value: number,
   unit: FhirPeriodUnit
 ) {
@@ -2510,7 +2691,7 @@ function maybeAssignTimingCode(
  * period clearly represents common cadences (daily/weekly/monthly).
  */
 function applyPeriod(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   period: number,
   unit: FhirPeriodUnit
 ) {
@@ -2534,7 +2715,7 @@ function applyPeriod(
  * the following token as the unit if the compact token only carries the value.
  */
 function tryParseCompactQ(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): boolean {
@@ -2573,7 +2754,7 @@ function tryParseCompactQ(
 }
 
 function applyFrequencyDescriptor(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   token: Token,
   descriptor: {
     code?: string;
@@ -2620,7 +2801,7 @@ function applyFrequencyDescriptor(
 }
 
 function applyWhenToken(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   token: Token,
   code: EventTiming
 ) {
@@ -2655,20 +2836,20 @@ function isTimingAnchorOrPrefix(
   );
 }
 
-function addDayOfWeek(internal: ParsedSigInternal, day: FhirDayOfWeek) {
+function addDayOfWeek(internal: ParserState, day: FhirDayOfWeek) {
   if (!arrayIncludes(internal.dayOfWeek, day)) {
     internal.dayOfWeek.push(day);
   }
 }
 
-function addDayOfWeekList(internal: ParsedSigInternal, days: FhirDayOfWeek[]) {
+function addDayOfWeekList(internal: ParserState, days: FhirDayOfWeek[]) {
   for (const day of days) {
     addDayOfWeek(internal, day);
   }
 }
 
 function tryConsumeDayRangeTokens(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number
 ): number {
@@ -2707,7 +2888,7 @@ function tryConsumeDayRangeTokens(
 }
 
 function parseAnchorSequence(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   prefixCode?: EventTiming
@@ -2783,7 +2964,7 @@ function parseAnchorSequence(
 }
 
 function parseSeparatedInterval(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[],
   index: number,
   options?: ParseOptions
@@ -2889,7 +3070,7 @@ function parseNumericRange(token: string): { low: number; high: number } | undef
   return { low, high };
 }
 
-function applyCountLimit(internal: ParsedSigInternal, value: number | undefined): boolean {
+function applyCountLimit(internal: ParserState, value: number | undefined): boolean {
   if (value === undefined || !Number.isFinite(value) || value <= 0) {
     return false;
   }
@@ -2987,10 +3168,10 @@ function resolveNumericDoseUnit(
   };
 }
 
-export function parseInternal(
+export function parseClauseState(
   input: string,
   options?: ParseOptions
-): ParsedSigInternal {
+): ParserState {
   const tokens = tokenize(input);
   const internal = createClauseBackedInternal(
     input,
@@ -3021,107 +3202,9 @@ export function parseInternal(
     return internal;
   }
 
-  // PRN detection
-  let prnReasonStart: number | undefined;
   const prnSiteSuffixIndices = new Set<number>();
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token.lower === "prn") {
-      internal.asNeeded = true;
-      mark(internal.consumed, token);
-      let reasonIndex = i + 1;
-      if (tokens[reasonIndex]?.lower === "for") {
-        mark(internal.consumed, tokens[reasonIndex]);
-        reasonIndex += 1;
-      }
-      prnReasonStart = reasonIndex;
-      break;
-    }
-    if (token.lower === "as" && tokens[i + 1]?.lower === "needed") {
-      internal.asNeeded = true;
-      mark(internal.consumed, token);
-      mark(internal.consumed, tokens[i + 1]);
-      let reasonIndex = i + 2;
-      if (tokens[reasonIndex]?.lower === "for") {
-        mark(internal.consumed, tokens[reasonIndex]);
-        reasonIndex += 1;
-      }
-      prnReasonStart = reasonIndex;
-      break;
-    }
-  }
-
-  // Multiplicative tokens like 1x3
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (internal.consumed.has(token.index)) continue;
-    const combined = token.lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]([0-9]+(?:\.[0-9]+)?)$/);
-    if (combined) {
-      const dose = parseFloat(combined[1]);
-      const freq = parseFloat(combined[2]);
-      if (internal.dose === undefined) {
-        internal.dose = dose;
-      }
-      internal.frequency = freq;
-      internal.period = 1;
-      internal.periodUnit = FhirPeriodUnit.Day;
-      mark(internal.consumed, token);
-      continue;
-    }
-
-    const hasNumericDoseBefore = (): boolean => {
-      for (let j = i - 1; j >= 0; j--) {
-        const prev = tokens[j];
-        if (!prev) {
-          continue;
-        }
-        if (internal.consumed.has(prev.index)) {
-          continue;
-        }
-        if (/^[0-9]+(?:\.[0-9]+)?$/.test(prev.lower)) {
-          return true;
-        }
-        if (normalizeUnit(prev.lower, options)) {
-          continue;
-        }
-        break;
-      }
-      return false;
-    };
-
-    if (internal.frequency === undefined && hasNumericDoseBefore()) {
-      const prefix = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
-      if (prefix) {
-        const freq = parseFloat(prefix[1]);
-        if (Number.isFinite(freq)) {
-          internal.frequency = freq;
-          internal.period = 1;
-          internal.periodUnit = FhirPeriodUnit.Day;
-          mark(internal.consumed, token);
-          continue;
-        }
-      }
-
-      if (token.lower === "x" || token.lower === "*") {
-        const next = tokens[i + 1];
-        if (
-          next &&
-          !internal.consumed.has(next.index) &&
-          /^[0-9]+(?:\.[0-9]+)?$/.test(next.lower)
-        ) {
-          const freq = parseFloat(next.original);
-          if (Number.isFinite(freq)) {
-            internal.frequency = freq;
-            internal.period = 1;
-            internal.periodUnit = FhirPeriodUnit.Day;
-            mark(internal.consumed, token);
-            mark(internal.consumed, next);
-            continue;
-          }
-        }
-      }
-    }
-  }
+  const prnReasonStart = detectPrnPrelude(internal, tokens);
+  collectMultiplicativeCadence(internal, tokens, options);
 
   const applyRouteDescriptor = (code: RouteCode, text?: string): boolean => {
     if (internal.routeCode && internal.routeCode !== code) {
@@ -3584,301 +3667,16 @@ export function parseInternal(
       continue;
     }
   }
-  // Units from trailing tokens if still undefined
-  if (internal.unit === undefined) {
-    for (const token of tokens) {
-      if (internal.consumed.has(token.index)) continue;
-      const unit = normalizeUnit(token.lower, options);
-      if (unit) {
-        internal.unit = unit;
-        mark(internal.consumed, token);
-        break;
-      }
-    }
-  }
-
-  if (internal.unit === undefined) {
-    internal.unit = enforceHouseholdUnitPolicy(
-      inferUnitFromContext(context),
-      options,
-    );
-  }
-
-  if (internal.unit === undefined) {
-    const fallbackUnit = enforceHouseholdUnitPolicy(
-      inferUnitFromRouteHints(internal),
-      options,
-    );
-    if (fallbackUnit) {
-      internal.unit = fallbackUnit;
-    }
-  }
-
-  if (
-    options?.assumeSingleDiscreteDose &&
-    internal.dose === undefined &&
-    internal.doseRange === undefined &&
-    internal.unit !== undefined &&
-    isDiscreteUnit(internal.unit)
-  ) {
-    internal.dose = 1;
-  }
-
-  // Frequency defaults when timing code implies it
-  if (
-    internal.frequency === undefined &&
-    internal.period === undefined &&
-    internal.timingCode
-  ) {
-    const descriptor = TIMING_ABBREVIATIONS[internal.timingCode.toLowerCase()];
-    if (descriptor) {
-      if (descriptor.frequency !== undefined) {
-        internal.frequency = descriptor.frequency;
-      }
-      if (descriptor.period !== undefined) {
-        internal.period = descriptor.period;
-      }
-      if (descriptor.periodUnit) {
-        internal.periodUnit = descriptor.periodUnit;
-      }
-      if (descriptor.when) {
-        for (const w of descriptor.when) {
-          addWhen(internal.when, w);
-        }
-      }
-    }
-  }
-
-  if (
-    !internal.timingCode &&
-    internal.frequency !== undefined &&
-    internal.periodUnit === FhirPeriodUnit.Day &&
-    (internal.period === undefined || internal.period === 1)
-  ) {
-    if (internal.frequency === 2) {
-      internal.timingCode = "BID";
-    } else if (internal.frequency === 3) {
-      internal.timingCode = "TID";
-    } else if (internal.frequency === 4) {
-      internal.timingCode = "QID";
-    }
-  }
-
-  reconcileMealTimingSpecificity(internal);
-
-  // Expand generic meal markers into specific EventTiming codes when asked to.
-  expandMealTimings(internal, options);
-
-  sortWhenValues(internal, options);
-
-  // PRN reason text
-  if (internal.asNeeded && prnReasonStart !== undefined) {
-    const reasonTokens: string[] = [];
-    const reasonIndices: number[] = [];
-    const reasonObjects: Token[] = [];
-    const PRN_RECLAIMABLE_CONNECTORS = new Set(["at", "to", "in", "into", "on", "onto"]);
-    for (let i = prnReasonStart; i < tokens.length; i++) {
-      const token = tokens[i];
-      if (internal.consumed.has(token.index)) {
-        // We only allow reclaiming certain generic connectors if they were used
-        // as standalone markers (like 'at' or 'to') and not if they were clearly
-        // part of a frequency/period instruction (which would be skipped here
-        // if they were consumed by those specific logic paths).
-        if (!PRN_RECLAIMABLE_CONNECTORS.has(token.lower)) {
-          continue;
-        }
-        // If it is a reclaimable connector, we can pull it back into the reason
-        // if it helps form a coherent phrase like 'irritation at rectum'.
-      }
-
-      // If we haven't started collecting the reason yet, we should skip introductory
-      // connectors to avoid phrases like "as needed for if pain".
-      const PRN_INTRODUCTIONS = new Set(["for", "if", "when", "upon", "due", "to"]);
-      if (reasonTokens.length === 0 && PRN_INTRODUCTIONS.has(token.lower)) {
-        // Special handling for "due to" - if we skipped "due", we should also skip "to"
-        if (token.lower === "due") {
-          const next = tokens[i + 1];
-          if (next && next.lower === "to") {
-            mark(internal.consumed, token);
-            mark(internal.consumed, next);
-            i++; // skip next token in loop
-            continue;
-          }
-        }
-        mark(internal.consumed, token);
-        continue;
-      }
-
-      reasonTokens.push(token.original);
-      reasonIndices.push(token.index);
-      reasonObjects.push(token);
-      mark(internal.consumed, token);
-    }
-    if (reasonTokens.length > 0) {
-      let sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
-      let range = computeTokenRange(internal.input, tokens, sortedIndices);
-      let sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
-      if (sourceText) {
-        const cutoff = determinePrnReasonCutoff(reasonObjects, sourceText);
-        if (cutoff !== undefined) {
-          for (let i = cutoff; i < reasonObjects.length; i++) {
-            internal.consumed.delete(reasonObjects[i].index);
-          }
-          reasonObjects.splice(cutoff);
-          reasonTokens.splice(cutoff);
-          reasonIndices.splice(cutoff);
-          while (reasonTokens.length > 0) {
-            const lastToken = reasonTokens[reasonTokens.length - 1];
-            if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
-              const removedObject = reasonObjects.pop();
-              if (removedObject) {
-                internal.consumed.delete(removedObject.index);
-              }
-              reasonTokens.pop();
-              const removedIndex = reasonIndices.pop();
-              if (removedIndex !== undefined) {
-                internal.consumed.delete(removedIndex);
-              }
-              continue;
-            }
-            break;
-          }
-          if (reasonTokens.length > 0) {
-            sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
-            range = computeTokenRange(internal.input, tokens, sortedIndices);
-            sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
-          } else {
-            range = undefined;
-            sourceText = undefined;
-          }
-        }
-      }
-      let canonicalPrefix: string | undefined;
-      if (reasonTokens.length > 0) {
-        const suffixInfo = findTrailingPrnSiteSuffix(reasonObjects, internal, options);
-        if (suffixInfo?.tokens?.length) {
-          for (const token of suffixInfo.tokens) {
-            prnSiteSuffixIndices.add(token.index);
-          }
-        }
-        if (suffixInfo && suffixInfo.startIndex > 0) {
-          const prefixTokens = reasonObjects
-            .slice(0, suffixInfo.startIndex)
-            .map((token) => token.original)
-            .join(" ")
-            .replace(/\s+/g, " ")
-            .trim();
-          if (prefixTokens) {
-            canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-          }
-        }
-      }
-      if (reasonTokens.length > 0) {
-        const joined = reasonTokens.join(" ").trim();
-        if (joined) {
-          let sanitized = joined.replace(/\s+/g, " ").trim();
-          let isProbe = false;
-          const probeMatch = sanitized.match(/^\{(.+)}$/);
-          if (probeMatch) {
-            isProbe = true;
-            sanitized = probeMatch[1];
-          }
-          sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-          const text = sanitized || joined;
-          internal.asNeededReason = text;
-          const normalized = text.toLowerCase();
-          const canonicalSource = canonicalPrefix || sanitized || text;
-          const canonical = canonicalSource
-            ? normalizePrnReasonKey(canonicalSource)
-            : normalizePrnReasonKey(text);
-          internal.prnReasonLookupRequest = {
-            originalText: joined,
-            text,
-            normalized,
-            canonical: canonical ?? "",
-            isProbe,
-            inputText: internal.input,
-            sourceText,
-            range
-          };
-        }
-      }
-    }
-  }
-
-  if (!internal.siteText) {
-    const sitePhraseServices = buildSitePhraseServices(internal, tokens, options);
-    for (let i = 0; i < tokens.length; i++) {
-      if (prnReasonStart !== undefined && i >= prnReasonStart) {
-        break;
-      }
-      const candidate = extractExplicitSiteCandidate(
-        tokens,
-        internal.consumed,
-        i,
-        options,
-        sitePhraseServices
-      );
-      if (
-        candidate &&
-        applySitePhraseCandidate(
-          internal,
-          tokens,
-          candidate,
-          options,
-          maybeApplyRouteDescriptor
-        )
-      ) {
-        break;
-      }
-    }
-  }
-
-  if (!internal.siteText) {
-    const groups = findUnparsedTokenGroups(internal);
-    const sitePhraseServices = buildSitePhraseServices(internal, tokens, options);
-    const siteCandidate = selectBestResidualSiteCandidate(
-      groups,
-      prnSiteSuffixIndices,
-      sitePhraseServices
-    );
-
-    if (siteCandidate) {
-      applySitePhraseCandidate(
-        internal,
-        tokens,
-        siteCandidate,
-        options,
-        maybeApplyRouteDescriptor
-      );
-    }
-  }
-
-  if (!internal.routeCode && internal.siteText) {
-    const routeHint = inferRouteHintFromSitePhraseFromModule(internal.siteText, options, {
-      lookupBodySiteDefinition
-    });
-    if (routeHint) {
-      setRoute(internal, routeHint);
-    }
-  }
-
-  seedSiteFromRoute(internal, options);
-
-  if (!internal.routeCode && internal.siteText && hasApplicationVerbBefore(tokens, tokens.length, internal.consumed)) {
-    setRoute(internal, RouteCode["Topical route"]);
-  }
-
-  collectAdditionalInstructions(internal, tokens);
-
-  if (
-    internal.routeCode === RouteCode["Intravitreal route (qualifier value)"] &&
-    (!internal.siteText || !/eye/i.test(internal.siteText))
-  ) {
-    internal.warnings.push(
-      "Intravitreal administrations require an eye site (e.g., OD/OS/OU)."
-    );
-  }
+  applyClauseDefaultsAfterTokenScan(internal, tokens, context, options);
+  collectPrnReasonText(internal, tokens, prnReasonStart, prnSiteSuffixIndices, options);
+  collectSiteAdviceAndWarnings(
+    internal,
+    tokens,
+    prnReasonStart,
+    prnSiteSuffixIndices,
+    options,
+    maybeApplyRouteDescriptor
+  );
 
   finalizeCanonicalClause(internal);
 
@@ -3890,21 +3688,21 @@ export function parseInternal(
  * callbacks, applying the best match to the in-progress parse result.
  */
 export function applyPrnReasonCoding(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): void {
   runPrnReasonResolutionSync(internal, options);
 }
 
 export async function applyPrnReasonCodingAsync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): Promise<void> {
   await runPrnReasonResolutionAsync(internal, options);
 }
 
 export function applySiteCoding(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): void {
   runSiteCodingResolutionSync(internal, options);
@@ -3915,7 +3713,7 @@ export function applySiteCoding(
  * suggestion callbacks so remote terminology services can be used.
  */
 export async function applySiteCodingAsync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): Promise<void> {
   await runSiteCodingResolutionAsync(internal, options);
@@ -3927,7 +3725,7 @@ export async function applySiteCodingAsync(
  * fails or a `{probe}` placeholder requested an interactive lookup.
  */
 function runSiteCodingResolutionSync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): void {
   internal.siteLookups = [];
@@ -4008,7 +3806,7 @@ function runSiteCodingResolutionSync(
  * results and suggestion providers, enabling remote terminology services.
  */
 async function runSiteCodingResolutionAsync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): Promise<void> {
   internal.siteLookups = [];
@@ -4156,7 +3954,7 @@ function pickSiteSelection(
  * Applies the selected body-site definition onto the parser state, defaulting
  * the coding system to SNOMED CT when the definition omits one.
  */
-function applySiteDefinition(internal: ParsedSigInternal, definition: BodySiteDefinition) {
+function applySiteDefinition(internal: ParserState, definition: BodySiteDefinition) {
   const coding = definition.coding;
   internal.siteCoding = coding?.code
     ? {
@@ -4483,7 +4281,7 @@ function hasInstructionSeparatorBeforeRange(
 }
 
 function inferAdditionalInstructionPredicate(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[]
 ): string {
   if (hasApplicationVerbBefore(tokens, tokens.length, internal.consumed)) {
@@ -4508,7 +4306,7 @@ function inferAdditionalInstructionPredicate(
 }
 
 function collectAdditionalInstructions(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   tokens: Token[]
 ): void {
   if (internal.additionalInstructions.length) {
@@ -4519,7 +4317,7 @@ function collectAdditionalInstructions(
     return;
   }
 
-  const instructions: ParsedSigInternal["additionalInstructions"] = [];
+  const instructions: ParserState["additionalInstructions"] = [];
   const seen = new Set<string>();
   const defaultPredicate = inferAdditionalInstructionPredicate(internal, tokens);
 
@@ -4681,7 +4479,7 @@ interface PrnSiteSuffixDetection {
 
 function findTrailingPrnSiteSuffix(
   tokens: Token[],
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): PrnSiteSuffixDetection | undefined {
   let suffixStart: number | undefined;
@@ -4840,7 +4638,7 @@ function pickPrnReasonSelection(
 }
 
 function applyPrnReasonDefinition(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   definition: PrnReasonDefinition
 ) {
   const coding = definition.coding;
@@ -4955,7 +4753,7 @@ function collectDefaultPrnReasonDefinitions(
 }
 
 function runPrnReasonResolutionSync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): void {
   internal.prnReasonLookups = [];
@@ -5031,7 +4829,7 @@ function runPrnReasonResolutionSync(
 }
 
 async function runPrnReasonResolutionAsync(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   options?: ParseOptions
 ): Promise<void> {
   internal.prnReasonLookups = [];
@@ -5150,7 +4948,7 @@ function isDiscreteUnit(unit: string): boolean {
   return DISCRETE_UNIT_SET.has(unit.trim().toLowerCase());
 }
 
-function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefined {
+function inferUnitFromRouteHints(internal: ParserState): string | undefined {
   if (internal.routeCode) {
     const unit = DEFAULT_UNIT_BY_ROUTE[internal.routeCode];
     if (unit) {

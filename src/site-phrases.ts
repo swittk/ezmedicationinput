@@ -14,7 +14,7 @@ import {
   isSiteSurfaceModifierWord,
   isWorkflowInstructionWord
 } from "./lexer/meaning";
-import { Token } from "./internal-types";
+import { Token } from "./parser-state";
 import { BodySiteDefinition, ParseOptions, RouteCode } from "./types";
 
 export interface SitePhraseServices {

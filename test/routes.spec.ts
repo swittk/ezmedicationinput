@@ -11,7 +11,7 @@ import {
 } from "../src/maps";
 import { toFhir } from "../src/fhir";
 import { normalizeDosageForm, inferUnitFromContext } from "../src/context";
-import { ParsedSigInternal } from "../src/internal-types";
+import { ParserState } from "../src/parser-state";
 import {
   RouteCode,
   SNOMEDCTRouteCodes
@@ -40,17 +40,10 @@ describe("SNOMED route coverage", () => {
   it("round-trips every SNOMED coding through FHIR helpers", () => {
     for (const code of Object.values(SNOMEDCTRouteCodes)) {
       const routeCode = code as RouteCode;
-      const internal: ParsedSigInternal = {
-        input: "",
-        tokens: [],
-        consumed: new Set<number>(),
-        dayOfWeek: [],
-        when: [],
-        warnings: [],
-        routeCode,
-        routeText: ROUTE_TEXT[routeCode]
-      };
-      const fhir = toFhir(internal);
+      const state = new ParserState("", []);
+      state.routeCode = routeCode;
+      state.routeText = ROUTE_TEXT[routeCode];
+      const fhir = toFhir(state);
       const coding = fhir.route?.coding?.[0];
       expect(coding).toEqual({
         system: SNOMED_SYSTEM,

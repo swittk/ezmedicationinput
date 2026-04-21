@@ -411,3 +411,32 @@ Desired behavior:
    - the parser state object is still named `ParsedSigInternal`
    - the central parse loop is still a large ordered collector/mutator, even though public outputs are canonical-first
    - next cleanup target is renaming/removing the old parser-state shell and pushing more collector decisions into explicit native clause assembly/scoring
+
+### 2026-04-22 Parser Core State Cutover
+
+1. Deleted the old parser shell file.
+   - removed `src/internal-types.ts`
+   - replaced it with `src/parser-state.ts`
+   - parser state is now explicitly a canonical-clause-backed `ParserState` object
+
+2. Canonical clause storage is now the parser core, not a reconstructed mirror.
+   - `ParserState` owns one primary canonical clause plus parser metadata (`consumed`, lookups, warnings, token spans)
+   - scalar parser fields (`dose`, `routeCode`, `siteText`, `timingCode`, `additionalInstructions`, etc.) are now accessors over the canonical clause, not duplicated semantic storage
+   - `src/ir.ts` no longer rebuilds clauses from parser state; `buildCanonicalSigClauses()` now just returns `state.clauses`
+
+3. The parser entrypoint was renamed and decomposed into explicit passes.
+   - `parseInternal()` became `parseClauseState()`
+   - PRN prelude detection is now a named pass
+   - multiplicative cadence collection is now a named pass
+   - post-token defaults (unit/frequency/timing reconciliation) are now a named pass
+   - PRN tail capture is now a named pass
+   - site/advice/warning collection is now a named pass
+
+4. Downstream paths now read parser state directly.
+   - parse-result assembly in `src/index.ts` now reads `state.clauses` directly
+   - FHIR lowering in `src/fhir.ts` now reads `state.clauses` directly
+   - formatter fallback in `src/format.ts` now reads `state.clauses` directly
+
+5. Current remaining debt after this parser-core cutover.
+   - the main sequential token scan in `parseClauseState()` is still heuristic-heavy and remains the biggest blob
+   - the next true endgame step is replacing that main scan with more explicit collector/scoring stages for dose/route/schedule/site ambiguity, not just more helper extraction

@@ -4,7 +4,7 @@ import {
 } from "./advice";
 import { formatCanonicalClause } from "./format";
 import { buildCanonicalSigClauses } from "./ir";
-import { ParsedSigInternal } from "./internal-types";
+import { ParserState } from "./parser-state";
 import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
@@ -200,9 +200,9 @@ export function canonicalToFhir(
   return dosage;
 }
 
-export function toFhir(internal: ParsedSigInternal): FhirDosage {
-  const clauses = buildCanonicalSigClauses(internal);
-  const clause = clauses[0] ?? createEmptyCanonicalClause(internal.input);
+export function toFhir(state: ParserState): FhirDosage {
+  const clauses = state.clauses;
+  const clause = clauses[0] ?? createEmptyCanonicalClause(state.input);
   return canonicalToFhir(clause);
 }
 
@@ -329,56 +329,49 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   return clause;
 }
 
-export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
-  const internal: ParsedSigInternal = {
-    input: dosage.text ?? "",
-    tokens: [],
-    consumed: new Set(),
-    dayOfWeek: dosage.timing?.repeat?.dayOfWeek
-      ? [...dosage.timing.repeat.dayOfWeek]
-      : [],
-    when: dosage.timing?.repeat?.when
-      ? dosage.timing.repeat.when.filter((value): value is EventTiming =>
-        arrayIncludes(
-          objectValues(EventTiming) as EventTiming[],
-          value as EventTiming
-        )
+export function parserStateFromFhir(dosage: FhirDosage): ParserState {
+  const state = new ParserState(dosage.text ?? "", []);
+  state.timeOfDay = dosage.timing?.repeat?.timeOfDay
+    ? [...dosage.timing.repeat.timeOfDay]
+    : [];
+  state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
+  state.count = dosage.timing?.repeat?.count;
+  state.frequency = dosage.timing?.repeat?.frequency;
+  state.frequencyMax = dosage.timing?.repeat?.frequencyMax;
+  state.period = dosage.timing?.repeat?.period;
+  state.periodMax = dosage.timing?.repeat?.periodMax;
+  state.periodUnit = dosage.timing?.repeat?.periodUnit;
+  state.routeText = dosage.route?.text;
+  state.siteText = dosage.site?.text;
+  state.asNeeded = dosage.asNeededBoolean;
+  state.asNeededReason = dosage.asNeededFor?.[0]?.text;
+
+  if (dosage.timing?.repeat?.dayOfWeek) {
+    state.dayOfWeek.push(...dosage.timing.repeat.dayOfWeek);
+  }
+  if (dosage.timing?.repeat?.when) {
+    const whenValues = dosage.timing.repeat.when.filter((value): value is EventTiming =>
+      arrayIncludes(
+        objectValues(EventTiming) as EventTiming[],
+        value as EventTiming
       )
-      : [],
-    timeOfDay: dosage.timing?.repeat?.timeOfDay
-      ? [...dosage.timing.repeat.timeOfDay]
-      : [],
-    warnings: [],
-    timingCode: dosage.timing?.code?.coding?.[0]?.code,
-    count: dosage.timing?.repeat?.count,
-    frequency: dosage.timing?.repeat?.frequency,
-    frequencyMax: dosage.timing?.repeat?.frequencyMax,
-    period: dosage.timing?.repeat?.period,
-    periodMax: dosage.timing?.repeat?.periodMax,
-    periodUnit: dosage.timing?.repeat?.periodUnit,
-    routeText: dosage.route?.text,
-    siteText: dosage.site?.text,
-    asNeeded: dosage.asNeededBoolean,
-    asNeededReason: dosage.asNeededFor?.[0]?.text,
-    siteTokenIndices: new Set(),
-    siteLookups: [],
-    prnReasonLookups: [],
-    additionalInstructions: []
-  };
+    );
+    state.when.push(...whenValues);
+  }
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
   if (routeCoding?.code) {
     // Translate SNOMED codings back into the simplified enum for round-trip fidelity.
     const mapped = ROUTE_BY_SNOMED[routeCoding.code as SNOMEDCTRouteCodes];
     if (mapped) {
-      internal.routeCode = mapped;
-      internal.routeText = ROUTE_TEXT[mapped];
+      state.routeCode = mapped;
+      state.routeText = ROUTE_TEXT[mapped];
     }
   }
 
   const siteCoding = dosage.site?.coding?.find((code) => code.system === SNOMED_SYSTEM);
   if (siteCoding?.code) {
-    internal.siteCoding = {
+    state.siteCoding = {
       code: siteCoding.code,
       display: siteCoding.display,
       system: siteCoding.system
@@ -391,7 +384,7 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
       reasonCoding.system ?? SNOMED_SYSTEM,
       reasonCoding.code
     );
-    internal.asNeededReasonCoding = {
+    state.asNeededReasonCoding = {
       code: reasonCoding.code,
       display: reasonCoding.display,
       system: reasonCoding.system,
@@ -400,7 +393,7 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
   }
 
   if (dosage.additionalInstruction?.length) {
-    internal.additionalInstructions = dosage.additionalInstruction.map((concept) => {
+    state.additionalInstructions = dosage.additionalInstruction.map((concept) => {
       const coding = concept.coding?.[0];
       const defaultDef = coding?.code
         ? findAdditionalInstructionDefinitionByCoding(
@@ -436,18 +429,18 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
   if (doseAndRate?.doseRange) {
     const { low, high } = doseAndRate.doseRange;
     if (low?.value !== undefined && high?.value !== undefined) {
-      internal.doseRange = { low: low.value, high: high.value };
+      state.doseRange = { low: low.value, high: high.value };
     }
-    internal.unit = low?.unit ?? high?.unit ?? internal.unit;
+    state.unit = low?.unit ?? high?.unit ?? state.unit;
   } else if (doseAndRate?.doseQuantity) {
     const dose = doseAndRate.doseQuantity;
     if (dose.value !== undefined) {
-      internal.dose = dose.value;
+      state.dose = dose.value;
     }
     if (dose.unit) {
-      internal.unit = dose.unit;
+      state.unit = dose.unit;
     }
   }
 
-  return internal;
+  return state;
 }

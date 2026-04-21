@@ -1,5 +1,5 @@
 import { buildCanonicalSigClauses } from "./ir";
-import { ParsedSigInternal } from "./internal-types";
+import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import {
   CanonicalDoseExpr,
@@ -767,8 +767,8 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
   return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
 }
 
-function firstCanonicalClause(internal: ParsedSigInternal): CanonicalSigClause {
-  const clauses = buildCanonicalSigClauses(internal);
+function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
+  const clauses = internal.clauses;
   if (clauses.length > 0) {
     return clauses[0];
   }
@@ -827,7 +827,7 @@ export function formatCanonicalClause(
 }
 
 export function formatInternal(
-  internal: ParsedSigInternal,
+  internal: ParserState,
   style: "short" | "long",
   localization?: SigLocalization,
   options?: TimingSummaryOptions
