@@ -1745,11 +1745,158 @@ describe("parseSig core scenarios", () => {
     });
   });
 
-  it("records probe requests for unknown sites so UIs can prompt", () => {
-    const input = "apply to {temple} nightly";
+  it("codes common ambulatory musculoskeletal sites with SNOMED", () => {
+    const cases = [
+      {
+        sig: "apply gel to left shoulder bid",
+        expected: { code: "91775009", display: "Left shoulder", text: "left shoulder" }
+      },
+      {
+        sig: "apply gel to right knee bid",
+        expected: { code: "6757004", display: "Right knee", text: "right knee" }
+      },
+      {
+        sig: "apply gel to both ankles bid",
+        expected: { code: "69948000", display: "Both ankles", text: "both ankles" }
+      }
+    ];
+
+    for (const { sig, expected } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(expected.text);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: expected.code,
+        display: expected.display
+      });
+    }
+  });
+
+  it("codes common clinic skin and breast application sites with SNOMED", () => {
+    const cases = [
+      {
+        sig: "apply cream to groin daily",
+        expected: { code: "26893007", display: "Inguinal region structure", text: "groin" }
+      },
+      {
+        sig: "apply patch to left breast daily",
+        expected: { code: "80248007", display: "Left breast", text: "left breast" }
+      },
+      {
+        sig: "apply deodorant to axilla daily",
+        expected: { code: "34797008", display: "Axilla structure", text: "axilla" }
+      }
+    ];
+
+    for (const { sig, expected } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(expected.text);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: expected.code,
+        display: expected.display
+      });
+    }
+  });
+
+  it("codes lip and eyelid anatomy with SNOMED", () => {
+    const lip = parseSig("apply ointment to lip daily");
+    expect(lip.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "48477009",
+      display: "Lip structure"
+    });
+
+    const eyelid = parseSig("apply ointment to eyelid daily");
+    expect(eyelid.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "80243003",
+      display: "Eyelid"
+    });
+  });
+
+  it("derives topical route from body-site definitions without separate regex maintenance", () => {
+    const result = parseSig("apply ointment to axilla daily");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+    expect(result.fhir.site?.coding?.[0]?.code).toBe("34797008");
+  });
+
+  it("supports generic affected-area application as uncoded site text", () => {
+    const result = parseSig("apply to affected area bid", { locale: "th" });
+    expect(result.fhir.site?.text).toBe("affected area");
+    expect(result.fhir.site?.coding).toBeUndefined();
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+    expect(result.longText).toContain("บริเวณที่เป็น");
+  });
+
+  it("codes head with bundled SNOMED anatomy", () => {
+    const result = parseSig("apply to head bid");
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "69536005",
+      display: "Head structure"
+    });
+  });
+
+  it("codes temple variants with bundled SNOMED anatomy", () => {
+    const cases = [
+      {
+        sig: "apply to temple nightly",
+        expected: { code: "450721000", display: "Temple region structure", text: "temple" }
+      },
+      {
+        sig: "apply to left temple nightly",
+        expected: { code: "1373280005", display: "Left temple region", text: "left temple" }
+      },
+      {
+        sig: "apply to right temple nightly",
+        expected: { code: "1373281009", display: "Right temple region", text: "right temple" }
+      },
+      {
+        sig: "apply to both temples nightly",
+        expected: { code: "362620003", display: "Entire temporal region", text: "both temples" }
+      }
+    ];
+
+    for (const { sig, expected } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(expected.text);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: expected.code,
+        display: expected.display
+      });
+    }
+  });
+
+  it("records probe requests for unresolved sites so UIs can prompt", () => {
+    const input = "apply to {mole scalp} nightly";
     const result = parseSig(input);
     const lookup = result.meta.siteLookups?.[0];
     expect(result.fhir.site?.coding).toBeUndefined();
+    expect(result.meta.siteLookups).toHaveLength(1);
+    expect(lookup?.request).toMatchObject({
+      text: "mole scalp",
+      isProbe: true,
+      inputText: input,
+      sourceText: "mole scalp"
+    });
+    expect(lookup?.request.range).toEqual({
+      start: input.toLowerCase().indexOf("mole scalp"),
+      end: input.toLowerCase().indexOf("mole scalp") + "mole scalp".length
+    });
+    expect(lookup?.suggestions).toEqual([]);
+  });
+
+  it("records probe requests for known bundled sites and exposes the bundled suggestion", () => {
+    const input = "apply to {temple} nightly";
+    const result = parseSig(input);
+    const lookup = result.meta.siteLookups?.[0];
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "450721000",
+      display: "Temple region structure"
+    });
     expect(result.meta.siteLookups).toHaveLength(1);
     expect(lookup?.request).toMatchObject({
       text: "temple",
@@ -1761,16 +1908,24 @@ describe("parseSig core scenarios", () => {
       start: input.toLowerCase().indexOf("temple"),
       end: input.toLowerCase().indexOf("temple") + "temple".length
     });
-    expect(lookup?.suggestions).toEqual([]);
+    expect(lookup?.suggestions).toEqual([
+      {
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "450721000",
+          display: "Temple region structure"
+        }
+      }
+    ]);
   });
 
-  it("leaves suggestions empty for unknown sites without probes", () => {
-    const result = parseSig("apply to temple nightly");
+  it("leaves site lookups empty for unresolved sites without probes", () => {
+    const result = parseSig("apply to mole on scalp nightly");
     expect(result.meta.siteLookups).toBeUndefined();
   });
 
   it("merges suggestion resolver results for probe lookups", () => {
-    const input = "apply to {temple} nightly";
+    const input = "apply to {mole scalp} nightly";
     const captured: SiteCodeLookupRequest[] = [];
     const result = parseSig(input, {
       siteCodeSuggestionResolvers: (request) => {
@@ -1780,8 +1935,8 @@ describe("parseSig core scenarios", () => {
             {
               coding: {
                 system: "http://snomed.info/sct",
-                code: "280447003",
-                display: "Temple region of head"
+                code: "450721000",
+                display: "Temple region structure"
               },
               text: "Temple"
             }
@@ -1791,18 +1946,18 @@ describe("parseSig core scenarios", () => {
     });
     expect(captured[0]).toMatchObject({
       inputText: input,
-      sourceText: "temple"
+      sourceText: "mole scalp"
     });
     expect(captured[0]?.range).toEqual({
-      start: input.toLowerCase().indexOf("temple"),
-      end: input.toLowerCase().indexOf("temple") + "temple".length
+      start: input.toLowerCase().indexOf("mole scalp"),
+      end: input.toLowerCase().indexOf("mole scalp") + "mole scalp".length
     });
     expect(result.meta.siteLookups?.[0].suggestions).toEqual([
       {
         coding: {
           system: "http://snomed.info/sct",
-          code: "280447003",
-          display: "Temple region of head"
+          code: "450721000",
+          display: "Temple region structure"
         },
         text: "Temple"
       }
@@ -1810,21 +1965,21 @@ describe("parseSig core scenarios", () => {
   });
 
   it("awaits asynchronous suggestion resolvers", async () => {
-    const input = "apply to {temple} nightly";
+    const input = "apply to {mole scalp} nightly";
     const result = await parseSigAsync(input, {
       siteCodeSuggestionResolvers: async (request) => {
         expect(request.inputText).toBe(input);
-        expect(request.sourceText).toBe("temple");
+        expect(request.sourceText).toBe("mole scalp");
         expect(request.range).toEqual({
-          start: input.toLowerCase().indexOf("temple"),
-          end: input.toLowerCase().indexOf("temple") + "temple".length
+          start: input.toLowerCase().indexOf("mole scalp"),
+          end: input.toLowerCase().indexOf("mole scalp") + "mole scalp".length
         });
         return [
           {
             coding: {
               system: "http://snomed.info/sct",
-              code: "280447003",
-              display: "Temple region of head"
+              code: "450721000",
+              display: "Temple region structure"
             },
             text: "Temple"
           }
@@ -1834,8 +1989,8 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.siteLookups?.[0].suggestions?.[0]).toMatchObject({
       coding: {
         system: "http://snomed.info/sct",
-        code: "280447003",
-        display: "Temple region of head"
+        code: "450721000",
+        display: "Temple region structure"
       },
       text: "Temple"
     });
@@ -1926,6 +2081,21 @@ describe("internationalization", () => {
       expect(fromFhir.longText).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
     });
 
+    it("formats Thai site text from SNOMED coding when FHIR site.text is absent", () => {
+      const parsed = parseSig("apply to right temple bid");
+      const fromFhir = fromFhirDosage(
+        {
+          ...parsed.fhir,
+          site: {
+            coding: parsed.fhir.site?.coding
+          }
+        },
+        { locale: "th" }
+      );
+
+      expect(fromFhir.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณขมับขวา.");
+    });
+
     it("translates eye site names in Thai", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
       expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
@@ -1948,6 +2118,20 @@ describe("internationalization", () => {
       const result = parseSig("1 drop right ear once daily", { locale: "th" });
       expect(result.longText).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
       expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+    });
+
+    it("translates head site names in Thai", () => {
+      const result = parseSig("apply to head bid", { locale: "th" });
+      expect(result.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะ.");
+      expect(result.fhir.text).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะ.");
+    });
+
+    it("translates SNOMED-coded site variants in Thai without alias-specific text keys", () => {
+      const temple = parseSig("apply to temple region bid", { locale: "th" });
+      expect(temple.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณขมับ.");
+
+      const leftHead = parseSig("apply to left side of head bid", { locale: "th" });
+      expect(leftHead.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะซ้าย.");
     });
 
     it("translates ear site variants without leaving English route text", () => {
@@ -2326,6 +2510,84 @@ describe("smart meal expansion", () => {
     const result = parseSig("1 tab 5 times daily pc", { smartMealExpansion: true });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
     expect(result.fhir.timing?.repeat?.frequency).toBe(5);
+  });
+
+  it("does not expand cadence-only schedules when a non-enteral body site is present", () => {
+    const result = parseSig("apply to head bid", { smartMealExpansion: true });
+    expect(result.fhir.site?.text).toBe("head");
+    expect(result.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("does not expand generic meal tokens for non-enteral routes", () => {
+    const result = parseSig("1 mL IM bid pc", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Intramuscular route"]
+    );
+  });
+
+  it("uses the default heuristic when no smart meal scope override is provided", () => {
+    const result = parseSig("1x2", { smartMealExpansion: true });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Dinner
+    ]);
+  });
+
+  it("supports excluding dosage forms from smart meal expansion", () => {
+    const result = parseSig("1x2", {
+      smartMealExpansion: true,
+      context: { dosageForm: "tablet" },
+      smartMealExpansionScope: { excludeDosageForms: ["tablet"] }
+    });
+    expect(result.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+  });
+
+  it("supports including dosage forms for smart meal expansion", () => {
+    const result = parseSig("1x2", {
+      smartMealExpansion: true,
+      context: { dosageForm: "tablet" },
+      smartMealExpansionScope: { includeDosageForms: ["tablet"] }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming.Breakfast,
+      EventTiming.Dinner
+    ]);
+  });
+
+  it("supports including routes for smart meal expansion", () => {
+    const result = parseSig("1 tab po bid pc", {
+      smartMealExpansion: true,
+      smartMealExpansionScope: {
+        includeRoutes: [RouteCode["Oral route"]]
+      }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Dinner"]
+    ]);
+  });
+
+  it("gives exclusions precedence over includes in smart meal scope overrides", () => {
+    const result = parseSig("1 tab po bid pc", {
+      smartMealExpansion: true,
+      context: { dosageForm: "tablet" },
+      smartMealExpansionScope: {
+        includeRoutes: [RouteCode["Oral route"]],
+        excludeDosageForms: ["tablet"]
+      }
+    });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
   });
 
   it("respects meal relation from context during default expansion", () => {

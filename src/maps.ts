@@ -219,76 +219,94 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
 }> = [
     {
       names: ["eye", "eyes"],
-      definition: { coding: { code: "81745001", display: "Eye" } }
+      definition: {
+        coding: { code: "81745001", display: "Eye" },
+        routeHint: RouteCode["Ophthalmic route"]
+      }
     },
     {
       names: ["left eye"],
       definition: {
-        coding: { code: "1290031003", display: "Structure of left eye proper" }
+        coding: { code: "1290031003", display: "Structure of left eye proper" },
+        routeHint: RouteCode["Ophthalmic route"]
       }
     },
     {
       names: ["right eye"],
       definition: {
-        coding: { code: "1290032005", display: "Structure of right eye proper" }
+        coding: { code: "1290032005", display: "Structure of right eye proper" },
+        routeHint: RouteCode["Ophthalmic route"]
       }
     },
     {
       names: ["both eyes", "bilateral eyes"],
-      definition: { coding: { code: "40638003", display: "Structure of both eyes" } }
+      definition: {
+        coding: { code: "40638003", display: "Structure of both eyes" },
+        routeHint: RouteCode["Ophthalmic route"]
+      }
     },
     {
       names: ["ear", "ears"],
-      definition: { coding: { code: "117590005", display: "Ear-related structure" } }
+      definition: {
+        coding: { code: "117590005", display: "Ear-related structure" },
+        routeHint: RouteCode["Otic route"]
+      }
     },
     {
       names: ["left ear"],
-      definition: { coding: { code: "89644007", display: "Left ear" } }
+      definition: { coding: { code: "89644007", display: "Left ear" }, routeHint: RouteCode["Otic route"] }
     },
     {
       names: ["right ear"],
-      definition: { coding: { code: "25577004", display: "Right ear" } }
+      definition: { coding: { code: "25577004", display: "Right ear" }, routeHint: RouteCode["Otic route"] }
     },
     {
       names: ["both ears", "bilateral ears"],
-      definition: { coding: { code: "34338003", display: "Both ears" } }
+      definition: { coding: { code: "34338003", display: "Both ears" }, routeHint: RouteCode["Otic route"] }
     },
     {
       names: ["nostril", "nostrils"],
-      definition: { coding: { code: "1797002", display: "Naris" } }
+      definition: { coding: { code: "1797002", display: "Naris" }, routeHint: RouteCode["Nasal route"] }
     },
     {
       names: ["left nostril", "left naris"],
       definition: {
-        coding: { code: "723608007", display: "Structure of left anterior naris" }
+        coding: { code: "723608007", display: "Structure of left anterior naris" },
+        routeHint: RouteCode["Nasal route"]
       }
     },
     {
       names: ["right nostril", "right naris"],
       definition: {
-        coding: { code: "723609004", display: "Structure of right anterior naris" }
+        coding: { code: "723609004", display: "Structure of right anterior naris" },
+        routeHint: RouteCode["Nasal route"]
       }
     },
     {
       names: ["nares", "anterior nares"],
-      definition: { coding: { code: "244506005", display: "Anterior nares" } }
+      definition: { coding: { code: "244506005", display: "Anterior nares" }, routeHint: RouteCode["Nasal route"] }
     },
     {
       names: ["nose"],
-      definition: { coding: { code: "181195007", display: "Entire nose" } }
+      definition: { coding: { code: "181195007", display: "Entire nose" }, routeHint: RouteCode["Nasal route"] }
     },
     {
       names: ["mouth"],
-      definition: { coding: { code: "123851003", display: "Mouth region" } }
+      definition: { coding: { code: "123851003", display: "Mouth region" }, routeHint: RouteCode["Oral route"] }
     },
     {
       names: ["tongue", "tongues"],
-      definition: { coding: { code: "21974007", display: "Tongue" } }
+      definition: { coding: { code: "21974007", display: "Tongue" }, routeHint: RouteCode["Sublingual route"] }
+    },
+    {
+      names: ["lip", "lips"],
+      definition: { coding: { code: "48477009", display: "Lip structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["cheek", "cheeks"],
       definition: {
-        coding: { code: "60819002", display: "Buccal region of face" }
+        coding: { code: "60819002", display: "Buccal region of face" },
+        routeHint: RouteCode["Buccal route"]
       }
     },
     {
@@ -297,120 +315,271 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
         coding: {
           code: "362116001",
           display: "Entire gum and supporting structure of tooth"
-        }
+        },
+        routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["tooth"],
-      definition: { coding: { code: "38199008", display: "Tooth" } }
+      definition: { coding: { code: "38199008", display: "Tooth" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["teeth"],
-      definition: { coding: { code: "1162715001", display: "All teeth" } }
+      definition: { coding: { code: "1162715001", display: "All teeth" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["arm", "upper arm"],
-      definition: { coding: { code: "302538001", display: "Entire upper arm" } }
+      definition: { coding: { code: "302538001", display: "Entire upper arm" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left arm", "left upper arm"],
       definition: {
-        coding: { code: "368208006", display: "Left upper arm structure" }
+        coding: { code: "368208006", display: "Left upper arm structure" },
+        routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["right arm", "right upper arm"],
-      definition: { coding: { code: "368209003", display: "Right upper arm" } }
+      definition: { coding: { code: "368209003", display: "Right upper arm" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["both arms", "bilateral arms"],
-      definition: { coding: { code: "69273007", display: "Both arms" } }
+      definition: { coding: { code: "69273007", display: "Both arms" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["shoulder", "shoulders"],
+      definition: { coding: { code: "16982005", display: "Shoulder region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left shoulder"],
+      definition: { coding: { code: "91775009", display: "Left shoulder" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right shoulder"],
+      definition: { coding: { code: "91774008", display: "Right shoulder" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["forearm"],
-      definition: { coding: { code: "14975008", display: "Forearm" } }
+      definition: { coding: { code: "14975008", display: "Forearm" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left forearm"],
-      definition: { coding: { code: "66480008", display: "Left forearm" } }
+      definition: { coding: { code: "66480008", display: "Left forearm" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right forearm"],
-      definition: { coding: { code: "64262003", display: "Right forearm" } }
+      definition: { coding: { code: "64262003", display: "Right forearm" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["elbow"],
+      definition: { coding: { code: "127949000", display: "Elbow region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left elbow"],
+      definition: { coding: { code: "368148009", display: "Left elbow" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right elbow"],
+      definition: { coding: { code: "368149001", display: "Right elbow" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["leg", "lower leg"],
       definition: {
-        coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" }
+        coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" },
+        routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["left leg", "left lower leg"],
-      definition: { coding: { code: "213384005", display: "Entire left lower leg" } }
+      definition: { coding: { code: "213384005", display: "Entire left lower leg" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right leg", "right lower leg"],
-      definition: { coding: { code: "213289002", display: "Entire right lower leg" } }
+      definition: { coding: { code: "213289002", display: "Entire right lower leg" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["both legs", "bilateral legs"],
-      definition: { coding: { code: "40927001", display: "Both legs" } }
+      definition: { coding: { code: "40927001", display: "Both legs" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["thigh"],
-      definition: { coding: { code: "68367000", display: "Thigh" } }
+      definition: { coding: { code: "68367000", display: "Thigh" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left thigh"],
-      definition: { coding: { code: "61396006", display: "Left thigh" } }
+      definition: { coding: { code: "61396006", display: "Left thigh" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right thigh"],
-      definition: { coding: { code: "11207009", display: "Right thigh" } }
+      definition: { coding: { code: "11207009", display: "Right thigh" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["knee"],
+      definition: { coding: { code: "72696002", display: "Knee region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left knee"],
+      definition: { coding: { code: "82169009", display: "Left knee" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right knee"],
+      definition: { coding: { code: "6757004", display: "Right knee" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["both knees", "bilateral knees"],
+      definition: { coding: { code: "36701003", display: "Both knees" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["wrist"],
+      definition: { coding: { code: "8205005", display: "Wrist region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left wrist"],
+      definition: { coding: { code: "5951000", display: "Structure of left wrist" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right wrist"],
+      definition: { coding: { code: "9736006", display: "Structure of right wrist" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["ankle"],
+      definition: { coding: { code: "344001", display: "Ankle region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left ankle"],
+      definition: { coding: { code: "51636004", display: "Structure of left ankle" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right ankle"],
+      definition: { coding: { code: "6685009", display: "Structure of right ankle" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["both ankles", "bilateral ankles"],
+      definition: { coding: { code: "69948000", display: "Both ankles" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["hip"],
+      definition: { coding: { code: "29836001", display: "Hip region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left hip"],
+      definition: { coding: { code: "287679003", display: "Left hip" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right hip"],
+      definition: { coding: { code: "287579007", display: "Right hip" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["hand", "hands"],
-      definition: { coding: { code: "85562004", display: "Hand" } }
+      definition: { coding: { code: "85562004", display: "Hand" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left hand"],
-      definition: { coding: { code: "85151006", display: "Left hand" } }
+      definition: { coding: { code: "85151006", display: "Left hand" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right hand"],
-      definition: { coding: { code: "78791008", display: "Right hand" } }
+      definition: { coding: { code: "78791008", display: "Right hand" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["foot", "feet"],
-      definition: { coding: { code: "56459004", display: "Foot" } }
+      definition: { coding: { code: "56459004", display: "Foot" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left foot"],
-      definition: { coding: { code: "22335008", display: "Left foot" } }
+      definition: { coding: { code: "22335008", display: "Left foot" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right foot"],
-      definition: { coding: { code: "7769000", display: "Right foot" } }
+      definition: { coding: { code: "7769000", display: "Right foot" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["abdomen", "abdominal", "belly"],
-      definition: { coding: { code: "302553009", display: "Entire abdomen" } }
+      definition: { coding: { code: "302553009", display: "Entire abdomen" }, routeHint: RouteCode["Subcutaneous route"] }
+    },
+    {
+      names: ["head"],
+      definition: { coding: { code: "69536005", display: "Head structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["affected area", "affected site", "บริเวณที่เป็น"],
+      definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left head", "left side of head"],
+      definition: { coding: { code: "64237003", display: "Structure of left half of head" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right head", "right side of head"],
+      definition: { coding: { code: "29624005", display: "Structure of right half of head" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["back"],
-      definition: { coding: { code: "77568009", display: "Back" } }
+      definition: { coding: { code: "77568009", display: "Back" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["chest"],
+      definition: { coding: { code: "51185008", display: "Thoracic structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["chest wall"],
+      definition: { coding: { code: "78904004", display: "Chest wall structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["breast"],
+      definition: { coding: { code: "76752008", display: "Breast structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left breast"],
+      definition: { coding: { code: "80248007", display: "Left breast" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right breast"],
+      definition: { coding: { code: "73056007", display: "Right breast" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["both breasts", "bilateral breasts"],
+      definition: { coding: { code: "63762007", display: "Both breasts" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["axilla", "axillae", "armpit", "armpits"],
+      definition: { coding: { code: "34797008", display: "Axilla structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["groin"],
+      definition: { coding: { code: "26893007", display: "Inguinal region structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["scalp"],
-      definition: { coding: { code: "41695006", display: "Scalp" } }
+      definition: { coding: { code: "41695006", display: "Scalp" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["face"],
-      definition: { coding: { code: "89545001", display: "Face" } }
+      definition: { coding: { code: "89545001", display: "Face" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["eyelid", "eyelids"],
+      definition: { coding: { code: "80243003", display: "Eyelid" }, routeHint: RouteCode["Ophthalmic route"] }
     },
     {
       names: ["forehead"],
-      definition: { coding: { code: "52795006", display: "Forehead" } }
+      definition: { coding: { code: "52795006", display: "Forehead" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["temple", "temple region", "temporal region"],
+      definition: { coding: { code: "450721000", display: "Temple region structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["temples", "both temples", "bilateral temples"],
+      definition: { coding: { code: "362620003", display: "Entire temporal region" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left temple", "left temple region", "left temporal region"],
+      definition: { coding: { code: "1373280005", display: "Left temple region" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right temple", "right temple region", "right temporal region"],
+      definition: { coding: { code: "1373281009", display: "Right temple region" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["chin"],
@@ -418,24 +587,25 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
         coding: {
           code: "897081006",
           display: "Skin and/or subcutaneous tissue of chin"
-        }
+        },
+        routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["neck"],
-      definition: { coding: { code: "45048000", display: "Neck" } }
+      definition: { coding: { code: "45048000", display: "Neck" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["buttock", "buttocks", "gluteal", "glute"],
-      definition: { coding: { code: "46862004", display: "Buttock" } }
+      definition: { coding: { code: "46862004", display: "Buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {
       names: ["left buttock", "left gluteal"],
-      definition: { coding: { code: "723979003", display: "Structure of left buttock" } }
+      definition: { coding: { code: "723979003", display: "Structure of left buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {
       names: ["right buttock", "right gluteal"],
-      definition: { coding: { code: "723980000", display: "Structure of right buttock" } }
+      definition: { coding: { code: "723980000", display: "Structure of right buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {
       names: ["muscle", "muscles"],
@@ -443,41 +613,43 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
         coding: {
           code: "362876008",
           display: "All skeletal and smooth muscles of the body"
-        }
+        },
+        routeHint: RouteCode["Intramuscular route"]
       }
     },
     {
       names: ["vein", "veins"],
-      definition: { coding: { code: "181367001", display: "Entire vein" } }
+      definition: { coding: { code: "181367001", display: "Entire vein" }, routeHint: RouteCode["Intravenous route"] }
     },
     {
       names: ["vagina", "vaginal"],
-      definition: { coding: { code: "76784001", display: "Vagina" } }
+      definition: { coding: { code: "76784001", display: "Vagina" }, routeHint: RouteCode["Per vagina"] }
     },
     {
       names: ["penis", "penile"],
-      definition: { coding: { code: "18911002", display: "Penis structure" } }
+      definition: { coding: { code: "18911002", display: "Penis structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["rectum", "rectal"],
-      definition: { coding: { code: "34402009", display: "Rectum" } }
+      definition: { coding: { code: "34402009", display: "Rectum" }, routeHint: RouteCode["Per rectum"] }
     },
     {
       names: ["anus"],
-      definition: { coding: { code: "181262009", display: "Entire anus" } }
+      definition: { coding: { code: "181262009", display: "Entire anus" }, routeHint: RouteCode["Per rectum"] }
     },
     {
       names: ["perineum"],
-      definition: { coding: { code: "243990009", display: "Entire perineum" } }
+      definition: { coding: { code: "243990009", display: "Entire perineum" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["skin"],
-      definition: { coding: { code: "181469002", display: "Entire skin" } }
+      definition: { coding: { code: "181469002", display: "Entire skin" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["hair"],
       definition: {
-        coding: { code: "386045008", display: "Hair structure (body structure)" }
+        coding: { code: "386045008", display: "Hair structure (body structure)" },
+        routeHint: RouteCode["Topical route"]
       }
     }
   ];
@@ -498,6 +670,32 @@ export const DEFAULT_BODY_SITE_SNOMED = objectFromEntries(
     return entries;
   }, [])
 ) as Record<string, BodySiteDefinition>;
+
+export const DEFAULT_BODY_SITE_HINTS = (() => {
+  const hints = new Set<string>();
+  const addPhrase = (phrase: string | undefined) => {
+    const normalized = normalizeBodySiteKey(phrase ?? "");
+    if (!normalized) {
+      return;
+    }
+    for (const part of normalized.split(" ")) {
+      if (part) {
+        hints.add(part);
+      }
+    }
+  };
+
+  for (const [key, definition] of objectEntries(DEFAULT_BODY_SITE_SNOMED)) {
+    addPhrase(key);
+    if (definition.aliases) {
+      for (const alias of definition.aliases) {
+        addPhrase(alias);
+      }
+    }
+  }
+
+  return hints;
+})();
 
 type UnitSynonymMap = Record<string, string>;
 

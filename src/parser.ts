@@ -2,6 +2,7 @@ import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS,
   DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES,
+  DEFAULT_BODY_SITE_HINTS,
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_PRN_REASON_ENTRIES,
@@ -18,7 +19,7 @@ import {
   normalizeBodySiteKey,
   normalizePrnReasonKey
 } from "./maps";
-import { inferRouteFromContext, inferUnitFromContext } from "./context";
+import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
 import { checkDiscouraged } from "./safety";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
@@ -38,6 +39,7 @@ import {
   PrnReasonSuggestionResolver,
   PrnReasonSuggestionsResult,
   RouteCode,
+  SmartMealExpansionScope,
   SiteCodeLookupRequest,
   SiteCodeResolver,
   SiteCodeSelection,
@@ -86,76 +88,8 @@ function buildCustomSiteHints(
 }
 
 function isBodySiteHint(word: string, customSiteHints?: Set<string>): boolean {
-  return BODY_SITE_HINTS.has(word) || (customSiteHints?.has(word) ?? false);
+  return DEFAULT_BODY_SITE_HINTS.has(word) || (customSiteHints?.has(word) ?? false);
 }
-
-const BODY_SITE_HINTS = new Set([
-  "left",
-  "right",
-  "bilateral",
-  "arm",
-  "arms",
-  "leg",
-  "legs",
-  "thigh",
-  "thighs",
-  "shoulder",
-  "shoulders",
-  "hand",
-  "hands",
-  "foot",
-  "feet",
-  "eye",
-  "eyes",
-  "ear",
-  "ears",
-  "nostril",
-  "nostrils",
-  "abdomen",
-  "belly",
-  "cheek",
-  "cheeks",
-  "upper",
-  "lower",
-  "forearm",
-  "back",
-  "mouth",
-  "tongue",
-  "tongues",
-  "cheek",
-  "cheeks",
-  "gum",
-  "gums",
-  "tooth",
-  "teeth",
-  "nose",
-  "nares",
-  "hair",
-  "skin",
-  "scalp",
-  "face",
-  "forehead",
-  "chin",
-  "neck",
-  "buttock",
-  "buttocks",
-  "gluteal",
-  "glute",
-  "muscle",
-  "muscles",
-  "vein",
-  "veins",
-  "vagina",
-  "vaginal",
-  "penis",
-  "penile",
-  "rectum",
-  "rectal",
-  "anus",
-  "perineum",
-  "temple",
-  "temples"
-]);
 
 const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
 
@@ -1116,48 +1050,6 @@ function tryParseTimeBasedSchedule(
   return false;
 }
 
-const SITE_UNIT_ROUTE_HINTS: Array<{ pattern: RegExp; route: RouteCode }> = [
-  { pattern: /\beye(s)?\b/i, route: RouteCode["Ophthalmic route"] },
-  { pattern: /\beyelid(s)?\b/i, route: RouteCode["Ophthalmic route"] },
-  { pattern: /\bintravitreal\b/i, route: RouteCode["Intravitreal route (qualifier value)"] },
-  { pattern: /\bear(s)?\b/i, route: RouteCode["Otic route"] },
-  { pattern: /\bnostril(s)?\b/i, route: RouteCode["Nasal route"] },
-  { pattern: /\bnares?\b/i, route: RouteCode["Nasal route"] },
-  { pattern: /\bnose\b/i, route: RouteCode["Nasal route"] },
-  { pattern: /\bmouth\b/i, route: RouteCode["Oral route"] },
-  { pattern: /\boral\b/i, route: RouteCode["Oral route"] },
-  { pattern: /\bunder (the )?tongue\b/i, route: RouteCode["Sublingual route"] },
-  { pattern: /\btongue\b/i, route: RouteCode["Sublingual route"] },
-  { pattern: /\bcheek(s)?\b/i, route: RouteCode["Buccal route"] },
-  { pattern: /\blung(s)?\b/i, route: RouteCode["Respiratory tract route (qualifier value)"] },
-  { pattern: /\brespiratory tract\b/i, route: RouteCode["Respiratory tract route (qualifier value)"] },
-  { pattern: /\bskin\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bscalp\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bface\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bhand(s)?\b/i, route: RouteCode["Topical route"] },
-  { pattern: /(\bfoot\b|\bfeet\b)/i, route: RouteCode["Topical route"] },
-  { pattern: /\belbow(s)?\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bknee(s)?\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bleg(s)?\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\barm(s)?\b/i, route: RouteCode["Topical route"] },
-  { pattern: /\bpatch(es)?\b/i, route: RouteCode["Transdermal route"] },
-  { pattern: /\babdomen\b/i, route: RouteCode["Subcutaneous route"] },
-  { pattern: /\bbelly\b/i, route: RouteCode["Subcutaneous route"] },
-  { pattern: /\bstomach\b/i, route: RouteCode["Subcutaneous route"] },
-  { pattern: /\bthigh(s)?\b/i, route: RouteCode["Subcutaneous route"] },
-  { pattern: /\bupper arm\b/i, route: RouteCode["Subcutaneous route"] },
-  { pattern: /\bbuttock(s)?\b/i, route: RouteCode["Intramuscular route"] },
-  { pattern: /\bglute(al)?\b/i, route: RouteCode["Intramuscular route"] },
-  { pattern: /\bdeltoid\b/i, route: RouteCode["Intramuscular route"] },
-  { pattern: /\bmuscle(s)?\b/i, route: RouteCode["Intramuscular route"] },
-  { pattern: /\bvein(s)?\b/i, route: RouteCode["Intravenous route"] },
-  { pattern: /\brectum\b/i, route: RouteCode["Per rectum"] },
-  { pattern: /\banus\b/i, route: RouteCode["Per rectum"] },
-  { pattern: /\brectal\b/i, route: RouteCode["Per rectum"] },
-  { pattern: /\bvagina\b/i, route: RouteCode["Per vagina"] },
-  { pattern: /\bvaginal\b/i, route: RouteCode["Per vagina"] }
-];
-
 export function tokenize(input: string): Token[] {
   const separators = /[(),;]/g;
   let normalized = input.trim().replace(separators, " ");
@@ -1600,6 +1492,151 @@ function reconcileMealTimingSpecificity(internal: ParsedSigInternal) {
   ]);
 }
 
+const MEAL_COMPATIBLE_ROUTE_CODES = new Set<RouteCode>([
+  RouteCode["Oral route"],
+  RouteCode["Gastrostomy route"],
+  RouteCode["Jejunostomy route"],
+  RouteCode["Nasogastric route"],
+  RouteCode["Gastroenteral use"],
+  RouteCode["Enteral route (qualifier value)"],
+  RouteCode["Gastro-intestinal stoma route (qualifier value)"],
+  RouteCode["Orogastric route (qualifier value)"],
+  RouteCode["Nasojejunal route (qualifier value)"],
+  RouteCode["Nasoduodenal route (qualifier value)"],
+  RouteCode["Digestive tract route (qualifier value)"],
+  RouteCode["Intraesophageal route (qualifier value)"],
+  RouteCode["Intragastric route (qualifier value)"],
+  RouteCode["Intraduodenal route (qualifier value)"],
+  RouteCode["Intrajejunal route (qualifier value)"],
+  RouteCode["Intestinal route (qualifier value)"],
+  RouteCode["Intraileal route (qualifier value)"],
+  RouteCode["Intracolonic route (qualifier value)"],
+  RouteCode["Esophagostomy route"],
+  RouteCode["Colostomy route (qualifier value)"],
+  RouteCode["Ileostomy route (qualifier value)"]
+]);
+
+function resolveMealExpansionRoute(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): RouteCode | undefined {
+  if (internal.routeCode) {
+    return internal.routeCode;
+  }
+
+  const routeText = internal.routeText?.trim().toLowerCase();
+  if (routeText) {
+    const synonym = DEFAULT_ROUTE_SYNONYMS[routeText];
+    if (synonym?.code) {
+      return synonym.code;
+    }
+  }
+
+  return inferRouteFromContext(options?.context ?? undefined);
+}
+
+function hasPendingSiteCue(internal: ParsedSigInternal): boolean {
+  for (const token of internal.tokens) {
+    if (internal.consumed.has(token.index)) {
+      continue;
+    }
+
+    const lower = normalizeTokenLower(token);
+    if (isBodySiteHint(lower, internal.customSiteHints)) {
+      return true;
+    }
+
+    if (!SITE_CONNECTORS.has(lower)) {
+      continue;
+    }
+
+    const next = internal.tokens[token.index + 1];
+    if (next && !internal.consumed.has(next.index)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function normalizeSmartMealExpansionForm(form: string | undefined): string | undefined {
+  if (!form) {
+    return undefined;
+  }
+  return normalizeDosageForm(form) ?? form.trim().toLowerCase();
+}
+
+function matchesSmartMealExpansionForm(
+  dosageForm: string | undefined,
+  candidates: string[] | undefined
+): boolean {
+  if (!dosageForm || !candidates?.length) {
+    return false;
+  }
+
+  return candidates.some(
+    (candidate) => normalizeSmartMealExpansionForm(candidate) === dosageForm
+  );
+}
+
+function resolveSmartMealExpansionScopeDecision(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): boolean | undefined {
+  const scope: SmartMealExpansionScope | undefined = options?.smartMealExpansionScope;
+  if (!scope) {
+    return undefined;
+  }
+
+  const route = resolveMealExpansionRoute(internal, options);
+  const dosageForm = normalizeSmartMealExpansionForm(options?.context?.dosageForm ?? undefined);
+
+  const routeExcluded = Boolean(
+    route && scope.excludeRoutes && arrayIncludes(scope.excludeRoutes, route)
+  );
+  const formExcluded = matchesSmartMealExpansionForm(dosageForm, scope.excludeDosageForms);
+  if (routeExcluded || formExcluded) {
+    return false;
+  }
+
+  const hasIncludes = Boolean(
+    (scope.includeRoutes && scope.includeRoutes.length > 0) ||
+    (scope.includeDosageForms && scope.includeDosageForms.length > 0)
+  );
+  if (!hasIncludes) {
+    return undefined;
+  }
+
+  const routeIncluded = Boolean(
+    route && scope.includeRoutes && arrayIncludes(scope.includeRoutes, route)
+  );
+  const formIncluded = matchesSmartMealExpansionForm(dosageForm, scope.includeDosageForms);
+  return routeIncluded || formIncluded;
+}
+
+function shouldExpandMealTimings(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): boolean {
+  const scopeDecision = resolveSmartMealExpansionScopeDecision(internal, options);
+  if (scopeDecision !== undefined) {
+    return scopeDecision;
+  }
+
+  const route = resolveMealExpansionRoute(internal, options);
+  if (route) {
+    return MEAL_COMPATIBLE_ROUTE_CODES.has(route);
+  }
+
+  // Site-specific instructions are more often topical/ocular/otic/injectable
+  // than enteral, so skip cadence-only meal expansion when a site is present.
+  if (internal.siteText?.trim() || hasPendingSiteCue(internal)) {
+    return false;
+  }
+
+  return true;
+}
+
 // Optionally replace generic meal tokens with concrete breakfast/lunch/dinner
 // EventTiming codes when the cadence or explicit meal abbreviations make the
 // intent obvious.
@@ -1630,6 +1667,10 @@ function expandMealTimings(
   const hasGeneralMealToken = hasBeforeMeal || hasAfterMeal || hasWithMeal;
 
   if (!hasGeneralMealToken && !needsDefaultExpansion) {
+    return;
+  }
+
+  if (!shouldExpandMealTimings(internal, options)) {
     return;
   }
 
@@ -3310,11 +3351,9 @@ export function parseInternal(
   }
 
   if (!internal.routeCode && internal.siteText) {
-    for (const { pattern, route } of SITE_UNIT_ROUTE_HINTS) {
-      if (pattern.test(internal.siteText)) {
-        setRoute(internal, route);
-        break;
-      }
+    const routeHint = inferRouteHintFromSitePhrase(internal.siteText, options);
+    if (routeHint) {
+      setRoute(internal, routeHint);
     }
   }
 
@@ -3545,6 +3584,38 @@ function lookupBodySiteDefinition(
       }
     }
   }
+  return undefined;
+}
+
+function inferRouteHintFromSitePhrase(
+  siteText: string,
+  options?: ParseOptions
+): RouteCode | undefined {
+  const canonical = normalizeBodySiteKey(siteText);
+  if (!canonical) {
+    return undefined;
+  }
+
+  const exact =
+    lookupBodySiteDefinition(options?.siteCodeMap, canonical) ??
+    DEFAULT_BODY_SITE_SNOMED[canonical];
+  if (exact?.routeHint) {
+    return exact.routeHint;
+  }
+
+  const words = canonical.split(/\s+/).filter((word) => word.length > 0);
+  for (let length = words.length; length >= 1; length -= 1) {
+    for (let start = 0; start + length <= words.length; start += 1) {
+      const candidate = words.slice(start, start + length).join(" ");
+      const definition =
+        lookupBodySiteDefinition(options?.siteCodeMap, candidate) ??
+        DEFAULT_BODY_SITE_SNOMED[candidate];
+      if (definition?.routeHint) {
+        return definition.routeHint;
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -4685,12 +4756,11 @@ function inferUnitFromRouteHints(internal: ParsedSigInternal): string | undefine
 }
 
 function inferUnitFromSiteText(siteText: string): string | undefined {
-  for (const { pattern, route } of SITE_UNIT_ROUTE_HINTS) {
-    if (pattern.test(siteText)) {
-      const unit = DEFAULT_UNIT_BY_ROUTE[route];
-      if (unit) {
-        return unit;
-      }
+  const route = inferRouteHintFromSitePhrase(siteText);
+  if (route) {
+    const unit = DEFAULT_UNIT_BY_ROUTE[route];
+    if (unit) {
+      return unit;
     }
   }
   return undefined;

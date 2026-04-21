@@ -345,6 +345,7 @@ export interface BodySiteCode {
 export interface BodySiteDefinition {
   coding?: BodySiteCode;
   text?: string;
+  routeHint?: RouteCode;
   /**
    * Optional phrases that should resolve to the same coding as this entry.
    * Aliases are normalized with the same logic as map keys so callers can
@@ -505,6 +506,31 @@ export type SiteCodeSuggestionResolver = (
   | undefined
   | Promise<SiteCodeSuggestionsResult | SiteCodeSuggestion[] | SiteCodeSuggestion | null | undefined>;
 
+export interface SmartMealExpansionScope {
+  /**
+   * Optional allowlist of routes that may use smart meal expansion. When
+   * provided, non-matching routes are excluded unless a dosage form matches
+   * `includeDosageForms`.
+   */
+  includeRoutes?: RouteCode[];
+  /**
+   * Optional denylist of routes that must not use smart meal expansion.
+   * Exclusions take precedence over includes.
+   */
+  excludeRoutes?: RouteCode[];
+  /**
+   * Optional allowlist of dosage forms that may use smart meal expansion.
+   * Values are matched case-insensitively after dosage-form normalization.
+   */
+  includeDosageForms?: string[];
+  /**
+   * Optional denylist of dosage forms that must not use smart meal expansion.
+   * Values are matched case-insensitively after dosage-form normalization.
+   * Exclusions take precedence over includes.
+   */
+  excludeDosageForms?: string[];
+}
+
 export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
@@ -543,6 +569,12 @@ export interface ParseOptions extends FormatOptions {
    * `context.mealRelation` when provided.
    */
   smartMealExpansion?: boolean;
+  /**
+   * Optional route/dosage-form policy overrides for smart meal expansion.
+   * When omitted, the parser uses its built-in default heuristic.
+   * Exclusions take precedence over includes.
+   */
+  smartMealExpansionScope?: SmartMealExpansionScope;
   /**
    * Enables parsing meal dash shorthand like `1-0-1` / `1-0-0-1` into
    * multiple dosage clauses aligned to breakfast/lunch/dinner/(bedtime).

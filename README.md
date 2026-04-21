@@ -307,7 +307,7 @@ const result = await parseSigAsync("apply to {left temple} nightly", {
           text: "Scalp"
         },
         {
-          coding: { system: "http://snomed.info/sct", code: "280447003", display: "Temple region of head" },
+          coding: { system: "http://snomed.info/sct", code: "450721000", display: "Temple region structure" },
           text: "Temple"
         }
       ];
@@ -375,6 +375,9 @@ You can specify the number of times (total count) the medication is supposed to 
   combinations (e.g. `1x3` → breakfast/lunch/dinner). This also respects
   `context.mealRelation` when provided and only applies to schedules with four
   or fewer daily doses.
+- `smartMealExpansionScope`: optional include/exclude overrides for route codes
+  and dosage forms. When omitted, smart meal expansion uses the built-in
+  default heuristic. Exclusions take precedence over includes.
 - `enableMealDashSyntax`: when `true`, enables shorthand meal-dose patterns
   such as `1-0-1`, `1-0-1 pc`, `10-12-0 ac`, and `1-0-0-1 ac`. The parser
   expands them into multiple dosage clauses aligned to breakfast/lunch/dinner

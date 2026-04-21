@@ -535,7 +535,7 @@ function formatSite(internal: ParsedSigInternal, grammar: RouteGrammar): string 
     } else if (lower.includes("ear")) {
       preposition = "in";
     } else if (
-      /(skin|arm|leg|thigh|abdomen|shoulder|hand|foot|cheek|forearm|back|buttock|hip|face|hair|scalp|forehead|chin|neck)/.test(
+      /(skin|head|temple|arm|leg|thigh|abdomen|shoulder|elbow|wrist|ankle|knee|hand|foot|cheek|forearm|back|chest|breast|axilla|armpit|groin|lip|buttock|hip|face|hair|scalp|forehead|eyelid|chin|neck)/.test(
         lower,
       )
     ) {

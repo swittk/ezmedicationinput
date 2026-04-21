@@ -1,4 +1,5 @@
 import { ParsedSigInternal } from "./internal-types";
+import { DEFAULT_BODY_SITE_SNOMED_SOURCE, normalizeBodySiteKey } from "./maps";
 import { EventTiming, FhirPeriodUnit, RouteCode } from "./types";
 import {
   getMealTimingGroup,
@@ -238,6 +239,13 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   "left upper arm": "ต้นแขนซ้าย",
   "right upper arm": "ต้นแขนขวา",
   "bilateral arms": "แขนทั้งสองข้าง",
+  shoulder: "ไหล่",
+  shoulders: "ไหล่ทั้งสองข้าง",
+  "left shoulder": "ไหล่ซ้าย",
+  "right shoulder": "ไหล่ขวา",
+  elbow: "ข้อศอก",
+  "left elbow": "ข้อศอกซ้าย",
+  "right elbow": "ข้อศอกขวา",
   "right leg": "ขาขวา",
   "left leg": "ขาซ้าย",
   "both legs": "ขาทั้งสองข้าง",
@@ -246,6 +254,22 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   "left lower leg": "ขาส่วนล่างซ้าย",
   "right lower leg": "ขาส่วนล่างขวา",
   "bilateral legs": "ขาทั้งสองข้าง",
+  knee: "เข่า",
+  "left knee": "เข่าซ้าย",
+  "right knee": "เข่าขวา",
+  "both knees": "เข่าทั้งสองข้าง",
+  "bilateral knees": "เข่าทั้งสองข้าง",
+  wrist: "ข้อมือ",
+  "left wrist": "ข้อมือซ้าย",
+  "right wrist": "ข้อมือขวา",
+  ankle: "ข้อเท้า",
+  "left ankle": "ข้อเท้าซ้าย",
+  "right ankle": "ข้อเท้าขวา",
+  "both ankles": "ข้อเท้าทั้งสองข้าง",
+  "bilateral ankles": "ข้อเท้าทั้งสองข้าง",
+  hip: "สะโพก",
+  "left hip": "สะโพกซ้าย",
+  "right hip": "สะโพกขวา",
   "right hand": "มือขวา",
   "left hand": "มือซ้าย",
   "both hands": "มือทั้งสองข้าง",
@@ -259,19 +283,53 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   abdomen: "ช่องท้อง",
   abdominal: "ช่องท้อง",
   belly: "ท้อง",
+  "affected area": "บริเวณที่เป็น",
+  "affected site": "บริเวณที่เป็น",
+  "บริเวณที่เป็น": "บริเวณที่เป็น",
+  head: "ศีรษะ",
+  "left head": "ศีรษะซ้าย",
+  "left side of head": "ศีรษะซ้าย",
+  "right head": "ศีรษะขวา",
+  "right side of head": "ศีรษะขวา",
   back: "แผ่นหลัง",
+  chest: "ทรวงอก",
+  "chest wall": "ผนังทรวงอก",
+  breast: "เต้านม",
+  "left breast": "เต้านมซ้าย",
+  "right breast": "เต้านมขวา",
+  "both breasts": "เต้านมทั้งสองข้าง",
+  "bilateral breasts": "เต้านมทั้งสองข้าง",
+  axilla: "รักแร้",
+  axillae: "รักแร้ทั้งสองข้าง",
+  armpit: "รักแร้",
+  armpits: "รักแร้ทั้งสองข้าง",
+  groin: "ขาหนีบ",
   scalp: "หนังศีรษะ",
   face: "ใบหน้า",
   cheek: "แก้ม",
   cheeks: "แก้มทั้งสองข้าง",
   forehead: "หน้าผาก",
+  temple: "ขมับ",
+  "temple region": "ขมับ",
+  "temporal region": "ขมับ",
+  temples: "ขมับทั้งสองข้าง",
+  "left temple": "ขมับซ้าย",
+  "left temple region": "ขมับซ้าย",
+  "left temporal region": "ขมับซ้าย",
+  "right temple": "ขมับขวา",
+  "right temple region": "ขมับขวา",
+  "right temporal region": "ขมับขวา",
+  "both temples": "ขมับทั้งสองข้าง",
+  "bilateral temples": "ขมับทั้งสองข้าง",
   chin: "คาง",
   neck: "คอ",
+  eyelid: "เปลือกตา",
+  eyelids: "เปลือกตา",
+  lip: "ริมฝีปาก",
+  lips: "ริมฝีปาก",
   forearm: "ปลายแขน",
   "left forearm": "ปลายแขนซ้าย",
   "right forearm": "ปลายแขนขวา",
-  shoulder: "ไหล่",
-  shoulders: "ไหล่ทั้งสองข้าง",
   thigh: "ต้นขา",
   thighs: "ต้นขาทั้งสองข้าง",
   "left thigh": "ต้นขาซ้าย",
@@ -303,6 +361,32 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   skin: "ผิวหนัง",
   hair: "เส้นผม"
 };
+
+const THAI_SITE_CODE_TRANSLATIONS: Record<string, string> = (() => {
+  const translations: Record<string, string> = {};
+
+  for (const { names, definition } of DEFAULT_BODY_SITE_SNOMED_SOURCE) {
+    const code = definition.coding?.code;
+    if (!code || translations[code]) {
+      continue;
+    }
+
+    let translated: string | undefined;
+    for (const name of names) {
+      const candidate = THAI_SITE_TRANSLATIONS[normalizeBodySiteKey(name)];
+      if (candidate) {
+        translated = candidate;
+        break;
+      }
+    }
+
+    if (translated) {
+      translations[code] = translated;
+    }
+  }
+
+  return translations;
+})();
 
 interface ThaiRouteGrammar {
   verb: string;
@@ -812,21 +896,33 @@ function buildRoutePhraseThai(
 }
 
 function formatSiteThai(internal: ParsedSigInternal, grammar: ThaiRouteGrammar): string | undefined {
-  const text = internal.siteText?.trim();
-  if (!text) {
+  const text = internal.siteText?.trim() || internal.siteCoding?.display?.trim();
+  const translated = translateSiteThai(text, internal.siteCoding?.code);
+  if (!translated) {
     return undefined;
   }
-  const translated = translateSiteThai(text);
   const preposition = grammar.sitePreposition ?? "ที่";
   const separator = /^[\u0E00-\u0E7F]/.test(translated) ? "" : " ";
   return `${preposition}${separator}${translated}`.trim();
 }
 
-function translateSiteThai(site: string): string {
-  const normalized = site.trim().toLowerCase().replace(/\s+/g, " ");
+function translateSiteThai(site: string | undefined, code?: string): string | undefined {
+  if (code) {
+    const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
+    if (translatedByCode) {
+      return translatedByCode;
+    }
+  }
+
+  if (!site) {
+    return undefined;
+  }
+
+  const normalized = normalizeBodySiteKey(site);
   if (!normalized) {
     return site;
   }
+
   return THAI_SITE_TRANSLATIONS[normalized] ?? site;
 }
 
