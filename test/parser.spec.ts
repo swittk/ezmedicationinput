@@ -1896,6 +1896,18 @@ describe("parseSig core scenarios", () => {
     const again = fromFhirDosage(parsed.fhir);
     expect(again.longText).toBe(parsed.longText);
   });
+
+  it("fromFhirDosage prefers computed formatting when format options are provided", () => {
+    const parsed = parseSig("1 tab po pc breakfast lunch dinner");
+    const again = fromFhirDosage(parsed.fhir, {
+      groupMealTimingsByRelation: true,
+      includeTimesPerDaySummary: true
+    });
+    expect(again.longText).toBe(
+      "Take 1 tablet by mouth three times daily after breakfast, lunch and dinner."
+    );
+    expect(again.fhir.text).toBe(again.longText);
+  });
 });
 
 describe("internationalization", () => {
@@ -2024,6 +2036,16 @@ describe("internationalization", () => {
     });
     expect(result.longText).toBe(
       "Take 1 tablet by mouth four times daily before breakfast, lunch and dinner and at bedtime."
+    );
+  });
+
+  it("does not group non-contiguous meal anchors across other natural times", () => {
+    const result = parseSig("1 tab po breakfast noon dinner", {
+      groupMealTimingsByRelation: true,
+      includeTimesPerDaySummary: true
+    });
+    expect(result.longText).toBe(
+      "Take 1 tablet by mouth three times daily with breakfast, at noon and with dinner."
     );
   });
 

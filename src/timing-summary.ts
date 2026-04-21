@@ -87,16 +87,23 @@ export function getMealTimingGroup(
   let relation: MealRelation | undefined;
   const meals: MealName[] = [];
   const groupedCodes: EventTiming[] = [];
+  let sawFirstMeal = false;
   for (let i = 0; i < uniqueWhen.length; i += 1) {
     const code = uniqueWhen[i];
     const detail = MEAL_TIMING_DETAILS[code];
     if (!detail) {
+      if (sawFirstMeal) {
+        break;
+      }
       continue;
+    }
+    if (!sawFirstMeal) {
+      sawFirstMeal = true;
     }
     if (!relation) {
       relation = detail.relation;
     } else if (relation !== detail.relation) {
-      return undefined;
+      break;
     }
     meals.push(detail.meal);
     groupedCodes.push(code);

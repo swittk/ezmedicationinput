@@ -561,7 +561,8 @@ export function fromFhirDosage(
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const shortText = formatInternal(internal, "short", localization, options);
   const computedLong = formatInternal(internal, "long", localization, options);
-  const longText = localization ? computedLong : dosage.text ?? computedLong;
+  const longText = computedLong || dosage.text || "";
+  dosage.text = longText;
   return {
     fhir: dosage,
     shortText,
