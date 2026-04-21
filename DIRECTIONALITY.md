@@ -213,6 +213,12 @@ Definition of done:
 - that slice preserves spans, leftovers, evidence, and unresolved text without reconstructing them post hoc
 - compatibility parser can still be used as fallback outside the migrated slice
 
+Current native slice:
+- additional-instruction/advice parsing now runs through `src/advice.ts`
+- vocabulary lives in `src/advice-terminology.json`
+- advice is parsed into `AdviceFrame[]` first and then coded by rule matching
+- the old `maps.ts` additional-instruction phrase bag has been removed
+
 ### Stage 4
 
 After that:

@@ -1,7 +1,5 @@
 import {
   DAY_OF_WEEK_TOKENS,
-  DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS,
-  DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES,
   DEFAULT_BODY_SITE_HINTS,
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_PRN_REASON_DEFINITIONS,
@@ -15,10 +13,10 @@ import {
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
   WORD_FREQUENCIES,
-  normalizeAdditionalInstructionKey,
   normalizeBodySiteKey,
   normalizePrnReasonKey
 } from "./maps";
+import { parseAdditionalInstructions } from "./advice";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
 import { lexInput } from "./lexer/lex";
 import { LexKind } from "./lexer/token-types";
@@ -32,8 +30,8 @@ import {
 } from "./site-phrases";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
-  AdditionalInstructionDefinition,
   BodySiteDefinition,
+  CanonicalSigClause,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
@@ -1074,6 +1072,431 @@ function tryParseTimeBasedSchedule(
 
 export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
+}
+
+function computeTrimmedInputRange(input: string): TextRange | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const start = input.search(/\S/);
+  if (start === -1) {
+    return undefined;
+  }
+  let end = input.length;
+  while (end > start && /\s/.test(input[end - 1] ?? "")) {
+    end -= 1;
+  }
+  return { start, end };
+}
+
+function buildCanonicalSourceSpan(
+  input: string,
+  range: TextRange | undefined,
+  tokenIndices?: number[]
+): CanonicalSigClause["raw"] {
+  const safeRange = range ?? { start: 0, end: input.length };
+  return {
+    start: safeRange.start,
+    end: safeRange.end,
+    text: input.slice(safeRange.start, safeRange.end),
+    tokenIndices: tokenIndices?.length ? [...tokenIndices] : undefined
+  };
+}
+
+function collectCanonicalLeftovers(
+  internal: ParsedSigInternal
+): CanonicalSigClause["leftovers"] {
+  const groups: CanonicalSigClause["leftovers"] = [];
+  let current: number[] = [];
+
+  const flush = () => {
+    if (!current.length) {
+      return;
+    }
+    const range = computeTokenRange(internal.input, internal.tokens, current);
+    if (range) {
+      groups.push(buildCanonicalSourceSpan(internal.input, range, current));
+    }
+    current = [];
+  };
+
+  for (const token of internal.tokens) {
+    if (internal.consumed.has(token.index)) {
+      flush();
+      continue;
+    }
+    if (current.length > 0 && token.index !== current[current.length - 1] + 1) {
+      flush();
+    }
+    current.push(token.index);
+  }
+
+  flush();
+  return groups;
+}
+
+function computeClauseConfidence(
+  internal: ParsedSigInternal,
+  leftovers: CanonicalSigClause["leftovers"]
+): number {
+  let confidence = 1;
+  confidence -= Math.min(0.4, leftovers.length * 0.12);
+  confidence -= Math.min(0.2, internal.warnings.length * 0.08);
+  if (!internal.routeCode && !internal.routeText && !internal.siteText && !internal.timingCode) {
+    confidence -= 0.05;
+  }
+  if (confidence < 0) {
+    return 0;
+  }
+  if (confidence > 1) {
+    return 1;
+  }
+  return Number(confidence.toFixed(2));
+}
+
+function createClauseBackedInternal(
+  input: string,
+  tokens: Token[],
+  customSiteHints?: Set<string>
+): ParsedSigInternal {
+  const dayOfWeek: FhirDayOfWeek[] = [];
+  const when: EventTiming[] = [];
+  const warnings: string[] = [];
+  const additionalInstructions: ParsedSigInternal["additionalInstructions"] = [];
+  const clause: CanonicalSigClause = {
+    kind: "administration",
+    rawText: input,
+    raw: {
+      start: 0,
+      end: input.length,
+      text: input
+    },
+    schedule: {
+      dayOfWeek,
+      when
+    },
+    leftovers: [],
+    evidence: [],
+    confidence: 1
+  };
+
+  const internal: ParsedSigInternal = {
+    input,
+    tokens,
+    consumed: new Set<number>(),
+    dayOfWeek,
+    when,
+    warnings,
+    siteTokenIndices: new Set<number>(),
+    siteLookups: [],
+    customSiteHints,
+    prnReasonLookups: [],
+    additionalInstructions,
+    canonicalClauses: [clause]
+  };
+
+  const ensureDose = () => {
+    if (!clause.dose) {
+      clause.dose = {};
+    }
+    return clause.dose;
+  };
+
+  const ensureRoute = () => {
+    if (!clause.route) {
+      clause.route = {};
+    }
+    return clause.route;
+  };
+
+  const ensureSite = () => {
+    if (!clause.site) {
+      clause.site = {};
+    }
+    return clause.site;
+  };
+
+  const ensureSchedule = () => {
+    if (!clause.schedule) {
+      clause.schedule = {};
+    }
+    if (!clause.schedule.dayOfWeek) {
+      clause.schedule.dayOfWeek = dayOfWeek;
+    }
+    if (!clause.schedule.when) {
+      clause.schedule.when = when;
+    }
+    return clause.schedule;
+  };
+
+  const ensurePrn = () => {
+    if (!clause.prn) {
+      clause.prn = { enabled: false };
+    }
+    return clause.prn;
+  };
+
+  Object.defineProperties(internal, {
+    dose: {
+      get: () => clause.dose?.value,
+      set: (value: number | undefined) => {
+        ensureDose().value = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    doseRange: {
+      get: () => clause.dose?.range,
+      set: (value: { low: number; high: number } | undefined) => {
+        ensureDose().range = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    unit: {
+      get: () => clause.dose?.unit,
+      set: (value: string | undefined) => {
+        ensureDose().unit = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    routeCode: {
+      get: () => clause.route?.code,
+      set: (value: RouteCode | undefined) => {
+        ensureRoute().code = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    routeText: {
+      get: () => clause.route?.text,
+      set: (value: string | undefined) => {
+        ensureRoute().text = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    count: {
+      get: () => clause.schedule?.count,
+      set: (value: number | undefined) => {
+        ensureSchedule().count = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    frequency: {
+      get: () => clause.schedule?.frequency,
+      set: (value: number | undefined) => {
+        ensureSchedule().frequency = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    frequencyMax: {
+      get: () => clause.schedule?.frequencyMax,
+      set: (value: number | undefined) => {
+        ensureSchedule().frequencyMax = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    period: {
+      get: () => clause.schedule?.period,
+      set: (value: number | undefined) => {
+        ensureSchedule().period = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    periodMax: {
+      get: () => clause.schedule?.periodMax,
+      set: (value: number | undefined) => {
+        ensureSchedule().periodMax = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    periodUnit: {
+      get: () => clause.schedule?.periodUnit,
+      set: (value: FhirPeriodUnit | undefined) => {
+        ensureSchedule().periodUnit = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    timingCode: {
+      get: () => clause.schedule?.timingCode,
+      set: (value: string | undefined) => {
+        ensureSchedule().timingCode = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    timeOfDay: {
+      get: () => clause.schedule?.timeOfDay,
+      set: (value: string[] | undefined) => {
+        ensureSchedule().timeOfDay = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    asNeeded: {
+      get: () => clause.prn?.enabled,
+      set: (value: boolean | undefined) => {
+        ensurePrn().enabled = Boolean(value);
+      },
+      configurable: true,
+      enumerable: true
+    },
+    asNeededReason: {
+      get: () => clause.prn?.reason?.text,
+      set: (value: string | undefined) => {
+        const prn = ensurePrn();
+        if (!prn.reason) {
+          prn.reason = {};
+        }
+        prn.reason.text = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    asNeededReasonCoding: {
+      get: () => clause.prn?.reason?.coding,
+      set: (value: (FhirCoding & { i18n?: Record<string, string> }) | undefined) => {
+        const prn = ensurePrn();
+        if (!prn.reason) {
+          prn.reason = {};
+        }
+        prn.reason.coding = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    siteText: {
+      get: () => clause.site?.text,
+      set: (value: string | undefined) => {
+        ensureSite().text = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    siteSource: {
+      get: () => clause.site?.source,
+      set: (value: "abbreviation" | "text" | undefined) => {
+        ensureSite().source = value;
+      },
+      configurable: true,
+      enumerable: true
+    },
+    siteCoding: {
+      get: () => clause.site?.coding,
+      set: (value: (FhirCoding & { i18n?: Record<string, string> }) | undefined) => {
+        ensureSite().coding = value?.code
+          ? {
+            code: value.code,
+            display: value.display,
+            system: value.system
+          }
+          : undefined;
+      },
+      configurable: true,
+      enumerable: true
+    }
+  });
+
+  return internal;
+}
+
+function finalizeCanonicalClause(internal: ParsedSigInternal): void {
+  const clause = internal.canonicalClauses?.[0];
+  if (!clause) {
+    return;
+  }
+
+  clause.rawText = internal.input;
+  const trimmedRange = computeTrimmedInputRange(internal.input);
+  clause.span = trimmedRange;
+  clause.raw = buildCanonicalSourceSpan(internal.input, trimmedRange);
+  clause.leftovers = collectCanonicalLeftovers(internal);
+  clause.confidence = computeClauseConfidence(internal, clause.leftovers);
+  clause.warnings = internal.warnings.length ? [...internal.warnings] : undefined;
+
+  if (clause.schedule) {
+    if (!clause.schedule.dayOfWeek?.length) {
+      delete clause.schedule.dayOfWeek;
+    }
+    if (!clause.schedule.when?.length) {
+      delete clause.schedule.when;
+    }
+    if (!clause.schedule.timeOfDay?.length) {
+      delete clause.schedule.timeOfDay;
+    }
+    if (
+      clause.schedule.timingCode === undefined &&
+      clause.schedule.count === undefined &&
+      clause.schedule.frequency === undefined &&
+      clause.schedule.frequencyMax === undefined &&
+      clause.schedule.period === undefined &&
+      clause.schedule.periodMax === undefined &&
+      clause.schedule.periodUnit === undefined &&
+      !clause.schedule.dayOfWeek &&
+      !clause.schedule.when &&
+      !clause.schedule.timeOfDay
+    ) {
+      delete clause.schedule;
+    }
+  }
+
+  if (clause.dose) {
+    if (!clause.dose.range && clause.dose.value === undefined && clause.dose.unit === undefined) {
+      delete clause.dose;
+    }
+  }
+
+  if (clause.route) {
+    if (clause.route.code === undefined && clause.route.text === undefined) {
+      delete clause.route;
+    }
+  }
+
+  if (clause.site) {
+    if (
+      clause.site.text === undefined &&
+      clause.site.coding === undefined &&
+      clause.site.source === undefined
+    ) {
+      delete clause.site;
+    }
+  }
+
+  if (clause.prn) {
+    if (!clause.prn.reason?.text && !clause.prn.reason?.coding) {
+      delete clause.prn.reason;
+    }
+    if (!clause.prn.enabled && !clause.prn.reason) {
+      delete clause.prn;
+    }
+  }
+
+  if (internal.additionalInstructions.length) {
+    clause.additionalInstructions = [];
+    for (const instruction of internal.additionalInstructions) {
+      clause.additionalInstructions.push({
+        text: instruction.text,
+        coding: instruction.coding?.code
+          ? {
+            code: instruction.coding.code,
+            display: instruction.coding.display,
+            system: instruction.coding.system
+          }
+          : undefined,
+        frames: instruction.frames?.length ? [...instruction.frames] : undefined
+      });
+    }
+  } else {
+    delete clause.additionalInstructions;
+  }
 }
 
 /**
@@ -2569,19 +2992,11 @@ export function parseInternal(
   options?: ParseOptions
 ): ParsedSigInternal {
   const tokens = tokenize(input);
-  const internal: ParsedSigInternal = {
+  const internal = createClauseBackedInternal(
     input,
     tokens,
-    consumed: new Set<number>(),
-    dayOfWeek: [],
-    when: [],
-    warnings: [],
-    siteTokenIndices: new Set<number>(),
-    siteLookups: [],
-    customSiteHints: buildCustomSiteHints(options?.siteCodeMap),
-    prnReasonLookups: [],
-    additionalInstructions: []
-  };
+    buildCustomSiteHints(options?.siteCodeMap)
+  );
 
   const context = options?.context ?? undefined;
   const customRouteMap = options?.routeMap
@@ -2602,6 +3017,7 @@ export function parseInternal(
     : undefined;
 
   if (tokens.length === 0) {
+    finalizeCanonicalClause(internal);
     return internal;
   }
 
@@ -3464,6 +3880,8 @@ export function parseInternal(
     );
   }
 
+  finalizeCanonicalClause(internal);
+
   return internal;
 }
 
@@ -3828,36 +4246,6 @@ function collectSuggestionResult(
   }
 }
 
-function findAdditionalInstructionDefinition(
-  text: string,
-  canonical: string
-): AdditionalInstructionDefinition | undefined {
-  if (!canonical) {
-    return undefined;
-  }
-  for (const entry of DEFAULT_ADDITIONAL_INSTRUCTION_ENTRIES) {
-    if (!entry.canonical) {
-      continue;
-    }
-    // Check for exact canonical match first
-    if (entry.canonical === canonical) {
-      return entry.definition;
-    }
-    // Avoid broad includes checks (like "with" matching "with meal") 
-    // to prevent leakage of common connectors into additional instructions.
-    for (const term of entry.terms) {
-      const normalizedTerm = normalizeAdditionalInstructionKey(term);
-      if (!normalizedTerm) {
-        continue;
-      }
-      if (canonical.includes(normalizedTerm) || normalizedTerm.includes(canonical)) {
-        return entry.definition;
-      }
-    }
-  }
-  return undefined;
-}
-
 const BODY_SITE_ADJECTIVE_SUFFIXES = [
   "al",
   "ial",
@@ -4074,6 +4462,51 @@ function isAdjectivalSitePhrase(phrase: string): boolean {
   return BODY_SITE_ADJECTIVE_SUFFIXES.some((suffix) => last.endsWith(suffix));
 }
 
+function hasInstructionSeparatorBeforeRange(
+  input: string,
+  range: TextRange | undefined
+): boolean {
+  if (!range) {
+    return false;
+  }
+  for (let cursor = range.start - 1; cursor >= 0; cursor--) {
+    const char = input[cursor];
+    if (char === "\n" || char === "\r") {
+      return true;
+    }
+    if (/\s/.test(char)) {
+      continue;
+    }
+    return char === ";" || char === ":" || char === "," || char === "-" || char === ".";
+  }
+  return false;
+}
+
+function inferAdditionalInstructionPredicate(
+  internal: ParsedSigInternal,
+  tokens: Token[]
+): string {
+  if (hasApplicationVerbBefore(tokens, tokens.length, internal.consumed)) {
+    return "apply";
+  }
+  if (
+    internal.routeCode === RouteCode["Topical route"] ||
+    internal.routeCode === RouteCode["Transdermal route"] ||
+    internal.routeCode === RouteCode["Otic route"] ||
+    internal.routeCode === RouteCode["Nasal route"] ||
+    internal.routeCode === RouteCode["Ophthalmic route"]
+  ) {
+    return "apply";
+  }
+  if (
+    internal.routeCode === RouteCode["Per rectum"] ||
+    internal.routeCode === RouteCode["Per vagina"]
+  ) {
+    return "use";
+  }
+  return "take";
+}
+
 function collectAdditionalInstructions(
   internal: ParsedSigInternal,
   tokens: Token[]
@@ -4081,192 +4514,87 @@ function collectAdditionalInstructions(
   if (internal.additionalInstructions.length) {
     return;
   }
-  const punctuationOnly = /^[;:.,-]+$/;
-  const trailing: Token[] = [];
-  let expectedIndex: number | undefined;
-  for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
-    const token = tokens[cursor];
-    if (!token) {
+  const groups = findUnparsedTokenGroups(internal);
+  if (!groups.length) {
+    return;
+  }
+
+  const instructions: ParsedSigInternal["additionalInstructions"] = [];
+  const seen = new Set<string>();
+  const defaultPredicate = inferAdditionalInstructionPredicate(internal, tokens);
+
+  for (const group of groups) {
+    if (!group.tokens.length) {
       continue;
     }
-    if (internal.consumed.has(token.index)) {
-      if (trailing.length > 0) {
-        break;
+    const range = group.range ?? computeTokenRange(
+      internal.input,
+      tokens,
+      group.tokens.map((token) => token.index)
+    );
+    let sourceText = "";
+    if (range) {
+      sourceText = internal.input.slice(range.start, range.end);
+    } else {
+      for (const token of group.tokens) {
+        if (sourceText) {
+          sourceText += " ";
+        }
+        sourceText += token.original;
       }
+    }
+    sourceText = sourceText.replace(/\s+/g, " ").trim();
+    if (!sourceText) {
       continue;
     }
-    if (expectedIndex !== undefined && token.index !== expectedIndex - 1) {
-      break;
-    }
-    trailing.unshift(token);
-    expectedIndex = token.index;
-  }
-  if (!trailing.length) {
-    return;
-  }
-  const contentTokens: Token[] = [];
-  const trailingIndices: number[] = [];
-  for (const token of trailing) {
-    trailingIndices.push(token.index);
-    if (!punctuationOnly.test(token.original)) {
-      contentTokens.push(token);
-    }
-  }
-  if (!contentTokens.length) {
-    return;
-  }
-  trailingIndices.sort((a, b) => a - b);
-  const lastIndex = trailingIndices[trailingIndices.length - 1];
-  for (let i = lastIndex + 1; i < tokens.length; i++) {
-    const nextToken = tokens[i];
-    if (!nextToken) {
-      continue;
-    }
-    if (!internal.consumed.has(nextToken.index)) {
-      return;
-    }
-  }
-  let joined = "";
-  for (const token of contentTokens) {
-    if (joined) {
-      joined += " ";
-    }
-    joined += token.original;
-  }
-  joined = joined.replace(/\s+/g, " ").trim();
-  if (!joined) {
-    return;
-  }
-  const joinedWords = joined.toLowerCase().split(/\s+/);
-  let hasJoinedWord = false;
-  let allApplicationVerbs = true;
-  for (const word of joinedWords) {
-    if (!word || SITE_FILLER_WORDS.has(word)) {
-      continue;
-    }
-    hasJoinedWord = true;
-    if (!isApplicationVerbWord(word)) {
-      allApplicationVerbs = false;
-      break;
-    }
-  }
-  if (hasJoinedWord && allApplicationVerbs) {
-    return;
-  }
-  const contentIndices: number[] = [];
-  for (const token of contentTokens) {
-    contentIndices.push(token.index);
-  }
-  contentIndices.sort((a, b) => a - b);
-  const lowerInput = internal.input.toLowerCase();
-  let trailingRange: TextRange | undefined;
-  let searchEnd = lowerInput.length;
-  let rangeStart: number | undefined;
-  let rangeEnd: number | undefined;
-  for (let i = contentTokens.length - 1; i >= 0; i--) {
-    const fragment = contentTokens[i].original.trim();
-    if (!fragment) {
-      continue;
-    }
-    const lowerFragment = fragment.toLowerCase();
-    const foundIndex = lowerInput.lastIndexOf(lowerFragment, searchEnd - 1);
-    if (foundIndex === -1) {
-      rangeStart = undefined;
-      rangeEnd = undefined;
-      break;
-    }
-    rangeStart = foundIndex;
-    if (rangeEnd === undefined) {
-      rangeEnd = foundIndex + lowerFragment.length;
-    }
-    searchEnd = foundIndex;
-  }
-  if (rangeStart !== undefined && rangeEnd !== undefined) {
-    trailingRange = { start: rangeStart, end: rangeEnd };
-  }
-  const range = trailingRange ?? computeTokenRange(internal.input, tokens, contentIndices);
-  let separatorDetected = false;
-  if (range) {
-    for (let cursor = range.start - 1; cursor >= 0; cursor--) {
-      const ch = internal.input[cursor];
-      if (ch === "\n" || ch === "\r") {
-        separatorDetected = true;
-        break;
+
+    const separatorDetected =
+      sourceText.includes(";") ||
+      sourceText.includes(".") ||
+      sourceText.includes("\n") ||
+      sourceText.includes("\r") ||
+      hasInstructionSeparatorBeforeRange(internal.input, range);
+
+    const parsed = parseAdditionalInstructions(
+      sourceText,
+      range ?? { start: 0, end: sourceText.length },
+      {
+        defaultPredicate,
+        allowFreeTextFallback: separatorDetected
       }
-      if (/\s/.test(ch)) {
+    );
+    if (!parsed.length) {
+      continue;
+    }
+
+    let groupAccepted = false;
+    for (const parsedInstruction of parsed) {
+      const key = parsedInstruction.coding?.code
+        ? `code:${parsedInstruction.coding.system ?? SNOMED_SYSTEM}|${parsedInstruction.coding.code}`
+        : parsedInstruction.text
+          ? `text:${parsedInstruction.text.toLowerCase()}`
+          : `frames:${parsedInstruction.frames.length}`;
+      if (seen.has(key)) {
         continue;
       }
-      if (/-|;|:|\.|\,/.test(ch)) {
-        separatorDetected = true;
-      }
-      break;
-    }
-  }
-  const sourceText = range
-    ? internal.input.slice(range.start, range.end)
-    : joined;
-  const normalized = sourceText
-    .replace(/\s+[-:]+\s+/g, "; ")
-    .replace(/\s*(?:\r?\n)+\s*/g, "; ")
-    .replace(/\s+/g, " ");
-  const segments = normalized
-    .split(/(?:;|\.)/)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-
-  // If no punctuation was detected, we only collect if at least one segment matches a known definition.
-  // This avoids capturing random trailing text as instructions unless it's codified.
-  if (!separatorDetected && !/[-;:.]/.test(sourceText)) {
-    const hasKnownDefinition = segments.some((phrase) => {
-      const canonical = normalizeAdditionalInstructionKey(phrase);
-      return (
-        DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS[canonical] ||
-        findAdditionalInstructionDefinition(phrase, canonical)
-      );
-    });
-    if (!hasKnownDefinition) {
-      return;
-    }
-  }
-
-  const phrases = segments.length ? segments : [joined];
-  const seen = new Set<string>();
-  const instructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }> = [];
-  for (const phrase of phrases) {
-    const canonical = normalizeAdditionalInstructionKey(phrase);
-    const definition =
-      DEFAULT_ADDITIONAL_INSTRUCTION_DEFINITIONS[canonical] ??
-      findAdditionalInstructionDefinition(phrase, canonical);
-    const key = definition?.coding?.code
-      ? `code:${definition.coding.system ?? SNOMED_SYSTEM}|${definition.coding.code}`
-      : canonical
-        ? `text:${canonical}`
-        : phrase.toLowerCase();
-    if (key && seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    if (definition) {
+      seen.add(key);
       instructions.push({
-        text: definition.text ?? phrase,
-        coding: definition.coding?.code
-          ? {
-            code: definition.coding.code,
-            display: definition.coding.display,
-            system: definition.coding.system ?? SNOMED_SYSTEM,
-            i18n: definition.i18n
-          }
-          : undefined
+        text: parsedInstruction.text,
+        coding: parsedInstruction.coding,
+        frames: parsedInstruction.frames
       });
-    } else if (!isMealContextConnectorWord(phrase.toLowerCase())) {
-      instructions.push({ text: phrase });
+      groupAccepted = true;
+    }
+
+    if (groupAccepted) {
+      for (const token of group.tokens) {
+        mark(internal.consumed, token);
+      }
     }
   }
+
   if (instructions.length) {
     internal.additionalInstructions = instructions;
-    for (const token of trailing) {
-      mark(internal.consumed, token);
-    }
   }
 }
 

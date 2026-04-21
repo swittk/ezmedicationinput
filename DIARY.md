@@ -364,3 +364,50 @@ Desired behavior:
    - `ParsedSigInternal` still exists inside `src/parser.ts`, carry-forward handling, and internal compatibility helpers
    - public parse semantics now flow through canonical clauses
    - next real deletion target is shrinking or replacing `ParsedSigInternal` inside the parser itself, not in public output assembly
+
+### 2026-04-22 Parser Core Follow-Through
+
+1. Parser semantic storage is no longer plain `ParsedSigInternal` field storage.
+   - `parseInternal()` now creates a clause-backed compatibility object in `src/parser.ts`
+   - dose / route / site / schedule / PRN scalar fields are stored through accessors that write into the canonical clause during parsing
+   - `dayOfWeek` / `when` arrays are now shared directly with the canonical clause schedule while parsing
+
+2. Canonical is now assembled during parsing, not only reconstructed after parsing.
+   - the parser finalization step now stamps canonical `rawText`, `span`, `raw`, `leftovers`, `warnings`, and `confidence`
+   - `buildCanonicalSigClauses()` in `src/ir.ts` now returns parser-built canonical clauses when they already exist
+
+3. Remaining compatibility boundary after this pass.
+   - helper functions in `src/parser.ts` still accept `ParsedSigInternal`-shaped state, but that state is now clause-backed
+   - `ParsedSigInternal` still exists as the parser-compatibility shell and for some older helper/tests
+   - the next cleanup target is reducing the parser helper signatures and resolver/carry-forward paths so they stop naming `ParsedSigInternal` at all
+
+### 2026-04-22 Advice Grammar And Terminology Extraction
+
+1. Replaced the old `maps.ts` additional-instruction phrase bag with data + grammar.
+   - added `src/advice-terminology.json` as the maintainable vocabulary source for advice lexemes and concepts
+   - added `src/advice.ts` as the grammar/data layer for additional instructions
+   - removed `DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE` and related lookup tables from `src/maps.ts`
+
+2. Additional instructions are no longer parsed as trailing exact-text label lookup.
+   - parser now scans every leftover token group, not only the trailing tail
+   - advice parsing now produces generic `AdviceFrame[]` structures first
+   - coding is assigned afterward through frame-matching rules, not direct phrase equality
+
+3. Reverse coding lookup is now advice-owned instead of map-owned.
+   - `findAdditionalInstructionDefinitionByCoding()` now lives in `src/advice.ts`
+   - coded FHIR round-trips can now hydrate advice frames from the coding rule templates
+
+4. Canonical output now preserves structured advice.
+   - canonical clause `additionalInstructions[]` now carry `frames`
+   - parser/fhir paths preserve those frames instead of flattening them immediately back to text
+   - regression tests now lock structured frames for:
+     - `do not crush or chew`
+     - `no alcohol`
+     - `after showering`
+     - `leave on for 10 minutes then rinse`
+     - `rinse in the morning`
+
+5. Current remaining parser-core debt after this slice.
+   - the parser state object is still named `ParsedSigInternal`
+   - the central parse loop is still a large ordered collector/mutator, even though public outputs are canonical-first
+   - next cleanup target is renaming/removing the old parser-state shell and pushing more collector decisions into explicit native clause assembly/scoring

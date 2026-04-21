@@ -47,10 +47,11 @@ function cloneCoding(coding?: FhirCoding): FhirCoding | undefined {
 
 function cloneAdditionalInstruction(
   instruction: CanonicalAdditionalInstructionExpr
-): { text?: string; coding?: FhirCoding } {
+): { text?: string; coding?: FhirCoding; frames?: CanonicalAdditionalInstructionExpr["frames"] } {
   return {
     text: instruction.text,
-    coding: cloneCoding(instruction.coding)
+    coding: cloneCoding(instruction.coding),
+    frames: instruction.frames ? [...instruction.frames] : undefined
   };
 }
 
@@ -192,6 +193,9 @@ function buildClauseConfidence(internal: ParsedSigInternal, leftovers: Canonical
 export function buildCanonicalSigClauses(
   internal: ParsedSigInternal
 ): CanonicalSigClause[] {
+  if (internal.canonicalClauses?.length) {
+    return internal.canonicalClauses;
+  }
   const trimmedRange = computeTrimmedInputRange(internal.input);
   const raw = buildRangeSourceSpan(internal.input, trimmedRange);
   const leftovers = collectLeftoverSpans(internal);
@@ -349,6 +353,7 @@ export function buildCanonicalSigClauses(
     clause.additionalInstructions = internal.additionalInstructions.map((instruction) => ({
       text: instruction.text,
       coding: cloneCoding(instruction.coding),
+      frames: instruction.frames ? [...instruction.frames] : undefined,
       evidence: buildEvidence("additional-instruction", raw, instruction.text)
     }));
     clause.evidence.push(

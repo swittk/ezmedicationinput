@@ -1,3 +1,7 @@
+import {
+  buildAdditionalInstructionFramesFromCoding,
+  findAdditionalInstructionDefinitionByCoding
+} from "./advice";
 import { formatCanonicalClause } from "./format";
 import { buildCanonicalSigClauses } from "./ir";
 import { ParsedSigInternal } from "./internal-types";
@@ -5,7 +9,6 @@ import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
   ROUTE_TEXT,
-  findAdditionalInstructionDefinitionByCoding,
   findPrnReasonDefinitionByCoding
 } from "./maps";
 import {
@@ -310,6 +313,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
             display: coding.display,
             system: coding.system
           }
+          : undefined,
+        frames: coding?.code
+          ? buildAdditionalInstructionFramesFromCoding(
+            coding.system ?? SNOMED_SYSTEM,
+            coding.code,
+            instruction.text ?? coding.display ?? "",
+            clause.raw
+          )
           : undefined
       });
     }
@@ -407,6 +418,14 @@ export function internalFromFhir(dosage: FhirDosage): ParsedSigInternal {
             system: coding.system,
             i18n: defaultDef?.i18n
           }
+          : undefined,
+        frames: coding?.code
+          ? buildAdditionalInstructionFramesFromCoding(
+            coding.system ?? SNOMED_SYSTEM,
+            coding.code,
+            concept.text ?? coding.display ?? "",
+            { start: 0, end: (concept.text ?? coding.display ?? "").length }
+          )
           : undefined
       };
     });

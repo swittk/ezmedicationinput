@@ -1,6 +1,6 @@
+import { findAdditionalInstructionDefinitionByCoding } from "./advice";
 import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
-  findAdditionalInstructionDefinitionByCoding,
   findPrnReasonDefinitionByCoding,
   normalizeBodySiteKey
 } from "./maps";

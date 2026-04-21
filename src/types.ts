@@ -367,6 +367,68 @@ export interface PrnReasonDefinition extends CodeableConceptDefinition { }
 export interface AdditionalInstructionDefinition
   extends CodeableConceptDefinition { }
 
+export enum AdvicePolarity {
+  Affirm = "affirm",
+  Negate = "negate"
+}
+
+export enum AdviceForce {
+  Instruction = "instruction",
+  Warning = "warning",
+  Caution = "caution",
+  Sequence = "sequence"
+}
+
+export enum AdviceRelation {
+  With = "with",
+  Without = "without",
+  Before = "before",
+  After = "after",
+  During = "during",
+  Then = "then",
+  Until = "until",
+  For = "for",
+  In = "in",
+  On = "on"
+}
+
+export enum AdviceArgumentRole {
+  Theme = "theme",
+  Object = "object",
+  Substance = "substance",
+  MealState = "meal_state",
+  Activity = "activity",
+  Material = "material",
+  Site = "site",
+  Amount = "amount",
+  Duration = "duration",
+  Time = "time",
+  Free = "free"
+}
+
+export interface AdviceArgument {
+  role: AdviceArgumentRole;
+  text: string;
+  normalized?: string;
+  conceptId?: string;
+  span?: TextRange;
+}
+
+export interface AdviceFrame {
+  force: AdviceForce;
+  polarity?: AdvicePolarity;
+  predicate: {
+    lemma: string;
+    semanticClass?: string;
+  };
+  relation?: AdviceRelation;
+  args: AdviceArgument[];
+  span: TextRange;
+  sourceText: string;
+  sequenceIndex?: number;
+  coding?: FhirCoding;
+}
+
 export interface TextRange {
   /** Inclusive start index of the matched substring within the original input. */
   start: number;
@@ -681,6 +743,7 @@ export interface CanonicalPrnExpr {
 export interface CanonicalAdditionalInstructionExpr {
   text?: string;
   coding?: FhirCoding;
+  frames?: AdviceFrame[];
   evidence?: CanonicalEvidence[];
 }
 

@@ -1,5 +1,7 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
 import {
+  AdviceFrame,
+  CanonicalSigClause,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
@@ -55,5 +57,10 @@ export interface ParsedSigInternal {
   customSiteHints?: Set<string>;
   prnReasonLookupRequest?: PrnReasonLookupRequest;
   prnReasonLookups: PrnReasonLookupDetail[];
-  additionalInstructions: Array<{ text?: string; coding?: FhirCoding & { i18n?: Record<string, string> } }>;
+  additionalInstructions: Array<{
+    text?: string;
+    coding?: FhirCoding & { i18n?: Record<string, string> };
+    frames?: AdviceFrame[];
+  }>;
+  canonicalClauses?: CanonicalSigClause[];
 }

@@ -7,6 +7,8 @@ import {
   ROUTE_TEXT
 } from "../src/maps";
 import {
+  AdvicePolarity,
+  AdviceRelation,
   EventTiming,
   RouteCode,
   SNOMEDCTRouteCodes,
@@ -1094,6 +1096,16 @@ describe("parseSig core scenarios", () => {
         }
       }
     ]);
+    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames).toEqual([
+      expect.objectContaining({
+        polarity: AdvicePolarity.Negate,
+        predicate: expect.objectContaining({ lemma: "crush" })
+      }),
+      expect.objectContaining({
+        polarity: AdvicePolarity.Negate,
+        predicate: expect.objectContaining({ lemma: "chew" })
+      })
+    ]);
     expect(result.meta.leftoverText).toBeUndefined();
     expect(result.longText).toContain("Swallow whole; do not crush or chew");
   });
@@ -1123,6 +1135,14 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.normalized.prnReason?.text).toBe("vomiting");
     expect(result.meta.normalized.additionalInstructions?.[0]?.text).toBe(
       "Avoid alcoholic drinks"
+    );
+    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames?.[0]).toEqual(
+      expect.objectContaining({
+        force: expect.any(String),
+        args: expect.arrayContaining([
+          expect.objectContaining({ conceptId: "alcohol" })
+        ])
+      })
     );
   });
 
@@ -2718,6 +2738,14 @@ describe("topical workflow and timing", () => {
       periodUnit: "d"
     });
     expect(result.fhir.additionalInstruction?.[0]?.text).toContain("after showering");
+    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames?.[0]).toEqual(
+      expect.objectContaining({
+        relation: AdviceRelation.After,
+        args: expect.arrayContaining([
+          expect.objectContaining({ conceptId: "showering" })
+        ])
+      })
+    );
   });
 
   it("keeps duration-based workflow phrases out of dose parsing", () => {
@@ -2726,6 +2754,15 @@ describe("topical workflow and timing", () => {
     expect(result.fhir.additionalInstruction?.[0]?.text).toContain(
       "leave on for 10 minutes then rinse"
     );
+    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames).toEqual([
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: "leave" }),
+        relation: AdviceRelation.For
+      }),
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: "rinse" })
+      })
+    ]);
   });
 
   it("keeps workflow timing separate from medication timing", () => {
@@ -2733,6 +2770,15 @@ describe("topical workflow and timing", () => {
     expect(result.fhir.site?.text).toBe("scalp");
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Night]);
     expect(result.fhir.additionalInstruction?.[0]?.text).toContain("rinse in the morning");
+    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames?.[0]).toEqual(
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: "rinse" }),
+        relation: AdviceRelation.In,
+        args: expect.arrayContaining([
+          expect.objectContaining({ conceptId: "morning" })
+        ])
+      })
+    );
   });
 });
 
