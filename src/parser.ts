@@ -20,6 +20,8 @@ import {
   normalizePrnReasonKey
 } from "./maps";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
+import { lexInput } from "./lexer/lex";
+import { LexKind } from "./lexer/token-types";
 import { checkDiscouraged } from "./safety";
 import { ParsedSigInternal, Token } from "./internal-types";
 import {
@@ -50,6 +52,11 @@ import {
 } from "./types";
 import { objectEntries } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
+import {
+  hasDayOfWeekMeaning,
+  hasEventTimingMeaning,
+  hasTimingAbbreviationMeaning
+} from "./lexer/meaning";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -961,6 +968,19 @@ function parseTimeToFhir(timeStr: string): string | undefined {
     clean.match(/^(\d{1,2})\s*(am|pm)$/) ||
     clean.match(/^(\d{1,2})$/);
 
+  const compact24h = clean.match(/^(\d{3,4})$/);
+  if (!match && compact24h) {
+    const digits = compact24h[1];
+    const hourText = digits.slice(0, digits.length - 2);
+    const minuteText = digits.slice(-2);
+    const hour = parseInt(hourText, 10);
+    const minute = parseInt(minuteText, 10);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      const normalizedHour = hour < 10 ? `0${hour}` : `${hour}`;
+      return `${normalizedHour}:${minuteText}:00`;
+    }
+  }
+
   if (!match) return undefined;
 
   let hour = parseInt(match[1], 10);
@@ -1147,48 +1167,7 @@ function tryParseTimeBasedSchedule(
 }
 
 export function tokenize(input: string): Token[] {
-  const separators = /[(),;]/g;
-  let normalized = input.trim().replace(separators, " ");
-  normalized = normalized.replace(
-    DAY_RANGE_SPACED_HYPHEN_REGEX,
-    (_match, prefix: string, start: string, end: string) => `${prefix}${start}-${end}`
-  );
-  normalized = normalized.replace(/\s-\s/g, " ; ");
-  normalized = normalized.replace(
-    /(\d+(?:\.\d+)?)\s*\/\s*(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)\b/gi,
-    (_match, value, unit) => `${value} per ${unit}`
-  );
-  normalized = normalized.replace(/(\d+)\s*\/\s*(\d+)/g, (match, num, den) => {
-    const numerator = parseFloat(num);
-    const denominator = parseFloat(den);
-    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
-      return match;
-    }
-    const value = numerator / denominator;
-    return value.toString();
-  });
-  normalized = normalized.replace(/(\d+(?:\.\d+)?[x*])([A-Za-z]+)/g, "$1 $2");
-  normalized = normalized.replace(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/g, "$1-$2");
-  normalized = normalized.replace(
-    /(\d+(?:\.\d+)?)(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|puff|puffs|spray|sprays|patch|patches)/gi,
-    "$1 $2"
-  );
-  normalized = normalized.replace(/[\\/]/g, " ");
-  const rawTokens = normalized
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0 && t !== "." && t !== "-");
-
-  const tokens: Token[] = [];
-  for (let i = 0; i < rawTokens.length; i++) {
-    const raw = rawTokens[i];
-    const parts = splitToken(raw);
-    for (const part of parts) {
-      if (!part) continue;
-      tokens.push({ original: part, lower: part.toLowerCase(), index: tokens.length });
-    }
-  }
-  return tokens;
+  return lexInput(input);
 }
 
 /**
@@ -1196,71 +1175,32 @@ export function tokenize(input: string): Token[] {
  * input so downstream consumers can highlight or replace the exact substring.
  */
 function computeTokenRange(
-  input: string,
+  _input: string,
   tokens: Token[],
   indices: number[]
 ): TextRange | undefined {
   if (!indices.length) {
     return undefined;
   }
-  const lowerInput = input.toLowerCase();
-  let searchStart = 0;
   let rangeStart: number | undefined;
   let rangeEnd: number | undefined;
   for (const tokenIndex of indices) {
     const token = tokens[tokenIndex];
-    if (!token) {
+    if (!token || token.sourceStart === undefined || token.sourceEnd === undefined) {
       continue;
     }
-    const segment = token.original.trim();
-    if (!segment) {
-      continue;
-    }
-    const lowerSegment = segment.toLowerCase();
-    const foundIndex = lowerInput.indexOf(lowerSegment, searchStart);
-    if (foundIndex === -1) {
-      return undefined;
-    }
-    const segmentEnd = foundIndex + lowerSegment.length;
     if (rangeStart === undefined) {
-      rangeStart = foundIndex;
+      rangeStart = token.sourceStart;
+      rangeEnd = token.sourceEnd;
+      continue;
     }
-    rangeEnd = segmentEnd;
-    searchStart = segmentEnd;
+    rangeStart = Math.min(rangeStart, token.sourceStart);
+    rangeEnd = Math.max(rangeEnd ?? token.sourceEnd, token.sourceEnd);
   }
   if (rangeStart === undefined || rangeEnd === undefined) {
     return undefined;
   }
   return { start: rangeStart, end: rangeEnd };
-}
-
-/**
- * Prefers highlighting the sanitized site text when it can be located directly
- * in the original input; otherwise falls back to the broader token-derived
- * range.
- */
-function refineSiteRange(
-  input: string,
-  sanitized: string,
-  tokenRange: TextRange | undefined
-): TextRange | undefined {
-  if (!input) {
-    return tokenRange;
-  }
-  const trimmed = sanitized.trim();
-  if (!trimmed) {
-    return tokenRange;
-  }
-  const lowerInput = input.toLowerCase();
-  const lowerSanitized = trimmed.toLowerCase();
-  let startIndex = tokenRange ? lowerInput.indexOf(lowerSanitized, tokenRange.start) : -1;
-  if (startIndex === -1) {
-    startIndex = lowerInput.indexOf(lowerSanitized);
-  }
-  if (startIndex === -1) {
-    return tokenRange;
-  }
-  return { start: startIndex, end: startIndex + lowerSanitized.length };
 }
 
 export function findUnparsedTokenGroups(
@@ -1277,53 +1217,14 @@ export function findUnparsedTokenGroups(
   const groups: Array<{ tokens: Token[]; range?: TextRange }> = [];
   let currentGroup: Token[] = [];
   let previousIndex: number | undefined;
-  let minimumStart = 0;
-
-  const locateRange = (
-    tokensToLocate: Token[],
-    initial: TextRange | undefined
-  ): TextRange | undefined => {
-    const lowerInput = internal.input.toLowerCase();
-    let searchStart = minimumStart;
-    let rangeStart: number | undefined;
-    let rangeEnd: number | undefined;
-
-    for (const token of tokensToLocate) {
-      const segment = token.original.trim();
-      if (!segment) {
-        continue;
-      }
-      const lowerSegment = segment.toLowerCase();
-      const foundIndex = lowerInput.indexOf(lowerSegment, searchStart);
-      if (foundIndex === -1) {
-        return initial;
-      }
-      if (rangeStart === undefined) {
-        rangeStart = foundIndex;
-      }
-      const segmentEnd = foundIndex + lowerSegment.length;
-      rangeEnd = rangeEnd === undefined ? segmentEnd : Math.max(rangeEnd, segmentEnd);
-      searchStart = segmentEnd;
-    }
-
-    if (rangeStart === undefined || rangeEnd === undefined) {
-      return initial;
-    }
-
-    return { start: rangeStart, end: rangeEnd };
-  };
 
   const flush = () => {
     if (!currentGroup.length) {
       return;
     }
     const indices = currentGroup.map((token) => token.index);
-    const initialRange = computeTokenRange(internal.input, internal.tokens, indices);
-    const range = locateRange(currentGroup, initialRange);
+    const range = computeTokenRange(internal.input, internal.tokens, indices);
     groups.push({ tokens: currentGroup, range });
-    if (range) {
-      minimumStart = Math.max(minimumStart, range.end);
-    }
     currentGroup = [];
     previousIndex = undefined;
   };
@@ -1340,48 +1241,42 @@ export function findUnparsedTokenGroups(
 
   return groups;
 }
-
-function splitToken(token: string): string[] {
-  if (/^[0-9]+(?:\.[0-9]+)?$/.test(token)) {
-    return [token];
-  }
-  const compactPoMeal = token.match(/^(po)(ac|pc|c)$/i);
-  if (compactPoMeal) {
-    const [, po, meal] = compactPoMeal;
-    return [po, meal];
-  }
-  if (/^[A-Za-z]+$/.test(token)) {
-    return [token];
-  }
-  const qRange = token.match(/^q([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/i);
-  if (qRange) {
-    const [, low, high, unit] = qRange;
-    return [token.charAt(0), `${low}-${high}`, unit];
-  }
-  const match = token.match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/);
-  if (match) {
-    const [, num, unit] = match;
-    if (/^(st|nd|rd|th)$/i.test(unit)) {
-      return [token];
-    }
-    const compactPoMealUnit = unit.match(/^(po)(ac|pc|c)$/i);
-    if (compactPoMealUnit) {
-      const [, po, meal] = compactPoMealUnit;
-      return [num, po, meal];
-    }
-    if (!/^x\d+/i.test(unit) && !/^q\d+/i.test(unit)) {
-      return [num, unit];
-    }
-  }
-  return [token];
-}
-
 function isNumericToken(value: string): boolean {
   return /^[0-9]+(?:\.[0-9]+)?$/.test(value);
 }
 
 function isOrdinalToken(value: string): boolean {
   return /^[0-9]+(?:st|nd|rd|th)$/i.test(value);
+}
+
+function isNumericLexToken(token: Token | undefined): boolean {
+  return token?.kind === LexKind.Number;
+}
+
+function isNumericRangeLexToken(token: Token | undefined): boolean {
+  return token?.kind === LexKind.NumberRange;
+}
+
+function parseNumericRangeToken(token: Token | undefined): { low: number; high: number } | undefined {
+  if (!token || token.kind !== LexKind.NumberRange) {
+    return undefined;
+  }
+  if (!Number.isFinite(token.low) || !Number.isFinite(token.high)) {
+    return undefined;
+  }
+  return { low: token.low!, high: token.high! };
+}
+
+function hasEventTimingSignal(token: Token | undefined): boolean {
+  return hasEventTimingMeaning(token);
+}
+
+function hasTimingAbbreviationSignal(token: Token | undefined): boolean {
+  return hasTimingAbbreviationMeaning(token);
+}
+
+function hasDayOfWeekSignal(token: Token | undefined): boolean {
+  return hasDayOfWeekMeaning(token);
 }
 
 function getPreviousActiveToken(
@@ -1717,6 +1612,7 @@ function applySitePhrase(
 
   const sortedIndices = Array.from(new Set(indices)).sort((a, b) => a - b);
   const displayWords: string[] = [];
+  const displayTokenIndices: number[] = [];
   for (const index of sortedIndices) {
     const token = tokens[index];
     if (!token) {
@@ -1728,21 +1624,44 @@ function applySitePhrase(
     if (
       !isBraceToken &&
       !SITE_CONNECTORS.has(lower) &&
-      !SITE_FILLER_WORDS.has(lower)
+      !SITE_FILLER_WORDS.has(lower) &&
+      lower !== ","
     ) {
       displayWords.push(token.original);
+      displayTokenIndices.push(token.index);
     }
     internal.siteTokenIndices.add(token.index);
     mark(internal.consumed, token);
   }
 
-  const normalizedSite = displayWords.join(" ").replace(/\s+/g, " ").trim();
-  if (!normalizedSite) {
+  if (options?.siteCodeMap && sortedIndices.length > 0) {
+    const lastIndex = sortedIndices[sortedIndices.length - 1];
+    const commaToken = tokens[lastIndex + 1];
+    const trailingModifier = tokens[lastIndex + 2];
+    const trailingLower = trailingModifier ? normalizeTokenLower(trailingModifier) : undefined;
+    if (
+      commaToken?.original === "," &&
+      trailingModifier &&
+      !internal.consumed.has(trailingModifier.index) &&
+      (trailingLower === "left" || trailingLower === "right" || trailingLower === "bilateral")
+    ) {
+      displayWords.push(trailingModifier.original);
+      displayTokenIndices.push(trailingModifier.index);
+      internal.siteTokenIndices.add(trailingModifier.index);
+      mark(internal.consumed, trailingModifier);
+    }
+  }
+  const resolvedSiteText = displayWords.join(" ").replace(/\s+/g, " ").trim();
+  if (!resolvedSiteText) {
     return false;
   }
 
-  const tokenRange = computeTokenRange(internal.input, tokens, sortedIndices);
-  let sanitized = normalizedSite;
+  const tokenRange = computeTokenRange(
+    internal.input,
+    tokens,
+    displayTokenIndices.length > 0 ? displayTokenIndices : sortedIndices
+  );
+  let sanitized = resolvedSiteText;
   let isProbe = false;
   const probeMatch = sanitized.match(/^\{(.+)}$/);
   if (probeMatch) {
@@ -1770,11 +1689,24 @@ function applySitePhrase(
     return true;
   }
 
-  const range = refineSiteRange(internal.input, sanitized, tokenRange);
-  const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+  let range = tokenRange;
+  let sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+  if (isProbe && range && sourceText) {
+    const openBrace = sourceText.indexOf("{");
+    const closeBrace = sourceText.lastIndexOf("}");
+    if (openBrace !== -1 && closeBrace > openBrace) {
+      range = {
+        start: range.start + openBrace + 1,
+        end: range.start + closeBrace
+      };
+      sourceText = internal.input.slice(range.start, range.end);
+    } else {
+      sourceText = sanitized;
+    }
+  }
   const canonical = normalizeBodySiteKey(displayText);
   internal.siteLookupRequest = {
-    originalText: normalizedSite,
+    originalText: resolvedSiteText,
     text: displayText,
     normalized: displayLower,
     canonical,
@@ -2505,6 +2437,8 @@ function isTimingAnchorOrPrefix(
   const comboKey = nextToken ? `${lower} ${nextToken.lower}` : undefined;
 
   return Boolean(
+    hasEventTimingSignal(token) ||
+    hasTimingAbbreviationSignal(token) ||
     EVENT_TIMING_TOKENS[lower] ||
     TIMING_ABBREVIATIONS[lower] ||
     (comboKey && COMBO_EVENT_TIMINGS[comboKey]) ||
@@ -2571,6 +2505,7 @@ const DAY_GROUP_TOKENS: Record<string, FhirDayOfWeek[]> = {
     FhirDayOfWeek.Friday
   ],
   วันหยุด: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
+  วันเสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
   สุดสัปดาห์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
   เสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
   จันทร์ถึงศุกร์: [
@@ -2618,7 +2553,7 @@ function resolveDayTokenDays(tokenLower: string): FhirDayOfWeek[] | undefined {
   if (grouped) {
     return grouped.slice();
   }
-  const rangeMatch = normalized.match(/^([^-–—~]+)[-–—~]([^-–—~]+)$/);
+  const rangeMatch = normalized.match(/^([^-–—~/]+)[-–—~/]([^-–—~/]+)$/);
   if (rangeMatch) {
     const start = DAY_OF_WEEK_TOKENS[rangeMatch[1]];
     const end = DAY_OF_WEEK_TOKENS[rangeMatch[2]];
@@ -3240,7 +3175,7 @@ export function parseInternal(
 
     // Frequency abbreviation map
     const freqDescriptor =
-      normalizedLower === "od"
+      normalizedLower === "od" || !hasTimingAbbreviationSignal(token)
         ? undefined
         : TIMING_ABBREVIATIONS[token.lower] ?? TIMING_ABBREVIATIONS[normalizedLower];
     if (freqDescriptor) {
@@ -3322,7 +3257,7 @@ export function parseInternal(
       applyWhenToken(internal, token, customWhen);
       continue;
     }
-    const whenCode = EVENT_TIMING_TOKENS[token.lower];
+    const whenCode = hasEventTimingSignal(token) ? EVENT_TIMING_TOKENS[token.lower] : undefined;
     if (whenCode) {
       // If we are in the PRN zone, be cautious about common reason words like "sleep"
       // unless they were already handled by combo/anchor logic (which happens above).
@@ -3342,7 +3277,9 @@ export function parseInternal(
     if (rangeConsumed > 0) {
       continue;
     }
-    const days = resolveDayTokenDays(normalizeTokenLower(token));
+    const days = hasDayOfWeekSignal(token)
+      ? resolveDayTokenDays(normalizeTokenLower(token))
+      : undefined;
     if (days) {
       addDayOfWeekList(internal, days);
       mark(internal.consumed, token);

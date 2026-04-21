@@ -206,24 +206,80 @@ Desired behavior:
    - `qam` / `qpm` / `nightly`
    - workflow instructions and duration phrases
 
+8. Added the first canonical IR foothold.
+   - New public `ParseResult.meta.canonical.clauses`
+   - New public `ParseBatchResult.meta.canonical.clauses`
+   - Backed by a minimal adapter in `src/ir.ts`
+   - Current implementation is one canonical clause per parsed segment
+
+9. Wrote a dedicated architecture overview in `DIRECTIONALITY.md`.
+   - Documents the target lexer -> clause parser -> scorer -> FHIR pipeline
+   - Clarifies that the new canonical clause layer is an adapter during migration
+
+## 2026-04-22
+
+### Completed In This Architecture Pass
+
+1. Replaced the semantic lexer spike with a real two-step token pipeline.
+   - `src/lexer/surface.ts` now scans the original string directly and preserves exact spans.
+   - `src/lexer/lex.ts` now performs normalization/expansion separately, with provenance.
+   - No medication-domain-specific token kinds remain in the lexer.
+
+2. Moved medication meaning out of token kinds.
+   - `src/lexer/meaning.ts` now handles day/timing/route-ish meaning checks.
+   - Parser logic no longer depends on semantic token-kind flags.
+
+3. Removed source-span reconstruction by `indexOf` from the core token path.
+   - Token spans now come from direct scanning.
+   - Token-range calculation for parser highlights now uses token spans instead of re-finding rewritten text.
+
+4. Expanded canonical clause structure.
+   - Canonical clauses now include `raw`, `leftovers`, `evidence`, and `confidence`.
+   - Evidence spans are cloned so rebasing does not mutate shared references.
+
+5. Added regression coverage for the new boundaries.
+   - Exact surface-token spans
+   - Provenance after compact-token expansion
+   - Thai-safe loose phrase normalization
+   - Existing parser corpus still passing
+
 ### Next Architecture Slice
 
-1. Extract the new site-phrase logic into a dedicated module.
-   - Goal: separate token classification, phrase extraction, route-safety, and site normalization
+1. Move from the current compatibility parser onto true layered parsing.
+   - Surface scan is now explicit and exact-span based.
+   - Normalization/expansion is now separate from semantic lookup.
+   - The next step is to make parser passes consume explicit annotations/candidates instead of ad hoc map checks.
 
-2. Replace more lexical string sets with deterministic token classes.
-   - Examples: ordinal recognition, side/laterality, surface modifiers, connector roles, workflow verbs
-   - Keep lexical inventories centralized and declarative instead of scattering string checks through parser passes
+2. Replace token-semantic shortcuts with proper annotation collectors.
+   - Keep `LexKind` coarse and lexical only.
+   - Emit route/site/timing/PRN candidates in dedicated passes.
+   - Preserve ambiguity like `od` until scoring instead of deciding in lexing.
 
-3. Add a compositional anatomy layer.
+3. Promote canonical IR from adapter to native parser output.
+   - Canonical clauses now carry raw spans, leftovers, evidence, and confidence.
+   - Lowering should eventually flow `candidates -> canonical clause -> internal/FHIR`.
+   - Remove duplicated mutable meaning between `ParsedSigInternal` and canonical clause once parity is reached.
+
+4. Rebuild suggestion generation from parser state.
+   - Current suggestion logic still predates the new token architecture.
+   - Long term it should complete clause slots, not stitch together phrase permutations.
+
+5. Extract the new site-phrase logic into a dedicated module.
+   - Goal: separate token classification, phrase extraction, route-safety, and site normalization.
+
+6. Replace more lexical string sets with deterministic token classes.
+   - Examples: ordinal recognition, side/laterality, surface modifiers, connector roles, workflow verbs.
+   - Keep lexical inventories centralized and declarative instead of scattering string checks through parser passes.
+
+7. Add a compositional anatomy layer.
    - `back of left ear`
    - `front of neck`
    - `left flank`
    - per-digit finger/toe phrases
-   - This should be phrase grammar plus modifier ordering rules, not another manual exhaustive list
+   - This should be phrase grammar plus modifier ordering rules, not another manual exhaustive list.
 
-4. Improve additional-instruction capture beyond trailing-only collection.
-   - Needed for phrases like `pea-sized amount`, `thin layer`, `fingertip unit`, and mid-clause workflow instructions
+8. Improve additional-instruction capture beyond trailing-only collection.
+   - Needed for phrases like `pea-sized amount`, `thin layer`, `fingertip unit`, and mid-clause workflow instructions.
 
 ### Likely Files To Touch Next
 

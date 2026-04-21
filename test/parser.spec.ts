@@ -2736,6 +2736,60 @@ describe("topical workflow and timing", () => {
   });
 });
 
+describe("canonical clause ir", () => {
+  it("exposes a canonical clause for single parses", () => {
+    const input = "1 tab po bid prn pain";
+    const result = parseSig(input);
+    expect(result.meta.canonical.clauses).toHaveLength(1);
+    expect(result.meta.canonical.clauses[0]).toMatchObject({
+      kind: "administration",
+      rawText: input,
+      dose: { value: 1, unit: "tab" },
+      route: { code: RouteCode["Oral route"], text: "by mouth" },
+      schedule: {
+        frequency: 2,
+        period: 1,
+        periodUnit: "d",
+        timingCode: "BID"
+      },
+      prn: {
+        enabled: true,
+        reason: {
+          text: "pain",
+          coding: { code: "22253000", display: "Pain", system: "http://snomed.info/sct" }
+        }
+      }
+    });
+    expect(result.meta.canonical.clauses[0]?.span).toEqual({
+      start: 0,
+      end: input.length
+    });
+  });
+
+  it("rebases canonical clause spans across segmented batches", () => {
+    const input = "1 tab po daily, apply cream to scalp nightly";
+    const secondClause = "apply cream to scalp nightly";
+    const secondStart = input.indexOf(secondClause);
+    const result = parseSig(input);
+
+    expect(result.meta.canonical.clauses).toHaveLength(2);
+    expect(result.meta.canonical.clauses[0]?.span).toEqual({
+      start: 0,
+      end: "1 tab po daily".length
+    });
+    expect(result.meta.canonical.clauses[1]).toMatchObject({
+      rawText: secondClause,
+      route: { code: RouteCode["Topical route"] },
+      site: { text: "scalp" },
+      schedule: { when: [EventTiming.Night] }
+    });
+    expect(result.meta.canonical.clauses[1]?.span).toEqual({
+      start: secondStart,
+      end: secondStart + secondClause.length
+    });
+  });
+});
+
 describe("assume single discrete dose", () => {
   it("does not assume a dose when disabled", () => {
     const result = parseSig("po tid", { context: { dosageForm: "tablet" } });

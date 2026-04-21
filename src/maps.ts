@@ -9,6 +9,7 @@ import {
   SNOMEDCTRouteCodes
 } from "./types";
 import { objectEntries, objectFromEntries } from "./utils/object";
+import { normalizeLoosePhraseKey } from "./utils/text";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -205,12 +206,7 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
  * same logic to ensure consistent lookups.
  */
 export function normalizeBodySiteKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeLoosePhraseKey(value);
 }
 
 export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
@@ -1646,21 +1642,11 @@ export const DEFAULT_UNIT_BY_ROUTE: Partial<Record<RouteCode, string>> = (() => 
 })();
 
 export function normalizePrnReasonKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeLoosePhraseKey(value);
 }
 
 export function normalizeAdditionalInstructionKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeLoosePhraseKey(value);
 }
 
 const DEFAULT_PRN_REASON_SOURCE: Array<{

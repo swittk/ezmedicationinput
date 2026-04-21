@@ -636,6 +636,83 @@ export interface ParseOptions extends FormatOptions {
   | PrnReasonSuggestionResolver[];
 }
 
+export interface CanonicalDoseExpr {
+  value?: number;
+  range?: { low: number; high: number };
+  unit?: string;
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalRouteExpr {
+  code?: RouteCode;
+  text?: string;
+  inferred?: boolean;
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalSiteExpr {
+  text?: string;
+  coding?: BodySiteCode;
+  source?: "abbreviation" | "text" | "selection" | "resolver";
+  inferred?: boolean;
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalScheduleExpr {
+  timingCode?: string;
+  count?: number;
+  frequency?: number;
+  frequencyMax?: number;
+  period?: number;
+  periodMax?: number;
+  periodUnit?: FhirPeriodUnit;
+  dayOfWeek?: FhirDayOfWeek[];
+  when?: EventTiming[];
+  timeOfDay?: string[];
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalPrnExpr {
+  enabled: boolean;
+  reason?: { text?: string; coding?: FhirCoding };
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalAdditionalInstructionExpr {
+  text?: string;
+  coding?: FhirCoding;
+  evidence?: CanonicalEvidence[];
+}
+
+export interface CanonicalSourceSpan extends TextRange {
+  text: string;
+  tokenIndices?: number[];
+}
+
+export interface CanonicalEvidence {
+  rule: string;
+  spans: CanonicalSourceSpan[];
+  score?: number;
+  note?: string;
+}
+
+export interface CanonicalSigClause {
+  kind: "administration";
+  rawText: string;
+  span?: TextRange;
+  raw: CanonicalSourceSpan;
+  dose?: CanonicalDoseExpr;
+  route?: CanonicalRouteExpr;
+  site?: CanonicalSiteExpr;
+  schedule?: CanonicalScheduleExpr;
+  prn?: CanonicalPrnExpr;
+  additionalInstructions?: CanonicalAdditionalInstructionExpr[];
+  leftovers: CanonicalSourceSpan[];
+  evidence: CanonicalEvidence[];
+  confidence: number;
+  warnings?: string[];
+}
+
 export interface ParseResult {
   fhir: FhirDosage;
   shortText: string;
@@ -650,6 +727,9 @@ export interface ParseResult {
       site?: { text?: string; coding?: BodySiteCode };
       prnReason?: { text?: string; coding?: FhirCoding };
       additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
+    };
+    canonical: {
+      clauses: CanonicalSigClause[];
     };
     siteLookups?: Array<{
       request: SiteCodeLookupRequest;
@@ -697,6 +777,9 @@ export interface ParseBatchResult {
       site?: { text?: string; coding?: BodySiteCode };
       prnReason?: { text?: string; coding?: FhirCoding };
       additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
+    };
+    canonical: {
+      clauses: CanonicalSigClause[];
     };
     siteLookups?: Array<{
       request: SiteCodeLookupRequest;

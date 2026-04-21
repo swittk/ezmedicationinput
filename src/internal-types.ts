@@ -1,3 +1,4 @@
+import { LexToken } from "./lexer/token-types";
 import {
   EventTiming,
   FhirCoding,
@@ -20,11 +21,7 @@ export interface PrnReasonLookupDetail {
   suggestions: PrnReasonSuggestion[];
 }
 
-export interface Token {
-  original: string;
-  lower: string;
-  index: number;
-}
+export interface Token extends LexToken {}
 
 export interface ParsedSigInternal {
   input: string;

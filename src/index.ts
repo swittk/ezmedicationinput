@@ -1,5 +1,6 @@
 import { formatInternal } from "./format";
 import { internalFromFhir, toFhir } from "./fhir";
+import { buildCanonicalSigClauses, shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization } from "./i18n";
 import { ParsedSigInternal } from "./internal-types";
 import {
@@ -377,6 +378,9 @@ function mergeParseResults(base: ParseResult, next: ParseResult, options?: Parse
       leftoverText: uniqueStrings(
         [base.meta.leftoverText, next.meta.leftoverText].filter((value): value is string => !!value)
       ).join(" ").trim() || undefined,
+      canonical: {
+        clauses: [...base.meta.canonical.clauses, ...next.meta.canonical.clauses]
+      },
       siteLookups: [...(base.meta.siteLookups ?? []), ...(next.meta.siteLookups ?? [])],
       prnReasonLookups: [...(base.meta.prnReasonLookups ?? []), ...(next.meta.prnReasonLookups ?? [])]
     }
@@ -402,6 +406,14 @@ function appendParseResult(
     return;
   }
   items.push(next);
+}
+
+function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
+  const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
+  for (const result of results) {
+    clauses.push(...result.meta.canonical.clauses);
+  }
+  return clauses;
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
@@ -432,6 +444,11 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     warnings: legacy.warnings,
     meta: {
       ...legacy.meta,
+      canonical: {
+        clauses: results.length
+          ? collectCanonicalClauses(results)
+          : legacy.meta.canonical.clauses
+      },
       segments: toSegmentMeta(segments)
     }
   };
@@ -511,6 +528,11 @@ export async function parseSigAsync(
     warnings: legacy.warnings,
     meta: {
       ...legacy.meta,
+      canonical: {
+        clauses: results.length
+          ? collectCanonicalClauses(results)
+          : legacy.meta.canonical.clauses
+      },
       segments: toSegmentMeta(segments)
     }
   };
@@ -609,6 +631,9 @@ export function fromFhirDosage(
               : undefined
           }))
           : undefined
+      },
+      canonical: {
+        clauses: buildCanonicalSigClauses(internal)
       }
     }
   };
@@ -721,6 +746,9 @@ function buildParseResult(
             : undefined,
         additionalInstructions
       },
+      canonical: {
+        clauses: buildCanonicalSigClauses(internal)
+      },
       siteLookups,
       prnReasonLookups
     }
@@ -790,6 +818,7 @@ function rebaseParseResult(result: ParseResult, fullInput: string, offset: numbe
       rebaseRequest(lookup.request);
     }
   }
+  shiftCanonicalSigClauses(result.meta.canonical.clauses, offset);
 }
 
 function shiftRange(range: TextRange | undefined, offset: number): TextRange | undefined {
