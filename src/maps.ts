@@ -502,7 +502,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "69536005", display: "Head structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["affected area", "affected site", "บริเวณที่เป็น"],
+      names: ["affected area", "affected areas", "affected site", "บริเวณที่เป็น"],
       definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
     },
     {
@@ -931,7 +931,9 @@ export const TIMING_ABBREVIATIONS: Record<string, FrequencyDescriptor> = {
   mo: { code: "MO", period: 1, periodUnit: FhirPeriodUnit.Month },
   monthly: { code: "MO", period: 1, periodUnit: FhirPeriodUnit.Month },
   am: { code: "AM", when: [EventTiming.Morning] },
-  pm: { code: "PM", when: [EventTiming.Evening] }
+  pm: { code: "PM", when: [EventTiming.Evening] },
+  qam: { code: "QAM", when: [EventTiming.Morning] },
+  qpm: { code: "QPM", when: [EventTiming.Evening] }
 };
 
 export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
@@ -979,8 +981,11 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   afternoon: EventTiming.Afternoon,
   aft: EventTiming.Afternoon,
   pm: EventTiming.Evening,
+  qam: EventTiming.Morning,
+  qpm: EventTiming.Evening,
   evening: EventTiming.Evening,
   night: EventTiming.Night,
+  nightly: EventTiming.Night,
   hs: EventTiming["Before Sleep"],
   bedtime: EventTiming["Before Sleep"],
   bed: EventTiming["Before Sleep"],
@@ -1889,6 +1894,53 @@ const DEFAULT_ADDITIONAL_INSTRUCTION_SOURCE: Array<{
         text: "Dissolve or mix with water before taking",
         i18n: { th: "ละลายหรือผสมน้ำก่อนรับประทาน" }
       }
+    },
+    {
+      names: [
+        "after showering",
+        "after bathing",
+        "after washing",
+        "after washing hair",
+        "after shampooing",
+        "after morning shower"
+      ],
+      definition: {}
+    },
+    {
+      names: [
+        "leave on",
+        "leave on overnight",
+        "leave on for 10 minutes",
+        "rinse",
+        "rinse in the morning",
+        "then rinse",
+        "wash off in the morning"
+      ],
+      definition: {}
+    },
+    {
+      names: ["cover with dressing", "and cover with dressing"],
+      definition: {}
+    },
+    {
+      names: [
+        "clean and dry affected area then apply",
+        "wash affected area then apply"
+      ],
+      definition: {}
+    },
+    {
+      names: [
+        "thin layer",
+        "thin film",
+        "sparingly",
+        "liberally",
+        "pea-sized amount",
+        "pea sized amount",
+        "fingertip unit",
+        "fingertip units"
+      ],
+      definition: {}
     },
     {
       names: ["avoid alcohol", "no alcohol", "no alc", "avoid alcoholic drink"],

@@ -93,6 +93,97 @@ function isBodySiteHint(word: string, customSiteHints?: Set<string>): boolean {
 
 const SITE_CONNECTORS = new Set(["to", "in", "into", "on", "onto", "at"]);
 
+const EXPLICIT_SITE_ANCHORS = new Set([
+  "to",
+  "in",
+  "into",
+  "on",
+  "onto",
+  "at",
+  "under",
+  "around",
+  "behind",
+  "above",
+  "below",
+  "beneath",
+  "near"
+]);
+
+const SITE_LIST_CONNECTORS = new Set(["and", "or", "&", "+"]);
+
+const SITE_SURFACE_MODIFIER_WORDS = new Set([
+  "left",
+  "right",
+  "both",
+  "bilateral",
+  "upper",
+  "lower",
+  "middle",
+  "mid",
+  "front",
+  "back",
+  "behind",
+  "around",
+  "under",
+  "above",
+  "below",
+  "beneath",
+  "near",
+  "side",
+  "top",
+  "external",
+  "internal",
+  "big",
+  "great",
+  "affected",
+  "intact",
+  "of"
+]);
+
+const WORKFLOW_INSTRUCTION_WORDS = new Set([
+  "wash",
+  "washing",
+  "shower",
+  "showering",
+  "bath",
+  "bathing",
+  "shampoo",
+  "shampooing",
+  "rinse",
+  "rinsing",
+  "cover",
+  "dressing",
+  "leave",
+  "clean",
+  "dry",
+  "off",
+  "then"
+]);
+
+const APPLICATION_ROUTE_VERBS = new Set([
+  "apply",
+  "rub",
+  "massage",
+  "spread",
+  "dab",
+  "lather"
+]);
+
+const DURATION_UNIT_WORDS = new Set([
+  "second",
+  "seconds",
+  "sec",
+  "secs",
+  "minute",
+  "minutes",
+  "min",
+  "mins",
+  "hour",
+  "hours",
+  "hr",
+  "hrs"
+]);
+
 const SITE_FILLER_WORDS = new Set([
   "the",
   "a",
@@ -272,6 +363,11 @@ const DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS = (() => {
   }
   return map;
 })();
+
+const ROUTE_IMPLIED_SITE_TEXT: Partial<Record<RouteCode, string>> = {
+  [RouteCode["Per rectum"]]: "rectum",
+  [RouteCode["Per vagina"]]: "vagina"
+};
 
 // Tracking explicit breakfast/lunch/dinner markers lets the meal-expansion
 // logic bail early when the clinician already specified precise events.
@@ -1265,6 +1361,9 @@ function splitToken(token: string): string[] {
   const match = token.match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/);
   if (match) {
     const [, num, unit] = match;
+    if (/^(st|nd|rd|th)$/i.test(unit)) {
+      return [token];
+    }
     const compactPoMealUnit = unit.match(/^(po)(ac|pc|c)$/i);
     if (compactPoMealUnit) {
       const [, po, meal] = compactPoMealUnit;
@@ -1275,6 +1374,449 @@ function splitToken(token: string): string[] {
     }
   }
   return [token];
+}
+
+function isNumericToken(value: string): boolean {
+  return /^[0-9]+(?:\.[0-9]+)?$/.test(value);
+}
+
+function isOrdinalToken(value: string): boolean {
+  return /^[0-9]+(?:st|nd|rd|th)$/i.test(value);
+}
+
+function getPreviousActiveToken(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): Token | undefined {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    return candidate;
+  }
+  return undefined;
+}
+
+function getNextActiveToken(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): Token | undefined {
+  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    return candidate;
+  }
+  return undefined;
+}
+
+function hasApplicationVerbBefore(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): boolean {
+  let inspected = 0;
+  for (let cursor = index - 1; cursor >= 0 && inspected < 10; cursor -= 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (APPLICATION_ROUTE_VERBS.has(lower)) {
+      return true;
+    }
+    if (!SITE_FILLER_WORDS.has(lower) && !SITE_LIST_CONNECTORS.has(lower)) {
+      inspected += 1;
+    }
+  }
+  return false;
+}
+
+function hasExplicitSiteIntroduction(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  index: number,
+  options?: ParseOptions
+): boolean {
+  if (hasApplicationVerbBefore(tokens, index, internal.consumed)) {
+    return true;
+  }
+  let previous: Token | undefined;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = tokens[cursor];
+    if (!candidate) {
+      continue;
+    }
+    const lowerCandidate = normalizeTokenLower(candidate);
+    if (/^[;:(),]+$/.test(lowerCandidate)) {
+      continue;
+    }
+    previous = candidate;
+    break;
+  }
+  if (!previous) {
+    return false;
+  }
+  const lower = normalizeTokenLower(previous);
+  return Boolean(
+    internal.routeCode ||
+    normalizeUnit(lower, options) ||
+    isNumericToken(lower) ||
+    DEFAULT_ROUTE_SYNONYMS[lower] ||
+    TIMING_ABBREVIATIONS[lower] ||
+    WORD_FREQUENCIES[lower]
+  );
+}
+
+function isWorkflowInstructionContext(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): boolean {
+  let inspected = 0;
+  for (let cursor = index - 1; cursor >= 0 && inspected < 4; cursor -= 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (WORKFLOW_INSTRUCTION_WORDS.has(lower)) {
+      return true;
+    }
+    if (!SITE_FILLER_WORDS.has(lower) && !SITE_LIST_CONNECTORS.has(lower)) {
+      inspected += 1;
+    }
+  }
+  const previous = getPreviousActiveToken(tokens, index, consumed);
+  if (previous) {
+    const previousLower = normalizeTokenLower(previous);
+    if (
+      (previousLower === "after" || previousLower === "before" || previousLower === "during") &&
+      (() => {
+        const next = getNextActiveToken(tokens, index, consumed);
+        return next ? WORKFLOW_INSTRUCTION_WORDS.has(normalizeTokenLower(next)) : false;
+      })()
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isDurationPhraseNumber(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): boolean {
+  const token = tokens[index];
+  if (!token || !isNumericToken(token.lower)) {
+    return false;
+  }
+  const previous = getPreviousActiveToken(tokens, index, consumed);
+  const next = getNextActiveToken(tokens, index, consumed);
+  if (!previous || !next) {
+    return false;
+  }
+  return normalizeTokenLower(previous) === "for" && DURATION_UNIT_WORDS.has(normalizeTokenLower(next));
+}
+
+function isLikelyMealAnchorUsage(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): boolean {
+  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (SITE_FILLER_WORDS.has(lower) || MEAL_CONTEXT_CONNECTORS.has(lower) || lower === ",") {
+      continue;
+    }
+    return Boolean(MEAL_KEYWORDS[lower]);
+  }
+  return false;
+}
+
+function isExplicitSiteBoundaryToken(
+  lower: string,
+  options?: ParseOptions
+): boolean {
+  if (!lower) {
+    return true;
+  }
+  if (WORKFLOW_INSTRUCTION_WORDS.has(lower)) {
+    return true;
+  }
+  if (
+    EVENT_TIMING_TOKENS[lower] ||
+    TIMING_ABBREVIATIONS[lower] ||
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
+    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
+    COUNT_KEYWORDS.has(lower) ||
+    mapFrequencyAdverb(lower) ||
+    mapIntervalUnit(lower) ||
+    MEAL_KEYWORDS[lower]
+  ) {
+    return true;
+  }
+  if (DEFAULT_ROUTE_SYNONYMS[lower] || normalizeUnit(lower, options)) {
+    return true;
+  }
+  if (APPLICATION_ROUTE_VERBS.has(lower)) {
+    return true;
+  }
+  if (lower === "prn" || lower === "as" || lower === "needed" || lower === "for") {
+    return true;
+  }
+  if (isNumericToken(lower) && !isOrdinalToken(lower)) {
+    return true;
+  }
+  return false;
+}
+
+function isTimingOnlyPhrase(words: string[]): boolean {
+  if (!words.length) {
+    return true;
+  }
+  const phrase = words.join(" ");
+  if (
+    COMBO_EVENT_TIMINGS[phrase] ||
+    EVENT_TIMING_TOKENS[phrase] ||
+    TIMING_ABBREVIATIONS[phrase] ||
+    MEAL_KEYWORDS[phrase]
+  ) {
+    return true;
+  }
+  return words.every((word) =>
+    Boolean(
+      EVENT_TIMING_TOKENS[word] ||
+      TIMING_ABBREVIATIONS[word] ||
+      MEAL_KEYWORDS[word]
+    )
+  );
+}
+
+function hasExternalSurfaceModifier(siteText: string): boolean {
+  const words = normalizeBodySiteKey(siteText)
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  return words.some((word) => SITE_SURFACE_MODIFIER_WORDS.has(word));
+}
+
+function extractExplicitSiteCandidate(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  startIndex: number,
+  options?: ParseOptions
+): number[] | undefined {
+  const anchor = tokens[startIndex];
+  if (!anchor || internal.consumed.has(anchor.index)) {
+    return undefined;
+  }
+  const anchorLower = normalizeTokenLower(anchor);
+  if (!EXPLICIT_SITE_ANCHORS.has(anchorLower)) {
+    return undefined;
+  }
+  if (!hasExplicitSiteIntroduction(internal, tokens, startIndex, options)) {
+    return undefined;
+  }
+
+  const collected: number[] = [anchor.index];
+  const contentWords: string[] = [];
+  let hasSiteHint = false;
+
+  for (let cursor = startIndex + 1; cursor < tokens.length; cursor += 1) {
+    const candidate = tokens[cursor];
+    if (!candidate || internal.consumed.has(candidate.index)) {
+      break;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (/^[;:(),]+$/.test(lower)) {
+      break;
+    }
+    if (SITE_FILLER_WORDS.has(lower) && contentWords.length === 0) {
+      collected.push(candidate.index);
+      continue;
+    }
+    if (SITE_LIST_CONNECTORS.has(lower) || lower === ",") {
+      let hasFollowingContent = false;
+      for (let lookahead = cursor + 1; lookahead < tokens.length; lookahead += 1) {
+        const lookaheadToken = tokens[lookahead];
+        if (!lookaheadToken || internal.consumed.has(lookaheadToken.index)) {
+          break;
+        }
+        const lookaheadLower = normalizeTokenLower(lookaheadToken);
+        if (SITE_FILLER_WORDS.has(lookaheadLower)) {
+          continue;
+        }
+        hasFollowingContent = !isExplicitSiteBoundaryToken(lookaheadLower, options);
+        break;
+      }
+      if (!hasFollowingContent) {
+        break;
+      }
+      collected.push(candidate.index);
+      continue;
+    }
+    if (isExplicitSiteBoundaryToken(lower, options)) {
+      if (lower === "top") {
+        const nextToken = getNextActiveToken(tokens, cursor, internal.consumed);
+        if (nextToken && normalizeTokenLower(nextToken) === "of") {
+          collected.push(candidate.index);
+          contentWords.push(lower);
+          hasSiteHint = true;
+          continue;
+        }
+      }
+      break;
+    }
+    collected.push(candidate.index);
+    if (!SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
+      contentWords.push(lower);
+      if (
+        isBodySiteHint(lower, internal.customSiteHints) ||
+        SITE_SURFACE_MODIFIER_WORDS.has(lower) ||
+        isOrdinalToken(lower)
+      ) {
+        hasSiteHint = true;
+      }
+    }
+  }
+
+  if (!contentWords.length || isTimingOnlyPhrase(contentWords)) {
+    return undefined;
+  }
+  if (
+    !hasSiteHint &&
+    contentWords.length === 1 &&
+    contentWords[0] !== "area" &&
+    anchorLower === "in"
+  ) {
+    return undefined;
+  }
+  return collected;
+}
+
+function applySitePhrase(
+  internal: ParsedSigInternal,
+  tokens: Token[],
+  indices: number[],
+  options?: ParseOptions,
+  routeDescriptorApplier?: (phrase: string | undefined) => boolean
+): boolean {
+  if (!indices.length) {
+    return false;
+  }
+
+  const sortedIndices = Array.from(new Set(indices)).sort((a, b) => a - b);
+  const displayWords: string[] = [];
+  for (const index of sortedIndices) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    const lower = normalizeTokenLower(token);
+    const trimmed = token.original.trim();
+    const isBraceToken = trimmed.length > 0 && /^[{}]+$/.test(trimmed);
+    if (
+      !isBraceToken &&
+      !SITE_CONNECTORS.has(lower) &&
+      !SITE_FILLER_WORDS.has(lower)
+    ) {
+      displayWords.push(token.original);
+    }
+    internal.siteTokenIndices.add(token.index);
+    mark(internal.consumed, token);
+  }
+
+  const normalizedSite = displayWords.join(" ").replace(/\s+/g, " ").trim();
+  if (!normalizedSite) {
+    return false;
+  }
+
+  const tokenRange = computeTokenRange(internal.input, tokens, sortedIndices);
+  let sanitized = normalizedSite;
+  let isProbe = false;
+  const probeMatch = sanitized.match(/^\{(.+)}$/);
+  if (probeMatch) {
+    isProbe = true;
+    sanitized = probeMatch[1];
+  }
+  sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+  const displayText = normalizeSiteDisplayText(sanitized, options?.siteCodeMap);
+  if (!displayText) {
+    return false;
+  }
+
+  const displayLower = displayText.toLowerCase();
+  const normalizedLower = sanitized.toLowerCase();
+  const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
+  const siteWords = displayLower.split(/\s+/).filter((word) => word.length > 0);
+  const hasNonSiteWords = siteWords.some(
+    (word) => !isBodySiteHint(word, internal.customSiteHints)
+  );
+  const shouldAttemptRouteDescriptor =
+    strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
+  const appliedRouteDescriptor =
+    shouldAttemptRouteDescriptor && Boolean(routeDescriptorApplier?.(sanitized));
+  if (appliedRouteDescriptor) {
+    return true;
+  }
+
+  const range = refineSiteRange(internal.input, sanitized, tokenRange);
+  const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
+  const canonical = normalizeBodySiteKey(displayText);
+  internal.siteLookupRequest = {
+    originalText: normalizedSite,
+    text: displayText,
+    normalized: displayLower,
+    canonical,
+    isProbe,
+    inputText: internal.input,
+    sourceText,
+    range
+  };
+  if (normalizedLower) {
+    internal.siteText = displayText;
+    if (!internal.siteSource) {
+      internal.siteSource = "text";
+    }
+  }
+  return true;
+}
+
+function seedSiteFromRoute(
+  internal: ParsedSigInternal,
+  options?: ParseOptions
+): void {
+  if (internal.siteText || !internal.routeCode) {
+    return;
+  }
+  const impliedText = ROUTE_IMPLIED_SITE_TEXT[internal.routeCode];
+  if (!impliedText) {
+    return;
+  }
+  const normalizedText = normalizeSiteDisplayText(impliedText, options?.siteCodeMap);
+  const canonical = normalizeBodySiteKey(normalizedText);
+  internal.siteText = normalizedText;
+  internal.siteSource = "text";
+  internal.siteLookupRequest = {
+    originalText: impliedText,
+    text: normalizedText,
+    normalized: normalizedText.toLowerCase(),
+    canonical,
+    isProbe: false,
+    inputText: internal.input,
+    sourceText: impliedText,
+    range: undefined
+  };
 }
 
 function mark(consumed: Set<number>, token: Token) {
@@ -2587,7 +3129,7 @@ export function parseInternal(
       }
     }
     const normalizedDescriptor = normalizeRouteDescriptorPhrase(normalized);
-    if (normalizedDescriptor && normalizedDescriptor !== normalized) {
+    if (normalizedDescriptor) {
       const customDescriptorCode = customRouteDescriptorMap?.get(normalizedDescriptor);
       if (customDescriptorCode) {
         if (applyRouteDescriptor(customDescriptorCode as RouteCode)) {
@@ -2622,6 +3164,12 @@ export function parseInternal(
         ? { code: customCode, text: ROUTE_TEXT[customCode] }
         : DEFAULT_ROUTE_SYNONYMS[phrase];
       if (synonym) {
+        if (phrase === "top" && slice.length === 1) {
+          const nextToken = tokens[startIndex + 1];
+          if (nextToken && normalizeTokenLower(nextToken) === "of") {
+            continue;
+          }
+        }
         if (phrase === "in" && slice.length === 1) {
           if (internal.routeCode) {
             continue;
@@ -2725,16 +3273,29 @@ export function parseInternal(
       }
     }
 
-    if (token.lower === "pc" || token.lower === "ac" || token.lower === "after" || token.lower === "before") {
+    if (token.lower === "pc" || token.lower === "ac") {
       parseAnchorSequence(
         internal,
         tokens,
         i,
-        (token.lower === "pc" || token.lower === "after")
+        token.lower === "pc"
           ? EventTiming["After Meal"]
           : EventTiming["Before Meal"]
       );
       continue;
+    }
+    if (token.lower === "after" || token.lower === "before") {
+      if (isLikelyMealAnchorUsage(tokens, i, internal.consumed)) {
+        parseAnchorSequence(
+          internal,
+          tokens,
+          i,
+          token.lower === "after"
+            ? EventTiming["After Meal"]
+            : EventTiming["Before Meal"]
+        );
+        continue;
+      }
     }
     if (isAtPrefixToken(token.lower) || token.lower === "on" || token.lower === "with") {
       if (tryParseTimeBasedSchedule(internal, tokens, i)) {
@@ -2742,6 +3303,12 @@ export function parseInternal(
       }
       if (parseAnchorSequence(internal, tokens, i)) {
         continue;
+      }
+      if (token.lower === "on") {
+        const previous = getPreviousActiveToken(tokens, i, internal.consumed);
+        if (previous && WORKFLOW_INSTRUCTION_WORDS.has(normalizeTokenLower(previous))) {
+          continue;
+        }
       }
       // If none of the above consume it, and it's a known anchor prefix, mark it
       // but only if it's not "with" which might be part of other phrases later.
@@ -2761,6 +3328,9 @@ export function parseInternal(
       // unless they were already handled by combo/anchor logic (which happens above).
       if (prnReasonStart !== undefined && i >= prnReasonStart && token.lower === "sleep") {
         // Leave for PRN reason
+      } else if (isWorkflowInstructionContext(tokens, i, internal.consumed)) {
+        // Keep topical workflow phrases like "rinse in the morning" intact instead
+        // of converting their time reference into the medication schedule.
       } else {
         applyWhenToken(internal, token, whenCode);
         continue;
@@ -2943,7 +3513,10 @@ export function parseInternal(
       }
       continue;
     }
-    if (/^[0-9]+(?:\.[0-9]+)?$/.test(token.lower)) {
+    if (isNumericToken(token.lower)) {
+      if (isDurationPhraseNumber(tokens, i, internal.consumed)) {
+        continue;
+      }
       const value = parseFloat(token.original);
       const resolvedDose = resolveNumericDoseUnit(tokens, i, value, internal.consumed, options);
       if (internal.dose === undefined) {
@@ -3208,145 +3781,93 @@ export function parseInternal(
     }
   }
 
-  collectAdditionalInstructions(internal, tokens);
+  if (!internal.siteText) {
+    for (let i = 0; i < tokens.length; i++) {
+      if (prnReasonStart !== undefined && i >= prnReasonStart) {
+        break;
+      }
+      const indices = extractExplicitSiteCandidate(internal, tokens, i, options);
+      if (indices && applySitePhrase(internal, tokens, indices, options, maybeApplyRouteDescriptor)) {
+        break;
+      }
+    }
+  }
 
-  // Determine site text from leftover tokens (excluding PRN reason tokens)
-  const leftoverTokens = tokens.filter((t) => !internal.consumed.has(t.index));
-  const siteCandidateIndices = new Set<number>();
-  const leftoverSiteIndices = new Set<number>();
-  for (const token of leftoverTokens) {
-    if (prnSiteSuffixIndices.has(token.index)) {
-      continue;
-    }
-    const normalized = normalizeTokenLower(token);
-    if (isBodySiteHint(normalized, internal.customSiteHints)) {
-      siteCandidateIndices.add(token.index);
-      leftoverSiteIndices.add(token.index);
-      continue;
-    }
-    if (SITE_CONNECTORS.has(normalized)) {
-      const next = tokens[token.index + 1];
-      if (next && !internal.consumed.has(next.index) && !prnSiteSuffixIndices.has(next.index)) {
-        siteCandidateIndices.add(next.index);
-      }
-    }
-  }
-  if (leftoverSiteIndices.size === 0) {
-    for (const idx of internal.siteTokenIndices) {
-      if (prnSiteSuffixIndices.has(idx)) {
+  if (!internal.siteText) {
+    const groups = findUnparsedTokenGroups(internal);
+    let bestGroup: Token[] | undefined;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const group of groups) {
+      const filteredTokens = group.tokens.filter(
+        (token) => !prnSiteSuffixIndices.has(token.index)
+      );
+      if (!filteredTokens.length) {
         continue;
       }
-      siteCandidateIndices.add(idx);
-    }
-  }
-  if (siteCandidateIndices.size > 0) {
-    const indicesToInclude = new Set<number>(siteCandidateIndices);
-    for (const idx of siteCandidateIndices) {
-      let prev = idx - 1;
-      while (prev >= 0) {
-        const token = tokens[prev];
-        if (!token) {
-          break;
-        }
-        const lower = normalizeTokenLower(token);
-        if (
-          SITE_CONNECTORS.has(lower) ||
-          isBodySiteHint(lower, internal.customSiteHints) ||
-          ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
-        ) {
-          indicesToInclude.add(token.index);
-          prev -= 1;
-          continue;
-        }
-        break;
-      }
-      let next = idx + 1;
-      while (next < tokens.length) {
-        const token = tokens[next];
-        if (!token) {
-          break;
-        }
-        const lower = normalizeTokenLower(token);
-        if (
-          SITE_CONNECTORS.has(lower) ||
-          isBodySiteHint(lower, internal.customSiteHints) ||
-          ROUTE_DESCRIPTOR_FILLER_WORDS.has(lower)
-        ) {
-          indicesToInclude.add(token.index);
-          next += 1;
-          continue;
-        }
-        break;
-      }
-    }
-    const sortedIndices = Array.from(indicesToInclude).sort((a, b) => a - b);
-    const displayWords: string[] = [];
-    for (const index of sortedIndices) {
-      const token = tokens[index];
-      if (!token) {
-        continue;
-      }
-      const lower = normalizeTokenLower(token);
-      const trimmed = token.original.trim();
-      const isBraceToken = trimmed.length > 0 && /^[{}]+$/.test(trimmed);
-      if (!isBraceToken && !SITE_CONNECTORS.has(lower) && !SITE_FILLER_WORDS.has(lower)) {
-        displayWords.push(token.original);
-      }
-      mark(internal.consumed, token);
-    }
-    const normalizedSite = displayWords
-      .filter((word) => !SITE_CONNECTORS.has(word.trim().toLowerCase()))
-      .join(" ")
-      .trim();
-    if (normalizedSite) {
-      const tokenRange = computeTokenRange(internal.input, tokens, sortedIndices);
-      let sanitized = normalizedSite;
-      let isProbe = false;
-      const probeMatch = sanitized.match(/^\{(.+)}$/);
-      if (probeMatch) {
-        // `{site}` placeholders flag interactive lookups so consumers can prompt
-        // for a coded selection even when the parser cannot resolve the entry.
-        isProbe = true;
-        sanitized = probeMatch[1];
-      }
-      // Remove stray braces and normalize whitespace so lookups and downstream
-      // displays operate on a clean phrase.
-      sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-      const range = refineSiteRange(internal.input, sanitized, tokenRange);
-      const sourceText = range ? internal.input.slice(range.start, range.end) : undefined;
-      const displayText = normalizeSiteDisplayText(sanitized, options?.siteCodeMap);
-      const displayLower = displayText.toLowerCase();
-      const canonical = displayText ? normalizeBodySiteKey(displayText) : "";
-      internal.siteLookupRequest = {
-        originalText: normalizedSite,
-        text: displayText,
-        normalized: displayLower,
-        canonical,
-        isProbe,
-        inputText: internal.input,
-        sourceText,
-        range
-      };
-      if (displayText) {
-        const normalizedLower = sanitized.toLowerCase();
-        const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
-        const siteWords = displayLower.split(/\s+/).filter((word) => word.length > 0);
-        const hasNonSiteWords = siteWords.some(
-          (word) => !isBodySiteHint(word, internal.customSiteHints)
+      const contentWords = filteredTokens
+        .map((token) => normalizeTokenLower(token))
+        .filter(
+          (word) =>
+            word.length > 0 &&
+            !SITE_CONNECTORS.has(word) &&
+            !SITE_FILLER_WORDS.has(word) &&
+            !SITE_LIST_CONNECTORS.has(word) &&
+            word !== ","
         );
-        const shouldAttemptRouteDescriptor =
-          strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
-        const appliedRouteDescriptor =
-          shouldAttemptRouteDescriptor && maybeApplyRouteDescriptor(sanitized);
-        if (!appliedRouteDescriptor) {
-          // Preserve the clean site text for FHIR output and resolver context
-          // whenever we keep the original phrase.
-          internal.siteText = displayText;
-          if (!internal.siteSource) {
-            internal.siteSource = "text";
-          }
-        }
+      if (!contentWords.length || isTimingOnlyPhrase(contentWords)) {
+        continue;
       }
+      if (contentWords.some((word) => WORKFLOW_INSTRUCTION_WORDS.has(word))) {
+        continue;
+      }
+      const startsWithApplicationContext = hasApplicationVerbBefore(
+        tokens,
+        filteredTokens[0].index,
+        internal.consumed
+      );
+      const knownWordCount = contentWords.filter((word) =>
+        isBodySiteHint(word, internal.customSiteHints)
+      ).length;
+      const modifierCount = contentWords.filter(
+        (word) => SITE_SURFACE_MODIFIER_WORDS.has(word) || isOrdinalToken(word)
+      ).length;
+      const previous = getPreviousActiveToken(
+        tokens,
+        filteredTokens[0].index,
+        internal.consumed
+      );
+      const anchoredBySiteConnector = previous
+        ? EXPLICIT_SITE_ANCHORS.has(normalizeTokenLower(previous))
+        : false;
+      if (
+        knownWordCount === 0 &&
+        modifierCount === 0 &&
+        !anchoredBySiteConnector
+      ) {
+        continue;
+      }
+      const score =
+        knownWordCount * 5 +
+        modifierCount * 2 +
+        (startsWithApplicationContext ? 2 : 0) +
+        (anchoredBySiteConnector ? 2 : 0) -
+        filteredTokens.length * 0.2 +
+        filteredTokens[0].index * 0.001;
+      if (score > bestScore) {
+        bestScore = score;
+        bestGroup = filteredTokens;
+      }
+    }
+
+    if (bestGroup) {
+      applySitePhrase(
+        internal,
+        tokens,
+        bestGroup.map((token) => token.index),
+        options,
+        maybeApplyRouteDescriptor
+      );
     }
   }
 
@@ -3356,6 +3877,14 @@ export function parseInternal(
       setRoute(internal, routeHint);
     }
   }
+
+  seedSiteFromRoute(internal, options);
+
+  if (!internal.routeCode && internal.siteText && hasApplicationVerbBefore(tokens, tokens.length, internal.consumed)) {
+    setRoute(internal, RouteCode["Topical route"]);
+  }
+
+  collectAdditionalInstructions(internal, tokens);
 
   if (
     internal.routeCode === RouteCode["Intravitreal route (qualifier value)"] &&
@@ -3601,6 +4130,10 @@ function inferRouteHintFromSitePhrase(
     DEFAULT_BODY_SITE_SNOMED[canonical];
   if (exact?.routeHint) {
     return exact.routeHint;
+  }
+
+  if (hasExternalSurfaceModifier(siteText)) {
+    return undefined;
   }
 
   const words = canonical.split(/\s+/).filter((word) => word.length > 0);
@@ -4061,6 +4594,16 @@ function collectAdditionalInstructions(
   if (!joined) {
     return;
   }
+  const joinedWords = joined
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 0 && !SITE_FILLER_WORDS.has(word));
+  if (
+    joinedWords.length > 0 &&
+    joinedWords.every((word) => APPLICATION_ROUTE_VERBS.has(word))
+  ) {
+    return;
+  }
   const contentIndices = contentTokens.map((token) => token.index).sort((a, b) => a - b);
   const lowerInput = internal.input.toLowerCase();
   let trailingRange: TextRange | undefined;
@@ -4110,7 +4653,7 @@ function collectAdditionalInstructions(
     ? internal.input.slice(range.start, range.end)
     : joined;
   const normalized = sourceText
-    .replace(/\s*[-:]+\s*/g, "; ")
+    .replace(/\s+[-:]+\s+/g, "; ")
     .replace(/\s*(?:\r?\n)+\s*/g, "; ")
     .replace(/\s+/g, " ");
   const segments = normalized

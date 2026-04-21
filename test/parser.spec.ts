@@ -1829,6 +1829,12 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toContain("บริเวณที่เป็น");
   });
 
+  it("normalizes affected areas to the built-in affected area site", () => {
+    const result = parseSig("apply to affected areas bid");
+    expect(result.fhir.site?.text).toBe("affected area");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+  });
+
   it("codes head with bundled SNOMED anatomy", () => {
     const result = parseSig("apply to head bid");
     expect(result.fhir.site?.coding?.[0]).toEqual({
@@ -1867,6 +1873,47 @@ describe("parseSig core scenarios", () => {
         display: expected.display
       });
     }
+  });
+
+  it("preserves unresolved topical site phrases and defaults them to topical route", () => {
+    const cases = [
+      { sig: "apply cream to left flank bid", site: "left flank" },
+      { sig: "apply cream to right big toe bid", site: "right big toe" },
+      { sig: "apply cream to 2nd toe bid", site: "2nd toe" },
+      { sig: "apply cream to top of head bid", site: "top of head" }
+    ];
+
+    for (const { sig, site } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(site);
+      expect(result.fhir.route?.coding?.[0]?.code).toBe(
+        SNOMEDCTRouteCodes["Topical route"]
+      );
+    }
+  });
+
+  it("does not infer instillation routes from external surface phrases", () => {
+    const cases = [
+      { sig: "apply to behind left ear bid", site: "behind left ear" },
+      { sig: "apply cream around nostrils bid", site: "around nostrils" },
+      { sig: "apply to around anus bid", site: "around anus" }
+    ];
+
+    for (const { sig, site } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(site);
+      expect(result.fhir.route?.coding?.[0]?.code).toBe(
+        SNOMEDCTRouteCodes["Topical route"]
+      );
+    }
+  });
+
+  it("preserves coordinated topical site phrases", () => {
+    const result = parseSig("apply to scalp and forehead bid");
+    expect(result.fhir.site?.text).toBe("scalp and forehead");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Topical route"]
+    );
   });
 
   it("records probe requests for unresolved sites so UIs can prompt", () => {
@@ -2646,6 +2693,47 @@ describe("event timing token coverage", () => {
       expect(result.fhir.timing?.repeat?.when).toEqual([expected]);
     });
   }
+});
+
+describe("topical workflow and timing", () => {
+  it("maps qam and qpm timing abbreviations", () => {
+    const morning = parseSig("apply cream qam");
+    expect(morning.fhir.timing?.repeat?.when).toEqual([EventTiming.Morning]);
+
+    const evening = parseSig("apply cream qpm");
+    expect(evening.fhir.timing?.repeat?.when).toEqual([EventTiming.Evening]);
+  });
+
+  it("maps nightly to night timing", () => {
+    const result = parseSig("apply cream nightly");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Night]);
+  });
+
+  it("does not treat hygiene workflow phrases as meal timing", () => {
+    const result = parseSig("apply after showering bid");
+    expect(result.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.additionalInstruction?.[0]?.text).toContain("after showering");
+  });
+
+  it("keeps duration-based workflow phrases out of dose parsing", () => {
+    const result = parseSig("leave on for 10 minutes then rinse");
+    expect(result.fhir.doseAndRate).toBeUndefined();
+    expect(result.fhir.additionalInstruction?.[0]?.text).toContain(
+      "leave on for 10 minutes then rinse"
+    );
+  });
+
+  it("keeps workflow timing separate from medication timing", () => {
+    const result = parseSig("apply to scalp nightly and rinse in the morning");
+    expect(result.fhir.site?.text).toBe("scalp");
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Night]);
+    expect(result.fhir.additionalInstruction?.[0]?.text).toContain("rinse in the morning");
+  });
 });
 
 describe("assume single discrete dose", () => {
