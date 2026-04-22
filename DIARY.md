@@ -1097,3 +1097,26 @@ Desired behavior:
    - scheduler stepper itself does support year units (`a`) if the FHIR timing
      already contains them, but the sig parser does not currently infer that
      free-text form
+
+## 2026-04-22 Minute interval realization bug fixed
+
+1. User-reported sig:
+   - `1 drop ou Q15min x 8 doses`
+
+2. Root cause:
+   - parser already produced the correct schedule structure:
+     - `period = 15`
+     - `periodUnit = min`
+     - `count = 8`
+   - the failure was only in long-text realization
+   - English/Thai frequency describers had hour/day/week/month handling but no
+     minute branch, so formatting fell back to count-only wording
+
+3. Fix:
+   - added minute-interval realization to both `src/format.ts` and
+     `src/i18n.ts`
+   - also added yearly realization while touching the same switch-shaped area
+
+4. Verified output:
+   - English: `Instill 1 drop every 15 minutes for 8 doses in both eyes.`
+   - Thai: `หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.`

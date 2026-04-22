@@ -311,6 +311,12 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     }
     return `${stripTrailingZero(frequency)} times daily`;
   }
+  if (periodUnit === FhirPeriodUnit.Minute && period) {
+    if (periodMax && periodMax !== period) {
+      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
+    }
+    return `every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
+  }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
@@ -343,6 +349,15 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
     }
     return `every ${stripTrailingZero(period)} months`;
+  }
+  if (periodUnit === FhirPeriodUnit.Year && period) {
+    if (period === 1 && (!periodMax || periodMax === 1)) {
+      return "once yearly";
+    }
+    if (periodMax && periodMax !== period) {
+      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
+    }
+    return `every ${stripTrailingZero(period)} years`;
   }
   if (timingCode) {
     if (timingCode === "WK") {

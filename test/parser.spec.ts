@@ -223,6 +223,17 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet orally every 6 hours for 10 doses.");
   });
 
+  it("renders minute intervals together with count limits in long text", () => {
+    const result = parseSig("1 drop ou q15min x 8 doses");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 15,
+      periodUnit: "min",
+      count: 8
+    });
+    expect(result.shortText).toBe("1 drop OPH Q15MIN x8");
+    expect(result.longText).toBe("Instill 1 drop every 15 minutes for 8 doses in both eyes.");
+  });
+
   it("parses finite duration windows introduced by for", () => {
     const result = parseSig("take 1 tab po od for 10 days", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({
@@ -3000,6 +3011,13 @@ describe("internationalization", () => {
       expect(result.shortText).toBe("1 เม็ด PO ทุก 1 ชั่วโมง x10");
       expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
       expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+    });
+
+    it("includes minute interval wording together with count information in Thai", () => {
+      const result = parseSig("1 drop ou q15min x 8 doses", { locale: "th" });
+      expect(result.shortText).toBe("1 หยด OPH ทุก 15 นาที x8");
+      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
+      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
     });
 
     it("describes day-of-week schedules in Thai", () => {

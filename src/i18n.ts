@@ -842,6 +842,12 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
     return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
+  if (periodUnit === FhirPeriodUnit.Minute && period) {
+    if (periodMax && periodMax !== period) {
+      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
+    }
+    return `ทุก ${stripTrailingZero(period)} นาที`;
+  }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
       return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
@@ -874,6 +880,15 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
       return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
     }
     return `ทุก ${stripTrailingZero(period)} เดือน`;
+  }
+  if (periodUnit === FhirPeriodUnit.Year && period) {
+    if (period === 1 && (!periodMax || periodMax === 1)) {
+      return "ปีละครั้ง";
+    }
+    if (periodMax && periodMax !== period) {
+      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
+    }
+    return `ทุก ${stripTrailingZero(period)} ปี`;
   }
   if (timingCode) {
     const map: Record<string, string> = {
