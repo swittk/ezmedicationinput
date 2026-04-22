@@ -52,6 +52,16 @@ describe("additional instruction rule inventory", () => {
     const instructions = parseAdditionalInstructions("may cause drowsiness", { start: 0, end: 20 });
     expect(instructions[0]?.text).toBe("May cause drowsiness");
     expect(instructions[0]?.coding?.code).toBe("418639000");
+
+    const modalVariants = [
+      "can cause drowsiness",
+      "might cause drowsiness",
+      "could cause drowsiness"
+    ];
+    for (const input of modalVariants) {
+      const variant = parseAdditionalInstructions(input, { start: 0, end: input.length });
+      expect(variant[0]?.coding?.code).toBe("418639000");
+    }
   });
 
   it("codes specific meal-state instructions instead of broader fallback concepts", () => {

@@ -697,3 +697,54 @@ Desired behavior:
    - public/storage path stays FHIR-first
    - Thai round-trip stops depending purely on formatter-local hardcoded phrase guesses
    - product-form nuance is preserved when consumers keep normal FHIR `text` + primitive extensions
+
+2026-04-22 advice grammar: elliptical meal-state fragments
+
+1. `empty stomach` is a real clinic shorthand, not just a missing synonym.
+   - it is an elliptical noun-phrase instruction
+   - the right parse is an implicit relation frame: `on + empty_stomach`
+   - the wrong parse is leftover free text or anatomical `site = stomach`
+
+2. Fix shape:
+   - advice terminology now carries `implicitRelation` on concepts when the noun phrase itself implies a relation
+   - advice grammar has an `implicit concept instruction` production
+   - clause/site grammar now refuses to steal residual or explicit site phrases that already parse as instruction grammar
+
+3. Locked cases:
+   - `drink 10 ml twice daily, empty stomach`
+   - `drink 10 ml twice daily, on an empty stomach`
+   - both now code SNOMED `717154004`
+   - both now render:
+     - English: `Drink 10 mL twice daily. On an empty stomach.`
+     - Thai: `รับประทาน ครั้งละ 10 มิลลิลิตร วันละ 2 ครั้ง. ขณะท้องว่าง.`
+
+4. Architectural note:
+   - this is grammar/terminology driven, not a raw string replacement
+   - the important guard is “instruction grammar outranks residual site salvage” for phrases that already have structured advice meaning
+
+2026-04-22 PRN reason cutoff vs warning tails
+
+1. `prn dizziness, can/may/might/could cause drowsiness` exposed a parser-boundary bug.
+   - PRN reason collection was swallowing the warning tail
+   - result was `asNeededFor = "dizziness, can cause drowsiness"` instead of:
+     - PRN reason: `dizziness`
+     - additional instruction: coded drowsiness warning
+
+2. Fix shape:
+   - drowsiness warning grammar now accepts modal variants:
+     - `may cause`
+     - `can cause`
+     - `might cause`
+     - `could cause`
+   - PRN cutoff now uses structured instruction detection on comma tails
+     - a comma only splits the PRN reason when the tail parses as real advice grammar
+     - this avoids blindly splitting every comma-delimited reason list
+
+3. Locked result:
+   - `take 10 ml prn dizziness, can cause drowsiness`
+   - `take 10 ml prn dizziness, may cause drowsiness`
+   - `take 10 ml prn dizziness, might cause drowsiness`
+   - `take 10 ml prn dizziness, could cause drowsiness`
+   - all now render:
+     - `Take 10 mL orally as needed for dizziness. May cause drowsiness.`
+   - all code drowsiness warning as SNOMED `418639000`

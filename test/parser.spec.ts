@@ -2426,6 +2426,24 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Drink 10 mL twice daily. On an empty stomach.");
   });
 
+  it("cuts PRN reasons at structured warning tails and codes drowsiness warnings across modal variants", () => {
+    const cases = [
+      "take 10 ml prn dizziness, may cause drowsiness",
+      "take 10 ml prn dizziness, can cause drowsiness",
+      "take 10 ml prn dizziness, might cause drowsiness",
+      "take 10 ml prn dizziness, could cause drowsiness"
+    ];
+
+    for (const input of cases) {
+      const result = parseSig(input);
+      expect(result.fhir.asNeededFor?.[0]?.text).toBe("dizziness");
+      expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418639000");
+      expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("418639000");
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.longText).toBe("Take 10 mL orally as needed for dizziness. May cause drowsiness.");
+    }
+  });
+
   it("suppresses redundant oral route phrasing for swallow methods", () => {
     const result = parseSig("swallow 1 tab po daily", { context: TAB_CONTEXT });
     expect(result.longText).toBe("Swallow 1 tablet once daily.");

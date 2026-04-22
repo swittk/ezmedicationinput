@@ -1925,7 +1925,11 @@ function collectPrnReasonText(
   let range = computeTokenRange(state.input, tokens, sortedIndices);
   let sourceText = range ? state.input.slice(range.start, range.end) : undefined;
   if (sourceText) {
-    const cutoff = determinePrnReasonCutoff(reasonObjects, sourceText);
+    const cutoff = determinePrnReasonCutoff(
+      reasonObjects,
+      sourceText,
+      inferAdditionalInstructionPredicate(state, tokens)
+    );
     if (cutoff !== undefined) {
       for (let index = cutoff; index < reasonObjects.length; index++) {
         state.consumed.delete(reasonObjects[index].index);
@@ -5964,8 +5968,50 @@ function collectAdditionalInstructions(
   }
 }
 
-function determinePrnReasonCutoff(tokens: Token[], sourceText: string): number | undefined {
-  const separatorIndex = findPrnReasonSeparator(sourceText);
+function hasStructuredAdditionalInstructionTail(
+  sourceText: string,
+  defaultPredicate: string
+): boolean {
+  const parsed = parseAdditionalInstructions(
+    sourceText,
+    { start: 0, end: sourceText.length },
+    { defaultPredicate }
+  );
+  for (const instruction of parsed) {
+    if (instruction.coding?.code || instruction.frames.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findStructuredPrnReasonCommaSeparator(
+  sourceText: string,
+  defaultPredicate: string
+): number | undefined {
+  for (let index = 0; index < sourceText.length; index++) {
+    if (sourceText[index] !== ",") {
+      continue;
+    }
+    const tail = sourceText.slice(index + 1).trim();
+    if (!tail) {
+      continue;
+    }
+    if (hasStructuredAdditionalInstructionTail(tail, defaultPredicate)) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
+function determinePrnReasonCutoff(
+  tokens: Token[],
+  sourceText: string,
+  defaultPredicate: string
+): number | undefined {
+  const separatorIndex =
+    findPrnReasonSeparator(sourceText) ??
+    findStructuredPrnReasonCommaSeparator(sourceText, defaultPredicate);
   if (separatorIndex === undefined) {
     return undefined;
   }

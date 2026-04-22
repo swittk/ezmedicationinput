@@ -217,6 +217,7 @@ const LEADING_NOISE_WORDS = new Set(["and", "please"]);
 const ADMINISTRATION_PREDICATES = new Set(["apply", "take", "use"]);
 const NEGATOR_WORDS = new Set(["not", "no", "dont", "don't"]);
 const VERB_CONNECTOR_WORDS = new Set(["and", "or"]);
+const EFFECT_MODAL_WORDS = new Set(["may", "can", "might", "could"]);
 const SIMPLE_TIME_WORDS = new Set(["morning", "evening", "night", "bedtime"]);
 const DURATION_UNIT_WORDS = new Set([
   "second",
@@ -1536,7 +1537,7 @@ function tryParseMayCauseInstruction(
     return undefined;
   }
   let cursor = skipLeadingNoise(words);
-  if (cursor < words.length && words[cursor] === "may") {
+  if (cursor < words.length && EFFECT_MODAL_WORDS.has(words[cursor])) {
     cursor += 1;
   }
   if (cursor >= words.length) {
