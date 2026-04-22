@@ -1120,3 +1120,31 @@ Desired behavior:
 4. Verified output:
    - English: `Instill 1 drop every 15 minutes for 8 doses in both eyes.`
    - Thai: `หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.`
+
+## 2026-04-22 FHIR course bounds corrected
+
+1. Standards decision:
+   - keep this library R5 `Dosage`-first for now
+   - do not target R6 `DosageDetails` yet because R6 is still ballot / CI-build,
+     not the current official release
+
+2. Clean semantic split:
+   - regimen/course limit like `for 7 days` now belongs in
+     `Timing.repeat.boundsDuration` or `Timing.repeat.boundsRange`
+   - per-administration runtime like `slow push over 5-10 minutes` is now free
+     to use the real `Timing.repeat.duration/durationMax/durationUnit` fields
+     later without semantic collision
+
+3. Implementation change:
+   - removed the incorrect FHIR wire use of `repeat.duration*` for course
+     limits
+   - canonical/internal parser state still keeps `schedule.duration*`
+     unchanged
+   - `canonical -> FHIR` now emits:
+     - fixed course length -> `repeat.boundsDuration`
+     - ranged course length -> `repeat.boundsRange`
+   - `FHIR -> canonical` and scheduling math now read those bounds fields
+
+4. Verification:
+   - parser tests now assert `boundsDuration` for fixed course windows
+   - FHIR import tests cover both `boundsDuration` and `boundsRange`

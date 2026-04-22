@@ -2,6 +2,8 @@ import {
   EventTiming,
   EventClockMap,
   FhirDosage,
+  FhirPeriodUnit,
+  FhirQuantity,
   FhirTiming,
   FhirTimingRepeat,
   FrequencyFallbackTimes,
@@ -425,13 +427,79 @@ function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   };
 }
 
+function parseBoundsDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUnit | undefined {
+  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
+  switch (candidate) {
+    case "s":
+    case "sec":
+    case "second":
+    case "seconds":
+      return FhirPeriodUnit.Second;
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      return FhirPeriodUnit.Minute;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return FhirPeriodUnit.Hour;
+    case "d":
+    case "day":
+    case "days":
+      return FhirPeriodUnit.Day;
+    case "wk":
+    case "wks":
+    case "week":
+    case "weeks":
+      return FhirPeriodUnit.Week;
+    case "mo":
+    case "month":
+    case "months":
+      return FhirPeriodUnit.Month;
+    case "a":
+    case "yr":
+    case "yrs":
+    case "year":
+    case "years":
+      return FhirPeriodUnit.Year;
+    default:
+      return undefined;
+  }
+}
+
+function resolveRepeatBoundsDuration(
+  repeat: FhirTimingRepeat | undefined
+): { value?: number; max?: number; unit?: FhirPeriodUnit } {
+  if (!repeat) {
+    return {};
+  }
+  if (repeat.boundsDuration?.value !== undefined) {
+    return {
+      value: repeat.boundsDuration.value,
+      unit: parseBoundsDurationUnit(repeat.boundsDuration)
+    };
+  }
+  if (!repeat.boundsRange) {
+    return {};
+  }
+  return {
+    value: repeat.boundsRange.low?.value,
+    max: repeat.boundsRange.high?.value,
+    unit: parseBoundsDurationUnit(repeat.boundsRange.low) ?? parseBoundsDurationUnit(repeat.boundsRange.high)
+  };
+}
+
 function resolveRepeatDurationCapEnd(
   repeat: FhirTimingRepeat | undefined,
   anchor: Date,
   timeZone: string
 ): Date | null {
-  const durationValue = repeat?.durationMax ?? repeat?.duration;
-  const durationUnit = repeat?.durationUnit;
+  const bounds = resolveRepeatBoundsDuration(repeat);
+  const durationValue = bounds.max ?? bounds.value;
+  const durationUnit = bounds.unit;
   if (
     durationValue === undefined ||
     !Number.isFinite(durationValue) ||

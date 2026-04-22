@@ -240,8 +240,11 @@ describe("parseSig core scenarios", () => {
       frequency: 1,
       period: 1,
       periodUnit: "d",
-      duration: 10,
-      durationUnit: "d"
+      boundsDuration: {
+        value: 10,
+        code: "d",
+        system: "http://unitsofmeasure.org"
+      }
     });
     expect(result.shortText).toBe("1 tab PO QD x10d");
     expect(result.longText).toBe("Take 1 tablet orally once daily for 10 days.");
@@ -254,8 +257,11 @@ describe("parseSig core scenarios", () => {
       frequency: 1,
       period: 1,
       periodUnit: "d",
-      duration: 7,
-      durationUnit: "d"
+      boundsDuration: {
+        value: 7,
+        code: "d",
+        system: "http://unitsofmeasure.org"
+      }
     });
     expect(result.fhir.timing?.repeat?.count).toBeUndefined();
     expect(result.shortText).toBe("1 tab PO QD x7d");
@@ -268,8 +274,11 @@ describe("parseSig core scenarios", () => {
       context: TAB_CONTEXT
     });
     expect(result.fhir.timing?.repeat).toMatchObject({
-      duration: 7,
-      durationUnit: "d"
+      boundsDuration: {
+        value: 7,
+        code: "d",
+        system: "http://unitsofmeasure.org"
+      }
     });
     expect(result.fhir.asNeededFor).toEqual([
       {

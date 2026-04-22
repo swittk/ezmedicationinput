@@ -18,6 +18,8 @@ import {
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
+  FhirPeriodUnit,
+  FhirQuantity,
   FhirRange,
   FhirTimingRepeat,
   RouteCode,
@@ -27,6 +29,7 @@ import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
+const UCUM_SYSTEM = "http://unitsofmeasure.org";
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
@@ -93,6 +96,135 @@ function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined)
   return fhirRange;
 }
 
+function describeDurationUnit(unit: FhirPeriodUnit, value: number | undefined): string {
+  const plural = value !== 1;
+  switch (unit) {
+    case FhirPeriodUnit.Second:
+      return plural ? "seconds" : "second";
+    case FhirPeriodUnit.Minute:
+      return plural ? "minutes" : "minute";
+    case FhirPeriodUnit.Hour:
+      return plural ? "hours" : "hour";
+    case FhirPeriodUnit.Day:
+      return plural ? "days" : "day";
+    case FhirPeriodUnit.Week:
+      return plural ? "weeks" : "week";
+    case FhirPeriodUnit.Month:
+      return plural ? "months" : "month";
+    case FhirPeriodUnit.Year:
+      return plural ? "years" : "year";
+    default:
+      return unit;
+  }
+}
+
+function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirQuantity {
+  return {
+    value,
+    unit: describeDurationUnit(unit, value),
+    system: UCUM_SYSTEM,
+    code: unit
+  };
+}
+
+function buildFhirBoundsRange(
+  low: number,
+  high: number,
+  unit: FhirPeriodUnit
+): FhirRange {
+  return {
+    low: buildFhirDurationQuantity(low, unit),
+    high: buildFhirDurationQuantity(high, unit)
+  };
+}
+
+function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUnit | undefined {
+  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
+  switch (candidate) {
+    case "s":
+    case "sec":
+    case "second":
+    case "seconds":
+      return FhirPeriodUnit.Second;
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      return FhirPeriodUnit.Minute;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return FhirPeriodUnit.Hour;
+    case "d":
+    case "day":
+    case "days":
+      return FhirPeriodUnit.Day;
+    case "wk":
+    case "wks":
+    case "week":
+    case "weeks":
+      return FhirPeriodUnit.Week;
+    case "mo":
+    case "month":
+    case "months":
+      return FhirPeriodUnit.Month;
+    case "a":
+    case "yr":
+    case "yrs":
+    case "year":
+    case "years":
+      return FhirPeriodUnit.Year;
+    default:
+      return undefined;
+  }
+}
+
+function extractCanonicalTimingBounds(
+  repeat: FhirTimingRepeat | undefined
+): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; warning?: string } {
+  if (!repeat) {
+    return {};
+  }
+
+  if (repeat.boundsDuration?.value !== undefined) {
+    const durationUnit = parseFhirDurationUnit(repeat.boundsDuration);
+    if (!durationUnit) {
+      return {};
+    }
+    return {
+      duration: repeat.boundsDuration.value,
+      durationUnit
+    };
+  }
+
+  if (!repeat.boundsRange) {
+    return {};
+  }
+
+  const low = repeat.boundsRange.low;
+  const high = repeat.boundsRange.high;
+  const lowUnit = parseFhirDurationUnit(low);
+  const highUnit = parseFhirDurationUnit(high);
+  const durationUnit = lowUnit ?? highUnit;
+  if (!durationUnit) {
+    return {};
+  }
+
+  let warning: string | undefined;
+  if (lowUnit && highUnit && lowUnit !== highUnit) {
+    warning = `FHIR timing boundsRange low/high units differ (${lowUnit} vs ${highUnit}); preserved numeric bounds using ${durationUnit}.`;
+  }
+
+  return {
+    duration: low?.value,
+    durationMax: high?.value,
+    durationUnit,
+    warning
+  };
+}
+
 function extractCanonicalDoseRange(
   range: FhirRange
 ): { range?: CanonicalDoseRange; unit?: string; warning?: string } {
@@ -153,12 +285,15 @@ export function canonicalToFhir(
     hasRepeat = true;
   }
   if (schedule?.duration !== undefined && schedule.durationUnit) {
-    repeat.duration = schedule.duration;
-    repeat.durationUnit = schedule.durationUnit;
-    hasRepeat = true;
-  }
-  if (schedule?.durationMax !== undefined) {
-    repeat.durationMax = schedule.durationMax;
+    if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
+      repeat.boundsRange = buildFhirBoundsRange(
+        schedule.duration,
+        schedule.durationMax,
+        schedule.durationUnit
+      );
+    } else {
+      repeat.boundsDuration = buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
+    }
     hasRepeat = true;
   }
   if (schedule?.frequencyMax !== undefined) {
@@ -380,12 +515,12 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const repeat = dosage.timing?.repeat;
+  const timingBounds = extractCanonicalTimingBounds(repeat);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
-    repeat?.duration !== undefined ||
-    repeat?.durationMax !== undefined ||
-    repeat?.durationUnit ||
+    repeat?.boundsDuration ||
+    repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
     repeat?.frequencyMax !== undefined ||
     repeat?.period !== undefined ||
@@ -398,9 +533,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     clause.schedule = {
       timingCode: dosage.timing?.code?.coding?.[0]?.code,
       count: repeat?.count,
-      duration: repeat?.duration,
-      durationMax: repeat?.durationMax,
-      durationUnit: repeat?.durationUnit,
+      duration: timingBounds.duration,
+      durationMax: timingBounds.durationMax,
+      durationUnit: timingBounds.durationUnit,
       frequency: repeat?.frequency,
       frequencyMax: repeat?.frequencyMax,
       period: repeat?.period,
@@ -410,6 +545,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
     };
+    clause.warnings = appendWarning(clause.warnings, timingBounds.warning);
   }
 
   const doseAndRate = dosage.doseAndRate?.[0];
@@ -492,11 +628,15 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
+  const timingBounds = extractCanonicalTimingBounds(dosage.timing?.repeat);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
   state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
   state.count = dosage.timing?.repeat?.count;
+  state.duration = timingBounds.duration;
+  state.durationMax = timingBounds.durationMax;
+  state.durationUnit = timingBounds.durationUnit;
   state.frequency = dosage.timing?.repeat?.frequency;
   state.frequencyMax = dosage.timing?.repeat?.frequencyMax;
   state.period = dosage.timing?.repeat?.period;
@@ -618,6 +758,13 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
           : undefined
       };
     });
+  }
+
+  if (timingBounds.warning) {
+    const nextWarnings = appendWarning(state.warnings, timingBounds.warning);
+    if (nextWarnings) {
+      state.warnings = nextWarnings;
+    }
   }
 
 

@@ -28,6 +28,8 @@ export interface FhirPrimitiveElement {
 export interface FhirQuantity {
   value?: number;
   unit?: string;
+  system?: string;
+  code?: string;
 }
 
 export interface FhirRange {
@@ -266,9 +268,8 @@ export enum FhirDayOfWeek {
 
 export interface FhirTimingRepeat {
   count?: number;
-  duration?: number;
-  durationMax?: number;
-  durationUnit?: FhirPeriodUnit;
+  boundsDuration?: FhirQuantity;
+  boundsRange?: FhirRange;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

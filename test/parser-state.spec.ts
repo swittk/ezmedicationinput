@@ -186,4 +186,53 @@ describe("FHIR parser-state import", () => {
       unit: "tab"
     });
   });
+
+  it("imports regimen bounds from boundsDuration", () => {
+    const state = parserStateFromFhir({
+      timing: {
+        repeat: {
+          boundsDuration: {
+            value: 7,
+            unit: "days",
+            system: "http://unitsofmeasure.org",
+            code: "d"
+          }
+        }
+      }
+    });
+
+    expect(state.primaryClause.schedule).toMatchObject({
+      duration: 7,
+      durationUnit: "d"
+    });
+  });
+
+  it("imports ranged regimen bounds from boundsRange", () => {
+    const state = parserStateFromFhir({
+      timing: {
+        repeat: {
+          boundsRange: {
+            low: {
+              value: 5,
+              unit: "days",
+              system: "http://unitsofmeasure.org",
+              code: "d"
+            },
+            high: {
+              value: 7,
+              unit: "days",
+              system: "http://unitsofmeasure.org",
+              code: "d"
+            }
+          }
+        }
+      }
+    });
+
+    expect(state.primaryClause.schedule).toMatchObject({
+      duration: 5,
+      durationMax: 7,
+      durationUnit: "d"
+    });
+  });
 });
