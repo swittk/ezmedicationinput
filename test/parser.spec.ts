@@ -1076,6 +1076,36 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.count).toBeUndefined();
   });
 
+  it("keeps once every 6 hours as cadence rather than collapsing to a one-time count", () => {
+    const result = parseSig("1 tab po once every 6 hours", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 6,
+      periodUnit: "h"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally every 6 hours.");
+  });
+
+  it("keeps one time every 8 hours as cadence rather than collapsing to a one-time count", () => {
+    const result = parseSig("1 tab po one time every 8 hours", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 8,
+      periodUnit: "h"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally every 8 hours.");
+  });
+
+  it("keeps once q week as cadence rather than collapsing to a one-time count", () => {
+    const result = parseSig("1 tab po once q week", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "wk"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally once weekly.");
+  });
+
   it("parses million IU notation with weekly cadence", () => {
     const result = parseSig("2.4M IU IM Q1week");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });

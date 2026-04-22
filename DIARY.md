@@ -1417,3 +1417,27 @@ Short version:
 - no fake fallback to `orderedAt`
 - yes to explicit external event anchor input when the caller actually knows the
   trigger datetime
+
+## 2026-04-22 Cadence continuation after `once` / `time`
+
+Audit finding was valid.
+
+Problem:
+- `hasCadenceContinuationAfter(...)` treated adverbs/units as cadence cues, but
+  not the interval lead tokens themselves
+- this let count parsing fire first for supported separated-interval forms like:
+  - `once every 6 hours`
+  - `one time every 8 hours`
+  - `once q week`
+- result was mixed semantics like `count = 1` plus cadence, which formatted as:
+  - `every 6 hours for 1 dose`
+
+Fix:
+- treat `EVERY_INTERVAL_TOKENS` (`q`, `every`, `each`) as cadence
+  continuations in `hasCadenceContinuationAfter(...)`
+- this keeps these forms on the cadence path instead of the finite-count path
+
+Locked with parser regressions for:
+- `1 tab po once every 6 hours`
+- `1 tab po one time every 8 hours`
+- `1 tab po once q week`

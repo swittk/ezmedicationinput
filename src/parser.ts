@@ -4243,6 +4243,7 @@ function hasCadenceContinuationAfter(
       return Boolean(mapFrequencyAdverb(lower) || mapIntervalUnit(lower));
     }
     if (
+      EVERY_INTERVAL_TOKENS.has(lower) ||
       mapFrequencyAdverb(lower) ||
       mapIntervalUnit(lower) ||
       getDayOfWeekMeaning(candidate) ||
