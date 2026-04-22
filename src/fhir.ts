@@ -41,12 +41,30 @@ function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
   };
 }
 
+function selectFirstCodingWithCode(
+  concept: FhirCodeableConcept | undefined
+): CodeableConceptCoding | undefined {
+  if (!concept?.coding?.length) {
+    return undefined;
+  }
+  for (const coding of concept.coding) {
+    if (coding.code) {
+      return coding;
+    }
+  }
+  return undefined;
+}
+
 function selectPreferredSiteCoding(site: FhirCodeableConcept | undefined): CodeableConceptCoding | undefined {
   if (!site?.coding?.length) {
     return undefined;
   }
-  const snomed = site.coding.find((code) => code.system === SNOMED_SYSTEM);
-  return snomed ?? site.coding[0];
+  for (const coding of site.coding) {
+    if (coding.system === SNOMED_SYSTEM && coding.code) {
+      return coding;
+    }
+  }
+  return selectFirstCodingWithCode(site);
 }
 
 export function canonicalToFhir(
@@ -390,7 +408,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     state.siteSource = "text";
   }
 
-  const reasonCoding = dosage.asNeededFor?.[0]?.coding?.[0];
+  const reasonCoding = selectFirstCodingWithCode(dosage.asNeededFor?.[0]);
   if (reasonCoding?.code) {
     const defaultDef = findPrnReasonDefinitionByCoding(
       reasonCoding.system ?? SNOMED_SYSTEM,
@@ -406,7 +424,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
 
   if (dosage.additionalInstruction?.length) {
     state.additionalInstructions = dosage.additionalInstruction.map((concept) => {
-      const coding = concept.coding?.[0];
+      const coding = selectFirstCodingWithCode(concept);
       const defaultDef = coding?.code
         ? findAdditionalInstructionDefinitionByCoding(
           coding.system ?? SNOMED_SYSTEM,

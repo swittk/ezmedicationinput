@@ -73,4 +73,79 @@ describe("FHIR parser-state import", () => {
     });
     expect(state.siteSource).toBe("text");
   });
+
+  it("ignores uncoded site entries and keeps the first coded site entry", () => {
+    const state = parserStateFromFhir({
+      site: {
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            display: "Missing code"
+          },
+          {
+            system: "http://example.org/site",
+            code: "coded-site",
+            display: "Coded site"
+          }
+        ]
+      }
+    });
+
+    expect(state.siteCoding).toEqual({
+      system: "http://example.org/site",
+      code: "coded-site",
+      display: "Coded site"
+    });
+  });
+
+  it("selects the first coded PRN and additional-instruction entries when uncoded entries lead", () => {
+    const state = parserStateFromFhir({
+      asNeededBoolean: true,
+      asNeededFor: [
+        {
+          text: "itch",
+          coding: [
+            {
+              system: "http://example.org/reason",
+              display: "No code first"
+            },
+            {
+              system: "http://snomed.info/sct",
+              code: "418363000",
+              display: "Itching of skin"
+            }
+          ]
+        }
+      ],
+      additionalInstruction: [
+        {
+          text: "Swallow whole; do not crush or chew",
+          coding: [
+            {
+              system: "http://example.org/instruction",
+              display: "No code first"
+            },
+            {
+              system: "http://snomed.info/sct",
+              code: "418693002",
+              display: "Swallowed whole, not chewed (qualifier value)"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(state.asNeededReasonCoding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "418363000",
+      display: "Itching of skin",
+      i18n: { th: "คัน" }
+    });
+    expect(state.additionalInstructions[0]?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "418693002",
+      display: "Swallowed whole, not chewed (qualifier value)",
+      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
+    });
+  });
 });
