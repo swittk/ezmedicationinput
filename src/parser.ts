@@ -4222,6 +4222,44 @@ function skipCountConnectors(
   return cursor;
 }
 
+function hasCadenceContinuationAfter(
+  tokens: Token[],
+  consumed: Set<number>,
+  startIndex: number
+): boolean {
+  let cursor = startIndex + 1;
+  let connectorPending = false;
+  while (cursor < tokens.length) {
+    const candidate = tokens[cursor];
+    cursor += 1;
+    if (!candidate || consumed.has(candidate.index)) {
+      continue;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (!lower || /^[;:.,()/-]+$/.test(lower)) {
+      continue;
+    }
+    if (connectorPending) {
+      return Boolean(mapFrequencyAdverb(lower) || mapIntervalUnit(lower));
+    }
+    if (
+      mapFrequencyAdverb(lower) ||
+      mapIntervalUnit(lower) ||
+      getDayOfWeekMeaning(candidate) ||
+      TIMING_ABBREVIATIONS[lower] ||
+      WORD_FREQUENCIES[lower]
+    ) {
+      return true;
+    }
+    if (FREQUENCY_CONNECTOR_WORDS.has(lower)) {
+      connectorPending = true;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
 function collectBldMealTiming(
   context: ClauseParseContext,
   _index: number,
@@ -4713,6 +4751,9 @@ function collectCountLimit(
   if (!isCountKeywordWord(token.lower)) {
     return false;
   }
+  if (hasCadenceContinuationAfter(tokens, state.consumed, index)) {
+    return false;
+  }
   const partsToMark: Token[] = [token];
   let value: number | undefined;
   const prevToken = tokens[index - 1];
@@ -4776,10 +4817,13 @@ function collectCountLimit(
 
 function collectStandaloneSingleOccurrence(
   context: ClauseParseContext,
-  _index: number,
+  index: number,
   token: Token
 ): boolean {
   if (token.lower !== "once") {
+    return false;
+  }
+  if (hasCadenceContinuationAfter(context.tokens, context.state.consumed, index)) {
     return false;
   }
   if (!applyCountLimit(context.state, 1)) {

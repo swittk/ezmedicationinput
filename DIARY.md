@@ -1337,3 +1337,83 @@ What changed:
    - `npm run build`
    - `npm test`
    - suite status after the fix: `551` tests passing
+
+## 2026-04-22 Audit follow-up on standalone-count formatting and one-time scheduling
+
+Verified the follow-up audit against the current code after the `once`/`one time`
+work and fixed the findings that still applied.
+
+1. Standalone-count formatting guard tightened.
+   - `describeStandaloneOccurrenceCount()` and the Thai counterpart now refuse
+     to emit standalone `once` / `twice` / `N times` wording when the schedule
+     also contains any structured recurrence/detail fields:
+     - `dayOfWeek`
+     - `when`
+     - `timeOfDay`
+     - `duration` / `durationMax` / `durationUnit`
+     - cadence fields already covered before (`frequency`, `period`, etc.)
+   - this prevents suppressing explicit dose-count phrasing on structured
+     schedules that are not truly standalone occurrences
+
+2. Count parsing no longer steals cadence phrases.
+   - added a cadence-follow-up guard so count parsing skips tokens like:
+     - `once daily`
+     - `one time daily`
+     - `4 times per day`
+   - bare `once` still becomes a one-time count
+   - explicit finite-count grammar still works:
+     - `for 4 times`
+     - `x4 doses`
+
+3. One-time scheduling with instruction text changed.
+   - the one-time scheduler path no longer suppresses anchored due doses just
+     because `patientInstruction` / `additionalInstruction` is present
+   - if the dosage is a true one-time repeat and an anchor exists, the anchored
+     due time is returned
+
+4. Regression coverage added/updated:
+   - one-time `once` schedule now asserts:
+     - `count: 1`
+     - no cadence fields
+   - `once daily` remains cadence, not a one-time count
+   - one-time schedules with instruction text now return the anchored due date
+
+5. Verification:
+   - `npx vitest run test/parser.spec.ts test/schedule.spec.ts`
+   - `npm run build`
+   - `npm test`
+   - suite status after this audit fix: `552` tests passing
+
+## 2026-04-22 Future shape for event-relative anchors
+
+For sigs like:
+- `insert 1 tab pv once after menstruation ends`
+
+the correct future path is not to reuse `orderedAt` as a fake trigger time.
+
+Preferred future design:
+
+1. Preserve the unresolved event-relative instruction in the parsed dosage.
+
+2. Let scheduler/calculation helpers accept an explicit external event anchor,
+   e.g. a dedicated option like:
+   - `anchorEventTime`
+   or better
+   - `instructionAnchorTime`
+   - `eventAnchorTime`
+
+3. When that explicit event anchor is provided:
+   - one-time event-relative regimens can become computable
+   - scheduler can emit the anchored due time
+   - calculator can count the one actual administration
+
+4. Longer-term richer option:
+   - use a map/list of event anchors rather than one scalar timestamp, so
+     future cases can disambiguate multiple external triggers
+   - after resolution, the concrete time could also be expressed via
+     `Timing.event` for downstream FHIR consumers
+
+Short version:
+- no fake fallback to `orderedAt`
+- yes to explicit external event anchor input when the caller actually knows the
+  trigger datetime

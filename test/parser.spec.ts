@@ -1058,6 +1058,22 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.frequencyMax).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.period).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.periodUnit).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.dayOfWeek).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.when).toBeUndefined();
+  });
+
+  it("keeps once daily as cadence rather than collapsing to a one-time count", () => {
+    const result = parseSig("insert 1 tab pv once daily", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
   });
 
   it("parses million IU notation with weekly cadence", () => {

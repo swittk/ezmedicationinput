@@ -412,6 +412,12 @@ function describeStandaloneOccurrenceCount(
     schedule?.period !== undefined ||
     schedule?.periodMax !== undefined ||
     schedule?.periodUnit !== undefined ||
+    schedule?.dayOfWeek?.length ||
+    schedule?.when?.length ||
+    schedule?.timeOfDay?.length ||
+    schedule?.duration !== undefined ||
+    schedule?.durationMax !== undefined ||
+    schedule?.durationUnit !== undefined ||
     schedule?.timingCode
   ) {
     return undefined;

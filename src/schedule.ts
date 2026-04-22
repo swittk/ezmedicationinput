@@ -13,6 +13,7 @@ import {
   TotalUnitsOptions,
   TotalUnitsResult
 } from "./types";
+import { parseAdditionalInstructions } from "./advice";
 import { arrayIncludes } from "./utils/array";
 import { getUnitCategory, convertValue } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
@@ -562,6 +563,34 @@ function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
   );
 }
 
+function hasUnresolvedRelationalInstruction(dosage: FhirDosage): boolean {
+  const texts: string[] = [];
+  if (dosage.patientInstruction?.trim()) {
+    texts.push(dosage.patientInstruction.trim());
+  }
+  for (const instruction of dosage.additionalInstruction ?? []) {
+    const text = instruction.text?.trim() || instruction.coding?.find((coding) => coding.display?.trim())?.display?.trim();
+    if (text) {
+      texts.push(text);
+    }
+  }
+  for (const text of texts) {
+    const parsed = parseAdditionalInstructions(
+      text,
+      { start: 0, end: text.length },
+      { defaultPredicate: "take" }
+    );
+    for (const instruction of parsed) {
+      for (const frame of instruction.frames) {
+        if (frame.relation) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function minDate(left: Date, right: Date | null): Date {
   if (!right) {
     return left;
@@ -939,7 +968,7 @@ export function nextDueDoses(
     remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
 
   if (isSingleAdministrationRepeat(repeat)) {
-    if (dosage.patientInstruction || (dosage.additionalInstruction?.length ?? 0) > 0) {
+    if (hasUnresolvedRelationalInstruction(dosage)) {
       return [];
     }
     const anchor = orderedAt ?? from;
@@ -1700,6 +1729,9 @@ function countScheduleEvents(
   const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
 
   if (isSingleAdministrationRepeat(repeat)) {
+    if (hasUnresolvedRelationalInstruction(dosage)) {
+      return 0;
+    }
     const anchor = orderedAt ?? baseTime;
     if (anchor < from || anchor >= to) {
       return 0;

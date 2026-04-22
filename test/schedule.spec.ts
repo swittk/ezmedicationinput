@@ -519,7 +519,22 @@ describe("nextDueDoses", () => {
     expect(results).toEqual(["2024-01-01T09:00:00+00:00"]);
   });
 
-  it("does not invent due dates for one-time schedules anchored only by additional instruction text", () => {
+  it("returns the anchored due date for one-time schedules when instruction text is non-relational", () => {
+    const parsed = parseSig("take 1 tab po once, take slowly", {
+      context: { dosageForm: "tab" }
+    });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual(["2024-01-01T09:00:00+00:00"]);
+  });
+
+  it("does not invent due dates for one-time schedules gated by unresolved relational instructions", () => {
     const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
       context: { dosageForm: "tab" }
     });
@@ -630,6 +645,22 @@ describe("calculateTotalUnits", () => {
     });
 
     expect(res.totalUnits).toBe(1);
+  });
+
+  it("does not count one-time schedules gated by unresolved relational instructions", () => {
+    const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
+      context: { dosageForm: "tab" }
+    });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 30,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+
+    expect(res.totalUnits).toBe(0);
   });
 
   it("caps count-limited minute intervals for calculateTotalUnits", () => {
