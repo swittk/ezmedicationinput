@@ -3,6 +3,7 @@ import {
   DEFAULT_ROUTE_SYNONYMS,
   EVENT_TIMING_TOKENS,
   FrequencyDescriptor,
+  ROUTE_TEXT,
   RouteSynonym,
   TIMING_ABBREVIATIONS
 } from "../maps";
@@ -104,6 +105,18 @@ const APPLICATION_ROUTE_VERBS = new Set([
   "dab",
   "lather"
 ]);
+
+const ADMINISTRATION_ROUTE_HINTS: Record<string, RouteCode> = {
+  apply: RouteCode["Topical route"],
+  rub: RouteCode["Topical route"],
+  massage: RouteCode["Topical route"],
+  spread: RouteCode["Topical route"],
+  dab: RouteCode["Topical route"],
+  lather: RouteCode["Topical route"],
+  take: RouteCode["Oral route"],
+  drink: RouteCode["Oral route"],
+  swallow: RouteCode["Oral route"]
+};
 
 const COUNT_KEYWORDS = new Set([
   "time",
@@ -263,6 +276,7 @@ export enum ConnectorRole {
 }
 
 export enum TokenWordClass {
+  AdministrationVerb = "ADMINISTRATION_VERB",
   SiteSurfaceModifier = "SITE_SURFACE_MODIFIER",
   WorkflowInstruction = "WORKFLOW_INSTRUCTION",
   ApplicationVerb = "APPLICATION_VERB",
@@ -311,6 +325,22 @@ function pushEnum<T extends string>(values: T[] | undefined, value: T): T[] {
     values.push(value);
   }
   return values;
+}
+
+function pushRouteCandidate(
+  candidates: RouteMeaningCandidate[] | undefined,
+  candidate: RouteMeaningCandidate
+): RouteMeaningCandidate[] {
+  if (!candidates) {
+    return [candidate];
+  }
+  for (const existing of candidates) {
+    if (existing.code === candidate.code && existing.text === candidate.text) {
+      return candidates;
+    }
+  }
+  candidates.push(candidate);
+  return candidates;
 }
 
 export function expandDayMeaningRange(
@@ -386,12 +416,30 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
   const routeSynonym = DEFAULT_ROUTE_SYNONYMS[normalized];
   if (routeSynonym) {
     annotations = annotations || {};
-    annotations.routeCandidates = [
+    annotations.routeCandidates = pushRouteCandidate(
+      annotations.routeCandidates,
       {
         ...routeSynonym,
         source: "synonym"
       }
-    ];
+    );
+  }
+
+  const administrationRoute = ADMINISTRATION_ROUTE_HINTS[normalized];
+  if (administrationRoute) {
+    annotations = annotations || {};
+    annotations.routeCandidates = pushRouteCandidate(
+      annotations.routeCandidates,
+      {
+        code: administrationRoute,
+        text: ROUTE_TEXT[administrationRoute],
+        source: "verb"
+      }
+    );
+    annotations.wordClasses = pushEnum(
+      annotations.wordClasses,
+      TokenWordClass.AdministrationVerb
+    );
   }
 
   const siteCandidates = TOKEN_SITE_CANDIDATES[normalized];
@@ -654,6 +702,10 @@ export function isWorkflowInstructionWord(word: string): boolean {
 
 export function isApplicationVerbWord(word: string): boolean {
   return APPLICATION_ROUTE_VERBS.has(normalizeMeaningKey(word));
+}
+
+export function isAdministrationVerbWord(word: string): boolean {
+  return normalizeMeaningKey(word) in ADMINISTRATION_ROUTE_HINTS;
 }
 
 export function isCountKeywordWord(word: string): boolean {

@@ -1366,6 +1366,77 @@ function applyClauseDefaultsAfterTokenScan(
   sortWhenValues(state, options);
 }
 
+function hasDoseValue(state: ParserState): boolean {
+  return state.dose !== undefined || state.doseRange !== undefined;
+}
+
+function hasScheduleValue(state: ParserState): boolean {
+  const timeOfDay = state.timeOfDay;
+  return Boolean(
+    state.frequency !== undefined ||
+    state.frequencyMax !== undefined ||
+    state.period !== undefined ||
+    state.periodMax !== undefined ||
+    state.timingCode !== undefined ||
+    state.count !== undefined ||
+    state.when.length > 0 ||
+    state.dayOfWeek.length > 0 ||
+    (timeOfDay ? timeOfDay.length > 0 : false)
+  );
+}
+
+function hasAdministrationVerbForRoute(
+  tokens: Token[],
+  routeCode: RouteCode
+): boolean {
+  for (const token of tokens) {
+    if (!hasTokenWordClass(token, TokenWordClass.AdministrationVerb)) {
+      continue;
+    }
+    const routeMeaning = getRouteMeaning(token);
+    if (routeMeaning?.code === routeCode) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function pushParserWarning(state: ParserState, warning: string): void {
+  if (!arrayIncludes(state.warnings, warning)) {
+    state.warnings.push(warning);
+  }
+}
+
+function collectCompletenessWarnings(
+  state: ParserState,
+  tokens: Token[]
+): void {
+  if (
+    !hasDoseValue(state) &&
+    (state.routeCode === RouteCode["Oral route"] ||
+      hasAdministrationVerbForRoute(tokens, RouteCode["Oral route"])) &&
+    (state.asNeeded || state.unit !== undefined)
+  ) {
+    pushParserWarning(
+      state,
+      "Incomplete sig: missing dose for oral administration."
+    );
+  }
+
+  if (
+    state.siteText &&
+    (state.routeCode === RouteCode["Topical route"] ||
+      state.routeCode === RouteCode["Transdermal route"]) &&
+    !state.asNeeded &&
+    !hasScheduleValue(state)
+  ) {
+    pushParserWarning(
+      state,
+      "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+    );
+  }
+}
+
 function collectPrnReasonText(
   state: ParserState,
   tokens: Token[],
@@ -4523,6 +4594,7 @@ export function parseClauseState(
     options,
     (phrase) => maybeApplyRouteDescriptorFromPhrase(parseContext, phrase)
   );
+  collectCompletenessWarnings(state, tokens);
   finalizeCanonicalClause(state);
   return state;
 }

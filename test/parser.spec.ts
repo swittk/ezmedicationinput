@@ -2324,6 +2324,37 @@ describe("parseSig core scenarios", () => {
     const parsed = parseSig("apply prn itch");
     expect(parsed.fhir.timing).toBeUndefined();
   });
+
+  it("treats oral administration verbs as route cues instead of stray advice text", () => {
+    const result = parseSig("drink 10 ml prn pain");
+
+    expect(result.shortText).toBe("10 mL PO PRN pain");
+    expect(result.longText).toBe("Take 10 mL by mouth as needed for pain.");
+    expect(result.meta.normalized.route).toBe(RouteCode["Oral route"]);
+    expect(result.meta.normalized.additionalInstructions).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("warns when an oral PRN instruction is missing the dose", () => {
+    const result = parseSig("take prn pain");
+
+    expect(result.meta.normalized.route).toBe(RouteCode["Oral route"]);
+    expect(result.warnings).toContain(
+      "Incomplete sig: missing dose for oral administration."
+    );
+  });
+
+  it("warns when a topical site instruction is missing timing or PRN, but not when timing is present", () => {
+    const bare = parseSig("apply to scalp");
+    const scheduled = parseSig("apply to scalp twice daily");
+
+    expect(bare.warnings).toContain(
+      "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+    );
+    expect(scheduled.warnings).not.toContain(
+      "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+    );
+  });
 });
 
 describe("internationalization", () => {

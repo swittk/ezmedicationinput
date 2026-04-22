@@ -34,4 +34,30 @@ describe("lintSig", () => {
       end: input.lastIndexOf("???") + 3
     });
   });
+
+  it("flags missing-dose oral sigs as incomplete", () => {
+    const linted = lintSig("take prn pain", { context: TAB_CONTEXT });
+
+    expect(linted.issues).toHaveLength(1);
+    expect(linted.issues[0]?.message).toBe(
+      "Incomplete sig: missing dose for oral administration."
+    );
+  });
+
+  it("flags topical site sigs with no timing or PRN as incomplete", () => {
+    const linted = lintSig("apply to scalp", { context: TAB_CONTEXT });
+
+    expect(linted.issues).toHaveLength(1);
+    expect(linted.issues[0]?.message).toBe(
+      "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+    );
+  });
+
+  it("does not flag valid oral and scheduled topical examples", () => {
+    const oral = lintSig("drink 10 ml prn pain", { context: TAB_CONTEXT });
+    const topical = lintSig("apply to scalp twice daily", { context: TAB_CONTEXT });
+
+    expect(oral.issues).toEqual([]);
+    expect(topical.issues).toEqual([]);
+  });
 });

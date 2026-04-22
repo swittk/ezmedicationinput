@@ -479,6 +479,12 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
         range: shiftedRange
       };
     });
+    issues.push(
+      ...buildSemanticLintIssues(result, input, {
+        start: segment.start,
+        end: segment.start + segment.text.length
+      })
+    );
     results.push({ result, issues });
     updateCarryForward(carry, state);
   }
@@ -850,6 +856,35 @@ function resolveLegacyParseResult(
   return buildParseResult(state, options);
 }
 
+function buildSemanticLintIssues(
+  result: ParseResult,
+  input: string,
+  fallbackRange?: TextRange
+): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const clause = result.meta.canonical.clauses[0];
+  const range = clause?.span ?? fallbackRange;
+  const text = range
+    ? input.slice(range.start, range.end)
+    : input;
+  const trimmedText = text.trim() || text;
+  const tokens = trimmedText ? trimmedText.split(/\s+/).filter((part) => part.length > 0) : [];
+
+  for (const warning of result.warnings) {
+    if (!warning.startsWith("Incomplete sig:")) {
+      continue;
+    }
+    issues.push({
+      message: warning,
+      text: trimmedText,
+      tokens,
+      range
+    });
+  }
+
+  return issues;
+}
+
 function resolveLegacyLintResult(
   results: LintResult[],
   input: string,
@@ -874,5 +909,6 @@ function resolveLegacyLintResult(
       range: group.range
     };
   });
+  issues.push(...buildSemanticLintIssues(result, input));
   return { result, issues };
 }
