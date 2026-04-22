@@ -604,6 +604,28 @@
       }
     },
     {
+      "id": "slowly",
+      "definition": {
+        "code": "419443000",
+        "display": "Slowly (qualifier value)",
+        "text": "Slowly",
+        "thai": "ช้าๆ"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "args": [{ "role": "free", "text": "slowly", "conceptId": "slowly" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateSemanticClasses": ["administration", "ingest"],
+          "argConcepts": [{ "conceptIds": ["slowly"], "role": "free" }]
+        }
+      }
+    },
+    {
       "id": "dissolved-under-tongue",
       "definition": {
         "code": "419529008",

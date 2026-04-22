@@ -10,6 +10,7 @@ import {
   EVENT_TIMING_TOKENS,
   HOUSEHOLD_VOLUME_UNITS,
   MEAL_KEYWORDS,
+  PRODUCT_FORM_HINTS,
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
   WORD_FREQUENCIES,
@@ -18,6 +19,7 @@ import {
 } from "./maps";
 import { parseAdditionalInstructions } from "./advice";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
+import { buildTranslationPrimitiveElement } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
 import { LexKind } from "./lexer/token-types";
 import { checkDiscouraged } from "./safety";
@@ -67,6 +69,7 @@ import {
   getTimingAbbreviationMeaning,
   hasPrnMeaning,
   hasTokenWordClass,
+  isAdministrationVerbWord,
   isApplicationVerbWord,
   isCountKeywordWord,
   isDayRangeConnectorWord,
@@ -186,6 +189,19 @@ const DISCRETE_UNIT_SET = new Set([
   "pieces",
   "stick",
   "sticks",
+  "pump",
+  "pumps",
+  "squeeze",
+  "squeezes",
+  "applicatorful",
+  "applicatorfuls",
+  "capful",
+  "capfuls",
+  "scoop",
+  "scoops",
+  "application",
+  "applications",
+  "ribbon",
   "pessary",
   "pessaries",
   "lozenge",
@@ -228,6 +244,139 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
 };
 
 const GENERIC_ITCH_REASON_TERMS = new Set(["itch", "itching", "itchy", "คัน"]);
+
+enum MethodAction {
+  Administer = "administer",
+  Apply = "apply",
+  Insert = "insert",
+  Instill = "instill",
+  Spray = "spray",
+  Swallow = "swallow",
+  Wash = "wash"
+}
+
+const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
+  apply: MethodAction.Apply,
+  dab: MethodAction.Apply,
+  drink: MethodAction.Swallow,
+  insert: MethodAction.Insert,
+  instill: MethodAction.Instill,
+  lather: MethodAction.Wash,
+  massage: MethodAction.Apply,
+  reapply: MethodAction.Apply,
+  rub: MethodAction.Apply,
+  shampoo: MethodAction.Wash,
+  spray: MethodAction.Spray,
+  spread: MethodAction.Apply,
+  swallow: MethodAction.Swallow,
+  take: MethodAction.Administer,
+  use: MethodAction.Administer,
+  wash: MethodAction.Wash
+};
+
+const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
+  [MethodAction.Administer]: {
+    system: SNOMED_SYSTEM,
+    code: "738990001",
+    display: "Administer"
+  },
+  [MethodAction.Apply]: {
+    system: SNOMED_SYSTEM,
+    code: "738991002",
+    display: "Apply",
+    _display: buildTranslationPrimitiveElement({ th: "ทา" })
+  },
+  [MethodAction.Insert]: {
+    system: SNOMED_SYSTEM,
+    code: "738993004",
+    display: "Insert",
+    _display: buildTranslationPrimitiveElement({ th: "สอด" })
+  },
+  [MethodAction.Instill]: {
+    system: SNOMED_SYSTEM,
+    code: "738994005",
+    display: "Instill",
+    _display: buildTranslationPrimitiveElement({ th: "หยอด" })
+  },
+  [MethodAction.Spray]: {
+    system: SNOMED_SYSTEM,
+    code: "738996007",
+    display: "Spray",
+    _display: buildTranslationPrimitiveElement({ th: "พ่น" })
+  },
+  [MethodAction.Swallow]: {
+    system: SNOMED_SYSTEM,
+    code: "738995006",
+    display: "Swallow",
+    _display: buildTranslationPrimitiveElement({ th: "รับประทาน" })
+  },
+  [MethodAction.Wash]: {
+    system: SNOMED_SYSTEM,
+    code: "785900008",
+    display: "Rinse or wash",
+    _display: buildTranslationPrimitiveElement({ th: "ล้าง" })
+  }
+};
+
+const PATIENT_INSTRUCTION_START_TOKENS = new Set([
+  "after",
+  "before",
+  "with",
+  "while",
+  "leave",
+  "rinse",
+  "washing",
+  "wash",
+  "showering",
+  "shower",
+  "bathing",
+  "bath",
+  "swimming",
+  "swim",
+  "outdoors",
+  "outdoor",
+  "outside",
+  "cleansing",
+  "cleanse"
+]);
+
+const WORKFLOW_EVENT_TOKENS = new Set([
+  "sun",
+  "exposure",
+  "swimming",
+  "swim",
+  "outdoors",
+  "outside",
+  "dressing",
+  "change",
+  "changes",
+  "bowel",
+  "movement",
+  "movements",
+  "diaper",
+  "cleansing",
+  "cleanse",
+  "showering",
+  "shower",
+  "bathing",
+  "bath"
+]);
+
+const RIBBON_LENGTH_UNITS: Record<string, string> = {
+  inch: "inch",
+  inches: "inch",
+  cm: "cm",
+  cms: "cm",
+  mm: "mm",
+  centimeter: "cm",
+  centimeters: "cm",
+  centimetre: "cm",
+  centimetres: "cm",
+  millimeter: "mm",
+  millimeters: "mm",
+  millimetre: "mm",
+  millimetres: "mm"
+};
 
 const DAY_RANGE_PART_PATTERN = Object.keys(DAY_OF_WEEK_TOKENS)
   .sort((a, b) => b.length - a.length)
@@ -1281,7 +1430,10 @@ function applyClauseDefaultsAfterTokenScan(
   context: MedicationContext | undefined,
   options?: ParseOptions
 ): void {
-  if (state.unit === undefined) {
+  if (
+    state.unit === undefined &&
+    (state.dose !== undefined || state.doseRange !== undefined)
+  ) {
     for (const token of tokens) {
       if (state.consumed.has(token.index)) {
         continue;
@@ -1307,7 +1459,11 @@ function applyClauseDefaultsAfterTokenScan(
       inferUnitFromRouteHints(state),
       options
     );
-    if (fallbackUnit) {
+    const productFormMatch = findAnyProductFormMatch(tokens);
+    if (
+      fallbackUnit &&
+      !suppressRouteFallbackUnitForProductForm(fallbackUnit, productFormMatch)
+    ) {
       state.unit = fallbackUnit;
     }
   }
@@ -1382,6 +1538,287 @@ function hasScheduleValue(state: ParserState): boolean {
     state.when.length > 0 ||
     state.dayOfWeek.length > 0 ||
     (timeOfDay ? timeOfDay.length > 0 : false)
+  );
+}
+
+function hasEstablishedAdministrationContent(state: ParserState): boolean {
+  return (
+    hasDoseValue(state) ||
+    state.routeCode !== undefined ||
+    state.routeText !== undefined ||
+    state.siteText !== undefined ||
+    hasScheduleValue(state) ||
+    Boolean(state.asNeeded)
+  );
+}
+
+function cloneMethodCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
+  if (!coding?.code) {
+    return undefined;
+  }
+  return {
+    system: coding.system,
+    code: coding.code,
+    display: coding.display,
+    _display: coding._display
+  };
+}
+
+function buildMethodEnglishText(
+  verb: string,
+  productFormKey: string | undefined
+): string | undefined {
+  switch (verb) {
+    case "apply":
+      switch (productFormKey) {
+        case "sunscreen":
+          return "Apply sunscreen";
+        default:
+          return "Apply";
+      }
+    case "dab":
+      return "Dab";
+    case "drink":
+      return "Drink";
+    case "insert":
+      return "Insert";
+    case "instill":
+      return "Instill";
+    case "lather":
+      return "Lather";
+    case "massage":
+      return "Massage";
+    case "reapply":
+      switch (productFormKey) {
+        case "sunscreen":
+          return "Reapply sunscreen";
+        default:
+          return "Reapply";
+      }
+    case "rub":
+      return "Rub";
+    case "shampoo":
+      return "Shampoo";
+    case "spray":
+      return "Spray";
+    case "spread":
+      return "Apply";
+    case "swallow":
+      return "Swallow";
+    case "take":
+      return "Take";
+    case "use":
+      switch (productFormKey) {
+        case "shampoo":
+          return "Use shampoo";
+        default:
+          return "Use";
+      }
+    case "wash":
+      return "Wash";
+    default:
+      return undefined;
+  }
+}
+
+function buildMethodThaiText(
+  verb: string,
+  productFormKey: string | undefined
+): string | undefined {
+  switch (verb) {
+    case "apply":
+      switch (productFormKey) {
+        case "sunscreen":
+          return "ทากันแดด";
+        default:
+          return "ทา";
+      }
+    case "drink":
+    case "swallow":
+    case "take":
+      return "รับประทาน";
+    case "insert":
+      return "สอด";
+    case "instill":
+      return "หยอด";
+    case "reapply":
+      switch (productFormKey) {
+        case "sunscreen":
+          return "ทากันแดดซ้ำ";
+        default:
+          return "ทาซ้ำ";
+      }
+    case "shampoo":
+      return "สระ";
+    case "spray":
+      return "พ่น";
+    case "use":
+      switch (productFormKey) {
+        case "shampoo":
+          return "สระ";
+        default:
+          return undefined;
+      }
+    case "wash":
+      return "ล้าง";
+    default:
+      return undefined;
+  }
+}
+
+function refreshMethodSurface(state: ParserState): void {
+  const verb = state.methodVerb;
+  if (!verb) {
+    return;
+  }
+
+  const methodText = buildMethodEnglishText(verb, state.productFormKey);
+  state.methodText = methodText;
+
+  const translatedText = buildMethodThaiText(verb, state.productFormKey);
+  state.methodTextElement = translatedText
+    ? buildTranslationPrimitiveElement({ th: translatedText })
+    : undefined;
+
+  const action = METHOD_ACTION_BY_VERB[verb];
+  state.methodCoding = action ? cloneMethodCoding(METHOD_CODING_BY_ACTION[action]) : undefined;
+}
+
+function setMethodFromVerbToken(state: ParserState, token: Token): void {
+  const normalized = normalizeTokenLower(token);
+  if (state.methodVerb) {
+    return;
+  }
+  if (!METHOD_ACTION_BY_VERB[normalized]) {
+    return;
+  }
+  state.methodVerb = normalized;
+  refreshMethodSurface(state);
+}
+
+function appendPatientInstruction(state: ParserState, text: string | undefined): void {
+  const normalized = text?.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return;
+  }
+  if (!state.patientInstruction) {
+    state.patientInstruction = normalized;
+    return;
+  }
+  const existingParts = state.patientInstruction
+    .split(/\s*;\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (arrayIncludes(existingParts, normalized)) {
+    return;
+  }
+  state.patientInstruction = `${state.patientInstruction}; ${normalized}`;
+}
+
+function findProductFormMatch(
+  tokens: Token[],
+  consumed: Set<number>,
+  startIndex: number
+): { key: string; hint: (typeof PRODUCT_FORM_HINTS)[string]; matchedTokens: Token[] } | undefined {
+  const maxSpan = Math.min(3, tokens.length - startIndex);
+  for (let span = maxSpan; span >= 1; span -= 1) {
+    const matchedTokens: Token[] = [];
+    const parts: string[] = [];
+    let blocked = false;
+    for (let offset = 0; offset < span; offset += 1) {
+      const token = tokens[startIndex + offset];
+      if (!token || consumed.has(token.index)) {
+        blocked = true;
+        break;
+      }
+      matchedTokens.push(token);
+      parts.push(normalizeTokenLower(token));
+    }
+    if (blocked) {
+      continue;
+    }
+    const key = parts.join(" ");
+    const hint = PRODUCT_FORM_HINTS[key];
+    if (hint) {
+      return { key, hint, matchedTokens };
+    }
+  }
+  return undefined;
+}
+
+function findAnyProductFormMatch(
+  tokens: Token[]
+): { key: string; hint: (typeof PRODUCT_FORM_HINTS)[string]; matchedTokens: Token[] } | undefined {
+  const consumed = new Set<number>();
+  for (let index = 0; index < tokens.length; index += 1) {
+    const match = findProductFormMatch(tokens, consumed, index);
+    if (match) {
+      return match;
+    }
+  }
+  return undefined;
+}
+
+function collectProductFormHints(state: ParserState, tokens: Token[]): void {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const match = findProductFormMatch(tokens, state.consumed, index);
+    if (!match) {
+      continue;
+    }
+    for (const token of match.matchedTokens) {
+      mark(state.consumed, token);
+    }
+    if (!state.routeCode && match.hint.routeHint) {
+      setRoute(state, match.hint.routeHint);
+    }
+    if (!state.productFormKey) {
+      state.productFormKey = match.key;
+    }
+    if (state.methodVerb) {
+      refreshMethodSurface(state);
+    }
+    index += match.matchedTokens.length - 1;
+  }
+}
+
+function suppressRouteFallbackUnitForProductForm(
+  fallbackUnit: string | undefined,
+  productFormMatch: { key: string; hint: (typeof PRODUCT_FORM_HINTS)[string]; matchedTokens: Token[] } | undefined
+): boolean {
+  if (!fallbackUnit || !productFormMatch?.hint.routeHint) {
+    return false;
+  }
+  switch (fallbackUnit) {
+    case "suppository":
+    case "pessary":
+    case "patch":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isWorkflowConnectorContext(
+  tokens: Token[],
+  index: number,
+  consumed: Set<number>
+): boolean {
+  const previous = getPreviousActiveToken(tokens, index, consumed);
+  const next = getNextActiveToken(tokens, index, consumed);
+  if (!previous || !next) {
+    return false;
+  }
+  const previousLower = normalizeTokenLower(previous);
+  if (
+    previousLower !== "with" &&
+    previousLower !== "after" &&
+    previousLower !== "before"
+  ) {
+    return false;
+  }
+  return (
+    WORKFLOW_EVENT_TOKENS.has(normalizeTokenLower(next)) ||
+    hasTokenWordClass(next, TokenWordClass.WorkflowInstruction)
   );
 }
 
@@ -3260,16 +3697,54 @@ function resolveUnitTokenAt(
     return undefined;
   }
   const normalized = normalizeTokenLower(token);
+  const nextToken = tokens[index + 1];
+  const nextNormalized =
+    nextToken && !consumed.has(nextToken.index)
+      ? normalizeTokenLower(nextToken)
+      : undefined;
+  const ribbonLengthUnit = RIBBON_LENGTH_UNITS[normalized];
+  if (ribbonLengthUnit && (nextNormalized === "ribbon" || nextNormalized === "ribbons")) {
+    return { unit: `${ribbonLengthUnit} ribbon`, consumedIndices: [index, index + 1] };
+  }
   const direct = normalizeUnit(normalized, options);
   if (direct) {
+    if (direct === "ribbon") {
+      const previousToken = tokens[index - 1];
+      if (!previousToken || consumed.has(previousToken.index)) {
+        return { unit: direct, consumedIndices: [index] };
+      }
+      const previousNormalized = normalizeTokenLower(previousToken);
+      const previousRibbonUnit = RIBBON_LENGTH_UNITS[previousNormalized];
+      if (previousRibbonUnit) {
+        return { unit: `${previousRibbonUnit} ribbon`, consumedIndices: [index - 1, index] };
+      }
+    }
     return { unit: direct, consumedIndices: [index] };
   }
-  if (normalized === "international") {
+  if (normalized === "fingertip") {
     const nextToken = tokens[index + 1];
     if (!nextToken || consumed.has(nextToken.index)) {
       return undefined;
     }
     const nextNormalized = normalizeTokenLower(nextToken);
+    if (nextNormalized === "unit" || nextNormalized === "units") {
+      return { unit: "fingertip unit", consumedIndices: [index, index + 1] };
+    }
+  }
+  if (normalized === "finger") {
+    const nextToken = tokens[index + 1];
+    if (!nextToken || consumed.has(nextToken.index)) {
+      return undefined;
+    }
+    const nextNormalized = normalizeTokenLower(nextToken);
+    if (nextNormalized === "length" || nextNormalized === "lengths") {
+      return { unit: "finger length", consumedIndices: [index, index + 1] };
+    }
+  }
+  if (normalized === "international") {
+    if (!nextToken || consumed.has(nextToken.index)) {
+      return undefined;
+    }
     switch (nextNormalized) {
       case "unit":
       case "units":
@@ -3971,9 +4446,19 @@ function collectDayRange(
 
 function collectDayOfWeek(
   context: ClauseParseContext,
-  _index: number,
+  index: number,
   token: Token
 ): boolean {
+  if (token.lower === "sun") {
+    const nextToken = getNextActiveToken(
+      context.tokens,
+      index,
+      context.state.consumed
+    );
+    if (nextToken && normalizeTokenLower(nextToken) === "exposure") {
+      return false;
+    }
+  }
   const days = getDayOfWeekMeaning(token);
   if (!days) {
     return false;
@@ -3987,6 +4472,14 @@ function collectRouteSynonym(
   context: ClauseParseContext,
   index: number
 ): boolean {
+  const token = context.tokens[index];
+  if (
+    token &&
+    normalizeTokenLower(token) === "shampoo" &&
+    context.state.methodVerb === "use"
+  ) {
+    return false;
+  }
   return tryCollectRouteSynonym(context, index);
 }
 
@@ -4284,10 +4777,16 @@ function collectPhraseWordFrequency(
 
 function collectGenericConnector(
   context: ClauseParseContext,
-  _index: number,
+  index: number,
   token: Token
 ): boolean {
   if (!GENERIC_CONNECTOR_TOKENS.has(token.lower)) {
+    return false;
+  }
+  if (
+    (token.lower === "each" || token.lower === "every") &&
+    isWorkflowConnectorContext(context.tokens, index, context.state.consumed)
+  ) {
     return false;
   }
   mark(context.state.consumed, token);
@@ -4320,6 +4819,41 @@ function parseScheduleTerm(
     applyGrammarTerminal(context, index, token, "schedule.phraseWordFrequency", collectPhraseWordFrequency) ??
     applyGrammarTerminal(context, index, token, "schedule.wordFrequency", collectWordFrequency)
   );
+}
+
+function collectMethodVerb(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  const normalized = normalizeTokenLower(token);
+  if (
+    normalized === "shampoo" &&
+    context.state.methodVerb === "use"
+  ) {
+    return false;
+  }
+  if (!hasTokenWordClass(token, TokenWordClass.AdministrationVerb) && !isAdministrationVerbWord(token.lower)) {
+    return false;
+  }
+  if (normalized === "use" && hasEstablishedAdministrationContent(context.state)) {
+    return false;
+  }
+  setMethodFromVerbToken(context.state, token);
+  const routeMeaning = getRouteMeaning(token);
+  if (routeMeaning && !context.state.routeCode) {
+    setRoute(context.state, routeMeaning.code, routeMeaning.text);
+  }
+  mark(context.state.consumed, token);
+  return true;
+}
+
+function parseMethodTerm(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): number | undefined {
+  return applyGrammarTerminal(context, index, token, "method.verb", collectMethodVerb);
 }
 
 function parseRouteTerm(
@@ -4374,6 +4908,7 @@ function parseCoreTerm(
 ): number | undefined {
   return (
     parseScheduleTerm(context, index, token) ??
+    parseMethodTerm(context, index, token) ??
     parseRouteTerm(context, index, token) ??
     parseSiteTerm(context, index, token) ??
     parseCountTerm(context, index, token) ??
@@ -4578,6 +5113,7 @@ export function parseClauseState(
   }
   parseContext.prnReasonStart = detectPrnPrelude(state, tokens);
   parseClauseGrammar(parseContext);
+  collectProductFormHints(state, tokens);
   applyClauseDefaultsAfterTokenScan(state, tokens, parseContext.medicationContext, options);
   collectPrnReasonText(
     state,
@@ -5221,6 +5757,70 @@ function inferAdditionalInstructionPredicate(
   return "take";
 }
 
+function isWorkflowPatientInstructionText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const words = normalized.split(/\s+/).filter((word) => word.length > 0);
+  if (!words.length) {
+    return false;
+  }
+  if (PATIENT_INSTRUCTION_START_TOKENS.has(words[0])) {
+    return true;
+  }
+  if (words[0] === "reapply") {
+    return true;
+  }
+  return (
+    normalized.includes(" sun exposure") ||
+    normalized.includes(" outdoors") ||
+    normalized.includes(" outside") ||
+    normalized.includes(" swimming") ||
+    normalized.includes(" diaper change") ||
+    normalized.includes(" dressing change") ||
+    normalized.includes(" bowel movement") ||
+    normalized.includes(" leave on ") ||
+    normalized.includes(" then rinse") ||
+    normalized.includes(" wash off")
+  );
+}
+
+function hasMethodModifierLeadIn(
+  internal: ParserState,
+  tokens: Token[],
+  groupTokens: Token[]
+): boolean {
+  if (!internal.methodVerb || !groupTokens.length) {
+    return false;
+  }
+
+  const firstIndex = groupTokens[0].index;
+  const methodToken = tokens[firstIndex - 1];
+  const separatorToken = tokens[firstIndex - 2];
+
+  if (!methodToken || !separatorToken) {
+    return false;
+  }
+  if (!internal.consumed.has(methodToken.index)) {
+    return false;
+  }
+  if (methodToken.kind !== LexKind.Word) {
+    return false;
+  }
+  if (normalizeTokenLower(methodToken) !== internal.methodVerb) {
+    return false;
+  }
+
+  switch (separatorToken.kind) {
+    case LexKind.Punctuation:
+    case LexKind.Separator:
+      return true;
+    default:
+      return false;
+  }
+}
+
 function collectAdditionalInstructions(
   internal: ParserState,
   tokens: Token[]
@@ -5239,6 +5839,19 @@ function collectAdditionalInstructions(
 
   for (const group of groups) {
     if (!group.tokens.length) {
+      continue;
+    }
+    let punctuationOnly = true;
+    for (const token of group.tokens) {
+      if (token.kind !== LexKind.Punctuation && token.kind !== LexKind.Separator) {
+        punctuationOnly = false;
+        break;
+      }
+    }
+    if (punctuationOnly) {
+      for (const token of group.tokens) {
+        mark(internal.consumed, token);
+      }
       continue;
     }
     const range = group.range ?? computeTokenRange(
@@ -5261,19 +5874,33 @@ function collectAdditionalInstructions(
     if (!sourceText) {
       continue;
     }
-
     const separatorDetected =
       sourceText.includes(";") ||
       sourceText.includes(".") ||
       sourceText.includes("\n") ||
       sourceText.includes("\r") ||
       hasInstructionSeparatorBeforeRange(internal.input, range);
+    const methodModifierLeadIn = hasMethodModifierLeadIn(
+      internal,
+      tokens,
+      group.tokens
+    );
+    if (isWorkflowPatientInstructionText(sourceText)) {
+      appendPatientInstruction(internal, sourceText);
+      for (const token of group.tokens) {
+        mark(internal.consumed, token);
+      }
+      continue;
+    }
 
     const parsed = parseAdditionalInstructions(
       sourceText,
       range ?? { start: 0, end: sourceText.length },
       {
-        defaultPredicate,
+        defaultPredicate:
+          methodModifierLeadIn && internal.methodVerb
+            ? internal.methodVerb
+            : defaultPredicate,
         allowFreeTextFallback: separatorDetected
       }
     );
@@ -5283,17 +5910,34 @@ function collectAdditionalInstructions(
 
     let groupAccepted = false;
     for (const parsedInstruction of parsed) {
+      const plainText = parsedInstruction.text?.replace(/\s+/g, " ").trim();
+      const resolvedPlainText =
+        methodModifierLeadIn &&
+        plainText &&
+        !parsedInstruction.coding?.code &&
+        internal.methodText
+          ? `${internal.methodText} ${sourceText}`.replace(/\s+/g, " ").trim()
+          : plainText;
+      if (
+        !parsedInstruction.coding?.code &&
+        resolvedPlainText &&
+        isWorkflowPatientInstructionText(resolvedPlainText)
+      ) {
+        appendPatientInstruction(internal, resolvedPlainText);
+        groupAccepted = true;
+        continue;
+      }
       const key = parsedInstruction.coding?.code
         ? `code:${parsedInstruction.coding.system ?? SNOMED_SYSTEM}|${parsedInstruction.coding.code}`
-        : parsedInstruction.text
-          ? `text:${parsedInstruction.text.toLowerCase()}`
+        : resolvedPlainText
+          ? `text:${resolvedPlainText.toLowerCase()}`
           : `frames:${parsedInstruction.frames.length}`;
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
       instructions.push({
-        text: parsedInstruction.text,
+        text: resolvedPlainText,
         coding: parsedInstruction.coding,
         frames: parsedInstruction.frames
       });

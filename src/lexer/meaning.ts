@@ -106,6 +106,25 @@ const APPLICATION_ROUTE_VERBS = new Set([
   "lather"
 ]);
 
+const ADMINISTRATION_METHOD_WORDS = new Set([
+  "apply",
+  "rub",
+  "massage",
+  "spread",
+  "dab",
+  "lather",
+  "spray",
+  "take",
+  "drink",
+  "swallow",
+  "use",
+  "insert",
+  "instill",
+  "reapply",
+  "wash",
+  "shampoo"
+]);
+
 const ADMINISTRATION_ROUTE_HINTS: Record<string, RouteCode> = {
   apply: RouteCode["Topical route"],
   rub: RouteCode["Topical route"],
@@ -113,6 +132,9 @@ const ADMINISTRATION_ROUTE_HINTS: Record<string, RouteCode> = {
   spread: RouteCode["Topical route"],
   dab: RouteCode["Topical route"],
   lather: RouteCode["Topical route"],
+  reapply: RouteCode["Topical route"],
+  wash: RouteCode["Topical route"],
+  shampoo: RouteCode["Topical route"],
   take: RouteCode["Oral route"],
   drink: RouteCode["Oral route"],
   swallow: RouteCode["Oral route"]
@@ -426,6 +448,14 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
   }
 
   const administrationRoute = ADMINISTRATION_ROUTE_HINTS[normalized];
+  if (ADMINISTRATION_METHOD_WORDS.has(normalized)) {
+    annotations = annotations || {};
+    annotations.wordClasses = pushEnum(
+      annotations.wordClasses,
+      TokenWordClass.AdministrationVerb
+    );
+  }
+
   if (administrationRoute) {
     annotations = annotations || {};
     annotations.routeCandidates = pushRouteCandidate(
@@ -435,10 +465,6 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
         text: ROUTE_TEXT[administrationRoute],
         source: "verb"
       }
-    );
-    annotations.wordClasses = pushEnum(
-      annotations.wordClasses,
-      TokenWordClass.AdministrationVerb
     );
   }
 
@@ -705,7 +731,7 @@ export function isApplicationVerbWord(word: string): boolean {
 }
 
 export function isAdministrationVerbWord(word: string): boolean {
-  return normalizeMeaningKey(word) in ADMINISTRATION_ROUTE_HINTS;
+  return ADMINISTRATION_METHOD_WORDS.has(normalizeMeaningKey(word));
 }
 
 export function isCountKeywordWord(word: string): boolean {

@@ -17,6 +17,28 @@ import {
 import { normalizeDosageForm } from "../src/context";
 
 const TAB_CONTEXT = { dosageForm: "tab" } as const;
+const FHIR_TRANSLATION_EXTENSION_URL =
+  "http://hl7.org/fhir/StructureDefinition/translation";
+
+function expectPrimitiveTranslation(
+  element: { extension?: Array<{ url: string; extension?: Array<{ url: string; valueCode?: string; valueString?: string }> }> } | undefined,
+  locale: string,
+  content: string
+): void {
+  expect(element?.extension).toContainEqual({
+    url: FHIR_TRANSLATION_EXTENSION_URL,
+    extension: [
+      {
+        url: "lang",
+        valueCode: locale
+      },
+      {
+        url: "content",
+        valueString: content
+      }
+    ]
+  });
+}
 
 describe("parseSig core scenarios", () => {
   it("parses 1x3 po pc", () => {
@@ -34,7 +56,7 @@ describe("parseSig core scenarios", () => {
       code: SNOMEDCTRouteCodes["Oral route"],
       display: "Oral route"
     });
-    expect(result.longText).toBe("Take 1 tablet by mouth three times daily after meals.");
+    expect(result.longText).toBe("Take 1 tablet orally three times daily after meals.");
   });
 
   it("parses decimal multiplicative tokens", () => {
@@ -192,19 +214,19 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("1 tab po q1h for 10 times", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat?.count).toBe(10);
     expect(result.shortText).toBe("1 tab PO Q1H x10");
-    expect(result.longText).toBe("Take 1 tablet by mouth every 1 hour for 10 doses.");
+    expect(result.longText).toBe("Take 1 tablet orally every 1 hour for 10 doses.");
   });
 
   it("parses asterisk-prefixed count limits", () => {
     const result = parseSig("1 tab po q6h *10 doses", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat?.count).toBe(10);
-    expect(result.longText).toBe("Take 1 tablet by mouth every 6 hours for 10 doses.");
+    expect(result.longText).toBe("Take 1 tablet orally every 6 hours for 10 doses.");
   });
 
   it("omits redundant mouth sites when route is oral", () => {
     const result = parseSig("500 mg per mouth every 4 to 6 hours as needed for pain");
     expect(result.fhir.site).toBeUndefined();
-    expect(result.longText).toBe("Take 500 mg by mouth as needed for pain.");
+    expect(result.longText).toBe("Take 500 mg orally as needed for pain.");
   });
 
   it("treats descriptive route phrases as routes instead of sites", () => {
@@ -884,7 +906,7 @@ describe("parseSig core scenarios", () => {
 
   it("formats oral bedtime instructions", () => {
     const result = parseSig("1 mg po hs");
-    expect(result.longText).toBe("Take 1 mg by mouth at bedtime.");
+    expect(result.longText).toBe("Take 1 mg orally at bedtime.");
   });
 
   it("normalizes spelled metric dose units", () => {
@@ -989,7 +1011,7 @@ describe("parseSig core scenarios", () => {
       high: { value: 2, unit: "tab" }
     });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
-    expect(result.longText).toContain("1 to 2 tablets by mouth");
+    expect(result.longText).toContain("1 to 2 tablets orally");
     expect(result.longText).toContain("as needed for pain");
   });
 
@@ -1227,7 +1249,7 @@ describe("parseSig core scenarios", () => {
       code: "22253000",
       display: "Pain"
     });
-    expect(result.longText).toBe("Take 1 tablet by mouth after meals as needed for pain.");
+    expect(result.longText).toBe("Take 1 tablet orally after meals as needed for pain.");
   });
 
   it("codes Thai topical PRN reasons and sparing instructions in end-to-end sigs", () => {
@@ -2256,7 +2278,7 @@ describe("parseSig core scenarios", () => {
       includeTimesPerDaySummary: true
     });
     expect(again.longText).toBe(
-      "Take 1 tablet by mouth three times daily after breakfast, lunch and dinner."
+      "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
     );
     expect(again.fhir.text).toBe(again.longText);
   });
@@ -2329,10 +2351,66 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("drink 10 ml prn pain");
 
     expect(result.shortText).toBe("10 mL PO PRN pain");
-    expect(result.longText).toBe("Take 10 mL by mouth as needed for pain.");
+    expect(result.longText).toBe("Drink 10 mL as needed for pain.");
+    expect(result.fhir.method?.text).toBe("Drink");
+    expectPrimitiveTranslation(result.fhir.method?._text, "th", "รับประทาน");
+    expect(result.fhir.method?.coding).toEqual([
+      {
+        system: "http://snomed.info/sct",
+        code: "738995006",
+        display: "Swallow",
+        _display: {
+          extension: [
+            {
+              url: FHIR_TRANSLATION_EXTENSION_URL,
+              extension: [
+                {
+                  url: "lang",
+                  valueCode: "th"
+                },
+                {
+                  url: "content",
+                  valueString: "รับประทาน"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]);
     expect(result.meta.normalized.route).toBe(RouteCode["Oral route"]);
+    expect(result.meta.normalized.method).toEqual({
+      text: "Drink",
+      coding: {
+        system: "http://snomed.info/sct",
+        code: "738995006",
+        display: "Swallow"
+      }
+    });
     expect(result.meta.normalized.additionalInstructions).toBeUndefined();
     expect(result.warnings).toEqual([]);
+  });
+
+  it("codes trailing adverbial method modifiers as additional instructions", () => {
+    const result = parseSig("po 10 ml twice daily, drink slowly");
+
+    expect(result.fhir.patientInstruction).toBeUndefined();
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("419443000");
+    expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("419443000");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Drink 10 mL twice daily. Drink slowly.");
+  });
+
+  it("codes bare slowly qualifiers using the clause administration context", () => {
+    const result = parseSig("take 1 tab po daily slowly", { context: TAB_CONTEXT });
+
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("419443000");
+    expect(result.longText).toBe("Take 1 tablet orally once daily. Take slowly.");
+  });
+
+  it("suppresses redundant oral route phrasing for swallow methods", () => {
+    const result = parseSig("swallow 1 tab po daily", { context: TAB_CONTEXT });
+    expect(result.longText).toBe("Swallow 1 tablet once daily.");
   });
 
   it("warns when an oral PRN instruction is missing the dose", () => {
@@ -2354,6 +2432,123 @@ describe("parseSig core scenarios", () => {
     expect(scheduled.warnings).not.toContain(
       "Incomplete sig: missing timing or PRN qualifier for topical site administration."
     );
+  });
+
+  it("codes known administration methods into FHIR dosage.method", () => {
+    const cases = [
+      {
+        sig: "take 1 tab po daily",
+        text: "Take",
+        thaiText: "รับประทาน",
+        code: "738990001",
+        display: "Administer"
+      },
+      {
+        sig: "swallow 1 tab po daily",
+        text: "Swallow",
+        thaiText: "รับประทาน",
+        code: "738995006",
+        display: "Swallow",
+        thaiDisplay: "รับประทาน"
+      },
+      {
+        sig: "apply cream to scalp twice daily",
+        text: "Apply",
+        thaiText: "ทา",
+        code: "738991002",
+        display: "Apply",
+        thaiDisplay: "ทา"
+      },
+      {
+        sig: "insert 1 applicatorful vaginally at bedtime",
+        text: "Insert",
+        thaiText: "สอด",
+        code: "738993004",
+        display: "Insert",
+        thaiDisplay: "สอด"
+      },
+      {
+        sig: "instill 1 drop to eye bid",
+        text: "Instill",
+        thaiText: "หยอด",
+        code: "738994005",
+        display: "Instill",
+        thaiDisplay: "หยอด"
+      },
+      {
+        sig: "spray once daily to nostril",
+        text: "Spray",
+        thaiText: "พ่น",
+        code: "738996007",
+        display: "Spray",
+        thaiDisplay: "พ่น"
+      },
+      {
+        sig: "use shampoo daily",
+        text: "Use shampoo",
+        thaiText: "สระ",
+        code: "738990001",
+        display: "Administer"
+      },
+      {
+        sig: "wash scalp daily",
+        text: "Wash",
+        thaiText: "ล้าง",
+        code: "785900008",
+        display: "Rinse or wash",
+        thaiDisplay: "ล้าง"
+      },
+      {
+        sig: "reapply sunscreen every 2 hours",
+        text: "Reapply sunscreen",
+        thaiText: "ทากันแดดซ้ำ",
+        code: "738991002",
+        display: "Apply",
+        thaiDisplay: "ทา"
+      }
+    ];
+
+    for (const { sig, text, thaiText, code, display, thaiDisplay } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.method?.text).toBe(text);
+      expectPrimitiveTranslation(result.fhir.method?._text, "th", thaiText);
+      expect(result.fhir.method?.coding).toEqual([
+        {
+          system: "http://snomed.info/sct",
+          code,
+          display,
+          ...(thaiDisplay
+            ? {
+              _display: {
+                extension: [
+                  {
+                    url: FHIR_TRANSLATION_EXTENSION_URL,
+                    extension: [
+                      {
+                        url: "lang",
+                        valueCode: "th"
+                      },
+                      {
+                        url: "content",
+                        valueString: thaiDisplay
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            : {})
+        }
+      ]);
+      expect(result.meta.normalized.method).toEqual({
+        text,
+        coding: {
+          system: "http://snomed.info/sct",
+          code,
+          display
+        }
+      });
+    }
   });
 });
 
@@ -2385,7 +2580,7 @@ describe("internationalization", () => {
         { locale: "th" }
       );
 
-      expect(fromFhir.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณขมับขวา.");
+      expect(fromFhir.longText).toBe("ทา บริเวณขมับขวา วันละ 2 ครั้ง.");
     });
 
     it("translates eye site names in Thai", () => {
@@ -2414,16 +2609,16 @@ describe("internationalization", () => {
 
     it("translates head site names in Thai", () => {
       const result = parseSig("apply to head bid", { locale: "th" });
-      expect(result.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะ.");
-      expect(result.fhir.text).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะ.");
+      expect(result.longText).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
+      expect(result.fhir.text).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
     });
 
     it("translates SNOMED-coded site variants in Thai without alias-specific text keys", () => {
       const temple = parseSig("apply to temple region bid", { locale: "th" });
-      expect(temple.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณขมับ.");
+      expect(temple.longText).toBe("ทา บริเวณขมับ วันละ 2 ครั้ง.");
 
       const leftHead = parseSig("apply to left side of head bid", { locale: "th" });
-      expect(leftHead.longText).toBe("ทา ยา วันละ 2 ครั้ง บริเวณศีรษะซ้าย.");
+      expect(leftHead.longText).toBe("ทา บริเวณศีรษะซ้าย วันละ 2 ครั้ง.");
     });
 
     it("translates ear site variants without leaving English route text", () => {
@@ -2501,7 +2696,7 @@ describe("internationalization", () => {
       includeTimesPerDaySummary: true
     });
     expect(result.longText).toBe(
-      "Take 1 tablet by mouth three times daily after breakfast, lunch and dinner."
+      "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
     );
   });
 
@@ -2511,7 +2706,7 @@ describe("internationalization", () => {
       includeTimesPerDaySummary: true
     });
     expect(result.longText).toBe(
-      "Take 1 tablet by mouth four times daily before breakfast, lunch and dinner and at bedtime."
+      "Take 1 tablet orally four times daily before breakfast, lunch and dinner and at bedtime."
     );
   });
 
@@ -2521,7 +2716,7 @@ describe("internationalization", () => {
       includeTimesPerDaySummary: true
     });
     expect(result.longText).toBe(
-      "Take 1 tablet by mouth three times daily with breakfast, at noon and with dinner."
+      "Take 1 tablet orally three times daily with breakfast, at noon and with dinner."
     );
   });
 
@@ -2980,32 +3175,19 @@ describe("topical workflow and timing", () => {
       period: 1,
       periodUnit: "d"
     });
-    expect(result.fhir.additionalInstruction?.[0]?.text).toContain("after showering");
-    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames?.[0]).toEqual(
-      expect.objectContaining({
-        relation: AdviceRelation.After,
-        args: expect.arrayContaining([
-          expect.objectContaining({ conceptId: "showering" })
-        ])
-      })
-    );
+    expect(result.fhir.patientInstruction).toBe("after showering");
+    expect(result.meta.normalized.patientInstruction).toBe("after showering");
   });
 
   it("keeps duration-based workflow phrases out of dose parsing", () => {
     const result = parseSig("leave on for 10 minutes then rinse");
     expect(result.fhir.doseAndRate).toBeUndefined();
-    expect(result.fhir.additionalInstruction?.[0]?.text).toContain(
+    expect(result.fhir.patientInstruction).toBe(
       "leave on for 10 minutes then rinse"
     );
-    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames).toEqual([
-      expect.objectContaining({
-        predicate: expect.objectContaining({ lemma: "leave" }),
-        relation: AdviceRelation.For
-      }),
-      expect.objectContaining({
-        predicate: expect.objectContaining({ lemma: "rinse" })
-      })
-    ]);
+    expect(result.meta.normalized.patientInstruction).toBe(
+      "leave on for 10 minutes then rinse"
+    );
   });
 
   it("keeps workflow timing separate from medication timing", () => {
@@ -3022,6 +3204,98 @@ describe("topical workflow and timing", () => {
         ])
       })
     );
+  });
+});
+
+describe("topical product forms and workflow", () => {
+  it("consumes common topical product nouns without stray leftovers", () => {
+    const scalp = parseSig("apply cream to scalp twice daily");
+    expect(scalp.meta.leftoverText).toBeUndefined();
+    expect(scalp.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Topical route"]
+    );
+
+    const face = parseSig("apply moisturizer to face every morning");
+    expect(face.meta.leftoverText).toBeUndefined();
+    expect(face.fhir.site?.text).toBe("face");
+  });
+
+  it("keeps shampoo instructions on the FHIR method path", () => {
+    const result = parseSig("use shampoo daily");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhir.method?.text).toBe("Use shampoo");
+    expectPrimitiveTranslation(result.fhir.method?._text, "th", "สระ");
+    expect(result.longText).toBe("Use shampoo topically once daily.");
+  });
+
+  it("preserves reapply nuance in Thai when method text is present", () => {
+    const result = parseSig("reapply sunscreen every 2 hours", { locale: "th" });
+    expect(result.longText).toBe("ทากันแดดซ้ำทุก 2 ชั่วโมง.");
+  });
+
+  it("round-trips Thai method text from standard FHIR translation extensions", () => {
+    const parsed = parseSig("reapply sunscreen every 2 hours");
+    const fromFhir = fromFhirDosage(parsed.fhir, { locale: "th" });
+    expect(fromFhir.longText).toBe("ทากันแดดซ้ำทุก 2 ชั่วโมง.");
+  });
+
+  it("falls back to method display translations when method.text is absent", () => {
+    const parsed = parseSig("spray once daily to nostril");
+    const dosage = {
+      ...parsed.fhir,
+      method: {
+        coding: parsed.fhir.method?.coding
+      }
+    };
+    const fromFhir = fromFhirDosage(dosage, { locale: "th" });
+    expect(fromFhir.longText).toBe("พ่นเข้ารูจมูก วันละครั้ง.");
+  });
+
+  it("renders shampoo naturally in Thai when product form is preserved", () => {
+    const result = parseSig("use shampoo daily", { locale: "th" });
+    expect(result.longText).toBe("สระวันละครั้ง.");
+  });
+
+  it("captures topical quantity units including metric ribbons", () => {
+    const pumps = parseSig("apply 2 pumps to face every morning");
+    expect(pumps.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 2,
+      unit: "pump"
+    });
+
+    const ribbon = parseSig("apply 0.5 cm ribbon to eyelid nightly");
+    expect(ribbon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 0.5,
+      unit: "cm ribbon"
+    });
+  });
+
+  it("stores workflow phrases in patientInstruction", () => {
+    const sun = parseSig("apply sunscreen before sun exposure");
+    expect(sun.fhir.patientInstruction).toBe("before sun exposure");
+    expect(sun.fhir.timing?.repeat?.dayOfWeek).toBeUndefined();
+
+    const dressing = parseSig("apply with each dressing change");
+    expect(dressing.fhir.patientInstruction).toBe("with each dressing change");
+
+    const bowel = parseSig("apply after each bowel movement");
+    expect(bowel.fhir.patientInstruction).toBe("after each bowel movement");
+  });
+
+  it("does not force suppository or pessary units onto creams", () => {
+    const vaginal = parseSig("apply vaginal cream nightly");
+    expect(vaginal.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Per vagina"]
+    );
+    expect(vaginal.fhir.doseAndRate).toBeUndefined();
+    expect(vaginal.meta.leftoverText).toBeUndefined();
+
+    const rectal = parseSig("apply rectal cream twice daily");
+    expect(rectal.fhir.route?.coding?.[0]?.code).toBe(
+      SNOMEDCTRouteCodes["Per rectum"]
+    );
+    expect(rectal.fhir.doseAndRate).toBeUndefined();
+    expect(rectal.meta.leftoverText).toBeUndefined();
   });
 });
 
@@ -3226,7 +3500,7 @@ describe("issue regression tests", () => {
   it("consumes optional 'for' after 'prn' to avoid duplication", () => {
     const result = parseSig("1 tab po prn for pain");
     expect(result.meta.normalized.prnReason?.text).toBe("pain");
-    expect(result.longText).toBe("Take 1 tablet by mouth as needed for pain.");
+    expect(result.longText).toBe("Take 1 tablet orally as needed for pain.");
   });
 
   it("consumes other introductory PRN connectors", () => {

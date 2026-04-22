@@ -80,6 +80,8 @@ const EN_TIMES_PER_DAY: Record<number, string> = {
   4: "four times daily"
 };
 
+const SLOWLY_QUALIFIER_CODE = "419443000";
+
 interface RouteGrammar {
   verb: string;
   routePhrase?: string | ((context: { hasSite: boolean; clause: CanonicalSigClause }) => string | undefined);
@@ -89,7 +91,7 @@ interface RouteGrammar {
 const DEFAULT_ROUTE_GRAMMAR: RouteGrammar = { verb: "Use" };
 
 const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
-  [RouteCode["Oral route"]]: { verb: "Take", routePhrase: "by mouth" },
+  [RouteCode["Oral route"]]: { verb: "Take", routePhrase: "orally" },
   [RouteCode["Ophthalmic route"]]: {
     verb: "Instill",
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "in the eye"),
@@ -103,6 +105,11 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
   [RouteCode["Per rectum"]]: {
     verb: "Use",
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "rectally"),
+    sitePreposition: "into"
+  },
+  [RouteCode["Per vagina"]]: {
+    verb: "Insert",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "vaginally"),
     sitePreposition: "into"
   },
   [RouteCode["Topical route"]]: {
@@ -181,6 +188,9 @@ function grammarFromRouteText(text: string | undefined): RouteGrammar | undefine
   if (normalized.includes("rectal") || normalized.includes("rectum")) {
     return ROUTE_GRAMMAR[RouteCode["Per rectum"]];
   }
+  if (normalized.includes("vagin")) {
+    return ROUTE_GRAMMAR[RouteCode["Per vagina"]];
+  }
   if (normalized.includes("nasal")) {
     return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
   }
@@ -198,21 +208,74 @@ function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
   return grammarFromRouteText(clause.route?.text) ?? DEFAULT_ROUTE_GRAMMAR;
 }
 
+function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar): string {
+  const methodText = clause.method?.text?.trim();
+  if (methodText) {
+    return methodText;
+  }
+  return grammar.verb;
+}
+
 function pluralize(unit: string, value: number): string {
   if (Math.abs(value) === 1) {
-    if (unit === "tab") return "tablet";
-    if (unit === "cap") return "capsule";
+    switch (unit) {
+      case "tab":
+        return "tablet";
+      case "cap":
+        return "capsule";
+      default:
+        return unit;
+    }
+  }
+  if (unit.endsWith(" ribbon")) {
     return unit;
   }
-  if (unit === "tab" || unit === "tablet") return "tablets";
-  if (unit === "cap" || unit === "capsule") return "capsules";
-  if (unit === "mL") return "mL";
-  if (unit === "mg") return "mg";
-  if (unit === "puff") return value === 1 ? "puff" : "puffs";
-  if (unit === "patch") return value === 1 ? "patch" : "patches";
-  if (unit === "drop") return value === 1 ? "drop" : "drops";
-  if (unit === "suppository") return value === 1 ? "suppository" : "suppositories";
-  return unit;
+  switch (unit) {
+    case "tab":
+    case "tablet":
+      return "tablets";
+    case "cap":
+    case "capsule":
+      return "capsules";
+    case "mL":
+    case "mg":
+      return unit;
+    case "puff":
+      return "puffs";
+    case "patch":
+      return "patches";
+    case "drop":
+      return "drops";
+    case "suppository":
+      return "suppositories";
+    case "pump":
+      return "pumps";
+    case "squeeze":
+      return "squeezes";
+    case "applicatorful":
+      return "applicatorfuls";
+    case "capful":
+      return "capfuls";
+    case "scoop":
+      return "scoops";
+    case "application":
+      return "applications";
+    case "fingertip unit":
+      return "fingertip units";
+    case "finger length":
+      return "finger lengths";
+    default:
+      return unit;
+  }
+}
+
+function formatPatientInstructionSentence(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const sentence = /^[.!?]$/.test(trimmed.slice(-1)) ? trimmed : `${trimmed}.`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
 function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -541,7 +604,7 @@ function buildRoutePhrase(
     return text;
   }
   if (normalized === "oral") {
-    return "by mouth";
+    return "orally";
   }
   if (normalized === "intravenous") {
     return "intravenously";
@@ -574,6 +637,9 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   }
   const lower = text.toLowerCase();
   if (clause.route?.code === RouteCode["Per rectum"] && (lower === "rectum" || lower === "rectal")) {
+    return undefined;
+  }
+  if (clause.route?.code === RouteCode["Per vagina"] && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
   let preposition = grammar.sitePreposition;
@@ -629,6 +695,38 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
     days.push(DAY_NAMES[day] ?? day);
   }
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
+}
+
+function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
+  const methodText = clause.method?.text?.trim();
+  switch (methodText) {
+    case "Apply sunscreen":
+    case "Reapply sunscreen":
+    case "Use shampoo":
+      return false;
+    default:
+      return true;
+  }
+}
+
+function shouldSuppressRoutePhrase(
+  clause: CanonicalSigClause,
+  grammar: RouteGrammar,
+  verb: string
+): boolean {
+  if (clause.route?.code !== RouteCode["Oral route"]) {
+    return false;
+  }
+  if (grammar.routePhrase !== "orally") {
+    return false;
+  }
+  switch (verb) {
+    case "Drink":
+    case "Swallow":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function formatShort(clause: CanonicalSigClause): string {
@@ -707,9 +805,15 @@ function formatShort(clause: CanonicalSigClause): string {
 function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
-  const dosePart = formatDoseLong(clause.dose) ?? "the medication";
+  const verb = resolveMethodVerb(clause, grammar);
+  const explicitDosePart = formatDoseLong(clause.dose);
+  const dosePart = explicitDosePart ?? (
+    shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
+  );
   const sitePart = formatSite(clause, grammar);
-  const routePart = buildRoutePhrase(clause, grammar, Boolean(sitePart));
+  const routePart = shouldSuppressRoutePhrase(clause, grammar, verb)
+    ? undefined
+    : buildRoutePhrase(clause, grammar, Boolean(sitePart));
   const frequencyPart =
     describeFrequency(schedule) ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
@@ -741,7 +845,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const reason = clause.prn?.reason?.text ?? clause.prn?.reason?.coding?.display;
   const asNeededPart = clause.prn?.enabled ? (reason ? `as needed for ${reason}` : "as needed") : undefined;
 
-  const segments: string[] = [dosePart];
+  const segments: string[] = [];
+  if (dosePart) {
+    segments.push(dosePart);
+  }
   if (routePart) {
     segments.push(routePart);
   }
@@ -764,15 +871,26 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const instructionPhrases: string[] = [];
   const instructionText = formatAdditionalInstructions(clause);
-  if (!body) {
-    if (!instructionText) {
-      return `${grammar.verb}.`;
-    }
-    return `${grammar.verb}. ${instructionText}`.trim();
+  if (instructionText) {
+    instructionPhrases.push(instructionText);
   }
-  const baseSentence = `${grammar.verb} ${body}.`;
-  return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
+  const patientInstruction = formatPatientInstructionSentence(
+    clause.patientInstruction
+  );
+  if (patientInstruction) {
+    instructionPhrases.push(patientInstruction);
+  }
+  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
+  if (!body) {
+    if (!trailingInstructionText) {
+      return `${verb}.`;
+    }
+    return `${verb}. ${trailingInstructionText}`.trim();
+  }
+  const baseSentence = `${verb} ${body}.`;
+  return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
 }
 
 function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
@@ -781,7 +899,14 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
     return undefined;
   }
   const phrases: string[] = [];
+  const grammar = resolveRouteGrammar(clause);
+  const verb = resolveMethodVerb(clause, grammar);
   for (const instruction of instructions) {
+    if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
+      const contextual = verb ? `${verb} slowly` : "Slowly";
+      phrases.push(contextual);
+      continue;
+    }
     const text = instruction.text ?? instruction.coding?.display;
     if (!text) {
       continue;

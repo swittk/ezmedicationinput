@@ -569,3 +569,131 @@ Desired behavior:
    - wound-itch variants intentionally fall back to generic `Itching of skin` while preserving the original text
 
 3. Added end-to-end parser tests for these subtype cases.
+
+### 2026-04-22 Topical / Shampoo / Cosmetic Gap Inventory
+
+1. Product-form nouns are still mostly treated as leftovers instead of neutral terminology.
+   - examples: `cream`, `ointment`, `gel`, `shampoo`, `moisturizer`, `lotion`, `serum`, `toner`, `sunscreen`, `deodorant`, `lip balm`, `makeup remover`
+   - current symptom: the clause parses, but `meta.leftoverText` still contains the product noun
+   - concrete failures seen:
+     - `apply cream to scalp twice daily`
+     - `use shampoo daily`
+     - `apply moisturizer to face every morning`
+     - `apply deodorant after showering`
+
+2. Topical/cosmetic quantity language is under-modeled.
+   - countable medication units like `patch`, `drop`, and `mL` work
+   - semi-structured topical quantities do not
+   - concrete failures seen:
+     - `1 fingertip unit` degrades into `1 U` with `fingertip` left over
+     - `1 squeeze`, `1 pump`, `1 scoop`, `1 capful`, `1 application` become `Apply 1 ...`
+     - `0.5 inch ribbon` loses the `ribbon` semantics
+     - `applicatorful` is not represented cleanly
+   - architectural conclusion:
+     - do not force these into ordinary `dose`
+     - add a dedicated canonical `applicationAmount` structure for topical/cosmetic quantities
+
+3. Qualitative amount language is mixed.
+   - currently good:
+     - `sparingly`
+     - `liberally`
+     - `thin layer`
+     - `pea-sized amount`
+   - currently weak:
+     - `small amount`
+     - `generous amount`
+     - `enough to cover`
+     - `little at a time` outside the already-covered advice paths
+
+4. Shampoo / cleanser / wash workflows are not modeled as first-class administration patterns.
+   - concrete failures seen:
+     - `use shampoo daily`
+     - `shampoo scalp daily`
+     - `use cleanser twice daily`
+     - `use face wash morning and bedtime`
+   - partial behavior:
+     - `wash scalp with shampoo daily` can fall into additional instructions
+     - `apply shampoo to scalp daily` parses, but treats `Shampoo` as trailing advice rather than the core product/action
+
+5. Workflow and event instructions are still partial.
+   - currently acceptable:
+     - `after showering`
+     - `after bathing`
+     - `before intercourse`
+     - `after sex`
+   - currently weak or broken:
+     - `leave on 5 minutes then rinse`
+     - `massage into scalp and leave on for 5 minutes then rinse`
+     - `after each diaper change`
+     - `with each dressing change`
+     - `after each bowel movement`
+     - `reapply after swimming`
+     - `while outdoors`
+     - `before going outside`
+     - `after cleansing`
+
+6. Several cosmetic / topical phrases still misparse badly and need explicit tests.
+   - `sun` can collide with Sunday in phrases like `before sun exposure`
+   - `patch` can collide with dosage-unit parsing in phrases like `dry patches`
+   - `under eyes`, `wet face`, `around nostrils`, `around anus` can be swallowed into crude site text instead of a better structured phrase
+   - `apply ointment inside nostrils twice daily` currently makes `ointment inside nostrils` the site text
+   - `apply rectal cream twice daily` currently over-infers rectal route plus `suppository`, which is wrong for cream
+   - `apply vaginal cream nightly` similarly over-infers route/unit too aggressively
+
+7. Multi-event timing for topical regimens is still incomplete.
+   - currently good:
+     - `nightly`
+     - `every morning`
+     - `before bed`
+     - `morning and bedtime`
+   - currently weak:
+     - `qam and qhs`
+     - combinations like `reapply every 2 hours while outdoors`
+     - event-driven recurrence such as `after each bowel movement` or `with each dressing change`
+
+8. Current recommended modeling direction for the next pass.
+   - add a `product form` grammar class so cosmetic/topical nouns stop becoming leftovers
+   - add canonical `applicationAmount`
+     - `value?: number`
+     - `unitText: string`
+     - `normalizedUnit?: "pump" | "squeeze" | "applicatorful" | "fingertip_unit" | "ribbon_inch" | "capful" | ...`
+   - keep qualitative phrases like `sparingly` / `thin layer` in advice/additional-instruction
+   - add workflow/event parsing for `after X`, `before X`, `while X`, `leave on`, `rinse`, `reapply`
+
+9. Highest-value probe cases to lock into tests before more parser work.
+   - `apply cream to scalp twice daily`
+   - `use shampoo daily`
+   - `apply moisturizer to face every morning`
+   - `apply sunscreen liberally 15 minutes before sun exposure`
+   - `reapply sunscreen every 2 hours`
+   - `apply 2 pumps to face every morning`
+   - `apply 1 fingertip unit to scalp twice daily`
+   - `insert 1 applicatorful vaginally at bedtime`
+   - `apply 0.5 inch ribbon to eyelid nightly`
+   - `apply hemorrhoid cream after each bowel movement`
+
+2026-04-22 method translation / FHIR standards note
+
+1. `Dosage.method` is the correct public field for administration technique.
+   - keep `route` / `site` / `timing` / `patientInstruction` on `Dosage`
+   - do not invent a public custom `productForm` field on `Dosage`
+
+2. Language localization for `method` should use standard FHIR primitive extensions, not custom JSON fields.
+   - `CodeableConcept.text` -> `_text.extension[url=translation]`
+   - `Coding.display` -> `_display.extension[url=translation]`
+   - Thai formatter should prefer those standard translations first
+
+3. Product form is not a `Dosage` element.
+   - it belongs more naturally on `Medication.doseForm` or `AdministrableProductDefinition.administrableDoseForm`
+   - for this library, product-form cues can still be used internally during parsing/realization, but should not leak as a public custom `Dosage` property
+
+4. Practical rule now:
+   - parser deterministically composes method surface text from verb + product-form cues
+   - public FHIR output carries that on `Dosage.method.text`
+   - Thai text is carried using standard FHIR translation extensions on `method._text`
+   - generic method code translations use `_display` when safe (`Apply`, `Spray`, `Insert`, `Instill`, `Swallow`, `Rinse or wash`)
+
+5. This is the current maintainable compromise.
+   - public/storage path stays FHIR-first
+   - Thai round-trip stops depending purely on formatter-local hardcoded phrase guesses
+   - product-form nuance is preserved when consumers keep normal FHIR `text` + primitive extensions

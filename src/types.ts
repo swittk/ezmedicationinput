@@ -4,12 +4,25 @@ export interface FhirCoding {
   system?: string;
   code?: string;
   display?: string;
+  _display?: FhirPrimitiveElement;
   i18n?: Record<string, string>;
 }
 
 export interface FhirCodeableConcept {
   coding?: FhirCoding[];
   text?: string;
+  _text?: FhirPrimitiveElement;
+}
+
+export interface FhirExtension {
+  url: string;
+  extension?: FhirExtension[];
+  valueCode?: string;
+  valueString?: string;
+}
+
+export interface FhirPrimitiveElement {
+  extension?: FhirExtension[];
 }
 
 export interface FhirQuantity {
@@ -281,9 +294,11 @@ export interface FhirDoseAndRate {
 
 export interface FhirDosage {
   text?: string;
+  patientInstruction?: string;
   timing?: FhirTiming;
   route?: FhirCodeableConcept;
   site?: FhirCodeableConcept;
+  method?: FhirCodeableConcept;
   additionalInstruction?: FhirCodeableConcept[];
   asNeededBoolean?: boolean;
   asNeededFor?: FhirCodeableConcept[];
@@ -727,6 +742,13 @@ export interface CanonicalSiteExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalMethodExpr {
+  text?: string;
+  _text?: FhirPrimitiveElement;
+  coding?: FhirCoding;
+  evidence?: CanonicalEvidence[];
+}
+
 export interface CanonicalScheduleExpr {
   timingCode?: string;
   count?: number;
@@ -774,8 +796,10 @@ export interface CanonicalSigClause {
   dose?: CanonicalDoseExpr;
   route?: CanonicalRouteExpr;
   site?: CanonicalSiteExpr;
+  method?: CanonicalMethodExpr;
   schedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
+  patientInstruction?: string;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];
   leftovers: CanonicalSourceSpan[];
   evidence: CanonicalEvidence[];
@@ -795,6 +819,8 @@ export interface ParseResult {
       route?: RouteCode;
       unit?: string;
       site?: { text?: string; coding?: BodySiteCode };
+      method?: { text?: string; coding?: FhirCoding };
+      patientInstruction?: string;
       prnReason?: { text?: string; coding?: FhirCoding };
       additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
     };
@@ -845,6 +871,8 @@ export interface ParseBatchResult {
       route?: RouteCode;
       unit?: string;
       site?: { text?: string; coding?: BodySiteCode };
+      method?: { text?: string; coding?: FhirCoding };
+      patientInstruction?: string;
       prnReason?: { text?: string; coding?: FhirCoding };
       additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
     };

@@ -1,4 +1,5 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
+import { clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
   CanonicalDoseRange,
@@ -6,6 +7,7 @@ import {
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
+  FhirPrimitiveElement,
   FhirPeriodUnit,
   PrnReasonLookupRequest,
   PrnReasonSuggestion,
@@ -39,6 +41,8 @@ export class ParserState {
   customSiteHints?: Set<string>;
   prnReasonLookupRequest?: PrnReasonLookupRequest;
   prnReasonLookups: PrnReasonLookupDetail[];
+  methodVerb?: string;
+  productFormKey?: string;
   clauses: CanonicalSigClause[];
   private clause: CanonicalSigClause;
 
@@ -114,6 +118,59 @@ export class ParserState {
 
   set routeText(value: string | undefined) {
     this.ensureRoute().text = value;
+  }
+
+  get methodText(): string | undefined {
+    return this.clause.method?.text;
+  }
+
+  set methodText(value: string | undefined) {
+    if (value === undefined) {
+      if (this.clause.method) {
+        delete this.clause.method.text;
+        this.cleanupMethod();
+      }
+      return;
+    }
+    this.ensureMethod().text = value;
+  }
+
+  get methodTextElement(): FhirPrimitiveElement | undefined {
+    return this.clause.method?._text;
+  }
+
+  set methodTextElement(value: FhirPrimitiveElement | undefined) {
+    if (value === undefined) {
+      if (this.clause.method) {
+        delete this.clause.method._text;
+        this.cleanupMethod();
+      }
+      return;
+    }
+    this.ensureMethod()._text = clonePrimitiveElement(value);
+  }
+
+  get methodCoding(): LocalizedCoding | undefined {
+    return this.clause.method?.coding as LocalizedCoding | undefined;
+  }
+
+  set methodCoding(value: LocalizedCoding | undefined) {
+    if (value === undefined) {
+      if (this.clause.method) {
+        delete this.clause.method.coding;
+        this.cleanupMethod();
+      }
+      return;
+    }
+    this.ensureMethod().coding = value?.code
+      ? {
+        code: value.code,
+        display: value.display,
+        system: value.system,
+        _display: clonePrimitiveElement(value._display),
+        i18n: value.i18n
+      }
+      : undefined;
   }
 
   get count(): number | undefined {
@@ -254,6 +311,7 @@ export class ParserState {
         code: value.code,
         display: value.display,
         system: value.system,
+        _display: clonePrimitiveElement(value._display),
         i18n: value.i18n
       }
       : undefined;
@@ -308,6 +366,14 @@ export class ParserState {
     this.clause.additionalInstructions = value;
   }
 
+  get patientInstruction(): string | undefined {
+    return this.clause.patientInstruction;
+  }
+
+  set patientInstruction(value: string | undefined) {
+    this.clause.patientInstruction = value;
+  }
+
   private ensureDose(): NonNullable<CanonicalSigClause["dose"]> {
     if (!this.clause.dose) {
       this.clause.dose = {};
@@ -327,6 +393,13 @@ export class ParserState {
       this.clause.site = {};
     }
     return this.clause.site;
+  }
+
+  private ensureMethod(): NonNullable<CanonicalSigClause["method"]> {
+    if (!this.clause.method) {
+      this.clause.method = {};
+    }
+    return this.clause.method;
   }
 
   private ensureSchedule(): NonNullable<CanonicalSigClause["schedule"]> {
@@ -373,6 +446,21 @@ export class ParserState {
       site.evidence === undefined
     ) {
       delete this.clause.site;
+    }
+  }
+
+  private cleanupMethod(): void {
+    const method = this.clause.method;
+    if (!method) {
+      return;
+    }
+    if (
+      method.text === undefined &&
+      method._text === undefined &&
+      method.coding === undefined &&
+      method.evidence === undefined
+    ) {
+      delete this.clause.method;
     }
   }
 }

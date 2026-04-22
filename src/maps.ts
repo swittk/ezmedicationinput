@@ -821,6 +821,19 @@ const STATIC_UNIT_SYNONYMS: UnitSynonymMap = {
   sprays: "spray",
   drop: "drop",
   drops: "drop",
+  pump: "pump",
+  pumps: "pump",
+  squeeze: "squeeze",
+  squeezes: "squeeze",
+  applicatorful: "applicatorful",
+  applicatorfuls: "applicatorful",
+  capful: "capful",
+  capfuls: "capful",
+  scoop: "scoop",
+  scoops: "scoop",
+  application: "application",
+  applications: "application",
+  ribbon: "ribbon",
   patch: "patch",
   patches: "patch",
   supp: "suppository",
@@ -845,6 +858,32 @@ export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = (() => {
   addMetricUnitSynonyms(map);
   return map;
 })();
+
+export interface ProductFormHint {
+  routeHint?: RouteCode;
+}
+
+export const PRODUCT_FORM_HINTS: Record<string, ProductFormHint> = {
+  cream: { routeHint: RouteCode["Topical route"] },
+  ointment: { routeHint: RouteCode["Topical route"] },
+  gel: { routeHint: RouteCode["Topical route"] },
+  lotion: { routeHint: RouteCode["Topical route"] },
+  serum: { routeHint: RouteCode["Topical route"] },
+  toner: { routeHint: RouteCode["Topical route"] },
+  moisturizer: { routeHint: RouteCode["Topical route"] },
+  shampoo: { routeHint: RouteCode["Topical route"] },
+  sunscreen: { routeHint: RouteCode["Topical route"] },
+  deodorant: { routeHint: RouteCode["Topical route"] },
+  cleanser: { routeHint: RouteCode["Topical route"] },
+  "face wash": { routeHint: RouteCode["Topical route"] },
+  "body wash": { routeHint: RouteCode["Topical route"] },
+  "body lotion": { routeHint: RouteCode["Topical route"] },
+  "lip balm": { routeHint: RouteCode["Topical route"] },
+  "spot treatment": { routeHint: RouteCode["Topical route"] },
+  "makeup remover": { routeHint: RouteCode["Topical route"] },
+  balm: { routeHint: RouteCode["Topical route"] },
+  foam: { routeHint: RouteCode["Topical route"] }
+};
 
 export interface FrequencyDescriptor {
   code?: string;

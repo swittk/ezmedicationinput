@@ -2,6 +2,7 @@ import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
+import { clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
 import {
@@ -245,6 +246,23 @@ export function canonicalToFhir(
     };
   }
 
+  if (clause.method?.text || clause.method?._text || clause.method?.coding?.code) {
+    dosage.method = {
+      text: clause.method?.text,
+      _text: clonePrimitiveElement(clause.method?._text),
+      coding: clause.method?.coding?.code
+        ? [
+          {
+            system: clause.method.coding.system ?? SNOMED_SYSTEM,
+            code: clause.method.coding.code,
+            display: clause.method.coding.display,
+            _display: clonePrimitiveElement(clause.method.coding._display)
+          }
+        ]
+        : undefined
+    };
+  }
+
   if (clause.additionalInstructions?.length) {
     dosage.additionalInstruction = [];
     for (const instruction of clause.additionalInstructions) {
@@ -287,6 +305,9 @@ export function canonicalToFhir(
   if (longText) {
     dosage.text = longText;
   }
+  if (clause.patientInstruction) {
+    dosage.patientInstruction = clause.patientInstruction;
+  }
 
   return dosage;
 }
@@ -325,6 +346,22 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
         }
         : undefined,
       source: "text"
+    };
+  }
+
+  const methodCoding = selectFirstCodingWithCode(dosage.method);
+  if (dosage.method?.text || dosage.method?._text || methodCoding?.code) {
+    clause.method = {
+      text: dosage.method?.text,
+      _text: clonePrimitiveElement(dosage.method?._text),
+      coding: methodCoding?.code
+        ? {
+          code: methodCoding.code,
+          display: methodCoding.display,
+          system: methodCoding.system,
+          _display: clonePrimitiveElement(methodCoding._display)
+        }
+        : undefined
     };
   }
 
@@ -417,6 +454,10 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     }
   }
 
+  if (dosage.patientInstruction) {
+    clause.patientInstruction = dosage.patientInstruction;
+  }
+
   return clause;
 }
 
@@ -434,6 +475,9 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.periodUnit = dosage.timing?.repeat?.periodUnit;
   state.routeText = dosage.route?.text;
   state.siteText = dosage.site?.text;
+  state.methodText = dosage.method?.text;
+  state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
+  state.patientInstruction = dosage.patientInstruction;
   state.asNeeded = dosage.asNeededBoolean;
   state.asNeededReason = dosage.asNeededFor?.[0]?.text;
 
@@ -470,6 +514,16 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     state.siteSource = "text";
   } else if (dosage.site?.text) {
     state.siteSource = "text";
+  }
+
+  const methodCoding = selectFirstCodingWithCode(dosage.method);
+  if (methodCoding?.code) {
+    state.methodCoding = {
+      code: methodCoding.code,
+      display: methodCoding.display,
+      system: methodCoding.system,
+      _display: clonePrimitiveElement(methodCoding._display)
+    };
   }
 
   const reasonCoding = selectFirstCodingWithCode(dosage.asNeededFor?.[0]);

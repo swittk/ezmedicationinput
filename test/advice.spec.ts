@@ -85,6 +85,9 @@ describe("additional instruction rule inventory", () => {
 
     const swish = parseAdditionalInstructions("swish and swallow", { start: 0, end: 17 });
     expect(swish[0]?.coding?.code).toBe("421298005");
+
+    const slowly = parseAdditionalInstructions("drink slowly", { start: 0, end: 12 });
+    expect(slowly[0]?.coding?.code).toBe("419443000");
   });
 
   it("rebuilds template frames from coded advice definitions", () => {

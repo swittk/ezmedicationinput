@@ -1,4 +1,5 @@
 import { findAdditionalInstructionDefinitionByCoding } from "./advice";
+import { getPrimitiveTranslation } from "./fhir-translations";
 import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
   findPrnReasonDefinitionByCoding,
@@ -215,6 +216,8 @@ const TH_TIMES_PER_DAY: Record<number, string> = {
   3: "วันละ 3 ครั้ง",
   4: "วันละ 4 ครั้ง"
 };
+
+const SLOWLY_QUALIFIER_CODE = "419443000";
 
 export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   eye: "ตา",
@@ -472,6 +475,166 @@ const THAI_ROUTE_GRAMMAR: Partial<Record<RouteCode, ThaiRouteGrammar>> = {
   }
 };
 
+const THAI_METHOD_TEXT_VERBS: Record<string, string> = {
+  Apply: "ทา",
+  "Apply sunscreen": "ทากันแดด",
+  Dab: "แต้ม",
+  Drink: "รับประทาน",
+  Insert: "สอด",
+  Instill: "หยอด",
+  Massage: "นวด",
+  Reapply: "ทาซ้ำ",
+  "Reapply sunscreen": "ทากันแดดซ้ำ",
+  Rub: "ถู",
+  Spray: "พ่น",
+  Shampoo: "สระ",
+  Swallow: "รับประทาน",
+  Take: "รับประทาน",
+  "Use shampoo": "สระ",
+  Wash: "ล้าง"
+};
+
+const THAI_IMPLIED_OBJECT_VERBS = new Set([
+  "ทา",
+  "ทาซ้ำ",
+  "แต้ม",
+  "ถู",
+  "นวด",
+  "พ่น",
+  "หยอด",
+  "สอด",
+  "ล้าง",
+  "สระ"
+]);
+
+const THAI_SUPPRESSIBLE_ROUTE_VERBS = new Set([
+  "ทา",
+  "ทากันแดด",
+  "ทาซ้ำ",
+  "ทากันแดดซ้ำ",
+  "แต้ม",
+  "ถู",
+  "นวด",
+  "ล้าง",
+  "สระ"
+]);
+
+const THAI_SITE_FIRST_VERBS = new Set([
+  "ทา",
+  "ทากันแดด",
+  "ทาซ้ำ",
+  "ทากันแดดซ้ำ",
+  "แต้ม",
+  "ถู",
+  "นวด",
+  "ล้าง",
+  "สระ",
+  "พ่น"
+]);
+
+function resolveThaiMethodVerb(
+  clause: CanonicalSigClause,
+  grammar: ThaiRouteGrammar
+): string {
+  const translatedText = getPrimitiveTranslation(clause.method?._text, "th");
+  if (translatedText) {
+    return translatedText;
+  }
+
+  const translatedDisplay = getPrimitiveTranslation(
+    clause.method?.coding?._display,
+    "th"
+  );
+  if (translatedDisplay) {
+    return translatedDisplay;
+  }
+
+  const methodText = clause.method?.text?.trim();
+  if (methodText) {
+    const overridden = THAI_METHOD_TEXT_VERBS[methodText];
+    if (overridden) {
+      return overridden;
+    }
+  }
+
+  return grammar.verb;
+}
+
+function joinThaiVerbAndBody(verb: string, body: string): string {
+  const trimmedBody = body.trim();
+  if (!trimmedBody) {
+    return verb;
+  }
+  switch (verb) {
+    case "พ่น":
+      if (trimmedBody.startsWith("เข้า")) {
+        return `${verb}${trimmedBody}`;
+      }
+      break;
+    case "ทาซ้ำ":
+    case "ทากันแดดซ้ำ":
+    case "สระ":
+      if (
+        trimmedBody.startsWith("ทุก") ||
+        trimmedBody.startsWith("วัน") ||
+        trimmedBody.startsWith("ก่อน") ||
+        trimmedBody.startsWith("หลัง")
+      ) {
+        return `${verb}${trimmedBody}`;
+      }
+      break;
+    default:
+      break;
+  }
+  return `${verb} ${trimmedBody}`;
+}
+
+function shouldUseGenericMedicationObjectThai(
+  clause: CanonicalSigClause,
+  verb: string,
+  explicitDosePart: string | undefined
+): boolean {
+  if (explicitDosePart) {
+    return false;
+  }
+  if (THAI_IMPLIED_OBJECT_VERBS.has(verb)) {
+    return false;
+  }
+  switch (clause.route?.code) {
+    case RouteCode["Topical route"]:
+    case RouteCode["Transdermal route"]:
+    case RouteCode["Nasal route"]:
+    case RouteCode["Ophthalmic route"]:
+    case RouteCode["Otic route"]:
+    case RouteCode["Per rectum"]:
+    case RouteCode["Per vagina"]:
+      return false;
+    default:
+      return true;
+  }
+}
+
+function shouldSuppressRoutePhraseThai(
+  clause: CanonicalSigClause,
+  verb: string,
+  hasSite: boolean,
+  explicitDosePart: string | undefined
+): boolean {
+  if (hasSite || explicitDosePart) {
+    return false;
+  }
+  if (!THAI_SUPPRESSIBLE_ROUTE_VERBS.has(verb)) {
+    return false;
+  }
+  switch (clause.route?.code) {
+    case RouteCode["Topical route"]:
+    case RouteCode["Transdermal route"]:
+      return true;
+    default:
+      return false;
+  }
+}
+
 function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
   return clause.schedule ?? {};
 }
@@ -525,6 +688,12 @@ function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | 
   }
   if (normalized.includes("intravenous") || normalized === "iv") {
     return THAI_ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
+  }
+  if (normalized.includes("rectal") || normalized.includes("rectum")) {
+    return THAI_ROUTE_GRAMMAR[RouteCode["Per rectum"]];
+  }
+  if (normalized.includes("vagin")) {
+    return THAI_ROUTE_GRAMMAR[RouteCode["Per vagina"]];
   }
   if (normalized.includes("nasal")) {
     return THAI_ROUTE_GRAMMAR[RouteCode["Nasal route"]];
@@ -947,9 +1116,25 @@ function buildRoutePhraseThai(
 
 function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): string | undefined {
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
+  const lower = text?.toLowerCase();
+  if (
+    clause.route?.code === RouteCode["Per rectum"] &&
+    (lower === "rectum" || lower === "rectal")
+  ) {
+    return undefined;
+  }
+  if (
+    clause.route?.code === RouteCode["Per vagina"] &&
+    (lower === "vagina" || lower === "vaginal")
+  ) {
+    return undefined;
+  }
   const translated = translateSiteThai(text, clause.site?.coding?.code);
   if (!translated) {
     return undefined;
+  }
+  if (clause.route?.code === RouteCode["Nasal route"]) {
+    return `เข้า${translated}`;
   }
   const preposition = grammar.sitePreposition ?? "ที่";
   const separator = /^[\u0E00-\u0E7F]/.test(translated) ? "" : " ";
@@ -1072,9 +1257,24 @@ function formatLongThai(
 ): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
-  const dosePart = formatDoseThaiLong(clause.dose) ?? "ยา";
+  const verb = resolveThaiMethodVerb(clause, grammar);
+  const explicitDosePart = formatDoseThaiLong(clause.dose);
   const sitePart = formatSiteThai(clause, grammar);
-  const routePart = buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
+  const dosePart = shouldUseGenericMedicationObjectThai(
+    clause,
+    verb,
+    explicitDosePart
+  )
+    ? explicitDosePart ?? "ยา"
+    : explicitDosePart;
+  const routePart = shouldSuppressRoutePhraseThai(
+    clause,
+    verb,
+    Boolean(sitePart),
+    explicitDosePart
+  )
+    ? undefined
+    : buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
   const frequencyPart =
     describeFrequencyThai(schedule) ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
@@ -1102,9 +1302,20 @@ function formatLongThai(
     schedule.count !== undefined ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง` : undefined;
   const asNeeded = formatAsNeededThai(clause);
 
-  const segments: string[] = [dosePart];
+  const segments: string[] = [];
+  if (dosePart) {
+    segments.push(dosePart);
+  }
   if (routePart) {
     segments.push(routePart);
+  }
+  const siteFirst =
+    Boolean(sitePart) &&
+    THAI_SITE_FIRST_VERBS.has(verb) &&
+    explicitDosePart === undefined &&
+    routePart === undefined;
+  if (siteFirst && sitePart) {
+    segments.push(sitePart);
   }
   if (timing.frequency) {
     segments.push(timing.frequency);
@@ -1121,19 +1332,30 @@ function formatLongThai(
   if (asNeeded) {
     segments.push(asNeeded);
   }
-  if (sitePart) {
+  if (!siteFirst && sitePart) {
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const instructionPhrases: string[] = [];
   const instructionText = formatAdditionalInstructionsThai(clause);
-  if (!body) {
-    if (!instructionText) {
-      return `${grammar.verb}.`;
-    }
-    return `${grammar.verb}. ${instructionText}`.trim();
+  if (instructionText) {
+    instructionPhrases.push(instructionText);
   }
-  const baseSentence = `${grammar.verb} ${body}.`;
-  return instructionText ? `${baseSentence} ${instructionText}` : baseSentence;
+  const patientInstruction = formatPatientInstructionSentence(
+    clause.patientInstruction
+  );
+  if (patientInstruction) {
+    instructionPhrases.push(patientInstruction);
+  }
+  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
+  if (!body) {
+    if (!trailingInstructionText) {
+      return `${verb}.`;
+    }
+    return `${verb}. ${trailingInstructionText}`.trim();
+  }
+  const baseSentence = `${joinThaiVerbAndBody(verb, body)}.`;
+  return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
 }
 
 function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | undefined {
@@ -1142,7 +1364,14 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
     return undefined;
   }
   const phrases: string[] = [];
+  const grammar = resolveRouteGrammarThai(clause);
+  const verb = resolveThaiMethodVerb(clause, grammar);
   for (const instruction of instructions) {
+    if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
+      const contextual = verb ? `${verb}ช้าๆ` : "ช้าๆ";
+      phrases.push(contextual);
+      continue;
+    }
     let text = instruction.text ?? instruction.coding?.display;
     if (instruction.coding?.code) {
       const definition = findAdditionalInstructionDefinitionByCoding(
@@ -1163,6 +1392,15 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
     return undefined;
   }
   return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
+}
+
+function formatPatientInstructionSentence(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const sentence = /^[.!?]$/.test(trimmed.slice(-1)) ? trimmed : `${trimmed}.`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
 function stripTrailingZero(value: number): string {

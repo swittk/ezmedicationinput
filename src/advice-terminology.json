@@ -42,10 +42,18 @@
     { "surface": "thin film", "lemma": "thin film", "partOfSpeech": "noun", "semanticClass": "amount_style" },
     { "surface": "sparingly", "lemma": "sparingly", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "liberally", "lemma": "liberally", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
+    { "surface": "slowly", "lemma": "slowly", "partOfSpeech": "modifier", "semanticClass": "manner_style" },
     { "surface": "pea sized amount", "lemma": "pea sized amount", "partOfSpeech": "noun", "semanticClass": "amount_style" },
     { "surface": "pea-sized amount", "lemma": "pea sized amount", "partOfSpeech": "noun", "semanticClass": "amount_style" },
     { "surface": "fingertip unit", "lemma": "fingertip unit", "partOfSpeech": "noun", "semanticClass": "amount_style" },
-    { "surface": "fingertip units", "lemma": "fingertip unit", "partOfSpeech": "noun", "semanticClass": "amount_style" }
+    { "surface": "fingertip units", "lemma": "fingertip unit", "partOfSpeech": "noun", "semanticClass": "amount_style" },
+    { "surface": "inject", "lemma": "inject", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "infuse", "lemma": "infuse", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "instill", "lemma": "instill", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "insert", "lemma": "insert", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "spray", "lemma": "spray", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "administer", "lemma": "administer", "partOfSpeech": "verb", "semanticClass": "administration" },
+    { "surface": "give", "lemma": "give", "partOfSpeech": "verb", "semanticClass": "administration" }
   ],
   "concepts": [
     { "surface": "food", "lemma": "food", "semanticClass": "meal_state", "conceptId": "food" },
@@ -79,6 +87,7 @@
     { "surface": "shampooing", "lemma": "shampooing", "semanticClass": "activity", "conceptId": "shampooing" },
     { "surface": "dressing", "lemma": "dressing", "semanticClass": "material", "conceptId": "dressing" },
     { "surface": "affected area", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },
-    { "surface": "affected areas", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" }
+    { "surface": "affected areas", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },
+    { "surface": "slowly", "lemma": "slowly", "semanticClass": "manner_style", "conceptId": "slowly" }
   ]
 }

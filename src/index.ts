@@ -676,6 +676,14 @@ function buildNormalizedMetaFromClause(
           coding: cloneBodySiteCoding(clause.site?.coding)
         }
         : undefined,
+    method:
+      clause.method?.text || clause.method?.coding?.code
+        ? {
+          text: clause.method?.text,
+          coding: cloneCoding(clause.method?.coding)
+        }
+        : undefined,
+    patientInstruction: clause.patientInstruction,
     prnReason:
       clause.prn?.reason?.text || clause.prn?.reason?.coding?.code
         ? {

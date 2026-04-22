@@ -889,6 +889,8 @@ function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgume
       return AdviceArgumentRole.Site;
     case "amount_style":
       return AdviceArgumentRole.Amount;
+    case "manner_style":
+      return AdviceArgumentRole.Free;
     case "duration":
       return AdviceArgumentRole.Duration;
     case "time":
@@ -1486,9 +1488,13 @@ function tryParseStyleInstruction(
     styleText = normalized.slice("apply ".length);
   }
   const lexeme = findNormalizedLexeme(styleText);
-  if (!lexeme || lexeme.semanticClass !== "amount_style") {
+  if (
+    !lexeme ||
+    (lexeme.semanticClass !== "amount_style" && lexeme.semanticClass !== "manner_style")
+  ) {
     return undefined;
   }
+  const concept = findContainedConcept(styleText);
   return [
     createFrame(
       sourceText,
@@ -1496,7 +1502,14 @@ function tryParseStyleInstruction(
       createDefaultForce(sequenceCount, sequenceIndex, context),
       context.defaultPredicate,
       "administration",
-      [createArgument(AdviceArgumentRole.Amount, styleText, styleText)],
+      [
+        createArgument(
+          mapSemanticClassToRole(lexeme.semanticClass),
+          styleText,
+          styleText,
+          concept?.conceptId
+        )
+      ],
       sequenceIndex
     )
   ];
