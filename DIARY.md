@@ -1148,3 +1148,47 @@ Desired behavior:
 4. Verification:
    - parser tests now assert `boundsDuration` for fixed course windows
    - FHIR import tests cover both `boundsDuration` and `boundsRange`
+
+## 2026-04-22 Planned staged-regimen work
+
+1. Scope judgment:
+   - supporting true staged regimens like
+     `Q15min x4, then Q1H x4, then Q2H for 7 days, then QID for 1 month`
+     is not a tiny patch
+   - but it is not a hopeless rewrite either if kept to a staged-regimen layer
+     above the current multi-dosage batch model
+
+2. Clean semantic target:
+   - concurrent / continuous multi-dose regimens:
+     - multiple `Dosage` entries with the same `sequence`
+     - example: thyroid-style different doses on different weekdays
+   - sequential / staged regimens:
+     - multiple `Dosage` entries with increasing `sequence`
+     - optional top-level R6-like `dosageDetails` export derived from the same
+       internal regimen model
+
+3. Architecture plan:
+   - keep current item-level `Dosage` output
+   - add an internal regimen grouping layer above `ParseBatchResult.items`
+   - parse `then` / explicit sequencing into stage boundaries
+   - mark concurrent grouped items separately from sequential stage transitions
+   - serialize:
+     - R5 path: `Dosage.sequence`
+     - optional top-level R6-ish `dosageDetails`
+
+4. Calculator impact:
+   - existing single-dosage calculators (`calculateTotalUnits`, `nextDueDoses`)
+     do not need to be replaced
+   - item-level calculation can stay as-is
+   - new regimen-aware calculation should sit above them:
+     - same-sequence items = concurrent windows, sum results
+     - increasing-sequence items = chained windows, each stage starts after the
+       previous stage ends
+   - this means staged-regimen support is a new orchestration layer, not a
+     total rewrite of the current schedule engine
+
+5. Recommended implementation order:
+   - phase 1: internal regimen grouping metadata + `Dosage.sequence`
+   - phase 2: parser support for explicit `then` stage boundaries
+   - phase 3: regimen-aware total-units / due-dose helpers
+   - phase 4: optional top-level `dosageDetails` serializer

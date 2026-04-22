@@ -939,7 +939,7 @@ describe("parseSig core scenarios", () => {
     });
   });
 
-  it("parses singular time daily cadence", () => {
+  it("parses plural times-per-day cadence", () => {
     const result = parseSig("apply to right arm 3 times per day");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 3,
@@ -2948,6 +2948,39 @@ describe("internationalization", () => {
       );
 
       expect(fromFhir.longText).toBe("ทา บริเวณขมับขวา วันละ 2 ครั้ง.");
+    });
+
+    it("suppresses duplicate Thai rectal and vaginal site phrases when coding already implies the route", () => {
+      const rectal = fromFhirDosage(
+        {
+          route: {
+            text: "rectal",
+            coding: [{ system: "http://snomed.info/sct", code: "37161004", display: "Per rectum" }]
+          },
+          site: {
+            text: "ไส้ตรง",
+            coding: [{ system: "http://snomed.info/sct", code: "34402009", display: "Rectum" }]
+          }
+        },
+        { locale: "th" }
+      );
+      expect(rectal.longText).toBe("สอด ทางทวารหนัก.");
+      expect(rectal.longText).not.toContain("ไส้ตรง");
+
+      const vaginal = fromFhirDosage(
+        {
+          route: {
+            text: "vaginal",
+            coding: [{ system: "http://snomed.info/sct", code: "16857009", display: "Per vagina" }]
+          },
+          site: {
+            text: "ช่องคลอด",
+            coding: [{ system: "http://snomed.info/sct", code: "76784001", display: "Vagina" }]
+          }
+        },
+        { locale: "th" }
+      );
+      expect(vaginal.longText).toBe("สอด ทางช่องคลอด.");
     });
 
     it("translates eye site names in Thai", () => {

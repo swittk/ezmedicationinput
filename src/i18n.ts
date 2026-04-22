@@ -1136,19 +1136,24 @@ function buildRoutePhraseThai(
 function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): string | undefined {
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   const lower = text?.toLowerCase();
+  const codingCode = clause.site?.coding?.code;
+  const isRectumSite =
+    codingCode === "34402009" || lower === "rectum" || lower === "rectal";
+  const isVaginaSite =
+    codingCode === "76784001" || lower === "vagina" || lower === "vaginal";
   if (
     clause.route?.code === RouteCode["Per rectum"] &&
-    (lower === "rectum" || lower === "rectal")
+    isRectumSite
   ) {
     return undefined;
   }
   if (
     clause.route?.code === RouteCode["Per vagina"] &&
-    (lower === "vagina" || lower === "vaginal")
+    isVaginaSite
   ) {
     return undefined;
   }
-  const translated = translateSiteThai(text, clause.site?.coding?.code);
+  const translated = translateSiteThai(text, codingCode);
   if (!translated) {
     return undefined;
   }
@@ -1438,13 +1443,10 @@ function formatLongThai(
     instructionPhrases.push(patientInstruction);
   }
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  if (!body) {
-    if (!trailingInstructionText) {
-      return `${verb}.`;
-    }
-    return `${verb}. ${trailingInstructionText}`.trim();
-  }
   const baseSentence = `${joinThaiVerbAndBody(verb, body)}.`;
+  if (!body) {
+    return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
+  }
   return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
 }
 
