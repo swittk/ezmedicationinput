@@ -1043,22 +1043,33 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
-  const defaults = {
-    short: formatShort(clause),
-    long: formatLong(clause, options)
-  } as const;
+  let shortDefault: string | undefined;
+  let longDefault: string | undefined;
+
+  const formatDefault = (target: "short" | "long") => {
+    switch (target) {
+      case "short":
+        if (shortDefault === undefined) {
+          shortDefault = formatShort(clause);
+        }
+        return shortDefault;
+      case "long":
+        if (longDefault === undefined) {
+          longDefault = formatLong(clause, options);
+        }
+        return longDefault;
+    }
+  };
 
   if (!localization) {
-    return defaults[style];
+    return formatDefault(style);
   }
-
-  const formatDefault = (target: "short" | "long") => defaults[target];
 
   if (style === "short" && localization.formatShort) {
     const context: SigShortContext = {
       style: "short",
       clause,
-      defaultText: defaults.short,
+      defaultText: formatDefault("short"),
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       formatDefault
@@ -1070,7 +1081,7 @@ export function formatCanonicalClause(
     const context: SigLongContext = {
       style: "long",
       clause,
-      defaultText: defaults.long,
+      defaultText: formatDefault("long"),
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       formatDefault
@@ -1078,7 +1089,7 @@ export function formatCanonicalClause(
     return localization.formatLong(context);
   }
 
-  return defaults[style];
+  return formatDefault(style);
 }
 
 export function formatInternal(
