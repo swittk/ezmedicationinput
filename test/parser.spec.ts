@@ -1262,6 +1262,46 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toContain("Apply sparingly.");
   });
 
+  it("codes eye-specific itch reasons instead of falling back to generic skin itch", () => {
+    const result = parseSig("1 drop to eye prn eye itch");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+    expect(result.fhir.site?.coding?.[0]?.code).toBe("81745001");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "74776002",
+      display: "Itching of eye"
+    });
+  });
+
+  it("codes Thai eye-itch reasons through localized PRN aliases", () => {
+    const result = parseSig("1 drop to eye prn คันตา", { locale: "th" });
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "74776002",
+      display: "Itching of eye"
+    });
+    expect(result.longText).toContain("คันตา");
+  });
+
+  it("codes lesion-specific itch reasons when the symptom text says lesion itch", () => {
+    const result = parseSig("apply to lesion prn lesion itch");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "445329008",
+      display: "Itching of lesion of skin"
+    });
+  });
+
+  it("falls back to generic itching when wound itch has no cleaner pre-coordinated concept", () => {
+    const result = parseSig("apply to wound prn wound itch");
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("wound itch");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "418363000",
+      display: "Itching of skin"
+    });
+  });
+
   it("parses 1x2 subcutaneous", () => {
     const result = parseSig("1x2 subcutaneous");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1 });

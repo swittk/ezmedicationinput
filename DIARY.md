@@ -555,3 +555,17 @@ Desired behavior:
    - oral `prn pain after food`
    - topical `prn คัน` with sparing advice
    - topical `prn เจ็บ` with a free-text lesion site
+
+### 2026-04-22 Itch Subtype PRN Coding
+
+1. Checked the local SNOMED RF2 snapshot for itch subtypes instead of guessing.
+   - `Itching of eye` exists and is usable (`74776002`)
+   - `Itching of lesion of skin` exists and is usable (`445329008`)
+   - no clean pre-coordinated `itching of wound` concept was found in the snapshot we ship against
+
+2. Expanded the default PRN reason dictionary accordingly.
+   - `eye itch`, `itchy eye`, `itchy eyes`, and Thai aliases like `คันตา` now resolve to `Itching of eye`
+   - lesion-itch variants now resolve to `Itching of lesion of skin`
+   - wound-itch variants intentionally fall back to generic `Itching of skin` while preserving the original text
+
+3. Added end-to-end parser tests for these subtype cases.

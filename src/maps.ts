@@ -1670,7 +1670,59 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       }
     },
     {
-      names: ["itch", "itching", "itchy"],
+      names: [
+        "eye itch",
+        "itchy eye",
+        "itchy eyes",
+        "eye itching",
+        "itching eye",
+        "itching eyes",
+        "itching of eye",
+        "itching of eyes"
+      ],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "74776002",
+          display: "Itching of eye"
+        },
+        text: "Eye itching",
+        aliases: ["คันตา", "ตาคัน"],
+        i18n: { th: "คันตา" }
+      }
+    },
+    {
+      names: [
+        "lesion itch",
+        "itchy lesion",
+        "itching lesion",
+        "lesion itching",
+        "itching of lesion",
+        "itching of skin lesion",
+        "skin lesion itch"
+      ],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: "445329008",
+          display: "Itching of lesion of skin"
+        },
+        text: "Lesion itching",
+        aliases: ["คันรอยโรค", "คันที่รอยโรค"],
+        i18n: { th: "คันที่รอยโรค" }
+      }
+    },
+    {
+      names: [
+        "itch",
+        "itching",
+        "itchy",
+        "wound itch",
+        "itchy wound",
+        "wound itching",
+        "itching wound",
+        "itching of wound"
+      ],
       definition: {
         coding: {
           system: SNOMED_SYSTEM,
@@ -1678,6 +1730,7 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
           display: "Itching of skin"
         },
         text: "Itching",
+        aliases: ["คันแผล", "แผลคัน"],
         i18n: { th: "คัน" }
       }
     },
