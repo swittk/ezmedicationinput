@@ -691,6 +691,12 @@ function buildNormalizedMetaFromClause(
           coding: cloneCoding(clause.prn?.reason?.coding)
         }
         : undefined,
+    prnReasons: clause.prn?.reasons?.length
+      ? clause.prn.reasons.map((reason) => ({
+        text: reason.text,
+        coding: cloneCoding(reason.coding)
+      }))
+      : undefined,
     additionalInstructions
   };
 }

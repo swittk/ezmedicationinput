@@ -1,6 +1,7 @@
 import { buildCanonicalSigClauses } from "./ir";
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
+import { getPreferredCanonicalPrnReasonText } from "./prn";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -795,7 +796,7 @@ function formatShort(clause: CanonicalSigClause): string {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   if (clause.prn?.enabled) {
-    const reason = clause.prn.reason?.text ?? clause.prn.reason?.coding?.display;
+    const reason = getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons);
     if (reason) {
       parts.push(`PRN ${reason}`);
     } else {
@@ -845,7 +846,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     schedule.count !== undefined
       ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
       : undefined;
-  const reason = clause.prn?.reason?.text ?? clause.prn?.reason?.coding?.display;
+  const reason = getPreferredCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons);
   const asNeededPart = clause.prn?.enabled ? (reason ? `as needed for ${reason}` : "as needed") : undefined;
 
   const segments: string[] = [];

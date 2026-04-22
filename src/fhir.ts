@@ -5,6 +5,7 @@ import {
 import { clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
+import { joinCanonicalPrnReasonTexts } from "./prn";
 import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
@@ -283,21 +284,25 @@ export function canonicalToFhir(
 
   if (clause.prn?.enabled) {
     dosage.asNeededBoolean = true;
-    if (clause.prn.reason?.text || clause.prn.reason?.coding?.code) {
-      const concept: FhirCodeableConcept = {};
-      if (clause.prn.reason?.text) {
-        concept.text = clause.prn.reason.text;
+    const reasons = clause.prn.reasons?.length ? clause.prn.reasons : clause.prn.reason ? [clause.prn.reason] : [];
+    if (reasons.length) {
+      dosage.asNeededFor = [];
+      for (const reason of reasons) {
+        const concept: FhirCodeableConcept = {};
+        if (reason.text) {
+          concept.text = reason.text;
+        }
+        if (reason.coding?.code) {
+          concept.coding = [
+            {
+              system: reason.coding.system ?? SNOMED_SYSTEM,
+              code: reason.coding.code,
+              display: reason.coding.display
+            }
+          ];
+        }
+        dosage.asNeededFor.push(concept);
       }
-      if (clause.prn.reason?.coding?.code) {
-        concept.coding = [
-          {
-            system: clause.prn.reason.coding.system ?? SNOMED_SYSTEM,
-            code: clause.prn.reason.coding.code,
-            display: clause.prn.reason.coding.display
-          }
-        ];
-      }
-      dosage.asNeededFor = [concept];
     }
   }
 
@@ -409,23 +414,32 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     };
   }
 
-  const reasonCoding = dosage.asNeededFor?.[0]?.coding?.find((code) => Boolean(code.code));
-  if (dosage.asNeededBoolean || dosage.asNeededFor?.[0]?.text || reasonCoding?.code) {
-    clause.prn = {
-      enabled: Boolean(dosage.asNeededBoolean || dosage.asNeededFor?.[0]?.text || reasonCoding?.code),
-      reason:
-        dosage.asNeededFor?.[0]?.text || reasonCoding?.code
+  const prnReasons = dosage.asNeededFor?.length
+    ? dosage.asNeededFor.map((concept) => {
+      const coding = concept.coding?.find((code) => Boolean(code.code));
+      return {
+        text: concept.text,
+        coding: coding?.code
           ? {
-            text: dosage.asNeededFor?.[0]?.text,
-            coding: reasonCoding?.code
-              ? {
-                code: reasonCoding.code,
-                display: reasonCoding.display,
-                system: reasonCoding.system
-              }
-              : undefined
+            code: coding.code,
+            display: coding.display,
+            system: coding.system
           }
           : undefined
+      };
+    })
+    : undefined;
+  const primaryReason = prnReasons?.[0];
+  if (dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code) {
+    clause.prn = {
+      enabled: Boolean(dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code),
+      reason:
+        prnReasons?.length === 1
+          ? primaryReason
+          : prnReasons?.length
+            ? { text: joinCanonicalPrnReasonTexts(prnReasons) }
+            : undefined,
+      reasons: prnReasons?.length ? prnReasons : undefined
     };
   }
 
@@ -479,7 +493,24 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
   state.asNeeded = dosage.asNeededBoolean;
-  state.asNeededReason = dosage.asNeededFor?.[0]?.text;
+  if (dosage.asNeededFor?.length) {
+    const prnReasons = dosage.asNeededFor.map((concept) => {
+      const coding = selectFirstCodingWithCode(concept);
+      return {
+        text: concept.text,
+        coding: coding?.code
+          ? {
+            code: coding.code,
+            display: coding.display,
+            system: coding.system,
+            _display: clonePrimitiveElement(coding._display)
+          }
+          : undefined
+      };
+    });
+    state.asNeededReasons = prnReasons;
+    state.asNeededReason = joinCanonicalPrnReasonTexts(prnReasons);
+  }
 
   if (dosage.timing?.repeat?.dayOfWeek) {
     state.dayOfWeek.push(...dosage.timing.repeat.dayOfWeek);
@@ -526,18 +557,20 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     };
   }
 
-  const reasonCoding = selectFirstCodingWithCode(dosage.asNeededFor?.[0]);
-  if (reasonCoding?.code) {
-    const defaultDef = findPrnReasonDefinitionByCoding(
-      reasonCoding.system ?? SNOMED_SYSTEM,
-      reasonCoding.code
-    );
-    state.asNeededReasonCoding = {
-      code: reasonCoding.code,
-      display: reasonCoding.display,
-      system: reasonCoding.system,
-      i18n: defaultDef?.i18n
-    };
+  if (dosage.asNeededFor?.length === 1) {
+    const reasonCoding = selectFirstCodingWithCode(dosage.asNeededFor[0]);
+    if (reasonCoding?.code) {
+      const defaultDef = findPrnReasonDefinitionByCoding(
+        reasonCoding.system ?? SNOMED_SYSTEM,
+        reasonCoding.code
+      );
+      state.asNeededReasonCoding = {
+        code: reasonCoding.code,
+        display: reasonCoding.display,
+        system: reasonCoding.system,
+        i18n: defaultDef?.i18n
+      };
+    }
   }
 
   if (dosage.additionalInstruction?.length) {

@@ -5,6 +5,7 @@ import {
   findPrnReasonDefinitionByCoding,
   normalizeBodySiteKey
 } from "./maps";
+import { getPreferredCanonicalPrnReasonText } from "./prn";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -1189,7 +1190,10 @@ function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
     );
     translation = definition?.i18n?.th;
   }
-  const reason = translation ?? clause.prn.reason?.text ?? coding?.display;
+  const reason =
+    translation ??
+    getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons, "หรือ") ??
+    coding?.display;
   if (reason) {
     return `ใช้เมื่อจำเป็นสำหรับ ${reason}`;
   }

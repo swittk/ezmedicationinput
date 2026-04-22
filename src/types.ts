@@ -773,9 +773,15 @@ export interface CanonicalScheduleExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalPrnReasonExpr {
+  text?: string;
+  coding?: FhirCoding;
+}
+
 export interface CanonicalPrnExpr {
   enabled: boolean;
-  reason?: { text?: string; coding?: FhirCoding };
+  reason?: CanonicalPrnReasonExpr;
+  reasons?: CanonicalPrnReasonExpr[];
   evidence?: CanonicalEvidence[];
 }
 
@@ -832,6 +838,7 @@ export interface ParseResult {
       method?: { text?: string; coding?: FhirCoding };
       patientInstruction?: string;
       prnReason?: { text?: string; coding?: FhirCoding };
+      prnReasons?: Array<{ text?: string; coding?: FhirCoding }>;
       additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
     };
     canonical: {

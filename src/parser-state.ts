@@ -3,6 +3,7 @@ import { clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
   CanonicalDoseRange,
+  CanonicalPrnReasonExpr,
   CanonicalSigClause,
   EventTiming,
   FhirCoding,
@@ -287,6 +288,40 @@ export class ParserState {
     prn.reason.text = value;
   }
 
+  get asNeededReasons(): CanonicalPrnReasonExpr[] | undefined {
+    return this.clause.prn?.reasons;
+  }
+
+  set asNeededReasons(value: CanonicalPrnReasonExpr[] | undefined) {
+    if (!value || !value.length) {
+      if (this.clause.prn?.reasons) {
+        delete this.clause.prn.reasons;
+        this.cleanupPrn();
+      }
+      return;
+    }
+    const prn = this.clause.prn ?? (this.clause.prn = { enabled: true });
+    if (prn.enabled === undefined) {
+      prn.enabled = true;
+    }
+    const reasons: CanonicalPrnReasonExpr[] = [];
+    for (const reason of value) {
+      reasons.push({
+        text: reason.text,
+        coding: reason.coding
+          ? {
+            code: reason.coding.code,
+            display: reason.coding.display,
+            system: reason.coding.system,
+            _display: clonePrimitiveElement(reason.coding._display),
+            i18n: reason.coding.i18n
+          }
+          : undefined
+      });
+    }
+    prn.reasons = reasons;
+  }
+
   get asNeededReasonCoding(): LocalizedCoding | undefined {
     return this.clause.prn?.reason?.coding as LocalizedCoding | undefined;
   }
@@ -428,7 +463,10 @@ export class ParserState {
     ) {
       delete prn.reason;
     }
-    if (prn.enabled === undefined && prn.reason === undefined) {
+    if (prn.reasons?.length === 0) {
+      delete prn.reasons;
+    }
+    if (prn.enabled === undefined && prn.reason === undefined && prn.reasons === undefined) {
       delete this.clause.prn;
     }
   }

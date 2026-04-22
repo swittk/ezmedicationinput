@@ -1346,6 +1346,75 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("splits coordinated PRN reasons into multiple coded asNeededFor concepts", () => {
+    const result = parseSig("1 tab po prn pain or fever", { context: TAB_CONTEXT });
+
+    expect(result.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
+    expect(result.fhir.asNeededFor).toEqual([
+      {
+        text: "pain",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "22253000",
+            display: "Pain"
+          }
+        ]
+      },
+      {
+        text: "fever",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "386661006",
+            display: "Fever"
+          }
+        ]
+      }
+    ]);
+    expect(result.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("pain or fever");
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toEqual([
+      expect.objectContaining({
+        text: "pain",
+        coding: expect.objectContaining({ code: "22253000" })
+      }),
+      expect.objectContaining({
+        text: "fever",
+        coding: expect.objectContaining({ code: "386661006" })
+      })
+    ]);
+    expect(result.meta.normalized.prnReason).toEqual({
+      text: "pain or fever",
+      coding: undefined
+    });
+    expect(result.meta.normalized.prnReasons).toEqual([
+      {
+        text: "pain",
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "22253000",
+          display: "Pain"
+        }
+      },
+      {
+        text: "fever",
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "386661006",
+          display: "Fever"
+        }
+      }
+    ]);
+  });
+
+  it("renders slash- and comma-coordinated PRN reasons naturally once split", () => {
+    const slash = parseSig("1 tab po prn pain/fever", { context: TAB_CONTEXT });
+    expect(slash.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
+
+    const comma = parseSig("1 tab po prn pain, fever", { context: TAB_CONTEXT });
+    expect(comma.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
+  });
+
   it("parses 1x2 subcutaneous", () => {
     const result = parseSig("1x2 subcutaneous");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1 });

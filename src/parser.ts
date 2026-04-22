@@ -2242,7 +2242,10 @@ function finalizeCanonicalClause(internal: ParserState): void {
     if (!clause.prn.reason?.text && !clause.prn.reason?.coding) {
       delete clause.prn.reason;
     }
-    if (!clause.prn.enabled && !clause.prn.reason) {
+    if (clause.prn.reasons?.length === 0) {
+      delete clause.prn.reasons;
+    }
+    if (!clause.prn.enabled && !clause.prn.reason && !clause.prn.reasons) {
       delete clause.prn;
     }
   }
@@ -6328,6 +6331,170 @@ function applyPrnReasonDefinition(
   }
 }
 
+function createPrnReasonLookupRequestFromText(
+  internal: ParserState,
+  text: string
+): PrnReasonLookupRequest {
+  const normalized = text.toLowerCase();
+  const canonical = normalizePrnReasonKey(text);
+  return {
+    originalText: text,
+    text,
+    normalized,
+    canonical: canonical ?? "",
+    isProbe: false,
+    inputText: internal.input,
+    sourceText: text,
+    range: undefined
+  };
+}
+
+function resolvePrnReasonDefinitionSyncForRequest(
+  internal: ParserState,
+  request: PrnReasonLookupRequest,
+  options?: ParseOptions
+): PrnReasonDefinition | undefined {
+  const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  if (selection) {
+    return selection;
+  }
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  if (customDefinition) {
+    return customDefinition;
+  }
+  const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
+  if (inferredDefinition) {
+    return inferredDefinition;
+  }
+  for (const resolver of toArray(options?.prnReasonResolvers)) {
+    const result = resolver(request);
+    if (isPromise(result)) {
+      throw new Error(
+        "PRN reason resolver returned a Promise; use parseSigAsync for asynchronous PRN reason resolution."
+      );
+    }
+    if (result) {
+      return result;
+    }
+  }
+  return request.canonical ? DEFAULT_PRN_REASON_DEFINITIONS[request.canonical] : undefined;
+}
+
+async function resolvePrnReasonDefinitionAsyncForRequest(
+  internal: ParserState,
+  request: PrnReasonLookupRequest,
+  options?: ParseOptions
+): Promise<PrnReasonDefinition | undefined> {
+  const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  if (selection) {
+    return selection;
+  }
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  if (customDefinition) {
+    return customDefinition;
+  }
+  const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
+  if (inferredDefinition) {
+    return inferredDefinition;
+  }
+  for (const resolver of toArray(options?.prnReasonResolvers)) {
+    const result = await resolver(request);
+    if (result) {
+      return result;
+    }
+  }
+  return request.canonical ? DEFAULT_PRN_REASON_DEFINITIONS[request.canonical] : undefined;
+}
+
+function splitCoordinatedPrnReasonText(text: string): string[] | undefined {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const patterns = [
+    /\s+and\/or\s+/i,
+    /\s+or\s+/i,
+    /\s+and\s+/i,
+    /\s*\/\s*/,
+    /\s*,\s*/
+  ];
+  for (const pattern of patterns) {
+    const parts = trimmed.split(pattern).map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      return parts;
+    }
+  }
+  return undefined;
+}
+
+function maybeApplyCoordinatedPrnReasonsSync(
+  internal: ParserState,
+  options?: ParseOptions
+): void {
+  const text = internal.asNeededReason;
+  if (!text || internal.asNeededReasonCoding) {
+    return;
+  }
+  const parts = splitCoordinatedPrnReasonText(text);
+  if (!parts || parts.length < 2) {
+    return;
+  }
+  const reasons = [];
+  for (const part of parts) {
+    const request = createPrnReasonLookupRequestFromText(internal, part);
+    const definition = resolvePrnReasonDefinitionSyncForRequest(internal, request, options);
+    if (!definition) {
+      return;
+    }
+    reasons.push({
+      text: part,
+      coding: definition.coding?.code
+        ? {
+          code: definition.coding.code,
+          display: definition.coding.display,
+          system: definition.coding.system ?? SNOMED_SYSTEM,
+          i18n: definition.i18n
+        }
+        : undefined
+    });
+  }
+  internal.asNeededReasons = reasons;
+}
+
+async function maybeApplyCoordinatedPrnReasonsAsync(
+  internal: ParserState,
+  options?: ParseOptions
+): Promise<void> {
+  const text = internal.asNeededReason;
+  if (!text || internal.asNeededReasonCoding) {
+    return;
+  }
+  const parts = splitCoordinatedPrnReasonText(text);
+  if (!parts || parts.length < 2) {
+    return;
+  }
+  const reasons = [];
+  for (const part of parts) {
+    const request = createPrnReasonLookupRequestFromText(internal, part);
+    const definition = await resolvePrnReasonDefinitionAsyncForRequest(internal, request, options);
+    if (!definition) {
+      return;
+    }
+    reasons.push({
+      text: part,
+      coding: definition.coding?.code
+        ? {
+          code: definition.coding.code,
+          display: definition.coding.display,
+          system: definition.coding.system ?? SNOMED_SYSTEM,
+          i18n: definition.i18n
+        }
+        : undefined
+    });
+  }
+  internal.asNeededReasons = reasons;
+}
+
 function definitionToPrnSuggestion(
   definition: PrnReasonDefinition
 ): PrnReasonSuggestion {
@@ -6469,6 +6636,7 @@ function runPrnReasonResolutionSync(
   } else {
     internal.asNeededReasonCoding = undefined;
   }
+  maybeApplyCoordinatedPrnReasonsSync(internal, options);
 
   const needsSuggestions = request.isProbe || !resolution;
   if (!needsSuggestions) {
@@ -6547,6 +6715,7 @@ async function runPrnReasonResolutionAsync(
   } else {
     internal.asNeededReasonCoding = undefined;
   }
+  await maybeApplyCoordinatedPrnReasonsAsync(internal, options);
 
   const needsSuggestions = request.isProbe || !resolution;
   if (!needsSuggestions) {

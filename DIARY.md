@@ -791,3 +791,35 @@ Desired behavior:
    - `npm run build`
    - `npm test`
    - green at `518` tests
+
+2026-04-22 Coordinated PRN reasons
+
+1. Surface wording like:
+   - `Take 1 tablet orally as needed for pain or fever.`
+   looked okay, but the structure underneath was wrong.
+   - parser only stored one PRN blob: `pain or fever`
+   - FHIR only emitted one `asNeededFor`
+
+2. Structural fix:
+   - widened canonical PRN shape to allow `prn.reasons[]` while keeping `prn.reason` as the original display phrase
+   - added deterministic coordinated-reason expansion after PRN resolution
+   - expansion only happens when every coordinated part resolves cleanly as a real PRN reason
+   - public/output path stays FHIR-first:
+     - `asNeededFor[0] = pain`
+     - `asNeededFor[1] = fever`
+
+3. Realization rule:
+   - keep natural human wording from the original phrase when it is already clean
+   - if the original combined phrase uses raw separators like `/` or `,`, prefer normalized coordinated realization from `prn.reasons[]`
+   - examples now all render as:
+     - `Take 1 tablet orally as needed for pain or fever.`
+   - covered inputs:
+     - `pain or fever`
+     - `pain/fever`
+     - `pain, fever`
+
+4. Verification:
+   - `nvm use 22`
+   - `npm run build`
+   - `npm test`
+   - green at `520` tests
