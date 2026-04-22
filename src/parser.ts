@@ -65,6 +65,7 @@ import {
   getPrimarySiteMeaningCandidate,
   getRouteMeaning,
   getTimingAbbreviationMeaning,
+  hasPrnMeaning,
   hasTokenWordClass,
   isApplicationVerbWord,
   isCountKeywordWord,
@@ -210,6 +211,8 @@ const OCULAR_SITE_WORDS = new Set([
   "oculus"
 ]);
 
+const STANDALONE_OCULAR_SITE_ABBREVIATIONS = new Set(["os", "ou", "re", "le"]);
+
 const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "early morning": EventTiming["Early Morning"],
   "late morning": EventTiming["Late Morning"],
@@ -223,6 +226,8 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "before sleep": EventTiming["Before Sleep"],
   "upon waking": EventTiming.Wake
 };
+
+const GENERIC_ITCH_REASON_TERMS = new Set(["itch", "itching", "itchy", "คัน"]);
 
 const DAY_RANGE_PART_PATTERN = Object.keys(DAY_OF_WEEK_TOKENS)
   .sort((a, b) => b.length - a.length)
@@ -594,6 +599,63 @@ function hasSpelledOcularSiteBefore(tokens: Token[], index: number): boolean {
   return false;
 }
 
+function hasStandaloneOcularTailContext(
+  tokens: Token[],
+  consumed: Set<number>,
+  index: number
+): boolean {
+  let sawTailCue = false;
+  let inPrnTail = false;
+  for (let i = index + 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) {
+      continue;
+    }
+    if (consumed.has(token.index)) {
+      if (hasPrnMeaning(token) || normalizeTokenLower(token) === "as") {
+        sawTailCue = true;
+        inPrnTail = true;
+      }
+      continue;
+    }
+    const normalized = normalizeTokenLower(token);
+    const previousToken = i > index + 1 ? tokens[i - 1] : undefined;
+    const previousNormalized = previousToken ? normalizeTokenLower(previousToken) : "";
+    const pairedTiming =
+      (previousNormalized && COMBO_EVENT_TIMINGS[`${previousNormalized} ${normalized}`]) ||
+      (previousNormalized && EVENT_TIMING_TOKENS[`${previousNormalized} ${normalized}`]);
+    if (!normalized || /^[;:.,()/-]+$/.test(normalized)) {
+      continue;
+    }
+    if (inPrnTail) {
+      continue;
+    }
+    if (
+      pairedTiming ||
+      (previousNormalized &&
+        BEFORE_AFTER_TOKENS.has(previousNormalized) &&
+        Boolean(MEAL_KEYWORDS[normalized])) ||
+      isTimingAnchorOrPrefix(tokens, i) ||
+      getTimingAbbreviationMeaning(token) ||
+      getEventTimingMeaning(token) ||
+      getDayOfWeekMeaning(token) ||
+      WORD_FREQUENCIES[normalized] ||
+      GENERIC_CONNECTOR_TOKENS.has(normalized) ||
+      isMealContextConnectorWord(normalized)
+    ) {
+      sawTailCue = true;
+      continue;
+    }
+    if (hasPrnMeaning(token) || PRN_INTRO_TOKENS.has(normalized)) {
+      sawTailCue = true;
+      inPrnTail = true;
+      continue;
+    }
+    return false;
+  }
+  return sawTailCue;
+}
+
 function shouldTreatAbbreviatedSiteCandidateAsSite(
   internal: ParserState,
   tokens: Token[],
@@ -637,6 +699,15 @@ function shouldTreatAbbreviatedSiteCandidateAsSite(
     return false;
   }
   if (!ophthalmicContext) {
+    if (
+      normalizedSelf !== "od" &&
+      STANDALONE_OCULAR_SITE_ABBREVIATIONS.has(normalizedSelf) &&
+      isOphthalmicSiteCandidate(siteCandidate) &&
+      index === 0 &&
+      hasStandaloneOcularTailContext(tokens, internal.consumed, index)
+    ) {
+      return true;
+    }
     const hasOtherActiveTokens = tokens.some(
       (token, tokenIndex) =>
         tokenIndex !== index && !internal.consumed.has(token.index)
@@ -5361,6 +5432,44 @@ function lookupPrnReasonDefinition(
   return undefined;
 }
 
+function lookupDefaultPrnReasonDefinition(
+  canonical: string
+): PrnReasonDefinition | undefined {
+  const normalized = normalizePrnReasonKey(canonical);
+  return normalized ? DEFAULT_PRN_REASON_DEFINITIONS[normalized] : undefined;
+}
+
+function inferSiteSpecificPrnReasonDefinition(
+  internal: ParserState,
+  request: PrnReasonLookupRequest
+): PrnReasonDefinition | undefined {
+  const normalizedRequest = normalizePrnReasonKey(request.text);
+  if (!normalizedRequest || !GENERIC_ITCH_REASON_TERMS.has(normalizedRequest)) {
+    return undefined;
+  }
+
+  const normalizedSiteText = normalizeBodySiteKey(internal.siteText ?? "");
+  const siteCodingDisplay = internal.siteCoding?.display;
+  const normalizedSiteCodingDisplay = siteCodingDisplay
+    ? normalizeBodySiteKey(siteCodingDisplay)
+    : "";
+  const isOcularSite =
+    (internal.routeCode !== undefined && OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) ||
+    normalizedSiteText.includes("eye") ||
+    normalizedSiteCodingDisplay.includes("eye");
+  if (isOcularSite) {
+    return lookupDefaultPrnReasonDefinition("eye itch");
+  }
+
+  const isLesionSite =
+    normalizedSiteText.includes("lesion") || normalizedSiteCodingDisplay.includes("lesion");
+  if (isLesionSite) {
+    return lookupDefaultPrnReasonDefinition("lesion itch");
+  }
+
+  return undefined;
+}
+
 function pickPrnReasonSelection(
   selections: PrnReasonSelection | PrnReasonSelection[] | undefined,
   request: PrnReasonLookupRequest
@@ -5538,6 +5647,7 @@ function runPrnReasonResolutionSync(
   const canonical = request.canonical;
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 
   if (!resolution) {
@@ -5556,6 +5666,9 @@ function runPrnReasonResolutionSync(
   }
 
   const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  if (!resolution && inferredDefinition) {
+    resolution = inferredDefinition;
+  }
   if (!resolution && defaultDefinition) {
     resolution = defaultDefinition;
   }
@@ -5577,6 +5690,9 @@ function runPrnReasonResolutionSync(
   }
   if (customDefinition) {
     addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(customDefinition));
+  }
+  if (inferredDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(inferredDefinition));
   }
   if (defaultDefinition) {
     addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(defaultDefinition));
@@ -5614,6 +5730,7 @@ async function runPrnReasonResolutionAsync(
   const canonical = request.canonical;
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 
   if (!resolution) {
@@ -5627,6 +5744,9 @@ async function runPrnReasonResolutionAsync(
   }
 
   const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  if (!resolution && inferredDefinition) {
+    resolution = inferredDefinition;
+  }
   if (!resolution && defaultDefinition) {
     resolution = defaultDefinition;
   }
@@ -5648,6 +5768,9 @@ async function runPrnReasonResolutionAsync(
   }
   if (customDefinition) {
     addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(customDefinition));
+  }
+  if (inferredDefinition) {
+    addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(inferredDefinition));
   }
   if (defaultDefinition) {
     addReasonSuggestionToMap(suggestionMap, definitionToPrnSuggestion(defaultDefinition));

@@ -1273,6 +1273,15 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("upgrades generic itch reasons to eye-specific coding when the parsed site is ocular", () => {
+    const result = parseSig("1 drop to eye prn itch");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "74776002",
+      display: "Itching of eye"
+    });
+  });
+
   it("codes Thai eye-itch reasons through localized PRN aliases", () => {
     const result = parseSig("1 drop to eye prn คันตา", { locale: "th" });
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
@@ -1281,6 +1290,15 @@ describe("parseSig core scenarios", () => {
       display: "Itching of eye"
     });
     expect(result.longText).toContain("คันตา");
+  });
+
+  it("upgrades generic itch reasons to lesion-specific coding when the parsed site is a lesion", () => {
+    const result = parseSig("apply to lesion prn itch");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "445329008",
+      display: "Itching of lesion of skin"
+    });
   });
 
   it("codes lesion-specific itch reasons when the symptom text says lesion itch", () => {
@@ -2457,6 +2475,24 @@ describe("ocular and injection scenarios", () => {
     const result = parseSig("1 drop OU QID hs");
     expect(result.longText).toBe(
       "Instill 1 drop four times daily and at bedtime in both eyes."
+    );
+  });
+
+  it("treats standalone OU before bedtime PRN as an ocular clause opener", () => {
+    const result = parseSig("ou before bed prn itch");
+    expect(result.fhir.route?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: SNOMEDCTRouteCodes["Ophthalmic route"],
+      display: "Ophthalmic route"
+    });
+    expect(result.fhir.site?.text).toBe("both eyes");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "74776002",
+      display: "Itching of eye"
+    });
+    expect(result.longText).toBe(
+      "Instill the medication at bedtime as needed for itch in both eyes."
     );
   });
 
