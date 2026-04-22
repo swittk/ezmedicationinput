@@ -1,0 +1,367 @@
+{
+  "rules": [
+    {
+      "id": "with-after-food",
+      "definition": {
+        "code": "311504000",
+        "display": "With or after food",
+        "text": "Take with or after food",
+        "thai": "รับประทานพร้อมหรือหลังอาหาร"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "with",
+          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "relations": ["with", "after"],
+          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
+        }
+      }
+    },
+    {
+      "id": "before-food",
+      "definition": {
+        "code": "311501008",
+        "display": "Half to one hour before food",
+        "text": "Take before food",
+        "thai": "รับประทานก่อนอาหาร"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "before",
+          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "relations": ["before"],
+          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
+        }
+      }
+    },
+    {
+      "id": "empty-stomach",
+      "definition": {
+        "code": "717154004",
+        "display": "Take on an empty stomach (qualifier value)",
+        "text": "Take on an empty stomach",
+        "thai": "รับประทานขณะท้องว่าง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "on",
+          "args": [{ "role": "meal_state", "text": "empty stomach", "conceptId": "empty_stomach" }]
+        }
+      ],
+      "matcher": {
+        "argConcept": { "conceptIds": ["empty_stomach"], "role": "meal_state" }
+      }
+    },
+    {
+      "id": "with-water",
+      "definition": {
+        "code": "419303009",
+        "display": "With plenty of water",
+        "text": "Take with plenty of water",
+        "thai": "รับประทานพร้อมน้ำดื่มจำนวนมาก"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "with",
+          "args": [{ "role": "substance", "text": "water", "conceptId": "water" }]
+        }
+      ],
+      "matcher": {
+        "anyOf": [
+          {
+            "frame": {
+              "relations": ["with"],
+              "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["drink"],
+              "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dissolve-with-water",
+      "definition": {
+        "code": "417995008",
+        "display": "Dissolve or mix with water before taking",
+        "text": "Dissolve or mix with water before taking",
+        "thai": "ละลายหรือผสมน้ำก่อนรับประทาน"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "dissolve", "semanticClass": "prepare" },
+          "relation": "with",
+          "args": [{ "role": "substance", "text": "water", "conceptId": "water" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": ["dissolve", "mix"],
+          "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+        }
+      }
+    },
+    {
+      "id": "avoid-alcohol",
+      "definition": {
+        "code": "419822006",
+        "display": "Warning. Avoid alcoholic drink (qualifier value)",
+        "text": "Avoid alcoholic drinks",
+        "thai": "หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
+          "args": [{ "role": "substance", "text": "alcohol", "conceptId": "alcohol" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": ["avoid", "drink"],
+          "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
+        }
+      }
+    },
+    {
+      "id": "drowsiness-drive",
+      "definition": {
+        "code": "418954008",
+        "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)",
+        "text": "May cause drowsiness; do not drive if affected",
+        "thai": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "cause", "semanticClass": "effect" },
+          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+        },
+        {
+          "force": "warning",
+          "polarity": "negate",
+          "predicate": { "lemma": "drive", "semanticClass": "activity" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "allOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["cause"],
+              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["drive"],
+              "polarity": "negate"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "drowsiness-drive-alcohol",
+      "definition": {
+        "code": "418914006",
+        "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
+        "text": "May cause drowsiness; avoid driving or alcohol",
+        "thai": "อาจทำให้ง่วงซึม; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "cause", "semanticClass": "effect" },
+          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+        },
+        {
+          "force": "warning",
+          "polarity": "negate",
+          "predicate": { "lemma": "drive", "semanticClass": "activity" },
+          "args": []
+        },
+        {
+          "force": "warning",
+          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
+          "args": [{ "role": "substance", "text": "alcohol", "conceptId": "alcohol" }]
+        }
+      ],
+      "matcher": {
+        "allOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["cause"],
+              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["drive"],
+              "polarity": "negate"
+            }
+          },
+          {
+            "argConcept": {
+              "conceptIds": ["alcohol"],
+              "role": "substance"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "next-day-drowsiness",
+      "definition": {
+        "code": "418071006",
+        "display": "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
+        "text": "May cause next-day drowsiness; avoid driving or alcohol",
+        "thai": "อาจทำให้ง่วงซึมในวันถัดมา; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "cause", "semanticClass": "effect" },
+          "args": [
+            { "role": "object", "text": "drowsiness", "conceptId": "drowsiness" },
+            { "role": "time", "text": "next day", "conceptId": "next_day" }
+          ]
+        }
+      ],
+      "matcher": {
+        "allOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["cause"],
+              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+            }
+          },
+          {
+            "argConcept": {
+              "conceptIds": ["next_day"],
+              "role": "time"
+            }
+          },
+          {
+            "argConcept": {
+              "conceptIds": ["alcohol"],
+              "role": "substance"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "avoid-sunlight",
+      "definition": {
+        "code": "418521000",
+        "display": "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)",
+        "text": "Avoid sunlight or sun lamps",
+        "thai": "หลีกเลี่ยงแสงแดดหรือหลอดไฟแสงยูวี"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
+          "args": [{ "role": "object", "text": "sunlight", "conceptId": "sunlight" }]
+        }
+      ],
+      "matcher": {
+        "argConcept": { "conceptIds": ["sunlight", "sun_lamps"] }
+      }
+    },
+    {
+      "id": "swallow-whole",
+      "definition": {
+        "code": "418693002",
+        "display": "Swallowed whole, not chewed (qualifier value)",
+        "text": "Swallow whole; do not crush or chew",
+        "thai": "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "polarity": "negate",
+          "predicate": { "lemma": "crush", "semanticClass": "manipulate" },
+          "args": []
+        },
+        {
+          "force": "instruction",
+          "polarity": "negate",
+          "predicate": { "lemma": "chew", "semanticClass": "manipulate" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "anyOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["crush"],
+              "polarity": "negate"
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["chew"],
+              "polarity": "negate"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "chew",
+      "definition": {
+        "code": "418991002",
+        "display": "Sucked or chewed (qualifier value)",
+        "text": "Suck or chew before swallowing",
+        "thai": "เคี้ยวหรืออมให้ละลายก่อนกลืน"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "chew", "semanticClass": "manipulate" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "allOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["chew"]
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "predicateLemmas": ["chew"],
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

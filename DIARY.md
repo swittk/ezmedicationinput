@@ -496,3 +496,23 @@ Desired behavior:
 4. Chose not to add Chevrotain at this stage.
    - researched it as the obvious JS grammar toolkit candidate
    - rejected it for now because this repo already has a lexer, wants a small runtime footprint, and the local recursive-descent grammar is enough for the current clause language without adding a new runtime/parser dependency
+
+### 2026-04-22 Advice Rule DSL
+
+1. Moved coded additional-instruction semantics out of handwritten TS matcher closures.
+   - added `src/advice-rules.json` as the declarative rule inventory
+   - `src/advice.ts` now maps JSON rule data into typed matcher trees and evaluates them generically
+
+2. Reduced concept-specific phrase branches in the advice parser.
+   - drowsiness/next-day detection now uses concept ids from terminology data instead of literal phrase checks
+   - negated activity detection such as `no driving` now resolves through verb lexemes instead of hardcoded string pairs
+   - added lemma coverage like `driving` and `causes` into `src/advice-terminology.json`
+
+3. Locked the data-driven rule layer with direct advice-module tests.
+   - added `test/advice.spec.ts`
+   - covers JSON-backed coding resolution, negated substance advice, and frame reconstruction from coded definitions
+
+4. This addresses the `AUDIT_ADDITIONAL_INST_2` complaint about rule semantics living in TS.
+   - advice collection is still leftover-group based in the main parser
+   - bilingual terminology breadth is still limited
+   - but the coded advice inventory is now maintainable as data instead of expanding matcher code

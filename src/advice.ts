@@ -1,4 +1,5 @@
 import adviceTerminologySource from "./advice-terminology.json";
+import adviceRulesSource from "./advice-rules.json";
 import { lexInput } from "./lexer/lex";
 import {
   AdditionalInstructionDefinition,
@@ -51,11 +52,128 @@ interface AdviceFrameTemplate {
   args: AdviceFrameTemplateArgument[];
 }
 
+interface AdviceDefinitionSource {
+  code: string;
+  display: string;
+  text: string;
+  thai: string;
+}
+
+interface AdviceFrameTemplateArgumentSource {
+  role: string;
+  text: string;
+  conceptId?: string;
+}
+
+interface AdviceFrameTemplateSource {
+  force: string;
+  polarity?: string;
+  predicate: {
+    lemma: string;
+    semanticClass?: string;
+  };
+  relation?: string;
+  args: AdviceFrameTemplateArgumentSource[];
+}
+
+interface AdviceArgConceptMatcher {
+  conceptIds: string[];
+  role?: AdviceArgumentRole;
+}
+
+interface AdviceFrameMatcher {
+  predicateLemmas?: string[];
+  predicateSemanticClasses?: string[];
+  relations?: AdviceRelation[];
+  force?: AdviceForce;
+  polarity?: AdvicePolarity;
+  argConcepts?: AdviceArgConceptMatcher[];
+}
+
+interface AdviceFrameMatcherSource {
+  predicateLemmas?: string[];
+  predicateSemanticClasses?: string[];
+  relations?: string[];
+  force?: string;
+  polarity?: string;
+  argConcepts?: AdviceArgConceptMatcherSource[];
+}
+
+interface AdviceArgConceptMatcherSource {
+  conceptIds: string[];
+  role?: string;
+}
+
+interface AdviceMatcherAllOf {
+  allOf: AdviceMatcher[];
+}
+
+interface AdviceMatcherAnyOf {
+  anyOf: AdviceMatcher[];
+}
+
+interface AdviceMatcherNot {
+  not: AdviceMatcher;
+}
+
+interface AdviceMatcherFrame {
+  frame: AdviceFrameMatcher;
+}
+
+interface AdviceMatcherArgConcept {
+  argConcept: AdviceArgConceptMatcher;
+}
+
+type AdviceMatcher =
+  | AdviceMatcherAllOf
+  | AdviceMatcherAnyOf
+  | AdviceMatcherNot
+  | AdviceMatcherFrame
+  | AdviceMatcherArgConcept;
+
+interface AdviceMatcherAllOfSource {
+  allOf: AdviceMatcherSource[];
+}
+
+interface AdviceMatcherAnyOfSource {
+  anyOf: AdviceMatcherSource[];
+}
+
+interface AdviceMatcherNotSource {
+  not: AdviceMatcherSource;
+}
+
+interface AdviceMatcherFrameSource {
+  frame: AdviceFrameMatcherSource;
+}
+
+interface AdviceMatcherArgConceptSource {
+  argConcept: AdviceArgConceptMatcherSource;
+}
+
+type AdviceMatcherSource =
+  | AdviceMatcherAllOfSource
+  | AdviceMatcherAnyOfSource
+  | AdviceMatcherNotSource
+  | AdviceMatcherFrameSource
+  | AdviceMatcherArgConceptSource;
+
+interface AdviceCodingRuleSource {
+  id: string;
+  definition: AdviceDefinitionSource;
+  frames: AdviceFrameTemplateSource[];
+  matcher: AdviceMatcherSource;
+}
+
 interface AdviceCodingRule {
   id: string;
   definition: AdditionalInstructionDefinition;
   frames: AdviceFrameTemplate[];
-  matches: (frames: AdviceFrame[]) => boolean;
+  matcher: AdviceMatcher;
+}
+
+interface AdviceRulesSource {
+  rules: AdviceCodingRuleSource[];
 }
 
 export interface ParsedAdditionalInstruction {
@@ -70,18 +188,13 @@ export interface AdviceParseContext {
   allowFreeTextFallback?: boolean;
 }
 
-interface AdviceTermMatch<T> {
-  entry: T;
-  start: number;
-  end: number;
-}
-
 interface AdviceSegment {
   text: string;
   range: TextRange;
 }
 
 const ADVICE_TERMINOLOGY: AdviceTerminologySource = adviceTerminologySource;
+const ADVICE_RULES: AdviceRulesSource = adviceRulesSource;
 
 const DEFAULT_INSTRUCTION_CONTEXT: AdviceParseContext = {
   defaultPredicate: "take",
@@ -113,6 +226,7 @@ const DURATION_UNIT_WORDS = new Set([
 
 const LEXEMES_BY_SURFACE: Record<string, AdviceLexemeEntry[]> = Object.create(null);
 const CONCEPTS_BY_SURFACE: Record<string, AdviceConceptEntry[]> = Object.create(null);
+const CONCEPT_KEYS_BY_ID: Record<string, string[]> = Object.create(null);
 const LEXEME_LIST: AdviceLexemeEntry[] = [];
 const CONCEPT_LIST: AdviceConceptEntry[] = [];
 let MAX_LEXEME_WORDS = 1;
@@ -162,6 +276,15 @@ function pushConcept(surfaceKey: string, entry: AdviceConceptEntry): void {
   CONCEPTS_BY_SURFACE[surfaceKey] = [entry];
 }
 
+function pushConceptKeyById(conceptId: string, surfaceKey: string): void {
+  const bucket = CONCEPT_KEYS_BY_ID[conceptId];
+  if (bucket) {
+    bucket.push(surfaceKey);
+    return;
+  }
+  CONCEPT_KEYS_BY_ID[conceptId] = [surfaceKey];
+}
+
 for (const entry of ADVICE_TERMINOLOGY.lexemes) {
   const surfaceKey = normalizeAdditionalInstructionKey(entry.surface);
   if (!surfaceKey) {
@@ -182,6 +305,7 @@ for (const entry of ADVICE_TERMINOLOGY.concepts) {
   }
   CONCEPT_LIST.push(entry);
   pushConcept(surfaceKey, entry);
+  pushConceptKeyById(entry.conceptId, surfaceKey);
   const wordCount = countWords(surfaceKey);
   if (wordCount > MAX_CONCEPT_WORDS) {
     MAX_CONCEPT_WORDS = wordCount;
@@ -214,384 +338,313 @@ function cleanFreeText(value: string): string {
   return collapseWhitespace(value.slice(start, end));
 }
 
-function createDefinition(
-  code: string,
-  display: string,
-  text: string,
-  thai: string
-): AdditionalInstructionDefinition {
+function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalInstructionDefinition {
   return {
     coding: {
       system: SNOMED_SYSTEM,
-      code,
-      display
+      code: source.code,
+      display: source.display
     },
-    text,
-    i18n: { th: thai }
+    text: source.text,
+    i18n: { th: source.thai }
   };
 }
 
-function hasArgConcept(
-  frame: AdviceFrame,
-  conceptId: string,
-  role?: AdviceArgumentRole
-): boolean {
+function mapAdviceForce(value: string): AdviceForce {
+  switch (value) {
+    case AdviceForce.Instruction:
+      return AdviceForce.Instruction;
+    case AdviceForce.Warning:
+      return AdviceForce.Warning;
+    case AdviceForce.Caution:
+      return AdviceForce.Caution;
+    case AdviceForce.Sequence:
+      return AdviceForce.Sequence;
+    default:
+      throw new Error(`Unsupported advice force: ${value}`);
+  }
+}
+
+function mapAdvicePolarity(value: string | undefined): AdvicePolarity | undefined {
+  if (!value) {
+    return undefined;
+  }
+  switch (value) {
+    case AdvicePolarity.Affirm:
+      return AdvicePolarity.Affirm;
+    case AdvicePolarity.Negate:
+      return AdvicePolarity.Negate;
+    default:
+      throw new Error(`Unsupported advice polarity: ${value}`);
+  }
+}
+
+function mapAdviceRelation(value: string | undefined): AdviceRelation | undefined {
+  if (!value) {
+    return undefined;
+  }
+  switch (value) {
+    case AdviceRelation.With:
+      return AdviceRelation.With;
+    case AdviceRelation.Without:
+      return AdviceRelation.Without;
+    case AdviceRelation.Before:
+      return AdviceRelation.Before;
+    case AdviceRelation.After:
+      return AdviceRelation.After;
+    case AdviceRelation.During:
+      return AdviceRelation.During;
+    case AdviceRelation.Then:
+      return AdviceRelation.Then;
+    case AdviceRelation.Until:
+      return AdviceRelation.Until;
+    case AdviceRelation.For:
+      return AdviceRelation.For;
+    case AdviceRelation.In:
+      return AdviceRelation.In;
+    case AdviceRelation.On:
+      return AdviceRelation.On;
+    default:
+      throw new Error(`Unsupported advice relation: ${value}`);
+  }
+}
+
+function mapAdviceArgumentRole(value: string): AdviceArgumentRole {
+  switch (value) {
+    case AdviceArgumentRole.Theme:
+      return AdviceArgumentRole.Theme;
+    case AdviceArgumentRole.Object:
+      return AdviceArgumentRole.Object;
+    case AdviceArgumentRole.Substance:
+      return AdviceArgumentRole.Substance;
+    case AdviceArgumentRole.MealState:
+      return AdviceArgumentRole.MealState;
+    case AdviceArgumentRole.Activity:
+      return AdviceArgumentRole.Activity;
+    case AdviceArgumentRole.Material:
+      return AdviceArgumentRole.Material;
+    case AdviceArgumentRole.Site:
+      return AdviceArgumentRole.Site;
+    case AdviceArgumentRole.Amount:
+      return AdviceArgumentRole.Amount;
+    case AdviceArgumentRole.Duration:
+      return AdviceArgumentRole.Duration;
+    case AdviceArgumentRole.Time:
+      return AdviceArgumentRole.Time;
+    case AdviceArgumentRole.Free:
+      return AdviceArgumentRole.Free;
+    default:
+      throw new Error(`Unsupported advice argument role: ${value}`);
+  }
+}
+
+function buildAdviceFrameTemplateArgument(
+  source: AdviceFrameTemplateArgumentSource
+): AdviceFrameTemplateArgument {
+  return {
+    role: mapAdviceArgumentRole(source.role),
+    text: source.text,
+    conceptId: source.conceptId
+  };
+}
+
+function buildAdviceFrameTemplate(source: AdviceFrameTemplateSource): AdviceFrameTemplate {
+  const args: AdviceFrameTemplateArgument[] = [];
+  for (const arg of source.args) {
+    args.push(buildAdviceFrameTemplateArgument(arg));
+  }
+  return {
+    force: mapAdviceForce(source.force),
+    polarity: mapAdvicePolarity(source.polarity),
+    predicate: {
+      lemma: source.predicate.lemma,
+      semanticClass: source.predicate.semanticClass
+    },
+    relation: mapAdviceRelation(source.relation),
+    args
+  };
+}
+
+function buildAdviceArgConceptMatcher(source: AdviceArgConceptMatcherSource): AdviceArgConceptMatcher {
+  return {
+    conceptIds: source.conceptIds.slice(),
+    role: source.role ? mapAdviceArgumentRole(source.role) : undefined
+  };
+}
+
+function buildAdviceFrameMatcher(source: AdviceFrameMatcherSource): AdviceFrameMatcher {
+  const argConcepts: AdviceArgConceptMatcher[] = [];
+  if (source.argConcepts) {
+    for (const argConcept of source.argConcepts) {
+      argConcepts.push(buildAdviceArgConceptMatcher(argConcept));
+    }
+  }
+  const relations: AdviceRelation[] = [];
+  if (source.relations) {
+    for (const relation of source.relations) {
+      const mapped = mapAdviceRelation(relation);
+      if (mapped) {
+        relations.push(mapped);
+      }
+    }
+  }
+  return {
+    predicateLemmas: source.predicateLemmas ? source.predicateLemmas.slice() : undefined,
+    predicateSemanticClasses: source.predicateSemanticClasses
+      ? source.predicateSemanticClasses.slice()
+      : undefined,
+    relations: relations.length ? relations : undefined,
+    force: source.force ? mapAdviceForce(source.force) : undefined,
+    polarity: mapAdvicePolarity(source.polarity),
+    argConcepts: argConcepts.length ? argConcepts : undefined
+  };
+}
+
+function buildAdviceMatcher(source: AdviceMatcherSource): AdviceMatcher {
+  if ("allOf" in source) {
+    const allOf: AdviceMatcher[] = [];
+    for (const item of source.allOf) {
+      allOf.push(buildAdviceMatcher(item));
+    }
+    return { allOf };
+  }
+  if ("anyOf" in source) {
+    const anyOf: AdviceMatcher[] = [];
+    for (const item of source.anyOf) {
+      anyOf.push(buildAdviceMatcher(item));
+    }
+    return { anyOf };
+  }
+  if ("not" in source) {
+    return { not: buildAdviceMatcher(source.not) };
+  }
+  if ("frame" in source) {
+    return { frame: buildAdviceFrameMatcher(source.frame) };
+  }
+  return { argConcept: buildAdviceArgConceptMatcher(source.argConcept) };
+}
+
+function buildAdviceCodingRule(source: AdviceCodingRuleSource): AdviceCodingRule {
+  const frames: AdviceFrameTemplate[] = [];
+  for (const frame of source.frames) {
+    frames.push(buildAdviceFrameTemplate(frame));
+  }
+  return {
+    id: source.id,
+    definition: createDefinitionFromSource(source.definition),
+    frames,
+    matcher: buildAdviceMatcher(source.matcher)
+  };
+}
+
+const ADDITIONAL_INSTRUCTION_RULES: AdviceCodingRule[] = [];
+
+for (const sourceRule of ADVICE_RULES.rules) {
+  ADDITIONAL_INSTRUCTION_RULES.push(buildAdviceCodingRule(sourceRule));
+}
+
+function frameHasArgConcept(frame: AdviceFrame, matcher: AdviceArgConceptMatcher): boolean {
   for (const arg of frame.args) {
-    if (arg.conceptId !== conceptId) {
+    if (matcher.role && arg.role !== matcher.role) {
       continue;
     }
-    if (role && arg.role !== role) {
-      continue;
+    for (const conceptId of matcher.conceptIds) {
+      if (arg.conceptId === conceptId) {
+        return true;
+      }
     }
-    return true;
   }
   return false;
 }
 
-function hasArgConceptAnywhere(frames: AdviceFrame[], conceptId: string, role?: AdviceArgumentRole): boolean {
+function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean {
+  if (matcher.force && frame.force !== matcher.force) {
+    return false;
+  }
+  if (matcher.polarity && frame.polarity !== matcher.polarity) {
+    return false;
+  }
+  if (matcher.relations) {
+    let relationMatched = false;
+    for (const relation of matcher.relations) {
+      if (frame.relation === relation) {
+        relationMatched = true;
+        break;
+      }
+    }
+    if (!relationMatched) {
+      return false;
+    }
+  }
+  if (matcher.predicateLemmas) {
+    let predicateMatched = false;
+    for (const lemma of matcher.predicateLemmas) {
+      if (frame.predicate.lemma === lemma) {
+        predicateMatched = true;
+        break;
+      }
+    }
+    if (!predicateMatched) {
+      return false;
+    }
+  }
+  if (matcher.predicateSemanticClasses) {
+    let semanticClassMatched = false;
+    for (const semanticClass of matcher.predicateSemanticClasses) {
+      if (frame.predicate.semanticClass === semanticClass) {
+        semanticClassMatched = true;
+        break;
+      }
+    }
+    if (!semanticClassMatched) {
+      return false;
+    }
+  }
+  if (matcher.argConcepts) {
+    for (const argConcept of matcher.argConcepts) {
+      if (!frameHasArgConcept(frame, argConcept)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function matchesAdviceMatcher(frames: AdviceFrame[], matcher: AdviceMatcher): boolean {
+  if ("allOf" in matcher) {
+    for (const item of matcher.allOf) {
+      if (!matchesAdviceMatcher(frames, item)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if ("anyOf" in matcher) {
+    for (const item of matcher.anyOf) {
+      if (matchesAdviceMatcher(frames, item)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if ("not" in matcher) {
+    return !matchesAdviceMatcher(frames, matcher.not);
+  }
+  if ("frame" in matcher) {
+    for (const frame of frames) {
+      if (frameMatches(frame, matcher.frame)) {
+        return true;
+      }
+    }
+    return false;
+  }
   for (const frame of frames) {
-    if (hasArgConcept(frame, conceptId, role)) {
+    if (frameHasArgConcept(frame, matcher.argConcept)) {
       return true;
     }
   }
   return false;
 }
-
-function hasPredicate(
-  frames: AdviceFrame[],
-  lemma: string,
-  polarity?: AdvicePolarity
-): boolean {
-  for (const frame of frames) {
-    if (frame.predicate.lemma !== lemma) {
-      continue;
-    }
-    if (polarity && frame.polarity !== polarity) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-function hasDrowsinessFrame(frames: AdviceFrame[]): boolean {
-  for (const frame of frames) {
-    if (frame.predicate.lemma !== "cause") {
-      continue;
-    }
-    if (hasArgConcept(frame, "drowsiness")) {
-      return true;
-    }
-  }
-  return false;
-}
-
-const ADDITIONAL_INSTRUCTION_RULES: AdviceCodingRule[] = [
-  {
-    id: "with-after-food",
-    definition: createDefinition(
-      "311504000",
-      "With or after food",
-      "Take with or after food",
-      "รับประทานพร้อมหรือหลังอาหาร"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "take", semanticClass: "administration" },
-        relation: AdviceRelation.With,
-        args: [{ role: AdviceArgumentRole.MealState, text: "food", conceptId: "food" }]
-      }
-    ],
-    matches: (frames) => {
-      for (const frame of frames) {
-        if (frame.relation !== AdviceRelation.With && frame.relation !== AdviceRelation.After) {
-          continue;
-        }
-        if (
-          hasArgConcept(frame, "food", AdviceArgumentRole.MealState) ||
-          hasArgConcept(frame, "meal", AdviceArgumentRole.MealState)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    }
-  },
-  {
-    id: "before-food",
-    definition: createDefinition(
-      "311501008",
-      "Half to one hour before food",
-      "Take before food",
-      "รับประทานก่อนอาหาร"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "take", semanticClass: "administration" },
-        relation: AdviceRelation.Before,
-        args: [{ role: AdviceArgumentRole.MealState, text: "food", conceptId: "food" }]
-      }
-    ],
-    matches: (frames) => {
-      for (const frame of frames) {
-        if (frame.relation !== AdviceRelation.Before) {
-          continue;
-        }
-        if (
-          hasArgConcept(frame, "food", AdviceArgumentRole.MealState) ||
-          hasArgConcept(frame, "meal", AdviceArgumentRole.MealState)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    }
-  },
-  {
-    id: "empty-stomach",
-    definition: createDefinition(
-      "717154004",
-      "Take on an empty stomach (qualifier value)",
-      "Take on an empty stomach",
-      "รับประทานขณะท้องว่าง"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "take", semanticClass: "administration" },
-        relation: AdviceRelation.On,
-        args: [{ role: AdviceArgumentRole.MealState, text: "empty stomach", conceptId: "empty_stomach" }]
-      }
-    ],
-    matches: (frames) => hasArgConceptAnywhere(frames, "empty_stomach", AdviceArgumentRole.MealState)
-  },
-  {
-    id: "with-water",
-    definition: createDefinition(
-      "419303009",
-      "With plenty of water",
-      "Take with plenty of water",
-      "รับประทานพร้อมน้ำดื่มจำนวนมาก"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "take", semanticClass: "administration" },
-        relation: AdviceRelation.With,
-        args: [{ role: AdviceArgumentRole.Substance, text: "water", conceptId: "water" }]
-      }
-    ],
-    matches: (frames) => {
-      for (const frame of frames) {
-        if (frame.relation !== AdviceRelation.With && frame.predicate.lemma !== "drink") {
-          continue;
-        }
-        if (hasArgConcept(frame, "water", AdviceArgumentRole.Substance)) {
-          return true;
-        }
-      }
-      return false;
-    }
-  },
-  {
-    id: "dissolve-with-water",
-    definition: createDefinition(
-      "417995008",
-      "Dissolve or mix with water before taking",
-      "Dissolve or mix with water before taking",
-      "ละลายหรือผสมน้ำก่อนรับประทาน"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "dissolve", semanticClass: "prepare" },
-        relation: AdviceRelation.With,
-        args: [{ role: AdviceArgumentRole.Substance, text: "water", conceptId: "water" }]
-      }
-    ],
-    matches: (frames) => {
-      for (const frame of frames) {
-        if (frame.predicate.lemma !== "dissolve" && frame.predicate.lemma !== "mix") {
-          continue;
-        }
-        if (hasArgConcept(frame, "water", AdviceArgumentRole.Substance)) {
-          return true;
-        }
-      }
-      return false;
-    }
-  },
-  {
-    id: "avoid-alcohol",
-    definition: createDefinition(
-      "419822006",
-      "Warning. Avoid alcoholic drink (qualifier value)",
-      "Avoid alcoholic drinks",
-      "หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "avoid", semanticClass: "avoidance" },
-        args: [{ role: AdviceArgumentRole.Substance, text: "alcohol", conceptId: "alcohol" }]
-      }
-    ],
-    matches: (frames) => {
-      for (const frame of frames) {
-        if (
-          frame.predicate.lemma === "avoid" ||
-          frame.predicate.lemma === "drink"
-        ) {
-          if (hasArgConcept(frame, "alcohol", AdviceArgumentRole.Substance)) {
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-  },
-  {
-    id: "drowsiness-drive",
-    definition: createDefinition(
-      "418954008",
-      "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)",
-      "May cause drowsiness; do not drive if affected",
-      "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "cause", semanticClass: "effect" },
-        args: [{ role: AdviceArgumentRole.Object, text: "drowsiness", conceptId: "drowsiness" }]
-      },
-      {
-        force: AdviceForce.Warning,
-        polarity: AdvicePolarity.Negate,
-        predicate: { lemma: "drive", semanticClass: "activity" },
-        args: []
-      }
-    ],
-    matches: (frames) => hasDrowsinessFrame(frames) && hasPredicate(frames, "drive", AdvicePolarity.Negate)
-  },
-  {
-    id: "drowsiness-drive-alcohol",
-    definition: createDefinition(
-      "418914006",
-      "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-      "May cause drowsiness; avoid driving or alcohol",
-      "อาจทำให้ง่วงซึม; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "cause", semanticClass: "effect" },
-        args: [{ role: AdviceArgumentRole.Object, text: "drowsiness", conceptId: "drowsiness" }]
-      },
-      {
-        force: AdviceForce.Warning,
-        polarity: AdvicePolarity.Negate,
-        predicate: { lemma: "drive", semanticClass: "activity" },
-        args: []
-      },
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "avoid", semanticClass: "avoidance" },
-        args: [{ role: AdviceArgumentRole.Substance, text: "alcohol", conceptId: "alcohol" }]
-      }
-    ],
-    matches: (frames) =>
-      hasDrowsinessFrame(frames) &&
-      hasPredicate(frames, "drive", AdvicePolarity.Negate) &&
-      hasArgConceptAnywhere(frames, "alcohol", AdviceArgumentRole.Substance)
-  },
-  {
-    id: "next-day-drowsiness",
-    definition: createDefinition(
-      "418071006",
-      "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-      "May cause next-day drowsiness; avoid driving or alcohol",
-      "อาจทำให้ง่วงซึมในวันถัดมา; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "cause", semanticClass: "effect" },
-        args: [
-          { role: AdviceArgumentRole.Object, text: "drowsiness", conceptId: "drowsiness" },
-          { role: AdviceArgumentRole.Time, text: "next day", conceptId: "next_day" }
-        ]
-      }
-    ],
-    matches: (frames) =>
-      hasDrowsinessFrame(frames) &&
-      hasArgConceptAnywhere(frames, "next_day", AdviceArgumentRole.Time) &&
-      hasArgConceptAnywhere(frames, "alcohol", AdviceArgumentRole.Substance)
-  },
-  {
-    id: "avoid-sunlight",
-    definition: createDefinition(
-      "418521000",
-      "Avoid exposure of skin to direct sunlight or sun lamps (qualifier value)",
-      "Avoid sunlight or sun lamps",
-      "หลีกเลี่ยงแสงแดดหรือหลอดไฟแสงยูวี"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Warning,
-        predicate: { lemma: "avoid", semanticClass: "avoidance" },
-        args: [{ role: AdviceArgumentRole.Object, text: "sunlight", conceptId: "sunlight" }]
-      }
-    ],
-    matches: (frames) =>
-      hasArgConceptAnywhere(frames, "sunlight") || hasArgConceptAnywhere(frames, "sun_lamps")
-  },
-  {
-    id: "swallow-whole",
-    definition: createDefinition(
-      "418693002",
-      "Swallowed whole, not chewed (qualifier value)",
-      "Swallow whole; do not crush or chew",
-      "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        polarity: AdvicePolarity.Negate,
-        predicate: { lemma: "crush", semanticClass: "manipulate" },
-        args: []
-      },
-      {
-        force: AdviceForce.Instruction,
-        polarity: AdvicePolarity.Negate,
-        predicate: { lemma: "chew", semanticClass: "manipulate" },
-        args: []
-      }
-    ],
-    matches: (frames) =>
-      hasPredicate(frames, "crush", AdvicePolarity.Negate) ||
-      hasPredicate(frames, "chew", AdvicePolarity.Negate)
-  },
-  {
-    id: "chew",
-    definition: createDefinition(
-      "418991002",
-      "Sucked or chewed (qualifier value)",
-      "Suck or chew before swallowing",
-      "เคี้ยวหรืออมให้ละลายก่อนกลืน"
-    ),
-    frames: [
-      {
-        force: AdviceForce.Instruction,
-        predicate: { lemma: "chew", semanticClass: "manipulate" },
-        args: []
-      }
-    ],
-    matches: (frames) =>
-      hasPredicate(frames, "chew") && !hasPredicate(frames, "chew", AdvicePolarity.Negate)
-  }
-];
 
 function findRuleByCoding(system: string, code: string): AdviceCodingRule | undefined {
   for (const rule of ADDITIONAL_INSTRUCTION_RULES) {
@@ -716,6 +769,69 @@ function findContainedConcept(normalized: string): AdviceConceptEntry | undefine
     bestLength = key.length;
   }
   return best;
+}
+
+function findVerbLexeme(word: string): AdviceLexemeEntry | undefined {
+  return findNormalizedLexeme(word, "verb");
+}
+
+function findVerbLemma(word: string): string | undefined {
+  return findVerbLexeme(word)?.lemma;
+}
+
+function containsConceptId(normalized: string, conceptId: string): boolean {
+  const keys = CONCEPT_KEYS_BY_ID[conceptId];
+  if (!keys) {
+    return false;
+  }
+  for (const key of keys) {
+    if (normalized === key || normalized.includes(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsVerbLemma(words: string[], lemma: string): boolean {
+  for (const word of words) {
+    if (findVerbLemma(word) === lemma) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsVerbSequence(words: string[], leadLemma: string, targetLemma: string): boolean {
+  for (let index = 0; index + 1 < words.length; index += 1) {
+    if (findVerbLemma(words[index]) !== leadLemma) {
+      continue;
+    }
+    if (findVerbLemma(words[index + 1]) === targetLemma) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsNegatedVerb(words: string[], lemma: string): boolean {
+  for (let index = 0; index < words.length; index += 1) {
+    if (
+      words[index] === "do" &&
+      index + 2 < words.length &&
+      NEGATOR_WORDS.has(words[index + 1]) &&
+      findVerbLemma(words[index + 2]) === lemma
+    ) {
+      return true;
+    }
+    if (
+      NEGATOR_WORDS.has(words[index]) &&
+      index + 1 < words.length &&
+      findVerbLemma(words[index + 1]) === lemma
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgumentRole {
@@ -1011,6 +1127,7 @@ function tryParseRelationInstruction(
 }
 
 function parseEmbeddedAvoidanceFrames(
+  words: string[],
   normalized: string,
   sourceText: string,
   span: TextRange,
@@ -1020,7 +1137,14 @@ function parseEmbeddedAvoidanceFrames(
   const frames: AdviceFrame[] = [];
   const force = sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning;
 
-  if (normalized.includes("avoid alcohol") || normalized.includes("no alcohol") || normalized.includes("no alc")) {
+  if (
+    containsConceptId(normalized, "alcohol") &&
+    (
+      containsVerbLemma(words, "avoid") ||
+      containsNegatedVerb(words, "drink") ||
+      (words.length >= 2 && words[0] === "no")
+    )
+  ) {
     frames.push(
       createFrame(
         sourceText,
@@ -1034,12 +1158,7 @@ function parseEmbeddedAvoidanceFrames(
     );
   }
 
-  if (
-    normalized.includes("avoid driving") ||
-    normalized.includes("do not drive") ||
-    normalized.includes("no driving") ||
-    normalized.includes("no drive")
-  ) {
+  if (containsVerbSequence(words, "avoid", "drive") || containsNegatedVerb(words, "drive")) {
     frames.push(
       createFrame(
         sourceText,
@@ -1064,15 +1183,16 @@ function tryParseDrowsinessInstruction(
   sequenceIndex: number,
   sequenceCount: number
 ): AdviceFrame[] | undefined {
-  const normalized = normalizeAdditionalInstructionKey(sourceText);
-  if (!normalized) {
+  const words = normalizeWords(sourceText);
+  if (!words.length) {
     return undefined;
   }
-  if (!normalized.includes("drowsiness") && !normalized.includes("drowsy")) {
+  const normalized = words.join(" ");
+  if (!containsConceptId(normalized, "drowsiness")) {
     return undefined;
   }
   const args = [createArgument(AdviceArgumentRole.Object, "drowsiness", "drowsiness", "drowsiness")];
-  if (normalized.includes("next day")) {
+  if (containsConceptId(normalized, "next_day")) {
     args.push(createArgument(AdviceArgumentRole.Time, "next day", "next day", "next_day"));
   }
   const frames = [
@@ -1086,7 +1206,14 @@ function tryParseDrowsinessInstruction(
       sequenceIndex
     )
   ];
-  const embedded = parseEmbeddedAvoidanceFrames(normalized, sourceText, span, sequenceIndex, sequenceCount);
+  const embedded = parseEmbeddedAvoidanceFrames(
+    words,
+    normalized,
+    sourceText,
+    span,
+    sequenceIndex,
+    sequenceCount
+  );
   for (const frame of embedded) {
     frames.push(frame);
   }
@@ -1104,7 +1231,7 @@ function tryParseAvoidInstruction(
     return undefined;
   }
   const cursor = skipLeadingNoise(words);
-  if (cursor >= words.length || words[cursor] !== "avoid") {
+  if (cursor >= words.length || findVerbLemma(words[cursor]) !== "avoid") {
     return undefined;
   }
   const objectText = words.slice(cursor + 1).join(" ");
@@ -1140,7 +1267,7 @@ function tryParseNoObjectInstruction(
   }
   const objectText = words.slice(cursor + 1).join(" ");
   const argument = classifyArgument(objectText);
-  if (argument.conceptId === "alcohol") {
+  if (argument.role === AdviceArgumentRole.Substance) {
     return [
       createFrame(
         sourceText,
@@ -1155,20 +1282,24 @@ function tryParseNoObjectInstruction(
       )
     ];
   }
-  if (objectText === "drive" || objectText === "driving") {
-    return [
-      createFrame(
-        sourceText,
-        span,
-        sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
-        "drive",
-        "activity",
-        [],
-        sequenceIndex,
-        undefined,
-        AdvicePolarity.Negate
-      )
-    ];
+  const objectWords = normalizeWords(objectText);
+  if (objectWords.length === 1) {
+    const verbLexeme = findVerbLexeme(objectWords[0]);
+    if (verbLexeme) {
+      return [
+        createFrame(
+          sourceText,
+          span,
+          sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
+          verbLexeme.lemma,
+          verbLexeme.semanticClass,
+          [],
+          sequenceIndex,
+          undefined,
+          AdvicePolarity.Negate
+        )
+      ];
+    }
   }
   return undefined;
 }
@@ -1269,7 +1400,7 @@ function tryParseMayCauseInstruction(
   if (cursor >= words.length) {
     return undefined;
   }
-  if (words[cursor] !== "cause" && words[cursor] !== "causes") {
+  if (findVerbLemma(words[cursor]) !== "cause") {
     return undefined;
   }
   const objectText = words.slice(cursor + 1).join(" ");
@@ -1467,7 +1598,7 @@ function parseSequenceFrames(
 
 function matchAdviceCodingRule(frames: AdviceFrame[]): AdviceCodingRule | undefined {
   for (const rule of ADDITIONAL_INSTRUCTION_RULES) {
-    if (rule.matches(frames)) {
+    if (matchesAdviceMatcher(frames, rule.matcher)) {
       return rule;
     }
   }
