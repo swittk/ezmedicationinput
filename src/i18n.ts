@@ -1177,6 +1177,47 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
   return days.length ? `ใน${joinWithAndThai(days)}` : undefined;
 }
 
+function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | undefined {
+  if (schedule.duration === undefined || !schedule.durationUnit) {
+    return undefined;
+  }
+  const base = stripTrailingZero(schedule.duration);
+  const qualifier =
+    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
+      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
+      : base;
+  return `x${qualifier}${schedule.durationUnit}`;
+}
+
+function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
+    return undefined;
+  }
+  const unit = schedule.durationUnit;
+  const label = (): string => {
+    switch (unit) {
+      case FhirPeriodUnit.Minute:
+        return "นาที";
+      case FhirPeriodUnit.Hour:
+        return "ชั่วโมง";
+      case FhirPeriodUnit.Day:
+        return "วัน";
+      case FhirPeriodUnit.Week:
+        return "สัปดาห์";
+      case FhirPeriodUnit.Month:
+        return "เดือน";
+      case FhirPeriodUnit.Year:
+        return "ปี";
+      default:
+        return unit;
+    }
+  };
+  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
+    return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ถึง ${stripTrailingZero(schedule.durationMax)} ${label()}`;
+  }
+  return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
+}
+
 function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
   if (!clause.prn?.enabled) {
     return undefined;
@@ -1270,6 +1311,10 @@ function formatShortThai(clause: CanonicalSigClause): string {
   if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
+  const durationShort = formatDurationShortThai(schedule);
+  if (durationShort) {
+    parts.push(durationShort);
+  }
   const asNeeded = formatAsNeededThai(clause);
   if (asNeeded) {
     parts.push(asNeeded);
@@ -1326,6 +1371,7 @@ function formatLongThai(
   const dayPart = describeDayOfWeekThai(schedule);
   const countPart =
     schedule.count !== undefined ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง` : undefined;
+  const durationPart = describeDurationThai(schedule);
   const asNeeded = formatAsNeededThai(clause);
 
   const segments: string[] = [];
@@ -1354,6 +1400,9 @@ function formatLongThai(
   }
   if (countPart) {
     segments.push(countPart);
+  }
+  if (durationPart) {
+    segments.push(durationPart);
   }
   if (asNeeded) {
     segments.push(asNeeded);

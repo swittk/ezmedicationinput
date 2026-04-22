@@ -1001,3 +1001,59 @@ Desired behavior:
 2. Fixed by widening both alias fields to `readonly string[]`.
    Runtime already only iterated aliases and never mutated them, so this is the
    correct public contract and removes the need for casts in consumer code.
+
+## 2026-04-22 PRN plus finite-duration window
+
+1. Probe:
+   - `take 1 tab po for 7 days prn vaginal itch`
+
+2. Conclusion:
+   - this is not bad form; it expresses a legitimate instruction window:
+     take orally as needed for vaginal itch, limited to a 7-day course
+   - parser does not currently scope it correctly
+
+3. Current incorrect behavior:
+   - `for 7 days` before `prn` gets dropped as leftovers
+   - `x 7 days` is treated as `count = 7` doses, not a 7-day duration window
+   - `prn vaginal itch for 7 days` swallows `for 7 days` into the PRN reason text
+
+4. Proper target semantics:
+   - dose: `1 tab`
+   - route: oral
+   - PRN reason: `vaginal itch` / SNOMED `34363003`
+   - duration window: `7 days`
+
+5. Architecture implication:
+   - need true schedule-bound grammar for PRN courses, not a count hack
+   - this should eventually lower to a timing bound/duration concept, not to a
+     reason suffix or dose count
+
+## 2026-04-22 Schedule duration regression fixed
+
+1. Root cause:
+   - local `FhirTimingRepeat` / canonical schedule model had `count` but no
+     `duration`/`durationUnit`
+   - parser therefore had no honest place to put `for 10 days`
+   - result: `for N days` got dropped, and `x7 days` degraded into `count = 7`
+
+2. Structural fix:
+   - added `duration`, `durationMax`, `durationUnit` to local FHIR timing type
+   - added matching fields to canonical schedule + parser state
+   - added grammar-level duration collector for unit-bearing windows:
+     `for 10 days`, `x7 days`, `x 7 days`, compact `x7d`
+   - kept plain `x7` as count
+
+3. Important guardrail:
+   - duration collection is now gated on existing administration content so
+     workflow text like `leave on for 10 minutes then rinse` stays in
+     `patientInstruction` instead of being stolen into schedule timing
+
+4. Verified examples after the fix:
+   - `take 1 tab po od for 10 days` -> `Take 1 tablet orally once daily for 10 days.`
+   - `1 tab po od for 7 days` -> `Take 1 tablet orally once daily for 7 days.`
+   - `1 tab po od x7 days` -> `Take 1 tablet orally once daily for 7 days.`
+   - `take 1 tab po for 7 days prn vaginal itch` ->
+     `Take 1 tablet orally for 7 days as needed for vaginal itch.`
+   - `take 1 tab po prn vaginal itch for 7 days` ->
+     `Take 1 tablet orally for 7 days as needed for vaginal itch.`
+   - `leave on for 10 minutes then rinse` stays patient-instruction text

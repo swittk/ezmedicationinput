@@ -223,6 +223,66 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet orally every 6 hours for 10 doses.");
   });
 
+  it("parses finite duration windows introduced by for", () => {
+    const result = parseSig("take 1 tab po od for 10 days", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      duration: 10,
+      durationUnit: "d"
+    });
+    expect(result.shortText).toBe("1 tab PO QD x10d");
+    expect(result.longText).toBe("Take 1 tablet orally once daily for 10 days.");
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("treats xN days as duration instead of dose count", () => {
+    const result = parseSig("1 tab po od x7 days", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      duration: 7,
+      durationUnit: "d"
+    });
+    expect(result.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(result.shortText).toBe("1 tab PO QD x7d");
+    expect(result.longText).toBe("Take 1 tablet orally once daily for 7 days.");
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("keeps PRN duration suffixes out of the PRN reason text", () => {
+    const result = parseSig("take 1 tab po prn vaginal itch for 7 days", {
+      context: TAB_CONTEXT
+    });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      duration: 7,
+      durationUnit: "d"
+    });
+    expect(result.fhir.asNeededFor).toEqual([
+      {
+        text: "vaginal itch",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "34363003",
+            display: "Pruritus of vagina"
+          }
+        ]
+      }
+    ]);
+    expect(result.longText).toBe(
+      "Take 1 tablet orally for 7 days as needed for vaginal itch."
+    );
+    expect(result.meta.canonical.clauses[0]?.prn?.reason).toMatchObject({
+      text: "vaginal itch",
+      coding: {
+        code: "34363003"
+      }
+    });
+  });
+
   it("omits redundant mouth sites when route is oral", () => {
     const result = parseSig("500 mg per mouth every 4 to 6 hours as needed for pain");
     expect(result.fhir.site).toBeUndefined();

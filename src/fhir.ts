@@ -152,6 +152,15 @@ export function canonicalToFhir(
     repeat.count = schedule.count;
     hasRepeat = true;
   }
+  if (schedule?.duration !== undefined && schedule.durationUnit) {
+    repeat.duration = schedule.duration;
+    repeat.durationUnit = schedule.durationUnit;
+    hasRepeat = true;
+  }
+  if (schedule?.durationMax !== undefined) {
+    repeat.durationMax = schedule.durationMax;
+    hasRepeat = true;
+  }
   if (schedule?.frequencyMax !== undefined) {
     repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;
@@ -374,6 +383,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
+    repeat?.duration !== undefined ||
+    repeat?.durationMax !== undefined ||
+    repeat?.durationUnit ||
     repeat?.frequency !== undefined ||
     repeat?.frequencyMax !== undefined ||
     repeat?.period !== undefined ||
@@ -386,6 +398,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     clause.schedule = {
       timingCode: dosage.timing?.code?.coding?.[0]?.code,
       count: repeat?.count,
+      duration: repeat?.duration,
+      durationMax: repeat?.durationMax,
+      durationUnit: repeat?.durationUnit,
       frequency: repeat?.frequency,
       frequencyMax: repeat?.frequencyMax,
       period: repeat?.period,

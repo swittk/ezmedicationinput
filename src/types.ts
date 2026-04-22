@@ -266,6 +266,9 @@ export enum FhirDayOfWeek {
 
 export interface FhirTimingRepeat {
   count?: number;
+  duration?: number;
+  durationMax?: number;
+  durationUnit?: FhirPeriodUnit;
   frequency?: number;
   frequencyMax?: number;
   period?: number;
@@ -762,6 +765,9 @@ export interface CanonicalMethodExpr {
 export interface CanonicalScheduleExpr {
   timingCode?: string;
   count?: number;
+  duration?: number;
+  durationMax?: number;
+  durationUnit?: FhirPeriodUnit;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

@@ -182,6 +182,30 @@ export class ParserState {
     this.ensureSchedule().count = value;
   }
 
+  get duration(): number | undefined {
+    return this.clause.schedule?.duration;
+  }
+
+  set duration(value: number | undefined) {
+    this.ensureSchedule().duration = value;
+  }
+
+  get durationMax(): number | undefined {
+    return this.clause.schedule?.durationMax;
+  }
+
+  set durationMax(value: number | undefined) {
+    this.ensureSchedule().durationMax = value;
+  }
+
+  get durationUnit(): FhirPeriodUnit | undefined {
+    return this.clause.schedule?.durationUnit;
+  }
+
+  set durationUnit(value: FhirPeriodUnit | undefined) {
+    this.ensureSchedule().durationUnit = value;
+  }
+
   get frequency(): number | undefined {
     return this.clause.schedule?.frequency;
   }

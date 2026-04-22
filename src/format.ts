@@ -701,6 +701,47 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
 
+function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
+  if (schedule.duration === undefined || !schedule.durationUnit) {
+    return undefined;
+  }
+  const base = stripTrailingZero(schedule.duration);
+  const qualifier =
+    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
+      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
+      : base;
+  return `x${qualifier}${schedule.durationUnit}`;
+}
+
+function describeDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
+    return undefined;
+  }
+  const unit = schedule.durationUnit;
+  const label = (value: number): string => {
+    switch (unit) {
+      case FhirPeriodUnit.Minute:
+        return value === 1 ? "minute" : "minutes";
+      case FhirPeriodUnit.Hour:
+        return value === 1 ? "hour" : "hours";
+      case FhirPeriodUnit.Day:
+        return value === 1 ? "day" : "days";
+      case FhirPeriodUnit.Week:
+        return value === 1 ? "week" : "weeks";
+      case FhirPeriodUnit.Month:
+        return value === 1 ? "month" : "months";
+      case FhirPeriodUnit.Year:
+        return value === 1 ? "year" : "years";
+      default:
+        return value === 1 ? "unit" : "units";
+    }
+  };
+  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
+    return `for ${stripTrailingZero(schedule.duration)} to ${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
+  }
+  return `for ${stripTrailingZero(schedule.duration)} ${label(schedule.duration)}`;
+}
+
 function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
   const methodText = clause.method?.text?.trim();
   switch (methodText) {
@@ -795,6 +836,10 @@ function formatShort(clause: CanonicalSigClause): string {
   if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
+  const durationShort = formatDurationShort(schedule);
+  if (durationShort) {
+    parts.push(durationShort);
+  }
   if (clause.prn?.enabled) {
     const reason = getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons);
     if (reason) {
@@ -846,6 +891,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     schedule.count !== undefined
       ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
       : undefined;
+  const durationPart = describeDuration(schedule);
   const reason = getPreferredCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons);
   const asNeededPart = clause.prn?.enabled ? (reason ? `as needed for ${reason}` : "as needed") : undefined;
 
@@ -867,6 +913,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   if (countPart) {
     segments.push(countPart);
+  }
+  if (durationPart) {
+    segments.push(durationPart);
   }
   if (asNeededPart) {
     segments.push(asNeededPart);

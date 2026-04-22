@@ -1525,6 +1525,9 @@ function hasDoseValue(state: ParserState): boolean {
 function hasScheduleValue(state: ParserState): boolean {
   const timeOfDay = state.timeOfDay;
   return Boolean(
+    state.duration !== undefined ||
+    state.durationMax !== undefined ||
+    state.durationUnit !== undefined ||
     state.frequency !== undefined ||
     state.frequencyMax !== undefined ||
     state.period !== undefined ||
@@ -2063,6 +2066,25 @@ function collectPrnReasonText(
     }
   }
 
+  if (reasonObjects.length > 0) {
+    const durationSuffixStart = findTrailingPrnDurationSuffix(state, reasonObjects);
+    if (durationSuffixStart !== undefined) {
+      reasonObjects.splice(durationSuffixStart);
+      reasonTokens.splice(durationSuffixStart);
+      reasonIndices.splice(durationSuffixStart);
+      while (reasonTokens.length > 0) {
+        const lastToken = reasonTokens[reasonTokens.length - 1];
+        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
+          reasonTokens.pop();
+          reasonIndices.pop();
+          reasonObjects.pop();
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
   if (!reasonTokens.length) {
     return;
   }
@@ -2095,6 +2117,56 @@ function collectPrnReasonText(
     sourceText,
     range
   };
+}
+
+function findTrailingPrnDurationSuffix(
+  state: ParserState,
+  tokens: Token[]
+): number | undefined {
+  if (
+    state.duration !== undefined ||
+    state.durationMax !== undefined ||
+    state.durationUnit !== undefined ||
+    tokens.length < 3
+  ) {
+    return undefined;
+  }
+  const unitIndex = tokens.length - 1;
+  const unitToken = tokens[unitIndex];
+  const unitCode = unitToken ? mapIntervalUnit(unitToken.lower) : undefined;
+  if (!unitCode) {
+    return undefined;
+  }
+  let numericIndex = unitIndex - 1;
+  while (numericIndex >= 0 && COUNT_CONNECTOR_WORDS.has(tokens[numericIndex].lower)) {
+    numericIndex -= 1;
+  }
+  if (numericIndex < 1) {
+    return undefined;
+  }
+  const numericToken = tokens[numericIndex];
+  const range = parseNumericRange(numericToken.lower);
+  let low: number | undefined;
+  let high: number | undefined;
+  if (range) {
+    low = range.low;
+    high = range.high;
+  } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)) {
+    low = parseFloat(numericToken.original);
+  } else {
+    return undefined;
+  }
+  let forIndex = numericIndex - 1;
+  while (forIndex >= 0 && COUNT_CONNECTOR_WORDS.has(tokens[forIndex].lower)) {
+    forIndex -= 1;
+  }
+  if (forIndex <= 0 || tokens[forIndex].lower !== "for") {
+    return undefined;
+  }
+  if (!applyDurationLimit(state, low, unitCode, high)) {
+    return undefined;
+  }
+  return forIndex;
 }
 
 function collectSiteAdviceAndWarnings(
@@ -2200,9 +2272,12 @@ function finalizeCanonicalClause(internal: ParserState): void {
     if (!clause.schedule.timeOfDay?.length) {
       delete clause.schedule.timeOfDay;
     }
-    if (
+  if (
       clause.schedule.timingCode === undefined &&
       clause.schedule.count === undefined &&
+      clause.schedule.duration === undefined &&
+      clause.schedule.durationMax === undefined &&
+      clause.schedule.durationUnit === undefined &&
       clause.schedule.frequency === undefined &&
       clause.schedule.frequencyMax === undefined &&
       clause.schedule.period === undefined &&
@@ -3703,6 +3778,25 @@ function applyCountLimit(internal: ParserState, value: number | undefined): bool
   return true;
 }
 
+function applyDurationLimit(
+  internal: ParserState,
+  value: number | undefined,
+  unit: FhirPeriodUnit | undefined,
+  max?: number
+): boolean {
+  if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit) {
+    return false;
+  }
+  if (internal.duration !== undefined || internal.durationUnit !== undefined) {
+    return false;
+  }
+  internal.duration = value;
+  internal.durationMax =
+    max !== undefined && Number.isFinite(max) && max > value ? max : undefined;
+  internal.durationUnit = unit;
+  return true;
+}
+
 const DOSE_SCALE_MULTIPLIERS: Record<string, number> = {
   k: 1_000,
   thousand: 1_000,
@@ -4662,6 +4756,123 @@ function collectCountLimit(
   return true;
 }
 
+function collectDurationLimit(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const state = context.state;
+  const tokens = context.tokens;
+  if (state.duration !== undefined || state.durationUnit !== undefined) {
+    return false;
+  }
+  if (!hasEstablishedAdministrationContent(state)) {
+    return false;
+  }
+
+  const compactMatch = token.lower.match(
+    /^[x*]([0-9]+(?:\.[0-9]+)?)(min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|wk|w|week|weeks|mo|month|months)$/
+  );
+  if (compactMatch) {
+    const unitCode = mapIntervalUnit(compactMatch[2]);
+    if (applyDurationLimit(state, parseFloat(compactMatch[1]), unitCode)) {
+      mark(state.consumed, token);
+      return true;
+    }
+  }
+
+  const tryApplyFromNumericAndUnit = (
+    numericToken: Token | undefined,
+    unitToken: Token | undefined,
+    partsToMark: Token[]
+  ): boolean => {
+    if (
+      !numericToken ||
+      !unitToken ||
+      state.consumed.has(numericToken.index) ||
+      state.consumed.has(unitToken.index)
+    ) {
+      return false;
+    }
+    const unitCode = mapIntervalUnit(unitToken.lower);
+    if (!unitCode) {
+      return false;
+    }
+    const range = parseNumericRange(numericToken.lower);
+    if (range) {
+      if (!applyDurationLimit(state, range.low, unitCode, range.high)) {
+        return false;
+      }
+    } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)) {
+      if (!applyDurationLimit(state, parseFloat(numericToken.original), unitCode)) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+    for (const part of partsToMark) {
+      mark(state.consumed, part);
+    }
+    return true;
+  };
+
+  const prefixedMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (prefixedMatch) {
+    const unitToken = tokens[index + 1];
+    const unitCode = unitToken ? mapIntervalUnit(unitToken.lower) : undefined;
+    if (
+      unitCode &&
+      applyDurationLimit(state, parseFloat(prefixedMatch[1]), unitCode)
+    ) {
+      mark(state.consumed, token);
+      mark(state.consumed, unitToken);
+      return true;
+    }
+  }
+
+  if (COUNT_MARKER_TOKENS.has(token.lower)) {
+    const numericToken = tokens[index + 1];
+    const unitToken = tokens[index + 2];
+    if (tryApplyFromNumericAndUnit(numericToken, unitToken, [token, numericToken, unitToken])) {
+      return true;
+    }
+  }
+
+  if (token.lower !== "for") {
+    return false;
+  }
+
+  const preConnectors: Token[] = [];
+  let lookaheadIndex = skipCountConnectors(
+    tokens,
+    state.consumed,
+    index + 1,
+    preConnectors
+  );
+  const numericToken = tokens[lookaheadIndex];
+  const postConnectors: Token[] = [];
+  lookaheadIndex = skipCountConnectors(
+    tokens,
+    state.consumed,
+    lookaheadIndex + 1,
+    postConnectors
+  );
+  const unitToken = tokens[lookaheadIndex];
+  if (
+    tryApplyFromNumericAndUnit(
+      numericToken,
+      unitToken,
+      [token, ...preConnectors, numericToken, ...postConnectors, unitToken].filter(
+        Boolean
+      ) as Token[]
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function collectCountBasedFrequency(
   context: ClauseParseContext,
   index: number
@@ -4849,6 +5060,7 @@ function parseScheduleTerm(
     applyGrammarTerminal(context, index, token, "schedule.eventTiming", collectEventTiming) ??
     applyGrammarTerminal(context, index, token, "schedule.dayRange", collectDayRange) ??
     applyGrammarTerminal(context, index, token, "schedule.dayOfWeek", collectDayOfWeek) ??
+    applyGrammarTerminal(context, index, token, "schedule.duration", collectDurationLimit) ??
     applyGrammarTerminal(context, index, token, "schedule.phraseWordFrequency", collectPhraseWordFrequency) ??
     applyGrammarTerminal(context, index, token, "schedule.wordFrequency", collectWordFrequency)
   );
@@ -5005,6 +5217,15 @@ function mergeScheduleState(target: ParserState, source: ParserState): void {
   if (source.count !== undefined) {
     target.count = source.count;
   }
+  if (source.duration !== undefined) {
+    target.duration = source.duration;
+  }
+  if (source.durationMax !== undefined) {
+    target.durationMax = source.durationMax;
+  }
+  if (source.durationUnit !== undefined) {
+    target.durationUnit = source.durationUnit;
+  }
   if (source.frequency !== undefined) {
     target.frequency = source.frequency;
   }
@@ -5065,6 +5286,9 @@ function tryApplyScheduleOnlyTokens(
     return false;
   }
   if (
+    probe.duration === undefined &&
+    probe.durationMax === undefined &&
+    probe.durationUnit === undefined &&
     probe.frequency === undefined &&
     probe.frequencyMax === undefined &&
     probe.period === undefined &&
