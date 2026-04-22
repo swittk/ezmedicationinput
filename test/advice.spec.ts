@@ -5,7 +5,13 @@ import {
   findAdditionalInstructionDefinitionByCoding,
   parseAdditionalInstructions
 } from "../src/advice";
-import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
+import {
+  AdviceArgumentRole,
+  AdviceForce,
+  AdviceModality,
+  AdvicePolarity,
+  AdviceRelation
+} from "../src/types";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -95,6 +101,92 @@ describe("additional instruction rule inventory", () => {
       { start: 0, end: 66 }
     );
     expect(printed[0]?.coding?.code).toBe("418849000");
+
+    const noAlcoholByNegatedAdministration = parseAdditionalInstructions(
+      "do not take with alcohol",
+      { start: 0, end: 24 }
+    );
+    expect(noAlcoholByNegatedAdministration[0]?.coding?.code).toBe("419822006");
+
+    const contractedAlcohol = parseAdditionalInstructions(
+      "don't take with alcohol",
+      { start: 0, end: 23 }
+    );
+    expect(contractedAlcohol[0]?.coding?.code).toBe("419822006");
+
+    const mustNotAlcohol = parseAdditionalInstructions(
+      "must not take with alcohol",
+      { start: 0, end: 26 }
+    );
+    expect(mustNotAlcohol[0]?.coding?.code).toBe("419822006");
+
+    const mustntAlcohol = parseAdditionalInstructions(
+      "mustn't take with alcohol",
+      { start: 0, end: 24 }
+    );
+    expect(mustntAlcohol[0]?.coding?.code).toBe("419822006");
+
+    const genericNegatedMedication = parseAdditionalInstructions(
+      "don't take with ibuprofen",
+      { start: 0, end: 25 }
+    );
+    expect(genericNegatedMedication[0]?.coding?.code).toBeUndefined();
+    expect(genericNegatedMedication[0]?.text).toBe("Do not take with ibuprofen");
+    expect(genericNegatedMedication[0]?.frames[0]).toMatchObject({
+      polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "take" },
+      relation: AdviceRelation.With
+    });
+
+    const genericMustNotMedication = parseAdditionalInstructions(
+      "must not take with warfarin",
+      { start: 0, end: 27 }
+    );
+    expect(genericMustNotMedication[0]?.coding?.code).toBeUndefined();
+    expect(genericMustNotMedication[0]?.text).toBe("Must not take with warfarin");
+    expect(genericMustNotMedication[0]?.frames[0]).toMatchObject({
+      modality: AdviceModality.Must,
+      polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "take" },
+      relation: AdviceRelation.With
+    });
+
+    const genericAffirmativeRelation = parseAdditionalInstructions(
+      "with grapefruit juice",
+      { start: 0, end: 21 },
+      { defaultPredicate: "take" }
+    );
+    expect(genericAffirmativeRelation[0]?.coding?.code).toBeUndefined();
+    expect(genericAffirmativeRelation[0]?.text).toBe("Take with grapefruit juice");
+    expect(genericAffirmativeRelation[0]?.frames[0]).toMatchObject({
+      predicate: { lemma: "take" },
+      relation: AdviceRelation.With
+    });
+
+    const genericCautionRelation = parseAdditionalInstructions(
+      "should take with grapefruit juice",
+      { start: 0, end: 33 }
+    );
+    expect(genericCautionRelation[0]?.coding?.code).toBeUndefined();
+    expect(genericCautionRelation[0]?.text).toBe("Should take with grapefruit juice");
+    expect(genericCautionRelation[0]?.frames[0]).toMatchObject({
+      force: AdviceForce.Caution,
+      modality: AdviceModality.Should,
+      predicate: { lemma: "take" },
+      relation: AdviceRelation.With
+    });
+
+    const genericModalWarning = parseAdditionalInstructions(
+      "might cause dizziness",
+      { start: 0, end: 21 }
+    );
+    expect(genericModalWarning[0]?.coding?.code).toBeUndefined();
+    expect(genericModalWarning[0]?.text).toBe("Might cause dizziness");
+    expect(genericModalWarning[0]?.frames[0]).toMatchObject({
+      force: AdviceForce.Warning,
+      modality: AdviceModality.Might,
+      predicate: { lemma: "cause" }
+    });
   });
 
   it("codes common clinic instructions for topical and oral products", () => {

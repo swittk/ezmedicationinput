@@ -204,10 +204,22 @@
         }
       ],
       "matcher": {
-        "frame": {
-          "predicateLemmas": ["avoid", "drink"],
-          "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
-        }
+        "anyOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["avoid", "drink"],
+              "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["take", "use", "administer"],
+              "relations": ["with"],
+              "polarity": "negate",
+              "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
+            }
+          }
+        ]
       }
     },
     {
@@ -463,7 +475,10 @@
         }
       ],
       "matcher": {
-        "argConcept": { "conceptIds": ["sunlight", "sun_lamps"] }
+        "frame": {
+          "predicateLemmas": ["avoid"],
+          "argConcepts": [{ "conceptIds": ["sunlight", "sun_lamps"] }]
+        }
       }
     },
     {

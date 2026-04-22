@@ -1135,9 +1135,12 @@ describe("parseSig core scenarios", () => {
 
   it("preserves free-form additional instructions when unmatched", () => {
     const result = parseSig("1 tab po daily; use caution in storms");
-    expect(result.fhir.additionalInstruction?.[0]).toEqual({ text: "use caution in storms" });
+    expect(result.fhir.additionalInstruction?.[0]).toEqual({
+      text: "Use caution in storms",
+      coding: undefined
+    });
     expect(result.meta.normalized.additionalInstructions).toEqual([
-      { text: "use caution in storms", coding: undefined }
+      { text: "Use caution in storms", coding: undefined }
     ]);
   });
 
@@ -2444,6 +2447,54 @@ describe("parseSig core scenarios", () => {
     }
   });
 
+  it("codes negated alcohol-advice tails after PRN reasons", () => {
+    const result = parseSig("take 1 tab po prn pain, do not take with alcohol", {
+      context: TAB_CONTEXT
+    });
+
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("419822006");
+    expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("419822006");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally as needed for pain. Avoid alcoholic drinks.");
+  });
+
+  it("normalizes uncoded affirmative relation tails through generic advice frames", () => {
+    const result = parseSig("take 1 tab po daily, with grapefruit juice", {
+      context: TAB_CONTEXT
+    });
+
+    expect(result.fhir.additionalInstruction?.[0]?.coding).toBeUndefined();
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Take with grapefruit juice");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally once daily. Take with grapefruit juice.");
+  });
+
+  it("normalizes uncoded negated relation tails through generic advice frames", () => {
+    const result = parseSig("take 1 tab po daily, must not take with warfarin", {
+      context: TAB_CONTEXT
+    });
+
+    expect(result.fhir.additionalInstruction?.[0]?.coding).toBeUndefined();
+    expect(result.fhir.additionalInstruction?.[0]?.text).toBe("Must not take with warfarin");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Take 1 tablet orally once daily. Must not take with warfarin.");
+  });
+
+  it("preserves uncoded modal caution and warning tails through the generic advice grammar", () => {
+    const caution = parseSig("take 1 tab po daily, should take with grapefruit juice", {
+      context: TAB_CONTEXT
+    });
+    expect(caution.fhir.additionalInstruction?.[0]?.text).toBe("Should take with grapefruit juice");
+    expect(caution.longText).toBe(
+      "Take 1 tablet orally once daily. Should take with grapefruit juice."
+    );
+
+    const warning = parseSig("take 10 ml po daily, might cause dizziness");
+    expect(warning.fhir.additionalInstruction?.[0]?.text).toBe("Might cause dizziness");
+    expect(warning.longText).toBe("Take 10 mL orally once daily. Might cause dizziness.");
+  });
+
   it("suppresses redundant oral route phrasing for swallow methods", () => {
     const result = parseSig("swallow 1 tab po daily", { context: TAB_CONTEXT });
     expect(result.longText).toBe("Swallow 1 tablet once daily.");
@@ -3230,16 +3281,8 @@ describe("topical workflow and timing", () => {
     const result = parseSig("apply to scalp nightly and rinse in the morning");
     expect(result.fhir.site?.text).toBe("scalp");
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Night]);
-    expect(result.fhir.additionalInstruction?.[0]?.text).toContain("rinse in the morning");
-    expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames?.[0]).toEqual(
-      expect.objectContaining({
-        predicate: expect.objectContaining({ lemma: "rinse" }),
-        relation: AdviceRelation.In,
-        args: expect.arrayContaining([
-          expect.objectContaining({ conceptId: "morning" })
-        ])
-      })
-    );
+    expect(result.fhir.patientInstruction).toBe("rinse in the morning");
+    expect(result.meta.normalized.patientInstruction).toBe("rinse in the morning");
   });
 });
 

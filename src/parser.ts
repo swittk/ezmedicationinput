@@ -318,11 +318,7 @@ const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
   }
 };
 
-const PATIENT_INSTRUCTION_START_TOKENS = new Set([
-  "after",
-  "before",
-  "with",
-  "while",
+const PATIENT_INSTRUCTION_CONTEXT_TOKENS = new Set([
   "leave",
   "rinse",
   "washing",
@@ -1713,6 +1709,17 @@ function appendPatientInstruction(state: ParserState, text: string | undefined):
     return;
   }
   state.patientInstruction = `${state.patientInstruction}; ${normalized}`;
+}
+
+function normalizeWorkflowPatientInstructionText(text: string | undefined): string | undefined {
+  const normalized = text?.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.toLowerCase().startsWith("and ")) {
+    return normalized.slice(4).trim();
+  }
+  return normalized;
 }
 
 function findProductFormMatch(
@@ -4486,6 +4493,17 @@ function collectRouteSynonym(
 ): boolean {
   const token = context.tokens[index];
   if (
+    context.state.methodVerb &&
+    hasEstablishedAdministrationContent(context.state) &&
+    token &&
+    (
+      hasTokenWordClass(token, TokenWordClass.AdministrationVerb) ||
+      isAdministrationVerbWord(token.lower)
+    )
+  ) {
+    return false;
+  }
+  if (
     token &&
     normalizeTokenLower(token) === "shampoo" &&
     context.state.methodVerb === "use"
@@ -4839,6 +4857,12 @@ function collectMethodVerb(
   token: Token
 ): boolean {
   const normalized = normalizeTokenLower(token);
+  if (
+    context.state.methodVerb &&
+    hasEstablishedAdministrationContent(context.state)
+  ) {
+    return false;
+  }
   if (
     normalized === "shampoo" &&
     context.state.methodVerb === "use"
@@ -5778,8 +5802,10 @@ function isWorkflowPatientInstructionText(text: string): boolean {
   if (!words.length) {
     return false;
   }
-  if (PATIENT_INSTRUCTION_START_TOKENS.has(words[0])) {
-    return true;
+  for (const word of words) {
+    if (PATIENT_INSTRUCTION_CONTEXT_TOKENS.has(word)) {
+      return true;
+    }
   }
   if (words[0] === "reapply") {
     return true;
@@ -5897,14 +5923,6 @@ function collectAdditionalInstructions(
       tokens,
       group.tokens
     );
-    if (isWorkflowPatientInstructionText(sourceText)) {
-      appendPatientInstruction(internal, sourceText);
-      for (const token of group.tokens) {
-        mark(internal.consumed, token);
-      }
-      continue;
-    }
-
     const parsed = parseAdditionalInstructions(
       sourceText,
       range ?? { start: 0, end: sourceText.length },
@@ -5935,7 +5953,10 @@ function collectAdditionalInstructions(
         resolvedPlainText &&
         isWorkflowPatientInstructionText(resolvedPlainText)
       ) {
-        appendPatientInstruction(internal, resolvedPlainText);
+        appendPatientInstruction(
+          internal,
+          normalizeWorkflowPatientInstructionText(sourceText) ?? resolvedPlainText
+        );
         groupAccepted = true;
         continue;
       }

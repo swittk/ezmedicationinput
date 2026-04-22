@@ -396,6 +396,15 @@ export enum AdviceForce {
   Sequence = "sequence"
 }
 
+export enum AdviceModality {
+  May = "may",
+  Can = "can",
+  Might = "might",
+  Could = "could",
+  Should = "should",
+  Must = "must"
+}
+
 export enum AdviceRelation {
   With = "with",
   Without = "without",
@@ -434,6 +443,7 @@ export interface AdviceArgument {
 export interface AdviceFrame {
   force: AdviceForce;
   polarity?: AdvicePolarity;
+  modality?: AdviceModality;
   predicate: {
     lemma: string;
     semanticClass?: string;

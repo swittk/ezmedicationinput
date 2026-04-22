@@ -7,6 +7,7 @@ import {
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
+  AdviceModality,
   AdvicePolarity,
   AdviceRelation,
   FhirCoding,
@@ -204,6 +205,12 @@ interface AdviceSegment {
   range: TextRange;
 }
 
+interface AdviceClausePrefix {
+  cursor: number;
+  polarity?: AdvicePolarity;
+  modality?: AdviceModality;
+}
+
 const ADVICE_TERMINOLOGY: AdviceTerminologySource = adviceTerminologySource;
 const ADVICE_RULES: AdviceRulesSource = adviceRulesSource;
 
@@ -215,9 +222,8 @@ const DEFAULT_INSTRUCTION_CONTEXT: AdviceParseContext = {
 
 const LEADING_NOISE_WORDS = new Set(["and", "please"]);
 const ADMINISTRATION_PREDICATES = new Set(["apply", "take", "use"]);
-const NEGATOR_WORDS = new Set(["not", "no", "dont", "don't"]);
+const NEGATOR_WORDS = new Set(["not", "no", "dont", "don't", "mustnt", "mustn't"]);
 const VERB_CONNECTOR_WORDS = new Set(["and", "or"]);
-const EFFECT_MODAL_WORDS = new Set(["may", "can", "might", "could"]);
 const SIMPLE_TIME_WORDS = new Set(["morning", "evening", "night", "bedtime"]);
 const DURATION_UNIT_WORDS = new Set([
   "second",
@@ -727,11 +733,13 @@ function createFrame(
   args: AdviceArgument[],
   sequenceIndex: number,
   relation?: AdviceRelation,
-  polarity?: AdvicePolarity
+  polarity?: AdvicePolarity,
+  modality?: AdviceModality
 ): AdviceFrame {
   return {
     force,
     polarity,
+    modality,
     predicate: {
       lemma: predicateLemma,
       semanticClass: predicateSemanticClass
@@ -835,6 +843,33 @@ function findVerbLemma(word: string): string | undefined {
   return findVerbLexeme(word)?.lemma;
 }
 
+function findModalLexeme(word: string): AdviceLexemeEntry | undefined {
+  const entry = findNormalizedLexeme(word, "modifier");
+  if (!entry || entry.semanticClass !== "modal") {
+    return undefined;
+  }
+  return entry;
+}
+
+function mapModalLemmaToModality(lemma: string | undefined): AdviceModality | undefined {
+  switch (lemma) {
+    case AdviceModality.May:
+      return AdviceModality.May;
+    case AdviceModality.Can:
+      return AdviceModality.Can;
+    case AdviceModality.Might:
+      return AdviceModality.Might;
+    case AdviceModality.Could:
+      return AdviceModality.Could;
+    case AdviceModality.Should:
+      return AdviceModality.Should;
+    case AdviceModality.Must:
+      return AdviceModality.Must;
+    default:
+      return undefined;
+  }
+}
+
 function containsConceptId(normalized: string, conceptId: string): boolean {
   const keys = CONCEPT_KEYS_BY_ID[conceptId];
   if (!keys) {
@@ -869,21 +904,113 @@ function containsVerbSequence(words: string[], leadLemma: string, targetLemma: s
   return false;
 }
 
+function consumeNegationPrefix(words: string[], start: number): number | undefined {
+  if (start >= words.length) {
+    return undefined;
+  }
+  const first = words[start];
+  const second = start + 1 < words.length ? words[start + 1] : undefined;
+  switch (first) {
+    case "do":
+      return second === "not" ? start + 2 : undefined;
+    case "don":
+      return second === "t" ? start + 2 : undefined;
+    case "must":
+      return second === "not" ? start + 2 : undefined;
+    case "mustn":
+      return second === "t" ? start + 2 : undefined;
+    default:
+      return NEGATOR_WORDS.has(first) ? start + 1 : undefined;
+  }
+}
+
+function parseLeadingClauseFeatures(words: string[]): AdviceClausePrefix | undefined {
+  let cursor = skipLeadingNoise(words);
+  if (cursor >= words.length) {
+    return undefined;
+  }
+
+  let modality: AdviceModality | undefined;
+  const modalLexeme = findModalLexeme(words[cursor]);
+  if (modalLexeme) {
+    modality = mapModalLemmaToModality(modalLexeme.lemma);
+    cursor += 1;
+  }
+
+  if (cursor >= words.length) {
+    return { cursor, modality };
+  }
+
+  const negationEnd = consumeNegationPrefix(words, cursor);
+  if (negationEnd === undefined) {
+    return {
+      cursor,
+      modality
+    };
+  }
+
+  switch (words[cursor]) {
+    case "mustn":
+      modality = AdviceModality.Must;
+      break;
+    default:
+      break;
+  }
+
+  return {
+    cursor: negationEnd,
+    modality,
+    polarity: AdvicePolarity.Negate
+  };
+}
+
+function deriveClauseForce(
+  sequenceCount: number,
+  context: AdviceParseContext,
+  predicateLemma: string,
+  predicateSemanticClass: string | undefined,
+  polarity: AdvicePolarity | undefined,
+  modality: AdviceModality | undefined
+): AdviceForce {
+  if (sequenceCount > 1) {
+    return AdviceForce.Sequence;
+  }
+  switch (predicateSemanticClass) {
+    case "effect":
+      return AdviceForce.Warning;
+    default:
+      break;
+  }
+  switch (modality) {
+    case AdviceModality.May:
+    case AdviceModality.Can:
+    case AdviceModality.Might:
+    case AdviceModality.Could:
+      return AdviceForce.Warning;
+    case AdviceModality.Should:
+      return AdviceForce.Caution;
+    default:
+      break;
+  }
+  switch (predicateLemma) {
+    case "avoid":
+      return AdviceForce.Warning;
+    default:
+      break;
+  }
+  switch (polarity) {
+    case AdvicePolarity.Negate:
+      return AdviceForce.Warning;
+    default:
+      break;
+  }
+  return context.defaultForce ?? AdviceForce.Instruction;
+}
+
 function containsNegatedVerb(words: string[], lemma: string): boolean {
   for (let index = 0; index < words.length; index += 1) {
-    if (
-      words[index] === "do" &&
-      index + 2 < words.length &&
-      NEGATOR_WORDS.has(words[index + 1]) &&
-      findVerbLemma(words[index + 2]) === lemma
-    ) {
-      return true;
-    }
-    if (
-      NEGATOR_WORDS.has(words[index]) &&
-      index + 1 < words.length &&
-      findVerbLemma(words[index + 1]) === lemma
-    ) {
+    const nextIndex = consumeNegationPrefix(words, index);
+    if (nextIndex !== undefined && nextIndex < words.length && findVerbLemma(words[nextIndex]) === lemma) {
       return true;
     }
   }
@@ -1320,80 +1447,6 @@ function parseEmbeddedAvoidanceFrames(
   return frames;
 }
 
-function tryParseDrowsinessInstruction(
-  sourceText: string,
-  span: TextRange,
-  sequenceIndex: number,
-  sequenceCount: number
-): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
-  if (!words.length) {
-    return undefined;
-  }
-  const normalized = words.join(" ");
-  if (!containsConceptId(normalized, "drowsiness")) {
-    return undefined;
-  }
-  const args = [createArgument(AdviceArgumentRole.Object, "drowsiness", "drowsiness", "drowsiness")];
-  if (containsConceptId(normalized, "next_day")) {
-    args.push(createArgument(AdviceArgumentRole.Time, "next day", "next day", "next_day"));
-  }
-  const frames = [
-    createFrame(
-      sourceText,
-      span,
-      sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
-      "cause",
-      "effect",
-      args,
-      sequenceIndex
-    )
-  ];
-  const embedded = parseEmbeddedAvoidanceFrames(
-    words,
-    normalized,
-    sourceText,
-    span,
-    sequenceIndex,
-    sequenceCount
-  );
-  for (const frame of embedded) {
-    frames.push(frame);
-  }
-  return frames;
-}
-
-function tryParseAvoidInstruction(
-  sourceText: string,
-  span: TextRange,
-  sequenceIndex: number,
-  sequenceCount: number
-): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
-  if (!words.length) {
-    return undefined;
-  }
-  const cursor = skipLeadingNoise(words);
-  if (cursor >= words.length || findVerbLemma(words[cursor]) !== "avoid") {
-    return undefined;
-  }
-  const objectText = words.slice(cursor + 1).join(" ");
-  if (!objectText) {
-    return undefined;
-  }
-  return [
-    createFrame(
-      sourceText,
-      span,
-      sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
-      "avoid",
-      "avoidance",
-      [classifyArgument(objectText)],
-      sequenceIndex
-    )
-  ];
-}
-
 function tryParseNoObjectInstruction(
   sourceText: string,
   span: TextRange,
@@ -1447,122 +1500,6 @@ function tryParseNoObjectInstruction(
   return undefined;
 }
 
-function tryParseNegatedVerbInstruction(
-  sourceText: string,
-  span: TextRange,
-  sequenceIndex: number,
-  sequenceCount: number
-): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
-  if (words.length < 3) {
-    return undefined;
-  }
-  let cursor = skipLeadingNoise(words);
-  if (cursor >= words.length) {
-    return undefined;
-  }
-  if (words[cursor] === "do" && cursor + 1 < words.length && words[cursor + 1] === "not") {
-    cursor += 2;
-  } else if (NEGATOR_WORDS.has(words[cursor])) {
-    cursor += 1;
-  } else {
-    return undefined;
-  }
-  if (cursor >= words.length || !isKnownVerb(words[cursor])) {
-    return undefined;
-  }
-
-  const verbWords: string[] = [];
-  let remainderStart = cursor;
-  while (remainderStart < words.length) {
-    const word = words[remainderStart];
-    if (isKnownVerb(word)) {
-      verbWords.push(word);
-      remainderStart += 1;
-      continue;
-    }
-    if (
-      VERB_CONNECTOR_WORDS.has(word) &&
-      remainderStart + 1 < words.length &&
-      isKnownVerb(words[remainderStart + 1])
-    ) {
-      remainderStart += 1;
-      continue;
-    }
-    break;
-  }
-
-  if (!verbWords.length) {
-    return undefined;
-  }
-
-  const remainderWords = words.slice(remainderStart);
-  const relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
-  const objectText = remainderWords.length
-    ? remainderWords.slice(relation ? 1 : 0).join(" ")
-    : "";
-
-  const frames: AdviceFrame[] = [];
-  for (const verb of verbWords) {
-    const args: AdviceArgument[] = [];
-    if (objectText) {
-      args.push(classifyArgument(objectText));
-    }
-    frames.push(
-      createFrame(
-        sourceText,
-        span,
-        sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
-        verb,
-        findNormalizedLexeme(verb, "verb")?.semanticClass,
-        args,
-        sequenceIndex,
-        relation,
-        AdvicePolarity.Negate
-      )
-    );
-  }
-
-  return frames;
-}
-
-function tryParseMayCauseInstruction(
-  sourceText: string,
-  span: TextRange,
-  sequenceIndex: number,
-  sequenceCount: number
-): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
-  if (words.length < 2) {
-    return undefined;
-  }
-  let cursor = skipLeadingNoise(words);
-  if (cursor < words.length && EFFECT_MODAL_WORDS.has(words[cursor])) {
-    cursor += 1;
-  }
-  if (cursor >= words.length) {
-    return undefined;
-  }
-  if (findVerbLemma(words[cursor]) !== "cause") {
-    return undefined;
-  }
-  const objectText = words.slice(cursor + 1).join(" ");
-  if (!objectText) {
-    return undefined;
-  }
-  return [
-    createFrame(
-      sourceText,
-      span,
-      sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
-      "cause",
-      "effect",
-      [classifyArgument(objectText)],
-      sequenceIndex
-    )
-  ];
-}
-
 function tryParseStyleInstruction(
   sourceText: string,
   span: TextRange,
@@ -1606,7 +1543,7 @@ function tryParseStyleInstruction(
   ];
 }
 
-function tryParseVerbInstruction(
+function tryParseClauseInstruction(
   sourceText: string,
   span: TextRange,
   context: AdviceParseContext,
@@ -1617,106 +1554,136 @@ function tryParseVerbInstruction(
   if (!words.length) {
     return undefined;
   }
-  let cursor = skipLeadingNoise(words);
-  if (cursor >= words.length) {
+  const prefix = parseLeadingClauseFeatures(words);
+  if (!prefix || prefix.cursor >= words.length) {
     return undefined;
+  }
+
+  const verbEntries: AdviceLexemeEntry[] = [];
+  let remainderStart = prefix.cursor;
+  while (remainderStart < words.length) {
+    const verbEntry = findVerbLexeme(words[remainderStart]);
+    if (!verbEntry) {
+      break;
+    }
+    verbEntries.push(verbEntry);
+    remainderStart += 1;
+    if (
+      remainderStart < words.length &&
+      VERB_CONNECTOR_WORDS.has(words[remainderStart]) &&
+      remainderStart + 1 < words.length &&
+      isKnownVerb(words[remainderStart + 1])
+    ) {
+      remainderStart += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (!verbEntries.length) {
+    return undefined;
+  }
+
+  let relation: AdviceRelation | undefined;
+  const args: AdviceArgument[] = [];
+  const remainderWords = words.slice(remainderStart);
+  const primaryVerb = verbEntries[0];
+
+  switch (primaryVerb.lemma) {
+    case "leave":
+      if (remainderWords[0] === "on") {
+        args.push(createArgument(AdviceArgumentRole.Theme, "on", "on"));
+        if (remainderWords.length > 1) {
+          const nextRelation = isRelationWord(remainderWords[1]);
+          if (nextRelation) {
+            relation = nextRelation;
+            const afterRelation = remainderWords.slice(2).join(" ");
+            if (afterRelation) {
+              args.push(classifyArgument(afterRelation));
+            }
+          } else {
+            const tail = remainderWords.slice(1).join(" ");
+            if (tail) {
+              args.push(classifyArgument(tail));
+            }
+          }
+        }
+        break;
+      }
+      relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
+      {
+        const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
+        if (objectText) {
+          args.push(classifyArgument(objectText));
+        }
+      }
+      break;
+    default:
+      relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
+      {
+        const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
+        if (objectText) {
+          args.push(classifyArgument(objectText));
+        }
+      }
+      break;
   }
 
   if (
-    cursor + 2 < words.length &&
-    isKnownVerb(words[cursor]) &&
-    words[cursor + 1] === "and" &&
-    isKnownVerb(words[cursor + 2])
+    !args.length &&
+    !relation &&
+    ADMINISTRATION_PREDICATES.has(primaryVerb.lemma)
   ) {
-    const objectText = words.slice(cursor + 3).join(" ");
-    if (!objectText) {
-      return undefined;
-    }
-    const firstVerb = words[cursor];
-    const secondVerb = words[cursor + 2];
-    const sharedArgument = classifyArgument(objectText);
-    return [
+    return undefined;
+  }
+
+  const frames: AdviceFrame[] = [];
+  for (const verbEntry of verbEntries) {
+    frames.push(
       createFrame(
         sourceText,
         span,
-        createDefaultForce(sequenceCount, sequenceIndex, context),
-        firstVerb,
-        findNormalizedLexeme(firstVerb, "verb")?.semanticClass,
-        [sharedArgument],
-        sequenceIndex
-      ),
-      createFrame(
-        sourceText,
-        span,
-        createDefaultForce(sequenceCount, sequenceIndex, context),
-        secondVerb,
-        findNormalizedLexeme(secondVerb, "verb")?.semanticClass,
-        [sharedArgument],
-        sequenceIndex
+        deriveClauseForce(
+          sequenceCount,
+          context,
+          verbEntry.lemma,
+          verbEntry.semanticClass,
+          prefix.polarity,
+          prefix.modality
+        ),
+        verbEntry.lemma,
+        verbEntry.semanticClass,
+        args,
+        sequenceIndex,
+        relation,
+        prefix.polarity,
+        prefix.modality
       )
-    ];
+    );
   }
 
-  let verb = words[cursor];
-  if (isAdministrationWord(verb) && cursor + 1 < words.length) {
-    const relation = isRelationWord(words[cursor + 1]);
-    if (relation) {
-      return tryParseRelationInstruction(sourceText, span, context, sequenceIndex, sequenceCount);
-    }
-    cursor += 1;
-    verb = cursor < words.length ? words[cursor] : "";
-  }
-
-  if (!verb || !isKnownVerb(verb) || isAdministrationWord(verb)) {
-    return undefined;
-  }
-
-  const force = createDefaultForce(sequenceCount, sequenceIndex, context);
-  const remainderWords = words.slice(cursor + 1);
-  const args: AdviceArgument[] = [];
-  let relation: AdviceRelation | undefined;
-
-  if (verb === "leave" && remainderWords[0] === "on") {
-    args.push(createArgument(AdviceArgumentRole.Theme, "on", "on"));
-    if (remainderWords.length > 1) {
-      const nextRelation = isRelationWord(remainderWords[1]);
-      if (nextRelation) {
-        relation = nextRelation;
-        const afterRelation = remainderWords.slice(2).join(" ");
-        if (afterRelation) {
-          args.push(classifyArgument(afterRelation));
-        }
-      } else {
-        const tail = remainderWords.slice(1).join(" ");
-        if (tail) {
-          args.push(classifyArgument(tail));
-        }
-      }
-    }
-  } else if (remainderWords.length > 0) {
-    relation = isRelationWord(remainderWords[0]);
-    const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
-    if (objectText) {
-      args.push(classifyArgument(objectText));
-    }
-  }
-
-  if (!args.length && (verb === "apply" || verb === "take" || verb === "use")) {
-    return undefined;
-  }
-
-  return [
-    createFrame(
+  if (
+    frames.length === 1 &&
+    frames[0].predicate.lemma === "cause" &&
+    frames[0].args.length === 1 &&
+    frames[0].args[0].conceptId === "drowsiness"
+  ) {
+    const embedded = parseEmbeddedAvoidanceFrames(
+      words,
+      words.join(" "),
       sourceText,
       span,
-      force,
-      verb,
-      findNormalizedLexeme(verb, "verb")?.semanticClass,
-      args,
       sequenceIndex,
-      relation
-    )
-  ];
+      sequenceCount
+    );
+    if (embedded.length) {
+      for (const frame of embedded) {
+        frames.push(frame);
+      }
+    }
+  }
+
+  return frames;
 }
 
 function parseSequenceFrames(
@@ -1732,15 +1699,11 @@ function parseSequenceFrames(
   for (let index = 0; index < sequenceSegments.length; index++) {
     const segment = sequenceSegments[index];
     const parsed =
-      tryParseDrowsinessInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
-      tryParseNegatedVerbInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
-      tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
-      tryParseAvoidInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
-      tryParseMayCauseInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
       tryParseRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseStyleInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
-      tryParseVerbInstruction(segment.text, segment.range, context, index, sequenceSegments.length);
+      tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
+      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length);
     if (!parsed) {
       return [];
     }
@@ -1782,6 +1745,99 @@ function shouldAllowFallbackText(sourceText: string, allowFreeTextFallback: bool
   return Boolean(allowFreeTextFallback && cleanFreeText(sourceText));
 }
 
+function capitalizeSentence(value: string): string {
+  if (!value) {
+    return value;
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function realizeAdviceModality(modality: AdviceModality | undefined): string | undefined {
+  switch (modality) {
+    case AdviceModality.May:
+      return "May";
+    case AdviceModality.Can:
+      return "Can";
+    case AdviceModality.Might:
+      return "Might";
+    case AdviceModality.Could:
+      return "Could";
+    case AdviceModality.Should:
+      return "Should";
+    case AdviceModality.Must:
+      return "Must";
+    default:
+      return undefined;
+  }
+}
+
+function joinAdviceArgumentTexts(args: AdviceArgument[]): string | undefined {
+  let text = "";
+  let added = 0;
+  for (const arg of args) {
+    const trimmed = cleanFreeText(arg.text);
+    if (!trimmed) {
+      continue;
+    }
+    if (added > 0) {
+      text += added === 1 ? " and " : ", ";
+    }
+    text += trimmed;
+    added += 1;
+  }
+  return text || undefined;
+}
+
+function realizeSingleAdviceFrame(frame: AdviceFrame): string | undefined {
+  const argText = joinAdviceArgumentTexts(frame.args);
+  const modalityText = realizeAdviceModality(frame.modality);
+  switch (frame.polarity) {
+    case AdvicePolarity.Negate: {
+      let text = `${modalityText === "Must" ? "Must not" : "Do not"} ${frame.predicate.lemma}`;
+      if (frame.relation) {
+        text += ` ${frame.relation}`;
+      }
+      if (argText) {
+        text += ` ${argText}`;
+      }
+      return text;
+    }
+    default:
+      break;
+  }
+
+  switch (frame.predicate.lemma) {
+    case "avoid":
+      if (!modalityText) {
+        return argText ? `Avoid ${argText}` : "Avoid";
+      }
+      return argText ? `${modalityText} avoid ${argText}` : `${modalityText} avoid`;
+    case "cause":
+      if (!modalityText) {
+        return argText ? "May cause " + argText : "May cause";
+      }
+      return argText ? `${modalityText} cause ${argText}` : `${modalityText} cause`;
+    default: {
+      let text = modalityText ? `${modalityText} ${frame.predicate.lemma}` : capitalizeSentence(frame.predicate.lemma);
+      if (frame.relation) {
+        text += ` ${frame.relation}`;
+      }
+      if (argText) {
+        text += ` ${argText}`;
+      }
+      return text;
+    }
+  }
+}
+
+function realizeAdviceFramesText(frames: AdviceFrame[]): string | undefined {
+  if (frames.length !== 1) {
+    return undefined;
+  }
+  const realized = realizeSingleAdviceFrame(frames[0]);
+  return realized ? capitalizeSentence(realized) : undefined;
+}
+
 export function parseAdditionalInstructions(
   sourceText: string,
   span: TextRange,
@@ -1806,8 +1862,9 @@ export function parseAdditionalInstructions(
       ? matchAdviceCodingRule(frames, normalizedText)
       : undefined;
     if (frames.length || rule) {
+      const realizedText = rule ? undefined : realizeAdviceFramesText(frames);
       instructions.push({
-        text: rule?.definition.text ?? cleanedText,
+        text: rule?.definition.text ?? realizedText ?? cleanedText,
         coding: cloneDefinitionCoding(rule?.definition.coding, rule?.definition.i18n),
         frames
       });

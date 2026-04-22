@@ -748,3 +748,46 @@ Desired behavior:
    - all now render:
      - `Take 10 mL orally as needed for dizziness. May cause drowsiness.`
    - all code drowsiness warning as SNOMED `418639000`
+
+2026-04-22 Generic advice-clause grammar unification
+
+1. The advice parser was still structurally too “branch by concept”.
+   - `avoid`, negated verb chains, `may cause`, and plain verb instructions each had their own parser entrypoint
+   - that worked, but it kept the advice layer feeling heuristic-heavy even after the larger parser migration
+
+2. Refactor shape:
+   - introduced first-class `AdviceModality`
+     - `may`
+     - `can`
+     - `might`
+     - `could`
+     - `should`
+     - `must`
+   - added those modal lexemes to `advice-terminology.json`
+   - replaced the separate avoid/negated-verb/may-cause/plain-verb parsers with one generic clause parser:
+     - optional modality
+     - optional negation
+     - verb series
+     - optional relation
+     - optional argument phrase
+   - force is now derived deterministically from grammar features:
+     - `effect` or weak modal -> warning
+     - `should` -> caution
+     - negation / `avoid` -> warning
+     - otherwise default instruction
+
+3. Important behavioral results:
+   - `must not take with warfarin` now stays `Must not...`, not flattened to generic `Do not...`
+   - uncoded modal advice now survives as structured text instead of dead leftovers:
+     - `Should take with grapefruit juice`
+     - `Might cause dizziness`
+     - `Use caution in storms`
+   - coded advice still wins when terminology exists:
+     - `can cause drowsiness` still codes SNOMED `418639000`
+     - `must not take with alcohol` still codes the alcohol warning
+
+4. Verification:
+   - `nvm use 22`
+   - `npm run build`
+   - `npm test`
+   - green at `518` tests
