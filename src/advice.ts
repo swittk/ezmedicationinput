@@ -124,12 +124,17 @@ interface AdviceMatcherArgConcept {
   argConcept: AdviceArgConceptMatcher;
 }
 
+interface AdviceMatcherNormalizedText {
+  normalizedTexts: string[];
+}
+
 type AdviceMatcher =
   | AdviceMatcherAllOf
   | AdviceMatcherAnyOf
   | AdviceMatcherNot
   | AdviceMatcherFrame
-  | AdviceMatcherArgConcept;
+  | AdviceMatcherArgConcept
+  | AdviceMatcherNormalizedText;
 
 interface AdviceMatcherAllOfSource {
   allOf: AdviceMatcherSource[];
@@ -151,12 +156,17 @@ interface AdviceMatcherArgConceptSource {
   argConcept: AdviceArgConceptMatcherSource;
 }
 
+interface AdviceMatcherNormalizedTextSource {
+  normalizedTexts: string[];
+}
+
 type AdviceMatcherSource =
   | AdviceMatcherAllOfSource
   | AdviceMatcherAnyOfSource
   | AdviceMatcherNotSource
   | AdviceMatcherFrameSource
-  | AdviceMatcherArgConceptSource;
+  | AdviceMatcherArgConceptSource
+  | AdviceMatcherNormalizedTextSource;
 
 interface AdviceCodingRuleSource {
   id: string;
@@ -521,7 +531,17 @@ function buildAdviceMatcher(source: AdviceMatcherSource): AdviceMatcher {
   if ("frame" in source) {
     return { frame: buildAdviceFrameMatcher(source.frame) };
   }
-  return { argConcept: buildAdviceArgConceptMatcher(source.argConcept) };
+  if ("argConcept" in source) {
+    return { argConcept: buildAdviceArgConceptMatcher(source.argConcept) };
+  }
+  const normalizedTexts: string[] = [];
+  for (const value of source.normalizedTexts) {
+    const normalized = normalizeAdditionalInstructionKey(value);
+    if (normalized) {
+      normalizedTexts.push(normalized);
+    }
+  }
+  return { normalizedTexts };
 }
 
 function buildAdviceCodingRule(source: AdviceCodingRuleSource): AdviceCodingRule {
@@ -610,10 +630,14 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
   return true;
 }
 
-function matchesAdviceMatcher(frames: AdviceFrame[], matcher: AdviceMatcher): boolean {
+function matchesAdviceMatcher(
+  frames: AdviceFrame[],
+  normalizedText: string,
+  matcher: AdviceMatcher
+): boolean {
   if ("allOf" in matcher) {
     for (const item of matcher.allOf) {
-      if (!matchesAdviceMatcher(frames, item)) {
+      if (!matchesAdviceMatcher(frames, normalizedText, item)) {
         return false;
       }
     }
@@ -621,14 +645,14 @@ function matchesAdviceMatcher(frames: AdviceFrame[], matcher: AdviceMatcher): bo
   }
   if ("anyOf" in matcher) {
     for (const item of matcher.anyOf) {
-      if (matchesAdviceMatcher(frames, item)) {
+      if (matchesAdviceMatcher(frames, normalizedText, item)) {
         return true;
       }
     }
     return false;
   }
   if ("not" in matcher) {
-    return !matchesAdviceMatcher(frames, matcher.not);
+    return !matchesAdviceMatcher(frames, normalizedText, matcher.not);
   }
   if ("frame" in matcher) {
     for (const frame of frames) {
@@ -638,8 +662,16 @@ function matchesAdviceMatcher(frames: AdviceFrame[], matcher: AdviceMatcher): bo
     }
     return false;
   }
-  for (const frame of frames) {
-    if (frameHasArgConcept(frame, matcher.argConcept)) {
+  if ("argConcept" in matcher) {
+    for (const frame of frames) {
+      if (frameHasArgConcept(frame, matcher.argConcept)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  for (const value of matcher.normalizedTexts) {
+    if (normalizedText === value) {
       return true;
     }
   }
@@ -1596,9 +1628,12 @@ function parseSequenceFrames(
   return frames;
 }
 
-function matchAdviceCodingRule(frames: AdviceFrame[]): AdviceCodingRule | undefined {
+function matchAdviceCodingRule(
+  frames: AdviceFrame[],
+  normalizedText: string
+): AdviceCodingRule | undefined {
   for (const rule of ADDITIONAL_INSTRUCTION_RULES) {
-    if (matchesAdviceMatcher(frames, rule.matcher)) {
+    if (matchesAdviceMatcher(frames, normalizedText, rule.matcher)) {
       return rule;
     }
   }
@@ -1642,9 +1677,12 @@ export function parseAdditionalInstructions(
     if (!cleanedText) {
       continue;
     }
+    const normalizedText = normalizeAdditionalInstructionKey(cleanedText);
     const frames = parseSequenceFrames(cleanedText, segment.range, effectiveContext);
-    if (frames.length) {
-      const rule = matchAdviceCodingRule(frames);
+    const rule = normalizedText
+      ? matchAdviceCodingRule(frames, normalizedText)
+      : undefined;
+    if (frames.length || rule) {
       instructions.push({
         text: rule?.definition.text ?? cleanedText,
         coding: cloneDefinitionCoding(rule?.definition.coding, rule?.definition.i18n),

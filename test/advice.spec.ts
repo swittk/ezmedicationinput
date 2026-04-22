@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseSig } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding,
@@ -47,6 +48,45 @@ describe("additional instruction rule inventory", () => {
     ]);
   });
 
+  it("codes drowsiness-only warnings from structured frames", () => {
+    const instructions = parseAdditionalInstructions("may cause drowsiness", { start: 0, end: 20 });
+    expect(instructions[0]?.text).toBe("May cause drowsiness");
+    expect(instructions[0]?.coding?.code).toBe("418639000");
+  });
+
+  it("codes specific meal-state instructions instead of broader fallback concepts", () => {
+    const afterFood = parseAdditionalInstructions("after food", { start: 0, end: 10 });
+    expect(afterFood[0]?.coding?.code).toBe("225758001");
+
+    const beforeFood = parseAdditionalInstructions("before food", { start: 0, end: 11 });
+    expect(beforeFood[0]?.coding?.code).toBe("311500009");
+  });
+
+  it("codes exact SNOMED canned advice phrases through normalized-text matching", () => {
+    const caution = parseAdditionalInstructions("use with caution", { start: 0, end: 16 });
+    expect(caution[0]?.coding?.code).toBe("428579001");
+
+    const printed = parseAdditionalInstructions(
+      "follow the printed instructions you have been given with this medicine",
+      { start: 0, end: 66 }
+    );
+    expect(printed[0]?.coding?.code).toBe("418849000");
+  });
+
+  it("codes common clinic instructions for topical and oral products", () => {
+    const sparingly = parseAdditionalInstructions("apply sparingly", { start: 0, end: 15 });
+    expect(sparingly[0]?.coding?.code).toBe("420883007");
+
+    const liberally = parseAdditionalInstructions("use liberally", { start: 0, end: 13 });
+    expect(liberally[0]?.coding?.code).toBe("419125005");
+
+    const dissolve = parseAdditionalInstructions("dissolve under the tongue", { start: 0, end: 25 });
+    expect(dissolve[0]?.coding?.code).toBe("419529008");
+
+    const swish = parseAdditionalInstructions("swish and swallow", { start: 0, end: 17 });
+    expect(swish[0]?.coding?.code).toBe("421298005");
+  });
+
   it("rebuilds template frames from coded advice definitions", () => {
     const definition = findAdditionalInstructionDefinitionByCoding(SNOMED_SYSTEM, "418693002");
     expect(definition).toMatchObject({
@@ -74,5 +114,13 @@ describe("additional instruction rule inventory", () => {
         predicate: expect.objectContaining({ lemma: "chew" })
       })
     ]);
+  });
+
+  it("renders coded advice in Thai when localized", () => {
+    const drowsy = parseSig("1 tab po daily; may cause drowsiness", { locale: "th" });
+    expect(drowsy.longText).toContain("อาจทำให้ง่วงซึม");
+
+    const sparingly = parseSig("apply sparingly", { locale: "th" });
+    expect(sparingly.longText).toContain("ใช้เพียงเล็กน้อย");
   });
 });

@@ -1657,6 +1657,7 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       definition: {
         coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
         text: "Pain",
+        aliases: ["เจ็บ", "ปวด"],
         i18n: { th: "ปวด" }
       }
     },
@@ -1784,36 +1785,54 @@ export const DEFAULT_PRN_REASON_ENTRIES: PrnReasonDictionaryEntry[] =
   DEFAULT_PRN_REASON_SOURCE.map((source) => {
     const canonicalTerm =
       source.definition.text ?? source.definition.coding?.display ?? source.names[0];
+    const terms: string[] = [];
+    const seen = new Set<string>();
+
+    const pushTerm = (value: string | undefined): void => {
+      if (!value) {
+        return;
+      }
+      const key = normalizePrnReasonKey(value);
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      terms.push(value);
+    };
+
+    for (const name of source.names) {
+      pushTerm(name);
+    }
+    if (source.definition.aliases) {
+      for (const alias of source.definition.aliases) {
+        pushTerm(alias);
+      }
+    }
+    if (source.definition.i18n) {
+      for (const locale in source.definition.i18n) {
+        const translation = source.definition.i18n[locale];
+        pushTerm(translation);
+      }
+    }
+
     return {
       canonical: normalizePrnReasonKey(canonicalTerm ?? ""),
       definition: source.definition,
-      terms: [...source.names]
+      terms
     };
   });
 
 export const DEFAULT_PRN_REASON_DEFINITIONS = objectFromEntries(
-  DEFAULT_PRN_REASON_SOURCE.reduce<Array<[string, PrnReasonDefinition]>>(
-    (entries, source) => {
-      for (const name of source.names) {
-        const key = normalizePrnReasonKey(name);
-        if (!key) {
-          continue;
-        }
-        entries.push([key, source.definition]);
+  DEFAULT_PRN_REASON_ENTRIES.reduce<Array<[string, PrnReasonDefinition]>>((entries, entry) => {
+    for (const term of entry.terms) {
+      const key = normalizePrnReasonKey(term);
+      if (!key) {
+        continue;
       }
-      if (source.definition.aliases) {
-        for (const alias of source.definition.aliases) {
-          const key = normalizePrnReasonKey(alias);
-          if (!key) {
-            continue;
-          }
-          entries.push([key, source.definition]);
-        }
-      }
-      return entries;
-    },
-    []
-  )
+      entries.push([key, entry.definition]);
+    }
+    return entries;
+  }, [])
 ) as Record<string, PrnReasonDefinition>;
 
 /**

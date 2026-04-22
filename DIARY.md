@@ -516,3 +516,42 @@ Desired behavior:
    - advice collection is still leftover-group based in the main parser
    - bilingual terminology breadth is still limited
    - but the coded advice inventory is now maintainable as data instead of expanding matcher code
+
+### 2026-04-22 RF2-Derived Advice Expansion
+
+1. Expanded the additional-instruction inventory from the local SNOMED RF2 release instead of inventing freehand codes.
+   - added specific meal-state qualifiers: `After food` and `Before food`
+   - added `Warning. May cause drowsiness`
+   - added common outpatient cautions such as `Use with caution` and `Follow the printed instructions...`
+   - added practical topical/oral instruction qualifiers such as `Sparingly`, `Liberally`, `Dissolved under the tongue`, and `Swish and swallow`
+   - added exact imperative qualifiers for `Wash`, `Insert`, `Instill`, and `Shampoo`
+
+2. Added a generic normalized-text matcher to the advice rule DSL.
+   - this lets us represent canned SNOMED instruction phrases in JSON when the clause grammar does not yet decompose them structurally
+   - avoids falling back to more concept-specific TS branches
+
+3. Added Thai text for the expanded coded advice set.
+   - Thai localization for additional instructions now benefits automatically because `i18n.ts` already prefers coded advice translations by SNOMED code
+
+4. Remaining architectural gap:
+   - advice collection still comes from leftover groups in the parser core
+   - terminology coverage is broader now, but a larger future step is still to mine more RF2 qualifier/instruction concepts systematically rather than ad hoc keyword passes
+
+### 2026-04-22 Real-World Advice And Thai PRN Fixes
+
+1. Fixed Thai PRN reason lookup at the dictionary layer.
+   - default PRN reason terms now include aliases and localized `i18n` text, not only the original English source names
+   - added explicit pain aliases such as `เจ็บ` and `ปวด`
+   - this lets cases like `apply prn คัน` and `apply to lesion prn เจ็บ` resolve to the intended SNOMED reasons
+
+2. Fixed PRN trailing meal suffix handling for oral sigs.
+   - explicit `after food` / `before food` at the end of a PRN reason tail now preserve the correct meal relation instead of degrading to generic `with meals`
+
+3. Expanded sparing-amount advice variants.
+   - `use little`, `use little at a time`, `use minimal`, `use minimum amount`, and similar topical shorthand now map to the coded sparingly instruction
+   - `liberally` remains coded as its own SNOMED qualifier
+
+4. Added parser-level regression tests for real-world combined sigs.
+   - oral `prn pain after food`
+   - topical `prn คัน` with sparing advice
+   - topical `prn เจ็บ` with a free-text lesion site

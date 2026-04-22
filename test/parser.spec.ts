@@ -1217,6 +1217,51 @@ describe("parseSig core scenarios", () => {
     );
   });
 
+  it("keeps after-food advice as schedule timing in real oral sigs", () => {
+    const result = parseSig("1 tab po prn pain after food", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
+    expect(result.fhir.additionalInstruction).toBeUndefined();
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "22253000",
+      display: "Pain"
+    });
+    expect(result.longText).toBe("Take 1 tablet by mouth after meals as needed for pain.");
+  });
+
+  it("codes Thai topical PRN reasons and sparing instructions in end-to-end sigs", () => {
+    const result = parseSig("apply cream to affected area prn คัน; use minimal");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "418363000",
+      display: "Itching of skin"
+    });
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "420883007",
+      display: "Sparingly - dosing instruction fragment"
+    });
+    expect(result.meta.normalized.prnReason?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: "418363000",
+      display: "Itching of skin"
+    });
+  });
+
+  it("codes Thai pain reasons in topical PRN sigs with free-text sites", () => {
+    const result = parseSig("apply to lesion prn เจ็บ; use little at a time");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+    expect(result.fhir.site?.text).toBe("lesion");
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: "22253000",
+      display: "Pain"
+    });
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("420883007");
+    expect(result.longText).toContain("Apply sparingly.");
+  });
+
   it("parses 1x2 subcutaneous", () => {
     const result = parseSig("1x2 subcutaneous");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1 });

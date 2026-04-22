@@ -1,6 +1,29 @@
 {
   "rules": [
     {
+      "id": "after-food",
+      "definition": {
+        "code": "225758001",
+        "display": "After food",
+        "text": "Take after food",
+        "thai": "รับประทานหลังอาหาร"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "after",
+          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "relations": ["after"],
+          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
+        }
+      }
+    },
+    {
       "id": "with-after-food",
       "definition": {
         "code": "311504000",
@@ -26,8 +49,8 @@
     {
       "id": "before-food",
       "definition": {
-        "code": "311501008",
-        "display": "Half to one hour before food",
+        "code": "311500009",
+        "display": "Before food",
         "text": "Take before food",
         "thai": "รับประทานก่อนอาหาร"
       },
@@ -44,6 +67,49 @@
           "relations": ["before"],
           "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
         }
+      }
+    },
+    {
+      "id": "half-to-one-hour-before-food",
+      "definition": {
+        "code": "311501008",
+        "display": "Half to one hour before food",
+        "text": "Take half to one hour before food",
+        "thai": "รับประทานก่อนอาหารครึ่งถึงหนึ่งชั่วโมง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "before",
+          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": ["half to one hour before food"]
+      }
+    },
+    {
+      "id": "hour-before-food-or-empty-stomach",
+      "definition": {
+        "code": "311502001",
+        "display": "An hour before food or on an empty stomach",
+        "text": "Take an hour before food or on an empty stomach",
+        "thai": "รับประทานก่อนอาหารหนึ่งชั่วโมงหรือขณะท้องว่าง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "relation": "before",
+          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "an hour before food or on an empty stomach",
+          "one hour before food or on an empty stomach"
+        ]
       }
     },
     {
@@ -142,6 +208,48 @@
           "predicateLemmas": ["avoid", "drink"],
           "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
         }
+      }
+    },
+    {
+      "id": "drowsiness-only",
+      "definition": {
+        "code": "418639000",
+        "display": "Warning. May cause drowsiness",
+        "text": "May cause drowsiness",
+        "thai": "อาจทำให้ง่วงซึม"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "cause", "semanticClass": "effect" },
+          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+        }
+      ],
+      "matcher": {
+        "allOf": [
+          {
+            "frame": {
+              "predicateLemmas": ["cause"],
+              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "predicateLemmas": ["drive"],
+                "polarity": "negate"
+              }
+            }
+          },
+          {
+            "not": {
+              "argConcept": {
+                "conceptIds": ["alcohol"],
+                "role": "substance"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -273,6 +381,73 @@
       }
     },
     {
+      "id": "use-with-caution",
+      "definition": {
+        "code": "428579001",
+        "display": "Use with caution",
+        "text": "Use with caution",
+        "thai": "ใช้ด้วยความระมัดระวัง"
+      },
+      "frames": [
+        {
+          "force": "caution",
+          "predicate": { "lemma": "use", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "use with caution",
+          "with caution"
+        ]
+      }
+    },
+    {
+      "id": "follow-printed-instructions",
+      "definition": {
+        "code": "418849000",
+        "display": "Warning. Follow the printed instructions you have been given with this medicine",
+        "text": "Follow the printed instructions you have been given with this medicine",
+        "thai": "ปฏิบัติตามคำแนะนำที่แนบมากับยานี้"
+      },
+      "frames": [
+        {
+          "force": "warning",
+          "predicate": { "lemma": "follow", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "follow the printed instructions you have been given with this medicine",
+          "follow the printed instructions"
+        ]
+      }
+    },
+    {
+      "id": "flammable-keep-away-from-fire",
+      "definition": {
+        "code": "419439004",
+        "display": "Caution flammable: keep away from fire or flames",
+        "text": "Caution: keep away from fire or flames",
+        "thai": "ระวังติดไฟง่าย; เก็บให้ห่างจากไฟหรือเปลวไฟ"
+      },
+      "frames": [
+        {
+          "force": "caution",
+          "predicate": { "lemma": "keep", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "caution flammable keep away from fire or flames",
+          "keep away from fire or flames",
+          "keep away from fire"
+        ]
+      }
+    },
+    {
       "id": "avoid-sunlight",
       "definition": {
         "code": "418521000",
@@ -360,6 +535,199 @@
               }
             }
           }
+        ]
+      }
+    },
+    {
+      "id": "sparingly",
+      "definition": {
+        "code": "420883007",
+        "display": "Sparingly - dosing instruction fragment",
+        "text": "Apply sparingly",
+        "thai": "ใช้เพียงเล็กน้อย"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "apply", "semanticClass": "administration" },
+          "args": [{ "role": "amount", "text": "sparingly" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "sparingly",
+          "apply sparingly",
+          "use sparingly",
+          "little",
+          "little at a time",
+          "a little at a time",
+          "minimal",
+          "minimum amount",
+          "use little at a time",
+          "use a little at a time",
+          "use little",
+          "use minimal",
+          "use minimal amount",
+          "use minimum amount",
+          "apply little at a time",
+          "apply a little at a time",
+          "apply little",
+          "apply minimal",
+          "apply minimal amount",
+          "apply minimum amount",
+          "ใช้ทีละน้อย",
+          "ทาทีละน้อย"
+        ]
+      }
+    },
+    {
+      "id": "liberally",
+      "definition": {
+        "code": "419125005",
+        "display": "Liberally",
+        "text": "Apply liberally",
+        "thai": "ใช้อย่างทั่วถึง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "apply", "semanticClass": "administration" },
+          "args": [{ "role": "amount", "text": "liberally" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "liberally",
+          "apply liberally",
+          "use liberally"
+        ]
+      }
+    },
+    {
+      "id": "dissolved-under-tongue",
+      "definition": {
+        "code": "419529008",
+        "display": "Dissolved under the tongue",
+        "text": "Allow to dissolve under the tongue",
+        "thai": "ปล่อยให้ละลายใต้ลิ้น"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "dissolve", "semanticClass": "prepare" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "dissolve under the tongue",
+          "allow to dissolve under the tongue",
+          "dissolved under the tongue"
+        ]
+      }
+    },
+    {
+      "id": "swish-and-swallow",
+      "definition": {
+        "code": "421298005",
+        "display": "Swish and swallow - dosing instruction imperative",
+        "text": "Swish and swallow",
+        "thai": "กลั้วปากแล้วกลืน"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "swish", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "swish and swallow"
+        ]
+      }
+    },
+    {
+      "id": "wash-imperative",
+      "definition": {
+        "code": "422152000",
+        "display": "Wash - dosing instruction imperative",
+        "text": "Wash",
+        "thai": "ล้าง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "wash", "semanticClass": "cleanse" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "wash"
+        ]
+      }
+    },
+    {
+      "id": "insert-imperative",
+      "definition": {
+        "code": "421257003",
+        "display": "Insert - dosing instruction imperative",
+        "text": "Insert",
+        "thai": "สอด"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "insert", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "insert"
+        ]
+      }
+    },
+    {
+      "id": "instill-imperative",
+      "definition": {
+        "code": "421538008",
+        "display": "Instill - dosing instruction imperative",
+        "text": "Instill",
+        "thai": "หยอด"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "instill", "semanticClass": "administration" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "instill"
+        ]
+      }
+    },
+    {
+      "id": "shampoo-imperative",
+      "definition": {
+        "code": "420606003",
+        "display": "Shampoo - dosing instruction imperative",
+        "text": "Shampoo",
+        "thai": "สระ"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "shampoo", "semanticClass": "cleanse" },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "shampoo"
         ]
       }
     }

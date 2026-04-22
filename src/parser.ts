@@ -4391,6 +4391,20 @@ function findTrailingPrnScheduleSuffix(
   tokens: Token[],
   options?: ParseOptions
 ): number | undefined {
+  if (tokens.length >= 2) {
+    const relationToken = tokens[tokens.length - 2];
+    const mealToken = tokens[tokens.length - 1];
+    const relation = relationToken ? normalizeTokenLower(relationToken) : "";
+    const meal = mealToken ? MEAL_KEYWORDS[normalizeTokenLower(mealToken)] : undefined;
+    if (meal && BEFORE_AFTER_TOKENS.has(relation)) {
+      addWhen(
+        internal.when,
+        relation === "after" ? meal.pc : meal.ac
+      );
+      return tokens.length - 2;
+    }
+  }
+
   const maxSpan = Math.min(4, tokens.length);
   for (let span = maxSpan; span >= 1; span--) {
     const startIndex = tokens.length - span;
