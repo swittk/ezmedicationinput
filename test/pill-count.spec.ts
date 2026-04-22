@@ -24,6 +24,28 @@ describe("calculateTotalUnits", () => {
         expect(result.totalUnits).toBe(7);
     });
 
+    it("caps external duration by parsed dosage duration when present", () => {
+        const parsed = parseSig("1 tab po od for 7 days", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 30,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(result.totalUnits).toBe(7);
+    });
+
+    it("caps external duration by parsed hour-based course duration", () => {
+        const parsed = parseSig("1 tab po q12h for 36 hours", { context: { dosageForm: "tab" } });
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 10,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(result.totalUnits).toBe(3);
+    });
+
     it("calculates BID dose for a week", () => {
         const dosage: FhirDosage = {
             doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],

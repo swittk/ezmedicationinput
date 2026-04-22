@@ -425,6 +425,38 @@ function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   };
 }
 
+function resolveRepeatDurationCapEnd(
+  repeat: FhirTimingRepeat | undefined,
+  anchor: Date,
+  timeZone: string
+): Date | null {
+  const durationValue = repeat?.durationMax ?? repeat?.duration;
+  const durationUnit = repeat?.durationUnit;
+  if (
+    durationValue === undefined ||
+    !Number.isFinite(durationValue) ||
+    durationValue <= 0 ||
+    !durationUnit
+  ) {
+    return null;
+  }
+  const stepper = createIntervalStepper(
+    { period: durationValue, periodUnit: durationUnit },
+    timeZone
+  );
+  if (!stepper) {
+    return null;
+  }
+  return stepper(anchor) ?? null;
+}
+
+function minDate(left: Date, right: Date | null): Date {
+  if (!right) {
+    return left;
+  }
+  return right.getTime() < left.getTime() ? right : left;
+}
+
 /** Provides the default meal pairing used for AC/PC expansions. */
 function getDefaultMealPairs(config: NextDueDoseConfig): string[] {
   return [EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner];
@@ -753,6 +785,8 @@ export function nextDueDoses(
   };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
+  const courseEnd =
+    timing && repeat ? resolveRepeatDurationCapEnd(repeat, baseTime, timeZone) : null;
 
   if (
     needsDerivedPriorCount &&
@@ -772,6 +806,9 @@ export function nextDueDoses(
   }
 
   if (!timing || !repeat) {
+    return [];
+  }
+  if (courseEnd && from >= courseEnd) {
     return [];
   }
 
@@ -819,7 +856,7 @@ export function nextDueDoses(
     const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
     if (includesImmediate) {
       const immediateSource = orderedAt ?? from;
-      if (!orderedAt || orderedAt >= from) {
+      if ((!orderedAt || orderedAt >= from) && (!courseEnd || immediateSource < courseEnd)) {
         const instantIso = formatZonedIso(immediateSource, timeZone);
         if (!seen.has(instantIso)) {
           seen.add(instantIso);
@@ -844,7 +881,11 @@ export function nextDueDoses(
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
       const maxIterations = effectiveLimit * 31;
-      while (results.length < effectiveLimit && iterations < maxIterations) {
+      while (
+        results.length < effectiveLimit &&
+        iterations < maxIterations &&
+        (!courseEnd || currentDay < courseEnd)
+      ) {
         const weekday = getLocalWeekday(currentDay, timeZone);
         if (!enforceDayFilter || dayFilter.has(weekday)) {
           for (const entry of expanded) {
@@ -859,6 +900,9 @@ export function nextDueDoses(
               continue;
             }
             if (orderedAt && zoned < orderedAt) {
+              continue;
+            }
+            if (courseEnd && zoned >= courseEnd) {
               continue;
             }
             const iso = formatZonedIso(zoned, timeZone);
@@ -904,7 +948,8 @@ export function nextDueDoses(
       timeZone,
       dayFilter,
       enforceDayFilter,
-      orderedAt
+      orderedAt,
+      courseEnd
     );
     return candidates;
   }
@@ -922,6 +967,7 @@ export function nextDueDoses(
       anchorDay: startOfLocalDay(baseTime, timeZone),
       startDay: from,
       from,
+      to: courseEnd ?? undefined,
       orderedAt,
       limit: effectiveLimit,
       defaultClock: toLocalClock(baseTime, timeZone)
@@ -939,7 +985,11 @@ export function nextDueDoses(
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
     const maxIterations = effectiveLimit * 31;
-    while (results.length < effectiveLimit && iterations < maxIterations) {
+    while (
+      results.length < effectiveLimit &&
+      iterations < maxIterations &&
+      (!courseEnd || currentDay < courseEnd)
+    ) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
         for (const clock of clocks) {
@@ -951,6 +1001,9 @@ export function nextDueDoses(
             continue;
           }
           if (orderedAt && zoned < orderedAt) {
+            continue;
+          }
+          if (courseEnd && zoned >= courseEnd) {
             continue;
           }
           const iso = formatZonedIso(zoned, timeZone);
@@ -1190,7 +1243,8 @@ function generateIntervalSeries(
   timeZone: string,
   dayFilter: Set<string>,
   enforceDayFilter: boolean,
-  orderedAt: Date | null
+  orderedAt: Date | null,
+  upperBound?: Date | null
 ): string[] {
   const increment = createIntervalStepper(repeat, timeZone);
   if (!increment) {
@@ -1209,7 +1263,11 @@ function generateIntervalSeries(
     current = next;
     guard += 1;
   }
-  while (results.length < effectiveLimit && guard < maxIterations) {
+  while (
+    results.length < effectiveLimit &&
+    guard < maxIterations &&
+    (!upperBound || current < upperBound)
+  ) {
     const weekday = getLocalWeekday(current, timeZone);
     if (!enforceDayFilter || dayFilter.has(weekday)) {
       if (current < from) {
@@ -1230,6 +1288,9 @@ function generateIntervalSeries(
         }
         current = next;
         continue;
+      }
+      if (upperBound && current >= upperBound) {
+        break;
       }
       const iso = formatZonedIso(current, timeZone);
       if (!seen.has(iso)) {
@@ -1665,6 +1726,8 @@ function calculateTotalUnitsSingle(
 ): TotalUnitsResult {
   const { dosage, durationValue, durationUnit, roundToMultiple, context } = options;
   const from = coerceDate(options.from, "from");
+  const orderedAtDate =
+    options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
@@ -1700,14 +1763,18 @@ function calculateTotalUnitsSingle(
   } else {
     endDay = from;
   }
+  endDay = minDate(
+    endDay,
+    resolveRepeatDurationCapEnd(dosage.timing?.repeat, orderedAtDate ?? from, timeZone)
+  );
 
   const count = countScheduleEvents(
     dosage,
     from,
     endDay,
     config,
-    options.orderedAt ? coerceDate(options.orderedAt, "orderedAt") : from,
-    options.orderedAt ? coerceDate(options.orderedAt, "orderedAt") : null,
+    orderedAtDate ?? from,
+    orderedAtDate,
     2000
   );
 

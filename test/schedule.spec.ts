@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits } from "../src/index";
+import { nextDueDoses, calculateTotalUnits, parseSig } from "../src/index";
 import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 const EVENT_CLOCK = {
@@ -160,6 +160,40 @@ describe("nextDueDoses", () => {
       "2024-01-01T09:00:00+00:00",
       "2024-01-01T10:00:00+00:00",
       "2024-01-01T11:00:00+00:00"
+    ]);
+  });
+
+  it("caps future generation at the parsed dosage duration window", () => {
+    const parsed = parseSig("1 tab po od for 7 days", { context: { dosageForm: "tab" } });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T00:00:00Z",
+      from: "2024-01-05T00:00:00Z",
+      limit: 10
+    });
+
+    expect(results).toEqual([
+      "2024-01-05T09:00:00+00:00",
+      "2024-01-06T09:00:00+00:00",
+      "2024-01-07T09:00:00+00:00"
+    ]);
+  });
+
+  it("caps future generation for month-based duration windows", () => {
+    const parsed = parseSig("1 tab po monthly for 2 months", {
+      context: { dosageForm: "tab" }
+    });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-15T00:00:00Z",
+      limit: 10
+    });
+
+    expect(results).toEqual([
+      "2024-02-01T09:00:00+00:00"
     ]);
   });
 

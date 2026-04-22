@@ -1057,3 +1057,43 @@ Desired behavior:
    - `take 1 tab po prn vaginal itch for 7 days` ->
      `Take 1 tablet orally for 7 days as needed for vaginal itch.`
    - `leave on for 10 minutes then rinse` stays patient-instruction text
+
+## 2026-04-22 Schedule duration cap in calculations
+
+1. Kept the external calculation API intact:
+   - `calculateTotalUnits` still uses caller-supplied `durationValue` /
+     `durationUnit`
+   - that remains the primary calculation window by design
+
+2. Added parsed-dosage duration as an internal cap:
+   - if `dosage.timing.repeat.duration` is present, it now clamps the external
+     window downward instead of replacing it
+   - effective behavior is `min(external window, parsed dosage duration cap)`
+
+3. Applied the same cap to `nextDueDoses`:
+   - future dose generation now stops at the regimen duration end when there is
+     a usable course anchor (`orderedAt`, otherwise `from`)
+
+4. Verified:
+   - `calculateTotalUnits(parseSig(\"1 tab po od for 7 days\"), external 30 days)`
+     now returns `7`, not `30`
+   - `nextDueDoses(parseSig(\"1 tab po od for 7 days\"), orderedAt Jan 1, from Jan 5)`
+     now stops after the Jan 7 dose
+
+## 2026-04-22 Non-day duration caps verified
+
+1. Live-probed parsed duration caps across other units:
+   - `1 tab po q12h for 36 hours`
+   - `1 tab po weekly for 3 weeks`
+   - `1 tab po monthly for 2 months`
+
+2. Confirmed behavior:
+   - hour-based caps work in both `calculateTotalUnits` and `nextDueDoses`
+   - week-based caps work in both `calculateTotalUnits` and `nextDueDoses`
+   - month-based caps work in both `calculateTotalUnits` and `nextDueDoses`
+
+3. Current caveat:
+   - free-text yearly duration did not parse from `yearly for 2 years`
+   - scheduler stepper itself does support year units (`a`) if the FHIR timing
+     already contains them, but the sig parser does not currently infer that
+     free-text form
