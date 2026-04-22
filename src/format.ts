@@ -650,15 +650,32 @@ function buildRoutePhrase(
 }
 
 function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string | undefined {
-  const text = clause.site?.text?.trim();
+  let text = clause.site?.text?.trim();
+  if (!text) {
+    const display = clause.site?.coding?.display?.trim();
+    if (display) {
+      text = display.charAt(0).toLowerCase() + display.slice(1);
+    } else {
+      text = clause.site?.coding?.code?.trim();
+    }
+  }
   if (!text) {
     return undefined;
   }
   const lower = text.toLowerCase();
-  if (clause.route?.code === RouteCode["Per rectum"] && (lower === "rectum" || lower === "rectal")) {
+  const routeText = clause.route?.text?.trim().toLowerCase();
+  const isRectalRoute =
+    clause.route?.code === RouteCode["Per rectum"] ||
+    routeText === "rectum" ||
+    routeText === "rectal";
+  const isVaginalRoute =
+    clause.route?.code === RouteCode["Per vagina"] ||
+    routeText === "vagina" ||
+    routeText === "vaginal";
+  if (isRectalRoute && (lower === "rectum" || lower === "rectal")) {
     return undefined;
   }
-  if (clause.route?.code === RouteCode["Per vagina"] && (lower === "vagina" || lower === "vaginal")) {
+  if (isVaginalRoute && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
   let preposition = grammar.sitePreposition;

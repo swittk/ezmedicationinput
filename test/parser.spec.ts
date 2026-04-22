@@ -2591,6 +2591,31 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("fromFhirDosage formats coded sites when site text is absent", () => {
+    const again = fromFhirDosage({
+      route: {
+        text: "topical",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "6064005",
+            display: "Topical route"
+          }
+        ]
+      },
+      site: {
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "41695006",
+            display: "Scalp"
+          }
+        ]
+      }
+    });
+    expect(again.longText).toBe("Apply the medication to the scalp.");
+  });
+
   it("fromFhirDosage preserves one-sided dose ranges", () => {
     const again = fromFhirDosage({
       doseAndRate: [
