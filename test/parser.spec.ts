@@ -25,19 +25,25 @@ function expectPrimitiveTranslation(
   locale: string,
   content: string
 ): void {
-  expect(element?.extension).toContainEqual({
-    url: FHIR_TRANSLATION_EXTENSION_URL,
-    extension: [
-      {
-        url: "lang",
-        valueCode: locale
-      },
-      {
-        url: "content",
-        valueString: content
-      }
-    ]
-  });
+  const translation = element?.extension?.find(
+    (extension) => extension.url === FHIR_TRANSLATION_EXTENSION_URL
+  );
+  expect(translation).toBeDefined();
+  expect(translation).toEqual(
+    expect.objectContaining({
+      url: FHIR_TRANSLATION_EXTENSION_URL,
+      extension: expect.arrayContaining([
+        expect.objectContaining({
+          url: "lang",
+          valueCode: locale
+        }),
+        expect.objectContaining({
+          url: "content",
+          valueString: content
+        })
+      ])
+    })
+  );
 }
 
 describe("parseSig core scenarios", () => {
@@ -2983,6 +2989,37 @@ describe("internationalization", () => {
       expect(vaginal.longText).toBe("สอด ทางช่องคลอด.");
     });
 
+    it("suppresses duplicate Thai rectal and vaginal site phrases for text-only routes", () => {
+      const rectal = fromFhirDosage(
+        {
+          route: {
+            text: "rectal"
+          },
+          site: {
+            text: "ไส้ตรง",
+            coding: [{ system: "http://snomed.info/sct", code: "34402009", display: "Rectum" }]
+          }
+        },
+        { locale: "th" }
+      );
+      expect(rectal.longText).toBe("สอด ทางทวารหนัก.");
+      expect(rectal.longText).not.toContain("ไส้ตรง");
+
+      const vaginal = fromFhirDosage(
+        {
+          route: {
+            text: "vaginal"
+          },
+          site: {
+            text: "ช่องคลอด",
+            coding: [{ system: "http://snomed.info/sct", code: "76784001", display: "Vagina" }]
+          }
+        },
+        { locale: "th" }
+      );
+      expect(vaginal.longText).toBe("สอด ทางช่องคลอด.");
+    });
+
     it("translates eye site names in Thai", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
       expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
@@ -3648,6 +3685,20 @@ describe("topical product forms and workflow", () => {
     };
     const fromFhir = fromFhirDosage(dosage, { locale: "th" });
     expect(fromFhir.longText).toBe("พ่นเข้ารูจมูก วันละครั้ง.");
+  });
+
+  it("prefers method.text overrides over generic translated method displays in Thai", () => {
+    const parsed = parseSig("reapply sunscreen every 2 hours");
+    const coding = parsed.fhir.method?.coding?.[0];
+    const dosage = {
+      ...parsed.fhir,
+      method: {
+        text: "Reapply",
+        coding: coding ? [coding] : undefined
+      }
+    };
+    const fromFhir = fromFhirDosage(dosage, { locale: "th" });
+    expect(fromFhir.longText).toBe("ทาซ้ำทุก 2 ชั่วโมง.");
   });
 
   it("renders shampoo naturally in Thai when product form is preserved", () => {

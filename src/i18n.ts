@@ -545,20 +545,20 @@ function resolveThaiMethodVerb(
     return translatedText;
   }
 
-  const translatedDisplay = getPrimitiveTranslation(
-    clause.method?.coding?._display,
-    "th"
-  );
-  if (translatedDisplay) {
-    return translatedDisplay;
-  }
-
   const methodText = clause.method?.text?.trim();
   if (methodText) {
     const overridden = THAI_METHOD_TEXT_VERBS[methodText];
     if (overridden) {
       return overridden;
     }
+  }
+
+  const translatedDisplay = getPrimitiveTranslation(
+    clause.method?.coding?._display,
+    "th"
+  );
+  if (translatedDisplay) {
+    return translatedDisplay;
   }
 
   return grammar.verb;
@@ -1137,18 +1137,27 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   const lower = text?.toLowerCase();
   const codingCode = clause.site?.coding?.code;
+  const routeText = clause.route?.text?.trim().toLowerCase();
+  const isRectalRoute =
+    clause.route?.code === RouteCode["Per rectum"] ||
+    routeText === "rectum" ||
+    routeText === "rectal";
+  const isVaginalRoute =
+    clause.route?.code === RouteCode["Per vagina"] ||
+    routeText === "vagina" ||
+    routeText === "vaginal";
   const isRectumSite =
     codingCode === "34402009" || lower === "rectum" || lower === "rectal";
   const isVaginaSite =
     codingCode === "76784001" || lower === "vagina" || lower === "vaginal";
   if (
-    clause.route?.code === RouteCode["Per rectum"] &&
+    isRectalRoute &&
     isRectumSite
   ) {
     return undefined;
   }
   if (
-    clause.route?.code === RouteCode["Per vagina"] &&
+    isVaginalRoute &&
     isVaginaSite
   ) {
     return undefined;
