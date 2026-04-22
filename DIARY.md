@@ -854,3 +854,150 @@ Desired behavior:
    - `npm run build`
    - `npm test`
    - green at `523` tests
+
+2026-04-22 Ambulatory PRN inventory findings
+
+1. Current built-in PRN scope is still small:
+   - `14` coded concept entries
+   - roughly `57` built-in surface aliases
+
+2. Local SNOMED snapshot produced clean ambulatory hits for a broad first-wave expansion.
+   Good candidates with stable clinic-usable concepts:
+
+   Pain/MSK:
+   - `22253000` Pain
+   - `25064002` Headache
+   - `37796009` Migraine
+   - `161891005` Backache / back pain
+   - `279039007` Low back pain
+   - `57676002` Pain of joint / joint pain
+   - `68962001` Muscle pain
+   - `301354004` Pain of ear / earache / otalgia
+   - `267102003` Sore throat
+   - `29857009` Chest pain
+   - `274671002` Pelvic and perineal pain
+   - `266599000` Dysmenorrhea / menstrual cramps
+   - `55300003` Cramp
+   - `45352006` Spasm
+
+   GI:
+   - `422587007` Nausea
+   - `422400008` Vomiting
+   - `16932000` Nausea and vomiting
+   - `62315008` Diarrhea
+   - `14760008` Constipation
+   - `16331000` Heartburn
+   - `21522001` Abdominal pain
+   - `116289008` Abdominal bloating
+   - `249504006` Flatulence
+
+   Respiratory/allergy/ENT:
+   - `49727002` Cough
+   - `68235000` Nasal congestion
+   - `64531003` Nasal discharge / rhinorrhea
+   - `267036007` Dyspnea / shortness of breath
+   - `56018004` Wheezing / wheeze
+   - `76067001` Sneezing
+   - `61582004` Allergic rhinitis
+   - `21719001` Hay fever
+
+   Derm/ocular:
+   - `418363000` Itching of skin
+   - `74776002` Itching of eye
+   - `445329008` Itching of lesion of skin
+   - `271807003` Eruption of skin / rash / skin rash
+   - `90673000` Burning sensation
+   - `257553007` Irritation
+   - `162290004` Dry eyes
+   - `703630003` Red eye
+   - `41652007` Pain in eye / eye pain
+   - `52475004` Xeroderma / dry skin
+
+   GU/OBGYN:
+   - `49650001` Dysuria
+   - `364198000` Frequency of urination
+   - `75088002` Urgent desire to urinate
+   - `271939006` Vaginal discharge
+   - `161816004` Vaginal irritation
+   - `34363003` Pruritus of vagina / itching of vagina
+
+   Psych/neuro:
+   - `48694002` Anxiety
+   - `225624000` Panic attack
+   - `24199005` Feeling agitated / agitation
+   - `193462001` Insomnia
+   - `79519003` Drowsiness
+   - `404640003` Dizziness
+   - `399153001` Vertigo
+   - `7011001` Hallucinations
+   - `231494001` Mania
+   - `80313002` Palpitations
+
+3. Ambiguous / trap concepts to avoid or review before adding:
+   - `255339005` is `Depression - motion`, so it is wrong for psychiatric depression
+   - `1806006` is morphologic `Eruption`; use `271807003` for symptom rash instead
+   - `79519003` vs `271782001` for drowsiness needs one consistent choice; current code already uses `79519003`
+   - plain `allergy` is too broad and low-signal; `allergic rhinitis` / `hay fever` is safer for ambulatory PRN
+   - ocular irritation/redness exact concept matching is uneven; `red eye` is clean, generic `eye irritation` is not
+
+4. Next implementation bias:
+   - add the clearly clean concepts first
+   - avoid inventing questionable psychiatric/depression codings
+   - keep Thai output labels on every coded concept
+   - add Thai free-text aliases only for the higher-frequency ambulatory symptoms first
+
+## 2026-04-22 Ambulatory PRN expansion verified
+
+1. Landed inventory size after the `src/maps.ts` expansion:
+   - `59` unique coded PRN concepts
+   - `290` normalized alias keys in `DEFAULT_PRN_REASON_DEFINITIONS`
+
+2. Verified representative coded parsing across specialties:
+   - primary care / pain: `1 tab po prn headache` -> `25064002`
+   - GI: `1 tab po prn diarrhea` -> `62315008`
+   - allergy / ENT: `1 tab po prn nasal congestion` -> `68235000`
+   - ocular: `1 drop ou prn red eye` -> `703630003`
+   - GU: `1 tab po prn dysuria` -> `49650001`
+   - psych: `1 tab po prn panic attack` -> `225624000`
+
+3. Verified Thai alias path end to end:
+   - `1 tab po prn ปวดหัว` -> localized `ปวดศีรษะ`, code `25064002`
+   - `1 tab po prn คัดจมูก` -> localized `คัดจมูก`, code `68235000`
+   - `1 drop ou prn ตาแดง` -> localized `ตาแดง`, code `703630003`
+   - `1 tab po prn แสบขัด` -> localized `แสบขัดเวลาปัสสาวะ`, code `49650001`
+
+4. Coordinated PRN behavior after expansion:
+   - partially known coordination now splits per concept instead of treating the whole phrase as one blob
+   - example: `mania or depression` -> `mania` coded (`231494001`), `depression` kept as text-only
+   - fully unknown coordination still splits into text-only reasons
+
+5. Regression coverage added:
+   - representative expanded ambulatory PRN codes across specialties
+   - Thai alias acceptance for the expanded inventory
+   - partial-known and fully-unknown coordinated PRN reasons
+
+## 2026-04-22 ParseBatch normalized type drift
+
+1. Found a declaration drift bug behind editor red underlining:
+   - runtime `parseSig(...).meta.normalized` already included `prnReasons`
+   - `ParseResult` declared it
+   - `ParseBatchResult` did not, even though `parseSig()` returns `ParseBatchResult`
+
+2. Fixed by introducing a shared `ParseNormalizedMeta` type in `src/types.ts`
+   and using it for both `ParseResult.meta.normalized` and
+   `ParseBatchResult.meta.normalized`.
+
+3. This removes the duplicate normalized-shape definitions and should prevent the
+   same drift from reappearing when new normalized fields are added later.
+
+## 2026-04-22 Readonly alias compatibility
+
+1. Found another public type-surface friction point in custom site maps:
+   - tests used `as const` for `siteCodeMap`
+   - nested `aliases` arrays became readonly tuples
+   - exported `BodySiteDefinition.aliases` and `CodeableConceptDefinition.aliases`
+     still required mutable `string[]`
+
+2. Fixed by widening both alias fields to `readonly string[]`.
+   Runtime already only iterated aliases and never mutated them, so this is the
+   correct public contract and removes the need for casts in consumer code.

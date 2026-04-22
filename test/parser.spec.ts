@@ -1415,19 +1415,85 @@ describe("parseSig core scenarios", () => {
     expect(comma.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
   });
 
-  it("splits unknown coordinated PRN reasons into separate text-only concepts", () => {
+  it("splits partially known coordinated PRN reasons into separate concepts", () => {
     const result = parseSig("1 tab po prn mania or depression", { context: TAB_CONTEXT });
 
     expect(result.longText).toBe("Take 1 tablet orally as needed for mania or depression.");
     expect(result.fhir.asNeededFor).toEqual([
-      { text: "mania" },
+      {
+        text: "mania",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "231494001",
+            display: "Mania"
+          }
+        ]
+      },
       { text: "depression" }
     ]);
     expect(result.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("mania or depression");
-    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toEqual([
-      { text: "mania", coding: undefined },
-      { text: "depression", coding: undefined }
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toMatchObject([
+      {
+        text: "mania",
+        coding: {
+          system: "http://snomed.info/sct",
+          code: "231494001",
+          display: "Mania"
+        }
+      },
+      { text: "depression" }
     ]);
+  });
+
+  it("splits fully unknown coordinated PRN reasons into separate text-only concepts", () => {
+    const result = parseSig("1 tab po prn intrusive thoughts or unable to work", {
+      context: TAB_CONTEXT
+    });
+
+    expect(result.longText).toBe(
+      "Take 1 tablet orally as needed for intrusive thoughts or unable to work."
+    );
+    expect(result.fhir.asNeededFor).toEqual([
+      { text: "intrusive thoughts" },
+      { text: "unable to work" }
+    ]);
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toEqual([
+      { text: "intrusive thoughts", coding: undefined },
+      { text: "unable to work", coding: undefined }
+    ]);
+  });
+
+  it("codes expanded ambulatory PRN reasons across specialties", () => {
+    const cases = [
+      ["1 tab po prn headache", "25064002"],
+      ["1 tab po prn diarrhea", "62315008"],
+      ["1 tab po prn nasal congestion", "68235000"],
+      ["1 drop ou prn red eye", "703630003"],
+      ["1 tab po prn dysuria", "49650001"],
+      ["1 tab po prn panic attack", "225624000"]
+    ] as const;
+
+    for (const [sig, code] of cases) {
+      const result = parseSig(sig, { context: TAB_CONTEXT });
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
+      expect(result.meta.canonical.clauses[0]?.prn?.reason?.coding?.code).toBe(code);
+    }
+  });
+
+  it("accepts Thai aliases for expanded ambulatory PRN reasons", () => {
+    const cases = [
+      ["1 tab po prn ปวดหัว", "25064002", "ปวดศีรษะ"],
+      ["1 tab po prn คัดจมูก", "68235000", "คัดจมูก"],
+      ["1 drop ou prn ตาแดง", "703630003", "ตาแดง"],
+      ["1 tab po prn แสบขัด", "49650001", "แสบขัดเวลาปัสสาวะ"]
+    ] as const;
+
+    for (const [sig, code, localizedReason] of cases) {
+      const result = parseSig(sig, { context: TAB_CONTEXT, locale: "th" });
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
+      expect(result.longText.includes(localizedReason)).toBe(true);
+    }
   });
 
   it("splits Thai coordinated PRN reasons on หรือ into separate text-only concepts", () => {

@@ -368,13 +368,13 @@ export interface BodySiteDefinition {
    * Aliases are normalized with the same logic as map keys so callers can
    * provide punctuation-heavy variants such as "first bicuspid, left".
    */
-  aliases?: string[];
+  aliases?: readonly string[];
 }
 
 export interface CodeableConceptDefinition {
   coding?: FhirCoding;
   text?: string;
-  aliases?: string[];
+  aliases?: readonly string[];
   /** Optional translations for different locales (e.g., { "th": "ปวด" }) */
   i18n?: Record<string, string>;
 }
@@ -831,16 +831,7 @@ export interface ParseResult {
   meta: {
     consumedTokens: string[];
     leftoverText?: string;
-    normalized: {
-      route?: RouteCode;
-      unit?: string;
-      site?: { text?: string; coding?: BodySiteCode };
-      method?: { text?: string; coding?: FhirCoding };
-      patientInstruction?: string;
-      prnReason?: { text?: string; coding?: FhirCoding };
-      prnReasons?: Array<{ text?: string; coding?: FhirCoding }>;
-      additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
-    };
+    normalized: ParseNormalizedMeta;
     canonical: {
       clauses: CanonicalSigClause[];
     };
@@ -853,6 +844,17 @@ export interface ParseResult {
       suggestions: PrnReasonSuggestion[];
     }>;
   };
+}
+
+export interface ParseNormalizedMeta {
+  route?: RouteCode;
+  unit?: string;
+  site?: { text?: string; coding?: BodySiteCode };
+  method?: { text?: string; coding?: FhirCoding };
+  patientInstruction?: string;
+  prnReason?: { text?: string; coding?: FhirCoding };
+  prnReasons?: Array<{ text?: string; coding?: FhirCoding }>;
+  additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
 }
 
 export interface ParseBatchSegmentMeta {
@@ -884,15 +886,7 @@ export interface ParseBatchResult {
   meta: {
     consumedTokens: string[];
     leftoverText?: string;
-    normalized: {
-      route?: RouteCode;
-      unit?: string;
-      site?: { text?: string; coding?: BodySiteCode };
-      method?: { text?: string; coding?: FhirCoding };
-      patientInstruction?: string;
-      prnReason?: { text?: string; coding?: FhirCoding };
-      additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
-    };
+    normalized: ParseNormalizedMeta;
     canonical: {
       clauses: CanonicalSigClause[];
     };

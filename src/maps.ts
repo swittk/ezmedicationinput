@@ -1691,181 +1691,634 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
   names: string[];
   definition: PrnReasonDefinition;
 }> = [
-    {
-      names: ["pain", "ache", "aches", "pains"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
-        text: "Pain",
-        aliases: ["เจ็บ", "ปวด"],
-        i18n: { th: "ปวด" }
-      }
-    },
-    {
-      names: ["nausea", "queasiness", "vomiting", "n/v", "nausea and vomiting"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
-        text: "Nausea",
-        i18n: { th: "คลื่นไส้" }
-      }
-    },
-    {
-      names: [
-        "eye itch",
-        "itchy eye",
-        "itchy eyes",
-        "eye itching",
-        "itching eye",
-        "itching eyes",
-        "itching of eye",
-        "itching of eyes"
-      ],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "74776002",
-          display: "Itching of eye"
-        },
-        text: "Eye itching",
-        aliases: ["คันตา", "ตาคัน"],
-        i18n: { th: "คันตา" }
-      }
-    },
-    {
-      names: [
-        "lesion itch",
-        "itchy lesion",
-        "itching lesion",
-        "lesion itching",
-        "itching of lesion",
-        "itching of skin lesion",
-        "skin lesion itch"
-      ],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "445329008",
-          display: "Itching of lesion of skin"
-        },
-        text: "Lesion itching",
-        aliases: ["คันรอยโรค", "คันที่รอยโรค"],
-        i18n: { th: "คันที่รอยโรค" }
-      }
-    },
-    {
-      names: [
-        "itch",
-        "itching",
-        "itchy",
-        "wound itch",
-        "itchy wound",
-        "wound itching",
-        "itching wound",
-        "itching of wound"
-      ],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "418363000",
-          display: "Itching of skin"
-        },
-        text: "Itching",
-        aliases: ["คันแผล", "แผลคัน"],
-        i18n: { th: "คัน" }
-      }
-    },
-    {
-      names: ["anxiety", "nervousness"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
-        text: "Anxiety",
-        i18n: { th: "วิตกกังวล" }
-      }
-    },
-    {
-      names: ["sleep", "sleeping", "insomnia", "sleep issues"],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "193462001",
-          display: "Insomnia"
-        },
-        text: "Sleep",
-        i18n: { th: "นอนหลับ" }
-      }
-    },
-    {
-      names: ["sleepiness", "sleepy", "drowsiness", "drowsy"],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "79519003",
-          display: "Drowsiness"
-        },
-        text: "Sleepiness",
-        i18n: { th: "ง่วงนอน" }
-      }
-    },
-    {
-      names: ["cough", "coughing"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
-        text: "Cough",
-        i18n: { th: "ไอ" }
-      }
-    },
-    {
-      names: ["fever", "temperature", "pyrexia"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
-        text: "Fever",
-        i18n: { th: "ไข้" }
-      }
-    },
-    {
-      names: ["spasm", "spasms", "muscle spasm"],
-      definition: {
-        coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
-        text: "Spasm",
-        i18n: { th: "ตะคริวหรือเกร็ง" }
-      }
-    },
-    {
-      names: ["constipation"],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "14760008",
-          display: "Constipation"
-        },
-        text: "Constipation",
-        i18n: { th: "ท้องผูก" }
-      }
-    },
-    {
-      names: ["irritation", "irritated"],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "257553007",
-          display: "Irritation"
-        },
-        text: "Irritation",
-        i18n: { th: "ระคายเคือง" }
-      }
-    },
-    {
-      names: ["dyspnea", "shortness of breath", "sob", "breathlessness"],
-      definition: {
-        coding: {
-          system: SNOMED_SYSTEM,
-          code: "267036007",
-          display: "Dyspnea"
-        },
-        text: "Shortness of breath",
-        i18n: { th: "เหนื่อยหรือหายใจลำบาก" }
-      }
+  {
+    names: ["pain", "ache", "aches", "pains"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "22253000", display: "Pain" },
+      text: "Pain",
+      aliases: ["เจ็บ", "ปวด"],
+      i18n: { th: "ปวด" }
     }
-  ];
+  },
+  {
+    names: ["headache", "head pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "25064002", display: "Headache" },
+      text: "Headache",
+      aliases: ["ปวดหัว", "ปวดศีรษะ"],
+      i18n: { th: "ปวดศีรษะ" }
+    }
+  },
+  {
+    names: ["migraine", "migraine headache"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "37796009", display: "Migraine" },
+      text: "Migraine",
+      aliases: ["ไมเกรน", "ปวดหัวไมเกรน"],
+      i18n: { th: "ไมเกรน" }
+    }
+  },
+  {
+    names: ["back pain", "backache", "pain in back"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "161891005", display: "Backache" },
+      text: "Back pain",
+      aliases: ["ปวดหลัง"],
+      i18n: { th: "ปวดหลัง" }
+    }
+  },
+  {
+    names: ["low back pain", "lower back pain", "lumbar pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "279039007", display: "Low back pain" },
+      text: "Low back pain",
+      aliases: ["ปวดหลังส่วนล่าง", "ปวดเอว"],
+      i18n: { th: "ปวดหลังส่วนล่าง" }
+    }
+  },
+  {
+    names: ["joint pain", "arthralgia", "painful joint"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "57676002", display: "Pain of joint" },
+      text: "Joint pain",
+      aliases: ["ปวดข้อ"],
+      i18n: { th: "ปวดข้อ" }
+    }
+  },
+  {
+    names: ["muscle pain", "myalgia"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "68962001", display: "Muscle pain" },
+      text: "Muscle pain",
+      aliases: ["ปวดกล้ามเนื้อ", "เมื่อยกล้ามเนื้อ"],
+      i18n: { th: "ปวดกล้ามเนื้อ" }
+    }
+  },
+  {
+    names: ["ear pain", "earache", "otalgia"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "301354004", display: "Pain of ear" },
+      text: "Ear pain",
+      aliases: ["ปวดหู"],
+      i18n: { th: "ปวดหู" }
+    }
+  },
+  {
+    names: ["sore throat", "throat pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "267102003", display: "Sore throat" },
+      text: "Sore throat",
+      aliases: ["เจ็บคอ", "คอเจ็บ"],
+      i18n: { th: "เจ็บคอ" }
+    }
+  },
+  {
+    names: ["chest pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "29857009", display: "Chest pain" },
+      text: "Chest pain",
+      aliases: ["เจ็บหน้าอก"],
+      i18n: { th: "เจ็บหน้าอก" }
+    }
+  },
+  {
+    names: ["pelvic pain", "pelvic and perineal pain"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "274671002",
+        display: "Pelvic and perineal pain"
+      },
+      text: "Pelvic pain",
+      aliases: ["ปวดเชิงกราน", "ปวดท้องน้อย"],
+      i18n: { th: "ปวดเชิงกราน" }
+    }
+  },
+  {
+    names: ["dysmenorrhea", "menstrual cramps", "period cramps", "period pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "266599000", display: "Dysmenorrhea" },
+      text: "Menstrual cramps",
+      aliases: ["ปวดประจำเดือน", "ปวดเมนส์"],
+      i18n: { th: "ปวดประจำเดือน" }
+    }
+  },
+  {
+    names: ["cramp", "cramps", "cramping"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "55300003", display: "Cramp" },
+      text: "Cramp",
+      aliases: ["ตะคริว"],
+      i18n: { th: "ตะคริว" }
+    }
+  },
+  {
+    names: ["spasm", "spasms", "muscle spasm"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
+      text: "Spasm",
+      aliases: ["เกร็ง", "กล้ามเนื้อเกร็ง"],
+      i18n: { th: "ตะคริวหรือเกร็ง" }
+    }
+  },
+  {
+    names: ["nausea", "queasiness", "queasy"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "422587007", display: "Nausea" },
+      text: "Nausea",
+      aliases: ["คลื่นไส้"],
+      i18n: { th: "คลื่นไส้" }
+    }
+  },
+  {
+    names: ["vomiting", "emesis", "throw up", "throwing up"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "422400008", display: "Vomiting" },
+      text: "Vomiting",
+      aliases: ["อาเจียน"],
+      i18n: { th: "อาเจียน" }
+    }
+  },
+  {
+    names: ["n/v", "nausea and vomiting", "vomiting and nausea"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "16932000",
+        display: "Nausea and vomiting"
+      },
+      text: "Nausea and vomiting",
+      aliases: ["คลื่นไส้อาเจียน", "คลื่นไส้และอาเจียน"],
+      i18n: { th: "คลื่นไส้และอาเจียน" }
+    }
+  },
+  {
+    names: ["diarrhea", "diarrhoea", "loose stool", "loose stools"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "62315008", display: "Diarrhea" },
+      text: "Diarrhea",
+      aliases: ["ท้องเสีย", "ถ่ายเหลว"],
+      i18n: { th: "ท้องเสีย" }
+    }
+  },
+  {
+    names: ["constipation"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "14760008",
+        display: "Constipation"
+      },
+      text: "Constipation",
+      aliases: ["ท้องผูก", "ถ่ายไม่ออก"],
+      i18n: { th: "ท้องผูก" }
+    }
+  },
+  {
+    names: ["heartburn"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "16331000", display: "Heartburn" },
+      text: "Heartburn",
+      aliases: ["แสบร้อนกลางอก"],
+      i18n: { th: "แสบร้อนกลางอก" }
+    }
+  },
+  {
+    names: ["abdominal pain", "stomach pain", "stomachache"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "21522001", display: "Abdominal pain" },
+      text: "Abdominal pain",
+      aliases: ["ปวดท้อง"],
+      i18n: { th: "ปวดท้อง" }
+    }
+  },
+  {
+    names: ["abdominal bloating", "bloating", "bloated"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "116289008",
+        display: "Abdominal bloating"
+      },
+      text: "Bloating",
+      aliases: ["ท้องอืด"],
+      i18n: { th: "ท้องอืด" }
+    }
+  },
+  {
+    names: ["flatulence", "gas", "gassy"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "249504006", display: "Flatulence" },
+      text: "Gas",
+      aliases: ["มีแก๊สในท้อง", "ลมในท้อง"],
+      i18n: { th: "มีแก๊สในท้อง" }
+    }
+  },
+  {
+    names: ["eye itch", "itchy eye", "itchy eyes", "eye itching", "itching eye", "itching eyes", "itching of eye", "itching of eyes"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "74776002",
+        display: "Itching of eye"
+      },
+      text: "Eye itching",
+      aliases: ["คันตา", "ตาคัน"],
+      i18n: { th: "คันตา" }
+    }
+  },
+  {
+    names: ["lesion itch", "itchy lesion", "itching lesion", "lesion itching", "itching of lesion", "itching of skin lesion", "skin lesion itch"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "445329008",
+        display: "Itching of lesion of skin"
+      },
+      text: "Lesion itching",
+      aliases: ["คันรอยโรค", "คันที่รอยโรค"],
+      i18n: { th: "คันที่รอยโรค" }
+    }
+  },
+  {
+    names: ["itch", "itching", "itchy", "wound itch", "itchy wound", "wound itching", "itching wound", "itching of wound"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "418363000",
+        display: "Itching of skin"
+      },
+      text: "Itching",
+      aliases: ["คัน", "คันแผล", "แผลคัน"],
+      i18n: { th: "คัน" }
+    }
+  },
+  {
+    names: ["cough", "coughing"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "49727002", display: "Cough" },
+      text: "Cough",
+      aliases: ["ไอ"],
+      i18n: { th: "ไอ" }
+    }
+  },
+  {
+    names: ["fever", "temperature", "pyrexia"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
+      text: "Fever",
+      aliases: ["ไข้", "ตัวร้อน"],
+      i18n: { th: "ไข้" }
+    }
+  },
+  {
+    names: ["nasal congestion", "congestion", "stuffy nose", "blocked nose"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "68235000",
+        display: "Nasal congestion"
+      },
+      text: "Nasal congestion",
+      aliases: ["คัดจมูก"],
+      i18n: { th: "คัดจมูก" }
+    }
+  },
+  {
+    names: ["nasal discharge", "rhinorrhea", "rhinorrhoea", "runny nose", "discharge from nose"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "64531003",
+        display: "Nasal discharge"
+      },
+      text: "Runny nose",
+      aliases: ["น้ำมูกไหล"],
+      i18n: { th: "น้ำมูกไหล" }
+    }
+  },
+  {
+    names: ["dyspnea", "dyspnoea", "shortness of breath", "sob", "breathlessness", "breathless"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "267036007",
+        display: "Dyspnea"
+      },
+      text: "Shortness of breath",
+      aliases: ["เหนื่อย", "หายใจลำบาก", "หอบ"],
+      i18n: { th: "เหนื่อยหรือหายใจลำบาก" }
+    }
+  },
+  {
+    names: ["wheezing", "wheeze", "wheezy"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "56018004", display: "Wheezing" },
+      text: "Wheeze",
+      aliases: ["หายใจมีเสียงหวีด"],
+      i18n: { th: "หายใจมีเสียงหวีด" }
+    }
+  },
+  {
+    names: ["sneezing", "sneeze", "sneezes"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "76067001", display: "Sneezing" },
+      text: "Sneezing",
+      aliases: ["จาม"],
+      i18n: { th: "จาม" }
+    }
+  },
+  {
+    names: ["allergic rhinitis", "allergy symptoms", "hay fever", "hayfever"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "61582004",
+        display: "Allergic rhinitis"
+      },
+      text: "Allergic rhinitis",
+      aliases: ["ภูมิแพ้จมูก", "ภูมิแพ้"],
+      i18n: { th: "ภูมิแพ้จมูก" }
+    }
+  },
+  {
+    names: ["rash", "skin rash", "skin eruption", "eruption of skin"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "271807003",
+        display: "Eruption of skin"
+      },
+      text: "Rash",
+      aliases: ["ผื่น"],
+      i18n: { th: "ผื่น" }
+    }
+  },
+  {
+    names: ["burning sensation", "burning", "burning pain"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "90673000",
+        display: "Burning sensation"
+      },
+      text: "Burning sensation",
+      aliases: ["แสบร้อน", "แสบ"],
+      i18n: { th: "แสบร้อน" }
+    }
+  },
+  {
+    names: ["irritation", "irritated"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "257553007",
+        display: "Irritation"
+      },
+      text: "Irritation",
+      aliases: ["ระคายเคือง"],
+      i18n: { th: "ระคายเคือง" }
+    }
+  },
+  {
+    names: ["dry eye", "dry eyes"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "162290004", display: "Dry eyes" },
+      text: "Dry eyes",
+      aliases: ["ตาแห้ง"],
+      i18n: { th: "ตาแห้ง" }
+    }
+  },
+  {
+    names: ["red eye", "red eyes"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "703630003", display: "Red eye" },
+      text: "Red eye",
+      aliases: ["ตาแดง"],
+      i18n: { th: "ตาแดง" }
+    }
+  },
+  {
+    names: ["eye pain", "pain in eye", "ocular pain"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "41652007", display: "Pain in eye" },
+      text: "Eye pain",
+      aliases: ["ปวดตา", "เจ็บตา"],
+      i18n: { th: "ปวดตา" }
+    }
+  },
+  {
+    names: ["dry skin", "xeroderma"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "52475004", display: "Xeroderma" },
+      text: "Dry skin",
+      aliases: ["ผิวแห้ง"],
+      i18n: { th: "ผิวแห้ง" }
+    }
+  },
+  {
+    names: ["dysuria", "burning urination", "burning when urinating"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "49650001", display: "Dysuria" },
+      text: "Dysuria",
+      aliases: ["แสบขัด", "ปัสสาวะแสบขัด", "แสบเวลาปัสสาวะ"],
+      i18n: { th: "แสบขัดเวลาปัสสาวะ" }
+    }
+  },
+  {
+    names: ["frequency of urination", "urinary frequency", "frequent urination"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "364198000",
+        display: "Frequency of urination"
+      },
+      text: "Urinary frequency",
+      aliases: ["ปัสสาวะบ่อย"],
+      i18n: { th: "ปัสสาวะบ่อย" }
+    }
+  },
+  {
+    names: ["urgent desire to urinate", "urinary urgency", "urgency to urinate", "urgency to pass urine", "urgency of micturition"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "75088002",
+        display: "Urgent desire to urinate"
+      },
+      text: "Urinary urgency",
+      aliases: ["ปวดปัสสาวะรีบ", "ปวดปัสสาวะกะทันหัน"],
+      i18n: { th: "ปวดปัสสาวะรีบ" }
+    }
+  },
+  {
+    names: ["vaginal discharge", "discharge from vagina"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "271939006",
+        display: "Vaginal discharge"
+      },
+      text: "Vaginal discharge",
+      aliases: ["ตกขาว"],
+      i18n: { th: "ตกขาว" }
+    }
+  },
+  {
+    names: ["vaginal irritation", "irritation of vagina"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "161816004",
+        display: "Vaginal irritation"
+      },
+      text: "Vaginal irritation",
+      aliases: ["ระคายเคืองช่องคลอด"],
+      i18n: { th: "ระคายเคืองช่องคลอด" }
+    }
+  },
+  {
+    names: ["pruritus of vagina", "itching of vagina", "vaginal itching", "vaginal itch"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "34363003",
+        display: "Pruritus of vagina"
+      },
+      text: "Vaginal itching",
+      aliases: ["คันช่องคลอด"],
+      i18n: { th: "คันช่องคลอด" }
+    }
+  },
+  {
+    names: ["anxiety", "nervousness", "feeling anxious"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "48694002", display: "Anxiety" },
+      text: "Anxiety",
+      aliases: ["วิตกกังวล", "กังวล"],
+      i18n: { th: "วิตกกังวล" }
+    }
+  },
+  {
+    names: ["panic attack", "panic", "panic episode"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "225624000", display: "Panic attack" },
+      text: "Panic attack",
+      aliases: ["อาการแพนิค", "แพนิค", "ตื่นตระหนก"],
+      i18n: { th: "อาการแพนิค" }
+    }
+  },
+  {
+    names: ["agitation", "agitated", "feeling agitated", "unable to keep still"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "24199005",
+        display: "Feeling agitated"
+      },
+      text: "Agitation",
+      aliases: ["กระสับกระส่าย", "อยู่ไม่นิ่ง"],
+      i18n: { th: "กระสับกระส่าย" }
+    }
+  },
+  {
+    names: ["sleep", "sleeping", "insomnia", "sleep issues", "unable to sleep"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "193462001",
+        display: "Insomnia"
+      },
+      text: "Sleep",
+      aliases: ["นอนหลับ", "นอนไม่หลับ"],
+      i18n: { th: "นอนหลับ" }
+    }
+  },
+  {
+    names: ["sleepiness", "sleepy", "drowsiness", "drowsy", "somnolence"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "79519003",
+        display: "Drowsiness"
+      },
+      text: "Sleepiness",
+      aliases: ["ง่วงนอน", "ง่วง"],
+      i18n: { th: "ง่วงนอน" }
+    }
+  },
+  {
+    names: ["dizziness", "giddiness"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "404640003", display: "Dizziness" },
+      text: "Dizziness",
+      aliases: ["เวียนหัว", "เวียนศีรษะ"],
+      i18n: { th: "เวียนศีรษะ" }
+    }
+  },
+  {
+    names: ["vertigo"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "399153001", display: "Vertigo" },
+      text: "Vertigo",
+      aliases: ["บ้านหมุน"],
+      i18n: { th: "บ้านหมุน" }
+    }
+  },
+  {
+    names: ["hallucinations", "hallucination"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "7011001", display: "Hallucinations" },
+      text: "Hallucinations",
+      aliases: ["ประสาทหลอน", "หูแว่ว", "เห็นภาพหลอน"],
+      i18n: { th: "ประสาทหลอน" }
+    }
+  },
+  {
+    names: ["mania", "manic"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "231494001", display: "Mania" },
+      text: "Mania",
+      aliases: ["แมเนีย", "อารมณ์คึกผิดปกติ"],
+      i18n: { th: "แมเนีย" }
+    }
+  },
+  {
+    names: ["depressed mood", "feeling depressed", "depressed"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "366979004",
+        display: "Depressed mood"
+      },
+      text: "Depressed mood",
+      aliases: ["อารมณ์ซึมเศร้า", "ซึมเศร้า"],
+      i18n: { th: "อารมณ์ซึมเศร้า" }
+    }
+  },
+  {
+    names: ["poor concentration", "difficulty concentrating", "unable to concentrate", "cannot concentrate", "can't focus"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "26329005",
+        display: "Poor concentration"
+      },
+      text: "Poor concentration",
+      aliases: ["สมาธิไม่ดี", "ขาดสมาธิ", "ไม่มีสมาธิ"],
+      i18n: { th: "สมาธิไม่ดี" }
+    }
+  },
+  {
+    names: ["palpitations", "palpitation"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "80313002", display: "Palpitations" },
+      text: "Palpitations",
+      aliases: ["ใจสั่น"],
+      i18n: { th: "ใจสั่น" }
+    }
+  }
+];
 
 export interface PrnReasonDictionaryEntry {
   canonical: string;
