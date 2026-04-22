@@ -257,6 +257,29 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.leftoverText).toBeUndefined();
   });
 
+  it("treats bare once as a single administration instead of once daily", () => {
+    const result = parseSig("insert 1 tab pv once", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.period).toBeUndefined();
+    expect(result.longText).toBe("Insert 1 tablet vaginally once.");
+  });
+
+  it("treats one time as a single administration instead of once daily", () => {
+    const result = parseSig("insert 1 tab pv one time", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.fhir.timing?.repeat?.period).toBeUndefined();
+    expect(result.longText).toBe("Insert 1 tablet vaginally once.");
+  });
+
+  it("keeps one-time event-relative instructions finite without coercing them to daily", () => {
+    const result = parseSig("insert 1 tab pv once after menstruation ends", { context: TAB_CONTEXT });
+    expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.longText).toBe("Insert 1 tablet vaginally once. Use after menstruation ends.");
+  });
+
   it("treats xN days as duration instead of dose count", () => {
     const result = parseSig("1 tab po od x7 days", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({
@@ -1034,11 +1057,7 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("2.4M IU IM once");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
-    expect(result.fhir.timing?.repeat).toMatchObject({
-      frequency: 1,
-      period: 1,
-      periodUnit: "d"
-    });
+    expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
   });
 
   it("parses million IU notation with weekly cadence", () => {

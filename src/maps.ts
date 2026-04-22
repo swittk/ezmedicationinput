@@ -1123,7 +1123,6 @@ export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {
 export const WORD_FREQUENCIES: Record<string, { frequency: number; periodUnit: FhirPeriodUnit }> = {
   daily: { frequency: 1, periodUnit: FhirPeriodUnit.Day },
   "once daily": { frequency: 1, periodUnit: FhirPeriodUnit.Day },
-  once: { frequency: 1, periodUnit: FhirPeriodUnit.Day },
   twice: { frequency: 2, periodUnit: FhirPeriodUnit.Day },
   "twice daily": { frequency: 2, periodUnit: FhirPeriodUnit.Day },
   "three times": { frequency: 3, periodUnit: FhirPeriodUnit.Day },

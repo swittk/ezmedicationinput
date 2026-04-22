@@ -399,6 +399,33 @@ function describeFrequencyCount(count: number | undefined): string | undefined {
   return `${stripTrailingZero(count)} times daily`;
 }
 
+function describeStandaloneOccurrenceCount(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const count = schedule?.count;
+  if (!count || count <= 0) {
+    return undefined;
+  }
+  if (
+    schedule?.frequency !== undefined ||
+    schedule?.frequencyMax !== undefined ||
+    schedule?.period !== undefined ||
+    schedule?.periodMax !== undefined ||
+    schedule?.periodUnit !== undefined ||
+    schedule?.timingCode
+  ) {
+    return undefined;
+  }
+  switch (count) {
+    case 1:
+      return "once";
+    case 2:
+      return "twice";
+    default:
+      return `${stripTrailingZero(count)} times`;
+  }
+}
+
 function formatDoseShort(dose: CanonicalDoseExpr | undefined): string | undefined {
   if (!dose) {
     return undefined;
@@ -895,8 +922,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const routePart = shouldSuppressRoutePhrase(clause, grammar, verb)
     ? undefined
     : buildRoutePhrase(clause, grammar, Boolean(sitePart));
+  const standaloneOccurrenceCount = describeStandaloneOccurrenceCount(schedule);
   const frequencyPart =
     describeFrequency(schedule) ??
+    standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = collectWhenPhrases(schedule, options);
   if (schedule.timeOfDay?.length) {
@@ -920,7 +949,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
   const dayPart = describeDayOfWeek(schedule);
   const countPart =
-    schedule.count !== undefined
+    schedule.count !== undefined && !standaloneOccurrenceCount
       ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
       : undefined;
   const durationPart = describeDuration(schedule);

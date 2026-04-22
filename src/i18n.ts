@@ -923,6 +923,26 @@ function describeFrequencyCountThai(count: number | undefined): string | undefin
   return TH_TIMES_PER_DAY[count] ?? `วันละ ${stripTrailingZero(count)} ครั้ง`;
 }
 
+function describeStandaloneOccurrenceCountThai(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const count = schedule?.count;
+  if (!count || count <= 0) {
+    return undefined;
+  }
+  if (
+    schedule?.frequency !== undefined ||
+    schedule?.frequencyMax !== undefined ||
+    schedule?.period !== undefined ||
+    schedule?.periodMax !== undefined ||
+    schedule?.periodUnit !== undefined ||
+    schedule?.timingCode
+  ) {
+    return undefined;
+  }
+  return `${stripTrailingZero(count)} ครั้ง`;
+}
+
 function joinMealNamesThai(parts: string[]): string {
   if (!parts.length) {
     return "";
@@ -1375,8 +1395,10 @@ function formatLongThai(
   )
     ? undefined
     : buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
+  const standaloneOccurrenceCount = describeStandaloneOccurrenceCountThai(schedule);
   const frequencyPart =
     describeFrequencyThai(schedule) ??
+    standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = collectWhenPhrasesThai(schedule, options);
   if (schedule.timeOfDay?.length) {
@@ -1399,7 +1421,9 @@ function formatLongThai(
   const timing = combineFrequencyAndEventsThai(frequencyPart, eventParts);
   const dayPart = describeDayOfWeekThai(schedule);
   const countPart =
-    schedule.count !== undefined ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง` : undefined;
+    schedule.count !== undefined && !standaloneOccurrenceCount
+      ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
+      : undefined;
   const durationPart = describeDurationThai(schedule);
   const asNeeded = formatAsNeededThai(clause);
 

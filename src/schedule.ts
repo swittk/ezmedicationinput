@@ -518,6 +518,50 @@ function resolveRepeatDurationCapEnd(
   return stepper(anchor) ?? null;
 }
 
+function resolveDayFilteredSeriesRepeat(
+  repeat: FhirTimingRepeat,
+  enforceDayFilter: boolean
+): FhirTimingRepeat | undefined {
+  if (!enforceDayFilter) {
+    return undefined;
+  }
+
+  if (repeat.frequency) {
+    return undefined;
+  }
+
+  if ((repeat.when?.length ?? 0) > 0 || (repeat.timeOfDay?.length ?? 0) > 0) {
+    return undefined;
+  }
+
+  switch (repeat.periodUnit) {
+    case FhirPeriodUnit.Week:
+    case FhirPeriodUnit.Month:
+    case FhirPeriodUnit.Year:
+      return repeat.period ? repeat : undefined;
+    case undefined:
+      return repeat.period === undefined
+        ? { ...repeat, period: 1, periodUnit: FhirPeriodUnit.Week }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
+  return (
+    repeat.count === 1 &&
+    repeat.frequency === undefined &&
+    repeat.frequencyMax === undefined &&
+    repeat.period === undefined &&
+    repeat.periodMax === undefined &&
+    repeat.periodUnit === undefined &&
+    (repeat.dayOfWeek?.length ?? 0) === 0 &&
+    (repeat.when?.length ?? 0) === 0 &&
+    (repeat.timeOfDay?.length ?? 0) === 0
+  );
+}
+
 function minDate(left: Date, right: Date | null): Date {
   if (!right) {
     return left;
@@ -894,10 +938,22 @@ export function nextDueDoses(
   const effectiveLimit =
     remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
 
+  if (isSingleAdministrationRepeat(repeat)) {
+    if (dosage.patientInstruction || (dosage.additionalInstruction?.length ?? 0) > 0) {
+      return [];
+    }
+    const anchor = orderedAt ?? from;
+    if ((orderedAt && orderedAt < from) || (courseEnd && anchor >= courseEnd)) {
+      return [];
+    }
+    return [formatZonedIso(anchor, timeZone)].slice(0, effectiveLimit);
+  }
+
   const results: string[] = [];
   const seen = new Set<string>();
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
+  const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
 
   const whenCodes = repeat.when ?? [];
   const timeOfDayEntries = repeat.timeOfDay ?? [];
@@ -1022,14 +1078,9 @@ export function nextDueDoses(
     return candidates;
   }
 
-  if (
-    enforceDayFilter &&
-    repeat.period &&
-    repeat.periodUnit &&
-    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
-  ) {
+  if (dayFilteredSeriesRepeat) {
     return generateDayFilteredPeriodSeries({
-      repeat,
+      repeat: dayFilteredSeriesRepeat,
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(baseTime, timeZone),
@@ -1115,6 +1166,7 @@ function derivePriorCountFromHistory(
 
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
+  const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
   const seen = new Set<string>();
   let count = 0;
 
@@ -1245,14 +1297,9 @@ function derivePriorCountFromHistory(
     return count;
   }
 
-  if (
-    enforceDayFilter &&
-    repeat.period &&
-    repeat.periodUnit &&
-    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
-  ) {
+  if (dayFilteredSeriesRepeat) {
     const generated = generateDayFilteredPeriodSeries({
-      repeat,
+      repeat: dayFilteredSeriesRepeat,
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(orderedAt, timeZone),
@@ -1627,11 +1674,38 @@ function countScheduleEvents(
   const repeat = timing?.repeat;
   if (!timing || !repeat) return 0;
 
+  const normalizedCount = repeat.count === undefined
+    ? undefined
+    : Math.max(0, Math.floor(repeat.count));
+  if (normalizedCount === 0) {
+    return 0;
+  }
+
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
+  const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
   const seen = new Set<string>();
   let count = 0;
   const timeZone = config.timeZone!;
+  const priorCount =
+    normalizedCount !== undefined && orderedAt && from > orderedAt
+      ? derivePriorCountFromHistory(timing, repeat, config, orderedAt, from, timeZone)
+      : 0;
+  const countLimit = normalizedCount === undefined
+    ? (limit ?? Number.POSITIVE_INFINITY)
+    : Math.min(limit ?? normalizedCount, Math.max(0, normalizedCount - priorCount));
+  if (countLimit <= 0) {
+    return 0;
+  }
+  const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
+
+  if (isSingleAdministrationRepeat(repeat)) {
+    const anchor = orderedAt ?? baseTime;
+    if (anchor < from || anchor >= to) {
+      return 0;
+    }
+    return 1;
+  }
 
   const recordCandidate = (candidate: Date | null) => {
     if (!candidate) return false;
@@ -1684,8 +1758,8 @@ function countScheduleEvents(
 
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
-      const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
-      while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
+      const maxIterations = hardLimit * 31;
+      while (count < countLimit && currentDay < to && iterations < maxIterations) {
         const weekday = getLocalWeekday(currentDay, timeZone);
         if (!enforceDayFilter || dayFilter.has(weekday)) {
           for (const entry of expanded) {
@@ -1721,7 +1795,7 @@ function countScheduleEvents(
 
     let current = baseTime;
     let guard = 0;
-    const maxIterations = limit !== undefined ? limit * 1000 : 10000;
+    const maxIterations = hardLimit * 1000;
 
     // Advance to "from"
     while (current < from && guard < maxIterations) {
@@ -1731,7 +1805,7 @@ function countScheduleEvents(
       guard++;
     }
 
-    while (current < to && count < (limit ?? Infinity) && guard < maxIterations) {
+    while (current < to && count < countLimit && guard < maxIterations) {
       const weekday = getLocalWeekday(current, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
         recordCandidate(current);
@@ -1750,8 +1824,8 @@ function countScheduleEvents(
 
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = limit !== undefined ? limit * 31 : 365 * 31;
-    while (count < (limit ?? Infinity) && currentDay < to && iterations < maxIterations) {
+    const maxIterations = hardLimit * 31;
+    while (count < countLimit && currentDay < to && iterations < maxIterations) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
         for (const clock of clocks) {
@@ -1765,14 +1839,9 @@ function countScheduleEvents(
   }
 
   // Fallback for dayOfWeek with period/periodUnit but no explicit frequency/clocks
-  if (
-    enforceDayFilter &&
-    repeat.period &&
-    repeat.periodUnit &&
-    (repeat.periodUnit === "wk" || repeat.periodUnit === "mo" || repeat.periodUnit === "a")
-  ) {
+  if (dayFilteredSeriesRepeat) {
     const generated = generateDayFilteredPeriodSeries({
-      repeat,
+      repeat: dayFilteredSeriesRepeat,
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(baseTime, timeZone),
@@ -1780,7 +1849,7 @@ function countScheduleEvents(
       from,
       to,
       orderedAt,
-      limit: limit ?? 365 * 31,
+      limit: hardLimit,
       defaultClock: toLocalClock(baseTime, timeZone)
     });
     return count + generated.length;

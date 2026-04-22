@@ -785,6 +785,7 @@ function hasStandaloneOcularTailContext(
       getEventTimingMeaning(token) ||
       getDayOfWeekMeaning(token) ||
       WORD_FREQUENCIES[normalized] ||
+      FREQUENCY_SIMPLE_WORDS[normalized] !== undefined ||
       GENERIC_CONNECTOR_TOKENS.has(normalized) ||
       isMealContextConnectorWord(normalized)
     ) {
@@ -992,7 +993,7 @@ function tryParseCountBasedFrequency(
     const simple = FREQUENCY_SIMPLE_WORDS[normalized];
     if (simple !== undefined) {
       value = simple;
-      requiresPeriod = false;
+      requiresPeriod = normalized === "once";
       requiresCue = false;
     } else {
       const wordValue = FREQUENCY_NUMBER_WORDS[normalized];
@@ -2530,7 +2531,8 @@ function hasExplicitSiteIntroduction(
     isNumericToken(lower) ||
     DEFAULT_ROUTE_SYNONYMS[lower] ||
     TIMING_ABBREVIATIONS[lower] ||
-    WORD_FREQUENCIES[lower]
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined
   );
 }
 
@@ -4747,12 +4749,43 @@ function collectCountLimit(
       partsToMark.push(nextToken);
     }
   }
+  if (value === undefined) {
+    const simpleCount = FREQUENCY_SIMPLE_WORDS[token.lower];
+    if (simpleCount !== undefined) {
+      value = simpleCount;
+    }
+  }
+  if (value === undefined) {
+    const prevToken = tokens[index - 1];
+    if (prevToken && !state.consumed.has(prevToken.index)) {
+      const prevWordValue = FREQUENCY_NUMBER_WORDS[prevToken.lower];
+      if (prevWordValue !== undefined) {
+        value = prevWordValue;
+        partsToMark.push(prevToken);
+      }
+    }
+  }
   if (!applyCountLimit(state, value)) {
     return false;
   }
   for (const part of partsToMark) {
     mark(state.consumed, part);
   }
+  return true;
+}
+
+function collectStandaloneSingleOccurrence(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): boolean {
+  if (token.lower !== "once") {
+    return false;
+  }
+  if (!applyCountLimit(context.state, 1)) {
+    return false;
+  }
+  mark(context.state.consumed, token);
   return true;
 }
 
@@ -5128,7 +5161,10 @@ function parseCountTerm(
   index: number,
   token: Token
 ): number | undefined {
-  return applyGrammarTerminal(context, index, token, "count.limit", collectCountLimit);
+  return (
+    applyGrammarTerminal(context, index, token, "count.singleOccurrence", collectStandaloneSingleOccurrence) ??
+    applyGrammarTerminal(context, index, token, "count.limit", collectCountLimit)
+  );
 }
 
 function parseDoseTerm(

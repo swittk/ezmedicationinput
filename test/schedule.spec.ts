@@ -448,6 +448,23 @@ describe("nextDueDoses", () => {
     ]);
   });
 
+  it("treats bare day-of-week schedules as weekly recurrences", () => {
+    const parsed = parseSig("1 tab po every monday", { context: { dosageForm: "tab" } });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-03T00:00:00Z",
+      limit: 3
+    });
+
+    expect(results).toEqual([
+      "2024-01-08T09:00:00+00:00",
+      "2024-01-15T09:00:00+00:00",
+      "2024-01-22T09:00:00+00:00"
+    ]);
+  });
+
   it("emits immediate doses when IMD is present", () => {
     const dosage: FhirDosage = {
       timing: {
@@ -487,6 +504,34 @@ describe("nextDueDoses", () => {
       "2024-01-01T08:00:00+00:00",
       "2024-01-01T16:00:00+00:00"
     ]);
+  });
+
+  it("emits a single anchored due dose for bare one-time schedules", () => {
+    const parsed = parseSig("insert 1 tab pv once", { context: { dosageForm: "tab" } });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual(["2024-01-01T09:00:00+00:00"]);
+  });
+
+  it("does not invent due dates for one-time schedules anchored only by additional instruction text", () => {
+    const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
+      context: { dosageForm: "tab" }
+    });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual([]);
   });
 });
 
@@ -573,6 +618,48 @@ describe("calculateTotalUnits", () => {
     expect(res.totalUnits).toBe(4);
   });
 
+  it("calculates one-time schedules as a single dose instead of a daily course", () => {
+    const parsed = parseSig("insert 1 tab pv once", { context: { dosageForm: "tab" } });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 30,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+
+    expect(res.totalUnits).toBe(1);
+  });
+
+  it("caps count-limited minute intervals for calculateTotalUnits", () => {
+    const parsed = parseSig("1 drop ou q15min x 8 doses");
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+
+    expect(res.totalUnits).toBe(8);
+  });
+
+  it("caps count-limited fractional-hour intervals for calculateTotalUnits", () => {
+    const parsed = parseSig("1 tab po q0.5h x3 times", { context: { dosageForm: "tab" } });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+
+    expect(res.totalUnits).toBe(3);
+  });
+
   it("handles complex weekly schedules with dayOfWeek", () => {
     // Mon, Wed, Fri for 2 weeks = 6 doses
     const dosage: FhirDosage = {
@@ -614,6 +701,20 @@ describe("calculateTotalUnits", () => {
       durationUnit: FhirPeriodUnit.Week,
       timeZone: "UTC"
     });
+    expect(res.totalUnits).toBe(4);
+  });
+
+  it("counts bare day-of-week schedules as weekly recurrences", () => {
+    const parsed = parseSig("1 tab po every monday", { context: { dosageForm: "tab" } });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 4,
+      durationUnit: FhirPeriodUnit.Week,
+      timeZone: "UTC"
+    });
+
     expect(res.totalUnits).toBe(4);
   });
 

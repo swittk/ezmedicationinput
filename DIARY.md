@@ -1192,3 +1192,148 @@ Desired behavior:
    - phase 2: parser support for explicit `then` stage boundaries
    - phase 3: regimen-aware total-units / due-dose helpers
    - phase 4: optional top-level `dosageDetails` serializer
+
+## 2026-04-22 Scheduler/Calculator Audit Before Staged-Regimen Work
+
+Verified the current `nextDueDoses` / `calculateTotalUnits` shape before adding
+sequential regimen support. Two real bugs were present in the shared schedule
+layer; both are now fixed and locked into tests.
+
+1. Real bugs that were found:
+   - bare `dayOfWeek` schedules like `1 tab po every monday` parsed fine but
+     did not recur in `nextDueDoses`
+   - `calculateTotalUnits` ignored total-count caps like:
+     - `1 drop ou q15min x 8 doses`
+     - `1 drop os q1/4h x4`
+     - `1 tab po q0.5h x3 times`
+     because `countScheduleEvents()` was not honoring `repeat.count`
+
+2. Structural fix:
+   - added a shared day-filtered series fallback in `src/schedule.ts`
+     so bare weekday schedules are treated as weekly recurrences without
+     changing the parser shape
+   - applied count-cap logic inside `countScheduleEvents()` itself, so
+     `calculateTotalUnits` now respects:
+     - total schedule count
+     - prior history before the evaluation window
+     - the existing external duration window
+
+3. New locked regressions:
+   - `nextDueDoses(parseSig("1 tab po every monday"))`
+     now yields weekly Monday timestamps as expected
+   - `calculateTotalUnits(parseSig("1 drop ou q15min x 8 doses"))`
+     now returns `8`
+   - `calculateTotalUnits(parseSig("1 tab po q0.5h x3 times"))`
+     now returns `3`
+   - `calculateTotalUnits(parseSig("1 tab po every monday"))`
+     now counts weekly recurrence correctly over a 4-week window
+
+4. Healthy baseline after the fix:
+   - anchored event timings
+   - time-of-day schedules
+   - daily frequency defaults
+   - interval schedules
+   - count-limited schedules
+   - parsed course bounds via `boundsDuration` / `boundsRange`
+   - weekly/monthly/yearly cadence with day filters
+   - bare weekday recurrence
+
+5. Verification:
+   - `npx vitest run test/schedule.spec.ts`
+   - `npm run build`
+   - `npm test`
+   - suite status after audit fix: `545` tests passing
+
+## 2026-04-22 Single-use / event-relative dosing check
+
+Checked whether one-time event-relative instructions are truly supported, using:
+- `put in vagina 1 tab after menstruation ends`
+- `insert 1 tab pv after menstruation ends`
+- `insert 1 tab pv once after menstruation ends`
+- `insert 1 tab pv once`
+
+Findings:
+
+1. Event-relative one-time instructions are only partially supported.
+   - parse layer does preserve the core administration meaning:
+     - dose = `1 tab`
+     - route = `Per vagina`
+     - site = `vagina`
+     - `after menstruation ends` is preserved as `additionalInstruction`
+   - but there is no computable timing anchor for `after menstruation ends`
+   - current behavior:
+     - `nextDueDoses(...)` returns `[]`
+     - `calculateTotalUnits(...)` returns `0`
+
+2. `once` currently has the wrong semantics.
+   - current parser maps bare `once` through the daily frequency table
+   - so:
+     - `insert 1 tab pv once`
+     - `insert 1 tab pv once after menstruation ends`
+     become `frequency=1, period=1 day`
+   - current output is therefore wrong:
+     - `Insert 1 tablet vaginally once daily...`
+     - calculator treats it like a 30-day daily regimen over a 30-day window
+
+3. Honest current status:
+   - free-text preservation: yes
+   - clinically reasonable formatting: partial
+   - true one-time semantics: no
+   - due-dose / total-unit calculation for event-relative single use: no
+
+4. Correct long-term shape:
+   - `once` should not be hard-mapped to `once daily`
+   - one-time administration should be modeled separately from daily cadence
+   - event-relative triggers like `after menstruation ends` should remain
+     preserved as instruction text unless/until the engine supports external
+     event anchors
+   - without an actual menstruation-end date, schedule generation cannot be
+     honestly computed from `Dosage` alone
+
+## 2026-04-22 `once` / `one time` semantics corrected
+
+Fixed the concrete wrong behavior where bare `once` was being coerced into
+`once daily`.
+
+What changed:
+
+1. Parse semantics:
+   - bare `once` now becomes a true finite occurrence count:
+     - `timing.repeat.count = 1`
+   - `one time` also becomes:
+     - `timing.repeat.count = 1`
+   - explicit daily phrases still stay daily:
+     - `once daily`
+     - `once a day`
+   - explicit finite count paths were preserved:
+     - `for 4 times`
+     - `x4 doses`
+
+2. Human formatting:
+   - `insert 1 tab pv once`
+     now formats as:
+     - `Insert 1 tablet vaginally once.`
+   - not:
+     - `Insert 1 tablet vaginally once daily.`
+   - event-relative one-time instructions stay finite in wording:
+     - `Insert 1 tablet vaginally once. Use after menstruation ends.`
+
+3. Scheduling / calculation boundary:
+   - plain one-time schedules now behave as one dose for total-units math
+   - `nextDueDoses(...)` now emits a single anchored due time for plain
+     one-time schedules without opaque instruction text
+   - but event-relative one-time instructions that are only anchored by
+     free-text instructions like `after menstruation ends` still do not invent
+     fake due timestamps
+
+4. Scope intentionally kept narrow:
+   - this pass fixed `once` / `one time`
+   - did not globally redefine every bare quantifier (`twice`, `thrice`, etc.)
+     into total-count semantics yet
+   - the already-good explicit finite-count grammar remains intact
+
+5. Verification:
+   - `npx vitest run test/parser.spec.ts test/schedule.spec.ts`
+   - `npm run build`
+   - `npm test`
+   - suite status after the fix: `551` tests passing
