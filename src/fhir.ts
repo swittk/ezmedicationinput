@@ -3,7 +3,6 @@ import {
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
 import { formatCanonicalClause } from "./format";
-import { buildCanonicalSigClauses } from "./ir";
 import { ParserState } from "./parser-state";
 import {
   ROUTE_BY_SNOMED,
@@ -12,10 +11,12 @@ import {
   findPrnReasonDefinitionByCoding
 } from "./maps";
 import {
+  CanonicalDoseRange,
   CanonicalSigClause,
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
+  FhirRange,
   FhirTimingRepeat,
   RouteCode,
   SNOMEDCTRouteCodes
@@ -67,6 +68,71 @@ function selectPreferredSiteCoding(site: FhirCodeableConcept | undefined): Codea
   return selectFirstCodingWithCode(site);
 }
 
+function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
+  const fhirRange: FhirRange = {};
+
+  if (range.low !== undefined) {
+    fhirRange.low = {
+      value: range.low,
+      unit
+    };
+  }
+  if (range.high !== undefined) {
+    fhirRange.high = {
+      value: range.high,
+      unit
+    };
+  }
+
+  if (!fhirRange.low && !fhirRange.high) {
+    return undefined;
+  }
+
+  return fhirRange;
+}
+
+function extractCanonicalDoseRange(
+  range: FhirRange
+): { range?: CanonicalDoseRange; unit?: string; warning?: string } {
+  const canonicalRange: CanonicalDoseRange = {};
+  const lowUnit = range.low?.unit;
+  const highUnit = range.high?.unit;
+
+  if (range.low?.value !== undefined) {
+    canonicalRange.low = range.low.value;
+  }
+  if (range.high?.value !== undefined) {
+    canonicalRange.high = range.high.value;
+  }
+
+  if (canonicalRange.low === undefined && canonicalRange.high === undefined) {
+    return {};
+  }
+
+  const unit = lowUnit ?? highUnit;
+  let warning: string | undefined;
+  if (lowUnit && highUnit && lowUnit !== highUnit) {
+    warning = `FHIR doseRange low/high units differ (${lowUnit} vs ${highUnit}); preserved numeric bounds using ${unit}.`;
+  }
+
+  return {
+    range: canonicalRange,
+    unit,
+    warning
+  };
+}
+
+function appendWarning(warnings: string[] | undefined, warning: string | undefined): string[] | undefined {
+  if (!warning) {
+    return warnings;
+  }
+  if (!warnings) {
+    return [warning];
+  }
+  warnings.push(warning);
+  return warnings;
+}
+
 export function canonicalToFhir(
   clause: CanonicalSigClause,
   textOverride?: string
@@ -112,8 +178,6 @@ export function canonicalToFhir(
 
   if (hasRepeat) {
     dosage.timing = { repeat };
-  } else {
-    dosage.timing = {};
   }
 
   if (schedule?.timingCode) {
@@ -125,14 +189,14 @@ export function canonicalToFhir(
   }
 
   if (clause.dose?.range) {
-    dosage.doseAndRate = [
-      {
-        doseRange: {
-          low: { value: clause.dose.range.low, unit: clause.dose.unit },
-          high: { value: clause.dose.range.high, unit: clause.dose.unit }
+    const doseRange = buildFhirDoseRange(clause.dose.range, clause.dose.unit);
+    if (doseRange) {
+      dosage.doseAndRate = [
+        {
+          doseRange
         }
-      }
-    ];
+      ];
+    }
   } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
@@ -293,13 +357,13 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const doseAndRate = dosage.doseAndRate?.[0];
   if (doseAndRate?.doseRange) {
-    const low = doseAndRate.doseRange.low?.value;
-    const high = doseAndRate.doseRange.high?.value;
-    if (low !== undefined && high !== undefined) {
+    const extracted = extractCanonicalDoseRange(doseAndRate.doseRange);
+    if (extracted.range) {
       clause.dose = {
-        range: { low, high },
-        unit: doseAndRate.doseRange.low?.unit ?? doseAndRate.doseRange.high?.unit
+        range: extracted.range,
+        unit: extracted.unit
       };
+      clause.warnings = appendWarning(clause.warnings, extracted.warning);
     }
   } else if (doseAndRate?.doseQuantity?.value !== undefined) {
     clause.dose = {
@@ -457,11 +521,14 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
 
   const doseAndRate = dosage.doseAndRate?.[0];
   if (doseAndRate?.doseRange) {
-    const { low, high } = doseAndRate.doseRange;
-    if (low?.value !== undefined && high?.value !== undefined) {
-      state.doseRange = { low: low.value, high: high.value };
+    const extracted = extractCanonicalDoseRange(doseAndRate.doseRange);
+    if (extracted.range) {
+      state.primaryClause.dose = {
+        range: extracted.range,
+        unit: extracted.unit
+      };
+      state.warnings = appendWarning(state.warnings, extracted.warning) ?? state.warnings;
     }
-    state.unit = low?.unit ?? high?.unit ?? state.unit;
   } else if (doseAndRate?.doseQuantity) {
     const dose = doseAndRate.doseQuantity;
     if (dose.value !== undefined) {

@@ -2279,6 +2279,51 @@ describe("parseSig core scenarios", () => {
       display: "Custom site"
     });
   });
+
+  it("fromFhirDosage preserves one-sided dose ranges", () => {
+    const again = fromFhirDosage({
+      doseAndRate: [
+        {
+          doseRange: {
+            high: { value: 2, unit: "tab" }
+          }
+        }
+      ]
+    });
+
+    expect(again.meta.canonical.clauses[0]?.dose).toEqual({
+      range: { high: 2 },
+      unit: "tab"
+    });
+    expect(again.shortText).toContain("<=2 tab");
+    expect(again.longText).toBe("Use up to 2 tablets.");
+  });
+
+  it("fromFhirDosage warns on mismatched dose range units instead of dropping the range", () => {
+    const again = fromFhirDosage({
+      doseAndRate: [
+        {
+          doseRange: {
+            low: { value: 1, unit: "tab" },
+            high: { value: 2, unit: "mL" }
+          }
+        }
+      ]
+    });
+
+    expect(again.meta.canonical.clauses[0]?.dose).toEqual({
+      range: { low: 1, high: 2 },
+      unit: "tab"
+    });
+    expect(again.warnings).toContain(
+      "FHIR doseRange low/high units differ (tab vs mL); preserved numeric bounds using tab."
+    );
+  });
+
+  it("does not emit empty timing objects when no timing data is present", () => {
+    const parsed = parseSig("apply prn itch");
+    expect(parsed.fhir.timing).toBeUndefined();
+  });
 });
 
 describe("internationalization", () => {

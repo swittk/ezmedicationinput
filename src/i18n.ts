@@ -540,11 +540,27 @@ function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | unde
     return undefined;
   }
   if (dose.range) {
-    const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
-    if (dose.unit) {
-      return `${base} ${formatUnitThai(dose.unit, dose.range.high, "short")}`;
+    if (dose.range.low !== undefined && dose.range.high !== undefined) {
+      const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
+      if (dose.unit) {
+        return `${base} ${formatUnitThai(dose.unit, dose.range.high, "short")}`;
+      }
+      return base;
     }
-    return base;
+    if (dose.range.low !== undefined) {
+      const base = `>=${stripTrailingZero(dose.range.low)}`;
+      if (dose.unit) {
+        return `${base} ${formatUnitThai(dose.unit, dose.range.low, "short")}`;
+      }
+      return base;
+    }
+    if (dose.range.high !== undefined) {
+      const base = `<=${stripTrailingZero(dose.range.high)}`;
+      if (dose.unit) {
+        return `${base} ${formatUnitThai(dose.unit, dose.range.high, "short")}`;
+      }
+      return base;
+    }
   }
   if (dose.value !== undefined) {
     if (dose.unit) {
@@ -560,14 +576,36 @@ function formatDoseThaiLong(dose: CanonicalDoseExpr | undefined): string | undef
     return undefined;
   }
   if (dose.range) {
-    if (dose.unit) {
-      return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)} ${formatUnitThai(
-        dose.unit,
-        dose.range.high,
-        "long"
-      )}`;
+    if (dose.range.low !== undefined && dose.range.high !== undefined) {
+      if (dose.unit) {
+        return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)} ${formatUnitThai(
+          dose.unit,
+          dose.range.high,
+          "long"
+        )}`;
+      }
+      return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)}`;
     }
-    return `ครั้งละ ${stripTrailingZero(dose.range.low)} ถึง ${stripTrailingZero(dose.range.high)}`;
+    if (dose.range.low !== undefined) {
+      if (dose.unit) {
+        return `ครั้งละ อย่างน้อย ${stripTrailingZero(dose.range.low)} ${formatUnitThai(
+          dose.unit,
+          dose.range.low,
+          "long"
+        )}`;
+      }
+      return `ครั้งละ อย่างน้อย ${stripTrailingZero(dose.range.low)}`;
+    }
+    if (dose.range.high !== undefined) {
+      if (dose.unit) {
+        return `ครั้งละ ไม่เกิน ${stripTrailingZero(dose.range.high)} ${formatUnitThai(
+          dose.unit,
+          dose.range.high,
+          "long"
+        )}`;
+      }
+      return `ครั้งละ ไม่เกิน ${stripTrailingZero(dose.range.high)}`;
+    }
   }
   if (dose.value !== undefined) {
     if (dose.unit) {

@@ -322,11 +322,27 @@ function formatDoseShort(dose: CanonicalDoseExpr | undefined): string | undefine
     return undefined;
   }
   if (dose.range) {
-    const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
-    if (dose.unit) {
-      return `${base} ${dose.unit}`;
+    if (dose.range.low !== undefined && dose.range.high !== undefined) {
+      const base = `${stripTrailingZero(dose.range.low)}-${stripTrailingZero(dose.range.high)}`;
+      if (dose.unit) {
+        return `${base} ${dose.unit}`;
+      }
+      return base;
     }
-    return base;
+    if (dose.range.low !== undefined) {
+      const base = `>=${stripTrailingZero(dose.range.low)}`;
+      if (dose.unit) {
+        return `${base} ${dose.unit}`;
+      }
+      return base;
+    }
+    if (dose.range.high !== undefined) {
+      const base = `<=${stripTrailingZero(dose.range.high)}`;
+      if (dose.unit) {
+        return `${base} ${dose.unit}`;
+      }
+      return base;
+    }
   }
   if (dose.value !== undefined) {
     if (dose.unit) {
@@ -342,13 +358,27 @@ function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined
     return undefined;
   }
   if (dose.range) {
-    if (dose.unit) {
-      return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)} ${pluralize(
-        dose.unit,
-        dose.range.high
-      )}`;
+    if (dose.range.low !== undefined && dose.range.high !== undefined) {
+      if (dose.unit) {
+        return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)} ${pluralize(
+          dose.unit,
+          dose.range.high
+        )}`;
+      }
+      return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)}`;
     }
-    return `${stripTrailingZero(dose.range.low)} to ${stripTrailingZero(dose.range.high)}`;
+    if (dose.range.low !== undefined) {
+      if (dose.unit) {
+        return `at least ${stripTrailingZero(dose.range.low)} ${pluralize(dose.unit, dose.range.low)}`;
+      }
+      return `at least ${stripTrailingZero(dose.range.low)}`;
+    }
+    if (dose.range.high !== undefined) {
+      if (dose.unit) {
+        return `up to ${stripTrailingZero(dose.range.high)} ${pluralize(dose.unit, dose.range.high)}`;
+      }
+      return `up to ${stripTrailingZero(dose.range.high)}`;
+    }
   }
   if (dose.value !== undefined) {
     if (dose.unit) {

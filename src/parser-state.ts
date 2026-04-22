@@ -1,6 +1,7 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
 import {
   CanonicalAdditionalInstructionExpr,
+  CanonicalDoseRange,
   CanonicalSigClause,
   EventTiming,
   FhirCoding,
@@ -83,11 +84,11 @@ export class ParserState {
     this.ensureDose().value = value;
   }
 
-  get doseRange(): { low: number; high: number } | undefined {
+  get doseRange(): CanonicalDoseRange | undefined {
     return this.clause.dose?.range;
   }
 
-  set doseRange(value: { low: number; high: number } | undefined) {
+  set doseRange(value: CanonicalDoseRange | undefined) {
     this.ensureDose().range = value;
   }
 

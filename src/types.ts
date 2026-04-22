@@ -700,9 +700,14 @@ export interface ParseOptions extends FormatOptions {
   | PrnReasonSuggestionResolver[];
 }
 
+export interface CanonicalDoseRange {
+  low?: number;
+  high?: number;
+}
+
 export interface CanonicalDoseExpr {
   value?: number;
-  range?: { low: number; high: number };
+  range?: CanonicalDoseRange;
   unit?: string;
   evidence?: CanonicalEvidence[];
 }

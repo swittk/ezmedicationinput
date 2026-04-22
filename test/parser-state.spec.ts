@@ -148,4 +148,42 @@ describe("FHIR parser-state import", () => {
       i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
     });
   });
+
+  it("preserves partial dose ranges and flags mismatched range units", () => {
+    const state = parserStateFromFhir({
+      doseAndRate: [
+        {
+          doseRange: {
+            low: { value: 1, unit: "tab" },
+            high: { value: 2, unit: "mL" }
+          }
+        }
+      ]
+    });
+
+    expect(state.primaryClause.dose).toEqual({
+      range: { low: 1, high: 2 },
+      unit: "tab"
+    });
+    expect(state.warnings).toContain(
+      "FHIR doseRange low/high units differ (tab vs mL); preserved numeric bounds using tab."
+    );
+  });
+
+  it("preserves one-sided dose ranges from FHIR", () => {
+    const state = parserStateFromFhir({
+      doseAndRate: [
+        {
+          doseRange: {
+            high: { value: 2, unit: "tab" }
+          }
+        }
+      ]
+    });
+
+    expect(state.primaryClause.dose).toEqual({
+      range: { high: 2 },
+      unit: "tab"
+    });
+  });
 });
