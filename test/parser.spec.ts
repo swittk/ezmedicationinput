@@ -385,7 +385,8 @@ describe("parseSig core scenarios", () => {
   it("strips connector words from spelled site phrases", () => {
     const result = parseSig("1 drop bid to face");
     expect(result.fhir.site?.text).toBe("face");
-    expect(result.longText).toBe("Apply 1 drop twice daily to the face.");
+    expect(result.fhir.route).toBeUndefined();
+    expect(result.longText).toBe("Use 1 drop twice daily to the face.");
   });
 
   describe("custom siteCodeMap usage", () => {
@@ -1958,6 +1959,32 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
   });
 
+  it("does not let generic abdomen site hints override topical application context", () => {
+    const result = parseSig("apply to abdomen bid");
+    expect(result.fhir.site?.text).toBe("abdomen");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
+  });
+
+  it("keeps default ocular route hints when a custom site map entry omits routeHint", () => {
+    const result = parseSig("1 drop to eye bid", {
+      siteCodeMap: {
+        eye: {
+          coding: {
+            code: "custom-eye",
+            display: "Custom eye",
+            system: "http://example.org/site"
+          }
+        }
+      }
+    });
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://example.org/site",
+      code: "custom-eye",
+      display: "Custom eye"
+    });
+  });
+
   it("codes head with bundled SNOMED anatomy", () => {
     const result = parseSig("apply to head bid");
     expect(result.fhir.site?.coding?.[0]).toEqual({
@@ -2232,6 +2259,25 @@ describe("parseSig core scenarios", () => {
       "Take 1 tablet by mouth three times daily after breakfast, lunch and dinner."
     );
     expect(again.fhir.text).toBe(again.longText);
+  });
+
+  it("fromFhirDosage preserves non-SNOMED site codings when no site text is present", () => {
+    const again = fromFhirDosage({
+      site: {
+        coding: [
+          {
+            system: "http://example.org/site-system",
+            code: "custom-site",
+            display: "Custom site"
+          }
+        ]
+      }
+    });
+    expect(again.meta.normalized.site?.coding).toEqual({
+      system: "http://example.org/site-system",
+      code: "custom-site",
+      display: "Custom site"
+    });
   });
 });
 

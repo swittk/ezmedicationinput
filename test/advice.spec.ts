@@ -5,7 +5,7 @@ import {
   findAdditionalInstructionDefinitionByCoding,
   parseAdditionalInstructions
 } from "../src/advice";
-import { AdvicePolarity } from "../src/types";
+import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -114,6 +114,33 @@ describe("additional instruction rule inventory", () => {
         predicate: expect.objectContaining({ lemma: "chew" })
       })
     ]);
+  });
+
+  it("does not over-code swallow-whole advice from a single prohibition", () => {
+    const instructions = parseAdditionalInstructions("do not crush", { start: 0, end: 12 });
+    expect(instructions[0]?.coding?.code).not.toBe("418693002");
+    expect(instructions[0]?.frames).toEqual([
+      expect.objectContaining({
+        polarity: AdvicePolarity.Negate,
+        predicate: expect.objectContaining({ lemma: "crush" })
+      })
+    ]);
+  });
+
+  it("keeps decimal durations intact when splitting instruction sentences", () => {
+    const instructions = parseAdditionalInstructions(
+      "leave on for 0.5 hours. rinse",
+      { start: 0, end: 29 }
+    );
+    expect(instructions).toHaveLength(2);
+    expect(instructions[0]?.frames?.[0]?.args).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: AdviceArgumentRole.Duration,
+          text: "0.5 hours"
+        })
+      ])
+    );
   });
 
   it("renders coded advice in Thai when localized", () => {

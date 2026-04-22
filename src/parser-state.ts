@@ -200,7 +200,11 @@ export class ParserState {
   }
 
   set asNeeded(value: boolean | undefined) {
-    this.ensurePrn().enabled = Boolean(value);
+    if (value === undefined) {
+      delete this.clause.prn;
+      return;
+    }
+    this.ensurePrn().enabled = value;
   }
 
   get asNeededReason(): string | undefined {
@@ -208,7 +212,17 @@ export class ParserState {
   }
 
   set asNeededReason(value: string | undefined) {
-    const prn = this.ensurePrn();
+    if (value === undefined) {
+      if (this.clause.prn?.reason) {
+        delete this.clause.prn.reason.text;
+        this.cleanupPrn();
+      }
+      return;
+    }
+    const prn = this.clause.prn ?? (this.clause.prn = { enabled: true });
+    if (prn.enabled === undefined) {
+      prn.enabled = true;
+    }
     if (!prn.reason) {
       prn.reason = {};
     }
@@ -220,7 +234,17 @@ export class ParserState {
   }
 
   set asNeededReasonCoding(value: LocalizedCoding | undefined) {
-    const prn = this.ensurePrn();
+    if (value === undefined) {
+      if (this.clause.prn?.reason) {
+        delete this.clause.prn.reason.coding;
+        this.cleanupPrn();
+      }
+      return;
+    }
+    const prn = this.clause.prn ?? (this.clause.prn = { enabled: true });
+    if (prn.enabled === undefined) {
+      prn.enabled = true;
+    }
     if (!prn.reason) {
       prn.reason = {};
     }
@@ -228,7 +252,8 @@ export class ParserState {
       ? {
         code: value.code,
         display: value.display,
-        system: value.system
+        system: value.system,
+        i18n: value.i18n
       }
       : undefined;
   }
@@ -254,11 +279,19 @@ export class ParserState {
   }
 
   set siteCoding(value: LocalizedCoding | undefined) {
+    if (value === undefined) {
+      if (this.clause.site) {
+        delete this.clause.site.coding;
+        this.cleanupSite();
+      }
+      return;
+    }
     this.ensureSite().coding = value?.code
       ? {
         code: value.code,
         display: value.display,
-        system: value.system
+        system: value.system,
+        i18n: value.i18n
       }
       : undefined;
   }
@@ -307,5 +340,38 @@ export class ParserState {
       this.clause.prn = { enabled: false };
     }
     return this.clause.prn;
+  }
+
+  private cleanupPrn(): void {
+    const prn = this.clause.prn;
+    if (!prn) {
+      return;
+    }
+    if (
+      prn.reason &&
+      prn.reason.text === undefined &&
+      prn.reason.coding === undefined
+    ) {
+      delete prn.reason;
+    }
+    if (prn.enabled === undefined && prn.reason === undefined) {
+      delete this.clause.prn;
+    }
+  }
+
+  private cleanupSite(): void {
+    const site = this.clause.site;
+    if (!site) {
+      return;
+    }
+    if (
+      site.text === undefined &&
+      site.coding === undefined &&
+      site.source === undefined &&
+      site.inferred === undefined &&
+      site.evidence === undefined
+    ) {
+      delete this.clause.site;
+    }
   }
 }

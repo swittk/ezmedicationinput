@@ -300,7 +300,7 @@ interface Lowerable {
 }
 
 function normalizeMeaningKey(value: string): string {
-  return value.toLowerCase().replace(/[.{};]/g, "");
+  return value.toLowerCase().replace(/[.{}]/g, "");
 }
 
 function pushEnum<T extends string>(values: T[] | undefined, value: T): T[] {
@@ -340,16 +340,20 @@ export function resolveDayMeaning(tokenLower: string): FhirDayOfWeek[] | undefin
   }
   const rangeMatch = normalized.match(/^([^-–—~/]+)[-–—~/]([^-–—~/]+)$/);
   if (rangeMatch) {
-    const start = DAY_OF_WEEK_TOKENS[rangeMatch[1]];
-    const end = DAY_OF_WEEK_TOKENS[rangeMatch[2]];
+    const startKey = rangeMatch[1].trim();
+    const endKey = rangeMatch[2].trim();
+    const start = DAY_OF_WEEK_TOKENS[startKey];
+    const end = DAY_OF_WEEK_TOKENS[endKey];
     if (start && end) {
       return expandDayMeaningRange(start, end);
     }
   }
   const compactConnectorRange = normalized.match(/^(.+?)(ถึง|จนถึง|to|through|thru)(.+)$/u);
   if (compactConnectorRange) {
-    const start = DAY_OF_WEEK_TOKENS[compactConnectorRange[1]];
-    const end = DAY_OF_WEEK_TOKENS[compactConnectorRange[3]];
+    const startKey = compactConnectorRange[1].trim();
+    const endKey = compactConnectorRange[3].trim();
+    const start = DAY_OF_WEEK_TOKENS[startKey];
+    const end = DAY_OF_WEEK_TOKENS[endKey];
     if (start && end) {
       return expandDayMeaningRange(start, end);
     }

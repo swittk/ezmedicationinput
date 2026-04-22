@@ -489,7 +489,7 @@
         }
       ],
       "matcher": {
-        "anyOf": [
+        "allOf": [
           {
             "frame": {
               "predicateLemmas": ["crush"],

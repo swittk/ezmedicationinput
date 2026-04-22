@@ -118,6 +118,67 @@ function buildToken(
   };
 }
 
+function pushIfPresent<T>(values: T[], value: T | undefined): void {
+  if (value !== undefined) {
+    values.push(value);
+  }
+}
+
+function buildFractionPartToken(
+  part: string,
+  surface: SurfaceToken | undefined,
+  input: string,
+  start: number | undefined,
+  end: number | undefined
+): LexToken | undefined {
+  if (!part || !surface || start === undefined || end === undefined || end <= start) {
+    return undefined;
+  }
+  return buildToken(part, [surface], input, start, end, true);
+}
+
+function buildFractionTokens(
+  left: SurfaceToken,
+  slash: SurfaceToken,
+  right: SurfaceToken,
+  input: string
+): LexToken[] | undefined {
+  const leftMatch = left.lower.match(/^([a-z]*)([0-9]+(?:\.[0-9]+)?)$/i);
+  const rightMatch = right.lower.match(/^([0-9]+(?:\.[0-9]+)?)([a-z]*)$/i);
+  if (!leftMatch || !rightMatch) {
+    return undefined;
+  }
+
+  const numerator = parseFloat(leftMatch[2]);
+  const denominator = parseFloat(rightMatch[1]);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return undefined;
+  }
+
+  const tokens: LexToken[] = [];
+  const prefix = leftMatch[1];
+  const suffix = rightMatch[2];
+  const valueText = (numerator / denominator).toString();
+
+  pushIfPresent(
+    tokens,
+    buildFractionPartToken(prefix, left, input, left.start, left.start + prefix.length)
+  );
+  tokens.push(buildToken(valueText, [left, slash, right], input, undefined, undefined, true));
+  pushIfPresent(
+    tokens,
+    buildFractionPartToken(
+      suffix,
+      right,
+      input,
+      right.end - suffix.length,
+      right.end
+    )
+  );
+
+  return tokens;
+}
+
 function pushSplitParts(
   output: LexToken[],
   surface: SurfaceToken,
@@ -266,7 +327,6 @@ function tryNumericRangeToken(
     !hyphen ||
     hyphen.original !== "-" ||
     !isSurfaceText(end) ||
-    hasWhitespaceAround(hyphen, input) ||
     !isNumericText(start.lower) ||
     !isNumericText(end.lower)
   ) {
@@ -313,7 +373,7 @@ function tryFractionToken(
   surfaces: SurfaceToken[],
   index: number,
   input: string
-): { token: LexToken; nextIndex: number } | undefined {
+): { tokens: LexToken[]; nextIndex: number } | undefined {
   const left = surfaces[index];
   const slash = surfaces[index + 1];
   const right = surfaces[index + 2];
@@ -322,25 +382,13 @@ function tryFractionToken(
     return undefined;
   }
 
-  const leftMatch = left.lower.match(/^([a-z]*)([0-9]+(?:\.[0-9]+)?)$/i);
-  const rightMatch = right.lower.match(/^([0-9]+(?:\.[0-9]+)?)([a-z]*)$/i);
-  if (!leftMatch || !rightMatch) {
+  const tokens = buildFractionTokens(left, slash, right, input);
+  if (!tokens) {
     return undefined;
   }
-
-  const numerator = parseFloat(leftMatch[2]);
-  const denominator = parseFloat(rightMatch[1]);
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
-    return undefined;
-  }
-
-  const value = numerator / denominator;
-  const prefix = leftMatch[1];
-  const suffix = rightMatch[2];
-  const normalized = `${prefix}${value.toString()}${suffix}`;
 
   return {
-    token: buildToken(normalized, [left, slash, right], input, undefined, undefined, true),
+    tokens,
     nextIndex: index + 3
   };
 }
@@ -411,11 +459,34 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
     /^([a-z]*)([0-9]+(?:\.[0-9]+)?)\/([0-9]+(?:\.[0-9]+)?)([a-z]*)$/i
   );
   if (fractionMatch) {
-    const numerator = parseFloat(fractionMatch[2]);
-    const denominator = parseFloat(fractionMatch[3]);
-    if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0) {
-      const normalized = `${fractionMatch[1]}${(numerator / denominator).toString()}${fractionMatch[4]}`;
-      output.push(buildToken(normalized, [surface], input, undefined, undefined, true));
+    const slashIndex = surface.original.indexOf("/");
+    const left = {
+      original: surface.original.slice(0, slashIndex),
+      lower: surface.lower.slice(0, slashIndex),
+      index: surface.index,
+      kind: surface.kind,
+      start: surface.start,
+      end: surface.start + slashIndex
+    };
+    const slash = {
+      original: "/",
+      lower: "/",
+      index: surface.index,
+      kind: SurfaceTokenKind.Punctuation,
+      start: surface.start + slashIndex,
+      end: surface.start + slashIndex + 1
+    };
+    const right = {
+      original: surface.original.slice(slashIndex + 1),
+      lower: surface.lower.slice(slashIndex + 1),
+      index: surface.index,
+      kind: surface.kind,
+      start: surface.start + slashIndex + 1,
+      end: surface.end
+    };
+    const tokens = buildFractionTokens(left, slash, right, input);
+    if (tokens) {
+      output.push(...tokens);
       return;
     }
   }
@@ -469,7 +540,7 @@ export function lexInput(input: string): LexToken[] {
 
     const fraction = tryFractionToken(surfaces, index, input);
     if (fraction) {
-      output.push(fraction.token);
+      output.push(...fraction.tokens);
       index = fraction.nextIndex;
       continue;
     }

@@ -24,6 +24,7 @@ import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
+type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
   return {
@@ -38,6 +39,14 @@ function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
     evidence: [],
     confidence: 1
   };
+}
+
+function selectPreferredSiteCoding(site: FhirCodeableConcept | undefined): CodeableConceptCoding | undefined {
+  if (!site?.coding?.length) {
+    return undefined;
+  }
+  const snomed = site.coding.find((code) => code.system === SNOMED_SYSTEM);
+  return snomed ?? site.coding[0];
 }
 
 export function canonicalToFhir(
@@ -222,7 +231,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     };
   }
 
-  const siteCoding = dosage.site?.coding?.find((code) => code.system === SNOMED_SYSTEM);
+  const siteCoding = selectPreferredSiteCoding(dosage.site);
   if (dosage.site?.text || siteCoding?.code) {
     clause.site = {
       text: dosage.site?.text,
@@ -369,13 +378,16 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     }
   }
 
-  const siteCoding = dosage.site?.coding?.find((code) => code.system === SNOMED_SYSTEM);
+  const siteCoding = selectPreferredSiteCoding(dosage.site);
   if (siteCoding?.code) {
     state.siteCoding = {
       code: siteCoding.code,
       display: siteCoding.display,
       system: siteCoding.system
     };
+    state.siteSource = "text";
+  } else if (dosage.site?.text) {
+    state.siteSource = "text";
   }
 
   const reasonCoding = dosage.asNeededFor?.[0]?.coding?.[0];

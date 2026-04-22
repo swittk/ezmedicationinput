@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeBodySiteKey } from "../src/maps";
 import { lexInput } from "../src/lexer/lex";
-import { annotateLexTokens, TokenWordClass } from "../src/lexer/meaning";
+import { annotateLexTokens, ConnectorRole, resolveDayMeaning, TokenWordClass } from "../src/lexer/meaning";
 import { scanSurfaceTokens } from "../src/lexer/surface";
 import { LexKind, SurfaceTokenKind } from "../src/lexer/token-types";
 import { RouteCode } from "../src/types";
@@ -78,6 +78,24 @@ describe("lex normalization", () => {
       derived: true
     });
   });
+
+  it("keeps spaced numeric dose ranges as one lex token", () => {
+    const tokens = lexInput("1 - 2 tabs");
+    expect(tokens[0]).toMatchObject({
+      original: "1-2",
+      kind: LexKind.NumberRange,
+      low: 1,
+      high: 2
+    });
+    expect(tokens[1]?.original).toBe("tabs");
+  });
+
+  it("splits fraction-plus-unit inputs into numeric and unit tokens", () => {
+    const tokens = lexInput("1/2tab");
+    expect(tokens.map((token) => token.original)).toEqual(["0.5", "tab"]);
+    expect(tokens[0]?.kind).toBe(LexKind.Number);
+    expect(tokens[1]?.kind).toBe(LexKind.Word);
+  });
 });
 
 describe("loose phrase normalization", () => {
@@ -114,6 +132,21 @@ describe("semantic annotations", () => {
         text: "by mouth",
         source: "synonym"
       }
+    ]);
+  });
+
+  it("preserves semicolon connector semantics during normalization", () => {
+    const tokens = annotateLexTokens(lexInput(";"));
+    expect(tokens[0]?.annotations?.connectorRoles).toContain(ConnectorRole.General);
+  });
+
+  it("trims weekday-range captures before day lookup", () => {
+    expect(resolveDayMeaning("mon - fri")).toEqual([
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
     ]);
   });
 });

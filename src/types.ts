@@ -4,6 +4,7 @@ export interface FhirCoding {
   system?: string;
   code?: string;
   display?: string;
+  i18n?: Record<string, string>;
 }
 
 export interface FhirCodeableConcept {
@@ -340,6 +341,7 @@ export interface BodySiteCode {
   code: string;
   display?: string;
   system?: string;
+  i18n?: Record<string, string>;
 }
 
 export interface BodySiteDefinition {

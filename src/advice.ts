@@ -243,7 +243,18 @@ let MAX_LEXEME_WORDS = 1;
 let MAX_CONCEPT_WORDS = 1;
 
 function normalizeAdditionalInstructionKey(value: string): string {
-  return normalizeLoosePhraseKey(value);
+  let prepared = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const previous = index > 0 ? value[index - 1] : "";
+    const next = index + 1 < value.length ? value[index + 1] : "";
+    if (char === "." && /\d/.test(previous) && /\d/.test(next)) {
+      prepared += "decimalpoint";
+      continue;
+    }
+    prepared += char;
+  }
+  return normalizeLoosePhraseKey(prepared).replace(/decimalpoint/g, ".");
 }
 
 function countWords(value: string): number {
@@ -955,6 +966,13 @@ function splitInstructionSegments(sourceText: string, baseRange: TextRange): Adv
     const char = sourceText[index];
     if (char !== ";" && char !== "." && char !== "\n" && char !== "\r") {
       continue;
+    }
+    if (char === ".") {
+      const previous = index > 0 ? sourceText[index - 1] : "";
+      const next = index + 1 < sourceText.length ? sourceText[index + 1] : "";
+      if (/\d/.test(previous) && /\d/.test(next)) {
+        continue;
+      }
     }
     const trimmed = trimSegment(sourceText, segmentStart, index);
     if (trimmed) {

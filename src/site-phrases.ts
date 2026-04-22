@@ -48,6 +48,71 @@ export interface SitePhraseCandidate {
   source: "explicit" | "residual";
 }
 
+function getInferableDefaultRouteHint(
+  canonical: string,
+  definition: BodySiteDefinition | undefined
+): RouteCode | undefined {
+  const routeHint = definition?.routeHint;
+  if (!routeHint) {
+    return undefined;
+  }
+
+  switch (routeHint) {
+    case RouteCode["Ophthalmic route"]:
+      return canonical.includes("eye") || canonical.includes("eyelid")
+        ? routeHint
+        : undefined;
+    case RouteCode["Otic route"]:
+      return canonical.includes("ear") ? routeHint : undefined;
+    case RouteCode["Nasal route"]:
+      return canonical.includes("nostril") ||
+        canonical.includes("naris") ||
+        canonical.includes("nares") ||
+        canonical === "nose"
+        ? routeHint
+        : undefined;
+    case RouteCode["Oral route"]:
+      return canonical === "mouth" ? routeHint : undefined;
+    case RouteCode["Sublingual route"]:
+      return canonical.includes("tongue") ? routeHint : undefined;
+    case RouteCode["Buccal route"]:
+      return canonical.includes("cheek") ? routeHint : undefined;
+    case RouteCode["Intravenous route"]:
+      return canonical.includes("vein") ? routeHint : undefined;
+    case RouteCode["Per vagina"]:
+      return canonical.includes("vagina") ? routeHint : undefined;
+    case RouteCode["Per rectum"]:
+      return canonical.includes("rectum") || canonical === "anus"
+        ? routeHint
+        : undefined;
+    case RouteCode["Topical route"]:
+      return canonical.startsWith("affected ") ? routeHint : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function mergeBodySiteRouteHint(
+  canonical: string,
+  customDefinition: BodySiteDefinition | undefined,
+  defaultDefinition: BodySiteDefinition | undefined
+): BodySiteDefinition | undefined {
+  const definition = customDefinition ?? defaultDefinition;
+  if (!definition) {
+    return undefined;
+  }
+  const routeHint =
+    customDefinition?.routeHint ??
+    getInferableDefaultRouteHint(canonical, defaultDefinition);
+  if (routeHint === definition.routeHint) {
+    return definition;
+  }
+  return {
+    ...definition,
+    routeHint
+  };
+}
+
 function isExplicitSiteBoundaryToken(
   lower: string,
   options: ParseOptions | undefined,
@@ -328,9 +393,12 @@ export function inferRouteHintFromSitePhrase(
     return undefined;
   }
 
-  const exact =
-    services.lookupBodySiteDefinition(options?.siteCodeMap, canonical) ??
-    DEFAULT_BODY_SITE_SNOMED[canonical];
+  const customExact = services.lookupBodySiteDefinition(options?.siteCodeMap, canonical);
+  const exact = mergeBodySiteRouteHint(
+    canonical,
+    customExact,
+    DEFAULT_BODY_SITE_SNOMED[canonical]
+  );
   if (exact?.routeHint) {
     return exact.routeHint;
   }
@@ -354,9 +422,12 @@ export function inferRouteHintFromSitePhrase(
         }
         candidate += words[start + offset];
       }
-      const definition =
-        services.lookupBodySiteDefinition(options?.siteCodeMap, candidate) ??
-        DEFAULT_BODY_SITE_SNOMED[candidate];
+      const customDefinition = services.lookupBodySiteDefinition(options?.siteCodeMap, candidate);
+      const definition = mergeBodySiteRouteHint(
+        candidate,
+        customDefinition,
+        DEFAULT_BODY_SITE_SNOMED[candidate]
+      );
       if (definition?.routeHint) {
         return definition.routeHint;
       }
