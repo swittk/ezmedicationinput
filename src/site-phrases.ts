@@ -21,6 +21,7 @@ export interface SitePhraseServices {
   customSiteHints?: Set<string>;
   siteConnectors: ReadonlySet<string>;
   siteFillerWords: ReadonlySet<string>;
+  isInstructionLikeText?: (text: string) => boolean;
   normalizeTokenLower: (token: Token) => string;
   isBodySiteHint: (word: string, customSiteHints?: Set<string>) => boolean;
   hasExplicitSiteIntroduction: (startIndex: number) => boolean;
@@ -216,6 +217,7 @@ export function extractExplicitSiteCandidate(
 
   const collected: number[] = [anchor.index];
   const contentWords: string[] = [];
+  const candidateTextParts: string[] = [anchor.original];
   let hasSiteHint = false;
 
   for (let cursor = startIndex + 1; cursor < tokens.length; cursor += 1) {
@@ -229,6 +231,7 @@ export function extractExplicitSiteCandidate(
     }
     if (services.siteFillerWords.has(lower) && contentWords.length === 0) {
       collected.push(candidate.index);
+      candidateTextParts.push(candidate.original);
       continue;
     }
     if (isSiteListConnectorWord(lower) || lower === ",") {
@@ -249,6 +252,7 @@ export function extractExplicitSiteCandidate(
         break;
       }
       collected.push(candidate.index);
+      candidateTextParts.push(candidate.original);
       continue;
     }
     if (isExplicitSiteBoundaryToken(lower, options, services)) {
@@ -256,6 +260,7 @@ export function extractExplicitSiteCandidate(
         const nextToken = services.getNextActiveToken(cursor);
         if (nextToken && services.normalizeTokenLower(nextToken) === "of") {
           collected.push(candidate.index);
+          candidateTextParts.push(candidate.original);
           contentWords.push(lower);
           hasSiteHint = true;
           continue;
@@ -264,6 +269,7 @@ export function extractExplicitSiteCandidate(
       break;
     }
     collected.push(candidate.index);
+    candidateTextParts.push(candidate.original);
     if (!services.siteConnectors.has(lower) && !services.siteFillerWords.has(lower)) {
       contentWords.push(lower);
       if (
@@ -277,6 +283,10 @@ export function extractExplicitSiteCandidate(
   }
 
   if (!contentWords.length || isTimingOnlySitePhrase(contentWords)) {
+    return undefined;
+  }
+  const candidateText = candidateTextParts.join(" ").replace(/\s+/g, " ").trim();
+  if (candidateText && services.isInstructionLikeText?.(candidateText)) {
     return undefined;
   }
   if (
@@ -304,6 +314,7 @@ export function selectBestResidualSiteCandidate(
   for (const group of groups) {
     const filteredTokens: Token[] = [];
     const contentWords: string[] = [];
+    const candidateTextParts: string[] = [];
     let hasWorkflowWord = false;
     let knownWordCount = 0;
     let modifierCount = 0;
@@ -323,6 +334,7 @@ export function selectBestResidualSiteCandidate(
       ) {
         continue;
       }
+      candidateTextParts.push(token.original);
       contentWords.push(lower);
       if (isWorkflowInstructionWord(lower)) {
         hasWorkflowWord = true;
@@ -340,6 +352,12 @@ export function selectBestResidualSiteCandidate(
     }
     if (!contentWords.length || isTimingOnlySitePhrase(contentWords)) {
       continue;
+    }
+    if (candidateTextParts.length) {
+      const candidateText = candidateTextParts.join(" ").replace(/\s+/g, " ").trim();
+      if (candidateText && services.isInstructionLikeText?.(candidateText)) {
+        continue;
+      }
     }
     if (hasWorkflowWord) {
       continue;

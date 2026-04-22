@@ -2408,6 +2408,24 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 tablet orally once daily. Take slowly.");
   });
 
+  it("codes explicit empty-stomach fragments as additional instructions", () => {
+    const result = parseSig("drink 10 ml twice daily, on an empty stomach");
+
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("717154004");
+    expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("717154004");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Drink 10 mL twice daily. On an empty stomach.");
+  });
+
+  it("infers elliptical empty-stomach fragments through the advice grammar", () => {
+    const result = parseSig("drink 10 ml twice daily, empty stomach");
+
+    expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("717154004");
+    expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("717154004");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Drink 10 mL twice daily. On an empty stomach.");
+  });
+
   it("suppresses redundant oral route phrasing for swallow methods", () => {
     const result = parseSig("swallow 1 tab po daily", { context: TAB_CONTEXT });
     expect(result.longText).toBe("Swallow 1 tablet once daily.");

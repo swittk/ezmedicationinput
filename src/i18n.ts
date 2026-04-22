@@ -6,6 +6,8 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import {
+  AdviceArgumentRole,
+  AdviceRelation,
   CanonicalDoseExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
@@ -218,6 +220,7 @@ const TH_TIMES_PER_DAY: Record<number, string> = {
 };
 
 const SLOWLY_QUALIFIER_CODE = "419443000";
+const EMPTY_STOMACH_QUALIFIER_CODE = "717154004";
 
 export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   eye: "ตา",
@@ -1370,6 +1373,21 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
     if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
       const contextual = verb ? `${verb}ช้าๆ` : "ช้าๆ";
       phrases.push(contextual);
+      continue;
+    }
+    if (
+      instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
+      instruction.frames?.some(
+        (frame) =>
+          frame.relation === AdviceRelation.On &&
+          frame.args.some(
+            (arg) =>
+              arg.role === AdviceArgumentRole.MealState &&
+              arg.conceptId === "empty_stomach"
+          )
+      )
+    ) {
+      phrases.push("ขณะท้องว่าง");
       continue;
     }
     let text = instruction.text ?? instruction.coding?.display;

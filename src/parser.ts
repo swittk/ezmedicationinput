@@ -2525,6 +2525,21 @@ function buildSitePhraseServices(
     customSiteHints: internal.customSiteHints,
     siteConnectors: SITE_CONNECTORS,
     siteFillerWords: SITE_FILLER_WORDS,
+    isInstructionLikeText: (text: string) => {
+      const parsed = parseAdditionalInstructions(
+        text,
+        { start: 0, end: text.length },
+        {
+          defaultPredicate: inferAdditionalInstructionPredicate(internal, tokens)
+        }
+      );
+      for (const instruction of parsed) {
+        if (instruction.frames.length || instruction.coding?.code) {
+          return true;
+        }
+      }
+      return false;
+    },
     normalizeTokenLower,
     isBodySiteHint,
     hasExplicitSiteIntroduction: (startIndex: number) =>
@@ -4385,14 +4400,7 @@ function collectGenericAnchor(
     return true;
   }
   if (token.lower === "on") {
-    const previous = getPreviousActiveToken(
-      context.tokens,
-      index,
-      context.state.consumed
-    );
-    if (previous && hasTokenWordClass(previous, TokenWordClass.WorkflowInstruction)) {
-      return false;
-    }
+    return false;
   }
   if (token.lower === "with") {
     return false;

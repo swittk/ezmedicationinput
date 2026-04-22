@@ -59,7 +59,13 @@
     { "surface": "food", "lemma": "food", "semanticClass": "meal_state", "conceptId": "food" },
     { "surface": "meal", "lemma": "meal", "semanticClass": "meal_state", "conceptId": "meal" },
     { "surface": "meals", "lemma": "meal", "semanticClass": "meal_state", "conceptId": "meal" },
-    { "surface": "empty stomach", "lemma": "empty stomach", "semanticClass": "meal_state", "conceptId": "empty_stomach" },
+    {
+      "surface": "empty stomach",
+      "lemma": "empty stomach",
+      "semanticClass": "meal_state",
+      "conceptId": "empty_stomach",
+      "implicitRelation": "on"
+    },
     { "surface": "water", "lemma": "water", "semanticClass": "substance", "conceptId": "water" },
     { "surface": "plenty of water", "lemma": "water", "semanticClass": "substance", "conceptId": "water" },
     { "surface": "lots of water", "lemma": "water", "semanticClass": "substance", "conceptId": "water" },

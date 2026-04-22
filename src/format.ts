@@ -2,6 +2,8 @@ import { buildCanonicalSigClauses } from "./ir";
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import {
+  AdviceArgumentRole,
+  AdviceRelation,
   CanonicalDoseExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
@@ -81,6 +83,7 @@ const EN_TIMES_PER_DAY: Record<number, string> = {
 };
 
 const SLOWLY_QUALIFIER_CODE = "419443000";
+const EMPTY_STOMACH_QUALIFIER_CODE = "717154004";
 
 interface RouteGrammar {
   verb: string;
@@ -905,6 +908,21 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
     if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
       const contextual = verb ? `${verb} slowly` : "Slowly";
       phrases.push(contextual);
+      continue;
+    }
+    if (
+      instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
+      instruction.frames?.some(
+        (frame) =>
+          frame.relation === AdviceRelation.On &&
+          frame.args.some(
+            (arg) =>
+              arg.role === AdviceArgumentRole.MealState &&
+              arg.conceptId === "empty_stomach"
+          )
+      )
+    ) {
+      phrases.push("On an empty stomach");
       continue;
     }
     const text = instruction.text ?? instruction.coding?.display;

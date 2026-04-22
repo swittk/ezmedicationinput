@@ -28,6 +28,7 @@ interface AdviceConceptEntry {
   lemma: string;
   semanticClass: string;
   conceptId: string;
+  implicitRelation?: string;
 }
 
 interface AdviceTerminologySource {
@@ -814,6 +815,17 @@ function findContainedConcept(normalized: string): AdviceConceptEntry | undefine
   return best;
 }
 
+function findExactConcept(normalized: string): AdviceConceptEntry | undefined {
+  const bucket = CONCEPTS_BY_SURFACE[normalized];
+  if (!bucket) {
+    return undefined;
+  }
+  for (const entry of bucket) {
+    return entry;
+  }
+  return undefined;
+}
+
 function findVerbLexeme(word: string): AdviceLexemeEntry | undefined {
   return findNormalizedLexeme(word, "verb");
 }
@@ -1100,6 +1112,33 @@ function isRelationWord(word: string): AdviceRelation | undefined {
   }
 }
 
+function parseAdviceRelation(value: string | undefined): AdviceRelation | undefined {
+  switch (value) {
+    case AdviceRelation.With:
+      return AdviceRelation.With;
+    case AdviceRelation.Without:
+      return AdviceRelation.Without;
+    case AdviceRelation.Before:
+      return AdviceRelation.Before;
+    case AdviceRelation.After:
+      return AdviceRelation.After;
+    case AdviceRelation.During:
+      return AdviceRelation.During;
+    case AdviceRelation.Then:
+      return AdviceRelation.Then;
+    case AdviceRelation.Until:
+      return AdviceRelation.Until;
+    case AdviceRelation.For:
+      return AdviceRelation.For;
+    case AdviceRelation.In:
+      return AdviceRelation.In;
+    case AdviceRelation.On:
+      return AdviceRelation.On;
+    default:
+      return undefined;
+  }
+}
+
 function normalizeWords(text: string): string[] {
   const normalized = normalizeAdditionalInstructionKey(text);
   if (!normalized) {
@@ -1172,6 +1211,57 @@ function tryParseRelationInstruction(
       context.defaultPredicate,
       "administration",
       args,
+      sequenceIndex,
+      relation
+    )
+  ];
+}
+
+function tryParseImplicitConceptInstruction(
+  sourceText: string,
+  span: TextRange,
+  context: AdviceParseContext,
+  sequenceIndex: number,
+  sequenceCount: number
+): AdviceFrame[] | undefined {
+  const words = normalizeWords(sourceText);
+  if (!words.length) {
+    return undefined;
+  }
+  const cursor = skipLeadingNoise(words);
+  if (cursor >= words.length) {
+    return undefined;
+  }
+  if (isRelationWord(words[cursor]) || isKnownVerb(words[cursor])) {
+    return undefined;
+  }
+  const conceptText = words.slice(cursor).join(" ");
+  if (!conceptText) {
+    return undefined;
+  }
+  const concept = findExactConcept(conceptText);
+  if (!concept) {
+    return undefined;
+  }
+  const relation = parseAdviceRelation(concept.implicitRelation);
+  if (!relation) {
+    return undefined;
+  }
+  return [
+    createFrame(
+      sourceText,
+      span,
+      createDefaultForce(sequenceCount, sequenceIndex, context),
+      context.defaultPredicate,
+      "administration",
+      [
+        createArgument(
+          mapSemanticClassToRole(concept.semanticClass),
+          conceptText,
+          conceptText,
+          concept.conceptId
+        )
+      ],
       sequenceIndex,
       relation
     )
@@ -1647,6 +1737,7 @@ function parseSequenceFrames(
       tryParseAvoidInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
       tryParseMayCauseInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
       tryParseRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
+      tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseStyleInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseVerbInstruction(segment.text, segment.range, context, index, sequenceSegments.length);
     if (!parsed) {

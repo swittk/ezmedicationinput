@@ -60,6 +60,20 @@ describe("additional instruction rule inventory", () => {
 
     const beforeFood = parseAdditionalInstructions("before food", { start: 0, end: 11 });
     expect(beforeFood[0]?.coding?.code).toBe("311500009");
+
+    const explicitEmptyStomach = parseAdditionalInstructions(
+      "on an empty stomach",
+      { start: 0, end: 19 },
+      { defaultPredicate: "drink" }
+    );
+    expect(explicitEmptyStomach[0]?.coding?.code).toBe("717154004");
+
+    const implicitEmptyStomach = parseAdditionalInstructions(
+      "empty stomach",
+      { start: 0, end: 13 },
+      { defaultPredicate: "drink" }
+    );
+    expect(implicitEmptyStomach[0]?.coding?.code).toBe("717154004");
   });
 
   it("codes exact SNOMED canned advice phrases through normalized-text matching", () => {
