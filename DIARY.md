@@ -823,3 +823,34 @@ Desired behavior:
    - `npm run build`
    - `npm test`
    - green at `520` tests
+
+2026-04-22 Thai coordinated PRN localization
+
+1. Two Thai-specific gaps showed up:
+   - parser did not split PRN reasons on Thai `หรือ`
+   - Thai formatter still preferred the raw combined phrase over translated split reasons when `prn.reasons[]` existed
+
+2. Fixes:
+   - PRN coordinated splitting now recognizes Thai connectors:
+     - `หรือ`
+     - `และ`
+   - Thai PRN realization now prefers translated/joined `prn.reasons[]` when present
+     - this lets coded reasons localize cleanly even if the original combined text was English
+
+3. Locked behavior:
+   - `1 tab po prn คิดฟุ้งซ่าน หรือ ทำงานไม่ได้`
+     - Thai long text:
+       - `รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ คิดฟุ้งซ่าน หรือ ทำงานไม่ได้.`
+     - FHIR:
+       - `asNeededFor[0].text = คิดฟุ้งซ่าน`
+       - `asNeededFor[1].text = ทำงานไม่ได้`
+   - `1 tab po prn pain or fever` with `locale: "th"`
+     - Thai long text:
+       - `รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด หรือ ไข้.`
+     - FHIR still keeps structured coded reasons for pain and fever
+
+4. Verification:
+   - `nvm use 22`
+   - `npm run build`
+   - `npm test`
+   - green at `523` tests

@@ -1415,6 +1415,71 @@ describe("parseSig core scenarios", () => {
     expect(comma.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
   });
 
+  it("splits unknown coordinated PRN reasons into separate text-only concepts", () => {
+    const result = parseSig("1 tab po prn mania or depression", { context: TAB_CONTEXT });
+
+    expect(result.longText).toBe("Take 1 tablet orally as needed for mania or depression.");
+    expect(result.fhir.asNeededFor).toEqual([
+      { text: "mania" },
+      { text: "depression" }
+    ]);
+    expect(result.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("mania or depression");
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toEqual([
+      { text: "mania", coding: undefined },
+      { text: "depression", coding: undefined }
+    ]);
+  });
+
+  it("splits Thai coordinated PRN reasons on หรือ into separate text-only concepts", () => {
+    const result = parseSig("1 tab po prn คิดฟุ้งซ่าน หรือ ทำงานไม่ได้", {
+      context: TAB_CONTEXT,
+      locale: "th"
+    });
+
+    expect(result.longText).toBe(
+      "รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ คิดฟุ้งซ่าน หรือ ทำงานไม่ได้."
+    );
+    expect(result.fhir.asNeededFor).toEqual([
+      { text: "คิดฟุ้งซ่าน" },
+      { text: "ทำงานไม่ได้" }
+    ]);
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons).toEqual([
+      { text: "คิดฟุ้งซ่าน", coding: undefined },
+      { text: "ทำงานไม่ได้", coding: undefined }
+    ]);
+  });
+
+  it("localizes coordinated coded PRN reasons to Thai from split reasons", () => {
+    const result = parseSig("1 tab po prn pain or fever", {
+      context: TAB_CONTEXT,
+      locale: "th"
+    });
+
+    expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด หรือ ไข้.");
+    expect(result.fhir.asNeededFor).toEqual([
+      {
+        text: "pain",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "22253000",
+            display: "Pain"
+          }
+        ]
+      },
+      {
+        text: "fever",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "386661006",
+            display: "Fever"
+          }
+        ]
+      }
+    ]);
+  });
+
   it("parses 1x2 subcutaneous", () => {
     const result = parseSig("1x2 subcutaneous");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1 });

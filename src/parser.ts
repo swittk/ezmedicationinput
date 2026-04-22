@@ -6413,7 +6413,9 @@ function splitCoordinatedPrnReasonText(text: string): string[] | undefined {
   }
   const patterns = [
     /\s+and\/or\s+/i,
+    /\s+หรือ\s+/,
     /\s+or\s+/i,
+    /\s+และ\s+/,
     /\s+and\s+/i,
     /\s*\/\s*/,
     /\s*,\s*/
@@ -6443,12 +6445,9 @@ function maybeApplyCoordinatedPrnReasonsSync(
   for (const part of parts) {
     const request = createPrnReasonLookupRequestFromText(internal, part);
     const definition = resolvePrnReasonDefinitionSyncForRequest(internal, request, options);
-    if (!definition) {
-      return;
-    }
     reasons.push({
       text: part,
-      coding: definition.coding?.code
+      coding: definition?.coding?.code
         ? {
           code: definition.coding.code,
           display: definition.coding.display,
@@ -6477,12 +6476,9 @@ async function maybeApplyCoordinatedPrnReasonsAsync(
   for (const part of parts) {
     const request = createPrnReasonLookupRequestFromText(internal, part);
     const definition = await resolvePrnReasonDefinitionAsyncForRequest(internal, request, options);
-    if (!definition) {
-      return;
-    }
     reasons.push({
       text: part,
-      coding: definition.coding?.code
+      coding: definition?.coding?.code
         ? {
           code: definition.coding.code,
           display: definition.coding.display,

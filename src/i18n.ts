@@ -1181,6 +1181,25 @@ function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
   if (!clause.prn?.enabled) {
     return undefined;
   }
+  if (clause.prn.reasons?.length) {
+    const translatedReasons: typeof clause.prn.reasons = [];
+    for (const reason of clause.prn.reasons) {
+      let text = reason.text ?? reason.coding?.display;
+      const coding = reason.coding;
+      if (coding?.code) {
+        const definition = findPrnReasonDefinitionByCoding(
+          coding.system ?? "http://snomed.info/sct",
+          coding.code
+        );
+        text = definition?.i18n?.th ?? text;
+      }
+      translatedReasons.push({ text, coding: reason.coding });
+    }
+    const joined = getPreferredCanonicalPrnReasonText(undefined, translatedReasons, "หรือ");
+    if (joined) {
+      return `ใช้เมื่อจำเป็นสำหรับ ${joined}`;
+    }
+  }
   let translation: string | undefined;
   const coding = clause.prn.reason?.coding;
   if (coding?.code) {
