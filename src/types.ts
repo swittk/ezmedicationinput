@@ -19,6 +19,7 @@ export interface FhirExtension {
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
+  valueDuration?: FhirQuantity;
 }
 
 export interface FhirPrimitiveElement {
@@ -285,6 +286,7 @@ export interface FhirTiming {
   event?: string[];
   repeat?: FhirTimingRepeat;
   code?: FhirCodeableConcept;
+  extension?: FhirExtension[];
 }
 
 export interface FhirDoseAndRate {
@@ -777,7 +779,35 @@ export interface CanonicalScheduleExpr {
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];
+  eventTriggers?: CanonicalEventTrigger[];
   evidence?: CanonicalEvidence[];
+}
+
+export type CanonicalEventTriggerRelation =
+  | AdviceRelation.Before
+  | AdviceRelation.After
+  | AdviceRelation.During
+  | AdviceRelation.On
+  | AdviceRelation.Until;
+
+export type CanonicalEventTriggerOccurrencePolicy =
+  | "next-occurrence"
+  | "current-occurrence";
+
+export type CanonicalEventTriggerResolutionStatus =
+  | "unresolved"
+  | "resolved";
+
+export interface CanonicalEventTrigger {
+  relation: CanonicalEventTriggerRelation;
+  anchorText: string;
+  sourceText?: string;
+  offset?: {
+    value: number;
+    unit: FhirPeriodUnit;
+  };
+  occurrencePolicy?: CanonicalEventTriggerOccurrencePolicy;
+  resolutionStatus?: CanonicalEventTriggerResolutionStatus;
 }
 
 export interface CanonicalPrnReasonExpr {
@@ -858,6 +888,7 @@ export interface ParseNormalizedMeta {
   unit?: string;
   site?: { text?: string; coding?: BodySiteCode };
   method?: { text?: string; coding?: FhirCoding };
+  eventTriggers?: CanonicalEventTrigger[];
   patientInstruction?: string;
   prnReason?: { text?: string; coding?: FhirCoding };
   prnReasons?: Array<{ text?: string; coding?: FhirCoding }>;

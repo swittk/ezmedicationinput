@@ -14,6 +14,7 @@ import {
   TotalUnitsResult
 } from "./types";
 import { parseAdditionalInstructions } from "./advice";
+import { hasUnresolvedEventTriggerExtension } from "./event-trigger";
 import { arrayIncludes } from "./utils/array";
 import { getUnitCategory, convertValue } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
@@ -564,6 +565,9 @@ function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
 }
 
 function hasUnresolvedRelationalInstruction(dosage: FhirDosage): boolean {
+  if (hasUnresolvedEventTriggerExtension(dosage.timing)) {
+    return true;
+  }
   const texts: string[] = [];
   if (dosage.patientInstruction?.trim()) {
     texts.push(dosage.patientInstruction.trim());

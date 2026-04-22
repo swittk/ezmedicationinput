@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits, parseSig } from "../src/index";
+import {
+  EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+  nextDueDoses,
+  calculateTotalUnits,
+  parseSig
+} from "../src/index";
 import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 const EVENT_CLOCK = {
@@ -548,6 +553,35 @@ describe("nextDueDoses", () => {
 
     expect(results).toEqual([]);
   });
+
+  it("does not invent due dates for extension-only unresolved event-relative one-time orders", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          count: 1
+        },
+        extension: [
+          {
+            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+            extension: [
+              { url: "triggerText", valueString: "menstruation ends" },
+              { url: "relationship", valueCode: "after" },
+              { url: "resolutionStatus", valueCode: "unresolved" }
+            ]
+          }
+        ]
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual([]);
+  });
 });
 
 describe("calculateTotalUnits", () => {
@@ -654,6 +688,36 @@ describe("calculateTotalUnits", () => {
 
     const res = calculateTotalUnits({
       dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 30,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    });
+
+    expect(res.totalUnits).toBe(0);
+  });
+
+  it("does not count extension-only unresolved event-relative one-time orders", () => {
+    const dosage: FhirDosage = {
+      timing: {
+        repeat: {
+          count: 1
+        },
+        extension: [
+          {
+            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+            extension: [
+              { url: "triggerText", valueString: "menstruation ends" },
+              { url: "relationship", valueCode: "after" },
+              { url: "resolutionStatus", valueCode: "unresolved" }
+            ]
+          }
+        ]
+      }
+    };
+
+    const res = calculateTotalUnits({
+      dosage,
       from: "2024-01-01T09:00:00Z",
       durationValue: 30,
       durationUnit: FhirPeriodUnit.Day,

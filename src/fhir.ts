@@ -2,6 +2,13 @@ import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
+import {
+  buildEventTriggerExtensions,
+  buildEventTriggerInstructionTextList,
+  cloneEventTriggers,
+  collectEventTriggersFromAdditionalInstructions,
+  parseEventTriggerExtensions
+} from "./event-trigger";
 import { clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
@@ -275,6 +282,10 @@ export function canonicalToFhir(
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
+  const eventTriggers =
+    schedule?.eventTriggers?.length
+      ? schedule.eventTriggers
+      : collectEventTriggersFromAdditionalInstructions(clause.additionalInstructions);
 
   if (schedule?.frequency !== undefined) {
     repeat.frequency = schedule.frequency;
@@ -332,6 +343,12 @@ export function canonicalToFhir(
       coding: [{ code: schedule.timingCode }],
       text: schedule.timingCode
     };
+  }
+
+  const timingExtensions = buildEventTriggerExtensions(eventTriggers);
+  if (timingExtensions?.length) {
+    dosage.timing = dosage.timing ?? {};
+    dosage.timing.extension = timingExtensions;
   }
 
   if (clause.dose?.range) {
@@ -516,6 +533,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const repeat = dosage.timing?.repeat;
   const timingBounds = extractCanonicalTimingBounds(repeat);
+  const eventTriggers = parseEventTriggerExtensions(dosage.timing);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
@@ -528,7 +546,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.periodUnit ||
     repeat?.dayOfWeek?.length ||
     repeat?.when?.length ||
-    repeat?.timeOfDay?.length
+    repeat?.timeOfDay?.length ||
+    eventTriggers?.length
   ) {
     clause.schedule = {
       timingCode: dosage.timing?.code?.coding?.[0]?.code,
@@ -543,7 +562,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       periodUnit: repeat?.periodUnit,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
-      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
+      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
+      eventTriggers: cloneEventTriggers(eventTriggers)
     };
     clause.warnings = appendWarning(clause.warnings, timingBounds.warning);
   }
@@ -621,6 +641,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   if (dosage.patientInstruction) {
     clause.patientInstruction = dosage.patientInstruction;
+  } else if (eventTriggers?.length) {
+    clause.patientInstruction = buildEventTriggerInstructionTextList(eventTriggers);
   }
 
   return clause;
@@ -629,6 +651,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
   const timingBounds = extractCanonicalTimingBounds(dosage.timing?.repeat);
+  const eventTriggers = parseEventTriggerExtensions(dosage.timing);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
@@ -647,6 +670,9 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
+  if (!state.patientInstruction && eventTriggers?.length) {
+    state.patientInstruction = buildEventTriggerInstructionTextList(eventTriggers);
+  }
   state.asNeeded = dosage.asNeededBoolean;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {
@@ -678,6 +704,10 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
       )
     );
     state.when.push(...whenValues);
+  }
+  if (eventTriggers?.length) {
+    state.primaryClause.schedule = state.primaryClause.schedule ?? {};
+    state.primaryClause.schedule.eventTriggers = cloneEventTriggers(eventTriggers);
   }
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);

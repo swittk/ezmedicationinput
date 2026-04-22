@@ -19,6 +19,7 @@ import {
 } from "./maps";
 import { parseAdditionalInstructions } from "./advice";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
+import { collectEventTriggersFromAdditionalInstructions } from "./event-trigger";
 import { buildTranslationPrimitiveElement } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
 import { LexKind } from "./lexer/token-types";
@@ -2286,7 +2287,8 @@ function finalizeCanonicalClause(internal: ParserState): void {
       clause.schedule.periodUnit === undefined &&
       !clause.schedule.dayOfWeek &&
       !clause.schedule.when &&
-      !clause.schedule.timeOfDay
+      !clause.schedule.timeOfDay &&
+      !clause.schedule.eventTriggers?.length
     ) {
       delete clause.schedule;
     }
@@ -2344,6 +2346,11 @@ function finalizeCanonicalClause(internal: ParserState): void {
           : undefined,
         frames: instruction.frames?.length ? [...instruction.frames] : undefined
       });
+    }
+    const eventTriggers = collectEventTriggersFromAdditionalInstructions(clause.additionalInstructions);
+    if (eventTriggers?.length) {
+      clause.schedule = clause.schedule ?? {};
+      clause.schedule.eventTriggers = eventTriggers;
     }
   } else {
     delete clause.additionalInstructions;

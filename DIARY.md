@@ -1441,3 +1441,88 @@ Locked with parser regressions for:
 - `1 tab po once every 6 hours`
 - `1 tab po one time every 8 hours`
 - `1 tab po once q week`
+
+## 2026-04-22 Relative-event dosage report synthesis
+
+Reviewed `relativeevent_dosage_report.md`.
+
+Main conclusions to keep:
+
+1. Base FHIR R5 `Dosage` / `Timing` does not provide a clean native way to
+   represent an unresolved arbitrary future trigger like:
+   - `once after menstruation ends`
+
+2. `Timing.repeat.when` is too constrained for this because it is tied to the
+   fixed `EventTiming` value set, and `Timing.event` only works once an actual
+   concrete datetime is known.
+
+3. The clean implementation direction for this repo is:
+   - keep definite dose/route/site facts in core `Dosage`
+   - preserve the human wording in `Dosage.text`
+   - preserve the unresolved trigger structurally in internal canonical data
+   - optionally serialize that trigger into a custom extension on
+     `Dosage.timing` for callers that want it
+   - when an external event datetime becomes known, resolve to concrete
+     `Timing.event`
+
+4. Scheduler/calculator semantics before resolution should remain:
+   - no fake due timestamps
+   - no fake fallback to `orderedAt`
+   - no accidental reinterpretation as daily cadence
+
+5. Longer-term API direction:
+   - add explicit external event-anchor input (`eventAnchorTime` or a keyed map)
+   - use that to resolve contingent event-relative one-time regimens into
+     concrete due times / counts
+
+Important repo-specific nuance:
+- this library should stay R5-first in public default output
+- any custom extension for unresolved event-relative triggers should be
+  serializer-level and optional, not the only place the meaning exists
+- internal canonical event-trigger representation should come first
+
+## 2026-04-22 Event-relative trigger extension implemented
+
+Implemented unresolved event-relative trigger serialization for sigs like:
+- `insert 1 tab pv once after menstruation ends`
+
+What changed:
+
+1. Added internal canonical `eventTriggers` on schedule state.
+
+2. Added custom timing extension serialization on `Dosage.timing.extension`
+   with:
+   - `triggerText`
+   - `relationship`
+   - `offsetDuration`
+   - `occurrencePolicy`
+   - `resolutionStatus`
+   - `sourceText`
+
+3. Added FHIR import support:
+   - extension-only dosage import now reconstructs the trigger into canonical
+     state
+   - if no patient instruction text exists, formatter synthesizes:
+     - `Use after menstruation ends`
+
+4. Added schedule-math support:
+   - unresolved event-trigger timing extensions suppress fake due dates
+   - unresolved event-trigger timing extensions suppress computable total units
+
+5. Exported the extension URL constant:
+   - `EVENT_RELATIVE_TRIGGER_EXTENSION_URL`
+
+Why this is still custom rather than HL7 `relative-date`:
+- reviewed `http://hl7.org/fhir/StructureDefinition/relative-date`
+- it is a real HL7 extension, but its context is `date` / `dateTime`, not
+  `Dosage.timing` as a whole
+- using it cleanly here would require primitive-element array extensions on
+  `Timing.event` (`_event` handling), which is a much larger wire-shape change
+- the CI-build structure also assumes a more explicit target-event model than
+  this library currently has for unresolved generic future triggers
+
+So the current repo decision is:
+- keep the internal canonical event-trigger model
+- use the custom timing extension now
+- leave room to add an official `relative-date`-style serializer later if the
+  library grows full primitive `Timing.event` extension support

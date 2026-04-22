@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, formatSig, parseSig, parseSigAsync } from "../src/index";
+import {
+  EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+  fromFhirDosage,
+  formatSig,
+  parseSig,
+  parseSigAsync
+} from "../src/index";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_UNIT_SYNONYMS,
@@ -277,7 +283,82 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("insert 1 tab pv once after menstruation ends", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    const eventTriggerExtension = result.fhir.timing?.extension?.find(
+      (extension) => extension.url === EVENT_RELATIVE_TRIGGER_EXTENSION_URL
+    );
+    expect(eventTriggerExtension).toEqual(
+      expect.objectContaining({
+        url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+        extension: expect.arrayContaining([
+          expect.objectContaining({
+            url: "triggerText",
+            valueString: "menstruation ends"
+          }),
+          expect.objectContaining({
+            url: "relationship",
+            valueCode: "after"
+          }),
+          expect.objectContaining({
+            url: "resolutionStatus",
+            valueCode: "unresolved"
+          })
+        ])
+      })
+    );
+    expect(result.meta.normalized.eventTriggers).toEqual([
+      expect.objectContaining({
+        relation: "after",
+        anchorText: "menstruation ends"
+      })
+    ]);
     expect(result.longText).toBe("Insert 1 tablet vaginally once. Use after menstruation ends.");
+  });
+
+  it("formats extension-only unresolved event triggers back into patient instruction text", () => {
+    const result = fromFhirDosage({
+      timing: {
+        repeat: { count: 1 },
+        extension: [
+          {
+            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+            extension: [
+              { url: "triggerText", valueString: "menstruation ends" },
+              { url: "relationship", valueCode: "after" },
+              { url: "resolutionStatus", valueCode: "unresolved" }
+            ]
+          }
+        ]
+      },
+      route: {
+        text: "vaginal",
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: SNOMEDCTRouteCodes["Per vagina"],
+            display: "Per vagina"
+          }
+        ]
+      },
+      site: {
+        text: "vagina"
+      },
+      doseAndRate: [
+        {
+          doseQuantity: {
+            value: 1,
+            unit: "tablet"
+          }
+        }
+      ]
+    });
+
+    expect(result.longText).toBe("Insert 1 tablet vaginally once. Use after menstruation ends.");
+    expect(result.meta.normalized.eventTriggers).toEqual([
+      expect.objectContaining({
+        relation: "after",
+        anchorText: "menstruation ends"
+      })
+    ]);
   });
 
   it("treats xN days as duration instead of dose count", () => {

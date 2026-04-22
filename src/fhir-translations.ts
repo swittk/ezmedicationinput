@@ -19,7 +19,15 @@ function cloneExtension(extension: FhirExtension): FhirExtension {
     url: extension.url,
     extension: extension.extension?.map(cloneExtension),
     valueCode: extension.valueCode,
-    valueString: extension.valueString
+    valueString: extension.valueString,
+    valueDuration: extension.valueDuration
+      ? {
+        value: extension.valueDuration.value,
+        unit: extension.valueDuration.unit,
+        system: extension.valueDuration.system,
+        code: extension.valueDuration.code
+      }
+      : undefined
   };
 }
 
