@@ -30,6 +30,7 @@ interface AdviceConceptEntry {
   semanticClass: string;
   conceptId: string;
   implicitRelation?: string;
+  coding?: FhirCoding;
 }
 
 interface AdviceTerminologySource {
@@ -245,6 +246,7 @@ const DURATION_UNIT_WORDS = new Set([
 const LEXEMES_BY_SURFACE: Record<string, AdviceLexemeEntry[]> = Object.create(null);
 const CONCEPTS_BY_SURFACE: Record<string, AdviceConceptEntry[]> = Object.create(null);
 const CONCEPT_KEYS_BY_ID: Record<string, string[]> = Object.create(null);
+const CONCEPT_CODING_BY_ID: Record<string, FhirCoding> = Object.create(null);
 const LEXEME_LIST: AdviceLexemeEntry[] = [];
 const CONCEPT_LIST: AdviceConceptEntry[] = [];
 let MAX_LEXEME_WORDS = 1;
@@ -314,6 +316,23 @@ function pushConceptKeyById(conceptId: string, surfaceKey: string): void {
   CONCEPT_KEYS_BY_ID[conceptId] = [surfaceKey];
 }
 
+function cloneAdviceConceptCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
+  if (!coding) {
+    return undefined;
+  }
+  return {
+    system: coding.system,
+    code: coding.code,
+    display: coding.display,
+    _display: coding._display
+      ? {
+        extension: coding._display.extension?.map((extension) => ({ ...extension }))
+      }
+      : undefined,
+    i18n: coding.i18n ? { ...coding.i18n } : undefined
+  };
+}
+
 for (const entry of ADVICE_TERMINOLOGY.lexemes) {
   const surfaceKey = normalizeAdditionalInstructionKey(entry.surface);
   if (!surfaceKey) {
@@ -335,10 +354,17 @@ for (const entry of ADVICE_TERMINOLOGY.concepts) {
   CONCEPT_LIST.push(entry);
   pushConcept(surfaceKey, entry);
   pushConceptKeyById(entry.conceptId, surfaceKey);
+  if (entry.coding && !CONCEPT_CODING_BY_ID[entry.conceptId]) {
+    CONCEPT_CODING_BY_ID[entry.conceptId] = cloneAdviceConceptCoding(entry.coding) as FhirCoding;
+  }
   const wordCount = countWords(surfaceKey);
   if (wordCount > MAX_CONCEPT_WORDS) {
     MAX_CONCEPT_WORDS = wordCount;
   }
+}
+
+export function getAdviceConceptCoding(conceptId: string): FhirCoding | undefined {
+  return cloneAdviceConceptCoding(CONCEPT_CODING_BY_ID[conceptId]);
 }
 
 function collapseWhitespace(value: string): string {

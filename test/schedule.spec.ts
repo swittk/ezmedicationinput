@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+  DOSAGE_CONDITIONS_EXTENSION_URL,
+  DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
   nextDueDoses,
   calculateTotalUnits,
   parseSig
@@ -556,20 +557,32 @@ describe("nextDueDoses", () => {
 
   it("does not invent due dates for extension-only unresolved event-relative one-time orders", () => {
     const dosage: FhirDosage = {
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                { url: "trigger", valueString: "menstruation ends" },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: 0,
+                    unit: "seconds",
+                    system: "http://unitsofmeasure.org",
+                    code: "s"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
       timing: {
         repeat: {
           count: 1
-        },
-        extension: [
-          {
-            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
-            extension: [
-              { url: "triggerText", valueString: "menstruation ends" },
-              { url: "relationship", valueCode: "after" },
-              { url: "resolutionStatus", valueCode: "unresolved" }
-            ]
-          }
-        ]
+        }
       }
     };
 
@@ -581,6 +594,97 @@ describe("nextDueDoses", () => {
     });
 
     expect(results).toEqual([]);
+  });
+
+  it("resolves one-time event-relative schedules from a scalar event anchor time", () => {
+    const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
+      context: { dosageForm: "tab" }
+    });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      eventAnchorTime: "2024-01-10T12:00:00Z",
+      limit: 5
+    });
+
+    expect(results).toEqual(["2024-01-10T12:00:00+00:00"]);
+  });
+
+  it("resolves one-time event-relative schedules from text-keyed event anchor maps", () => {
+    const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
+      context: { dosageForm: "tab" }
+    });
+
+    const results = nextDueDoses(parsed.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T09:00:00Z",
+      from: "2024-01-01T09:00:00Z",
+      eventAnchorTimes: {
+        "menstruation ends": "2024-01-10T12:00:00Z"
+      },
+      limit: 5
+    });
+
+    expect(results).toEqual(["2024-01-10T12:00:00+00:00"]);
+  });
+
+  it("resolves matched dosage-condition references from event anchor lists", () => {
+    const dosage: FhirDosage = {
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                {
+                  url: "trigger",
+                  valueReference: {
+                    reference: "Observation/example-menstruation",
+                    type: "Observation",
+                    display: "menstruation"
+                  }
+                },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: -2,
+                    unit: "days",
+                    system: "http://unitsofmeasure.org",
+                    code: "d"
+                  }
+                },
+                {
+                  url: DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+                  valueCode: "before"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      timing: {
+        repeat: {
+          count: 1
+        }
+      }
+    };
+
+    const results = nextDueDoses(dosage, {
+      ...BASE_OPTIONS,
+      from: "2024-01-01T00:00:00Z",
+      eventAnchorTimes: [
+        {
+          at: "2024-01-10T00:00:00Z",
+          reference: "Observation/example-menstruation"
+        }
+      ],
+      limit: 5
+    });
+
+    expect(results).toEqual(["2024-01-08T00:00:00+00:00"]);
   });
 });
 
@@ -699,20 +803,32 @@ describe("calculateTotalUnits", () => {
 
   it("does not count extension-only unresolved event-relative one-time orders", () => {
     const dosage: FhirDosage = {
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                { url: "trigger", valueString: "menstruation ends" },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: 0,
+                    unit: "seconds",
+                    system: "http://unitsofmeasure.org",
+                    code: "s"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
       timing: {
         repeat: {
           count: 1
-        },
-        extension: [
-          {
-            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
-            extension: [
-              { url: "triggerText", valueString: "menstruation ends" },
-              { url: "relationship", valueCode: "after" },
-              { url: "resolutionStatus", valueCode: "unresolved" }
-            ]
-          }
-        ]
+        }
       }
     };
 
@@ -725,6 +841,90 @@ describe("calculateTotalUnits", () => {
     });
 
     expect(res.totalUnits).toBe(0);
+  });
+
+  it("counts one-time event-relative schedules when a scalar event anchor is supplied", () => {
+    const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
+      context: { dosageForm: "tab" }
+    });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 30,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      eventAnchorTime: "2024-01-10T12:00:00Z"
+    });
+
+    expect(res.totalUnits).toBe(1);
+  });
+
+  it("counts matched referenced event triggers when anchor metadata is supplied", () => {
+    const dosage: FhirDosage = {
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                {
+                  url: "trigger",
+                  valueReference: {
+                    reference: "Observation/example-menstruation",
+                    type: "Observation",
+                    display: "menstruation"
+                  }
+                },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: -2,
+                    unit: "days",
+                    system: "http://unitsofmeasure.org",
+                    code: "d"
+                  }
+                },
+                {
+                  url: DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+                  valueCode: "before"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      timing: {
+        repeat: {
+          count: 1
+        }
+      },
+      doseAndRate: [
+        {
+          doseQuantity: {
+            value: 1,
+            unit: "tablet"
+          }
+        }
+      ]
+    };
+
+    const res = calculateTotalUnits({
+      dosage,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 30,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      eventAnchorTimes: [
+        {
+          at: "2024-01-10T00:00:00Z",
+          reference: "Observation/example-menstruation"
+        }
+      ]
+    });
+
+    expect(res.totalUnits).toBe(1);
   });
 
   it("caps count-limited minute intervals for calculateTotalUnits", () => {

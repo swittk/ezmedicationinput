@@ -27,6 +27,26 @@ function cloneExtension(extension: FhirExtension): FhirExtension {
         system: extension.valueDuration.system,
         code: extension.valueDuration.code
       }
+      : undefined,
+    valueCodeableConcept: extension.valueCodeableConcept
+      ? {
+        text: extension.valueCodeableConcept.text,
+        _text: clonePrimitiveElement(extension.valueCodeableConcept._text),
+        coding: extension.valueCodeableConcept.coding?.map((coding) => ({
+          system: coding.system,
+          code: coding.code,
+          display: coding.display,
+          _display: clonePrimitiveElement(coding._display),
+          i18n: coding.i18n ? { ...coding.i18n } : undefined
+        }))
+      }
+      : undefined,
+    valueReference: extension.valueReference
+      ? {
+        reference: extension.valueReference.reference,
+        type: extension.valueReference.type,
+        display: extension.valueReference.display
+      }
       : undefined
   };
 }

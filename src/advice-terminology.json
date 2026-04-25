@@ -95,7 +95,149 @@
     { "surface": "bath", "lemma": "bathing", "semanticClass": "activity", "conceptId": "bathing" },
     { "surface": "washing", "lemma": "washing", "semanticClass": "activity", "conceptId": "washing" },
     { "surface": "washing hair", "lemma": "washing hair", "semanticClass": "activity", "conceptId": "washing_hair" },
-    { "surface": "shampooing", "lemma": "shampooing", "semanticClass": "activity", "conceptId": "shampooing" },
+    {
+      "surface": "shampooing",
+      "lemma": "shampooing",
+      "semanticClass": "activity",
+      "conceptId": "shampooing",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "16993007",
+        "display": "Routine shampoo of hair"
+      }
+    },
+    {
+      "surface": "menstruation",
+      "lemma": "menstruation",
+      "semanticClass": "event",
+      "conceptId": "menstruation",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "248957007",
+        "display": "Menstruation"
+      }
+    },
+    {
+      "surface": "menstrual period",
+      "lemma": "menstruation",
+      "semanticClass": "event",
+      "conceptId": "menstruation",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "248957007",
+        "display": "Menstruation"
+      }
+    },
+    {
+      "surface": "menstruation ends",
+      "lemma": "menstruation",
+      "semanticClass": "event",
+      "conceptId": "menstruation",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "248957007",
+        "display": "Menstruation"
+      }
+    },
+    {
+      "surface": "menstrual period ends",
+      "lemma": "menstruation",
+      "semanticClass": "event",
+      "conceptId": "menstruation",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "248957007",
+        "display": "Menstruation"
+      }
+    },
+    {
+      "surface": "dialysis",
+      "lemma": "dialysis",
+      "semanticClass": "event",
+      "conceptId": "dialysis",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "1231460007",
+        "display": "Dialysis"
+      }
+    },
+    {
+      "surface": "hemodialysis",
+      "lemma": "dialysis",
+      "semanticClass": "event",
+      "conceptId": "dialysis",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "1231460007",
+        "display": "Dialysis"
+      }
+    },
+    {
+      "surface": "haemodialysis",
+      "lemma": "dialysis",
+      "semanticClass": "event",
+      "conceptId": "dialysis",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "1231460007",
+        "display": "Dialysis"
+      }
+    },
+    {
+      "surface": "dressing change",
+      "lemma": "dressing change",
+      "semanticClass": "event",
+      "conceptId": "dressing_change",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "18949003",
+        "display": "Dressing change"
+      }
+    },
+    {
+      "surface": "change of dressing",
+      "lemma": "dressing change",
+      "semanticClass": "event",
+      "conceptId": "dressing_change",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "18949003",
+        "display": "Dressing change"
+      }
+    },
+    {
+      "surface": "bowel movement",
+      "lemma": "bowel movement",
+      "semanticClass": "event",
+      "conceptId": "bowel_movement",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "39211005",
+        "display": "Bowel action"
+      }
+    },
+    {
+      "surface": "bowel movements",
+      "lemma": "bowel movement",
+      "semanticClass": "event",
+      "conceptId": "bowel_movement",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "39211005",
+        "display": "Bowel action"
+      }
+    },
+    {
+      "surface": "defecation",
+      "lemma": "bowel movement",
+      "semanticClass": "event",
+      "conceptId": "bowel_movement",
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "39211005",
+        "display": "Bowel action"
+      }
+    },
     { "surface": "dressing", "lemma": "dressing", "semanticClass": "material", "conceptId": "dressing" },
     { "surface": "affected area", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },
     { "surface": "affected areas", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },

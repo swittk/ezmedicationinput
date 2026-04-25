@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+  DOSAGE_CONDITIONS_EXTENSION_URL,
+  DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+  DOSAGE_CONDITION_TRIGGER_CODE_EXTENSION_URL,
   fromFhirDosage,
   formatSig,
   parseSig,
@@ -283,24 +285,32 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("insert 1 tab pv once after menstruation ends", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
-    const eventTriggerExtension = result.fhir.timing?.extension?.find(
-      (extension) => extension.url === EVENT_RELATIVE_TRIGGER_EXTENSION_URL
+    const eventTriggerExtension = result.fhir.extension?.find(
+      (extension) => extension.url === DOSAGE_CONDITIONS_EXTENSION_URL
     );
     expect(eventTriggerExtension).toEqual(
       expect.objectContaining({
-        url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
+        url: DOSAGE_CONDITIONS_EXTENSION_URL,
         extension: expect.arrayContaining([
           expect.objectContaining({
-            url: "triggerText",
-            valueString: "menstruation ends"
-          }),
-          expect.objectContaining({
-            url: "relationship",
-            valueCode: "after"
-          }),
-          expect.objectContaining({
-            url: "resolutionStatus",
-            valueCode: "unresolved"
+            url: "whenTrigger",
+            extension: expect.arrayContaining([
+              expect.objectContaining({
+                url: "trigger",
+                valueString: "menstruation ends"
+              }),
+              expect.objectContaining({
+                url: "offset",
+                valueDuration: expect.objectContaining({
+                  value: 0,
+                  code: "s"
+                })
+              }),
+              expect.objectContaining({
+                url: DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+                valueCode: "after"
+              })
+            ])
           })
         ])
       })
@@ -308,7 +318,16 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.normalized.eventTriggers).toEqual([
       expect.objectContaining({
         relation: "after",
-        anchorText: "menstruation ends"
+        anchorText: "menstruation ends",
+        triggerCode: expect.objectContaining({
+          coding: expect.arrayContaining([
+            expect.objectContaining({
+              system: "http://snomed.info/sct",
+              code: "248957007",
+              display: "Menstruation"
+            })
+          ])
+        })
       })
     ]);
     expect(result.longText).toBe("Insert 1 tablet vaginally once. Use after menstruation ends.");
@@ -316,18 +335,34 @@ describe("parseSig core scenarios", () => {
 
   it("formats extension-only unresolved event triggers back into patient instruction text", () => {
     const result = fromFhirDosage({
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                { url: "trigger", valueString: "menstruation ends" },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: 0,
+                    unit: "seconds",
+                    system: "http://unitsofmeasure.org",
+                    code: "s"
+                  }
+                },
+                {
+                  url: DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+                  valueCode: "after"
+                }
+              ]
+            }
+          ]
+        }
+      ],
       timing: {
-        repeat: { count: 1 },
-        extension: [
-          {
-            url: EVENT_RELATIVE_TRIGGER_EXTENSION_URL,
-            extension: [
-              { url: "triggerText", valueString: "menstruation ends" },
-              { url: "relationship", valueCode: "after" },
-              { url: "resolutionStatus", valueCode: "unresolved" }
-            ]
-          }
-        ]
+        repeat: { count: 1 }
       },
       route: {
         text: "vaginal",
@@ -357,6 +392,132 @@ describe("parseSig core scenarios", () => {
       expect.objectContaining({
         relation: "after",
         anchorText: "menstruation ends"
+      })
+    ]);
+  });
+
+  it("emits SNOMED-coded trigger metadata for supported event concepts", () => {
+    const result = parseSig("apply after each bowel movement", { context: TAB_CONTEXT });
+    const whenTrigger = result.fhir.extension?.[0]?.extension?.find(
+      (extension) => extension.url === "whenTrigger"
+    );
+    expect(whenTrigger?.extension).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: DOSAGE_CONDITION_TRIGGER_CODE_EXTENSION_URL,
+          valueCodeableConcept: expect.objectContaining({
+            coding: expect.arrayContaining([
+              expect.objectContaining({
+                system: "http://snomed.info/sct",
+                code: "39211005",
+                display: "Bowel action"
+              })
+            ])
+          })
+        })
+      ])
+    );
+    expect(result.meta.normalized.eventTriggers).toEqual([
+      expect.objectContaining({
+        relation: "after",
+        anchorText: "bowel movement",
+        triggerCode: expect.objectContaining({
+          coding: expect.arrayContaining([
+            expect.objectContaining({
+              system: "http://snomed.info/sct",
+              code: "39211005",
+              display: "Bowel action"
+            })
+          ])
+        })
+      })
+    ]);
+  });
+
+  it("preserves coded and referenced triggers from dosage-conditions extensions", () => {
+    const result = fromFhirDosage({
+      extension: [
+        {
+          url: DOSAGE_CONDITIONS_EXTENSION_URL,
+          extension: [
+            {
+              url: "whenTrigger",
+              extension: [
+                {
+                  url: "trigger",
+                  valueReference: {
+                    reference: "Observation/example-menstruation",
+                    type: "Observation",
+                    display: "menstruation"
+                  }
+                },
+                {
+                  url: "offset",
+                  valueDuration: {
+                    value: -2,
+                    unit: "days",
+                    system: "http://unitsofmeasure.org",
+                    code: "d"
+                  }
+                },
+                {
+                  url: DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+                  valueCode: "before"
+                },
+                {
+                  url: DOSAGE_CONDITION_TRIGGER_CODE_EXTENSION_URL,
+                  valueCodeableConcept: {
+                    coding: [
+                      {
+                        system: "http://loinc.org",
+                        code: "8665-2",
+                        display: "Last menstrual period start date"
+                      }
+                    ],
+                    text: "Menstruation event"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      timing: {
+        repeat: { count: 1 }
+      },
+      doseAndRate: [
+        {
+          doseQuantity: {
+            value: 1,
+            unit: "tablet"
+          }
+        }
+      ]
+    });
+
+    expect(result.meta.normalized.eventTriggers).toEqual([
+      expect.objectContaining({
+        relation: "before",
+        anchorText: "menstruation",
+        triggerReference: {
+          reference: "Observation/example-menstruation",
+          type: "Observation",
+          display: "menstruation"
+        },
+        triggerCode: {
+          text: "Menstruation event",
+          coding: [
+            {
+              system: "http://loinc.org",
+              code: "8665-2",
+              display: "Last menstrual period start date"
+            }
+          ]
+        },
+        offset: {
+          value: 2,
+          unit: "d"
+        }
       })
     ]);
   });
@@ -3901,6 +4062,20 @@ describe("topical product forms and workflow", () => {
 
     const bowel = parseSig("apply after each bowel movement");
     expect(bowel.fhir.patientInstruction).toBe("after each bowel movement");
+    expect(bowel.meta.normalized.eventTriggers).toEqual([
+      expect.objectContaining({
+        relation: "after",
+        anchorText: "bowel movement",
+        triggerCode: expect.objectContaining({
+          coding: expect.arrayContaining([
+            expect.objectContaining({
+              system: "http://snomed.info/sct",
+              code: "39211005"
+            })
+          ])
+        })
+      })
+    ]);
   });
 
   it("does not force suppository or pessary units onto creams", () => {

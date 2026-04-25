@@ -1,6 +1,9 @@
 import {
+  CanonicalEventTrigger,
   EventTiming,
   EventClockMap,
+  EventTriggerAnchor,
+  EventTriggerAnchorMap,
   FhirDosage,
   FhirPeriodUnit,
   FhirQuantity,
@@ -14,7 +17,10 @@ import {
   TotalUnitsResult
 } from "./types";
 import { parseAdditionalInstructions } from "./advice";
-import { hasUnresolvedEventTriggerExtension } from "./event-trigger";
+import {
+  hasUnresolvedDosageConditionExtension,
+  parseDosageConditionExtensions
+} from "./event-trigger";
 import { arrayIncludes } from "./utils/array";
 import { getUnitCategory, convertValue } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
@@ -564,8 +570,268 @@ function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
   );
 }
 
+function normalizeEventTriggerText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.replace(/\s+/g, " ").toLowerCase();
+}
+
+function appendEventAnchorCandidate(
+  collected: EventTriggerAnchor[],
+  candidate: EventTriggerAnchor | undefined
+): void {
+  if (!candidate || candidate.at === undefined) {
+    return;
+  }
+  collected.push(candidate);
+}
+
+function appendEventAnchorMapEntry(
+  collected: EventTriggerAnchor[],
+  key: string,
+  at: Date | string
+): void {
+  const trimmedKey = key.trim();
+  if (!trimmedKey) {
+    return;
+  }
+  const lowerKey = trimmedKey.toLowerCase();
+  if (lowerKey.startsWith("ref:")) {
+    appendEventAnchorCandidate(collected, {
+      at,
+      reference: trimmedKey.slice(4).trim()
+    });
+    return;
+  }
+  if (lowerKey.startsWith("reference:")) {
+    appendEventAnchorCandidate(collected, {
+      at,
+      reference: trimmedKey.slice("reference:".length).trim()
+    });
+    return;
+  }
+  if (lowerKey.startsWith("code:")) {
+    const payload = trimmedKey.slice(5).trim();
+    const separatorIndex = payload.indexOf("|");
+    if (separatorIndex >= 0) {
+      appendEventAnchorCandidate(collected, {
+        at,
+        system: payload.slice(0, separatorIndex).trim() || undefined,
+        code: payload.slice(separatorIndex + 1).trim() || undefined
+      });
+      return;
+    }
+    appendEventAnchorCandidate(collected, {
+      at,
+      code: payload || undefined
+    });
+    return;
+  }
+  appendEventAnchorCandidate(collected, {
+    at,
+    text: trimmedKey
+  });
+}
+
+function collectConfiguredEventAnchors(
+  config: NextDueDoseConfig
+): EventTriggerAnchor[] {
+  const collected: EventTriggerAnchor[] = [];
+  const configuredAnchors = config.eventAnchorTimes;
+  if (Array.isArray(configuredAnchors)) {
+    for (const anchor of configuredAnchors) {
+      appendEventAnchorCandidate(collected, anchor);
+    }
+  } else if (configuredAnchors && typeof configuredAnchors === "object") {
+    const entries = configuredAnchors as EventTriggerAnchorMap;
+    for (const key of Object.keys(entries)) {
+      appendEventAnchorMapEntry(collected, key, entries[key]);
+    }
+  }
+  if (config.eventAnchorTime !== undefined) {
+    appendEventAnchorCandidate(collected, { at: config.eventAnchorTime });
+  }
+  return collected;
+}
+
+function collectExplicitTimingEvents(
+  timing: FhirTiming | undefined
+): Date[] {
+  const collected: Date[] = [];
+  const seen = new Set<number>();
+  for (const event of timing?.event ?? []) {
+    const parsed = coerceDate(event, "timing.event");
+    const key = parsed.getTime();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    collected.push(parsed);
+  }
+  collected.sort((left, right) => left.getTime() - right.getTime());
+  return collected;
+}
+
+function matchesTriggerCode(
+  trigger: CanonicalEventTrigger,
+  anchor: EventTriggerAnchor
+): number {
+  if (!anchor.code) {
+    return 0;
+  }
+  let bareCodeMatch = false;
+  for (const coding of trigger.triggerCode?.coding ?? []) {
+    if (!coding.code || coding.code !== anchor.code) {
+      continue;
+    }
+    if (
+      anchor.system &&
+      coding.system &&
+      coding.system === anchor.system
+    ) {
+      return 3;
+    }
+    bareCodeMatch = true;
+  }
+  return bareCodeMatch ? 2 : 0;
+}
+
+function matchesTriggerText(
+  trigger: CanonicalEventTrigger,
+  anchor: EventTriggerAnchor
+): boolean {
+  const normalizedAnchorText = normalizeEventTriggerText(anchor.text);
+  if (!normalizedAnchorText) {
+    return false;
+  }
+  const candidates: Array<string | undefined> = [
+    trigger.anchorText,
+    trigger.sourceText,
+    trigger.triggerReference?.display,
+    trigger.triggerCode?.text
+  ];
+  for (const coding of trigger.triggerCode?.coding ?? []) {
+    candidates.push(coding.display);
+    candidates.push(coding.code);
+  }
+  for (const candidate of candidates) {
+    if (normalizeEventTriggerText(candidate) === normalizedAnchorText) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveRelativeEventDate(
+  trigger: CanonicalEventTrigger,
+  anchorDate: Date,
+  timeZone: string
+): Date {
+  const offsetValue = trigger.offset?.value ?? 0;
+  const offsetUnit = trigger.offset?.unit;
+  if (!offsetUnit || !Number.isFinite(offsetValue) || offsetValue === 0) {
+    return anchorDate;
+  }
+  const direction = trigger.relation === "before" ? -1 : 1;
+  const stepper = createIntervalStepper(
+    {
+      period: offsetValue * direction,
+      periodUnit: offsetUnit
+    },
+    timeZone
+  );
+  return stepper?.(anchorDate) ?? anchorDate;
+}
+
+function resolveTriggerAnchorDate(
+  trigger: CanonicalEventTrigger,
+  anchors: EventTriggerAnchor[],
+  timeZone: string,
+  allowGenericAnchor: boolean
+): Date | null {
+  let bestAnchor: EventTriggerAnchor | undefined;
+  let bestScore = -1;
+  for (const anchor of anchors) {
+    let score = 0;
+    if (
+      trigger.triggerReference?.reference &&
+      anchor.reference &&
+      trigger.triggerReference.reference === anchor.reference
+    ) {
+      score = 4;
+    } else {
+      score = matchesTriggerCode(trigger, anchor);
+      if (score === 0 && matchesTriggerText(trigger, anchor)) {
+        score = 1;
+      }
+      if (
+        score === 0 &&
+        allowGenericAnchor &&
+        !anchor.reference &&
+        !anchor.code &&
+        !anchor.text
+      ) {
+        score = 1;
+      }
+    }
+    if (score <= bestScore) {
+      continue;
+    }
+    bestScore = score;
+    bestAnchor = anchor;
+  }
+  if (!bestAnchor || bestScore < 0) {
+    return null;
+  }
+  const anchorDate = coerceDate(bestAnchor.at, "eventAnchorTime");
+  return resolveRelativeEventDate(trigger, anchorDate, timeZone);
+}
+
+function resolveRelationalScheduleAnchor(
+  dosage: FhirDosage,
+  config: NextDueDoseConfig,
+  timeZone: string
+): { exactEvents?: Date[]; baseTime?: Date; unresolved: boolean } {
+  const explicitEvents = collectExplicitTimingEvents(dosage.timing);
+  if (explicitEvents.length > 0) {
+    return {
+      exactEvents: explicitEvents,
+      baseTime: explicitEvents[0],
+      unresolved: false
+    };
+  }
+
+  const triggers = parseDosageConditionExtensions(dosage);
+  if (!triggers?.length) {
+    return { unresolved: false };
+  }
+
+  const anchors = collectConfiguredEventAnchors(config);
+  const allowGenericAnchor = triggers.length === 1;
+  for (const trigger of triggers) {
+    const resolvedDate = resolveTriggerAnchorDate(
+      trigger,
+      anchors,
+      timeZone,
+      allowGenericAnchor
+    );
+    if (!resolvedDate) {
+      continue;
+    }
+    return {
+      exactEvents: [resolvedDate],
+      baseTime: resolvedDate,
+      unresolved: false
+    };
+  }
+
+  return { unresolved: true };
+}
+
 function hasUnresolvedRelationalInstruction(dosage: FhirDosage): boolean {
-  if (hasUnresolvedEventTriggerExtension(dosage.timing)) {
+  if (hasUnresolvedDosageConditionExtension(dosage)) {
     return true;
   }
   const texts: string[] = [];
@@ -902,8 +1168,7 @@ export function nextDueDoses(
     }
   }
   let priorCount = priorCountInput !== undefined ? Math.floor(priorCountInput) : 0;
-  const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt;
-  const baseTime = orderedAt ?? from;
+  const defaultBaseTime = orderedAt ?? from;
 
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
@@ -926,16 +1191,20 @@ export function nextDueDoses(
     timeZone,
     eventClock,
     mealOffsets,
-    frequencyDefaults
+    frequencyDefaults,
+    eventAnchorTime: options.eventAnchorTime ?? providedConfig?.eventAnchorTime,
+    eventAnchorTimes: options.eventAnchorTimes ?? providedConfig?.eventAnchorTimes
   };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
+  const resolvedAnchorState = resolveRelationalScheduleAnchor(dosage, config, timeZone);
+  const scheduleStart = resolvedAnchorState.baseTime ?? defaultBaseTime;
+  const needsDerivedPriorCount = priorCountInput === undefined && from > scheduleStart;
   const courseEnd =
-    timing && repeat ? resolveRepeatDurationCapEnd(repeat, baseTime, timeZone) : null;
+    timing && repeat ? resolveRepeatDurationCapEnd(repeat, scheduleStart, timeZone) : null;
 
   if (
     needsDerivedPriorCount &&
-    orderedAt &&
     timing &&
     repeat &&
     repeat.count !== undefined
@@ -944,13 +1213,16 @@ export function nextDueDoses(
       timing,
       repeat,
       config,
-      orderedAt,
+      scheduleStart,
       from,
       timeZone
     );
   }
 
   if (!timing || !repeat) {
+    return [];
+  }
+  if (resolvedAnchorState.unresolved) {
     return [];
   }
   if (courseEnd && from >= courseEnd) {
@@ -972,11 +1244,31 @@ export function nextDueDoses(
     remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
 
   if (isSingleAdministrationRepeat(repeat)) {
-    if (hasUnresolvedRelationalInstruction(dosage)) {
+    const exactEvents = resolvedAnchorState.exactEvents;
+    if (exactEvents?.length) {
+      const results: string[] = [];
+      for (const candidate of exactEvents) {
+        if (candidate < from) {
+          continue;
+        }
+        if (candidate < scheduleStart) {
+          continue;
+        }
+        if (courseEnd && candidate >= courseEnd) {
+          continue;
+        }
+        results.push(formatZonedIso(candidate, timeZone));
+        if (results.length >= effectiveLimit) {
+          break;
+        }
+      }
+      return results;
+    }
+    if (resolvedAnchorState.unresolved || hasUnresolvedRelationalInstruction(dosage)) {
       return [];
     }
-    const anchor = orderedAt ?? from;
-    if ((orderedAt && orderedAt < from) || (courseEnd && anchor >= courseEnd)) {
+    const anchor = scheduleStart;
+    if (anchor < from || (courseEnd && anchor >= courseEnd)) {
       return [];
     }
     return [formatZonedIso(anchor, timeZone)].slice(0, effectiveLimit);
@@ -1012,8 +1304,8 @@ export function nextDueDoses(
     }
     const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
     if (includesImmediate) {
-      const immediateSource = orderedAt ?? from;
-      if ((!orderedAt || orderedAt >= from) && (!courseEnd || immediateSource < courseEnd)) {
+      const immediateSource = scheduleStart;
+      if (immediateSource >= from && (!courseEnd || immediateSource < courseEnd)) {
         const instantIso = formatZonedIso(immediateSource, timeZone);
         if (!seen.has(instantIso)) {
           seen.add(instantIso);
@@ -1056,7 +1348,7 @@ export function nextDueDoses(
             if (zoned < from) {
               continue;
             }
-            if (orderedAt && zoned < orderedAt) {
+            if (zoned < scheduleStart) {
               continue;
             }
             if (courseEnd && zoned >= courseEnd) {
@@ -1098,14 +1390,14 @@ export function nextDueDoses(
     // True interval schedules advance from the order start in fixed units. The
     // timing.code remains advisory so we only rely on the period/unit fields.
     const candidates = generateIntervalSeries(
-      baseTime,
+      scheduleStart,
       from,
       effectiveLimit,
       repeat,
       timeZone,
       dayFilter,
       enforceDayFilter,
-      orderedAt,
+      scheduleStart,
       courseEnd
     );
     return candidates;
@@ -1116,13 +1408,13 @@ export function nextDueDoses(
       repeat: dayFilteredSeriesRepeat,
       timeZone,
       dayFilter,
-      anchorDay: startOfLocalDay(baseTime, timeZone),
+      anchorDay: startOfLocalDay(scheduleStart, timeZone),
       startDay: from,
       from,
       to: courseEnd ?? undefined,
-      orderedAt,
+      orderedAt: scheduleStart,
       limit: effectiveLimit,
-      defaultClock: toLocalClock(baseTime, timeZone)
+      defaultClock: toLocalClock(scheduleStart, timeZone)
     }).slice(0, effectiveLimit);
   }
 
@@ -1152,7 +1444,7 @@ export function nextDueDoses(
           if (zoned < from) {
             continue;
           }
-          if (orderedAt && zoned < orderedAt) {
+          if (zoned < scheduleStart) {
             continue;
           }
           if (courseEnd && zoned >= courseEnd) {
@@ -1710,7 +2002,13 @@ function countScheduleEvents(
   const normalizedCount = repeat.count === undefined
     ? undefined
     : Math.max(0, Math.floor(repeat.count));
+  const timeZone = config.timeZone!;
+  const resolvedAnchorState = resolveRelationalScheduleAnchor(dosage, config, timeZone);
+  const scheduleStart = resolvedAnchorState.baseTime ?? orderedAt ?? baseTime;
   if (normalizedCount === 0) {
+    return 0;
+  }
+  if (resolvedAnchorState.unresolved) {
     return 0;
   }
 
@@ -1719,10 +2017,9 @@ function countScheduleEvents(
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
   const seen = new Set<string>();
   let count = 0;
-  const timeZone = config.timeZone!;
   const priorCount =
-    normalizedCount !== undefined && orderedAt && from > orderedAt
-      ? derivePriorCountFromHistory(timing, repeat, config, orderedAt, from, timeZone)
+    normalizedCount !== undefined && from > scheduleStart
+      ? derivePriorCountFromHistory(timing, repeat, config, scheduleStart, from, timeZone)
       : 0;
   const countLimit = normalizedCount === undefined
     ? (limit ?? Number.POSITIVE_INFINITY)
@@ -1732,19 +2029,9 @@ function countScheduleEvents(
   }
   const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
 
-  if (isSingleAdministrationRepeat(repeat)) {
-    if (hasUnresolvedRelationalInstruction(dosage)) {
-      return 0;
-    }
-    const anchor = orderedAt ?? baseTime;
-    if (anchor < from || anchor >= to) {
-      return 0;
-    }
-    return 1;
-  }
-
   const recordCandidate = (candidate: Date | null) => {
     if (!candidate) return false;
+    if (candidate < scheduleStart) return false;
     if (candidate < from || candidate >= to) return false;
     const iso = formatZonedIso(candidate, timeZone);
     if (seen.has(iso)) return false;
@@ -1752,6 +2039,26 @@ function countScheduleEvents(
     count += 1;
     return true;
   };
+
+  if (isSingleAdministrationRepeat(repeat)) {
+    const exactEvents = resolvedAnchorState.exactEvents;
+    if (exactEvents?.length) {
+      for (const candidate of exactEvents) {
+        if (recordCandidate(candidate) && count >= countLimit) {
+          break;
+        }
+      }
+      return count;
+    }
+    if (resolvedAnchorState.unresolved || hasUnresolvedRelationalInstruction(dosage)) {
+      return 0;
+    }
+    const anchor = scheduleStart;
+    if (anchor < from || anchor >= to) {
+      return 0;
+    }
+    return 1;
+  }
 
   const whenCodes = repeat.when ?? [];
   const timeOfDayEntries = repeat.timeOfDay ?? [];
@@ -1776,8 +2083,8 @@ function countScheduleEvents(
     }
 
     if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
-      const immediateSource = orderedAt ?? from;
-      if (!orderedAt || orderedAt >= from) {
+      const immediateSource = scheduleStart;
+      if (immediateSource >= from) {
         recordCandidate(immediateSource);
       }
     }
@@ -1829,7 +2136,7 @@ function countScheduleEvents(
     const increment = createIntervalStepper(repeat, timeZone);
     if (!increment) return count;
 
-    let current = baseTime;
+    let current = scheduleStart;
     let guard = 0;
     const maxIterations = hardLimit * 1000;
 
@@ -1880,13 +2187,13 @@ function countScheduleEvents(
       repeat: dayFilteredSeriesRepeat,
       timeZone,
       dayFilter,
-      anchorDay: startOfLocalDay(baseTime, timeZone),
+      anchorDay: startOfLocalDay(scheduleStart, timeZone),
       startDay: from,
       from,
       to,
-      orderedAt,
+      orderedAt: scheduleStart,
       limit: hardLimit,
-      defaultClock: toLocalClock(baseTime, timeZone)
+      defaultClock: toLocalClock(scheduleStart, timeZone)
     });
     return count + generated.length;
   }
@@ -1924,8 +2231,12 @@ function calculateTotalUnitsSingle(
     timeZone,
     eventClock,
     mealOffsets,
-    frequencyDefaults
+    frequencyDefaults,
+    eventAnchorTime: options.eventAnchorTime ?? providedConfig?.eventAnchorTime,
+    eventAnchorTimes: options.eventAnchorTimes ?? providedConfig?.eventAnchorTimes
   };
+  const resolvedAnchorState = resolveRelationalScheduleAnchor(dosage, config, timeZone);
+  const scheduleStart = resolvedAnchorState.baseTime ?? orderedAtDate ?? from;
 
   // Calculate end date based on duration
   let endDay: Date;
@@ -1938,7 +2249,7 @@ function calculateTotalUnitsSingle(
   }
   endDay = minDate(
     endDay,
-    resolveRepeatDurationCapEnd(dosage.timing?.repeat, orderedAtDate ?? from, timeZone)
+    resolveRepeatDurationCapEnd(dosage.timing?.repeat, scheduleStart, timeZone)
   );
 
   const count = countScheduleEvents(
@@ -1946,8 +2257,8 @@ function calculateTotalUnitsSingle(
     from,
     endDay,
     config,
-    orderedAtDate ?? from,
-    orderedAtDate,
+    scheduleStart,
+    scheduleStart,
     2000
   );
 

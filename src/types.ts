@@ -14,12 +14,20 @@ export interface FhirCodeableConcept {
   _text?: FhirPrimitiveElement;
 }
 
+export interface FhirReference {
+  reference?: string;
+  type?: string;
+  display?: string;
+}
+
 export interface FhirExtension {
   url: string;
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
   valueDuration?: FhirQuantity;
+  valueCodeableConcept?: FhirCodeableConcept;
+  valueReference?: FhirReference;
 }
 
 export interface FhirPrimitiveElement {
@@ -300,6 +308,7 @@ export interface FhirDoseAndRate {
 
 export interface FhirDosage {
   text?: string;
+  extension?: FhirExtension[];
   patientInstruction?: string;
   timing?: FhirTiming;
   route?: FhirCodeableConcept;
@@ -801,6 +810,8 @@ export type CanonicalEventTriggerResolutionStatus =
 export interface CanonicalEventTrigger {
   relation: CanonicalEventTriggerRelation;
   anchorText: string;
+  triggerCode?: FhirCodeableConcept;
+  triggerReference?: FhirReference;
   sourceText?: string;
   offset?: {
     value: number;
@@ -994,6 +1005,17 @@ export interface FrequencyFallbackTimes {
   byFrequency?: Record<string, string[]>;
 }
 
+export interface EventTriggerAnchor {
+  at: Date | string;
+  reference?: string;
+  type?: string;
+  code?: string;
+  system?: string;
+  text?: string;
+}
+
+export type EventTriggerAnchorMap = Record<string, Date | string>;
+
 /**
  * Shared configuration required to generate next-due dose timestamps.
  */
@@ -1002,6 +1024,8 @@ export interface NextDueDoseConfig {
   eventClock?: EventClockMap;
   mealOffsets?: MealOffsetMap;
   frequencyDefaults?: FrequencyFallbackTimes;
+  eventAnchorTime?: Date | string;
+  eventAnchorTimes?: EventTriggerAnchor[] | EventTriggerAnchorMap;
 }
 
 /**
@@ -1010,6 +1034,8 @@ export interface NextDueDoseConfig {
 export interface NextDueDoseOptions {
   from: Date | string;
   orderedAt?: Date | string;
+  eventAnchorTime?: Date | string;
+  eventAnchorTimes?: EventTriggerAnchor[] | EventTriggerAnchorMap;
   limit?: number;
   priorCount?: number;
   timeZone?: string;

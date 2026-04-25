@@ -3,11 +3,11 @@ import {
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
 import {
-  buildEventTriggerExtensions,
+  buildDosageConditionExtensions,
   buildEventTriggerInstructionTextList,
   cloneEventTriggers,
   collectEventTriggersFromAdditionalInstructions,
-  parseEventTriggerExtensions
+  parseDosageConditionExtensions
 } from "./event-trigger";
 import { clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
@@ -345,10 +345,9 @@ export function canonicalToFhir(
     };
   }
 
-  const timingExtensions = buildEventTriggerExtensions(eventTriggers);
-  if (timingExtensions?.length) {
-    dosage.timing = dosage.timing ?? {};
-    dosage.timing.extension = timingExtensions;
+  const dosageExtensions = buildDosageConditionExtensions(eventTriggers);
+  if (dosageExtensions?.length) {
+    dosage.extension = dosageExtensions;
   }
 
   if (clause.dose?.range) {
@@ -533,7 +532,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const repeat = dosage.timing?.repeat;
   const timingBounds = extractCanonicalTimingBounds(repeat);
-  const eventTriggers = parseEventTriggerExtensions(dosage.timing);
+  const eventTriggers = parseDosageConditionExtensions(dosage);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
@@ -651,7 +650,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
   const timingBounds = extractCanonicalTimingBounds(dosage.timing?.repeat);
-  const eventTriggers = parseEventTriggerExtensions(dosage.timing);
+  const eventTriggers = parseDosageConditionExtensions(dosage);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
@@ -673,6 +672,12 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   if (!state.patientInstruction && eventTriggers?.length) {
     state.patientInstruction = buildEventTriggerInstructionTextList(eventTriggers);
   }
+  state.primaryClause.rawText = dosage.text ?? state.patientInstruction ?? state.input;
+  state.primaryClause.raw = {
+    start: 0,
+    end: state.primaryClause.rawText.length,
+    text: state.primaryClause.rawText
+  };
   state.asNeeded = dosage.asNeededBoolean;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {

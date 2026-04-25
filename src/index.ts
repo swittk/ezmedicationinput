@@ -31,7 +31,12 @@ import {
 } from "./types";
 export { suggestSig } from "./suggest";
 export * from "./types";
-export { EVENT_RELATIVE_TRIGGER_EXTENSION_URL } from "./event-trigger";
+export {
+  DOSAGE_CONDITIONS_EXTENSION_URL,
+  DOSAGE_CONDITION_RELATIONSHIP_EXTENSION_URL,
+  DOSAGE_CONDITION_TRIGGER_CODE_EXTENSION_URL,
+  DOSAGE_CONDITION_SOURCE_TEXT_EXTENSION_URL
+} from "./event-trigger";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
 export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
 export {
@@ -688,6 +693,23 @@ function buildNormalizedMetaFromClause(
       ? clause.schedule.eventTriggers.map((trigger) => ({
         relation: trigger.relation,
         anchorText: trigger.anchorText,
+        triggerCode: trigger.triggerCode
+          ? {
+            text: trigger.triggerCode.text,
+            coding: trigger.triggerCode.coding?.map((coding) => ({
+              system: coding.system,
+              code: coding.code,
+              display: coding.display
+            }))
+          }
+          : undefined,
+        triggerReference: trigger.triggerReference
+          ? {
+            reference: trigger.triggerReference.reference,
+            type: trigger.triggerReference.type,
+            display: trigger.triggerReference.display
+          }
+          : undefined,
         sourceText: trigger.sourceText,
         offset: trigger.offset
           ? {

@@ -19,7 +19,10 @@ import {
 } from "./maps";
 import { parseAdditionalInstructions } from "./advice";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
-import { collectEventTriggersFromAdditionalInstructions } from "./event-trigger";
+import {
+  buildEventTriggerFromAdviceFrame,
+  collectEventTriggersFromAdditionalInstructions
+} from "./event-trigger";
 import { buildTranslationPrimitiveElement } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
 import { LexKind } from "./lexer/token-types";
@@ -6190,6 +6193,29 @@ function collectAdditionalInstructions(
   const seen = new Set<string>();
   const defaultPredicate = inferAdditionalInstructionPredicate(internal, tokens);
 
+  function appendEventTriggersFromFrames(frames: typeof instructions[number]["frames"]): void {
+    if (!frames?.length) {
+      return;
+    }
+    const clause = internal.primaryClause;
+    const schedule = clause.schedule ?? (clause.schedule = {});
+    const eventTriggers = schedule.eventTriggers ?? (schedule.eventTriggers = []);
+    const seen = new Set(eventTriggers.map((trigger) => `${trigger.relation}|${trigger.anchorText.toLowerCase()}`));
+
+    for (const frame of frames) {
+      const trigger = buildEventTriggerFromAdviceFrame(frame);
+      if (!trigger) {
+        continue;
+      }
+      const key = `${trigger.relation}|${trigger.anchorText.toLowerCase()}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      eventTriggers.push(trigger);
+    }
+  }
+
   for (const group of groups) {
     if (!group.tokens.length) {
       continue;
@@ -6268,6 +6294,7 @@ function collectAdditionalInstructions(
         resolvedPlainText &&
         isWorkflowPatientInstructionText(resolvedPlainText)
       ) {
+        appendEventTriggersFromFrames(parsedInstruction.frames);
         appendPatientInstruction(
           internal,
           normalizeWorkflowPatientInstructionText(sourceText) ?? resolvedPlainText

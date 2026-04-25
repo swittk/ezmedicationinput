@@ -1481,6 +1481,78 @@ Important repo-specific nuance:
   serializer-level and optional, not the only place the meaning exists
 - internal canonical event-trigger representation should come first
 
+## 2026-04-23 Switched experiment from custom trigger extension to HL7 `dosage-conditions`
+
+On experimental branch `codex/temp-dosage-conditions-experiment`, replaced the
+custom unresolved event-trigger serializer with the HL7 Extensions Pack
+`dosage-conditions` extension:
+- URL: `http://hl7.org/fhir/StructureDefinition/dosage-conditions`
+- used slice: `whenTrigger`
+
+Current serialized shape for:
+- `insert 1 tab pv once after menstruation ends`
+
+is:
+- normal `Dosage.timing.repeat.count = 1`
+- `Dosage.extension[dose-conditions].whenTrigger.trigger = "menstruation ends"`
+- `Dosage.extension[dose-conditions].whenTrigger.offset = 0 seconds`
+
+Why this is better than the earlier custom timing extension:
+- it is HL7-defined rather than repo-defined
+- it applies directly to `Dosage`
+- it fits contingent event-trigger semantics better than the `relative-date`
+  extension, which is scoped to primitive `date` / `dateTime`
+
+Important caveat:
+- `dosage-conditions.whenTrigger` does not have an explicit relationship field
+  like `before/after/during/on/until`
+- current experiment therefore uses offset sign and, on import, patient-facing
+  instruction text to infer the relation
+- zero-offset extension-only imports are therefore effectively biased toward
+  `after` unless the text also preserves the wording
+
+Status:
+- targeted parser/schedule tests passing
+- full suite passing (`560` tests)
+
+## 2026-04-23 Richer `dosage-conditions` representation
+
+Extended the experimental `dosage-conditions` path so it can represent:
+- explicit relation: `before` / `after` / `during` / `on` / `until`
+- signed or unsigned relative offset durations
+- coded trigger types
+- referenced trigger resources
+
+Current experimental wire shape:
+- HL7 outer scaffold:
+  - `Dosage.extension[url=dosage-conditions]`
+  - nested `whenTrigger`
+  - nested official `trigger`
+  - nested official `offset`
+- custom nested subextensions:
+  - `dosage-condition-relationship`
+  - `dosage-condition-triggerCode`
+  - `dosage-condition-sourceText`
+
+Key behavior:
+- parser-generated event-relative instructions now emit relation explicitly
+- recognized event concepts like `after showering` also emit a coded trigger
+- external FHIR imports can provide:
+  - `trigger` as `valueReference`
+  - `triggerCode` as `valueCodeableConcept`
+  - relation as custom subextension
+- imported negative offsets are normalized to positive magnitude internally when
+  relation is `before`
+
+Why this shape:
+- keeps the sanctioned HL7 `dosage-conditions` outer model
+- fills the missing semantics the base extension does not carry explicitly
+- avoids collapsing relation and event typing back into unstructured strings
+
+Current experimental verification:
+- targeted parser/schedule tests passing
+- full suite passing (`562` tests)
+
 ## 2026-04-22 Event-relative trigger extension implemented
 
 Implemented unresolved event-relative trigger serialization for sigs like:
@@ -1526,3 +1598,82 @@ So the current repo decision is:
 - use the custom timing extension now
 - leave room to add an official `relative-date`-style serializer later if the
   library grows full primitive `Timing.event` extension support
+
+## 2026-04-23 Known event anchors now drive schedule math on experiment branch
+
+On `codex/temp-dosage-conditions-experiment`, event-relative dosage conditions
+now become computable when the caller provides a known event time.
+
+What works now:
+- `nextDueDoses(...)` accepts:
+  - `eventAnchorTime`
+  - `eventAnchorTimes`
+- `calculateTotalUnits(...)` accepts the same anchor inputs
+- anchor matching works in three levels:
+  - scalar fallback (`eventAnchorTime`) for the simple single-trigger case
+  - text-keyed map/list matching (`menstruation ends`)
+  - metadata matching by `Reference` for `whenTrigger.trigger.valueReference`
+- relative offsets are applied after matching, so
+  - `after X` uses the event time plus offset
+  - `before X` uses the event time minus offset
+
+Important behavioral boundary:
+- unresolved `dosage-conditions` still suppress fake computation:
+  - `nextDueDoses(...) -> []`
+  - `calculateTotalUnits(...) -> 0`
+- once an event anchor is supplied, the same dosage becomes schedulable/countable
+
+Examples now covered:
+- parsed:
+  - `insert 1 tab pv once after menstruation ends`
+  - with `eventAnchorTime = 2024-01-10T12:00:00Z`
+  - `nextDueDoses(...) -> 2024-01-10T12:00:00+00:00`
+  - `calculateTotalUnits(...) -> 1`
+- extension-only:
+  - `whenTrigger.trigger = Reference(Observation/example-menstruation)`
+  - `relationship = before`
+  - `offset = 2 days`
+  - with matching anchor reference at `2024-01-10T00:00:00Z`
+  - due time resolves to `2024-01-08T00:00:00+00:00`
+
+One cleanup folded into the same pass:
+- removed the old `-1 second` sentinel idea for bare `before`
+- relation now lives in the explicit custom nested subextension, and zero offset
+  stays genuinely zero unless a real relative duration exists
+
+## 2026-04-23 Event-trigger coding switched from fake internal ids to real terminology where honest
+
+The event-trigger path no longer emits placeholder trigger codes like
+`urn:ezmedicationinput:event-trigger-concept|showering`.
+
+What changed:
+- event trigger coding now comes from `src/advice-terminology.json`
+- `src/advice.ts` exposes concept coding lookup from terminology data
+- `src/event-trigger.ts` now uses that terminology coding when building
+  `triggerCode`
+- unsupported events fall back to text-only trigger representation instead of
+  fake internal codings
+
+Current honest SNOMED-coded trigger examples:
+- `menstruation` / `menstruation ends` -> `248957007` `Menstruation`
+- `dialysis` -> `1231460007` `Dialysis`
+- `dressing change` -> `18949003` `Dressing change`
+- `bowel movement` / `defecation` -> `39211005` `Bowel action`
+- `shampooing` -> `16993007` `Routine shampoo of hair`
+
+Current text-only by design unless we find a cleaner concept:
+- `showering`
+- `bathing`
+- generic `washing`
+- `sun exposure`
+- `swimming`
+
+Why:
+- some common sig trigger phrases do not have a clean event/activity concept in
+  the local SNOMED release
+- better to preserve them as structured text than to emit misleading codes
+
+One small normalization added with this pass:
+- distributive words such as `each` / `every` are stripped from the canonical
+  trigger anchor text, so `after each bowel movement` now normalizes to anchor
+  text `bowel movement`
