@@ -70,6 +70,16 @@ describe("additional instruction rule inventory", () => {
     }
   });
 
+  it("codes elliptical modal drowsiness warnings without an explicit cause verb", () => {
+    const modalVariants = ["may drowsy", "can drowsy", "might drowsy", "could drowsy"];
+
+    for (const input of modalVariants) {
+      const variant = parseAdditionalInstructions(input, { start: 0, end: input.length });
+      expect(variant[0]?.text).toBe("May cause drowsiness");
+      expect(variant[0]?.coding?.code).toBe("418639000");
+    }
+  });
+
   it("codes specific meal-state instructions instead of broader fallback concepts", () => {
     const afterFood = parseAdditionalInstructions("after food", { start: 0, end: 10 });
     expect(afterFood[0]?.coding?.code).toBe("225758001");

@@ -2823,6 +2823,29 @@ describe("parseSig core scenarios", () => {
     }
   });
 
+  it("treats leading modal drowsiness warnings after PRN as additional instructions without punctuation", () => {
+    const cases = [
+      "1 tab po prn may drowsy",
+      "1 tab po prn can drowsy",
+      "1 tab po prn might drowsy",
+      "1 tab po prn could drowsy",
+      "1 tab po prn may cause drowsiness",
+      "1 tab po prn can cause drowsiness",
+      "1 tab po prn might cause drowsiness",
+      "1 tab po prn could cause drowsiness"
+    ];
+
+    for (const input of cases) {
+      const result = parseSig(input, { context: TAB_CONTEXT });
+      expect(result.fhir.asNeededBoolean).toBe(true);
+      expect(result.fhir.asNeededFor).toBeUndefined();
+      expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418639000");
+      expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("418639000");
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.longText).toBe("Take 1 tablet orally as needed. May cause drowsiness.");
+    }
+  });
+
   it("codes negated alcohol-advice tails after PRN reasons", () => {
     const result = parseSig("take 1 tab po prn pain, do not take with alcohol", {
       context: TAB_CONTEXT

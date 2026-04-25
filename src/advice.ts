@@ -1500,6 +1500,76 @@ function tryParseNoObjectInstruction(
   return undefined;
 }
 
+function tryParseEllipticalEffectInstruction(
+  sourceText: string,
+  span: TextRange,
+  context: AdviceParseContext,
+  sequenceIndex: number,
+  sequenceCount: number
+): AdviceFrame[] | undefined {
+  const words = normalizeWords(sourceText);
+  if (!words.length) {
+    return undefined;
+  }
+
+  const prefix = parseLeadingClauseFeatures(words);
+  if (!prefix || prefix.cursor >= words.length || prefix.polarity) {
+    return undefined;
+  }
+
+  switch (prefix.modality) {
+    case AdviceModality.May:
+    case AdviceModality.Can:
+    case AdviceModality.Might:
+    case AdviceModality.Could:
+      break;
+    default:
+      return undefined;
+  }
+
+  if (isKnownVerb(words[prefix.cursor]) || isRelationWord(words[prefix.cursor])) {
+    return undefined;
+  }
+
+  const objectText = words.slice(prefix.cursor).join(" ");
+  if (!objectText) {
+    return undefined;
+  }
+  const concept = findExactConcept(objectText);
+  if (!concept || concept.semanticClass !== "effect") {
+    return undefined;
+  }
+
+  return [
+    createFrame(
+      sourceText,
+      span,
+      deriveClauseForce(
+        sequenceCount,
+        context,
+        "cause",
+        "effect",
+        undefined,
+        prefix.modality
+      ),
+      "cause",
+      "effect",
+      [
+        createArgument(
+          mapSemanticClassToRole(concept.semanticClass),
+          objectText,
+          objectText,
+          concept.conceptId
+        )
+      ],
+      sequenceIndex,
+      undefined,
+      undefined,
+      prefix.modality
+    )
+  ];
+}
+
 function tryParseStyleInstruction(
   sourceText: string,
   span: TextRange,
@@ -1703,6 +1773,13 @@ function parseSequenceFrames(
       tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseStyleInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
+      tryParseEllipticalEffectInstruction(
+        segment.text,
+        segment.range,
+        context,
+        index,
+        sequenceSegments.length
+      ) ??
       tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length);
     if (!parsed) {
       return [];

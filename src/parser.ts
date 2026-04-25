@@ -6333,11 +6333,26 @@ function findStructuredPrnReasonCommaSeparator(
   return undefined;
 }
 
+function hasLeadingModalAdditionalInstruction(
+  sourceText: string,
+  defaultPredicate: string
+): boolean {
+  const trimmed = sourceText.trim();
+  if (!/^(may|can|might|could)\b/i.test(trimmed)) {
+    return false;
+  }
+  return hasStructuredAdditionalInstructionTail(trimmed, defaultPredicate);
+}
+
 function determinePrnReasonCutoff(
   tokens: Token[],
   sourceText: string,
   defaultPredicate: string
 ): number | undefined {
+  if (hasLeadingModalAdditionalInstruction(sourceText, defaultPredicate)) {
+    return 0;
+  }
+
   const separatorIndex =
     findPrnReasonSeparator(sourceText) ??
     findStructuredPrnReasonCommaSeparator(sourceText, defaultPredicate);
