@@ -131,6 +131,10 @@ const TIME_LIST_SEPARATORS = new Set([",", "and"]);
 const MEAL_ANCHOR_TOKENS = new Set(["pc", "ac"]);
 const BEFORE_AFTER_TOKENS = new Set(["before", "after"]);
 const GENERIC_ANCHOR_TOKENS = new Set(["on", "with"]);
+const EXPLICIT_SITE_PHRASE_ANCHOR_TOKENS = new Set([
+  "at",
+  ...GENERIC_ANCHOR_TOKENS
+]);
 const GENERIC_CONNECTOR_TOKENS = new Set(["per", "a", "every", "each"]);
 const PRN_INTRO_TOKENS = new Set(["for", "if", "when", "upon", "due", "to"]);
 
@@ -4670,6 +4674,39 @@ function collectSiteAbbreviation(
   return true;
 }
 
+function collectExplicitSitePhrase(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): boolean {
+  const lower = normalizeTokenLower(token);
+  if (!EXPLICIT_SITE_PHRASE_ANCHOR_TOKENS.has(lower)) {
+    return false;
+  }
+  const sitePhraseServices = buildSitePhraseServices(
+    context.state,
+    context.tokens,
+    context.options
+  );
+  const candidate = extractExplicitSiteCandidate(
+    context.tokens,
+    context.state.consumed,
+    index,
+    context.options,
+    sitePhraseServices
+  );
+  if (!candidate) {
+    return false;
+  }
+  return applySitePhraseCandidate(
+    context.state,
+    context.tokens,
+    candidate,
+    context.options,
+    (phrase) => maybeApplyRouteDescriptorFromPhrase(context, phrase)
+  );
+}
+
 function collectCountLimit(
   context: ClauseParseContext,
   index: number,
@@ -5133,6 +5170,7 @@ function parseScheduleTerm(
     applyGrammarTerminal(context, index, token, "schedule.comboEventTiming", collectComboEventTiming) ??
     applyGrammarTerminal(context, index, token, "schedule.pcAcAnchor", collectPcAcAnchor) ??
     applyGrammarTerminal(context, index, token, "schedule.beforeAfterAnchor", collectBeforeAfterAnchor) ??
+    applyGrammarTerminal(context, index, token, "site.anchorPhrase", collectExplicitSitePhrase) ??
     applyGrammarTerminal(context, index, token, "schedule.genericAnchor", collectGenericAnchor) ??
     applyGrammarTerminal(context, index, token, "schedule.customWhen", collectCustomWhen) ??
     applyGrammarTerminal(context, index, token, "schedule.eventTiming", collectEventTiming) ??
@@ -5255,6 +5293,7 @@ function parseCoreTerm(
  * Clause        ::= CoreSequence
  * CoreSequence  ::= CoreTerm*
  * CoreTerm      ::= ScheduleTerm
+ *                 | MethodTerm
  *                 | RouteTerm
  *                 | SiteTerm
  *                 | CountTerm

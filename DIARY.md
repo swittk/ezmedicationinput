@@ -1441,3 +1441,37 @@ Locked with parser regressions for:
 - `1 tab po once every 6 hours`
 - `1 tab po one time every 8 hours`
 - `1 tab po once q week`
+
+## 2026-04-25 Topical `at <site>` overlap fixed at grammar level
+
+Main-branch bug:
+- `apply before bed at lesion`
+- `apply twice daily at wound`
+
+were parsing the timing correctly but dropping the trailing site because `at`
+was being consumed by the generic schedule-anchor production before site
+resolution could claim it.
+
+Bad attempted shape:
+- hardcoded guard logic in the generic-anchor matcher to make it back off for
+  specific topical-site tails
+
+Actual fix:
+- added an explicit `site.anchorPhrase` grammar production for overlapping
+  anchor tokens (`at` / `on` / `with`)
+- placed that production ahead of `schedule.genericAnchor`
+- kept the broader grammar order unchanged
+
+Why this is cleaner:
+- the overlap is real lexical ambiguity between two productions
+- the fix belongs in production precedence, not in a literal lesion/wound check
+
+Verified outputs:
+- `apply before bed at lesion` -> `Apply the medication at bedtime to the lesion.`
+- `apply twice daily at wound` -> `Apply the medication twice daily to the wound.`
+
+Regression check:
+- narrower overlap handling does not regress nearby cases like:
+  - `1 drop to OS OD`
+  - `apply moisturizer to face every morning`
+  - `1 drop to OS q1/4h x4`

@@ -3754,6 +3754,24 @@ describe("topical workflow and timing", () => {
     expect(result.fhir.patientInstruction).toBe("rinse in the morning");
     expect(result.meta.normalized.patientInstruction).toBe("rinse in the morning");
   });
+
+  it("keeps explicit topical sites introduced by at after timing phrases", () => {
+    const bedtime = parseSig("apply before bed at lesion");
+    expect(bedtime.fhir.site?.text).toBe("lesion");
+    expect(bedtime.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
+    expect(bedtime.meta.leftoverText).toBeUndefined();
+    expect(bedtime.longText).toBe("Apply the medication at bedtime to the lesion.");
+
+    const twiceDaily = parseSig("apply twice daily at wound");
+    expect(twiceDaily.fhir.site?.text).toBe("wound");
+    expect(twiceDaily.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(twiceDaily.meta.leftoverText).toBeUndefined();
+    expect(twiceDaily.longText).toBe("Apply the medication twice daily to the wound.");
+  });
 });
 
 describe("topical product forms and workflow", () => {
