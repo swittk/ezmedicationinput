@@ -1980,6 +1980,7 @@ function collectPrnReasonText(
   }
 
   let canonicalPrefix: string | undefined;
+  let canonicalWithLocativeSite: string | undefined;
   if (reasonTokens.length > 0) {
     const suffixInfo = findTrailingPrnSiteSuffix(reasonObjects, state, options);
     if (suffixInfo?.tokens?.length) {
@@ -1996,6 +1997,12 @@ function collectPrnReasonText(
         .trim();
       if (prefixTokens) {
         canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+        const normalizedHead = normalizePrnReasonKey(canonicalPrefix);
+        if (normalizedHead) {
+          canonicalWithLocativeSite = normalizePrnReasonKey(
+            `${suffixInfo.canonical} ${normalizedHead}`
+          );
+        }
       }
     }
   }
@@ -2108,15 +2115,15 @@ function collectPrnReasonText(
   const text = sanitized || joined;
   state.asNeededReason = text;
   const normalized = text.toLowerCase();
-  const canonicalSource = canonicalPrefix || sanitized || text;
-  const canonical = canonicalSource
-    ? normalizePrnReasonKey(canonicalSource)
-    : normalizePrnReasonKey(text);
+  const canonicalSource = canonicalWithLocativeSite || canonicalPrefix || sanitized || text;
+  const canonical = canonicalSource ? normalizePrnReasonKey(canonicalSource) : normalizePrnReasonKey(text);
+  const headCanonical = canonicalPrefix ? normalizePrnReasonKey(canonicalPrefix) : undefined;
   state.prnReasonLookupRequest = {
     originalText: joined,
     text,
     normalized,
     canonical: canonical ?? "",
+    headCanonical,
     isProbe,
     inputText: state.input,
     sourceText,
@@ -6472,6 +6479,7 @@ function findPrnReasonSeparator(sourceText: string): number | undefined {
 interface PrnSiteSuffixDetection {
   tokens: Token[];
   startIndex: number;
+  canonical: string;
 }
 
 function findTrailingPrnSiteSuffix(
@@ -6555,28 +6563,53 @@ function findTrailingPrnSiteSuffix(
 
   return {
     tokens: siteHintTokens,
-    startIndex: suffixStart
+    startIndex: suffixStart,
+    canonical
   };
+}
+
+function collectPrnReasonLookupCanonicals(request: PrnReasonLookupRequest): string[] {
+  const canonicals: string[] = [];
+  const seen = new Set<string>();
+  const pushCanonical = (value: string | undefined) => {
+    const normalized = normalizePrnReasonKey(value ?? "");
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    canonicals.push(normalized);
+  };
+
+  pushCanonical(request.canonical);
+  pushCanonical(request.headCanonical);
+
+  return canonicals;
 }
 
 function lookupPrnReasonDefinition(
   map: Record<string, PrnReasonDefinition> | undefined,
-  canonical: string
+  canonical: string | string[]
 ): PrnReasonDefinition | undefined {
   if (!map) {
     return undefined;
   }
-  const direct = map[canonical];
-  if (direct) {
-    return direct;
+  const canonicals = Array.isArray(canonical)
+    ? canonical.map((value) => normalizePrnReasonKey(value)).filter(Boolean) as string[]
+    : [normalizePrnReasonKey(canonical)].filter(Boolean) as string[];
+  for (const key of canonicals) {
+    const direct = map[key];
+    if (direct) {
+      return direct;
+    }
   }
   for (const [key, definition] of objectEntries(map)) {
-    if (normalizePrnReasonKey(key) === canonical) {
+    const normalizedKey = normalizePrnReasonKey(key);
+    if (arrayIncludes(canonicals, normalizedKey)) {
       return definition;
     }
     if (definition.aliases) {
       for (const alias of definition.aliases) {
-        if (normalizePrnReasonKey(alias) === canonical) {
+        if (arrayIncludes(canonicals, normalizePrnReasonKey(alias))) {
           return definition;
         }
       }
@@ -6586,10 +6619,18 @@ function lookupPrnReasonDefinition(
 }
 
 function lookupDefaultPrnReasonDefinition(
-  canonical: string
+  canonical: string | string[]
 ): PrnReasonDefinition | undefined {
-  const normalized = normalizePrnReasonKey(canonical);
-  return normalized ? DEFAULT_PRN_REASON_DEFINITIONS[normalized] : undefined;
+  const canonicals = Array.isArray(canonical)
+    ? canonical.map((value) => normalizePrnReasonKey(value)).filter(Boolean) as string[]
+    : [normalizePrnReasonKey(canonical)].filter(Boolean) as string[];
+  for (const normalized of canonicals) {
+    const definition = DEFAULT_PRN_REASON_DEFINITIONS[normalized];
+    if (definition) {
+      return definition;
+    }
+  }
+  return undefined;
 }
 
 function inferSiteSpecificPrnReasonDefinition(
@@ -6630,7 +6671,7 @@ function pickPrnReasonSelection(
   if (!selections) {
     return undefined;
   }
-  const canonical = request.canonical;
+  const canonicals = collectPrnReasonLookupCanonicals(request);
   const normalizedText = normalizePrnReasonKey(request.text);
   const requestRange = request.range;
   for (const selection of toArray(selections)) {
@@ -6651,13 +6692,13 @@ function pickPrnReasonSelection(
       matched = true;
     }
     if (selection.canonical) {
-      if (normalizePrnReasonKey(selection.canonical) !== canonical) {
+      if (!arrayIncludes(canonicals, normalizePrnReasonKey(selection.canonical))) {
         continue;
       }
       matched = true;
     } else if (selection.text) {
       const normalizedSelection = normalizePrnReasonKey(selection.text);
-      if (normalizedSelection !== canonical && normalizedSelection !== normalizedText) {
+      if (!arrayIncludes(canonicals, normalizedSelection) && normalizedSelection !== normalizedText) {
         continue;
       }
       matched = true;
@@ -6701,6 +6742,7 @@ function createPrnReasonLookupRequestFromText(
     text,
     normalized,
     canonical: canonical ?? "",
+    headCanonical: undefined,
     isProbe: false,
     inputText: internal.input,
     sourceText: text,
@@ -6717,7 +6759,8 @@ function resolvePrnReasonDefinitionSyncForRequest(
   if (selection) {
     return selection;
   }
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const canonicals = collectPrnReasonLookupCanonicals(request);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
     return customDefinition;
   }
@@ -6736,7 +6779,7 @@ function resolvePrnReasonDefinitionSyncForRequest(
       return result;
     }
   }
-  return request.canonical ? DEFAULT_PRN_REASON_DEFINITIONS[request.canonical] : undefined;
+  return lookupDefaultPrnReasonDefinition(canonicals);
 }
 
 async function resolvePrnReasonDefinitionAsyncForRequest(
@@ -6748,7 +6791,8 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
   if (selection) {
     return selection;
   }
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const canonicals = collectPrnReasonLookupCanonicals(request);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
     return customDefinition;
   }
@@ -6762,7 +6806,7 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
       return result;
     }
   }
-  return request.canonical ? DEFAULT_PRN_REASON_DEFINITIONS[request.canonical] : undefined;
+  return lookupDefaultPrnReasonDefinition(canonicals);
 }
 
 function splitCoordinatedPrnReasonText(text: string): string[] | undefined {
@@ -6909,18 +6953,19 @@ function collectReasonSuggestionResult(
 function collectDefaultPrnReasonDefinitions(
   request: PrnReasonLookupRequest
 ): PrnReasonDefinition[] {
-  const canonical = request.canonical;
+  const canonicals = collectPrnReasonLookupCanonicals(request);
   const normalized = request.normalized;
   const seen = new Set<PrnReasonDefinition>();
   for (const entry of DEFAULT_PRN_REASON_ENTRIES) {
     if (!entry.canonical) {
       continue;
     }
-    if (entry.canonical === canonical) {
-      seen.add(entry.definition);
-      continue;
-    }
-    if (canonical && (entry.canonical.includes(canonical) || canonical.includes(entry.canonical))) {
+    if (
+      arrayIncludes(canonicals, entry.canonical) ||
+      canonicals.some((canonical) =>
+        entry.canonical.includes(canonical) || canonical.includes(entry.canonical)
+      )
+    ) {
       seen.add(entry.definition);
       continue;
     }
@@ -6929,7 +6974,7 @@ function collectDefaultPrnReasonDefinitions(
       if (!normalizedTerm) {
         continue;
       }
-      if (canonical && canonical.includes(normalizedTerm)) {
+      if (canonicals.some((canonical) => canonical.includes(normalizedTerm))) {
         seen.add(entry.definition);
         break;
       }
@@ -6957,9 +7002,9 @@ function runPrnReasonResolutionSync(
     return;
   }
 
-  const canonical = request.canonical;
+  const canonicals = collectPrnReasonLookupCanonicals(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 
@@ -6978,7 +7023,7 @@ function runPrnReasonResolutionSync(
     }
   }
 
-  const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  const defaultDefinition = lookupDefaultPrnReasonDefinition(canonicals);
   if (!resolution && inferredDefinition) {
     resolution = inferredDefinition;
   }
@@ -7041,9 +7086,9 @@ async function runPrnReasonResolutionAsync(
     return;
   }
 
-  const canonical = request.canonical;
+  const canonicals = collectPrnReasonLookupCanonicals(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonical);
+  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 
@@ -7057,7 +7102,7 @@ async function runPrnReasonResolutionAsync(
     }
   }
 
-  const defaultDefinition = canonical ? DEFAULT_PRN_REASON_DEFINITIONS[canonical] : undefined;
+  const defaultDefinition = lookupDefaultPrnReasonDefinition(canonicals);
   if (!resolution && inferredDefinition) {
     resolution = inferredDefinition;
   }

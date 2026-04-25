@@ -1622,7 +1622,13 @@ describe("parseSig core scenarios", () => {
       ["1 tab po prn nasal congestion", "68235000"],
       ["1 drop ou prn red eye", "703630003"],
       ["1 tab po prn dysuria", "49650001"],
-      ["1 tab po prn panic attack", "225624000"]
+      ["1 tab po prn panic attack", "225624000"],
+      ["apply prn acne", "88616000"],
+      ["apply prn hives", "126485001"],
+      ["1 tab po prn hemorrhoid", "70153002"],
+      ["insert 1 supp pr prn hemorrhoids", "70153002"],
+      ["1 tab po prn motion sickness", "37031009"],
+      ["apply prn mouth ulcer", "26284000"]
     ] as const;
 
     for (const [sig, code] of cases) {
@@ -1632,12 +1638,44 @@ describe("parseSig core scenarios", () => {
     }
   });
 
+  it("maps anatomy-normalized variants for existing ambulatory PRN reasons", () => {
+    const cases = [
+      ["1 tab po prn abdomen pain", "21522001"],
+      ["1 tab po prn pain at abdomen", "21522001"],
+      ["1 tab po prn ulcer at mouth", "26284000"],
+      ["1 tab po prn itching at scalp", "275921007"]
+    ] as const;
+
+    for (const [sig, code] of cases) {
+      const result = parseSig(sig, { context: TAB_CONTEXT });
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
+      expect(result.meta.canonical.clauses[0]?.prn?.reason?.coding?.code).toBe(code);
+    }
+  });
+
+  it("preserves locative PRN reason text across FHIR round-trips when using a generic symptom code", () => {
+    const cases = ["pain at hands", "pain at buttock", "pain at anus"] as const;
+
+    for (const reason of cases) {
+      const parsed = parseSig(`1 tab po prn ${reason}`, { context: TAB_CONTEXT });
+      const roundTripped = fromFhirDosage(parsed.fhir);
+
+      expect(parsed.fhir.asNeededFor?.[0]?.text).toBe(reason);
+      expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
+      expect(roundTripped.fhir.asNeededFor?.[0]?.text).toBe(reason);
+      expect(roundTripped.meta.normalized.prnReason?.text).toBe(reason);
+      expect(roundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
+    }
+  });
+
   it("accepts Thai aliases for expanded ambulatory PRN reasons", () => {
     const cases = [
       ["1 tab po prn ปวดหัว", "25064002", "ปวดศีรษะ"],
       ["1 tab po prn คัดจมูก", "68235000", "คัดจมูก"],
       ["1 drop ou prn ตาแดง", "703630003", "ตาแดง"],
-      ["1 tab po prn แสบขัด", "49650001", "แสบขัดเวลาปัสสาวะ"]
+      ["1 tab po prn แสบขัด", "49650001", "แสบขัดเวลาปัสสาวะ"],
+      ["apply prn สิว", "88616000", "สิว"],
+      ["1 tab po prn เมารถ", "37031009", "เมารถหรือเมาเรือ"]
     ] as const;
 
     for (const [sig, code, localizedReason] of cases) {

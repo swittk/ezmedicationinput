@@ -508,6 +508,7 @@ export interface PrnReasonLookupRequest {
   text: string;
   normalized: string;
   canonical: string;
+  headCanonical?: string;
   isProbe: boolean;
   inputText: string;
   sourceText?: string;

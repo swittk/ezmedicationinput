@@ -1475,3 +1475,66 @@ Regression check:
   - `1 drop to OS OD`
   - `apply moisturizer to face every morning`
   - `1 drop to OS q1/4h x4`
+
+## 2026-04-26 PRN ambulatory reason coverage expanded in terminology layer
+
+User-facing gaps:
+- `PRN acne`
+- anatomy-normalized variants like `abdomen pain`
+- several common ambulatory topical / GU / travel reasons were still missing
+
+Fix shape:
+- expanded `DEFAULT_PRN_REASON_SOURCE` rather than adding parser-side special
+  cases
+- kept the solution in the coded terminology dictionary where it belongs
+
+Added coded PRN coverage:
+- acne
+- eczema / atopic dermatitis
+- psoriasis
+- hives / urticaria
+- cold sore / herpes labialis
+- mouth ulcer / aphthous ulcer / canker sore
+- dandruff
+- scalp itching
+- hemorrhoids
+- vaginal dryness
+- motion sickness
+- dry mouth
+
+Alias normalization tightened:
+- `abdomen pain` now maps to the existing abdominal-pain concept instead of
+  missing just because the adjective/noun form changed
+
+Locked with parser regressions for:
+- `apply prn acne`
+- `apply prn hives`
+- `insert 1 supp pr prn hemorrhoids`
+- `1 tab po prn motion sickness`
+- `apply prn mouth ulcer`
+- `1 tab po prn abdomen pain`
+- Thai aliases like `สิว` and `เมารถ`
+
+## 2026-04-26 PRN `symptom at site` now keeps full text and prefers exact combined concepts
+
+Problem shape:
+- phrases like `ulcer at mouth` and `pain at abdomen` were grammatically a
+  head symptom plus a locative complement
+- the old behavior either missed the exact combined concept or collapsed back
+  to the generic symptom coding only
+
+Actual fix:
+- kept the original PRN text intact for FHIR `asNeededFor.text`
+- when PRN parsing sees a trailing locative site phrase, it now derives a
+  combined canonical from the parsed structure (`site + symptom-head`) before
+  falling back to the bare symptom head
+- this stays in the PRN grammar/analysis layer, not in ad hoc lookup hacks
+
+Result:
+- `ulcer at mouth` now resolves through the same mouth-ulcer concept as
+  `mouth ulcer`
+- `pain at abdomen` resolves through the abdominal-pain concept
+- generic locative forms like `pain at hands` / `pain at buttock` /
+  `pain at anus` keep the full phrase text across parse -> FHIR -> round-trip,
+  while still using the generic `Pain` code when no exact combined concept is
+  available

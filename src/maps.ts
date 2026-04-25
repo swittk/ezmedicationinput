@@ -1883,7 +1883,14 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
-    names: ["abdominal pain", "stomach pain", "stomachache"],
+    names: [
+      "abdominal pain",
+      "abdomen pain",
+      "abdomen ache",
+      "pain in abdomen",
+      "stomach pain",
+      "stomachache"
+    ],
     definition: {
       coding: { system: SNOMED_SYSTEM, code: "21522001", display: "Abdominal pain" },
       text: "Abdominal pain",
@@ -2041,6 +2048,68 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
+    names: [
+      "acne",
+      "acne vulgaris",
+      "pimple",
+      "pimples",
+      "breakout",
+      "breakouts",
+      "acne breakout",
+      "acne breakouts"
+    ],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "88616000",
+        display: "Acne vulgaris"
+      },
+      text: "Acne",
+      aliases: ["สิว"],
+      i18n: { th: "สิว" }
+    }
+  },
+  {
+    names: ["eczema", "eczema flare", "eczematous rash"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "43116000", display: "Eczema" },
+      text: "Eczema",
+      aliases: ["เอ็กซีมา", "ผื่นแพ้"],
+      i18n: { th: "ผื่นแพ้" }
+    }
+  },
+  {
+    names: ["atopic dermatitis", "atopic eczema"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "24079001",
+        display: "Atopic dermatitis"
+      },
+      text: "Atopic dermatitis",
+      aliases: ["ผื่นภูมิแพ้", "ภูมิแพ้ผิวหนัง", "แพ้ผิว", "ผิวแพ้"],
+      i18n: { th: "ผื่นภูมิแพ้" }
+    }
+  },
+  {
+    names: ["psoriasis", "psoriatic rash"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "9014002", display: "Psoriasis" },
+      text: "Psoriasis",
+      aliases: ["สะเก็ดเงิน"],
+      i18n: { th: "สะเก็ดเงิน" }
+    }
+  },
+  {
+    names: ["hives", "urticaria"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "126485001", display: "Urticaria" },
+      text: "Hives",
+      aliases: ["ลมพิษ", "ลมพิด"],
+      i18n: { th: "ลมพิษ" }
+    }
+  },
+  {
     names: ["rash", "skin rash", "skin eruption", "eruption of skin"],
     definition: {
       coding: {
@@ -2107,12 +2176,81 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
+    names: [
+      "cold sore",
+      "cold sores",
+      "herpes labialis",
+      "fever blister",
+      "fever blisters"
+    ],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "1475003",
+        display: "Herpes labialis"
+      },
+      text: "Cold sores",
+      aliases: ["เริมที่ปาก", "แผลเริมที่ปาก"],
+      i18n: { th: "เริมที่ปาก" }
+    }
+  },
+  {
+    names: [
+      "mouth ulcer",
+      "mouth ulcers",
+      "oral ulcer",
+      "oral ulcers",
+      "mouth sore",
+      "mouth sores",
+      "canker sore",
+      "canker sores",
+      "aphthous ulcer",
+      "aphthous ulcers"
+    ],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "26284000",
+        display: "Ulcer of mouth"
+      },
+      text: "Mouth ulcer",
+      aliases: ["แผลในปาก", "ร้อนใน"],
+      i18n: { th: "แผลในปาก" }
+    }
+  },
+  {
     names: ["dry skin", "xeroderma"],
     definition: {
       coding: { system: SNOMED_SYSTEM, code: "52475004", display: "Xeroderma" },
       text: "Dry skin",
       aliases: ["ผิวแห้ง"],
       i18n: { th: "ผิวแห้ง" }
+    }
+  },
+  {
+    names: ["dandruff", "scalp dandruff"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "400201008",
+        display: "Pityriasis capitis"
+      },
+      text: "Dandruff",
+      aliases: ["รังแค"],
+      i18n: { th: "รังแค" }
+    }
+  },
+  {
+    names: ["scalp itch", "scalp itching", "itching of scalp", "itchy scalp"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "275921007",
+        display: "Scalp itchy"
+      },
+      text: "Scalp itching",
+      aliases: ["คันหนังศีรษะ"],
+      i18n: { th: "คันหนังศีรษะ" }
     }
   },
   {
@@ -2148,6 +2286,15 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       text: "Urinary urgency",
       aliases: ["ปวดปัสสาวะรีบ", "ปวดปัสสาวะกะทันหัน"],
       i18n: { th: "ปวดปัสสาวะรีบ" }
+    }
+  },
+  {
+    names: ["hemorrhoids", "haemorrhoids", "hemorrhoid", "haemorrhoid", "piles"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "70153002", display: "Hemorrhoids" },
+      text: "Hemorrhoids",
+      aliases: ["ริดสีดวง", "ริดสีดวงทวาร"],
+      i18n: { th: "ริดสีดวง" }
     }
   },
   {
@@ -2187,6 +2334,19 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       text: "Vaginal itching",
       aliases: ["คันช่องคลอด"],
       i18n: { th: "คันช่องคลอด" }
+    }
+  },
+  {
+    names: ["vaginal dryness", "dry vagina"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "31908003",
+        display: "Vaginal dryness"
+      },
+      text: "Vaginal dryness",
+      aliases: ["ช่องคลอดแห้ง"],
+      i18n: { th: "ช่องคลอดแห้ง" }
     }
   },
   {
@@ -2306,6 +2466,28 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       text: "Poor concentration",
       aliases: ["สมาธิไม่ดี", "ขาดสมาธิ", "ไม่มีสมาธิ"],
       i18n: { th: "สมาธิไม่ดี" }
+    }
+  },
+  {
+    names: ["motion sickness", "travel sickness", "car sickness", "sea sickness", "seasickness"],
+    definition: {
+      coding: {
+        system: SNOMED_SYSTEM,
+        code: "37031009",
+        display: "Motion sickness"
+      },
+      text: "Motion sickness",
+      aliases: ["เมารถ", "เมาเรือ", "เมาเครื่องบิน"],
+      i18n: { th: "เมารถหรือเมาเรือ" }
+    }
+  },
+  {
+    names: ["dry mouth", "xerostomia"],
+    definition: {
+      coding: { system: SNOMED_SYSTEM, code: "162014002", display: "Dry mouth" },
+      text: "Dry mouth",
+      aliases: ["ปากแห้ง"],
+      i18n: { th: "ปากแห้ง" }
     }
   },
   {
