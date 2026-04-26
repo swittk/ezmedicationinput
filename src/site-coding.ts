@@ -262,6 +262,11 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
   } else if (internal.siteLookupRequest?.text) {
     internal.siteText = internal.siteLookupRequest.text;
   }
+  if (definition.spatialRelation) {
+    internal.siteSpatialRelation = definition.spatialRelation;
+  } else if (internal.siteLookupRequest?.spatialRelation) {
+    internal.siteSpatialRelation = internal.siteLookupRequest.spatialRelation;
+  }
 }
 
 function definitionToSuggestion(
@@ -326,4 +331,3 @@ function collectSuggestionResult(
     addSuggestionToMap(map, suggestion);
   }
 }
-

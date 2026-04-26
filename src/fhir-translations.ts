@@ -14,13 +14,44 @@ function normalizeLocaleKey(locale: string | undefined): string | undefined {
   return trimmed || undefined;
 }
 
-function cloneExtension(extension: FhirExtension): FhirExtension {
+export function cloneExtension(extension: FhirExtension): FhirExtension {
   return {
     url: extension.url,
     extension: extension.extension?.map(cloneExtension),
     valueCode: extension.valueCode,
-    valueString: extension.valueString
+    valueString: extension.valueString,
+    valueCoding: extension.valueCoding
+      ? {
+        system: extension.valueCoding.system,
+        code: extension.valueCoding.code,
+        display: extension.valueCoding.display,
+        _display: clonePrimitiveElement(extension.valueCoding._display),
+        i18n: extension.valueCoding.i18n,
+        extension: extension.valueCoding.extension?.map(cloneExtension)
+      }
+      : undefined,
+    valueCodeableConcept: extension.valueCodeableConcept
+      ? {
+        text: extension.valueCodeableConcept.text,
+        _text: clonePrimitiveElement(extension.valueCodeableConcept._text),
+        coding: extension.valueCodeableConcept.coding?.map((coding) => ({
+          system: coding.system,
+          code: coding.code,
+          display: coding.display,
+          _display: clonePrimitiveElement(coding._display),
+          i18n: coding.i18n,
+          extension: coding.extension?.map(cloneExtension)
+        })),
+        extension: extension.valueCodeableConcept.extension?.map(cloneExtension)
+      }
+      : undefined
   };
+}
+
+export function cloneExtensions(
+  extensions: FhirExtension[] | undefined
+): FhirExtension[] | undefined {
+  return extensions?.length ? extensions.map(cloneExtension) : undefined;
 }
 
 export function clonePrimitiveElement(

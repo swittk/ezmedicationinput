@@ -6,6 +6,7 @@ import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
   AdviceRelation,
+  BodySiteSpatialRelation,
   CanonicalDoseExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
@@ -695,8 +696,67 @@ function buildRoutePhrase(
   return `via ${text}`;
 }
 
+const ENGLISH_SPATIAL_PREPOSITIONS: Record<string, string> = {
+  above: "above",
+  around: "around",
+  behind: "behind",
+  below: "below",
+  beneath: "beneath",
+  between: "between",
+  inside: "in",
+  near: "near",
+  outside: "outside",
+  under: "under"
+};
+
+function renderSpatialSiteEnglish(
+  relation: BodySiteSpatialRelation | undefined,
+  grammar: RouteGrammar
+): string | undefined {
+  if (!relation?.relationText) {
+    return undefined;
+  }
+  const rawTarget = relation.targetText ?? relation.targetCoding?.display;
+  if (!rawTarget) {
+    return undefined;
+  }
+  const resolvedTarget = resolveBodySitePhrase(rawTarget);
+  const target = resolvedTarget?.englishObjectText ??
+    `the ${rawTarget.charAt(0).toLowerCase()}${rawTarget.slice(1)}`;
+  const preposition = ENGLISH_SPATIAL_PREPOSITIONS[relation.relationText];
+  if (preposition) {
+    return `${preposition} ${target}`;
+  }
+  switch (relation.relationText) {
+    case "back":
+    case "center":
+    case "centre":
+    case "front":
+    case "left side":
+    case "middle":
+    case "right side":
+    case "side":
+    case "both sides":
+    case "bilateral sides":
+    case "top":
+      return `${grammar.sitePreposition ?? "at"} ${
+        relation.relationText.startsWith("both") || relation.relationText.startsWith("bilateral")
+          ? relation.relationText
+          : `the ${relation.relationText}`
+      } of ${target}`.trim();
+    default:
+      return undefined;
+  }
+}
+
 function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string | undefined {
   let text = clause.site?.text?.trim();
+  if (!text) {
+    const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
+    if (spatialSite) {
+      return spatialSite;
+    }
+  }
   if (!text) {
     const display = clause.site?.coding?.display?.trim();
     if (display) {

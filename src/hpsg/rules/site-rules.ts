@@ -271,6 +271,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               text: displayText,
               source: "text",
               coding: resolved?.coding,
+              spatialRelation: resolved?.spatialRelation,
               lookupRequest: {
                 originalText: sourceText,
                 text: sourceText,
@@ -279,7 +280,8 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 isProbe,
                 inputText: context.state.input,
                 sourceText: range ? context.state.input.slice(range.start, range.end) : sourceText,
-                range
+                range,
+                spatialRelation: resolved?.spatialRelation
               }
             }
           },
@@ -342,6 +344,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 text: displayText,
                 source: "text",
                 coding: resolved.coding,
+                spatialRelation: resolved.spatialRelation,
                 lookupRequest: {
                   originalText: sourceText,
                   text: sourceText,
@@ -350,7 +353,8 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                   isProbe: false,
                   inputText: context.state.input,
                   sourceText,
-                  range: rangeFromTokens(tokens)
+                  range: rangeFromTokens(tokens),
+                  spatialRelation: resolved.spatialRelation
                 }
               }
             },

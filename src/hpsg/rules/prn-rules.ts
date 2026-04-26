@@ -186,6 +186,7 @@ function createPrnReasonRequest(
     effectiveRange = { start, end };
   }
   const site = siteText ? resolveBodySitePhrase(siteText, context.options?.siteCodeMap) : undefined;
+  const spatialTargetCoding = site?.spatialRelation?.targetCoding;
   const canonical = normalizePrnReasonKey(text);
   const headCanonical = headText ? normalizeLocatedReasonHead(headText) : undefined;
   return {
@@ -200,7 +201,14 @@ function createPrnReasonRequest(
       locativeSiteCanonical: siteText
         ? site?.canonical ?? normalizeBodySiteKey(siteText)
         : undefined,
-      locativeSiteCoding: site?.coding,
+      locativeSiteCoding: site?.coding ?? (spatialTargetCoding?.code
+        ? {
+          code: spatialTargetCoding.code,
+          display: spatialTargetCoding.display,
+          system: spatialTargetCoding.system
+        }
+        : undefined),
+      locativeSiteSpatialRelation: site?.spatialRelation,
       isProbe,
       inputText: context.state.input,
       sourceText: effectiveRange ? context.state.input.slice(effectiveRange.start, effectiveRange.end) : text,
@@ -402,6 +410,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                     headCanonical: undefined,
                     locativeSiteCanonical: undefined,
                     locativeSiteCoding: undefined,
+                    locativeSiteSpatialRelation: undefined,
                     isProbe: false,
                     inputText: context.state.input,
                     sourceText: range ? context.state.input.slice(range.start, range.end) : reasonText,

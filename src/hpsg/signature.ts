@@ -1,6 +1,7 @@
 import {
   CanonicalDoseRange,
   CanonicalAdditionalInstructionExpr,
+  BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
@@ -47,6 +48,7 @@ export interface HpsgSiteFeature {
   text?: string;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   coding?: FhirCoding;
+  spatialRelation?: BodySiteSpatialRelation;
   lookupRequest?: SiteCodeLookupRequest;
 }
 

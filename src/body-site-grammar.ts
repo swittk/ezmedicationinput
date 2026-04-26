@@ -1,6 +1,6 @@
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { objectEntries } from "./utils/object";
-import { BodySiteDefinition, FhirCoding, RouteCode } from "./types";
+import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
   BODY_SITE_ADJECTIVE_SUFFIXES,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
@@ -9,6 +9,8 @@ import {
   BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS,
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
+  BODY_SITE_PARTITIVE_MODIFIERS,
+  BODY_SITE_SPATIAL_RELATION_CODINGS,
   NASAL_SITE_WORDS,
   OPHTHALMIC_SITE_WORDS,
   OTIC_SITE_WORDS
@@ -48,7 +50,8 @@ export type BodySiteLocativeRelation =
   | "beneath"
   | "near"
   | "outside"
-  | "inside";
+  | "inside"
+  | "between";
 
 export interface BodySiteNominalFeatures {
   kind: "nominal";
@@ -61,6 +64,7 @@ export interface BodySiteNominalFeatures {
 export interface BodySitePartitiveFeatures {
   kind: "partitive";
   part: string;
+  relationKey?: string;
   whole: BodySiteNominalFeatures;
 }
 
@@ -80,6 +84,7 @@ export interface ResolvedBodySitePhrase {
   canonical: string;
   displayText: string;
   coding?: FhirCoding;
+  spatialRelation?: BodySiteSpatialRelation;
   definition?: BodySiteDefinition;
   features: BodySiteFeatureStructure;
   englishObjectText: string;
@@ -124,6 +129,30 @@ function buildBodySiteCoding(
     display: coding.display,
     system: coding.system ?? SNOMED_SYSTEM
   };
+}
+
+function cloneBodySiteCode(
+  coding: { code?: string; display?: string; system?: string; i18n?: Record<string, string> } | undefined
+): BodySiteCode | undefined {
+  if (!coding?.code) {
+    return undefined;
+  }
+  return {
+    code: coding.code,
+    display: coding.display,
+    system: coding.system ?? SNOMED_SYSTEM,
+    i18n: coding.i18n
+  };
+}
+
+function lookupDefinitionForCanonical(
+  canonical: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): BodySiteDefinition | undefined {
+  return (
+    lookupBodySiteDefinition(customSiteMap, canonical) ??
+    DEFAULT_BODY_SITE_SNOMED[canonical]
+  );
 }
 
 function isAdjectivalSitePhrase(phrase: string): boolean {
@@ -303,41 +332,62 @@ function normalizeSiteDisplayText(
 function buildNominalFeatures(
   text: string,
   canonical: string,
-  coding?: FhirCoding
+  coding?: FhirCoding,
+  customSiteMap?: Record<string, BodySiteDefinition>
 ): BodySiteNominalFeatures {
   const normalized = normalizeBodySiteKey(text);
   const firstWord = normalized.split(/\s+/)[0];
+  const definition = lookupDefinitionForCanonical(canonical, customSiteMap);
   return {
     kind: "nominal",
     text,
     canonical,
-    coding,
+    coding: coding ?? buildBodySiteCoding(definition),
     article: firstWord && BODY_SITE_BARE_NOMINAL_PREFIXES.has(firstWord) ? "bare" : "definite"
   };
 }
 
 function parseBodySiteFeatures(
   text: string,
-  coding?: FhirCoding
+  coding?: FhirCoding,
+  customSiteMap?: Record<string, BodySiteDefinition>
 ): BodySiteFeatureStructure {
   const normalized = normalizeBodySiteKey(text);
   if (!normalized) {
-    return buildNominalFeatures(text, normalized, coding);
+    return buildNominalFeatures(text, normalized, coding, customSiteMap);
   }
   const words = normalized.split(/\s+/).filter((word) => word.length > 0);
   if (!words.length) {
-    return buildNominalFeatures(text, normalized, coding);
+    return buildNominalFeatures(text, normalized, coding, customSiteMap);
   }
 
   const firstWord = words[0];
   if (firstWord && BODY_SITE_LOCATIVE_RELATIONS.has(firstWord) && words.length > 1) {
     const targetText = words.slice(1).join(" ");
-    const targetFeatures = parseBodySiteFeatures(targetText);
+    const targetFeatures = parseBodySiteFeatures(targetText, undefined, customSiteMap);
     return {
       kind: "locative",
       relation: firstWord as BodySiteLocativeRelation,
       target: targetFeatures.kind === "locative"
-        ? buildNominalFeatures(targetText, normalizeBodySiteKey(targetText))
+        ? buildNominalFeatures(targetText, normalizeBodySiteKey(targetText), undefined, customSiteMap)
+        : targetFeatures
+    };
+  }
+
+  if (
+    firstWord &&
+    (firstWord === "area" || firstWord === "region") &&
+    words[1] !== undefined &&
+    BODY_SITE_LOCATIVE_RELATIONS.has(words[1]) &&
+    words.length > 2
+  ) {
+    const targetText = words.slice(2).join(" ");
+    const targetFeatures = parseBodySiteFeatures(targetText, undefined, customSiteMap);
+    return {
+      kind: "locative",
+      relation: words[1] as BodySiteLocativeRelation,
+      target: targetFeatures.kind === "locative"
+        ? buildNominalFeatures(targetText, normalizeBodySiteKey(targetText), undefined, customSiteMap)
         : targetFeatures
     };
   }
@@ -353,11 +403,31 @@ function parseBodySiteFeatures(
     return {
       kind: "partitive",
       part: firstWord,
-      whole: buildNominalFeatures(wholeText, normalizeBodySiteKey(wholeText))
+      relationKey: firstWord,
+      whole: buildNominalFeatures(wholeText, normalizeBodySiteKey(wholeText), undefined, customSiteMap)
     };
   }
 
-  return buildNominalFeatures(text, normalized, coding);
+  if (
+    words.length > 3 &&
+    firstWord &&
+    BODY_SITE_PARTITIVE_MODIFIERS.has(firstWord) &&
+    words[1] !== undefined &&
+    BODY_SITE_PARTITIVE_HEADS.has(words[1]) &&
+    words[2] !== undefined &&
+    BODY_SITE_PARTITIVE_CONNECTORS.has(words[2])
+  ) {
+    const head = words[1] === "sides" ? "side" : words[1];
+    const wholeText = words.slice(3).join(" ");
+    return {
+      kind: "partitive",
+      part: `${firstWord} ${words[1]}`,
+      relationKey: head,
+      whole: buildNominalFeatures(wholeText, normalizeBodySiteKey(wholeText), undefined, customSiteMap)
+    };
+  }
+
+  return buildNominalFeatures(text, normalized, coding, customSiteMap);
 }
 
 function renderNominalObject(features: BodySiteNominalFeatures): string {
@@ -371,9 +441,80 @@ function renderBodySiteObject(
     case "locative":
       return `${BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS.get(features.relation) ?? features.relation} ${renderBodySiteObject(features.target)}`;
     case "partitive":
-      return `the ${features.part} of ${renderNominalObject(features.whole)}`;
+      return `${
+        features.part.startsWith("both") || features.part.startsWith("bilateral")
+          ? features.part
+          : `the ${features.part}`
+      } of ${renderNominalObject(features.whole)}`;
     case "nominal":
       return renderNominalObject(features);
+  }
+}
+
+function featureDisplayText(features: BodySiteFeatureStructure): string {
+  switch (features.kind) {
+    case "locative":
+      return `${features.relation} ${featureDisplayText(features.target)}`;
+    case "partitive":
+      return `${features.part} of ${features.whole.text}`;
+    case "nominal":
+      return features.text;
+  }
+}
+
+function resolveFeatureCoding(
+  features: BodySiteFeatureStructure,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): BodySiteCode | undefined {
+  const direct = lookupDefinitionForCanonical(
+    normalizeBodySiteKey(featureDisplayText(features)),
+    customSiteMap
+  );
+  const directCoding = cloneBodySiteCode(direct?.coding);
+  if (directCoding) {
+    return directCoding;
+  }
+  switch (features.kind) {
+    case "locative":
+      return resolveFeatureCoding(features.target, customSiteMap);
+    case "partitive":
+      return cloneBodySiteCode(features.whole.coding);
+    case "nominal":
+      return cloneBodySiteCode(features.coding);
+  }
+}
+
+function buildSpatialRelation(
+  features: BodySiteFeatureStructure,
+  sourceText: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): BodySiteSpatialRelation | undefined {
+  switch (features.kind) {
+    case "locative": {
+      const relationCoding = BODY_SITE_SPATIAL_RELATION_CODINGS.get(features.relation);
+      return {
+        relationText: features.relation,
+        relationCoding,
+        targetText: featureDisplayText(features.target),
+        targetCoding: resolveFeatureCoding(features.target, customSiteMap),
+        sourceText
+      };
+    }
+    case "partitive": {
+      const relationCoding = BODY_SITE_SPATIAL_RELATION_CODINGS.get(features.relationKey ?? features.part);
+      if (!relationCoding) {
+        return undefined;
+      }
+      return {
+        relationText: features.part,
+        relationCoding,
+        targetText: features.whole.text,
+        targetCoding: cloneBodySiteCode(features.whole.coding),
+        sourceText
+      };
+    }
+    case "nominal":
+      return undefined;
   }
 }
 
@@ -433,13 +574,17 @@ export function resolveBodySitePhrase(
     DEFAULT_BODY_SITE_SNOMED[canonical];
   const coding = buildBodySiteCoding(definition);
   const finalDisplayText = definition?.text ?? displayText;
-  const features = parseBodySiteFeatures(finalDisplayText, coding);
+  const features = parseBodySiteFeatures(finalDisplayText, coding, customSiteMap);
+  const spatialRelation =
+    definition?.spatialRelation ??
+    buildSpatialRelation(features, finalDisplayText, customSiteMap);
 
   return {
     lookupCanonical,
     canonical: normalizeBodySiteKey(finalDisplayText) || canonical,
     displayText: finalDisplayText,
     coding,
+    spatialRelation,
     definition,
     features,
     englishObjectText: renderBodySiteObject(features),

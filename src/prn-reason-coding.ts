@@ -1,8 +1,9 @@
-import { resolveBodySitePhrase } from "./body-site-grammar";
+import { collectParsedBodySiteCandidates } from "./body-site-resolution";
+import { cloneExtensions } from "./fhir-translations";
+import { buildSnomedFindingSiteCoding } from "./snomed-postcoordination";
 import {
   DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_PRN_REASON_ENTRIES,
-  normalizeBodySiteKey,
   normalizePrnReasonKey
 } from "./maps";
 import { ParserState } from "./parser-state";
@@ -91,25 +92,24 @@ function buildPostcoordinatedPrnReasonDefinition(
     !definition?.coding?.code ||
     !request.headCanonical ||
     request.canonical === request.headCanonical ||
-    !request.locativeSiteCoding?.code ||
-    definition.coding.code.indexOf(":363698007=") >= 0
+    !request.locativeSiteCoding?.code
   ) {
     return definition;
   }
 
-  const focusSystem = definition.coding.system ?? SNOMED_SYSTEM;
-  const siteSystem = request.locativeSiteCoding.system ?? SNOMED_SYSTEM;
-  if (focusSystem !== SNOMED_SYSTEM || siteSystem !== SNOMED_SYSTEM) {
+  const coding = buildSnomedFindingSiteCoding({
+    focusCoding: definition.coding,
+    siteCoding: request.locativeSiteCoding,
+    display: request.text,
+    spatialRelation: request.locativeSiteSpatialRelation
+  });
+  if (!coding) {
     return definition;
   }
 
   return {
     ...definition,
-    coding: {
-      system: SNOMED_SYSTEM,
-      code: `${definition.coding.code}:363698007=${request.locativeSiteCoding.code}`,
-      display: request.text
-    }
+    coding
   };
 }
 
@@ -169,82 +169,37 @@ function inferSiteSpecificPrnReasonDefinition(
     return undefined;
   }
 
-  const normalizedSiteText = normalizeBodySiteKey(internal.siteText ?? "");
-  const siteCodingDisplay = internal.siteCoding?.display;
-  const normalizedSiteCodingDisplay = siteCodingDisplay
-    ? normalizeBodySiteKey(siteCodingDisplay)
-    : "";
+  const siteCandidates = collectParsedBodySiteCandidates(internal);
   const isOcularSite =
     (internal.routeCode !== undefined && OPHTHALMIC_ROUTE_CODES.has(internal.routeCode)) ||
-    normalizedSiteText.includes("eye") ||
-    normalizedSiteCodingDisplay.includes("eye");
+    siteCandidates.normalizedSiteText.includes("eye") ||
+    siteCandidates.normalizedSiteCodingDisplay.includes("eye");
   if (isOcularSite) {
     return lookupDefaultPrnReasonDefinition("eye itch");
   }
 
   const isLesionSite =
-    normalizedSiteText.includes("lesion") || normalizedSiteCodingDisplay.includes("lesion");
+    siteCandidates.normalizedSiteText.includes("lesion") ||
+    siteCandidates.normalizedSiteCodingDisplay.includes("lesion");
   if (isLesionSite) {
     return lookupDefaultPrnReasonDefinition("lesion itch");
   }
 
-  const siteCanonicalCandidates: string[] = [];
-  const siteCodingCandidates: FhirCoding[] = [];
-  const pushSiteCanonical = (value: string | undefined) => {
-    const normalized = normalizeBodySiteKey(value ?? "");
-    if (!normalized || arrayIncludes(siteCanonicalCandidates, normalized)) {
-      return;
-    }
-    siteCanonicalCandidates.push(normalized);
-  };
-  const pushResolvedSite = (value: string | undefined) => {
-    const resolvedSite = value
-      ? resolveBodySitePhrase(value, undefined)
-      : undefined;
-    if (!resolvedSite) {
-      return;
-    }
-    pushSiteCanonical(resolvedSite.canonical);
-    const coding = resolvedSite.coding;
-    if (
-      coding?.code &&
-      !siteCodingCandidates.some(
-        (candidate) =>
-          candidate.code === coding.code &&
-          (candidate.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)
-      )
-    ) {
-      siteCodingCandidates.push(coding);
-    }
-  };
-  pushResolvedSite(internal.siteLookupRequest?.text);
-  pushResolvedSite(internal.siteText);
-  pushSiteCanonical(internal.siteLookupRequest?.canonical);
-  pushSiteCanonical(internal.siteText);
-  pushSiteCanonical(siteCodingDisplay);
-  if (internal.siteCoding?.code) {
-    siteCodingCandidates.push({
-      code: internal.siteCoding.code,
-      display: internal.siteCoding.display,
-      system: internal.siteCoding.system ?? SNOMED_SYSTEM
-    });
-  }
-
-  for (const siteCanonical of siteCanonicalCandidates) {
+  for (const siteCanonical of siteCandidates.canonicals) {
     const exactDefinition = lookupDefaultPrnReasonDefinition(`${siteCanonical} itch`);
     if (exactDefinition) {
       return exactDefinition;
     }
   }
 
-  const siteCoding = siteCodingCandidates[0];
+  const siteCoding = siteCandidates.codings[0];
   if (!siteCoding?.code) {
     return undefined;
   }
   const syntheticRequest: PrnReasonLookupRequest = {
     ...request,
     headCanonical: normalizePrnReasonKey("itch"),
-    locativeSiteCanonical: siteCanonicalCandidates[0],
+    locativeSiteCanonical: siteCandidates.canonicals[0],
     locativeSiteCoding: siteCoding
   };
   return buildPostcoordinatedPrnReasonDefinition(
@@ -313,6 +268,7 @@ function applyPrnReasonDefinition(
       code: coding.code,
       display: coding.display,
       system: coding.system ?? SNOMED_SYSTEM,
+      extension: cloneExtensions(coding.extension),
       i18n: definition?.i18n
     }
     : undefined;
@@ -485,6 +441,7 @@ function maybeApplyCoordinatedPrnReasonsSync(
           code: definition.coding.code,
           display: definition.coding.display,
           system: definition.coding.system ?? SNOMED_SYSTEM,
+          extension: cloneExtensions(definition.coding.extension),
           i18n: definition.i18n
         }
         : undefined
@@ -516,6 +473,7 @@ async function maybeApplyCoordinatedPrnReasonsAsync(
           code: definition.coding.code,
           display: definition.coding.display,
           system: definition.coding.system ?? SNOMED_SYSTEM,
+          extension: cloneExtensions(definition.coding.extension),
           i18n: definition.i18n
         }
         : undefined
@@ -549,6 +507,7 @@ function codingFromPrnDefinition(
       code: coding.code,
       display: coding.display,
       system: coding.system ?? SNOMED_SYSTEM,
+      extension: cloneExtensions(coding.extension),
       i18n: definition?.i18n
     }
     : undefined;
@@ -639,6 +598,7 @@ function runMultiplePrnReasonResolutionSync(
     const definition = resolvePrnReasonDefinitionSyncForRequest(internal, request, options);
     reasons.push({
       text: request.text,
+      spatialRelation: request.locativeSiteSpatialRelation,
       coding: codingFromPrnDefinition(definition)
     });
     collectSuggestionsForRequestSync(internal, request, definition, options);
@@ -664,6 +624,7 @@ async function runMultiplePrnReasonResolutionAsync(
     const definition = await resolvePrnReasonDefinitionAsyncForRequest(internal, request, options);
     reasons.push({
       text: request.text,
+      spatialRelation: request.locativeSiteSpatialRelation,
       coding: codingFromPrnDefinition(definition)
     });
     await collectSuggestionsForRequestAsync(internal, request, definition, options);
@@ -685,7 +646,8 @@ function definitionToPrnSuggestion(
       ? {
         code: definition.coding.code,
         display: definition.coding.display,
-        system: definition.coding.system ?? SNOMED_SYSTEM
+        system: definition.coding.system ?? SNOMED_SYSTEM,
+        extension: cloneExtensions(definition.coding.extension)
       }
       : undefined,
     text: definition.text ?? definition.coding?.display
@@ -839,6 +801,9 @@ function runPrnReasonResolutionSync(
 
   if (resolution) {
     applyPrnReasonDefinition(internal, resolution);
+    if (request.locativeSiteSpatialRelation && internal.primaryClause.prn?.reason) {
+      internal.primaryClause.prn.reason.spatialRelation = request.locativeSiteSpatialRelation;
+    }
   } else {
     internal.asNeededReasonCoding = undefined;
   }
@@ -941,6 +906,9 @@ async function runPrnReasonResolutionAsync(
 
   if (resolution) {
     applyPrnReasonDefinition(internal, resolution);
+    if (request.locativeSiteSpatialRelation && internal.primaryClause.prn?.reason) {
+      internal.primaryClause.prn.reason.spatialRelation = request.locativeSiteSpatialRelation;
+    }
   } else {
     internal.asNeededReasonCoding = undefined;
   }

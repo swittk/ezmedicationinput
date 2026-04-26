@@ -1,4 +1,4 @@
-import { EventTiming, RouteCode } from "../types";
+import { EventTiming, FhirCoding, RouteCode } from "../types";
 import source from "./lexical-classes.json";
 
 type MealRelation = "before" | "after" | "with";
@@ -94,6 +94,16 @@ function bodySiteFeatureScoreBonus(
   return map;
 }
 
+function codingRecord(record: Record<string, FhirCoding>): Map<string, FhirCoding> {
+  const map = new Map<string, FhirCoding>();
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      map.set(key, { ...record[key] });
+    }
+  }
+  return map;
+}
+
 export const SITE_ANCHORS = setOf(source.siteAnchors);
 export const SITE_SELF_DISPLAY_ANCHORS = setOf(source.siteSelfDisplayAnchors);
 export const SITE_FILLERS = setOf(source.siteFillers);
@@ -101,7 +111,11 @@ export const BODY_SITE_LOCATIVE_RELATIONS = setOf(source.bodySiteLocativeRelatio
 export const BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS = new Map<string, string>(
   stringEntries(source.bodySiteLocativeRenderPrepositions)
 );
+export const BODY_SITE_SPATIAL_RELATION_CODINGS = codingRecord(
+  source.bodySiteSpatialRelationCodings
+);
 export const BODY_SITE_PARTITIVE_HEADS = setOf(source.bodySitePartitiveHeads);
+export const BODY_SITE_PARTITIVE_MODIFIERS = setOf(source.bodySitePartitiveModifiers);
 export const BODY_SITE_PARTITIVE_CONNECTORS = setOf(source.bodySitePartitiveConnectors);
 export const BODY_SITE_BARE_NOMINAL_PREFIXES = setOf(source.bodySiteBareNominalPrefixes);
 export const OTIC_SITE_WORDS = setOf(source.oticSiteWords);

@@ -527,6 +527,10 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "78791008", display: "Right hand" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["finger", "fingers"],
+      definition: { coding: { code: "7569003", display: "Finger structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
       names: ["back of hand", "dorsum of hand"],
       definition: {
         coding: { code: "731077003", display: "Entire dorsum of hand" },

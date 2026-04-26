@@ -1,7 +1,8 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
-import { clonePrimitiveElement } from "./fhir-translations";
+import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
+  BodySiteSpatialRelation,
   CanonicalDoseRange,
   CanonicalPrnReasonExpr,
   CanonicalSigClause,
@@ -333,11 +334,13 @@ export class ParserState {
     for (const reason of value) {
       reasons.push({
         text: reason.text,
+        spatialRelation: reason.spatialRelation,
         coding: reason.coding
           ? {
             code: reason.coding.code,
             display: reason.coding.display,
             system: reason.coding.system,
+            extension: cloneExtensions(reason.coding.extension),
             _display: clonePrimitiveElement(reason.coding._display),
             i18n: reason.coding.i18n
           }
@@ -371,6 +374,7 @@ export class ParserState {
         code: value.code,
         display: value.display,
         system: value.system,
+        extension: cloneExtensions(value.extension),
         _display: clonePrimitiveElement(value._display),
         i18n: value.i18n
       }
@@ -413,6 +417,43 @@ export class ParserState {
         i18n: value.i18n
       }
       : undefined;
+  }
+
+  get siteSpatialRelation(): BodySiteSpatialRelation | undefined {
+    return this.clause.site?.spatialRelation;
+  }
+
+  set siteSpatialRelation(value: BodySiteSpatialRelation | undefined) {
+    if (value === undefined) {
+      if (this.clause.site) {
+        delete this.clause.site.spatialRelation;
+        this.cleanupSite();
+      }
+      return;
+    }
+    this.ensureSite().spatialRelation = {
+      relationText: value.relationText,
+      relationCoding: value.relationCoding
+        ? {
+          code: value.relationCoding.code,
+          display: value.relationCoding.display,
+          system: value.relationCoding.system,
+          extension: cloneExtensions(value.relationCoding.extension),
+          _display: clonePrimitiveElement(value.relationCoding._display),
+          i18n: value.relationCoding.i18n
+        }
+        : undefined,
+      targetText: value.targetText,
+      targetCoding: value.targetCoding
+        ? {
+          code: value.targetCoding.code,
+          display: value.targetCoding.display,
+          system: value.targetCoding.system,
+          i18n: value.targetCoding.i18n
+        }
+        : undefined,
+      sourceText: value.sourceText
+    };
   }
 
   get additionalInstructions(): CanonicalAdditionalInstructionExpr[] {
@@ -504,6 +545,7 @@ export class ParserState {
     if (
       site.text === undefined &&
       site.coding === undefined &&
+      site.spatialRelation === undefined &&
       site.source === undefined &&
       site.inferred === undefined &&
       site.evidence === undefined

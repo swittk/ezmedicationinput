@@ -13,6 +13,8 @@ import {
   tokenize
 } from "./parser";
 import { parseSigSegments } from "./hpsg/segmenter";
+import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
+import { cloneExtensions } from "./fhir-translations";
 import {
   BodySiteCode,
   FhirDosage,
@@ -629,15 +631,16 @@ function getPrimaryClause(
 }
 
 function cloneCoding(
-  coding?: { code?: string; display?: string; system?: string }
-): { code?: string; display?: string; system?: string } | undefined {
+  coding?: { code?: string; display?: string; system?: string; extension?: ReturnType<typeof cloneExtensions> }
+): { code?: string; display?: string; system?: string; extension?: ReturnType<typeof cloneExtensions> } | undefined {
   if (!coding?.code && !coding?.display && !coding?.system) {
     return undefined;
   }
   return {
     code: coding.code,
     display: coding.display,
-    system: coding.system
+    system: coding.system,
+    extension: cloneExtensions(coding.extension)
   };
 }
 
@@ -670,10 +673,11 @@ function buildNormalizedMetaFromClause(
     route: clause.route?.code,
     unit: clause.dose?.unit,
     site:
-      clause.site?.text || clause.site?.coding?.code
+      clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation
         ? {
           text: clause.site?.text,
-          coding: cloneBodySiteCoding(clause.site?.coding)
+          coding: cloneBodySiteCoding(clause.site?.coding),
+          spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation)
         }
         : undefined,
     method:
@@ -688,13 +692,15 @@ function buildNormalizedMetaFromClause(
       clause.prn?.reason?.text || clause.prn?.reason?.coding?.code
         ? {
           text: clause.prn?.reason?.text,
-          coding: cloneCoding(clause.prn?.reason?.coding)
+          coding: cloneCoding(clause.prn?.reason?.coding),
+          spatialRelation: cloneBodySiteSpatialRelation(clause.prn?.reason?.spatialRelation)
         }
         : undefined,
     prnReasons: clause.prn?.reasons?.length
       ? clause.prn.reasons.map((reason) => ({
         text: reason.text,
-        coding: cloneCoding(reason.coding)
+        coding: cloneCoding(reason.coding),
+        spatialRelation: cloneBodySiteSpatialRelation(reason.spatialRelation)
       }))
       : undefined,
     additionalInstructions

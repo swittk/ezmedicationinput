@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fromFhirDosage, formatSig, parseSig, parseSigAsync } from "../src/index";
+import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
+import { SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE } from "../src/snomed";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_UNIT_SYNONYMS,
@@ -19,6 +21,8 @@ import { normalizeDosageForm } from "../src/context";
 const TAB_CONTEXT = { dosageForm: "tab" } as const;
 const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
+const findingSiteCode = (focus: string, site: string) =>
+  `${focus}:${SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE}=${site}`;
 
 function expectPrimitiveTranslation(
   element: { extension?: Array<{ url: string; extension?: Array<{ url: string; valueCode?: string; valueString?: string }> }> } | undefined,
@@ -1354,7 +1358,7 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("irritation at rectum");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
-      code: "257553007:363698007=34402009",
+      code: findingSiteCode("257553007", "34402009"),
       display: "irritation at rectum"
     });
     expect(result.fhir.site?.text).toBe("rectum");
@@ -1364,7 +1368,7 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.normalized.prnReason?.text).toBe("irritation at rectum");
     expect(result.meta.normalized.prnReason?.coding).toEqual({
       system: "http://snomed.info/sct",
-      code: "257553007:363698007=34402009",
+      code: findingSiteCode("257553007", "34402009"),
       display: "irritation at rectum"
     });
     expect(result.longText.toLowerCase()).toContain("irritation at rectum");
@@ -1658,9 +1662,9 @@ describe("parseSig core scenarios", () => {
 
   it("preserves locative PRN reason text across FHIR round-trips when using a generic symptom code", () => {
     const cases = [
-      ["pain at hands", "22253000:363698007=85562004"],
-      ["pain at buttock", "22253000:363698007=46862004"],
-      ["pain at anus", "22253000:363698007=181262009"]
+      ["pain at hands", findingSiteCode("22253000", "85562004")],
+      ["pain at buttock", findingSiteCode("22253000", "46862004")],
+      ["pain at anus", findingSiteCode("22253000", "181262009")]
     ] as const;
 
     for (const [reason, code] of cases) {
@@ -1681,21 +1685,21 @@ describe("parseSig core scenarios", () => {
         sig: "apply to back of hand prn itchiness",
         siteText: "back of hand",
         siteCode: "731077003",
-        prnCode: "418363000:363698007=731077003",
+        prnCode: findingSiteCode("418363000", "731077003"),
         longText: "Apply the medication as needed for itchiness to the back of the hand."
       },
       {
         sig: "apply to back of head prn itchiness",
         siteText: "back of head",
         siteCode: "182322006",
-        prnCode: "418363000:363698007=182322006",
+        prnCode: findingSiteCode("418363000", "182322006"),
         longText: "Apply the medication as needed for itchiness to the back of the head."
       },
       {
         sig: "apply to palm prn itchiness",
         siteText: "palm",
         siteCode: "731973001",
-        prnCode: "418363000:363698007=731973001",
+        prnCode: findingSiteCode("418363000", "731973001"),
         longText: "Apply the medication as needed for itchiness to the palm."
       }
     ] as const;
@@ -2552,7 +2556,14 @@ describe("parseSig core scenarios", () => {
       { sig: "apply cream to left flank bid", site: "left flank" },
       { sig: "apply cream to right big toe bid", site: "right big toe" },
       { sig: "apply cream to 2nd toe bid", site: "2nd toe" },
-      { sig: "apply cream to top of head bid", site: "top of head" }
+      { sig: "apply cream to top of head bid", site: "top of head" },
+      { sig: "apply below ear bid", site: "below ear" },
+      { sig: "apply under ear bid", site: "under ear" },
+      { sig: "apply above ear bid", site: "above ear" },
+      { sig: "apply at left side of hand bid", site: "left side of hand" },
+      { sig: "apply to right side of abdomen bid", site: "right side of abdomen" },
+      { sig: "apply between fingers", site: "between fingers" },
+      { sig: "apply to area between fingers", site: "area between fingers" }
     ];
 
     for (const { sig, site } of cases) {
@@ -2583,13 +2594,147 @@ describe("parseSig core scenarios", () => {
   it("formats unresolved locative site phrases as natural English noun phrases", () => {
     const cases = [
       ["apply to behind left ear bid", "Apply the medication twice daily behind the left ear."],
-      ["apply cream to top of head bid", "Apply the medication twice daily to the top of the head."]
+      ["apply cream to top of head bid", "Apply the medication twice daily to the top of the head."],
+      ["apply below ear bid", "Apply the medication twice daily below the ear."],
+      ["apply under ear bid", "Apply the medication twice daily under the ear."],
+      ["apply above ear bid", "Apply the medication twice daily above the ear."],
+      ["apply at left side of hand bid", "Apply the medication twice daily to the left side of the hand."],
+      ["apply to both sides of neck bid", "Apply the medication twice daily to both sides of the neck."],
+      ["apply between fingers", "Apply the medication between the fingers."],
+      ["apply to area between fingers", "Apply the medication between the fingers."]
     ] as const;
 
     for (const [sig, longText] of cases) {
       const result = parseSig(sig);
       expect(result.longText).toBe(longText);
     }
+  });
+
+  it("emits structured spatial relation metadata for body-site relation phrases", () => {
+    const result = parseSig("apply below ear bid");
+    const relation = result.fhir.site?.extension?.find(
+      (extension) => extension.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
+    );
+
+    expect(relation?.extension).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: "relation",
+          valueCoding: expect.objectContaining({
+            system: "http://snomed.info/sct",
+            code: "351726001",
+            display: "Beneath"
+          })
+        }),
+        expect.objectContaining({
+          url: "target",
+          valueCodeableConcept: expect.objectContaining({
+            text: "ear",
+            coding: expect.arrayContaining([
+              expect.objectContaining({
+                system: "http://snomed.info/sct",
+                code: "117590005",
+                display: "Ear-related structure"
+              })
+            ])
+          })
+        })
+      ])
+    );
+    expect(result.meta.normalized.site?.spatialRelation).toMatchObject({
+      relationText: "below",
+      targetText: "ear",
+      targetCoding: { code: "117590005" }
+    });
+
+    const roundTripped = fromFhirDosage({
+      ...result.fhir,
+      site: { extension: result.fhir.site?.extension }
+    });
+    expect(roundTripped.longText).toBe("Apply the medication twice daily below the ear.");
+    expect(roundTripped.meta.normalized.site?.spatialRelation?.targetCoding?.code).toBe("117590005");
+
+    const side = parseSig("apply at left side of hand bid");
+    expect(side.meta.normalized.site?.spatialRelation).toMatchObject({
+      relationText: "left side",
+      relationCoding: { code: "49370004" },
+      targetText: "hand",
+      targetCoding: { code: "85562004" }
+    });
+
+    const between = parseSig("apply to area between fingers");
+    expect(between.meta.normalized.site?.spatialRelation).toMatchObject({
+      relationText: "between",
+      targetText: "fingers",
+      targetCoding: { code: "7569003" }
+    });
+  });
+
+  it("passes parsed spatial relation metadata to site terminology callbacks", () => {
+    let request: SiteCodeLookupRequest | undefined;
+    const result = parseSig("apply below custom scar bid", {
+      siteCodeResolvers: [(candidate) => {
+        request = candidate;
+        return {
+          text: candidate.text,
+          coding: {
+            system: "http://example.org/sites",
+            code: "BELOW-SCAR",
+            display: "Below custom scar"
+          },
+          spatialRelation: candidate.spatialRelation
+            ? {
+              ...candidate.spatialRelation,
+              targetCoding: {
+                system: "http://example.org/sites",
+                code: "SCAR",
+                display: "Custom scar"
+              }
+            }
+            : undefined
+        };
+      }]
+    });
+
+    expect(request?.spatialRelation).toMatchObject({
+      relationText: "below",
+      targetText: "custom scar",
+      relationCoding: { code: "351726001" }
+    });
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://example.org/sites",
+      code: "BELOW-SCAR",
+      display: "Below custom scar"
+    });
+    expect(result.meta.normalized.site?.spatialRelation?.targetCoding?.code).toBe("SCAR");
+  });
+
+  it("passes parsed spatial relation metadata to PRN reason terminology callbacks", () => {
+    let seenRelation: unknown;
+    const result = parseSig("apply prn itch below custom scar", {
+      prnReasonResolvers: [(request) => {
+        seenRelation = request.locativeSiteSpatialRelation;
+        return {
+          text: request.text,
+          coding: {
+            system: "http://example.org/reasons",
+            code: "ITCH-BELOW-SCAR",
+            display: "Itch below custom scar"
+          }
+        };
+      }]
+    });
+
+    expect(seenRelation).toMatchObject({
+      relationText: "below",
+      targetText: "custom scar",
+      relationCoding: { code: "351726001" }
+    });
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+      system: "http://example.org/reasons",
+      code: "ITCH-BELOW-SCAR",
+      display: "Itch below custom scar"
+    });
   });
 
   it("preserves coordinated topical site phrases", () => {
@@ -3319,6 +3464,37 @@ describe("internationalization", () => {
       const result = parseSig("apply to head bid", { locale: "th" });
       expect(result.longText).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
       expect(result.fhir.text).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
+    });
+
+    it("translates spatial body-site relations in Thai", () => {
+      const belowEar = parseSig("apply below ear bid", { locale: "th" });
+      expect(belowEar.longText).toBe("ทา บริเวณใต้หู วันละ 2 ครั้ง.");
+
+      const topOfHand = parseSig("apply to top of hand bid", { locale: "th" });
+      expect(topOfHand.longText).toBe("ทา บริเวณด้านบนของมือ วันละ 2 ครั้ง.");
+
+      const rightAbdomen = parseSig("apply to right side of abdomen bid", { locale: "th" });
+      expect(rightAbdomen.longText).toBe("ทา บริเวณท้องด้านขวา วันละ 2 ครั้ง.");
+
+      const betweenFingers = parseSig("apply to area between fingers", { locale: "th" });
+      expect(betweenFingers.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+
+      const fromExtensionOnly = fromFhirDosage(
+        {
+          ...belowEar.fhir,
+          site: { extension: belowEar.fhir.site?.extension }
+        },
+        { locale: "th" }
+      );
+      expect(fromExtensionOnly.longText).toBe("ทา บริเวณใต้หู วันละ 2 ครั้ง.");
+    });
+
+    it("translates spatial PRN reason sites in Thai", () => {
+      const result = parseSig("apply prn itch below ear", { locale: "th" });
+      expect(result.longText).toBe("ทา ใช้เมื่อจำเป็นสำหรับ คันใต้หู.");
+      expect(result.fhir.asNeededFor?.[0]?.extension?.[0]?.url).toBe(
+        BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
+      );
     });
 
     it("translates SNOMED-coded site variants in Thai without alias-specific text keys", () => {

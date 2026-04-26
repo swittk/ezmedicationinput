@@ -1,4 +1,5 @@
 import { findAdditionalInstructionDefinitionByCoding } from "./advice";
+import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
@@ -9,7 +10,9 @@ import { getPreferredCanonicalPrnReasonText } from "./prn";
 import {
   AdviceArgumentRole,
   AdviceRelation,
+  BodySiteSpatialRelation,
   CanonicalDoseExpr,
+  CanonicalPrnReasonExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
   EventTiming,
@@ -297,6 +300,8 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   "both hands": "มือทั้งสองข้าง",
   hand: "มือ",
   hands: "มือทั้งสองข้าง",
+  finger: "นิ้วมือ",
+  fingers: "นิ้วมือ",
   "back of hand": "หลังมือ",
   "both backs of hands": "หลังมือทั้งสองข้าง",
   palm: "ฝ่ามือ",
@@ -314,8 +319,8 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   "left heel": "ส้นเท้าซ้าย",
   "right heel": "ส้นเท้าขวา",
   "both heels": "ส้นเท้าทั้งสองข้าง",
-  abdomen: "ช่องท้อง",
-  abdominal: "ช่องท้อง",
+  abdomen: "ท้อง",
+  abdominal: "ท้อง",
   belly: "ท้อง",
   "affected area": "บริเวณที่เป็น",
   "affected site": "บริเวณที่เป็น",
@@ -1208,7 +1213,9 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   ) {
     return undefined;
   }
-  const translated = translateSiteThai(text, codingCode);
+  const translated = text
+    ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
+    : translateSpatialSiteThai(undefined, clause.site?.spatialRelation);
   if (!translated) {
     return undefined;
   }
@@ -1220,7 +1227,85 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   return `${preposition}${separator}${translated}`.trim();
 }
 
-function translateSiteThai(site: string | undefined, code?: string): string | undefined {
+const THAI_SPATIAL_RELATION_PREFIXES: Record<string, string> = {
+  above: "เหนือ",
+  around: "รอบ",
+  back: "ด้านหลัง",
+  behind: "ด้านหลัง",
+  below: "ใต้",
+  beneath: "ใต้",
+  center: "กลาง",
+  centre: "กลาง",
+  external: "ด้านนอก",
+  front: "ด้านหน้า",
+  inside: "ใน",
+  between: "ระหว่าง",
+  "left side": "ด้านซ้ายของ",
+  lower: "ส่วนล่างของ",
+  middle: "กลาง",
+  near: "ใกล้",
+  outside: "ด้านนอก",
+  "right side": "ด้านขวาของ",
+  side: "ด้านข้าง",
+  "both sides": "ทั้งสองด้านของ",
+  "bilateral sides": "ทั้งสองด้านของ",
+  top: "ด้านบนของ",
+  under: "ใต้",
+  upper: "ส่วนบนของ"
+};
+
+const THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES: Record<string, string> = {
+  abdomen: "ท้อง",
+  abdominal: "ท้อง",
+  belly: "ท้อง"
+};
+
+function translateSpatialTargetThai(
+  relation: BodySiteSpatialRelation
+): string | undefined {
+  const normalizedTarget = normalizeBodySiteKey(relation.targetText ?? "");
+  const override = THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES[normalizedTarget];
+  return override ?? translateSiteThai(
+    relation.targetText,
+    relation.targetCoding?.code
+  );
+}
+
+function translateSpatialSiteThai(
+  site: string | undefined,
+  relation?: BodySiteSpatialRelation
+): string | undefined {
+  const spatialRelation = relation ?? (site ? resolveBodySitePhrase(site)?.spatialRelation : undefined);
+  if (!spatialRelation?.relationText) {
+    return undefined;
+  }
+  const prefix = THAI_SPATIAL_RELATION_PREFIXES[spatialRelation.relationText];
+  if (!prefix) {
+    return undefined;
+  }
+  const target = translateSpatialTargetThai(spatialRelation);
+  if (!target) {
+    return undefined;
+  }
+  switch (spatialRelation.relationText) {
+    case "left side":
+      return `${target}ด้านซ้าย`;
+    case "right side":
+      return `${target}ด้านขวา`;
+    case "both sides":
+    case "bilateral sides":
+      return `${target}ทั้งสองข้าง`;
+    default:
+      break;
+  }
+  return `${prefix}${target}`;
+}
+
+function translateSiteThai(
+  site: string | undefined,
+  code?: string,
+  spatialRelation?: BodySiteSpatialRelation
+): string | undefined {
   if (code) {
     const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
     if (translatedByCode) {
@@ -1234,7 +1319,12 @@ function translateSiteThai(site: string | undefined, code?: string): string | un
   if (!normalized) {
     return site;
   }
-  return THAI_SITE_TRANSLATIONS[normalized] ?? site;
+  const direct = THAI_SITE_TRANSLATIONS[normalized];
+  if (direct) {
+    return direct;
+  }
+  const spatial = translateSpatialSiteThai(site, spatialRelation);
+  return spatial ?? site;
 }
 
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1293,6 +1383,33 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
   return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
 }
 
+function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
+  system: string,
+  code: string
+) {
+  return (
+    findPrnReasonDefinitionByCoding(system, code) ??
+    findPrnReasonDefinitionByCoding(system, code.split(":")[0] ?? code)
+  );
+}
+
+function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefined {
+  let text = reason.text ?? reason.coding?.display;
+  const coding = reason.coding;
+  if (coding?.code) {
+    const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
+      coding.system ?? "http://snomed.info/sct",
+      coding.code
+    );
+    text = definition?.i18n?.th ?? text;
+  }
+  const spatial = translateSpatialSiteThai(undefined, reason.spatialRelation);
+  if (text && spatial) {
+    return `${text}${spatial}`;
+  }
+  return text;
+}
+
 function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
   if (!clause.prn?.enabled) {
     return undefined;
@@ -1300,15 +1417,7 @@ function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
   if (clause.prn.reasons?.length) {
     const translatedReasons: typeof clause.prn.reasons = [];
     for (const reason of clause.prn.reasons) {
-      let text = reason.text ?? reason.coding?.display;
-      const coding = reason.coding;
-      if (coding?.code) {
-        const definition = findPrnReasonDefinitionByCoding(
-          coding.system ?? "http://snomed.info/sct",
-          coding.code
-        );
-        text = definition?.i18n?.th ?? text;
-      }
+      const text = translatePrnReasonThai(reason);
       translatedReasons.push({ text, coding: reason.coding });
     }
     const joined = getPreferredCanonicalPrnReasonText(undefined, translatedReasons, "หรือ");
@@ -1319,13 +1428,14 @@ function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
   let translation: string | undefined;
   const coding = clause.prn.reason?.coding;
   if (coding?.code) {
-    const definition = findPrnReasonDefinitionByCoding(
+    const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
       coding.system ?? "http://snomed.info/sct",
       coding.code
     );
     translation = definition?.i18n?.th;
   }
   const reason =
+    translatePrnReasonThai(clause.prn.reason ?? {}) ??
     translation ??
     getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons, "หรือ") ??
     coding?.display;

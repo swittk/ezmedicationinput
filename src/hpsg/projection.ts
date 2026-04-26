@@ -111,6 +111,9 @@ export function projectHpsgSignToState(
     if (site.coding !== undefined) {
       state.siteCoding = site.coding;
     }
+    if (site.spatialRelation !== undefined) {
+      state.siteSpatialRelation = site.spatialRelation;
+    }
     if (site.lookupRequest !== undefined) {
       state.siteLookupRequest = site.lookupRequest;
     }

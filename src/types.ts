@@ -4,6 +4,7 @@ export interface FhirCoding {
   system?: string;
   code?: string;
   display?: string;
+  extension?: FhirExtension[];
   _display?: FhirPrimitiveElement;
   i18n?: Record<string, string>;
 }
@@ -11,6 +12,7 @@ export interface FhirCoding {
 export interface FhirCodeableConcept {
   coding?: FhirCoding[];
   text?: string;
+  extension?: FhirExtension[];
   _text?: FhirPrimitiveElement;
 }
 
@@ -19,6 +21,8 @@ export interface FhirExtension {
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
+  valueCoding?: FhirCoding;
+  valueCodeableConcept?: FhirCodeableConcept;
 }
 
 export interface FhirPrimitiveElement {
@@ -363,9 +367,18 @@ export interface BodySiteCode {
   i18n?: Record<string, string>;
 }
 
+export interface BodySiteSpatialRelation {
+  relationText: string;
+  relationCoding?: FhirCoding;
+  targetText?: string;
+  targetCoding?: BodySiteCode;
+  sourceText?: string;
+}
+
 export interface BodySiteDefinition {
   coding?: BodySiteCode;
   text?: string;
+  spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
   /**
    * Optional phrases that should resolve to the same coding as this entry.
@@ -490,6 +503,12 @@ export interface SiteCodeLookupRequest {
   sourceText?: string;
   /** Location of {@link sourceText} relative to the original input. */
   range?: TextRange;
+  /**
+   * Parsed spatial relation when the site phrase is relation + body site
+   * (for example, "below ear" or "top of hand"). Terminology callbacks can
+   * use this to code either the full site phrase or the relation target.
+   */
+  spatialRelation?: BodySiteSpatialRelation;
 }
 
 export interface SiteCodeResolution extends BodySiteDefinition { }
@@ -511,6 +530,7 @@ export interface PrnReasonLookupRequest {
   headCanonical?: string;
   locativeSiteCanonical?: string;
   locativeSiteCoding?: FhirCoding;
+  locativeSiteSpatialRelation?: BodySiteSpatialRelation;
   isProbe: boolean;
   inputText: string;
   sourceText?: string;
@@ -754,6 +774,7 @@ export interface CanonicalRouteExpr {
 export interface CanonicalSiteExpr {
   text?: string;
   coding?: BodySiteCode;
+  spatialRelation?: BodySiteSpatialRelation;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   inferred?: boolean;
   evidence?: CanonicalEvidence[];
@@ -786,6 +807,7 @@ export interface CanonicalScheduleExpr {
 export interface CanonicalPrnReasonExpr {
   text?: string;
   coding?: FhirCoding;
+  spatialRelation?: BodySiteSpatialRelation;
 }
 
 export interface CanonicalPrnExpr {
@@ -859,11 +881,11 @@ export interface ParseResult {
 export interface ParseNormalizedMeta {
   route?: RouteCode;
   unit?: string;
-  site?: { text?: string; coding?: BodySiteCode };
+  site?: { text?: string; coding?: BodySiteCode; spatialRelation?: BodySiteSpatialRelation };
   method?: { text?: string; coding?: FhirCoding };
   patientInstruction?: string;
-  prnReason?: { text?: string; coding?: FhirCoding };
-  prnReasons?: Array<{ text?: string; coding?: FhirCoding }>;
+  prnReason?: { text?: string; coding?: FhirCoding; spatialRelation?: BodySiteSpatialRelation };
+  prnReasons?: Array<{ text?: string; coding?: FhirCoding; spatialRelation?: BodySiteSpatialRelation }>;
   additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
 }
 
