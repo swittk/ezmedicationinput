@@ -10,7 +10,7 @@ import {
   HpsgInstructionFeature,
   HpsgSynsem
 } from "./signature";
-import { FhirCoding, RouteCode } from "../types";
+import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -36,14 +36,24 @@ function sameCoding(left: FhirCoding | undefined, right: FhirCoding | undefined)
   );
 }
 
+function sameOptionalText(left: string | undefined, right: string | undefined): boolean {
+  return (left ?? "") === (right ?? "");
+}
+
 function sameSpatialRelation(
-  left: HpsgSiteFeature["spatialRelation"] | undefined,
-  right: HpsgSiteFeature["spatialRelation"] | undefined
+  left: BodySiteSpatialRelation | undefined,
+  right: BodySiteSpatialRelation | undefined
 ): boolean {
   if (!left || !right) {
     return left === right;
   }
-  return JSON.stringify(left) === JSON.stringify(right);
+  return (
+    left.relationText === right.relationText &&
+    sameCoding(left.relationCoding, right.relationCoding) &&
+    sameOptionalText(left.targetText, right.targetText) &&
+    sameCoding(left.targetCoding, right.targetCoding) &&
+    sameOptionalText(left.sourceText, right.sourceText)
+  );
 }
 
 function mergeMethod(
@@ -156,11 +166,38 @@ function mergePrnReasons(
 ): HpsgPrnFeature["reasons"] | undefined {
   const result: NonNullable<HpsgPrnFeature["reasons"]> = [];
   for (const reason of [...(left ?? []), ...(right ?? [])]) {
-    if (!result.some((candidate) => candidate.text === reason.text)) {
+    if (!result.some((candidate) =>
+      candidate.text === reason.text &&
+      samePrnLookupRequest(candidate.lookupRequest, reason.lookupRequest)
+    )) {
       result.push(reason);
     }
   }
   return result.length ? result : undefined;
+}
+
+function samePrnLookupRequest(
+  left: PrnReasonLookupRequest | undefined,
+  right: PrnReasonLookupRequest | undefined
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return (
+    left.originalText === right.originalText &&
+    left.text === right.text &&
+    left.normalized === right.normalized &&
+    left.canonical === right.canonical &&
+    sameOptionalText(left.headCanonical, right.headCanonical) &&
+    sameOptionalText(left.locativeSiteCanonical, right.locativeSiteCanonical) &&
+    sameCoding(left.locativeSiteCoding, right.locativeSiteCoding) &&
+    sameSpatialRelation(left.locativeSiteSpatialRelation, right.locativeSiteSpatialRelation) &&
+    left.isProbe === right.isProbe &&
+    left.inputText === right.inputText &&
+    sameOptionalText(left.sourceText, right.sourceText) &&
+    (left.range?.start ?? -1) === (right.range?.start ?? -1) &&
+    (left.range?.end ?? -1) === (right.range?.end ?? -1)
+  );
 }
 
 function mergePrnLookupRequests(

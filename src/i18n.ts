@@ -1498,18 +1498,9 @@ function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
       return `ใช้เมื่อจำเป็นสำหรับ ${joined}`;
     }
   }
-  let translation: string | undefined;
   const coding = clause.prn.reason?.coding;
-  if (coding?.code) {
-    const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
-      coding.system ?? "http://snomed.info/sct",
-      coding.code
-    );
-    translation = definition?.i18n?.th;
-  }
   const reason =
     translatePrnReasonThai(clause.prn.reason ?? {}) ??
-    translation ??
     getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons, "หรือ") ??
     coding?.display;
   if (reason) {

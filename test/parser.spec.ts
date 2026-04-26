@@ -1730,12 +1730,22 @@ describe("parseSig core scenarios", () => {
     for (const [reason, code] of cases) {
       const parsed = parseSig(`1 tab po prn ${reason}`, { context: TAB_CONTEXT });
       const roundTripped = fromFhirDosage(parsed.fhir);
+      const codeOnlyFhir = {
+        ...parsed.fhir,
+        asNeededFor: parsed.fhir.asNeededFor?.map((concept) => ({
+          ...concept,
+          text: undefined
+        }))
+      };
+      const codeOnlyRoundTripped = fromFhirDosage(codeOnlyFhir);
 
       expect(parsed.fhir.asNeededFor?.[0]?.text).toBe(reason);
       expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
       expect(roundTripped.fhir.asNeededFor?.[0]?.text).toBe(reason);
       expect(roundTripped.meta.normalized.prnReason?.text).toBe(reason);
       expect(roundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
+      expect(codeOnlyRoundTripped.meta.normalized.prnReason?.text).toBe(reason);
+      expect(codeOnlyRoundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
     }
   });
 

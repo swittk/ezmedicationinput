@@ -6,7 +6,7 @@ import {
 import { RouteCode } from "../../types";
 
 export function productRouteHint(phrase: string | undefined): RouteCode | undefined {
-  const key = (phrase ?? "").trim().toLowerCase();
+  const key = (phrase ?? "").trim().replace(/\s+/g, " ").toLowerCase();
   if (!key) {
     return undefined;
   }

@@ -14,6 +14,7 @@ import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
+import { parseSnomedFindingSitePostcoordinationCode } from "./snomed-postcoordination";
 import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
@@ -122,6 +123,47 @@ function buildSiteCodingArray(
       display: siteCoding.display
     }
   ];
+}
+
+function getFallbackSiteText(site: FhirCodeableConcept | undefined): string | undefined {
+  if (site?.text) {
+    return site.text;
+  }
+  const siteCoding = selectPreferredSiteCoding(site);
+  return siteCoding?.code
+    ? getBodySiteText({
+      system: siteCoding.system,
+      code: siteCoding.code,
+      display: siteCoding.display
+    })
+    : undefined;
+}
+
+function lowerFirst(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.charAt(0).toLowerCase() + trimmed.slice(1) : undefined;
+}
+
+function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): string | undefined {
+  if (concept?.text) {
+    return concept.text;
+  }
+  const coding = selectFirstCodingWithCode(concept);
+  const display = lowerFirst(coding?.display);
+  if (display) {
+    return display;
+  }
+  const parsed = parseSnomedFindingSitePostcoordinationCode(coding?.code);
+  if (!parsed || (coding?.system ?? SNOMED_SYSTEM) !== SNOMED_SYSTEM) {
+    return undefined;
+  }
+  const focus = findPrnReasonDefinitionByCoding(SNOMED_SYSTEM, parsed.focusCode);
+  const siteText = getBodySiteText({
+    system: SNOMED_SYSTEM,
+    code: parsed.siteCode
+  });
+  const focusText = lowerFirst(focus?.text ?? focus?.coding?.display);
+  return focusText && siteText ? `${focusText} at ${siteText}` : focusText;
 }
 
 function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
@@ -532,15 +574,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   const siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
-  const siteText = dosage.site?.text ?? (
-    siteCoding?.code
-      ? getBodySiteText({
-        system: siteCoding.system,
-        code: siteCoding.code,
-        display: siteCoding.display
-      })
-      : undefined
-  );
+  const siteText = getFallbackSiteText(dosage.site);
   if (siteText || siteCoding?.code || siteSpatialRelation) {
     clause.site = {
       text: siteText,
@@ -627,7 +661,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     ? dosage.asNeededFor.map((concept) => {
       const coding = concept.coding?.find((code) => Boolean(code.code));
       return {
-        text: concept.text,
+        text: getFallbackPrnReasonText(concept),
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
         coding: coding?.code
           ? {
@@ -704,15 +738,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.periodUnit = dosage.timing?.repeat?.periodUnit;
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);
-  state.siteText = dosage.site?.text ?? (
-    siteCoding?.code
-      ? getBodySiteText({
-        system: siteCoding.system,
-        code: siteCoding.code,
-        display: siteCoding.display
-      })
-      : undefined
-  );
+  state.siteText = getFallbackSiteText(dosage.site);
   state.siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
@@ -722,7 +748,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     const prnReasons = dosage.asNeededFor.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);
       return {
-        text: concept.text,
+        text: getFallbackPrnReasonText(concept),
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
         coding: coding?.code
           ? {

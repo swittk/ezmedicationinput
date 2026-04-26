@@ -201,8 +201,8 @@ not the main semantics.
 Examples of bad architecture:
 
 - parser knows `inside ear`
-- formatter separately regexes `inside`
-- PRN coding separately tries to recover `ear`
+- formatter applies a separate regex to `inside`
+- PRN coding tries to recover `ear` on its own
 
 That means the grammar is fragmented.
 
