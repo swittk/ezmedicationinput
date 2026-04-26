@@ -241,23 +241,73 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       }
     },
     {
-      names: ["ear", "ears"],
+      names: ["ear", "inside ear"],
       definition: {
         coding: { code: "117590005", display: "Ear-related structure" },
+        text: "ear",
+        routeHint: RouteCode["Otic route"]
+      }
+    },
+    {
+      names: ["ears", "both ears", "bilateral ears", "inside ears"],
+      definition: {
+        coding: { code: "34338003", display: "Both ears" },
+        text: "both ears",
+        routeHint: RouteCode["Otic route"]
+      }
+    },
+    {
+      names: [
+        "ear canal",
+        "inside ear canal",
+        "external auditory canal",
+        "external ear canal"
+      ],
+      definition: {
+        coding: { code: "181178004", display: "Entire external auditory canal" },
+        text: "ear canal",
+        routeHint: RouteCode["Otic route"]
+      }
+    },
+    {
+      names: ["ear canals", "both ear canals", "inside ear canals", "both external auditory canals"],
+      definition: {
+        coding: { code: "181178004", display: "Entire external auditory canal" },
+        text: "both ear canals",
         routeHint: RouteCode["Otic route"]
       }
     },
     {
       names: ["left ear"],
-      definition: { coding: { code: "89644007", display: "Left ear" }, routeHint: RouteCode["Otic route"] }
+      definition: {
+        coding: { code: "89644007", display: "Left ear" },
+        text: "left ear",
+        routeHint: RouteCode["Otic route"]
+      }
     },
     {
       names: ["right ear"],
-      definition: { coding: { code: "25577004", display: "Right ear" }, routeHint: RouteCode["Otic route"] }
+      definition: {
+        coding: { code: "25577004", display: "Right ear" },
+        text: "right ear",
+        routeHint: RouteCode["Otic route"]
+      }
     },
     {
-      names: ["both ears", "bilateral ears"],
-      definition: { coding: { code: "34338003", display: "Both ears" }, routeHint: RouteCode["Otic route"] }
+      names: ["left ear canal", "left external auditory canal"],
+      definition: {
+        coding: { code: "368588007", display: "Entire left external auditory canal" },
+        text: "left ear canal",
+        routeHint: RouteCode["Otic route"]
+      }
+    },
+    {
+      names: ["right ear canal", "right external auditory canal"],
+      definition: {
+        coding: { code: "368566007", display: "Entire right external auditory canal" },
+        text: "right ear canal",
+        routeHint: RouteCode["Otic route"]
+      }
     },
     {
       names: ["nostril", "nostrils"],
@@ -477,6 +527,38 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "78791008", display: "Right hand" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["back of hand", "dorsum of hand"],
+      definition: {
+        coding: { code: "731077003", display: "Entire dorsum of hand" },
+        text: "back of hand",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["backs of hands", "both backs of hands", "both dorsa of hands"],
+      definition: {
+        coding: { code: "731077003", display: "Entire dorsum of hand" },
+        text: "both backs of hands",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["palm", "palm of hand", "palm of the hand"],
+      definition: {
+        coding: { code: "731973001", display: "Entire palm (region)" },
+        text: "palm",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["palms", "both palms"],
+      definition: {
+        coding: { code: "731973001", display: "Entire palm (region)" },
+        text: "both palms",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["foot", "feet"],
       definition: { coding: { code: "56459004", display: "Foot" }, routeHint: RouteCode["Topical route"] }
     },
@@ -490,11 +572,87 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
     },
     {
       names: ["abdomen", "abdominal", "belly"],
-      definition: { coding: { code: "302553009", display: "Entire abdomen" }, routeHint: RouteCode["Subcutaneous route"] }
+      definition: {
+        coding: { code: "302553009", display: "Entire abdomen" },
+        text: "abdomen",
+        routeHint: RouteCode["Subcutaneous route"]
+      }
     },
     {
       names: ["head"],
       definition: { coding: { code: "69536005", display: "Head structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["back of head"],
+      definition: {
+        coding: { code: "182322006", display: "Entire back of head" },
+        text: "back of head",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["sole", "sole of foot", "sole of the foot"],
+      definition: {
+        coding: { code: "731075006", display: "Entire sole of foot" },
+        text: "sole of foot",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["soles", "both soles", "sole of feet", "soles of feet"],
+      definition: {
+        coding: { code: "731075006", display: "Entire sole of foot" },
+        text: "both soles",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["heel"],
+      definition: {
+        coding: { code: "362804005", display: "Entire heel" },
+        text: "heel",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["heels", "both heels"],
+      definition: {
+        coding: { code: "362804005", display: "Entire heel" },
+        text: "both heels",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["left heel"],
+      definition: {
+        coding: { code: "723606006", display: "Structure of left heel" },
+        text: "left heel",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["right heel"],
+      definition: {
+        coding: { code: "723607002", display: "Structure of right heel" },
+        text: "right heel",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["back of foot", "dorsum of foot"],
+      definition: {
+        coding: { code: "731036002", display: "Entire dorsum of foot" },
+        text: "back of foot",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["backs of feet", "both backs of feet", "both dorsa of feet"],
+      definition: {
+        coding: { code: "731036002", display: "Entire dorsum of foot" },
+        text: "both backs of feet",
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["affected area", "affected areas", "affected site", "บริเวณที่เป็น"],
@@ -566,7 +724,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
     },
     {
       names: ["temples", "both temples", "bilateral temples"],
-      definition: { coding: { code: "362620003", display: "Entire temporal region" }, routeHint: RouteCode["Topical route"] }
+      definition: {
+        coding: { code: "362620003", display: "Entire temporal region" },
+        text: "both temples",
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["left temple", "left temple region", "left temporal region"],
@@ -1947,7 +2109,19 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
-    names: ["itch", "itching", "itchy", "wound itch", "itchy wound", "wound itching", "itching wound", "itching of wound"],
+    names: [
+      "itch",
+      "itching",
+      "itchiness",
+      "itchy",
+      "wound itch",
+      "wound itchiness",
+      "itchy wound",
+      "wound itching",
+      "itching wound",
+      "itching of wound",
+      "itchiness of wound"
+    ],
     definition: {
       coding: {
         system: SNOMED_SYSTEM,
@@ -2241,7 +2415,7 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
-    names: ["scalp itch", "scalp itching", "itching of scalp", "itchy scalp"],
+    names: ["scalp itch", "scalp itchiness", "scalp itching", "itchiness of scalp", "itching of scalp", "itchy scalp"],
     definition: {
       coding: {
         system: SNOMED_SYSTEM,

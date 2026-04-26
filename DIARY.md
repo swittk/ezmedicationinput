@@ -1538,3 +1538,189 @@ Result:
   `pain at anus` keep the full phrase text across parse -> FHIR -> round-trip,
   while still using the generic `Pain` code when no exact combined concept is
   available
+
+## 2026-04-26 Generic `PRN symptom at site` now falls back to SNOMED postcoordination
+
+The user was right to push here: once the parser has already recognized a PRN
+head symptom plus a locative site complement, stopping at a generic symptom
+code is underspecified.
+
+New fallback:
+- if there is no exact pre-coordinated concept for the combined meaning
+- and the symptom head plus site both have SNOMED concepts
+- emit a compositional grammar expression using `363698007 | Finding site |`
+
+Examples:
+- `pain at hands` -> `22253000:363698007=85562004`
+- `pain at buttock` -> `22253000:363698007=46862004`
+- `pain at anus` -> `22253000:363698007=181262009`
+- `irritation at rectum` -> `257553007:363698007=34402009`
+- `irritation at vagina` -> `257553007:363698007=76784001`
+
+Still preserved:
+- the original phrase remains in `asNeededFor.text`
+- exact pre-coordinated concepts still win over postcoordination when available
+
+## 2026-04-26 Site normalization for interior/surface anatomy phrases
+
+The parser was still leaving several common topical/otic site phrases as raw
+text, which made the long text sound machine-generated and also blocked more
+specific site coding for PRN symptom-at-site phrases.
+
+Fixed with terminology-backed normalization instead of formatter-only hacks:
+- `inside ear` now normalizes to the coded `ear` site
+- `inside ear canal` now normalizes to coded `ear canal`
+- common proper surface/body sub-sites are now bundled too:
+  - `back of hand` / `both backs of hands`
+  - `palm` / `both palms`
+  - `sole of foot` / `both soles`
+  - `heel` / `left heel` / `right heel` / `both heels`
+  - `back of foot` / `dorsum of foot`
+  - `back of head`
+- generic itchiness aliases were widened so `itchiness` can participate in the
+  existing PRN `symptom + site` grammar and SNOMED postcoordination fallback
+
+Formatting cleanup paired with that:
+- `Apply the medication to the inside ear canal.` -> `Apply the medication in
+  the ear canal.`
+- `Apply the medication to the inside ear.` -> `Apply the medication in the
+  ear.`
+- unresolved locative site phrases now realize more naturally too:
+  - `behind left ear` -> `behind the left ear`
+  - `top of head` -> `to the top of the head`
+
+## 2026-04-26 Body-site feature grammar foundation
+
+The old weak point was that anatomical/site handling still lived in three
+different places:
+- parser normalization
+- PRN symptom-at-site coding
+- formatter English realization
+
+That kept producing the same pathology over and over: one path knew the site
+structure, another only saw a flattened string, and a third had late regex
+cleanup bolted on top.
+
+This is now moved onto one shared body-site grammar module:
+- `src/body-site-grammar.ts`
+
+It is not a full HPSG parser for the whole sig language yet, but it is an
+HPSG-ish typed feature-structure slice for site NPs and locative complements:
+- nominal sites
+- partitives like `back of hand`, `sole of foot`
+- locatives like `behind left ear`
+
+Shared consequences:
+- parser site lookup keeps two identities separate:
+  - lookup identity for code resolution / custom maps
+  - semantic display identity for canonical meaning / realization
+- PRN `symptom at site` fallback now reuses the same site analysis
+- English site realization no longer relies on the new regex glue that had been
+  added in `src/format.ts`
+- custom `siteCodeMap` behavior still works because lookup canonical and display
+  canonical are no longer conflated
+
+This is the right shape for the larger rewrite too:
+- whole-parser migration should generalize this pattern to other clause
+  constituents
+- dose / schedule / route / method / PRN should become typed feature
+  structures with unification-like compatibility rules
+- then the central parser can stop depending so heavily on ordered collector
+  passes
+
+Also fixed along the way:
+- exact abdomen/temple surface forms are stabilized (`abdomen`, `both temples`)
+- otic English realization no longer falls back to `via otic`; it now formats
+  as `Instill ... in the right ear.`
+
+## 2026-04-26 HPSG implementation reference added
+
+Added:
+- `HPSG_IMPLEMENTATION_GUIDE.md`
+
+Purpose:
+- give this repo a concrete, implementation-oriented HPSG reference instead of
+  relying on memory or vague theory talk
+- define whole-parser migration rules:
+  - typed feature structures first
+  - lexical/construction separation
+  - contribution/unification style parser core
+  - no new semantic formatter hacks
+  - no conflating lookup form, canonical meaning, and realization
+
+Research basis used for the note:
+- DELPH-IN formalism and grammar docs
+- Grammar Matrix docs
+- DELPH-IN grammar scale-up discussion
+- HPSG handbook / HPSG synopsis material
+
+## 2026-04-26 Parser-core contribution layer: first whole-parser slice
+
+Started the real parser-core migration away from direct collector mutation.
+
+Added:
+- `src/clause-features.ts`
+
+This is the first shared typed contribution layer for clause semantics:
+- `method`
+- `route`
+- `site`
+- `schedule`
+- warnings
+- consumed token indices
+
+Parser core changes in `src/parser.ts`:
+- added contribution compatibility checks:
+  - `canApplyScheduleContribution(...)`
+  - `canApplyClauseContribution(...)`
+- added contribution application:
+  - `applyScheduleContribution(...)`
+  - `applyClauseContribution(...)`
+- added feature-terminal dispatch:
+  - `applyGrammarFeatureTerminal(...)`
+- added descriptor-to-schedule contribution helper:
+  - `buildScheduleContributionFromDescriptor(...)`
+
+Migrated first-wave low-risk terminals from direct mutation to typed
+contributions:
+- schedule:
+  - `schedule.bldMeal`
+  - `schedule.odTimingAbbreviation`
+  - `schedule.timingAbbreviation`
+  - `schedule.eventTiming`
+  - `schedule.dayOfWeek`
+  - `schedule.phraseWordFrequency`
+  - `schedule.wordFrequency`
+- method:
+  - `method.verb`
+- site:
+  - `site.abbreviation`
+- count:
+  - `count.singleOccurrence`
+
+Why these first:
+- they map cleanly to independent typed schedule/method/site/count
+  contributions
+- they do not depend on the more entangled interval/count-limit parsers
+- they let the parser start behaving like contribution + compatibility merge
+  instead of pure mutation order, without destabilizing the harder cadence
+  machinery in the same change
+
+Important regression caught/fixed while doing this:
+- ophthalmic side abbreviations like `OS` were initially blocked because the
+  new site-abbreviation contribution was also trying to force a route
+- fixed by matching the old semantics exactly:
+  - contribution route only when `state.routeCode` is not already set
+- same fix applied to method-verb route contributions
+
+This is not yet full HPSG/unification for the whole parser, but it is the
+first actual whole-parser center-of-gravity move:
+- collectors can now emit typed semantic contributions
+- parser core can accept/reject them by compatibility instead of only mutation
+  sequencing
+- the next slices should migrate the harder terminals:
+  - explicit site phrases
+  - route synonyms
+  - numeric/separated/compact cadence
+  - count limits
+  - dose structures

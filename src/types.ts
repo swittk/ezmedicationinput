@@ -509,6 +509,8 @@ export interface PrnReasonLookupRequest {
   normalized: string;
   canonical: string;
   headCanonical?: string;
+  locativeSiteCanonical?: string;
+  locativeSiteCoding?: FhirCoding;
   isProbe: boolean;
   inputText: string;
   sourceText?: string;

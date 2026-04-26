@@ -1351,8 +1351,8 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("irritation at rectum");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
-      code: "257553007",
-      display: "Irritation"
+      code: "257553007:363698007=34402009",
+      display: "irritation at rectum"
     });
     expect(result.fhir.site?.text).toBe("rectum");
     expect(result.fhir.site?.coding?.[0]?.system).toBe("http://snomed.info/sct");
@@ -1361,8 +1361,8 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.normalized.prnReason?.text).toBe("irritation at rectum");
     expect(result.meta.normalized.prnReason?.coding).toEqual({
       system: "http://snomed.info/sct",
-      code: "257553007",
-      display: "Irritation"
+      code: "257553007:363698007=34402009",
+      display: "irritation at rectum"
     });
     expect(result.longText.toLowerCase()).toContain("irritation at rectum");
   });
@@ -1654,17 +1654,56 @@ describe("parseSig core scenarios", () => {
   });
 
   it("preserves locative PRN reason text across FHIR round-trips when using a generic symptom code", () => {
-    const cases = ["pain at hands", "pain at buttock", "pain at anus"] as const;
+    const cases = [
+      ["pain at hands", "22253000:363698007=85562004"],
+      ["pain at buttock", "22253000:363698007=46862004"],
+      ["pain at anus", "22253000:363698007=181262009"]
+    ] as const;
 
-    for (const reason of cases) {
+    for (const [reason, code] of cases) {
       const parsed = parseSig(`1 tab po prn ${reason}`, { context: TAB_CONTEXT });
       const roundTripped = fromFhirDosage(parsed.fhir);
 
       expect(parsed.fhir.asNeededFor?.[0]?.text).toBe(reason);
-      expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
+      expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
       expect(roundTripped.fhir.asNeededFor?.[0]?.text).toBe(reason);
       expect(roundTripped.meta.normalized.prnReason?.text).toBe(reason);
       expect(roundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
+    }
+  });
+
+  it("codes normalized topical itchiness sites and preserves the full PRN text", () => {
+    const cases = [
+      {
+        sig: "apply to back of hand prn itchiness",
+        siteText: "back of hand",
+        siteCode: "731077003",
+        prnCode: "418363000:363698007=731077003",
+        longText: "Apply the medication as needed for itchiness to the back of the hand."
+      },
+      {
+        sig: "apply to back of head prn itchiness",
+        siteText: "back of head",
+        siteCode: "182322006",
+        prnCode: "418363000:363698007=182322006",
+        longText: "Apply the medication as needed for itchiness to the back of the head."
+      },
+      {
+        sig: "apply to palm prn itchiness",
+        siteText: "palm",
+        siteCode: "731973001",
+        prnCode: "418363000:363698007=731973001",
+        longText: "Apply the medication as needed for itchiness to the palm."
+      }
+    ] as const;
+
+    for (const { sig, siteText, siteCode, prnCode, longText } of cases) {
+      const result = parseSig(sig);
+      expect(result.longText).toBe(longText);
+      expect(result.fhir.site?.text).toBe(siteText);
+      expect(result.fhir.site?.coding?.[0]?.code).toBe(siteCode);
+      expect(result.fhir.asNeededFor?.[0]?.text).toBe(sig.replace(/^apply to .+ prn /, ""));
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(prnCode);
     }
   });
 
@@ -2439,6 +2478,72 @@ describe("parseSig core scenarios", () => {
     }
   });
 
+  it("normalizes coded ear and surface sub-sites instead of keeping raw interior text", () => {
+    const cases = [
+      {
+        sig: "apply inside ear",
+        site: { text: "ear", code: "117590005", display: "Ear-related structure" },
+        longText: "Apply the medication in the ear."
+      },
+      {
+        sig: "apply inside ear canal",
+        site: { text: "ear canal", code: "181178004", display: "Entire external auditory canal" },
+        longText: "Apply the medication in the ear canal."
+      },
+      {
+        sig: "apply to palms",
+        site: { text: "both palms", code: "731973001", display: "Entire palm (region)" },
+        longText: "Apply the medication to both palms."
+      },
+      {
+        sig: "apply to sole",
+        site: { text: "sole of foot", code: "731075006", display: "Entire sole of foot" },
+        longText: "Apply the medication to the sole of the foot."
+      },
+      {
+        sig: "apply to heel",
+        site: { text: "heel", code: "362804005", display: "Entire heel" },
+        longText: "Apply the medication to the heel."
+      },
+      {
+        sig: "apply to back of foot",
+        site: { text: "back of foot", code: "731036002", display: "Entire dorsum of foot" },
+        longText: "Apply the medication to the back of the foot."
+      },
+      {
+        sig: "apply to back of hand",
+        site: { text: "back of hand", code: "731077003", display: "Entire dorsum of hand" },
+        longText: "Apply the medication to the back of the hand."
+      },
+      {
+        sig: "apply to back of head",
+        site: { text: "back of head", code: "182322006", display: "Entire back of head" },
+        longText: "Apply the medication to the back of the head."
+      },
+      {
+        sig: "apply to palm",
+        site: { text: "palm", code: "731973001", display: "Entire palm (region)" },
+        longText: "Apply the medication to the palm."
+      }
+    ] as const;
+
+    for (const { sig, site, longText } of cases) {
+      const result = parseSig(sig);
+      expect(result.longText).toBe(longText);
+      expect(result.fhir.site?.text).toBe(site.text);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: site.code,
+        display: site.display
+      });
+    }
+  });
+
+  it("uses otic route grammar instead of generic via-otic wording", () => {
+    const result = parseSig("1 drop right ear once daily");
+    expect(result.longText).toBe("Instill 1 drop once daily in the right ear.");
+  });
+
   it("preserves unresolved topical site phrases and defaults them to topical route", () => {
     const cases = [
       { sig: "apply cream to left flank bid", site: "left flank" },
@@ -2469,6 +2574,18 @@ describe("parseSig core scenarios", () => {
       expect(result.fhir.route?.coding?.[0]?.code).toBe(
         SNOMEDCTRouteCodes["Topical route"]
       );
+    }
+  });
+
+  it("formats unresolved locative site phrases as natural English noun phrases", () => {
+    const cases = [
+      ["apply to behind left ear bid", "Apply the medication twice daily behind the left ear."],
+      ["apply cream to top of head bid", "Apply the medication twice daily to the top of the head."]
+    ] as const;
+
+    for (const [sig, longText] of cases) {
+      const result = parseSig(sig);
+      expect(result.longText).toBe(longText);
     }
   });
 

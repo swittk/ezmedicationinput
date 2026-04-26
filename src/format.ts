@@ -2,6 +2,7 @@ import { buildCanonicalSigClauses } from "./ir";
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -141,6 +142,11 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "intravenously"),
     sitePreposition: "into"
   },
+  [RouteCode["Otic route"]]: {
+    verb: "Instill",
+    routePhrase: ({ hasSite }) => (hasSite ? undefined : "in the ear"),
+    sitePreposition: "in"
+  },
   [RouteCode["Nasal route"]]: {
     verb: "Use",
     routePhrase: ({ hasSite }) => (hasSite ? undefined : "via nasal route"),
@@ -194,6 +200,9 @@ function grammarFromRouteText(text: string | undefined): RouteGrammar | undefine
   }
   if (normalized.includes("vagin")) {
     return ROUTE_GRAMMAR[RouteCode["Per vagina"]];
+  }
+  if (normalized.includes("otic") || normalized.includes("ear")) {
+    return ROUTE_GRAMMAR[RouteCode["Otic route"]];
   }
   if (normalized.includes("nasal")) {
     return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
@@ -695,7 +704,9 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (!text) {
     return undefined;
   }
-  const lower = text.toLowerCase();
+  const resolvedSite = resolveBodySitePhrase(text);
+  const normalizedText = resolvedSite?.displayText ?? text;
+  const lower = normalizedText.toLowerCase();
   const routeText = clause.route?.text?.trim().toLowerCase();
   const isRectalRoute =
     clause.route?.code === RouteCode["Per rectum"] ||
@@ -711,47 +722,19 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (isVaginalRoute && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
+  if (resolvedSite?.features.kind === "locative") {
+    return resolvedSite.englishObjectText;
+  }
+  const preferredPreposition = resolvedSite?.preferredPreposition;
   let preposition = grammar.sitePreposition;
+  if (!preposition || (preposition === "to" && preferredPreposition && preferredPreposition !== "to")) {
+    preposition = preferredPreposition;
+  }
   if (!preposition) {
-    if (lower.includes("eye")) {
-      preposition = "in";
-    } else if (lower.includes("nostril") || lower.includes("nose")) {
-      preposition = "into";
-    } else if (lower.includes("lung") || lower.includes("airway") || lower.includes("bronch")) {
-      preposition = "into";
-    } else if (lower.includes("ear")) {
-      preposition = "in";
-    } else if (
-      /(skin|head|temple|arm|leg|thigh|abdomen|shoulder|elbow|wrist|ankle|knee|hand|foot|cheek|forearm|back|chest|breast|axilla|armpit|groin|lip|buttock|hip|face|hair|scalp|forehead|eyelid|chin|neck)/.test(
-        lower
-      )
-    ) {
-      preposition = "to";
-    } else {
-      preposition = "at";
-    }
+    preposition = "at";
   }
-  const noun = formatSiteNoun(text, preposition);
+  const noun = resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   return `${preposition} ${noun}`.trim();
-}
-
-function formatSiteNoun(site: string, preposition: string): string {
-  const trimmed = site.trim();
-  const lower = trimmed.toLowerCase();
-  const skipArticlePrefixes = ["the ", "both ", "each ", "either ", "every ", "all ", "bilateral "];
-  for (const prefix of skipArticlePrefixes) {
-    if (lower.startsWith(prefix)) {
-      return trimmed;
-    }
-  }
-  const needsArticle =
-    /^(left|right|upper|lower|inner|outer|mid|middle|posterior|anterior|proximal|distal|medial|lateral|dorsal|ventral)\b/.test(
-      lower
-    );
-  if (needsArticle || preposition === "at") {
-    return `the ${trimmed}`;
-  }
-  return `the ${trimmed}`;
 }
 
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {

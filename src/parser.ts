@@ -18,6 +18,13 @@ import {
   normalizePrnReasonKey
 } from "./maps";
 import { parseAdditionalInstructions } from "./advice";
+import { resolveBodySitePhrase } from "./body-site-grammar";
+import {
+  ClauseFeatureContribution,
+  ClauseScheduleContribution,
+  sameCoding,
+  sameOptionalScalar
+} from "./clause-features";
 import { inferRouteFromContext, inferUnitFromContext, normalizeDosageForm } from "./context";
 import { buildTranslationPrimitiveElement } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
@@ -247,7 +254,7 @@ const COMBO_EVENT_TIMINGS: Record<string, EventTiming> = {
   "upon waking": EventTiming.Wake
 };
 
-const GENERIC_ITCH_REASON_TERMS = new Set(["itch", "itching", "itchy", "คัน"]);
+const GENERIC_ITCH_REASON_TERMS = new Set(["itch", "itching", "itchiness", "itchy", "คัน"]);
 
 enum MethodAction {
   Administer = "administer",
@@ -1980,15 +1987,20 @@ function collectPrnReasonText(
   }
 
   let canonicalPrefix: string | undefined;
-  let canonicalWithLocativeSite: string | undefined;
+  let locativeSiteCanonical: string | undefined;
+  let locativeSiteCoding: FhirCoding | undefined;
   if (reasonTokens.length > 0) {
-    const suffixInfo = findTrailingPrnSiteSuffix(reasonObjects, state, options);
+    const suffixInfo =
+      findTrailingPrnSiteSuffix(reasonObjects, state, options) ??
+      findTrailingBarePrnSiteSuffix(reasonObjects, state, options);
     if (suffixInfo?.tokens?.length) {
       for (const token of suffixInfo.tokens) {
         prnSiteSuffixIndices.add(token.index);
       }
     }
     if (suffixInfo && suffixInfo.startIndex > 0) {
+      locativeSiteCanonical = suffixInfo.canonical;
+      locativeSiteCoding = suffixInfo.coding;
       const prefixTokens = reasonObjects
         .slice(0, suffixInfo.startIndex)
         .map((token) => token.original)
@@ -1997,12 +2009,6 @@ function collectPrnReasonText(
         .trim();
       if (prefixTokens) {
         canonicalPrefix = prefixTokens.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-        const normalizedHead = normalizePrnReasonKey(canonicalPrefix);
-        if (normalizedHead) {
-          canonicalWithLocativeSite = normalizePrnReasonKey(
-            `${suffixInfo.canonical} ${normalizedHead}`
-          );
-        }
       }
     }
   }
@@ -2115,7 +2121,7 @@ function collectPrnReasonText(
   const text = sanitized || joined;
   state.asNeededReason = text;
   const normalized = text.toLowerCase();
-  const canonicalSource = canonicalWithLocativeSite || canonicalPrefix || sanitized || text;
+  const canonicalSource = sanitized || text;
   const canonical = canonicalSource ? normalizePrnReasonKey(canonicalSource) : normalizePrnReasonKey(text);
   const headCanonical = canonicalPrefix ? normalizePrnReasonKey(canonicalPrefix) : undefined;
   state.prnReasonLookupRequest = {
@@ -2124,6 +2130,8 @@ function collectPrnReasonText(
     normalized,
     canonical: canonical ?? "",
     headCanonical,
+    locativeSiteCanonical,
+    locativeSiteCoding,
     isProbe,
     inputText: state.input,
     sourceText,
@@ -2734,13 +2742,15 @@ function applySitePhrase(
     sanitized = probeMatch[1];
   }
   sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
-  const displayText = normalizeSiteDisplayText(sanitized, options?.siteCodeMap);
+  const resolvedSite = resolveBodySitePhrase(sanitized, options?.siteCodeMap);
+  const displayText = resolvedSite?.displayText ?? sanitized;
   if (!displayText) {
     return false;
   }
+  const requestText = sanitized || displayText;
 
   const displayLower = displayText.toLowerCase();
-  const normalizedLower = sanitized.toLowerCase();
+  const normalizedLower = requestText.toLowerCase();
   const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
   let hasNonSiteWords = false;
   for (const word of displayLower.split(/\s+/)) {
@@ -2775,11 +2785,11 @@ function applySitePhrase(
       sourceText = sanitized;
     }
   }
-  const canonical = normalizeBodySiteKey(displayText);
+  const canonical = resolvedSite?.lookupCanonical ?? normalizeBodySiteKey(displayText);
   internal.siteLookupRequest = {
     originalText: resolvedSiteText,
-    text: displayText,
-    normalized: displayLower,
+    text: requestText,
+    normalized: normalizedLower,
     canonical,
     isProbe,
     inputText: internal.input,
@@ -2822,8 +2832,9 @@ function seedSiteFromRoute(
   if (!impliedText) {
     return;
   }
-  const normalizedText = normalizeSiteDisplayText(impliedText, options?.siteCodeMap);
-  const canonical = normalizeBodySiteKey(normalizedText);
+  const resolvedSite = resolveBodySitePhrase(impliedText, options?.siteCodeMap);
+  const normalizedText = resolvedSite?.displayText ?? impliedText;
+  const canonical = resolvedSite?.lookupCanonical ?? normalizeBodySiteKey(normalizedText);
   internal.siteText = normalizedText;
   internal.siteSource = "text";
   internal.siteLookupRequest = {
@@ -3955,6 +3966,12 @@ type TerminalMatcher = (
   token: Token
 ) => boolean;
 
+type FeatureContributionMatcher = (
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+) => ClauseFeatureContribution | undefined;
+
 type GrammarProduction = (
   context: ClauseParseContext,
   index: number,
@@ -4140,6 +4157,202 @@ function applyGrammarTerminal(
   return endIndex + 1;
 }
 
+function canApplyScheduleContribution(
+  state: ParserState,
+  schedule: ClauseScheduleContribution
+): boolean {
+  return (
+    sameOptionalScalar(state.timingCode, schedule.timingCode) &&
+    sameOptionalScalar(state.count, schedule.count) &&
+    sameOptionalScalar(state.duration, schedule.duration) &&
+    sameOptionalScalar(state.durationMax, schedule.durationMax) &&
+    sameOptionalScalar(state.durationUnit, schedule.durationUnit) &&
+    sameOptionalScalar(state.frequency, schedule.frequency) &&
+    sameOptionalScalar(state.frequencyMax, schedule.frequencyMax) &&
+    sameOptionalScalar(state.period, schedule.period) &&
+    sameOptionalScalar(state.periodMax, schedule.periodMax) &&
+    sameOptionalScalar(state.periodUnit, schedule.periodUnit)
+  );
+}
+
+function canApplyClauseContribution(
+  state: ParserState,
+  contribution: ClauseFeatureContribution
+): boolean {
+  const method = contribution.method;
+  if (method && state.methodVerb && state.methodVerb !== method.verb) {
+    return false;
+  }
+
+  const route = contribution.route;
+  if (route && state.routeCode !== undefined && state.routeCode !== route.code) {
+    return false;
+  }
+
+  const site = contribution.site;
+  if (site) {
+    if (
+      site.text &&
+      state.siteText &&
+      normalizeBodySiteKey(site.text) !== normalizeBodySiteKey(state.siteText)
+    ) {
+      return false;
+    }
+    if (site.coding && state.siteCoding && !sameCoding(site.coding, state.siteCoding)) {
+      return false;
+    }
+  }
+
+  const schedule = contribution.schedule;
+  if (schedule && !canApplyScheduleContribution(state, schedule)) {
+    return false;
+  }
+
+  return true;
+}
+
+function applyScheduleContribution(
+  state: ParserState,
+  schedule: ClauseScheduleContribution
+): void {
+  if (schedule.timingCode !== undefined) {
+    state.timingCode = schedule.timingCode;
+  }
+  if (schedule.count !== undefined) {
+    state.count = schedule.count;
+  }
+  if (schedule.duration !== undefined) {
+    state.duration = schedule.duration;
+  }
+  if (schedule.durationMax !== undefined) {
+    state.durationMax = schedule.durationMax;
+  }
+  if (schedule.durationUnit !== undefined) {
+    state.durationUnit = schedule.durationUnit;
+  }
+  if (schedule.frequency !== undefined) {
+    state.frequency = schedule.frequency;
+  }
+  if (schedule.frequencyMax !== undefined) {
+    state.frequencyMax = schedule.frequencyMax;
+  }
+  if (schedule.period !== undefined) {
+    state.period = schedule.period;
+  }
+  if (schedule.periodMax !== undefined) {
+    state.periodMax = schedule.periodMax;
+  }
+  if (schedule.periodUnit !== undefined) {
+    state.periodUnit = schedule.periodUnit;
+  }
+  if (schedule.when) {
+    for (const whenCode of schedule.when) {
+      addWhen(state.when, whenCode);
+    }
+  }
+  if (schedule.dayOfWeek) {
+    addDayOfWeekList(state, schedule.dayOfWeek);
+  }
+  if (schedule.timeOfDay?.length) {
+    const existing = state.timeOfDay ? [...state.timeOfDay] : [];
+    for (const time of schedule.timeOfDay) {
+      if (!arrayIncludes(existing, time)) {
+        existing.push(time);
+      }
+    }
+    state.timeOfDay = existing;
+  }
+}
+
+function applyClauseContribution(
+  state: ParserState,
+  contribution: ClauseFeatureContribution,
+  tokens: Token[]
+): boolean {
+  if (!canApplyClauseContribution(state, contribution)) {
+    return false;
+  }
+
+  if (contribution.method) {
+    state.methodVerb = contribution.method.verb;
+    if (contribution.method.text !== undefined) {
+      state.methodText = contribution.method.text;
+    } else {
+      refreshMethodSurface(state);
+    }
+    if (contribution.method.textElement !== undefined) {
+      state.methodTextElement = contribution.method.textElement;
+    }
+    if (contribution.method.coding !== undefined) {
+      state.methodCoding = contribution.method.coding;
+    }
+  }
+
+  if (contribution.route) {
+    setRoute(state, contribution.route.code, contribution.route.text);
+  }
+
+  if (contribution.site) {
+    if (contribution.site.text !== undefined) {
+      state.siteText = contribution.site.text;
+    }
+    if (contribution.site.source !== undefined) {
+      state.siteSource = contribution.site.source;
+    }
+    if (contribution.site.coding !== undefined) {
+      state.siteCoding = contribution.site.coding;
+    }
+    if (contribution.site.lookupRequest !== undefined) {
+      state.siteLookupRequest = contribution.site.lookupRequest;
+    }
+  }
+
+  if (contribution.schedule) {
+    applyScheduleContribution(state, contribution.schedule);
+  }
+
+  if (contribution.warnings?.length) {
+    for (const warning of contribution.warnings) {
+      if (!arrayIncludes(state.warnings, warning)) {
+        state.warnings.push(warning);
+      }
+    }
+  }
+
+  for (const tokenIndex of contribution.consumedTokenIndices) {
+    const parsedToken = tokens[tokenIndex];
+    if (parsedToken) {
+      mark(state.consumed, parsedToken);
+    }
+  }
+
+  return true;
+}
+
+function applyGrammarFeatureTerminal(
+  context: ClauseParseContext,
+  index: number,
+  token: Token,
+  rule: string,
+  matcher: FeatureContributionMatcher
+): number | undefined {
+  const contribution = matcher(context, index, token);
+  if (!contribution) {
+    return undefined;
+  }
+  if (!applyClauseContribution(context.state, contribution, context.tokens)) {
+    return undefined;
+  }
+  let endIndex = index;
+  for (const consumedIndex of contribution.consumedTokenIndices) {
+    if (consumedIndex > endIndex) {
+      endIndex = consumedIndex;
+    }
+  }
+  recordClauseEvidence(context.state, rule, index, endIndex);
+  return endIndex + 1;
+}
+
 function tryCollectRouteSynonym(
   context: ClauseParseContext,
   startIndex: number
@@ -4272,6 +4485,42 @@ function hasCadenceContinuationAfter(
   return false;
 }
 
+function buildScheduleContributionFromDescriptor(
+  token: Token,
+  descriptor: {
+    code?: string;
+    frequency?: number;
+    frequencyMax?: number;
+    period?: number;
+    periodMax?: number;
+    periodUnit?: FhirPeriodUnit;
+    when?: EventTiming[];
+    discouraged?: string;
+  },
+  options?: ParseOptions
+): ClauseFeatureContribution {
+  const warnings: string[] = [];
+  if (descriptor.discouraged) {
+    const check = checkDiscouraged(token.original, options);
+    if (check.warning) {
+      warnings.push(check.warning);
+    }
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    warnings,
+    schedule: {
+      timingCode: descriptor.code,
+      frequency: descriptor.frequency,
+      frequencyMax: descriptor.frequencyMax,
+      period: descriptor.period,
+      periodMax: descriptor.periodMax,
+      periodUnit: descriptor.periodUnit,
+      when: descriptor.when ? [...descriptor.when] : undefined
+    }
+  };
+}
+
 function collectBldMealTiming(
   context: ClauseParseContext,
   _index: number,
@@ -4286,6 +4535,28 @@ function collectBldMealTiming(
   }
   applyWhenToken(context.state, token, EventTiming.Meal);
   return true;
+}
+
+function collectBldMealTimingContribution(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  if (!BLD_TOKENS.has(token.lower)) {
+    return undefined;
+  }
+  const warnings: string[] = [];
+  const check = checkDiscouraged(token.original, context.options);
+  if (check.warning) {
+    warnings.push(check.warning);
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    warnings,
+    schedule: {
+      when: [EventTiming.Meal]
+    }
+  };
 }
 
 function collectSeparatedInterval(
@@ -4440,6 +4711,34 @@ function collectOdTimingAbbreviation(
   return true;
 }
 
+function collectOdTimingAbbreviationContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const normalizedLower = normalizeTokenLower(token);
+  if (normalizedLower !== "od") {
+    return undefined;
+  }
+  const semantics = buildTokenSemanticContext(context, index, token);
+  if (
+    !semantics.timingAbbreviation ||
+    !shouldInterpretOdAsOnceDaily(
+      context.state,
+      context.tokens,
+      index,
+      semantics.treatSiteCandidateAsSite
+    )
+  ) {
+    return undefined;
+  }
+  return buildScheduleContributionFromDescriptor(
+    token,
+    semantics.timingAbbreviation,
+    context.options
+  );
+}
+
 function collectTimingAbbreviation(
   context: ClauseParseContext,
   index: number,
@@ -4460,6 +4759,26 @@ function collectTimingAbbreviation(
     context.options
   );
   return true;
+}
+
+function collectTimingAbbreviationContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const normalizedLower = normalizeTokenLower(token);
+  if (normalizedLower === "od") {
+    return undefined;
+  }
+  const semantics = buildTokenSemanticContext(context, index, token);
+  if (!semantics.timingAbbreviation) {
+    return undefined;
+  }
+  return buildScheduleContributionFromDescriptor(
+    token,
+    semantics.timingAbbreviation,
+    context.options
+  );
 }
 
 function collectCompactInterval(
@@ -4605,6 +4924,33 @@ function collectEventTiming(
   return true;
 }
 
+function collectEventTimingContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const whenCode = getEventTimingMeaning(token);
+  if (!whenCode) {
+    return undefined;
+  }
+  if (
+    context.prnReasonStart !== undefined &&
+    index >= context.prnReasonStart &&
+    token.lower === "sleep"
+  ) {
+    return undefined;
+  }
+  if (isWorkflowInstructionContext(context.tokens, index, context.state.consumed)) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    schedule: {
+      when: [whenCode]
+    }
+  };
+}
+
 function collectDayRange(
   context: ClauseParseContext,
   index: number
@@ -4634,6 +4980,33 @@ function collectDayOfWeek(
   addDayOfWeekList(context.state, days);
   mark(context.state.consumed, token);
   return true;
+}
+
+function collectDayOfWeekContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  if (token.lower === "sun") {
+    const nextToken = getNextActiveToken(
+      context.tokens,
+      index,
+      context.state.consumed
+    );
+    if (nextToken && normalizeTokenLower(nextToken) === "exposure") {
+      return undefined;
+    }
+  }
+  const days = getDayOfWeekMeaning(token);
+  if (!days) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    schedule: {
+      dayOfWeek: days
+    }
+  };
 }
 
 function collectRouteSynonym(
@@ -4679,6 +5052,28 @@ function collectSiteAbbreviation(
   }
   mark(context.state.consumed, token);
   return true;
+}
+
+function collectSiteAbbreviationContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const semantics = buildTokenSemanticContext(context, index, token);
+  const siteCandidate = semantics.siteCandidate;
+  if (!siteCandidate || !semantics.treatSiteCandidateAsSite) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    route: siteCandidate.route && !context.state.routeCode
+      ? { code: siteCandidate.route }
+      : undefined,
+    site: {
+      text: siteCandidate.text,
+      source: "abbreviation"
+    }
+  };
 }
 
 function collectExplicitSitePhrase(
@@ -4876,6 +5271,25 @@ function collectStandaloneSingleOccurrence(
   }
   mark(context.state.consumed, token);
   return true;
+}
+
+function collectStandaloneSingleOccurrenceContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  if (token.lower !== "once") {
+    return undefined;
+  }
+  if (hasCadenceContinuationAfter(context.tokens, context.state.consumed, index)) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    schedule: {
+      count: 1
+    }
+  };
 }
 
 function collectDurationLimit(
@@ -5100,6 +5514,25 @@ function collectWordFrequency(
   return true;
 }
 
+function collectWordFrequencyContribution(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const wordFreq = WORD_FREQUENCIES[token.lower];
+  if (!wordFreq) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: [token.index],
+    schedule: {
+      frequency: wordFreq.frequency,
+      period: 1,
+      periodUnit: wordFreq.periodUnit
+    }
+  };
+}
+
 function collectPhraseWordFrequency(
   context: ClauseParseContext,
   index: number,
@@ -5141,6 +5574,48 @@ function collectPhraseWordFrequency(
   return false;
 }
 
+function collectPhraseWordFrequencyContribution(
+  context: ClauseParseContext,
+  index: number,
+  _token: Token
+): ClauseFeatureContribution | undefined {
+  const maxSpan = Math.min(3, context.tokens.length - index);
+  for (let span = maxSpan; span >= 2; span--) {
+    let blocked = false;
+    const phraseParts: string[] = [];
+    const matchedTokens: Token[] = [];
+    for (let offset = 0; offset < span; offset++) {
+      const candidate = context.tokens[index + offset];
+      if (!candidate) {
+        blocked = true;
+        break;
+      }
+      if (context.state.consumed.has(candidate.index)) {
+        blocked = true;
+        break;
+      }
+      matchedTokens.push(candidate);
+      phraseParts.push(candidate.lower);
+    }
+    if (blocked) {
+      continue;
+    }
+    const descriptor = WORD_FREQUENCIES[phraseParts.join(" ")];
+    if (!descriptor) {
+      continue;
+    }
+    return {
+      consumedTokenIndices: matchedTokens.map((matchedToken) => matchedToken.index),
+      schedule: {
+        frequency: descriptor.frequency,
+        period: 1,
+        periodUnit: descriptor.periodUnit
+      }
+    };
+  }
+  return undefined;
+}
+
 function collectGenericConnector(
   context: ClauseParseContext,
   index: number,
@@ -5165,13 +5640,31 @@ function parseScheduleTerm(
   token: Token
 ): number | undefined {
   return (
-    applyGrammarTerminal(context, index, token, "schedule.bldMeal", collectBldMealTiming) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.bldMeal",
+      collectBldMealTimingContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "schedule.separatedInterval", collectSeparatedInterval) ??
     applyGrammarTerminal(context, index, token, "schedule.timeBased", collectTimeBasedSchedule) ??
     applyGrammarTerminal(context, index, token, "schedule.numericCadence", collectNumericCadence) ??
     applyGrammarTerminal(context, index, token, "schedule.multiplicativeCadence", collectMultiplicativeCadenceTerm) ??
-    applyGrammarTerminal(context, index, token, "schedule.odTimingAbbreviation", collectOdTimingAbbreviation) ??
-    applyGrammarTerminal(context, index, token, "schedule.timingAbbreviation", collectTimingAbbreviation) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.odTimingAbbreviation",
+      collectOdTimingAbbreviationContribution
+    ) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.timingAbbreviation",
+      collectTimingAbbreviationContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "schedule.compactInterval", collectCompactInterval) ??
     applyGrammarTerminal(context, index, token, "schedule.timingConnector", collectTimingConnector) ??
     applyGrammarTerminal(context, index, token, "schedule.comboEventTiming", collectComboEventTiming) ??
@@ -5180,12 +5673,36 @@ function parseScheduleTerm(
     applyGrammarTerminal(context, index, token, "site.anchorPhrase", collectExplicitSitePhrase) ??
     applyGrammarTerminal(context, index, token, "schedule.genericAnchor", collectGenericAnchor) ??
     applyGrammarTerminal(context, index, token, "schedule.customWhen", collectCustomWhen) ??
-    applyGrammarTerminal(context, index, token, "schedule.eventTiming", collectEventTiming) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.eventTiming",
+      collectEventTimingContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "schedule.dayRange", collectDayRange) ??
-    applyGrammarTerminal(context, index, token, "schedule.dayOfWeek", collectDayOfWeek) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.dayOfWeek",
+      collectDayOfWeekContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "schedule.duration", collectDurationLimit) ??
-    applyGrammarTerminal(context, index, token, "schedule.phraseWordFrequency", collectPhraseWordFrequency) ??
-    applyGrammarTerminal(context, index, token, "schedule.wordFrequency", collectWordFrequency)
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.phraseWordFrequency",
+      collectPhraseWordFrequencyContribution
+    ) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.wordFrequency",
+      collectWordFrequencyContribution
+    )
   );
 }
 
@@ -5222,12 +5739,60 @@ function collectMethodVerb(
   return true;
 }
 
+function collectMethodVerbContribution(
+  context: ClauseParseContext,
+  _index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const normalized = normalizeTokenLower(token);
+  if (
+    context.state.methodVerb &&
+    hasEstablishedAdministrationContent(context.state)
+  ) {
+    return undefined;
+  }
+  if (
+    normalized === "shampoo" &&
+    context.state.methodVerb === "use"
+  ) {
+    return undefined;
+  }
+  if (
+    !hasTokenWordClass(token, TokenWordClass.AdministrationVerb) &&
+    !isAdministrationVerbWord(token.lower)
+  ) {
+    return undefined;
+  }
+  if (normalized === "use" && hasEstablishedAdministrationContent(context.state)) {
+    return undefined;
+  }
+  if (!METHOD_ACTION_BY_VERB[normalized]) {
+    return undefined;
+  }
+  const routeMeaning = getRouteMeaning(token);
+  return {
+    consumedTokenIndices: [token.index],
+    method: {
+      verb: normalized
+    },
+    route: routeMeaning && !context.state.routeCode
+      ? { code: routeMeaning.code, text: routeMeaning.text }
+      : undefined
+  };
+}
+
 function parseMethodTerm(
   context: ClauseParseContext,
   index: number,
   token: Token
 ): number | undefined {
-  return applyGrammarTerminal(context, index, token, "method.verb", collectMethodVerb);
+  return applyGrammarFeatureTerminal(
+    context,
+    index,
+    token,
+    "method.verb",
+    collectMethodVerbContribution
+  );
 }
 
 function parseRouteTerm(
@@ -5243,7 +5808,13 @@ function parseSiteTerm(
   index: number,
   token: Token
 ): number | undefined {
-  return applyGrammarTerminal(context, index, token, "site.abbreviation", collectSiteAbbreviation);
+  return applyGrammarFeatureTerminal(
+    context,
+    index,
+    token,
+    "site.abbreviation",
+    collectSiteAbbreviationContribution
+  );
 }
 
 function parseCountTerm(
@@ -5252,7 +5823,13 @@ function parseCountTerm(
   token: Token
 ): number | undefined {
   return (
-    applyGrammarTerminal(context, index, token, "count.singleOccurrence", collectStandaloneSingleOccurrence) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "count.singleOccurrence",
+      collectStandaloneSingleOccurrenceContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "count.limit", collectCountLimit)
   );
 }
@@ -5803,11 +6380,11 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
       code: coding.code,
       display: coding.display,
       system: coding.system ?? SNOMED_SYSTEM
-    }
+      }
     : undefined;
   if (definition.text) {
     internal.siteText = definition.text;
-  } else if (!internal.siteText && internal.siteLookupRequest?.text) {
+  } else if (internal.siteLookupRequest?.text) {
     internal.siteText = internal.siteLookupRequest.text;
   }
 }
@@ -5884,222 +6461,6 @@ function collectSuggestionResult(
   for (const suggestion of suggestions) {
     addSuggestionToMap(map, suggestion);
   }
-}
-
-const BODY_SITE_ADJECTIVE_SUFFIXES = [
-  "al",
-  "ial",
-  "ual",
-  "ic",
-  "ous",
-  "ive",
-  "ary",
-  "ory",
-  "atic",
-  "etic",
-  "ular",
-  "otic",
-  "ile",
-  "eal",
-  "inal",
-  "aneal",
-  "enal"
-];
-
-const DEFAULT_SITE_SYNONYM_KEYS = (() => {
-  const map = new Map<BodySiteDefinition, string[]>();
-  for (const [key, definition] of objectEntries(DEFAULT_BODY_SITE_SNOMED)) {
-    if (!definition) {
-      continue;
-    }
-    const normalized = key.trim();
-    if (!normalized) {
-      continue;
-    }
-    const existing = map.get(definition);
-    if (existing) {
-      if (existing.indexOf(normalized) === -1) {
-        existing.push(normalized);
-      }
-    } else {
-      map.set(definition, [normalized]);
-    }
-  }
-  return map;
-})();
-
-function normalizeSiteDisplayText(
-  text: string,
-  customSiteMap?: Record<string, BodySiteDefinition>
-): string {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-
-  const canonicalInput = normalizeBodySiteKey(trimmed);
-  if (!canonicalInput) {
-    return trimmed;
-  }
-
-  const resolvePreferred = (
-    canonical: string
-  ): { text: string; canonical: string } | undefined => {
-    const definition =
-      lookupBodySiteDefinition(customSiteMap, canonical) ??
-      DEFAULT_BODY_SITE_SNOMED[canonical];
-    if (!definition) {
-      return undefined;
-    }
-    const preferred = pickPreferredBodySitePhrase(
-      canonical,
-      definition,
-      customSiteMap
-    );
-    const textValue = preferred ?? canonical;
-    const normalized = normalizeBodySiteKey(textValue);
-    if (!normalized) {
-      return undefined;
-    }
-    return { text: textValue, canonical: normalized };
-  };
-
-  if (isAdjectivalSitePhrase(canonicalInput)) {
-    const direct = resolvePreferred(canonicalInput);
-    return direct?.text ?? trimmed;
-  }
-
-  const words = canonicalInput.split(/\s+/).filter((word) => word.length > 0);
-  for (let i = 1; i < words.length; i++) {
-    const prefix = words.slice(0, i);
-    if (!prefix.every((word) => isAdjectivalSitePhrase(word))) {
-      continue;
-    }
-    const candidateCanonical = words.slice(i).join(" ");
-    if (!candidateCanonical) {
-      continue;
-    }
-    const candidatePreferred = resolvePreferred(candidateCanonical);
-    if (!candidatePreferred) {
-      continue;
-    }
-    const prefixMatches = prefix.every((word) => {
-      const normalizedPrefix = resolvePreferred(word);
-      return (
-        normalizedPrefix !== undefined &&
-        normalizedPrefix.canonical === candidatePreferred.canonical
-      );
-    });
-    if (!prefixMatches) {
-      continue;
-    }
-    return candidatePreferred.text;
-  }
-
-  return trimmed;
-}
-
-function pickPreferredBodySitePhrase(
-  canonical: string,
-  definition: BodySiteDefinition,
-  customSiteMap?: Record<string, BodySiteDefinition>
-): string | undefined {
-  const synonyms = new Set<string>();
-  synonyms.add(canonical);
-
-  if (definition.aliases) {
-    for (const alias of definition.aliases) {
-      const normalizedAlias = normalizeBodySiteKey(alias);
-      if (normalizedAlias) {
-        synonyms.add(normalizedAlias);
-      }
-    }
-  }
-
-  const defaultSynonyms = DEFAULT_SITE_SYNONYM_KEYS.get(definition);
-  if (defaultSynonyms) {
-    for (const synonym of defaultSynonyms) {
-      synonyms.add(synonym);
-    }
-  }
-
-  if (customSiteMap) {
-    for (const [key, candidate] of objectEntries(customSiteMap)) {
-      if (!candidate) {
-        continue;
-      }
-      if (candidate === definition) {
-        const normalizedKey = normalizeBodySiteKey(key);
-        if (normalizedKey) {
-          synonyms.add(normalizedKey);
-        }
-        if (candidate.aliases) {
-          for (const alias of candidate.aliases) {
-            const normalizedAlias = normalizeBodySiteKey(alias);
-            if (normalizedAlias) {
-              synonyms.add(normalizedAlias);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  const candidates = Array.from(synonyms).filter(
-    (phrase) => phrase && !isAdjectivalSitePhrase(phrase)
-  );
-  if (!candidates.length) {
-    return undefined;
-  }
-
-  candidates.sort((a, b) => scoreBodySitePhrase(b) - scoreBodySitePhrase(a));
-  const best = candidates[0];
-  if (!best) {
-    return undefined;
-  }
-
-  if (normalizeBodySiteKey(best) === canonical) {
-    return undefined;
-  }
-
-  return best;
-}
-
-function scoreBodySitePhrase(phrase: string): number {
-  const lower = phrase.toLowerCase();
-  const words = lower.split(/\s+/).filter((part) => part.length > 0);
-  let score = 0;
-  if (!/(structure|region|entire|proper|body)/.test(lower)) {
-    score += 3;
-  }
-  if (!lower.includes(" of ")) {
-    score += 1;
-  }
-  if (words.length <= 2) {
-    score += 1;
-  }
-  if (words.length === 1) {
-    score += 0.5;
-  }
-  score -= words.length * 0.2;
-  score -= lower.length * 0.01;
-  return score;
-}
-
-function isAdjectivalSitePhrase(phrase: string): boolean {
-  const normalized = phrase.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  const words = normalized.split(/\s+/).filter((word) => word.length > 0);
-  if (words.length !== 1) {
-    return false;
-  }
-  const last = words[words.length - 1];
-  if (last.length <= 3) {
-    return false;
-  }
-  return BODY_SITE_ADJECTIVE_SUFFIXES.some((suffix) => last.endsWith(suffix));
 }
 
 function hasInstructionSeparatorBeforeRange(
@@ -6480,6 +6841,7 @@ interface PrnSiteSuffixDetection {
   tokens: Token[];
   startIndex: number;
   canonical: string;
+  coding?: FhirCoding;
 }
 
 function findTrailingPrnSiteSuffix(
@@ -6550,22 +6912,77 @@ function findTrailingPrnSiteSuffix(
   }
 
   const sitePhrase = siteWords.join(" ");
-  const canonical = normalizeBodySiteKey(sitePhrase);
+  const resolvedSite = resolveBodySitePhrase(sitePhrase, options?.siteCodeMap);
+  const canonical = resolvedSite?.canonical;
   if (!canonical) {
     return undefined;
   }
-
-  const definition =
-    lookupBodySiteDefinition(options?.siteCodeMap, canonical) ?? DEFAULT_BODY_SITE_SNOMED[canonical];
-  if (!definition) {
+  if (!resolvedSite?.definition && !resolvedSite?.coding) {
     return undefined;
   }
 
   return {
     tokens: siteHintTokens,
     startIndex: suffixStart,
-    canonical
+    canonical,
+    coding: resolvedSite.coding
   };
+}
+
+function findTrailingBarePrnSiteSuffix(
+  tokens: Token[],
+  internal: ParserState,
+  options?: ParseOptions
+): PrnSiteSuffixDetection | undefined {
+  for (let suffixStart = 1; suffixStart < tokens.length; suffixStart++) {
+    const suffixTokens = tokens.slice(suffixStart);
+    const siteWords: string[] = [];
+    let blocked = false;
+
+    for (const token of suffixTokens) {
+      const trimmed = token.original.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const lower = normalizeTokenLower(token);
+      if (!lower || SITE_CONNECTORS.has(lower)) {
+        blocked = true;
+        break;
+      }
+      siteWords.push(trimmed);
+    }
+
+    if (blocked || !siteWords.length) {
+      continue;
+    }
+
+    const resolvedSite = resolveBodySitePhrase(siteWords.join(" "), options?.siteCodeMap);
+    const canonical = resolvedSite?.canonical;
+    if (!canonical) {
+      continue;
+    }
+    if (!resolvedSite?.definition && !resolvedSite?.coding) {
+      continue;
+    }
+
+    return {
+      tokens: suffixTokens,
+      startIndex: suffixStart,
+      canonical,
+      coding: resolvedSite.coding
+    };
+  }
+
+  return undefined;
+}
+
+function buildCombinedPrnReasonCanonical(
+  request: PrnReasonLookupRequest
+): string | undefined {
+  if (!request.locativeSiteCanonical || !request.headCanonical) {
+    return undefined;
+  }
+  return normalizePrnReasonKey(`${request.locativeSiteCanonical} ${request.headCanonical}`);
 }
 
 function collectPrnReasonLookupCanonicals(request: PrnReasonLookupRequest): string[] {
@@ -6581,9 +6998,42 @@ function collectPrnReasonLookupCanonicals(request: PrnReasonLookupRequest): stri
   };
 
   pushCanonical(request.canonical);
+  pushCanonical(buildCombinedPrnReasonCanonical(request));
   pushCanonical(request.headCanonical);
 
   return canonicals;
+}
+
+function buildPostcoordinatedPrnReasonDefinition(
+  request: PrnReasonLookupRequest,
+  definition: PrnReasonDefinition | undefined,
+  hasExactCombinedDefinition: boolean
+): PrnReasonDefinition | undefined {
+  if (
+    hasExactCombinedDefinition ||
+    !definition?.coding?.code ||
+    !request.headCanonical ||
+    request.canonical === request.headCanonical ||
+    !request.locativeSiteCoding?.code ||
+    definition.coding.code.indexOf(":363698007=") >= 0
+  ) {
+    return definition;
+  }
+
+  const focusSystem = definition.coding.system ?? SNOMED_SYSTEM;
+  const siteSystem = request.locativeSiteCoding.system ?? SNOMED_SYSTEM;
+  if (focusSystem !== SNOMED_SYSTEM || siteSystem !== SNOMED_SYSTEM) {
+    return definition;
+  }
+
+  return {
+    ...definition,
+    coding: {
+      system: SNOMED_SYSTEM,
+      code: `${definition.coding.code}:363698007=${request.locativeSiteCoding.code}`,
+      display: request.text
+    }
+  };
 }
 
 function lookupPrnReasonDefinition(
@@ -6660,6 +7110,71 @@ function inferSiteSpecificPrnReasonDefinition(
   if (isLesionSite) {
     return lookupDefaultPrnReasonDefinition("lesion itch");
   }
+
+  const siteCanonicalCandidates: string[] = [];
+  const siteCodingCandidates: FhirCoding[] = [];
+  const pushSiteCanonical = (value: string | undefined) => {
+    const normalized = normalizeBodySiteKey(value ?? "");
+    if (!normalized || arrayIncludes(siteCanonicalCandidates, normalized)) {
+      return;
+    }
+    siteCanonicalCandidates.push(normalized);
+  };
+  const pushResolvedSite = (value: string | undefined) => {
+    const resolvedSite = value
+      ? resolveBodySitePhrase(value, undefined)
+      : undefined;
+    if (!resolvedSite) {
+      return;
+    }
+    pushSiteCanonical(resolvedSite.canonical);
+    const coding = resolvedSite.coding;
+    if (
+      coding?.code &&
+      !siteCodingCandidates.some(
+        (candidate) =>
+          candidate.code === coding.code &&
+          (candidate.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)
+      )
+    ) {
+      siteCodingCandidates.push(coding);
+    }
+  };
+  pushResolvedSite(internal.siteLookupRequest?.text);
+  pushResolvedSite(internal.siteText);
+  pushSiteCanonical(internal.siteLookupRequest?.canonical);
+  pushSiteCanonical(internal.siteText);
+  pushSiteCanonical(siteCodingDisplay);
+  if (internal.siteCoding?.code) {
+    siteCodingCandidates.push({
+      code: internal.siteCoding.code,
+      display: internal.siteCoding.display,
+      system: internal.siteCoding.system ?? SNOMED_SYSTEM
+    });
+  }
+
+  for (const siteCanonical of siteCanonicalCandidates) {
+    const exactDefinition = lookupDefaultPrnReasonDefinition(`${siteCanonical} itch`);
+    if (exactDefinition) {
+      return exactDefinition;
+    }
+  }
+
+  const siteCoding = siteCodingCandidates[0];
+  if (!siteCoding?.code) {
+    return undefined;
+  }
+  const syntheticRequest: PrnReasonLookupRequest = {
+    ...request,
+    headCanonical: normalizePrnReasonKey("itch"),
+    locativeSiteCanonical: siteCanonicalCandidates[0],
+    locativeSiteCoding: siteCoding
+  };
+  return buildPostcoordinatedPrnReasonDefinition(
+    syntheticRequest,
+    lookupDefaultPrnReasonDefinition("itch"),
+    false
+  );
 
   return undefined;
 }
@@ -6743,6 +7258,8 @@ function createPrnReasonLookupRequestFromText(
     normalized,
     canonical: canonical ?? "",
     headCanonical: undefined,
+    locativeSiteCanonical: undefined,
+    locativeSiteCoding: undefined,
     isProbe: false,
     inputText: internal.input,
     sourceText: text,
@@ -6760,9 +7277,16 @@ function resolvePrnReasonDefinitionSyncForRequest(
     return selection;
   }
   const canonicals = collectPrnReasonLookupCanonicals(request);
+  const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
+  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
-    return customDefinition;
+    return buildPostcoordinatedPrnReasonDefinition(
+      request,
+      customDefinition,
+      hasExactCombinedDefinition
+    );
   }
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   if (inferredDefinition) {
@@ -6779,7 +7303,11 @@ function resolvePrnReasonDefinitionSyncForRequest(
       return result;
     }
   }
-  return lookupDefaultPrnReasonDefinition(canonicals);
+  return buildPostcoordinatedPrnReasonDefinition(
+    request,
+    lookupDefaultPrnReasonDefinition(canonicals),
+    hasExactCombinedDefinition
+  );
 }
 
 async function resolvePrnReasonDefinitionAsyncForRequest(
@@ -6792,9 +7320,16 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
     return selection;
   }
   const canonicals = collectPrnReasonLookupCanonicals(request);
+  const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
+  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
-    return customDefinition;
+    return buildPostcoordinatedPrnReasonDefinition(
+      request,
+      customDefinition,
+      hasExactCombinedDefinition
+    );
   }
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   if (inferredDefinition) {
@@ -6806,7 +7341,11 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
       return result;
     }
   }
-  return lookupDefaultPrnReasonDefinition(canonicals);
+  return buildPostcoordinatedPrnReasonDefinition(
+    request,
+    lookupDefaultPrnReasonDefinition(canonicals),
+    hasExactCombinedDefinition
+  );
 }
 
 function splitCoordinatedPrnReasonText(text: string): string[] | undefined {
@@ -7003,7 +7542,11 @@ function runPrnReasonResolutionSync(
   }
 
   const canonicals = collectPrnReasonLookupCanonicals(request);
+  const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  const exactCustomDefinition =
+    lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical) ??
+    lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical ?? "");
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
@@ -7023,13 +7566,26 @@ function runPrnReasonResolutionSync(
     }
   }
 
-  const defaultDefinition = lookupDefaultPrnReasonDefinition(canonicals);
+  const exactDefaultDefinition =
+    lookupDefaultPrnReasonDefinition(request.canonical) ??
+    lookupDefaultPrnReasonDefinition(combinedCanonical ?? "");
+  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
+  const defaultDefinition = buildPostcoordinatedPrnReasonDefinition(
+    request,
+    lookupDefaultPrnReasonDefinition(canonicals),
+    hasExactCombinedDefinition
+  );
   if (!resolution && inferredDefinition) {
     resolution = inferredDefinition;
   }
   if (!resolution && defaultDefinition) {
     resolution = defaultDefinition;
   }
+  resolution = buildPostcoordinatedPrnReasonDefinition(
+    request,
+    resolution,
+    hasExactCombinedDefinition
+  );
 
   if (resolution) {
     applyPrnReasonDefinition(internal, resolution);
@@ -7087,7 +7643,11 @@ async function runPrnReasonResolutionAsync(
   }
 
   const canonicals = collectPrnReasonLookupCanonicals(request);
+  const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
+  const exactCustomDefinition =
+    lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical) ??
+    lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical ?? "");
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
@@ -7102,13 +7662,26 @@ async function runPrnReasonResolutionAsync(
     }
   }
 
-  const defaultDefinition = lookupDefaultPrnReasonDefinition(canonicals);
+  const exactDefaultDefinition =
+    lookupDefaultPrnReasonDefinition(request.canonical) ??
+    lookupDefaultPrnReasonDefinition(combinedCanonical ?? "");
+  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
+  const defaultDefinition = buildPostcoordinatedPrnReasonDefinition(
+    request,
+    lookupDefaultPrnReasonDefinition(canonicals),
+    hasExactCombinedDefinition
+  );
   if (!resolution && inferredDefinition) {
     resolution = inferredDefinition;
   }
   if (!resolution && defaultDefinition) {
     resolution = defaultDefinition;
   }
+  resolution = buildPostcoordinatedPrnReasonDefinition(
+    request,
+    resolution,
+    hasExactCombinedDefinition
+  );
 
   if (resolution) {
     applyPrnReasonDefinition(internal, resolution);
