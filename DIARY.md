@@ -1724,3 +1724,111 @@ first actual whole-parser center-of-gravity move:
   - numeric/separated/compact cadence
   - count limits
   - dose structures
+
+## 2026-04-26 Parser-core contribution layer: second family migration
+
+Pushed a bigger parser-core family migration instead of another isolated
+terminal patch.
+
+Moved these clause-grammar families onto typed contributions in `src/parser.ts`:
+- route:
+  - `route.synonym`
+- site:
+  - `site.anchorPhrase` (explicit site phrases)
+- schedule/count/duration:
+  - `count.limit`
+  - `schedule.duration`
+  - `dose.countBasedFrequency`
+
+This matters because these are not tiny leaf cases:
+- route/site phrase resolution is a major ambiguity center
+- finite count/duration/cadence structure is one of the main schedule families
+- count-based frequency (`once daily`, `3 times per day`, `one time weekly`)
+  was still sitting on the old mutation path
+
+Important architectural changes:
+- added route refinement semantics instead of treating all route differences as
+  flat conflicts
+- parser now recognizes that:
+  - `Topical -> Per vagina / Per rectum / Ophthalmic / Otic / Nasal`
+  - `Oral -> Buccal / Sublingual`
+  - `Ophthalmic -> Ocular / Intravitreal`
+  are compatible lexical-semantic refinements, not contradictions
+- explicit site-phrase contributions can now carry:
+  - consumed tokens
+  - site token indices
+  - site lookup request
+  - route upgrades inferred from site semantics
+
+This fixed a real regression uncovered by the rewrite:
+- `apply cream to vagina once daily`
+- `apply vaginal cream nightly`
+had started collapsing back to generic topical route because the new
+contribution compatibility layer treated `Topical` vs `Per vagina` as a hard
+conflict
+- that is now modeled correctly as refinement
+
+Net effect:
+- a whole lexical family is now off the old mutation-only path in core clause
+  parsing
+- route/site/cadence/count/duration now participate in typed compatibility
+  checks instead of only collector ordering
+- the remaining old center is more clearly concentrated in:
+  - separated/compact/numeric interval cadence
+  - explicit route/default reconciliation
+  - dose/unit structure
+  - some post-parse cleanup passes
+
+## 2026-04-26 Clause sign inventory and candidate selection
+
+Addressed the biggest remaining “cheating” point in the parser core:
+- even after contribution migration, `parseCoreTerm(...)` was still choosing
+  rule families by hardcoded control flow:
+  - `parseScheduleTerm -> parseMethodTerm -> parseRouteTerm -> ...`
+
+That is no longer the core dispatch model.
+
+Added:
+- `ParserState.clone()` in `src/parser-state.ts`
+
+Parser-core changes in `src/parser.ts`:
+- added a declarative `CLAUSE_GRAMMAR_RULES` inventory
+- added preview for both:
+  - feature rules
+  - imperative legacy rules
+- rule preview now uses cloned parser state for imperative rules, so candidate
+  evaluation does not mutate the live state
+- added candidate ranking based on:
+  - longest span
+  - consumed-token coverage
+  - grammar precedence
+  - feature/state delta richness
+- `parseCoreTerm(...)` now selects the best compatible clause sign candidate
+  from the inventory instead of calling category parsers in fixed order
+
+Important consequences:
+- rule choice is no longer identical to parser control-flow order
+- explicit verb heads can now outrank weaker route inferences on the same token
+- lexical refinements like `Topical -> Per vagina` are modeled as compatible
+  route refinement, not hard conflict
+
+Real regression uncovered/fixed while doing this:
+- `po 10 ml twice daily, drink slowly`
+  initially regressed because the candidate scorer preferred a route-like
+  analysis of `drink` over the explicit method-verb analysis
+- fixed by making grammar precedence outrank raw feature-count after
+  span/coverage, which is closer to actual headed lexical analysis
+
+This is materially closer to an HPSG-style parser center because:
+- rule inventory is declarative
+- candidate evaluation is separate from commitment
+- compatibility is feature-based
+- live state mutation happens only after candidate selection
+
+Still not “full HPSG” yet:
+- no full chart / parse forest
+- no true branching ambiguity retention beyond best-candidate commitment
+- many higher-order construction families are still implemented by legacy
+  procedural matchers
+
+But the center is no longer just a deterministic term-order walker.

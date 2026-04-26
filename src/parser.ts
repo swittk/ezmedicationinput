@@ -498,6 +498,51 @@ const OPHTHALMIC_ROUTE_CODES = new Set<RouteCode>([
   RouteCode["Intravitreal route (qualifier value)"]
 ]);
 
+const ROUTE_REFINEMENTS = new Map<RouteCode, ReadonlySet<RouteCode>>([
+  [
+    RouteCode["Topical route"],
+    new Set<RouteCode>([
+      RouteCode["Per vagina"],
+      RouteCode["Per rectum"],
+      RouteCode["Ophthalmic route"],
+      RouteCode["Ocular route (qualifier value)"],
+      RouteCode["Intravitreal route (qualifier value)"],
+      RouteCode["Otic route"],
+      RouteCode["Nasal route"]
+    ])
+  ],
+  [
+    RouteCode["Oral route"],
+    new Set<RouteCode>([
+      RouteCode["Buccal route"],
+      RouteCode["Sublingual route"]
+    ])
+  ],
+  [
+    RouteCode["Ophthalmic route"],
+    new Set<RouteCode>([
+      RouteCode["Ocular route (qualifier value)"],
+      RouteCode["Intravitreal route (qualifier value)"]
+    ])
+  ],
+  [
+    RouteCode["Ocular route (qualifier value)"],
+    new Set<RouteCode>([
+      RouteCode["Intravitreal route (qualifier value)"]
+    ])
+  ]
+]);
+
+function isCompatibleRouteRefinement(
+  current: RouteCode | undefined,
+  next: RouteCode
+): boolean {
+  if (current === undefined || current === next) {
+    return true;
+  }
+  return Boolean(ROUTE_REFINEMENTS.get(current)?.has(next));
+}
+
 function isOphthalmicSiteCandidate(
   candidate: { text: string; route?: RouteCode } | undefined
 ): boolean {
@@ -1101,6 +1146,133 @@ function tryParseCountBasedFrequency(
   }
 
   return consumeCurrentToken;
+}
+
+function buildCountBasedFrequencyContribution(
+  context: ClauseParseContext,
+  index: number
+): ClauseFeatureContribution | undefined {
+  const internal = context.state;
+  const tokens = context.tokens;
+  const token = tokens[index];
+  if (!token || internal.consumed.has(token.index)) {
+    return undefined;
+  }
+  if (
+    internal.frequency !== undefined ||
+    internal.frequencyMax !== undefined ||
+    internal.period !== undefined ||
+    internal.periodMax !== undefined
+  ) {
+    return undefined;
+  }
+
+  const normalized = normalizeTokenLower(token);
+  let value: number | undefined;
+  let requiresPeriod = true;
+  let requiresCue = true;
+
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(normalized)) {
+    value = parseFloat(token.original);
+  } else {
+    const simple = FREQUENCY_SIMPLE_WORDS[normalized];
+    if (simple !== undefined) {
+      value = simple;
+      requiresPeriod = normalized === "once";
+      requiresCue = false;
+    } else {
+      const wordValue = FREQUENCY_NUMBER_WORDS[normalized];
+      if (wordValue === undefined) {
+        return undefined;
+      }
+      value = wordValue;
+    }
+  }
+
+  if (!Number.isFinite(value) || value === undefined || value <= 0) {
+    return undefined;
+  }
+
+  const nextToken = tokens[index + 1];
+  if (
+    nextToken &&
+    !internal.consumed.has(nextToken.index) &&
+    normalizeUnit(normalizeTokenLower(nextToken), context.options)
+  ) {
+    return undefined;
+  }
+
+  const consumedTokenIndices: number[] = [];
+  let nextIndex = index + 1;
+  let periodUnit: FhirPeriodUnit | undefined;
+  let sawCue = !requiresCue;
+  let sawTimesWord = false;
+  let sawConnectorWord = false;
+
+  while (true) {
+    const candidate = tokens[nextIndex];
+    if (!candidate || internal.consumed.has(candidate.index)) {
+      break;
+    }
+    const lower = normalizeTokenLower(candidate);
+    if (FREQUENCY_TIMES_WORDS.has(lower)) {
+      consumedTokenIndices.push(candidate.index);
+      sawCue = true;
+      sawTimesWord = true;
+      nextIndex += 1;
+      continue;
+    }
+    if (FREQUENCY_CONNECTOR_WORDS.has(lower)) {
+      consumedTokenIndices.push(candidate.index);
+      sawCue = true;
+      sawConnectorWord = true;
+      nextIndex += 1;
+      continue;
+    }
+    const adverbUnit = mapFrequencyAdverb(lower);
+    if (adverbUnit) {
+      periodUnit = adverbUnit;
+      consumedTokenIndices.push(candidate.index);
+      break;
+    }
+    const mappedUnit = mapIntervalUnit(lower);
+    if (mappedUnit) {
+      periodUnit = mappedUnit;
+      consumedTokenIndices.push(candidate.index);
+      break;
+    }
+    break;
+  }
+
+  if (!periodUnit) {
+    if (requiresPeriod) {
+      return undefined;
+    }
+    periodUnit = FhirPeriodUnit.Day;
+  }
+
+  if (requiresCue && !sawCue) {
+    return undefined;
+  }
+
+  const consumeCurrentToken =
+    !(value === 1 && !sawConnectorWord && sawTimesWord && periodUnit !== FhirPeriodUnit.Day);
+  if (consumeCurrentToken) {
+    consumedTokenIndices.unshift(token.index);
+  }
+
+  return {
+    consumedTokenIndices,
+    schedule: {
+      frequency: value,
+      period: 1,
+      periodUnit,
+      timingCode:
+        value === 1 && periodUnit === FhirPeriodUnit.Day && !internal.timingCode
+          ? "QD"
+          : undefined
+    }
+  };
 }
 
 function parseTimeToFhir(timeStr: string): string | undefined {
@@ -3802,6 +3974,14 @@ function applyCountLimit(internal: ParserState, value: number | undefined): bool
   return true;
 }
 
+function normalizeCountLimitValue(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  const rounded = Math.round(value);
+  return rounded > 0 ? rounded : undefined;
+}
+
 function applyDurationLimit(
   internal: ParserState,
   value: number | undefined,
@@ -3819,6 +3999,22 @@ function applyDurationLimit(
     max !== undefined && Number.isFinite(max) && max > value ? max : undefined;
   internal.durationUnit = unit;
   return true;
+}
+
+function buildDurationScheduleContribution(
+  value: number | undefined,
+  unit: FhirPeriodUnit | undefined,
+  max?: number
+): ClauseScheduleContribution | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit) {
+    return undefined;
+  }
+  return {
+    duration: value,
+    durationMax:
+      max !== undefined && Number.isFinite(max) && max > value ? max : undefined,
+    durationUnit: unit
+  };
 }
 
 const DOSE_SCALE_MULTIPLIERS: Record<string, number> = {
@@ -3978,6 +4174,29 @@ type GrammarProduction = (
   token: Token
 ) => number | undefined;
 
+type ClauseGrammarRule =
+  | {
+    id: string;
+    kind: "feature";
+    precedence: number;
+    matcher: FeatureContributionMatcher;
+  }
+  | {
+    id: string;
+    kind: "imperative";
+    precedence: number;
+    matcher: TerminalMatcher;
+  };
+
+interface ClauseGrammarCandidate {
+  nextIndex: number;
+  endIndex: number;
+  consumedCount: number;
+  featureCount: number;
+  precedence: number;
+  apply: () => number | undefined;
+}
+
 function buildCustomRouteMap(
   routeMap: ParseOptions["routeMap"] | undefined
 ): Map<string, RouteCode> | undefined {
@@ -4032,7 +4251,7 @@ function tryApplyRouteDescriptor(
   code: RouteCode,
   text?: string
 ): boolean {
-  if (state.routeCode && state.routeCode !== code) {
+  if (!isCompatibleRouteRefinement(state.routeCode, code)) {
     return false;
   }
   setRoute(state, code, text);
@@ -4081,6 +4300,158 @@ function maybeApplyRouteDescriptorFromPhrase(
     fallbackSynonym.code,
     fallbackSynonym.text
   );
+}
+
+function resolveRouteContributionFromPhrase(
+  context: ClauseParseContext,
+  phrase: string | undefined
+): ClauseFeatureContribution["route"] | undefined {
+  if (!phrase) {
+    return undefined;
+  }
+  const normalized = phrase.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const applyIfCompatible = (
+    code: RouteCode,
+    text?: string
+  ): ClauseFeatureContribution["route"] | undefined => {
+    if (!isCompatibleRouteRefinement(context.state.routeCode, code)) {
+      return undefined;
+    }
+    return { code, text };
+  };
+
+  const customCode = context.customRouteMap?.get(normalized);
+  if (customCode) {
+    const contribution = applyIfCompatible(customCode);
+    if (contribution) {
+      return contribution;
+    }
+  }
+
+  const synonym = DEFAULT_ROUTE_SYNONYMS[normalized];
+  if (synonym) {
+    const contribution = applyIfCompatible(synonym.code, synonym.text);
+    if (contribution) {
+      return contribution;
+    }
+  }
+
+  const normalizedDescriptor = normalizeRouteDescriptorPhrase(normalized);
+  if (!normalizedDescriptor) {
+    return undefined;
+  }
+
+  const customDescriptorCode = context.customRouteDescriptorMap?.get(normalizedDescriptor);
+  if (customDescriptorCode) {
+    const contribution = applyIfCompatible(customDescriptorCode);
+    if (contribution) {
+      return contribution;
+    }
+  }
+
+  const fallbackSynonym = DEFAULT_ROUTE_DESCRIPTOR_SYNONYMS.get(normalizedDescriptor);
+  if (!fallbackSynonym) {
+    return undefined;
+  }
+  return applyIfCompatible(fallbackSynonym.code, fallbackSynonym.text);
+}
+
+function collectRouteSynonymContribution(
+  context: ClauseParseContext,
+  startIndex: number,
+  _token: Token
+): ClauseFeatureContribution | undefined {
+  if (context.prnReasonStart !== undefined && startIndex >= context.prnReasonStart) {
+    return undefined;
+  }
+  const state = context.state;
+  const tokens = context.tokens;
+  const currentToken = tokens[startIndex];
+  if (
+    state.methodVerb &&
+    hasEstablishedAdministrationContent(state) &&
+    currentToken &&
+    (
+      hasTokenWordClass(currentToken, TokenWordClass.AdministrationVerb) ||
+      isAdministrationVerbWord(currentToken.lower)
+    )
+  ) {
+    return undefined;
+  }
+  if (
+    currentToken &&
+    normalizeTokenLower(currentToken) === "shampoo" &&
+    state.methodVerb === "use"
+  ) {
+    return undefined;
+  }
+
+  const maxSpan = Math.min(24, tokens.length - startIndex);
+  for (let span = maxSpan; span >= 1; span--) {
+    const slice: Token[] = [];
+    const phraseParts: string[] = [];
+    let blocked = false;
+    for (let offset = 0; offset < span; offset++) {
+      const part = tokens[startIndex + offset];
+      if (!part) {
+        blocked = true;
+        break;
+      }
+      if (state.consumed.has(part.index)) {
+        blocked = true;
+        break;
+      }
+      slice.push(part);
+      if (!/^[;:(),]+$/.test(part.lower)) {
+        phraseParts.push(part.lower);
+      }
+    }
+    if (blocked) {
+      continue;
+    }
+    const phrase = phraseParts.join(" ");
+    const customCode = context.customRouteMap?.get(phrase);
+    const annotatedRoute = span === 1 ? getRouteMeaning(slice[0]) : undefined;
+    const synonym = customCode
+      ? { code: customCode, text: ROUTE_TEXT[customCode] }
+      : annotatedRoute ?? DEFAULT_ROUTE_SYNONYMS[phrase];
+    if (!synonym) {
+      continue;
+    }
+    if (phrase === "top" && slice.length === 1) {
+      const nextToken = tokens[startIndex + 1];
+      if (nextToken && normalizeTokenLower(nextToken) === "of") {
+        continue;
+      }
+    }
+    if (phrase === "in" && slice.length === 1) {
+      if (state.routeCode) {
+        continue;
+      }
+      const prevToken = tokens[startIndex - 1];
+      if (prevToken && !state.consumed.has(prevToken.index)) {
+        continue;
+      }
+    }
+    if (!isCompatibleRouteRefinement(state.routeCode, synonym.code)) {
+      continue;
+    }
+    return {
+      consumedTokenIndices: slice.map((part) => part.index),
+      siteTokenIndices: slice
+        .filter((part) => isBodySiteHint(part.lower, state.customSiteHints))
+        .map((part) => part.index),
+      route: {
+        code: synonym.code,
+        text: synonym.text
+      }
+    };
+  }
+  return undefined;
 }
 
 function buildTokenSemanticContext(
@@ -4185,7 +4556,7 @@ function canApplyClauseContribution(
   }
 
   const route = contribution.route;
-  if (route && state.routeCode !== undefined && state.routeCode !== route.code) {
+  if (route && !isCompatibleRouteRefinement(state.routeCode, route.code)) {
     return false;
   }
 
@@ -4319,6 +4690,12 @@ function applyClauseContribution(
     }
   }
 
+  if (contribution.siteTokenIndices?.length) {
+    for (const tokenIndex of contribution.siteTokenIndices) {
+      state.siteTokenIndices.add(tokenIndex);
+    }
+  }
+
   for (const tokenIndex of contribution.consumedTokenIndices) {
     const parsedToken = tokens[tokenIndex];
     if (parsedToken) {
@@ -4351,6 +4728,189 @@ function applyGrammarFeatureTerminal(
   }
   recordClauseEvidence(context.state, rule, index, endIndex);
   return endIndex + 1;
+}
+
+function measureScheduleContribution(schedule: ClauseScheduleContribution | undefined): number {
+  if (!schedule) {
+    return 0;
+  }
+  let score = 0;
+  if (schedule.timingCode !== undefined) score += 1;
+  if (schedule.count !== undefined) score += 1;
+  if (schedule.duration !== undefined) score += 1;
+  if (schedule.durationMax !== undefined) score += 1;
+  if (schedule.durationUnit !== undefined) score += 1;
+  if (schedule.frequency !== undefined) score += 1;
+  if (schedule.frequencyMax !== undefined) score += 1;
+  if (schedule.period !== undefined) score += 1;
+  if (schedule.periodMax !== undefined) score += 1;
+  if (schedule.periodUnit !== undefined) score += 1;
+  if (schedule.when?.length) score += schedule.when.length;
+  if (schedule.dayOfWeek?.length) score += schedule.dayOfWeek.length;
+  if (schedule.timeOfDay?.length) score += schedule.timeOfDay.length;
+  return score;
+}
+
+function measureContributionFeatures(contribution: ClauseFeatureContribution): number {
+  let score = 0;
+  if (contribution.method) {
+    score += 1;
+    if (contribution.method.text !== undefined) score += 1;
+    if (contribution.method.textElement !== undefined) score += 1;
+    if (contribution.method.coding !== undefined) score += 1;
+  }
+  if (contribution.route) {
+    score += 1;
+    if (contribution.route.text !== undefined) score += 1;
+  }
+  if (contribution.site) {
+    score += 1;
+    if (contribution.site.text !== undefined) score += 1;
+    if (contribution.site.source !== undefined) score += 1;
+    if (contribution.site.coding !== undefined) score += 1;
+    if (contribution.site.lookupRequest !== undefined) score += 1;
+  }
+  score += measureScheduleContribution(contribution.schedule);
+  if (contribution.warnings?.length) {
+    score += contribution.warnings.length;
+  }
+  if (contribution.siteTokenIndices?.length) {
+    score += 1;
+  }
+  return score;
+}
+
+function measureStateDelta(before: ParserState, after: ParserState): number {
+  let score = 0;
+  if (before.methodVerb !== after.methodVerb) score += 1;
+  if (before.methodText !== after.methodText) score += 1;
+  if (before.routeCode !== after.routeCode) score += 1;
+  if (before.routeText !== after.routeText) score += 1;
+  if (before.siteText !== after.siteText) score += 1;
+  if (before.siteSource !== after.siteSource) score += 1;
+  if (before.count !== after.count) score += 1;
+  if (before.duration !== after.duration) score += 1;
+  if (before.durationMax !== after.durationMax) score += 1;
+  if (before.durationUnit !== after.durationUnit) score += 1;
+  if (before.frequency !== after.frequency) score += 1;
+  if (before.frequencyMax !== after.frequencyMax) score += 1;
+  if (before.period !== after.period) score += 1;
+  if (before.periodMax !== after.periodMax) score += 1;
+  if (before.periodUnit !== after.periodUnit) score += 1;
+  if (before.timingCode !== after.timingCode) score += 1;
+  if ((before.when?.length ?? 0) !== (after.when?.length ?? 0)) score += 1;
+  if ((before.dayOfWeek?.length ?? 0) !== (after.dayOfWeek?.length ?? 0)) score += 1;
+  if ((before.timeOfDay?.length ?? 0) !== (after.timeOfDay?.length ?? 0)) score += 1;
+  if (before.dose !== after.dose) score += 1;
+  if (before.unit !== after.unit) score += 1;
+  if (before.doseRange?.low !== after.doseRange?.low || before.doseRange?.high !== after.doseRange?.high) {
+    score += 1;
+  }
+  if (before.consumed.size !== after.consumed.size) {
+    score += Math.max(1, after.consumed.size - before.consumed.size);
+  }
+  return score;
+}
+
+function isBetterClauseGrammarCandidate(
+  candidate: ClauseGrammarCandidate,
+  best: ClauseGrammarCandidate | undefined
+): boolean {
+  if (!best) {
+    return true;
+  }
+  if (candidate.endIndex !== best.endIndex) {
+    return candidate.endIndex > best.endIndex;
+  }
+  if (candidate.consumedCount !== best.consumedCount) {
+    return candidate.consumedCount > best.consumedCount;
+  }
+  if (candidate.precedence !== best.precedence) {
+    return candidate.precedence > best.precedence;
+  }
+  if (candidate.featureCount !== best.featureCount) {
+    return candidate.featureCount > best.featureCount;
+  }
+  return false;
+}
+
+function previewFeatureGrammarRule(
+  context: ClauseParseContext,
+  index: number,
+  token: Token,
+  rule: Extract<ClauseGrammarRule, { kind: "feature" }>
+): ClauseGrammarCandidate | undefined {
+  const contribution = rule.matcher(context, index, token);
+  if (!contribution) {
+    return undefined;
+  }
+  if (!canApplyClauseContribution(context.state, contribution)) {
+    return undefined;
+  }
+  let endIndex = index;
+  for (const consumedIndex of contribution.consumedTokenIndices) {
+    if (consumedIndex > endIndex) {
+      endIndex = consumedIndex;
+    }
+  }
+  return {
+    nextIndex: endIndex + 1,
+    endIndex,
+    consumedCount: contribution.consumedTokenIndices.length,
+    featureCount: measureContributionFeatures(contribution),
+    precedence: rule.precedence,
+    apply: () =>
+      applyGrammarFeatureTerminal(context, index, token, rule.id, rule.matcher)
+  };
+}
+
+function previewImperativeGrammarRule(
+  context: ClauseParseContext,
+  index: number,
+  token: Token,
+  rule: Extract<ClauseGrammarRule, { kind: "imperative" }>
+): ClauseGrammarCandidate | undefined {
+  const stateClone = context.state.clone();
+  const previewContext: ClauseParseContext = {
+    ...context,
+    state: stateClone
+  };
+  const beforeConsumed = new Set<number>();
+  for (const consumedIndex of stateClone.consumed) {
+    beforeConsumed.add(consumedIndex);
+  }
+  if (!rule.matcher(previewContext, index, token)) {
+    return undefined;
+  }
+  let endIndex = index;
+  let consumedCount = 0;
+  for (const consumedIndex of stateClone.consumed) {
+    if (!beforeConsumed.has(consumedIndex)) {
+      consumedCount += 1;
+      if (consumedIndex > endIndex) {
+        endIndex = consumedIndex;
+      }
+    }
+  }
+  return {
+    nextIndex: endIndex + 1,
+    endIndex,
+    consumedCount,
+    featureCount: measureStateDelta(context.state, stateClone),
+    precedence: rule.precedence,
+    apply: () => applyGrammarTerminal(context, index, token, rule.id, rule.matcher)
+  };
+}
+
+function previewClauseGrammarRule(
+  context: ClauseParseContext,
+  index: number,
+  token: Token,
+  rule: ClauseGrammarRule
+): ClauseGrammarCandidate | undefined {
+  return rule.kind === "feature"
+    ? previewFeatureGrammarRule(context, index, token, rule)
+    : previewImperativeGrammarRule(context, index, token, rule);
 }
 
 function tryCollectRouteSynonym(
@@ -5076,6 +5636,164 @@ function collectSiteAbbreviationContribution(
   };
 }
 
+function buildSitePhraseContribution(
+  context: ClauseParseContext,
+  candidate: SitePhraseCandidate
+): ClauseFeatureContribution | undefined {
+  if (!candidate.tokenIndices.length) {
+    return undefined;
+  }
+
+  const sortedIndices = Array.from(new Set(candidate.tokenIndices)).sort((a, b) => a - b);
+  const displayWords: string[] = [];
+  const displayTokenIndices: number[] = [];
+  const siteTokenIndices: number[] = [];
+
+  for (const index of sortedIndices) {
+    const token = context.tokens[index];
+    if (!token) {
+      continue;
+    }
+    const lower = normalizeTokenLower(token);
+    const trimmed = token.original.trim();
+    const isBraceToken = trimmed.length > 0 && /^[{}]+$/.test(trimmed);
+    if (
+      !isBraceToken &&
+      !SITE_CONNECTORS.has(lower) &&
+      !SITE_FILLER_WORDS.has(lower) &&
+      lower !== ","
+    ) {
+      displayWords.push(token.original);
+      displayTokenIndices.push(token.index);
+    }
+    siteTokenIndices.push(token.index);
+  }
+
+  const consumedTokenIndices = [...sortedIndices];
+  if (context.options?.siteCodeMap && sortedIndices.length > 0) {
+    const lastIndex = sortedIndices[sortedIndices.length - 1];
+    const commaToken = context.tokens[lastIndex + 1];
+    const trailingModifier = context.tokens[lastIndex + 2];
+    const trailingLower = trailingModifier ? normalizeTokenLower(trailingModifier) : undefined;
+    if (
+      commaToken?.original === "," &&
+      trailingModifier &&
+      !context.state.consumed.has(trailingModifier.index) &&
+      (trailingLower === "left" || trailingLower === "right" || trailingLower === "bilateral")
+    ) {
+      displayWords.push(trailingModifier.original);
+      displayTokenIndices.push(trailingModifier.index);
+      siteTokenIndices.push(trailingModifier.index);
+      consumedTokenIndices.push(trailingModifier.index);
+    }
+  }
+
+  const resolvedSiteText = displayWords.join(" ").replace(/\s+/g, " ").trim();
+  if (!resolvedSiteText) {
+    return undefined;
+  }
+
+  const tokenRange = computeTokenRange(
+    context.state.input,
+    context.tokens,
+    displayTokenIndices.length > 0 ? displayTokenIndices : sortedIndices
+  );
+  let range = tokenRange;
+  let sanitized = resolvedSiteText;
+  let isProbe = false;
+  const probeMatch = sanitized.match(/^\{(.+)}$/);
+  if (probeMatch) {
+    isProbe = true;
+    sanitized = probeMatch[1];
+  }
+  sanitized = sanitized.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+
+  let sourceText = range ? context.state.input.slice(range.start, range.end) : undefined;
+  if (isProbe && range && sourceText) {
+    const openBrace = sourceText.indexOf("{");
+    const closeBrace = sourceText.lastIndexOf("}");
+    if (openBrace !== -1 && closeBrace > openBrace) {
+      range = {
+        start: range.start + openBrace + 1,
+        end: range.start + closeBrace
+      };
+      sourceText = context.state.input.slice(range.start, range.end);
+    } else {
+      sourceText = sanitized;
+    }
+  }
+
+  const resolvedSite = resolveBodySitePhrase(sanitized, context.options?.siteCodeMap);
+  const displayText = resolvedSite?.displayText ?? sanitized;
+  if (!displayText) {
+    return undefined;
+  }
+
+  const requestText = sanitized || displayText;
+  const displayLower = displayText.toLowerCase();
+  const normalizedLower = requestText.toLowerCase();
+  const strippedDescriptor = normalizeRouteDescriptorPhrase(normalizedLower);
+  let hasNonSiteWords = false;
+  for (const word of displayLower.split(/\s+/)) {
+    if (!word) {
+      continue;
+    }
+    if (!isBodySiteHint(word, context.state.customSiteHints)) {
+      hasNonSiteWords = true;
+      break;
+    }
+  }
+  const shouldAttemptRouteDescriptor =
+    strippedDescriptor !== normalizedLower || hasNonSiteWords || strippedDescriptor === "mouth";
+  const routeContribution =
+    shouldAttemptRouteDescriptor
+      ? resolveRouteContributionFromPhrase(context, sanitized)
+      : undefined;
+  if (routeContribution) {
+    return {
+      consumedTokenIndices,
+      siteTokenIndices,
+      route: routeContribution
+    };
+  }
+
+  const siteRouteHint = inferRouteHintFromSitePhraseFromModule(displayText, context.options, {
+    lookupBodySiteDefinition
+  });
+  const hintedRouteContribution =
+    siteRouteHint &&
+    (
+      !context.state.routeCode ||
+      (
+        context.state.routeCode === RouteCode["Topical route"] &&
+        siteRouteHint !== RouteCode["Topical route"]
+      )
+    )
+      ? { code: siteRouteHint }
+      : undefined;
+
+  const canonical = resolvedSite?.lookupCanonical ?? normalizeBodySiteKey(displayText);
+  return {
+    consumedTokenIndices,
+    siteTokenIndices,
+    route: hintedRouteContribution,
+    site: {
+      text: displayText,
+      source: "text",
+      lookupRequest: {
+        originalText: resolvedSiteText,
+        text: requestText,
+        normalized: normalizedLower,
+        canonical,
+        isProbe,
+        inputText: context.state.input,
+        sourceText,
+        range
+      }
+    }
+  };
+}
+
 function collectExplicitSitePhrase(
   context: ClauseParseContext,
   index: number,
@@ -5107,6 +5825,33 @@ function collectExplicitSitePhrase(
     context.options,
     (phrase) => maybeApplyRouteDescriptorFromPhrase(context, phrase)
   );
+}
+
+function collectExplicitSitePhraseContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const lower = normalizeTokenLower(token);
+  if (!EXPLICIT_SITE_PHRASE_ANCHOR_TOKENS.has(lower)) {
+    return undefined;
+  }
+  const sitePhraseServices = buildSitePhraseServices(
+    context.state,
+    context.tokens,
+    context.options
+  );
+  const candidate = extractExplicitSiteCandidate(
+    context.tokens,
+    context.state.consumed,
+    index,
+    context.options,
+    sitePhraseServices
+  );
+  if (!candidate) {
+    return undefined;
+  }
+  return buildSitePhraseContribution(context, candidate);
 }
 
 function collectCountLimit(
@@ -5255,6 +6000,177 @@ function collectCountLimit(
   return true;
 }
 
+function collectCountLimitContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const state = context.state;
+  const tokens = context.tokens;
+  if (state.count !== undefined) {
+    return undefined;
+  }
+
+  const countMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (countMatch) {
+    const count = normalizeCountLimitValue(parseFloat(countMatch[1]));
+    if (count !== undefined) {
+      const consumedTokenIndices = [token.index];
+      const nextToken = tokens[index + 1];
+      if (nextToken && isCountKeywordWord(nextToken.lower)) {
+        consumedTokenIndices.push(nextToken.index);
+      }
+      return {
+        consumedTokenIndices,
+        schedule: {
+          count
+        }
+      };
+    }
+  }
+
+  if (COUNT_MARKER_TOKENS.has(token.lower)) {
+    const numericToken = tokens[index + 1];
+    if (
+      numericToken &&
+      !state.consumed.has(numericToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
+    ) {
+      const count = normalizeCountLimitValue(parseFloat(numericToken.original));
+      if (count !== undefined) {
+        const consumedTokenIndices = [token.index, numericToken.index];
+        const afterToken = tokens[index + 2];
+        if (afterToken && isCountKeywordWord(afterToken.lower)) {
+          consumedTokenIndices.push(afterToken.index);
+        }
+        return {
+          consumedTokenIndices,
+          schedule: {
+            count
+          }
+        };
+      }
+    }
+  }
+
+  if (token.lower === "for") {
+    const preConnectors: Token[] = [];
+    let lookaheadIndex = skipCountConnectors(
+      tokens,
+      state.consumed,
+      index + 1,
+      preConnectors
+    );
+    const numericToken = tokens[lookaheadIndex];
+    if (
+      numericToken &&
+      !state.consumed.has(numericToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
+    ) {
+      const postConnectors: Token[] = [];
+      lookaheadIndex = skipCountConnectors(
+        tokens,
+        state.consumed,
+        lookaheadIndex + 1,
+        postConnectors
+      );
+      const keywordToken = tokens[lookaheadIndex];
+      if (
+        keywordToken &&
+        !state.consumed.has(keywordToken.index) &&
+        isCountKeywordWord(keywordToken.lower)
+      ) {
+        const count = normalizeCountLimitValue(parseFloat(numericToken.original));
+        if (count !== undefined) {
+          return {
+            consumedTokenIndices: [
+              token.index,
+              ...preConnectors.map((connector) => connector.index),
+              numericToken.index,
+              ...postConnectors.map((connector) => connector.index),
+              keywordToken.index
+            ],
+            schedule: {
+              count
+            }
+          };
+        }
+      }
+    }
+  }
+
+  if (!isCountKeywordWord(token.lower)) {
+    return undefined;
+  }
+  if (hasCadenceContinuationAfter(tokens, state.consumed, index)) {
+    return undefined;
+  }
+
+  const consumedTokenIndices: number[] = [token.index];
+  let value: number | undefined;
+  const prevToken = tokens[index - 1];
+  if (prevToken && !state.consumed.has(prevToken.index)) {
+    const prevLower = prevToken.lower;
+    const suffixMatch = prevLower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
+    const prefixMatch = prevLower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+    if (suffixMatch) {
+      value = parseFloat(suffixMatch[1]);
+      consumedTokenIndices.push(prevToken.index);
+    } else if (prefixMatch) {
+      value = parseFloat(prefixMatch[1]);
+      consumedTokenIndices.push(prevToken.index);
+    } else if (/^[0-9]+(?:\.[0-9]+)?$/.test(prevLower)) {
+      const maybeX = tokens[index - 2];
+      if (
+        maybeX &&
+        !state.consumed.has(maybeX.index) &&
+        COUNT_MARKER_TOKENS.has(maybeX.lower)
+      ) {
+        value = parseFloat(prevToken.original);
+        consumedTokenIndices.push(maybeX.index, prevToken.index);
+      }
+    }
+  }
+  if (value === undefined) {
+    const nextToken = tokens[index + 1];
+    if (
+      nextToken &&
+      !state.consumed.has(nextToken.index) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(nextToken.lower)
+    ) {
+      value = parseFloat(nextToken.original);
+      consumedTokenIndices.push(nextToken.index);
+    }
+  }
+  if (value === undefined) {
+    const simpleCount = FREQUENCY_SIMPLE_WORDS[token.lower];
+    if (simpleCount !== undefined) {
+      value = simpleCount;
+    }
+  }
+  if (value === undefined) {
+    const previousToken = tokens[index - 1];
+    if (previousToken && !state.consumed.has(previousToken.index)) {
+      const prevWordValue = FREQUENCY_NUMBER_WORDS[previousToken.lower];
+      if (prevWordValue !== undefined) {
+        value = prevWordValue;
+        consumedTokenIndices.push(previousToken.index);
+      }
+    }
+  }
+
+  const count = normalizeCountLimitValue(value);
+  if (count === undefined) {
+    return undefined;
+  }
+  return {
+    consumedTokenIndices: Array.from(new Set(consumedTokenIndices)),
+    schedule: {
+      count
+    }
+  };
+}
+
 function collectStandaloneSingleOccurrence(
   context: ClauseParseContext,
   index: number,
@@ -5279,6 +6195,9 @@ function collectStandaloneSingleOccurrenceContribution(
   token: Token
 ): ClauseFeatureContribution | undefined {
   if (token.lower !== "once") {
+    return undefined;
+  }
+  if (context.state.count !== undefined) {
     return undefined;
   }
   if (hasCadenceContinuationAfter(context.tokens, context.state.consumed, index)) {
@@ -5409,6 +6328,129 @@ function collectDurationLimit(
   return false;
 }
 
+function collectDurationLimitContribution(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseFeatureContribution | undefined {
+  const state = context.state;
+  const tokens = context.tokens;
+  if (state.duration !== undefined || state.durationUnit !== undefined) {
+    return undefined;
+  }
+  if (!hasEstablishedAdministrationContent(state)) {
+    return undefined;
+  }
+
+  const compactMatch = token.lower.match(
+    /^[x*]([0-9]+(?:\.[0-9]+)?)(min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|wk|w|week|weeks|mo|month|months)$/
+  );
+  if (compactMatch) {
+    const unitCode = mapIntervalUnit(compactMatch[2]);
+    const schedule = buildDurationScheduleContribution(
+      parseFloat(compactMatch[1]),
+      unitCode
+    );
+    if (schedule) {
+      return {
+        consumedTokenIndices: [token.index],
+        schedule
+      };
+    }
+  }
+
+  const buildFromNumericAndUnit = (
+    numericToken: Token | undefined,
+    unitToken: Token | undefined,
+    consumedTokenIndices: number[]
+  ): ClauseFeatureContribution | undefined => {
+    if (
+      !numericToken ||
+      !unitToken ||
+      state.consumed.has(numericToken.index) ||
+      state.consumed.has(unitToken.index)
+    ) {
+      return undefined;
+    }
+    const unitCode = mapIntervalUnit(unitToken.lower);
+    if (!unitCode) {
+      return undefined;
+    }
+    const range = parseNumericRange(numericToken.lower);
+    const schedule = range
+      ? buildDurationScheduleContribution(range.low, unitCode, range.high)
+      : /^[0-9]+(?:\.[0-9]+)?$/.test(numericToken.lower)
+        ? buildDurationScheduleContribution(parseFloat(numericToken.original), unitCode)
+        : undefined;
+    if (!schedule) {
+      return undefined;
+    }
+    return {
+      consumedTokenIndices,
+      schedule
+    };
+  };
+
+  const prefixedMatch = token.lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
+  if (prefixedMatch) {
+    const unitToken = tokens[index + 1];
+    const schedule = buildDurationScheduleContribution(
+      parseFloat(prefixedMatch[1]),
+      unitToken ? mapIntervalUnit(unitToken.lower) : undefined
+    );
+    if (schedule && unitToken) {
+      return {
+        consumedTokenIndices: [token.index, unitToken.index],
+        schedule
+      };
+    }
+  }
+
+  if (COUNT_MARKER_TOKENS.has(token.lower)) {
+    const contribution = buildFromNumericAndUnit(
+      tokens[index + 1],
+      tokens[index + 2],
+      [token.index, tokens[index + 1]?.index, tokens[index + 2]?.index].filter(
+        (value): value is number => value !== undefined
+      )
+    );
+    if (contribution) {
+      return contribution;
+    }
+  }
+
+  if (token.lower !== "for") {
+    return undefined;
+  }
+
+  const preConnectors: Token[] = [];
+  let lookaheadIndex = skipCountConnectors(
+    tokens,
+    state.consumed,
+    index + 1,
+    preConnectors
+  );
+  const numericToken = tokens[lookaheadIndex];
+  const postConnectors: Token[] = [];
+  lookaheadIndex = skipCountConnectors(
+    tokens,
+    state.consumed,
+    lookaheadIndex + 1,
+    postConnectors
+  );
+  return buildFromNumericAndUnit(
+    numericToken,
+    tokens[lookaheadIndex],
+    [
+      token.index,
+      ...preConnectors.map((connector) => connector.index),
+      numericToken?.index,
+      ...postConnectors.map((connector) => connector.index),
+      tokens[lookaheadIndex]?.index
+    ].filter((value): value is number => value !== undefined)
+  );
+}
+
 function collectCountBasedFrequency(
   context: ClauseParseContext,
   index: number
@@ -5419,6 +6461,14 @@ function collectCountBasedFrequency(
     index,
     context.options
   );
+}
+
+function collectCountBasedFrequencyContribution(
+  context: ClauseParseContext,
+  index: number,
+  _token: Token
+): ClauseFeatureContribution | undefined {
+  return buildCountBasedFrequencyContribution(context, index);
 }
 
 function collectDoseRange(
@@ -5670,7 +6720,13 @@ function parseScheduleTerm(
     applyGrammarTerminal(context, index, token, "schedule.comboEventTiming", collectComboEventTiming) ??
     applyGrammarTerminal(context, index, token, "schedule.pcAcAnchor", collectPcAcAnchor) ??
     applyGrammarTerminal(context, index, token, "schedule.beforeAfterAnchor", collectBeforeAfterAnchor) ??
-    applyGrammarTerminal(context, index, token, "site.anchorPhrase", collectExplicitSitePhrase) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "site.anchorPhrase",
+      collectExplicitSitePhraseContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "schedule.genericAnchor", collectGenericAnchor) ??
     applyGrammarTerminal(context, index, token, "schedule.customWhen", collectCustomWhen) ??
     applyGrammarFeatureTerminal(
@@ -5688,7 +6744,13 @@ function parseScheduleTerm(
       "schedule.dayOfWeek",
       collectDayOfWeekContribution
     ) ??
-    applyGrammarTerminal(context, index, token, "schedule.duration", collectDurationLimit) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "schedule.duration",
+      collectDurationLimitContribution
+    ) ??
     applyGrammarFeatureTerminal(
       context,
       index,
@@ -5800,7 +6862,13 @@ function parseRouteTerm(
   index: number,
   token: Token
 ): number | undefined {
-  return applyGrammarTerminal(context, index, token, "route.synonym", collectRouteSynonym);
+  return applyGrammarFeatureTerminal(
+    context,
+    index,
+    token,
+    "route.synonym",
+    collectRouteSynonymContribution
+  );
 }
 
 function parseSiteTerm(
@@ -5830,7 +6898,13 @@ function parseCountTerm(
       "count.singleOccurrence",
       collectStandaloneSingleOccurrenceContribution
     ) ??
-    applyGrammarTerminal(context, index, token, "count.limit", collectCountLimit)
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "count.limit",
+      collectCountLimitContribution
+    )
   );
 }
 
@@ -5840,7 +6914,13 @@ function parseDoseTerm(
   token: Token
 ): number | undefined {
   return (
-    applyGrammarTerminal(context, index, token, "dose.countBasedFrequency", collectCountBasedFrequency) ??
+    applyGrammarFeatureTerminal(
+      context,
+      index,
+      token,
+      "dose.countBasedFrequency",
+      collectCountBasedFrequencyContribution
+    ) ??
     applyGrammarTerminal(context, index, token, "dose.range", collectDoseRange) ??
     applyGrammarTerminal(context, index, token, "dose.numeric", collectNumericDose) ??
     applyGrammarTerminal(context, index, token, "dose.times", collectTimesDose)
@@ -5855,20 +6935,61 @@ function parseConnectorTerm(
   return applyGrammarTerminal(context, index, token, "connector.generic", collectGenericConnector);
 }
 
+const CLAUSE_GRAMMAR_RULES: ClauseGrammarRule[] = [
+  { id: "site.anchorPhrase", kind: "feature", precedence: 980, matcher: collectExplicitSitePhraseContribution },
+  { id: "method.verb", kind: "feature", precedence: 975, matcher: collectMethodVerbContribution },
+  { id: "route.synonym", kind: "feature", precedence: 970, matcher: collectRouteSynonymContribution },
+  { id: "schedule.separatedInterval", kind: "imperative", precedence: 960, matcher: collectSeparatedInterval },
+  { id: "schedule.timeBased", kind: "imperative", precedence: 955, matcher: collectTimeBasedSchedule },
+  { id: "schedule.numericCadence", kind: "imperative", precedence: 950, matcher: collectNumericCadence },
+  { id: "schedule.compactInterval", kind: "imperative", precedence: 945, matcher: collectCompactInterval },
+  { id: "schedule.multiplicativeCadence", kind: "imperative", precedence: 940, matcher: collectMultiplicativeCadenceTerm },
+  { id: "dose.countBasedFrequency", kind: "feature", precedence: 935, matcher: collectCountBasedFrequencyContribution },
+  { id: "schedule.duration", kind: "feature", precedence: 930, matcher: collectDurationLimitContribution },
+  { id: "count.limit", kind: "feature", precedence: 920, matcher: collectCountLimitContribution },
+  { id: "count.singleOccurrence", kind: "feature", precedence: 915, matcher: collectStandaloneSingleOccurrenceContribution },
+  { id: "schedule.comboEventTiming", kind: "imperative", precedence: 910, matcher: collectComboEventTiming },
+  { id: "schedule.pcAcAnchor", kind: "imperative", precedence: 905, matcher: collectPcAcAnchor },
+  { id: "schedule.beforeAfterAnchor", kind: "imperative", precedence: 900, matcher: collectBeforeAfterAnchor },
+  { id: "schedule.odTimingAbbreviation", kind: "feature", precedence: 895, matcher: collectOdTimingAbbreviationContribution },
+  { id: "schedule.timingAbbreviation", kind: "feature", precedence: 890, matcher: collectTimingAbbreviationContribution },
+  { id: "schedule.customWhen", kind: "imperative", precedence: 885, matcher: collectCustomWhen },
+  { id: "schedule.eventTiming", kind: "feature", precedence: 880, matcher: collectEventTimingContribution },
+  { id: "schedule.dayRange", kind: "imperative", precedence: 875, matcher: collectDayRange },
+  { id: "schedule.dayOfWeek", kind: "feature", precedence: 870, matcher: collectDayOfWeekContribution },
+  { id: "schedule.bldMeal", kind: "feature", precedence: 865, matcher: collectBldMealTimingContribution },
+  { id: "schedule.phraseWordFrequency", kind: "feature", precedence: 860, matcher: collectPhraseWordFrequencyContribution },
+  { id: "schedule.wordFrequency", kind: "feature", precedence: 855, matcher: collectWordFrequencyContribution },
+  { id: "dose.range", kind: "imperative", precedence: 850, matcher: collectDoseRange },
+  { id: "dose.numeric", kind: "imperative", precedence: 845, matcher: collectNumericDose },
+  { id: "dose.times", kind: "imperative", precedence: 840, matcher: collectTimesDose },
+  { id: "site.abbreviation", kind: "feature", precedence: 830, matcher: collectSiteAbbreviationContribution },
+  { id: "schedule.timingConnector", kind: "imperative", precedence: 200, matcher: collectTimingConnector },
+  { id: "schedule.genericAnchor", kind: "imperative", precedence: 190, matcher: collectGenericAnchor },
+  { id: "connector.generic", kind: "imperative", precedence: 100, matcher: collectGenericConnector }
+];
+
+function selectBestClauseGrammarCandidate(
+  context: ClauseParseContext,
+  index: number,
+  token: Token
+): ClauseGrammarCandidate | undefined {
+  let best: ClauseGrammarCandidate | undefined;
+  for (const rule of CLAUSE_GRAMMAR_RULES) {
+    const candidate = previewClauseGrammarRule(context, index, token, rule);
+    if (candidate && isBetterClauseGrammarCandidate(candidate, best)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 function parseCoreTerm(
   context: ClauseParseContext,
   index: number,
   token: Token
 ): number | undefined {
-  return (
-    parseScheduleTerm(context, index, token) ??
-    parseMethodTerm(context, index, token) ??
-    parseRouteTerm(context, index, token) ??
-    parseSiteTerm(context, index, token) ??
-    parseCountTerm(context, index, token) ??
-    parseDoseTerm(context, index, token) ??
-    parseConnectorTerm(context, index, token)
-  );
+  return selectBestClauseGrammarCandidate(context, index, token)?.apply();
 }
 
 /**

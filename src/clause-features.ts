@@ -45,6 +45,7 @@ export interface ClauseScheduleContribution {
 
 export interface ClauseFeatureContribution {
   consumedTokenIndices: number[];
+  siteTokenIndices?: number[];
   warnings?: string[];
   method?: ClauseMethodContribution;
   route?: ClauseRouteContribution;
