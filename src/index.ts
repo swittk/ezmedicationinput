@@ -12,7 +12,7 @@ import {
   parseClauseState,
   tokenize
 } from "./parser";
-import { splitSigSegments } from "./segment";
+import { parseSigSegments } from "./hpsg/segmenter";
 import {
   BodySiteCode,
   FhirDosage,
@@ -107,8 +107,8 @@ function formatMealDashAmount(value: number): string {
 }
 
 function expandMealDashSegment(
-  segment: ReturnType<typeof splitSigSegments>[number]
-): ReturnType<typeof splitSigSegments> {
+  segment: ReturnType<typeof parseSigSegments>[number]
+): ReturnType<typeof parseSigSegments> {
   const tokens = tokenize(segment.text);
   if (tokens.length === 0) {
     return [segment];
@@ -165,20 +165,20 @@ function expandMealDashSegment(
 }
 
 function expandMealDashSegments(
-  segments: ReturnType<typeof splitSigSegments>,
+  segments: ReturnType<typeof parseSigSegments>,
   options?: ParseOptions
-): ReturnType<typeof splitSigSegments> {
+): ReturnType<typeof parseSigSegments> {
   if (!options?.enableMealDashSyntax) {
     return segments;
   }
-  const expanded: ReturnType<typeof splitSigSegments> = [];
+  const expanded: ReturnType<typeof parseSigSegments> = [];
   for (const segment of segments) {
     expanded.push(...expandMealDashSegment(segment));
   }
   return expanded;
 }
 
-function toSegmentMeta(segments: ReturnType<typeof splitSigSegments>): ParseBatchSegmentMeta[] {
+function toSegmentMeta(segments: ReturnType<typeof parseSigSegments>): ParseBatchSegmentMeta[] {
   return segments.map((segment, index) => ({
     index,
     text: segment.text,
@@ -417,7 +417,7 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const segments = expandMealDashSegments(splitSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -432,22 +432,22 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     updateCarryForward(carry, state);
   }
 
-  const legacy = resolveLegacyParseResult(results, input, options);
+  const primary = resolvePrimaryParseResult(results, input, options);
 
   return {
     input,
     count: results.length,
     items: results,
-    fhir: legacy.fhir,
-    shortText: legacy.shortText,
-    longText: legacy.longText,
-    warnings: legacy.warnings,
+    fhir: primary.fhir,
+    shortText: primary.shortText,
+    longText: primary.longText,
+    warnings: primary.warnings,
     meta: {
-      ...legacy.meta,
+      ...primary.meta,
       canonical: {
         clauses: results.length
           ? collectCanonicalClauses(results)
-          : legacy.meta.canonical.clauses
+          : primary.meta.canonical.clauses
       },
       segments: toSegmentMeta(segments)
     }
@@ -455,7 +455,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
-  const segments = expandMealDashSegments(splitSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: LintResult[] = [];
 
@@ -489,14 +489,14 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     updateCarryForward(carry, state);
   }
 
-  const legacy = resolveLegacyLintResult(results, input, options);
+  const primary = resolvePrimaryLintResult(results, input, options);
 
   return {
     input,
     count: results.length,
     items: results,
-    result: legacy.result,
-    issues: legacy.issues,
+    result: primary.result,
+    issues: primary.issues,
     meta: {
       segments: toSegmentMeta(segments)
     }
@@ -507,7 +507,7 @@ export async function parseSigAsync(
   input: string,
   options?: ParseOptions
 ): Promise<ParseBatchResult> {
-  const segments = expandMealDashSegments(splitSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -522,22 +522,22 @@ export async function parseSigAsync(
     updateCarryForward(carry, state);
   }
 
-  const legacy = resolveLegacyParseResult(results, input, options);
+  const primary = resolvePrimaryParseResult(results, input, options);
 
   return {
     input,
     count: results.length,
     items: results,
-    fhir: legacy.fhir,
-    shortText: legacy.shortText,
-    longText: legacy.longText,
-    warnings: legacy.warnings,
+    fhir: primary.fhir,
+    shortText: primary.shortText,
+    longText: primary.longText,
+    warnings: primary.warnings,
     meta: {
-      ...legacy.meta,
+      ...primary.meta,
       canonical: {
         clauses: results.length
           ? collectCanonicalClauses(results)
-          : legacy.meta.canonical.clauses
+          : primary.meta.canonical.clauses
       },
       segments: toSegmentMeta(segments)
     }
@@ -856,7 +856,7 @@ function shiftRange(range: TextRange | undefined, offset: number): TextRange | u
   };
 }
 
-function resolveLegacyParseResult(
+function resolvePrimaryParseResult(
   results: ParseResult[],
   input: string,
   options?: ParseOptions
@@ -899,7 +899,7 @@ function buildSemanticLintIssues(
   return issues;
 }
 
-function resolveLegacyLintResult(
+function resolvePrimaryLintResult(
   results: LintResult[],
   input: string,
   options?: ParseOptions

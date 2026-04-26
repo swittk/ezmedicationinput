@@ -1,7 +1,7 @@
-import { TIMING_ABBREVIATIONS } from "./maps";
-import { ClauseScheduleContribution } from "./clause-features";
-import { ParserState } from "./parser-state";
-import { FhirPeriodUnit } from "./types";
+import { TIMING_ABBREVIATIONS } from "../maps";
+import { ParserState } from "../parser-state";
+import { FhirPeriodUnit } from "../types";
+import { HpsgScheduleFeature } from "./signature";
 
 export const EVERY_INTERVAL_TOKENS = new Set(["q", "every", "each"]);
 export const COUNT_MARKER_TOKENS = new Set(["x", "*"]);
@@ -54,10 +54,6 @@ const FREQUENCY_ADVERB_UNITS: Record<string, FhirPeriodUnit> = {
   hourly: FhirPeriodUnit.Hour
 };
 
-/**
- * Convert hour-based values into minutes when fractional quantities appear so
- * the resulting FHIR repeat payloads avoid unwieldy decimals.
- */
 export function normalizePeriodValue(value: number, unit: FhirPeriodUnit): {
   value: number;
   unit: FhirPeriodUnit;
@@ -68,10 +64,6 @@ export function normalizePeriodValue(value: number, unit: FhirPeriodUnit): {
   return { value, unit };
 }
 
-/**
- * Ensure ranges expressed in hours remain consistent when fractional values
- * demand conversion into minutes.
- */
 export function normalizePeriodRange(
   low: number,
   high: number,
@@ -125,10 +117,6 @@ function maybeAssignTimingCode(
   }
 }
 
-/**
- * Apply the chosen period/unit pair and infer helpful timing codes when the
- * period clearly represents common cadences (daily/weekly/monthly).
- */
 export function applyPeriod(
   internal: ParserState,
   period: number,
@@ -149,10 +137,10 @@ export function applyPeriod(
   }
 }
 
-export function buildPeriodScheduleContribution(
+export function buildPeriodScheduleFeature(
   period: number,
   unit: FhirPeriodUnit
-): ClauseScheduleContribution {
+): HpsgScheduleFeature {
   const normalized = normalizePeriodValue(period, unit);
   let timingCode: string | undefined;
   const suffix = periodUnitSuffix(normalized.unit);
@@ -266,11 +254,11 @@ export function applyDurationLimit(
   return true;
 }
 
-export function buildDurationScheduleContribution(
+export function buildDurationScheduleFeature(
   value: number | undefined,
   unit: FhirPeriodUnit | undefined,
   max?: number
-): ClauseScheduleContribution | undefined {
+): HpsgScheduleFeature | undefined {
   if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit) {
     return undefined;
   }

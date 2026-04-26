@@ -41,6 +41,7 @@ export class ParserState {
   siteLookups: SiteLookupDetail[];
   customSiteHints?: Set<string>;
   prnReasonLookupRequest?: PrnReasonLookupRequest;
+  prnReasonLookupRequests?: PrnReasonLookupRequest[];
   prnReasonLookups: PrnReasonLookupDetail[];
   methodVerb?: string;
   productFormKey?: string;

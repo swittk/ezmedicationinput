@@ -1914,6 +1914,95 @@ Verification:
 - `npm test`
 - 566 tests passing
 
+## 2026-04-26 HPSG core substrate is live, but full parser deletion is not done
+
+The latest work moved the live clause terminal path onto typed HPSG signs:
+
+- added [src/hpsg/signature.ts](src/hpsg/signature.ts)
+- added [src/hpsg/unification.ts](src/hpsg/unification.ts)
+- added [src/hpsg/projection.ts](src/hpsg/projection.ts)
+- added [src/hpsg/chart.ts](src/hpsg/chart.ts)
+- added [src/hpsg/terminal-adapter.ts](src/hpsg/terminal-adapter.ts)
+- added [src/hpsg/method-lexicon.ts](src/hpsg/method-lexicon.ts)
+
+What is now true:
+
+- clause terminals are converted into typed signs before they can affect
+  parser state
+- compatibility now goes through feature-structure unification, including
+  route refinement, site identity, dose identity, and schedule identity
+- state mutation is centralized through HPSG sign projection
+- the old direct `apply*Contribution` / `canApply*Contribution` procedural path
+  was deleted from `clause-grammar-engine.ts`
+- the active rule executor now uses an agenda over licensed signs instead of a
+  single direct left-to-right mutation loop
+- count/cadence ambiguity is constrained structurally:
+  `once every 6 hours`, `one time every 8 hours`, and `once q week` now consume
+  the frequency marker as part of the cadence construction with no leftover text
+
+What is still not done:
+
+- `parser.ts` still contains the legacy `collect*Contribution` terminal
+  inventory
+- the HPSG chart parser exists and runs in shadow mode, but is not yet the sole
+  clause parser
+- PRN reason grammar and additional-instruction grammar are still separate
+  token-segment grammars rather than unified HPSG sign families
+- the remaining deletion target is to replace each `collect*Contribution`
+  family with real HPSG lexical entries and phrase constructions, then remove
+  the adapter layer
+
+Live replacement attempt:
+
+- direct projection from the new chart parser was attempted and intentionally
+  rolled back to shadow mode after it produced broad regressions
+- the regressions were not random; they identified missing HPSG construction
+  families:
+  - dose-times-frequency constructions such as `1.5 x3`
+  - one-time schedule constructions such as bare `once`
+  - time-of-day list constructions such as `at 9:00, 22:00`
+  - route display phrase spans across all SNOMED route synonyms
+  - site/probe constructions including `{mole scalp}` range handling
+  - coordinated day/weekend constructions
+  - product-form method constructions such as `use shampoo`
+- conclusion: projecting the new chart before these families are complete would
+  be fake HPSG and worse than the existing behavior
+
+Current measured footprint:
+
+- `src/parser.ts`: 7193 lines
+- `src/clause-grammar-engine.ts`: 268 lines
+- `src/hpsg/*.ts`: 1871 lines
+
+Real-world probes checked in this pass:
+
+- `apply before bed at lesion`
+- `apply twice daily at wound`
+- `po 10 ml twice daily, drink slowly`
+- `drink 10 ml twice daily, empty stomach`
+- `take 10 ml prn dizziness, can cause drowsiness`
+- `take 1 tab po prn pain, do not take with alcohol`
+- `apply to head prn itchy head`
+- `apply to back of hand prn itchiness`
+- `apply inside ear canal`
+- `apply inside ear`
+- `1 tab po once every 6 hours`
+- `insert 1 tab pv once after menstruation ends`
+
+Known probe weakness:
+
+- `apply to skin twice daily morning and evening, only at affected areas`
+  currently chooses `affected area` as the final site and leaves `to skin , only`
+  as leftover. The semantic target should be represented as body site `skin`
+  plus a restriction/precondition like "only affected areas" rather than
+  overwriting the site.
+
+Verification:
+
+- `npm run build`
+- `npm test`
+- 566 tests passing
+
 ## 2026-04-26 Replaced PRN/advice tail cutoffs with token-segment tail grammar
 
 The user was correct that these functions were not grammar:
@@ -1988,3 +2077,75 @@ Verification:
 - `npm run build`
 - `npm test`
 - 566 tests passing
+
+## 2026-04-26 Removed the legacy clause parser path
+
+The active parser entrypoint has now been cut over to an HPSG-only shape.
+
+What changed:
+- replaced the 7k-line `src/parser.ts` body with a 395-line orchestration layer
+  that only tokenizes, invokes the HPSG chart parser, and finalizes canonical
+  output
+- deleted the old ordered agenda/collector layer:
+  - `src/clause-grammar-engine.ts`
+  - `src/clause-features.ts`
+  - `src/segment.ts`
+  - `src/hpsg/terminal-adapter.ts`
+- moved timing lexical features under `src/hpsg/timing-lexicon.ts`
+- moved multi-clause segmentation under `src/hpsg/segmenter.ts`
+- added typed HPSG PRN feature support so PRN reason scope and locative site
+  information live in the sign structure instead of being only a post-parse
+  string tail
+- scrubbed parser-facing references to the old contribution/collector/legacy
+  vocabulary
+
+Current measured footprint:
+- `src/parser.ts`: 395 lines
+- `src/hpsg/*.ts`: 2247 lines
+- deleted old clause agenda files: 512 lines removed
+
+Important caveat:
+- this is the HPSG shape cutover, not restored behavior parity
+- rule coverage is now intentionally incomplete until each old supported
+  phenomenon is rebuilt as HPSG lexical entries/constructions
+- `npm test` was deliberately not used as the target during this step because
+  the user explicitly asked to fix shape first, behavior parity second
+
+Verification:
+- `npm run build`
+
+## 2026-04-26 PRN coordination moved into HPSG sign structure
+
+The PRN weak point after the HPSG cutover was that a PRN sign still projected a
+single lookup request. That meant coordinated reasons and located symptoms could
+collapse to one generic reason or leave comma-separated reasons as leftovers.
+
+What changed:
+- widened `HpsgPrnFeature` so it can carry multiple reason signs and multiple
+  lookup requests
+- added a token-level PRN reason grammar for:
+  - coordinated reasons: `pain or fever`, `pain, fever`, `pain/fever`
+  - located symptoms: `pain at hand`, `itch at foot`
+  - coordinated located symptoms: `pain at hand or itch at foot`
+  - ellipsis over shared symptom heads: `pain at hands or feet`
+  - adjectival located symptoms: `itchy head`
+- changed PRN resolution to code each HPSG reason request separately into
+  `asNeededFor[]`
+- preserved SNOMED postcoordination per reason when the symptom and body site
+  both have codes
+- made `/` a clause boundary only when it introduces a likely new clause,
+  otherwise it can act as a PRN coordinator
+
+Checked smoke cases:
+- `1 tab po prn pain, fever` -> two coded `asNeededFor` entries
+- `1 tab po prn pain/fever` -> two coded `asNeededFor` entries
+- `apply prn pain at hands or itch at feet` -> two postcoordinated coded
+  `asNeededFor` entries
+- `apply prn pain at hands or feet` -> two postcoordinated coded entries using
+  the shared `pain` head
+- `apply to head prn itchy head` -> postcoordinated itch-at-head reason
+- `take prn dizziness, can cause drowsiness` still stops PRN before the
+  instruction tail instead of swallowing it as a reason
+
+Verification:
+- `npm run build`

@@ -878,17 +878,17 @@ export interface ParseBatchResult {
   count: number;
   items: ParseResult[];
   /**
-   * Legacy compatibility field mirroring the first parsed item so existing
+   * Top-level compatibility field mirroring the first parsed item so existing
    * single-sig integrations can migrate incrementally.
    */
   fhir: FhirDosage;
   /**
-   * Legacy compatibility field mirroring the first parsed item so existing
+   * Top-level compatibility field mirroring the first parsed item so existing
    * single-sig integrations can migrate incrementally.
    */
   shortText: string;
   /**
-   * Legacy compatibility field mirroring the first parsed item so existing
+   * Top-level compatibility field mirroring the first parsed item so existing
    * single-sig integrations can migrate incrementally.
    */
   longText: string;
@@ -935,7 +935,7 @@ export interface LintBatchResult {
   count: number;
   items: LintResult[];
   /**
-   * Legacy compatibility fields mirroring the first parsed item so existing
+   * Top-level compatibility fields mirroring the first parsed item so existing
    * consumers of `lintSig` can migrate incrementally.
    */
   result: ParseResult;

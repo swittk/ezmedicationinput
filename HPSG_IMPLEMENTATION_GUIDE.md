@@ -412,30 +412,27 @@ Until the full rewrite is complete:
 
 ## Current architectural interpretation for `ezmedicationinput`
 
-The current codebase is **not yet full HPSG**.
+The current parser entrypoint is now HPSG-only: `src/parser.ts` delegates clause
+recognition to the typed chart/unification grammar in `src/hpsg/*`.
 
-It is currently best described as:
+The remaining work is not migration off a legacy agenda anymore. It is grammar
+coverage and modularization inside the HPSG layer:
 
-- a domain/sublanguage parser
-- with increasing use of typed feature slices
-- but still too much central ordered mutation
+1. Expand typed constituents for every old supported phenomenon:
+   PRN reason, additional instructions, product form methods, event triggers,
+   route display phrases, day/week ranges, time-of-day lists, and site probes.
 
-The immediate migration path should therefore be:
+2. Keep all new behavior as lexical entries or construction constraints under
+   `src/hpsg/*`.
 
-1. Shared typed modules for each major constituent family.
-   Site is already moving here.
+3. Do not reintroduce parser-local collector passes, contribution adapters, or
+   ordered mutation agenda logic.
 
-2. Clause contributions instead of direct mutation in parser terminals.
+4. Restore regression coverage only after the missing HPSG constructions are
+   represented.
 
-3. Unification-like merge rules for:
-   - route-site compatibility
-   - symptom-site compatibility
-   - event-trigger compatibility
-   - schedule compatibility
-
-4. Delayed disambiguation instead of early forced commits where practical.
-
-5. Realization consuming typed structures directly.
+5. Realization should consume typed structures directly once the parse coverage
+   is rebuilt.
 
 ## Concrete dos and don’ts for future edits in this repo
 

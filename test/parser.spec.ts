@@ -1084,6 +1084,7 @@ describe("parseSig core scenarios", () => {
     });
     expect(result.fhir.timing?.repeat?.count).toBeUndefined();
     expect(result.longText).toBe("Take 1 tablet orally every 6 hours.");
+    expect(result.meta.leftoverText).toBeUndefined();
   });
 
   it("keeps one time every 8 hours as cadence rather than collapsing to a one-time count", () => {
@@ -1094,6 +1095,7 @@ describe("parseSig core scenarios", () => {
     });
     expect(result.fhir.timing?.repeat?.count).toBeUndefined();
     expect(result.longText).toBe("Take 1 tablet orally every 8 hours.");
+    expect(result.meta.leftoverText).toBeUndefined();
   });
 
   it("keeps once q week as cadence rather than collapsing to a one-time count", () => {
@@ -1104,6 +1106,7 @@ describe("parseSig core scenarios", () => {
     });
     expect(result.fhir.timing?.repeat?.count).toBeUndefined();
     expect(result.longText).toBe("Take 1 tablet orally once weekly.");
+    expect(result.meta.leftoverText).toBeUndefined();
   });
 
   it("parses million IU notation with weekly cadence", () => {

@@ -56,7 +56,7 @@ export function getPreferredCanonicalPrnReasonText(
   if (!direct) {
     return joinCanonicalPrnReasonTexts(reasons, conjunction);
   }
-  return /[,/;]/.test(direct)
+  return /[,/;]/.test(direct) || /\b(?:or|and|and\/or)\b/i.test(direct) || /\s(?:หรือ|และ)\s/.test(direct)
     ? joinCanonicalPrnReasonTexts(reasons, conjunction)
     : direct;
 }
