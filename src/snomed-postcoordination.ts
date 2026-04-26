@@ -1,6 +1,7 @@
 import { buildBodySiteSpatialRelationExtensions } from "./body-site-spatial";
 import {
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
+  SNOMED_CT_LATERALITY_ATTRIBUTE_CODE,
   SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE,
   SNOMED_SYSTEM
 } from "./snomed";
@@ -8,6 +9,7 @@ import { BodySiteSpatialRelation, FhirCoding } from "./types";
 
 const SNOMED_FINDING_SITE_ATTRIBUTE_MARKER = `:${SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE}=`;
 const SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER = `:${SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE}=`;
+const SNOMED_LATERALITY_MARKER = `:${SNOMED_CT_LATERALITY_ATTRIBUTE_CODE}=`;
 
 export function hasSnomedFindingSitePostcoordination(code: string | undefined): boolean {
   return Boolean(code?.includes(SNOMED_FINDING_SITE_ATTRIBUTE_MARKER));
@@ -31,6 +33,17 @@ export function buildSnomedBodySiteTopographicalModifierPostcoordinationCode(
   return `${siteCode}${SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER}${modifierCode}`;
 }
 
+export function hasSnomedBodySiteLateralityPostcoordination(code: string | undefined): boolean {
+  return Boolean(code?.includes(SNOMED_LATERALITY_MARKER));
+}
+
+export function buildSnomedBodySiteLateralityPostcoordinationCode(
+  siteCode: string,
+  lateralityCode: string
+): string {
+  return `${siteCode}${SNOMED_LATERALITY_MARKER}${lateralityCode}`;
+}
+
 export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
   code: string | undefined
 ): { siteCode: string; modifierCode: string } | undefined {
@@ -46,6 +59,23 @@ export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
     return undefined;
   }
   return { siteCode, modifierCode };
+}
+
+export function parseSnomedBodySiteLateralityPostcoordinationCode(
+  code: string | undefined
+): { siteCode: string; lateralityCode: string } | undefined {
+  const markerIndex = code?.indexOf(SNOMED_LATERALITY_MARKER) ?? -1;
+  if (!code || markerIndex < 0) {
+    return undefined;
+  }
+  const siteCode = code.slice(0, markerIndex).trim();
+  const lateralityCode = code
+    .slice(markerIndex + SNOMED_LATERALITY_MARKER.length)
+    .trim();
+  if (!siteCode || !lateralityCode) {
+    return undefined;
+  }
+  return { siteCode, lateralityCode };
 }
 
 export function parseSnomedFindingSitePostcoordinationCode(

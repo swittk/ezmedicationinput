@@ -6,12 +6,27 @@ import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
   normalizeBodySiteKey
 } from "./maps";
-import { SNOMED_SYSTEM } from "./snomed";
+import {
+  SNOMED_CT_BILATERAL_QUALIFIER_CODE,
+  SNOMED_CT_LEFT_QUALIFIER_CODE,
+  SNOMED_CT_RIGHT_QUALIFIER_CODE,
+  SNOMED_SYSTEM
+} from "./snomed";
 import {
   buildSnomedBodySiteTopographicalModifierPostcoordinationCode,
+  parseSnomedBodySiteLateralityPostcoordinationCode,
   parseSnomedBodySiteTopographicalModifierPostcoordinationCode,
   parseSnomedFindingSitePostcoordinationCode
 } from "./snomed-postcoordination";
+import {
+  BODY_SITE_LOCATIVE_RELATIONS,
+  BODY_SITE_PARTITIVE_CONNECTORS,
+  BODY_SITE_PARTITIVE_HEADS,
+  BODY_SITE_PARTITIVE_MODIFIERS,
+  BODY_SITE_SPATIAL_RELATION_CODINGS,
+  SITE_ANCHORS,
+  SITE_SELF_DISPLAY_ANCHORS
+} from "./hpsg/lexical-classes";
 import {
   BodySiteCode,
   BodySiteDefinition,
@@ -22,6 +37,7 @@ import { objectEntries } from "./utils/object";
 
 export interface BodySiteLookupOptions {
   siteCodeMap?: Record<string, BodySiteDefinition>;
+  siteCodeResolvers?: BodySiteResolver | BodySiteResolver[];
   bodySiteContext?: string;
   /**
    * Defaults to true. When true, phrase-to-code lookup can return a
@@ -34,6 +50,7 @@ export interface BodySiteLookupOptions {
 
 export interface BodySiteTextOptions {
   siteCodeMap?: Record<string, BodySiteDefinition>;
+  siteTextResolvers?: BodySiteTextResolver | BodySiteTextResolver[];
   system?: string;
   /**
    * Defaults to true. When true, SNOMED finding-site postcoordination strings
@@ -56,12 +73,68 @@ export interface BodySiteLookupResult {
   score: number;
 }
 
+export interface BodySiteLookupRequest {
+  originalText: string;
+  text: string;
+  normalized: string;
+  canonical: string;
+  bodySiteContext?: string;
+  spatialRelation?: BodySiteSpatialRelation;
+}
+
+export interface BodySiteTextLookupRequest {
+  coding: BodySiteCode;
+  originalCoding: BodySiteCode;
+  parsedPostcoordination?: {
+    type: "topographicalModifier" | "laterality" | "findingSite";
+    siteCode: string;
+    modifierCode?: string;
+    lateralityCode?: string;
+    focusCode?: string;
+  };
+}
+
+export type BodySiteResolver = (
+  request: BodySiteLookupRequest
+) => BodySiteDefinition | null | undefined | Promise<BodySiteDefinition | null | undefined>;
+
+export type BodySiteTextResolver = (
+  request: BodySiteTextLookupRequest
+) => string | null | undefined | Promise<string | null | undefined>;
+
+export interface BodySiteVocabularyOptions {
+  siteCodeMap?: Record<string, BodySiteDefinition>;
+  bodySiteContext?: string;
+  limit?: number;
+}
+
+export interface BodySiteGrammarVocabulary {
+  siteAnchors: string[];
+  siteSelfDisplayAnchors: string[];
+  locativeRelations: string[];
+  partitiveHeads: string[];
+  partitiveModifiers: string[];
+  partitiveConnectors: string[];
+  spatialRelationCodings: Record<string, FhirCoding>;
+}
+
 interface BodySiteCandidate {
   phrase: string;
   definition?: BodySiteDefinition;
 }
 
 type BodySiteCodeInput = string | BodySiteCode | FhirCoding;
+
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function isPromise<T>(value: unknown): value is Promise<T> {
+  return !!value && typeof (value as { then?: unknown }).then === "function";
+}
 
 const POSTCOORDINATABLE_RELATION_TEXTS = new Set([
   "above",
@@ -87,6 +160,12 @@ const RELATION_TEXT_BY_TOPOGRAPHICAL_MODIFIER_CODE: Record<string, string> = {
 const POSTCOORDINATABLE_RELATION_CODES = new Set(
   Object.keys(RELATION_TEXT_BY_TOPOGRAPHICAL_MODIFIER_CODE)
 );
+
+const LATERALITY_TEXT_BY_CODE: Record<string, string> = {
+  [SNOMED_CT_LEFT_QUALIFIER_CODE]: "left",
+  [SNOMED_CT_RIGHT_QUALIFIER_CODE]: "right",
+  [SNOMED_CT_BILATERAL_QUALIFIER_CODE]: "both"
+};
 
 function toBodySiteCode(coding: FhirCoding | BodySiteCode | undefined): BodySiteCode | undefined {
   if (!coding?.code) {
@@ -116,6 +195,95 @@ function resultFromResolved(
     definition: resolved.definition,
     score
   };
+}
+
+function bodySiteLookupRequest(
+  input: string,
+  resolved: ResolvedBodySitePhrase | undefined,
+  options?: BodySiteLookupOptions
+): BodySiteLookupRequest {
+  const normalized = normalizeBodySiteKey(input);
+  return {
+    originalText: input,
+    text: resolved?.displayText ?? input.trim(),
+    normalized,
+    canonical: resolved?.canonical ?? normalized,
+    bodySiteContext: options?.bodySiteContext,
+    spatialRelation: resolved?.spatialRelation
+  };
+}
+
+function applyResolverDefinition(
+  result: BodySiteLookupResult,
+  definition: BodySiteDefinition
+): BodySiteLookupResult {
+  return {
+    ...result,
+    text: definition.text ?? result.text,
+    coding: toBodySiteCode(definition.coding),
+    spatialRelation: definition.spatialRelation ?? result.spatialRelation,
+    definition
+  };
+}
+
+function resultFromResolverDefinition(
+  input: string,
+  definition: BodySiteDefinition
+): BodySiteLookupResult {
+  const normalized = normalizeBodySiteKey(input);
+  const text = definition.text ?? normalized;
+  return {
+    text,
+    canonical: normalizeBodySiteKey(text),
+    lookupCanonical: normalized,
+    resolutionCanonical: normalized,
+    matchedText: normalized,
+    coding: toBodySiteCode(definition.coding),
+    spatialRelation: definition.spatialRelation,
+    definition,
+    score: 100
+  };
+}
+
+function applySyncResolvers(
+  result: BodySiteLookupResult | undefined,
+  input: string,
+  resolved: ResolvedBodySitePhrase | undefined,
+  options?: BodySiteLookupOptions
+): BodySiteLookupResult | undefined {
+  for (const resolver of toArray(options?.siteCodeResolvers)) {
+    const resolution = resolver(bodySiteLookupRequest(input, resolved, options));
+    if (isPromise(resolution)) {
+      throw new Error(
+        "Body site resolver returned a Promise; use lookupBodySiteAsync/getBodySiteCodeAsync for asynchronous site lookup."
+      );
+    }
+    if (!resolution) {
+      continue;
+    }
+    return result
+      ? applyResolverDefinition(result, resolution)
+      : resultFromResolverDefinition(input, resolution);
+  }
+  return result;
+}
+
+async function applyAsyncResolvers(
+  result: BodySiteLookupResult | undefined,
+  input: string,
+  resolved: ResolvedBodySitePhrase | undefined,
+  options?: BodySiteLookupOptions
+): Promise<BodySiteLookupResult | undefined> {
+  for (const resolver of toArray(options?.siteCodeResolvers)) {
+    const resolution = await resolver(bodySiteLookupRequest(input, resolved, options));
+    if (!resolution) {
+      continue;
+    }
+    return result
+      ? applyResolverDefinition(result, resolution)
+      : resultFromResolverDefinition(input, resolution);
+  }
+  return result;
 }
 
 function addCandidate(
@@ -200,6 +368,30 @@ function bodySiteCodeFromInput(
   return coding;
 }
 
+function parsedPostcoordinationForInput(
+  input: BodySiteCodeInput,
+  options?: BodySiteTextOptions
+): {
+  topographicalModifier?: ReturnType<typeof parseSnomedBodySiteTopographicalModifierPostcoordinationCode>;
+  laterality?: ReturnType<typeof parseSnomedBodySiteLateralityPostcoordinationCode>;
+  findingSite?: ReturnType<typeof parseSnomedFindingSitePostcoordinationCode>;
+} {
+  const originalCoding = codeFromInput(input, options);
+  const shouldParse =
+    options?.postcoordination !== false &&
+    options?.parsePostcoordination !== false;
+  if (!shouldParse) {
+    return {};
+  }
+  return {
+    topographicalModifier: parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
+      originalCoding?.code
+    ),
+    laterality: parseSnomedBodySiteLateralityPostcoordinationCode(originalCoding?.code),
+    findingSite: parseSnomedFindingSitePostcoordinationCode(originalCoding?.code)
+  };
+}
+
 function findBodySiteTextByCode(
   coding: BodySiteCode,
   siteCodeMap?: Record<string, BodySiteDefinition>
@@ -229,6 +421,84 @@ function codeMatches(
   const leftSystem = left.system ?? SNOMED_SYSTEM;
   const rightSystem = right.system ?? SNOMED_SYSTEM;
   return left.code === right.code && leftSystem === rightSystem;
+}
+
+function buildBodySiteTextLookupRequest(
+  coding: BodySiteCode,
+  originalCoding: BodySiteCode,
+  parsedTopographicalModifier:
+    | ReturnType<typeof parseSnomedBodySiteTopographicalModifierPostcoordinationCode>
+    | undefined,
+  parsedLaterality:
+    | ReturnType<typeof parseSnomedBodySiteLateralityPostcoordinationCode>
+    | undefined,
+  parsedFindingSite:
+    | ReturnType<typeof parseSnomedFindingSitePostcoordinationCode>
+    | undefined
+): BodySiteTextLookupRequest {
+  const parsedPostcoordination = parsedTopographicalModifier
+    ? {
+      type: "topographicalModifier" as const,
+      siteCode: parsedTopographicalModifier.siteCode,
+      modifierCode: parsedTopographicalModifier.modifierCode
+    }
+    : parsedLaterality
+      ? {
+        type: "laterality" as const,
+        siteCode: parsedLaterality.siteCode,
+        lateralityCode: parsedLaterality.lateralityCode
+      }
+      : parsedFindingSite
+        ? {
+          type: "findingSite" as const,
+          siteCode: parsedFindingSite.siteCode,
+          focusCode: parsedFindingSite.focusCode
+        }
+        : undefined;
+  return {
+    coding,
+    originalCoding,
+    parsedPostcoordination
+  };
+}
+
+function applySyncTextResolvers(
+  text: string | undefined,
+  request: BodySiteTextLookupRequest,
+  options?: BodySiteTextOptions
+): string | undefined {
+  if (text) {
+    return text;
+  }
+  for (const resolver of toArray(options?.siteTextResolvers)) {
+    const result = resolver(request);
+    if (isPromise(result)) {
+      throw new Error(
+        "Body site text resolver returned a Promise; use getBodySiteTextAsync for asynchronous site text lookup."
+      );
+    }
+    if (result) {
+      return result;
+    }
+  }
+  return undefined;
+}
+
+async function applyAsyncTextResolvers(
+  text: string | undefined,
+  request: BodySiteTextLookupRequest,
+  options?: BodySiteTextOptions
+): Promise<string | undefined> {
+  if (text) {
+    return text;
+  }
+  for (const resolver of toArray(options?.siteTextResolvers)) {
+    const result = await resolver(request);
+    if (result) {
+      return result;
+    }
+  }
+  return undefined;
 }
 
 function scoreCandidate(query: string, candidate: string): number {
@@ -277,6 +547,34 @@ function resultKey(result: BodySiteLookupResult): string {
     return `${result.coding.system ?? SNOMED_SYSTEM}|${result.coding.code}|${relation}`;
   }
   return `${result.canonical}|${relation}`;
+}
+
+function sortBodySiteResults(results: BodySiteLookupResult[]): BodySiteLookupResult[] {
+  return results.sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    return left.text.localeCompare(right.text);
+  });
+}
+
+function uniqueText(results: BodySiteLookupResult[]): string[] {
+  const seen = new Set<string>();
+  const texts: string[] = [];
+  for (const result of results) {
+    const text = result.text.trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    texts.push(text);
+  }
+  return texts;
+}
+
+function sortedSetValues(values: Set<string>): string[] {
+  return Array.from(values).sort((left, right) => left.localeCompare(right));
 }
 
 function canBuildTopographicalModifierPostcoordination(
@@ -353,7 +651,20 @@ export function lookupBodySite(
   const resolved = resolveBodySitePhrase(input, options?.siteCodeMap, {
     bodySiteContext: options?.bodySiteContext
   });
-  return resolved ? resultFromResolved(resolved, normalized, 100) : undefined;
+  const result = resolved ? resultFromResolved(resolved, normalized, 100) : undefined;
+  return applySyncResolvers(result, input, resolved, options);
+}
+
+export async function lookupBodySiteAsync(
+  input: string,
+  options?: BodySiteLookupOptions
+): Promise<BodySiteLookupResult | undefined> {
+  const normalized = normalizeBodySiteKey(input);
+  const resolved = resolveBodySitePhrase(input, options?.siteCodeMap, {
+    bodySiteContext: options?.bodySiteContext
+  });
+  const result = resolved ? resultFromResolved(resolved, normalized, 100) : undefined;
+  return applyAsyncResolvers(result, input, resolved, options);
 }
 
 export function getBodySiteCode(
@@ -371,36 +682,101 @@ export function getBodySiteCode(
   );
 }
 
+export async function getBodySiteCodeAsync(
+  input: string,
+  options?: BodySiteLookupOptions
+): Promise<BodySiteCode | undefined> {
+  const resolved = await lookupBodySiteAsync(input, options);
+  if (!resolved) {
+    return undefined;
+  }
+  return resolved.coding ?? buildBodySiteTopographicalModifierCoding(
+    resolved.spatialRelation,
+    resolved.text,
+    options
+  );
+}
+
 export function getBodySiteText(
   input: BodySiteCodeInput,
   options?: BodySiteTextOptions
 ): string | undefined {
+  const originalCoding = codeFromInput(input, options);
   const coding = bodySiteCodeFromInput(input, options);
   if (!coding) {
     return undefined;
   }
 
-  const parsedTopographicalModifier =
-    options?.postcoordination === false || options?.parsePostcoordination === false
-      ? undefined
-      : parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
-        codeFromInput(input, options)?.code
-      );
+  const parsed = parsedPostcoordinationForInput(input, options);
   const siteText = findBodySiteTextByCode(coding, options?.siteCodeMap);
-  if (parsedTopographicalModifier) {
+  let text = siteText;
+  if (parsed.topographicalModifier) {
     const relationText =
-      RELATION_TEXT_BY_TOPOGRAPHICAL_MODIFIER_CODE[parsedTopographicalModifier.modifierCode];
+      RELATION_TEXT_BY_TOPOGRAPHICAL_MODIFIER_CODE[parsed.topographicalModifier.modifierCode];
     if (siteText && relationText) {
       switch (relationText) {
         case "above":
         case "below":
-          return `${relationText} ${siteText}`;
+          text = `${relationText} ${siteText}`;
+          break;
         default:
-          return `${relationText} of ${siteText}`;
+          text = `${relationText} of ${siteText}`;
+          break;
       }
     }
   }
-  return siteText;
+  if (!text && parsed.laterality) {
+    const baseText = findBodySiteTextByCode(
+      {
+        system: originalCoding?.system ?? SNOMED_SYSTEM,
+        code: parsed.laterality.siteCode
+      },
+      options?.siteCodeMap
+    );
+    const lateralityText = LATERALITY_TEXT_BY_CODE[parsed.laterality.lateralityCode];
+    if (baseText && lateralityText) {
+      text = lateralityText === "both" ? `both ${baseText}s` : `${lateralityText} ${baseText}`;
+    }
+  }
+  return applySyncTextResolvers(
+    text,
+    buildBodySiteTextLookupRequest(
+      coding,
+      originalCoding ?? coding,
+      parsed.topographicalModifier,
+      parsed.laterality,
+      parsed.findingSite
+    ),
+    options
+  );
+}
+
+export async function getBodySiteTextAsync(
+  input: BodySiteCodeInput,
+  options?: BodySiteTextOptions
+): Promise<string | undefined> {
+  const originalCoding = codeFromInput(input, options);
+  const coding = bodySiteCodeFromInput(input, options);
+  if (!coding) {
+    return undefined;
+  }
+
+  const parsed = parsedPostcoordinationForInput(input, options);
+  const text = getBodySiteText(input, {
+    ...options,
+    siteTextResolvers: undefined
+  });
+  return applyAsyncTextResolvers(
+    text,
+    buildBodySiteTextLookupRequest(
+      coding,
+      originalCoding ?? coding,
+      parsed.topographicalModifier,
+      parsed.laterality,
+      parsed.findingSite
+    ),
+    options
+  );
 }
 
 export function suggestBodySites(
@@ -436,13 +812,52 @@ export function suggestBodySites(
     }
   }
 
-  return Array.from(ranked.values())
-    .sort((left, right) => {
-      const scoreDelta = right.score - left.score;
-      if (scoreDelta !== 0) {
-        return scoreDelta;
-      }
-      return left.text.localeCompare(right.text);
-    })
-    .slice(0, limit);
+  return sortBodySiteResults(Array.from(ranked.values())).slice(0, limit);
+}
+
+export function suggestBodySiteText(
+  input: string,
+  options?: BodySiteLookupOptions
+): string[] {
+  return uniqueText(suggestBodySites(input, options));
+}
+
+export function listSupportedBodySiteText(
+  options?: BodySiteVocabularyOptions
+): string[] {
+  const limit = options?.limit ?? Number.POSITIVE_INFINITY;
+  if (limit <= 0) {
+    return [];
+  }
+  const ranked = new Map<string, BodySiteLookupResult>();
+  for (const candidate of collectBodySiteCandidates(options?.siteCodeMap)) {
+    const resolved = resolveBodySitePhrase(candidate.phrase, options?.siteCodeMap, {
+      bodySiteContext: options?.bodySiteContext
+    });
+    if (!resolved) {
+      continue;
+    }
+    const result = resultFromResolved(resolved, candidate.phrase, 100);
+    const key = resultKey(result);
+    if (!ranked.has(key)) {
+      ranked.set(key, result);
+    }
+  }
+  return uniqueText(sortBodySiteResults(Array.from(ranked.values()))).slice(0, limit);
+}
+
+export function listSupportedBodySiteGrammar(): BodySiteGrammarVocabulary {
+  const spatialRelationCodings: Record<string, FhirCoding> = {};
+  for (const [key, coding] of BODY_SITE_SPATIAL_RELATION_CODINGS) {
+    spatialRelationCodings[key] = { ...coding };
+  }
+  return {
+    siteAnchors: sortedSetValues(SITE_ANCHORS),
+    siteSelfDisplayAnchors: sortedSetValues(SITE_SELF_DISPLAY_ANCHORS),
+    locativeRelations: sortedSetValues(BODY_SITE_LOCATIVE_RELATIONS),
+    partitiveHeads: sortedSetValues(BODY_SITE_PARTITIVE_HEADS),
+    partitiveModifiers: sortedSetValues(BODY_SITE_PARTITIVE_MODIFIERS),
+    partitiveConnectors: sortedSetValues(BODY_SITE_PARTITIVE_CONNECTORS),
+    spatialRelationCodings
+  };
 }

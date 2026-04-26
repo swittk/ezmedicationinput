@@ -18,7 +18,7 @@
 - Generates upcoming administration timestamps from FHIR dosage data via `nextDueDoses` using configurable clinic clocks.
 - Auto-codes common body-site phrases (e.g. "left arm", "right eye") with SNOMED CT anatomy concepts and supports interactive lookup flows for ambiguous sites.
 - Represents spatial body-site phrases such as `below ear`, `right side of abdomen`, `between fingers`, and Thai forms like `ระหว่างนิ้วมือ` through structured site metadata.
-- Exposes body-site lookup/suggestion helpers and SNOMED finding-site postcoordination helpers for UI search and terminology workflows.
+- Exposes body-site lookup/suggestion/listing helpers and SNOMED postcoordination helpers for UI search and terminology workflows.
 
 ## Parser architecture
 
@@ -313,8 +313,13 @@ For typeahead/search UI, use the exported body-site helpers directly:
 ```ts
 import {
   getBodySiteCode,
+  getBodySiteCodeAsync,
   getBodySiteText,
+  getBodySiteTextAsync,
+  listSupportedBodySiteGrammar,
+  listSupportedBodySiteText,
   lookupBodySite,
+  suggestBodySiteText,
   suggestBodySites
 } from "ezmedicationinput";
 
@@ -336,6 +341,12 @@ getBodySiteCode("top of head", { postcoordination: false });
 getBodySiteText("69536005:106233006=261183002");
 // → "top of head"
 
+getBodySiteCode("right big toe");
+// → { system: "http://snomed.info/sct", code: "78883009:272741003=24028007", display: "right great toe" }
+
+getBodySiteText("78883009:272741003=24028007");
+// → "right great toe"
+
 getBodySiteText("22253000:363698007=723979003", {
   parsePostcoordination: false
 });
@@ -346,23 +357,78 @@ lookupBodySite("ระหว่างนิ้ว", { bodySiteContext: "feet" })
 
 suggestBodySites("หนัง", { limit: 5 });
 // → [{ text: "scalp", coding: { code: "41695006", ... }, ... }]
+
+suggestBodySiteText("นิ้วโป้ง", { limit: 5 });
+// → ["thumb", "great toe", ...]
+
+listSupportedBodySiteText({ limit: 10 });
+// → ["abdomen", "affected area", ...]
+
+listSupportedBodySiteGrammar().siteAnchors;
+// → ["above", "around", "at", "beneath", "below", "between", ...]
 ```
 
 `getBodySiteCode` and `getBodySiteText` are convenience wrappers for the common
 phrase-to-code and code-to-label cases. `getBodySiteCode` returns direct
 pre-coordinated body-site codings when available; otherwise it can build a
 SNOMED topographical-modifier expression for coded spatial phrases such as
-`top of head` or `below ear`. Parsed medication orders use the same behavior for
+`top of head` or `below ear`, and SNOMED laterality expressions for digit sites
+such as `right big toe`. Parsed medication orders use the same behavior for
 `Dosage.site.coding` by default and still preserve the structured spatial
 extension; pass `bodySitePostcoordination: false` to `parseSig` when a consumer
-only accepts literal body-site codes. `getBodySiteText` resolves both finding-site
-and topographical-modifier postcoordination by default. Pass
+only accepts literal body-site codes. `getBodySiteText` resolves finding-site,
+topographical-modifier, and laterality postcoordination by default. Pass
 `postcoordination: false` or `parsePostcoordination: false` to require literal
-body-site codes only. `lookupBodySite` returns the full resolved metadata,
-including spatial relation details. `suggestBodySites` returns ranked
-bundled/custom candidates for autocomplete. Lookup helpers accept `siteCodeMap`;
+body-site codes only.
+
+`lookupBodySite` returns the full resolved metadata, including spatial relation
+details. `suggestBodySites` returns ranked bundled/custom candidates for
+autocomplete, while `suggestBodySiteText` returns only display labels.
+`listSupportedBodySiteText` exposes the bundled/custom label inventory for UI
+preloading, and `listSupportedBodySiteGrammar` exposes the supported site
+anchors/prepositions, locative relations, partitive heads/modifiers, and
+SNOMED-coded spatial relation metadata. Lookup helpers accept `siteCodeMap`;
 phrase-based helpers also accept `bodySiteContext`, used only for genuinely
 ambiguous shorthand such as Thai `ระหว่างนิ้ว`.
+
+Standalone lookup helpers can also call sync or async terminology hooks:
+
+```ts
+getBodySiteCode("clinic site", {
+  siteCodeMap: {
+    "clinic site": {
+      coding: {
+        system: "http://example.org/sites",
+        code: "CLINIC-SITE",
+        display: "Clinic site"
+      },
+      text: "clinic site"
+    }
+  }
+});
+
+await getBodySiteCodeAsync("remote site", {
+  siteCodeResolvers: async (request) => {
+    if (request.canonical !== "remote site") return undefined;
+    return {
+      coding: {
+        system: "http://example.org/sites",
+        code: "REMOTE-SITE",
+        display: "Remote site"
+      },
+      text: "remote site"
+    };
+  }
+});
+
+await getBodySiteTextAsync(
+  { system: "http://example.org/sites", code: "REMOTE-SITE" },
+  {
+    siteTextResolvers: async (request) =>
+      request.originalCoding.code === "REMOTE-SITE" ? "remote site" : undefined
+  }
+);
+```
 
 You can extend or replace the built-in codings via `ParseOptions`:
 
@@ -467,6 +533,42 @@ export type SiteCodeSuggestionResolver = (
 
 Consumers that only need synchronous resolution can continue calling `parseSig`. If any synchronous resolver accidentally returns a Promise, an error is thrown with guidance to switch to `parseSigAsync`.
 
+#### Standalone body-site helper resolver signatures
+
+The standalone helper callbacks are intentionally smaller than parser callbacks
+because they only resolve one phrase or one code at a time.
+
+```ts
+export interface BodySiteLookupRequest {
+  originalText: string;
+  text: string;
+  normalized: string;
+  canonical: string;
+  bodySiteContext?: string;
+  spatialRelation?: BodySiteSpatialRelation;
+}
+
+export type BodySiteResolver = (
+  request: BodySiteLookupRequest
+) => BodySiteDefinition | null | undefined | Promise<BodySiteDefinition | null | undefined>;
+
+export interface BodySiteTextLookupRequest {
+  coding: BodySiteCode;         // decoded literal site when postcoordination is enabled
+  originalCoding: BodySiteCode; // original input coding/code
+  parsedPostcoordination?: {
+    type: "topographicalModifier" | "laterality" | "findingSite";
+    siteCode: string;
+    modifierCode?: string;
+    lateralityCode?: string;
+    focusCode?: string;
+  };
+}
+
+export type BodySiteTextResolver = (
+  request: BodySiteTextLookupRequest
+) => string | null | undefined | Promise<string | null | undefined>;
+```
+
 #### SNOMED finding-site postcoordination helpers
 
 When a PRN reason has a symptom plus site (for example `pain at abdomen`), the
@@ -474,16 +576,21 @@ library can represent the coded symptom with a SNOMED finding-site expression.
 The helpers are exported for callers that need the same representation outside
 the parser.
 
-This is separate from body-site topographical postcoordination. PRN findings
-use `363698007 | Finding site |`; spatial body-site phrases use
-`106233006 | Topographical modifier |`.
+This is separate from body-site postcoordination. PRN findings use
+`363698007 | Finding site |`; spatial body-site phrases use
+`106233006 | Topographical modifier |`; laterality on body sites uses
+`272741003 | Laterality |`.
 
 ```ts
 import {
+  buildSnomedBodySiteLateralityPostcoordinationCode,
   buildSnomedFindingSiteCoding,
   buildSnomedFindingSitePostcoordinationCode,
   hasSnomedFindingSitePostcoordination
 } from "ezmedicationinput";
+
+buildSnomedBodySiteLateralityPostcoordinationCode("78883009", "24028007");
+// → "78883009:272741003=24028007"
 
 buildSnomedFindingSitePostcoordinationCode("22253000", "85562004");
 // → "22253000:363698007=85562004"

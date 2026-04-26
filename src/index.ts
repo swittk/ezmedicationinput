@@ -38,14 +38,26 @@ export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
 export {
   buildBodySiteTopographicalModifierCoding,
   getBodySiteCode,
+  getBodySiteCodeAsync,
   getBodySiteText,
+  getBodySiteTextAsync,
+  listSupportedBodySiteGrammar,
+  listSupportedBodySiteText,
   lookupBodySite,
+  lookupBodySiteAsync,
+  suggestBodySiteText,
   suggestBodySites
 } from "./body-site-lookup";
 export type {
+  BodySiteGrammarVocabulary,
   BodySiteLookupOptions,
+  BodySiteLookupRequest,
   BodySiteLookupResult,
-  BodySiteTextOptions
+  BodySiteResolver,
+  BodySiteTextLookupRequest,
+  BodySiteTextOptions,
+  BodySiteTextResolver,
+  BodySiteVocabularyOptions
 } from "./body-site-lookup";
 export {
   BODY_SITE_SPATIAL_RELATION_EXTENSION_URL,
@@ -57,16 +69,27 @@ export {
 export {
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_DISPLAY,
+  SNOMED_CT_BILATERAL_QUALIFIER_CODE,
+  SNOMED_CT_BILATERAL_QUALIFIER_DISPLAY,
+  SNOMED_CT_LATERALITY_ATTRIBUTE_CODE,
+  SNOMED_CT_LATERALITY_ATTRIBUTE_DISPLAY,
+  SNOMED_CT_LEFT_QUALIFIER_CODE,
+  SNOMED_CT_LEFT_QUALIFIER_DISPLAY,
+  SNOMED_CT_RIGHT_QUALIFIER_CODE,
+  SNOMED_CT_RIGHT_QUALIFIER_DISPLAY,
   SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE,
   SNOMED_CT_TOPOGRAPHICAL_MODIFIER_DISPLAY,
   SNOMED_SYSTEM
 } from "./snomed";
 export {
+  buildSnomedBodySiteLateralityPostcoordinationCode,
   buildSnomedBodySiteTopographicalModifierPostcoordinationCode,
   buildSnomedFindingSiteCoding,
   buildSnomedFindingSitePostcoordinationCode,
+  hasSnomedBodySiteLateralityPostcoordination,
   hasSnomedFindingSitePostcoordination,
   hasSnomedTopographicalModifierPostcoordination,
+  parseSnomedBodySiteLateralityPostcoordinationCode,
   parseSnomedBodySiteTopographicalModifierPostcoordinationCode,
   parseSnomedFindingSitePostcoordinationCode
 } from "./snomed-postcoordination";

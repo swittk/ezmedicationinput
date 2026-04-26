@@ -3,15 +3,21 @@ import {
   fromFhirDosage,
   formatSig,
   getBodySiteCode,
+  getBodySiteCodeAsync,
   getBodySiteText,
+  getBodySiteTextAsync,
+  listSupportedBodySiteGrammar,
+  listSupportedBodySiteText,
   lookupBodySite,
   parseSig,
   parseSigAsync,
+  suggestBodySiteText,
   suggestBodySites
 } from "../src/index";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import {
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
+  SNOMED_CT_LATERALITY_ATTRIBUTE_CODE,
   SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE
 } from "../src/snomed";
 import {
@@ -37,6 +43,8 @@ const findingSiteCode = (focus: string, site: string) =>
   `${focus}:${SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE}=${site}`;
 const topographicalSiteCode = (site: string, modifier: string) =>
   `${site}:${SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE}=${modifier}`;
+const lateralizedSiteCode = (site: string, laterality: string) =>
+  `${site}:${SNOMED_CT_LATERALITY_ATTRIBUTE_CODE}=${laterality}`;
 
 function expectPrimitiveTranslation(
   element: { extension?: Array<{ url: string; extension?: Array<{ url: string; valueCode?: string; valueString?: string }> }> } | undefined,
@@ -1504,7 +1512,10 @@ describe("parseSig core scenarios", () => {
     const cases = [
       ["when dizzy take 1 tab po", "dizziness", "404640003"],
       ["when nauseous take 1 tab po", "nausea", "422587007"],
-      ["when feverish take 1 tab po", "fever", "386661006"]
+      ["when feverish take 1 tab po", "fever", "386661006"],
+      ["when เวียนหัว take 1 tab po", "เวียนหัว", "404640003"],
+      ["when คลื่นไส้ take 1 tab po", "คลื่นไส้", "422587007"],
+      ["when มีไข้ take 1 tab po", "มีไข้", "386661006"]
     ] as const;
 
     for (const [sig, reason, code] of cases) {
@@ -2604,8 +2615,6 @@ describe("parseSig core scenarios", () => {
     const cases = [
       { sig: "apply cream to left flank bid", site: "left flank" },
       { sig: "apply cream to right flank bid", site: "right flank" },
-      { sig: "apply cream to right big toe bid", site: "right big toe" },
-      { sig: "apply cream to 2nd toe bid", site: "2nd toe" },
       { sig: "apply cream to top of head bid", site: "top of head" },
       { sig: "apply below ear bid", site: "below ear" },
       { sig: "apply under ear bid", site: "under ear" },
@@ -2628,6 +2637,81 @@ describe("parseSig core scenarios", () => {
         SNOMEDCTRouteCodes["Topical route"]
       );
     }
+  });
+
+  it("recognizes Thai body-site aliases for paired anatomy and named digits", () => {
+    const cases = [
+      { sig: "apply to ตา", site: "eye", code: "81745001", display: "Eye", route: SNOMEDCTRouteCodes["Ophthalmic route"] },
+      { sig: "apply to ตาซ้าย", site: "left eye", code: "1290031003", display: "Structure of left eye proper", route: SNOMEDCTRouteCodes["Ophthalmic route"] },
+      { sig: "apply to ตาขวา", site: "right eye", code: "1290032005", display: "Structure of right eye proper", route: SNOMEDCTRouteCodes["Ophthalmic route"] },
+      { sig: "apply to ตาสองข้าง", site: "both eyes", code: "40638003", display: "Structure of both eyes", route: SNOMEDCTRouteCodes["Ophthalmic route"] },
+      { sig: "apply to หูซ้าย", site: "left ear", code: "89644007", display: "Left ear", route: SNOMEDCTRouteCodes["Otic route"] },
+      { sig: "apply to หูขวา", site: "right ear", code: "25577004", display: "Right ear", route: SNOMEDCTRouteCodes["Otic route"] },
+      { sig: "apply to หูสองข้าง", site: "both ears", code: "34338003", display: "Both ears", route: SNOMEDCTRouteCodes["Otic route"] },
+      { sig: "apply to แขน", site: "arm", code: "302538001", display: "Entire upper arm", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to ขา", site: "leg", code: "362793004", display: "Entire lower leg, from knee to ankle", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to เท้าซ้าย", site: "left foot", code: "22335008", display: "Left foot", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to เท้าขวา", site: "right foot", code: "7769000", display: "Right foot", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to คอ", site: "neck", code: "45048000", display: "Neck", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to อัณฑะ", site: "testis", code: "40689003", display: "Testis", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วโป้ง", site: "thumb", code: "76505004", display: "Thumb", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วชี้มือ", site: "index finger", code: "83738005", display: "Index finger", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วกลางมือ", site: "middle finger", code: "65531009", display: "Middle finger", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วนางมือ", site: "ring finger", code: "82002001", display: "Ring finger", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วก้อยมือ", site: "little finger", code: "12406000", display: "Little finger", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to big toe", site: "great toe", code: "78883009", display: "Great toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to 2nd toe", site: "second toe", code: "55078004", display: "Second toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to right big toe", site: "right great toe", code: lateralizedSiteCode("78883009", "24028007"), display: "right great toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to left thumb", site: "left thumb", code: lateralizedSiteCode("76505004", "7771000"), display: "left thumb", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วโป้งขวา", site: "right thumb", code: lateralizedSiteCode("76505004", "24028007"), display: "right thumb", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วก้อยเท้าซ้าย", site: "left fifth toe", code: lateralizedSiteCode("39915008", "7771000"), display: "left fifth toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วชี้เท้าสองข้าง", site: "both second toes", code: lateralizedSiteCode("55078004", "51440002"), display: "both second toes", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วโป้งเท้า", site: "great toe", code: "78883009", display: "Great toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วชี้เท้า", site: "second toe", code: "55078004", display: "Second toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วกลางเท้า", site: "third toe", code: "78132007", display: "Third toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วนางเท้า", site: "fourth toe", code: "80349001", display: "Fourth toe", route: SNOMEDCTRouteCodes["Topical route"] },
+      { sig: "apply to นิ้วก้อยเท้า", site: "fifth toe", code: "39915008", display: "Fifth toe", route: SNOMEDCTRouteCodes["Topical route"] }
+    ] as const;
+
+    for (const { sig, site, code, display, route } of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(site);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code,
+        display
+      });
+      expect(result.fhir.route?.coding?.[0]?.code).toBe(route);
+    }
+  });
+
+  it("localizes Thai body-site aliases through canonical site text", () => {
+    const cases = [
+      ["apply to ตาขวา", "ทา ที่ตาขวา."],
+      ["apply to หูสองข้าง", "ทา ที่หูทั้งสองข้าง."],
+      ["apply to นิ้วโป้งเท้า", "ทา บริเวณนิ้วโป้งเท้า."],
+      ["apply to นิ้วก้อยเท้าซ้าย", "ทา บริเวณนิ้วก้อยเท้าซ้าย."],
+      ["apply to อัณฑะ", "ทา บริเวณอัณฑะ."]
+    ] as const;
+
+    for (const [sig, text] of cases) {
+      expect(parseSig(sig, { locale: "th" }).longText).toBe(text);
+    }
+
+    const fromCodeOnly = fromFhirDosage(
+      {
+        site: {
+          coding: [
+            {
+              system: "http://snomed.info/sct",
+              code: lateralizedSiteCode("78883009", "24028007")
+            }
+          ]
+        }
+      },
+      { locale: "th" }
+    );
+    expect(fromCodeOnly.longText).toContain("นิ้วโป้งเท้าขวา");
   });
 
   it("does not infer instillation routes from external surface phrases", () => {
@@ -2782,9 +2866,22 @@ describe("parseSig core scenarios", () => {
       display: "top of head"
     });
     expect(getBodySiteCode("top of head", { postcoordination: false })).toBeUndefined();
+    expect(getBodySiteCode("right big toe")).toEqual({
+      system: "http://snomed.info/sct",
+      code: lateralizedSiteCode("78883009", "24028007"),
+      display: "right great toe",
+      i18n: undefined
+    });
+    expect(getBodySiteCode("นิ้วก้อยเท้าซ้าย")).toEqual({
+      system: "http://snomed.info/sct",
+      code: lateralizedSiteCode("39915008", "7771000"),
+      display: "left fifth toe",
+      i18n: undefined
+    });
     expect(getBodySiteText("723979003")).toBe("left buttock");
     expect(getBodySiteText(findingSiteCode("22253000", "723979003"))).toBe("left buttock");
     expect(getBodySiteText(topographicalSiteCode("69536005", "261183002"))).toBe("top of head");
+    expect(getBodySiteText(lateralizedSiteCode("78883009", "24028007"))).toBe("right great toe");
     expect(
       getBodySiteText(findingSiteCode("22253000", "723979003"), {
         parsePostcoordination: false
@@ -2828,6 +2925,74 @@ describe("parseSig core scenarios", () => {
         })
       ])
     );
+
+    expect(suggestBodySiteText("นิ้วโป้ง", { limit: 3 })).toEqual(
+      expect.arrayContaining(["thumb", "great toe"])
+    );
+    expect(listSupportedBodySiteText()).toEqual(
+      expect.arrayContaining(["right great toe", "left thumb", "both second toes"])
+    );
+    expect(listSupportedBodySiteGrammar()).toMatchObject({
+      siteAnchors: expect.arrayContaining(["to", "ที่", "between"]),
+      locativeRelations: expect.arrayContaining(["above", "below", "between"]),
+      partitiveHeads: expect.arrayContaining(["top", "side"]),
+      partitiveModifiers: expect.arrayContaining(["left", "right"]),
+      partitiveConnectors: expect.arrayContaining(["of"]),
+      spatialRelationCodings: expect.objectContaining({
+        below: expect.objectContaining({ code: "351726001" }),
+        top: expect.objectContaining({ code: "261183002" })
+      })
+    });
+  });
+
+  it("allows custom sync and async body-site lookup helpers", async () => {
+    const customMap = {
+      "clinic site": {
+        coding: {
+          system: "http://example.org/sites",
+          code: "CLINIC-SITE",
+          display: "Clinic site"
+        },
+        text: "clinic site"
+      }
+    } as const;
+
+    expect(getBodySiteCode("clinic site", { siteCodeMap: customMap })).toEqual({
+      system: "http://example.org/sites",
+      code: "CLINIC-SITE",
+      display: "Clinic site",
+      i18n: undefined
+    });
+    expect(getBodySiteText(
+      { system: "http://example.org/sites", code: "CLINIC-SITE" },
+      { siteCodeMap: customMap }
+    )).toBe("clinic site");
+
+    await expect(getBodySiteCodeAsync("remote site", {
+      siteCodeResolvers: [async (request) => request.canonical === "remote site"
+        ? {
+          coding: {
+            system: "http://example.org/sites",
+            code: "REMOTE-SITE",
+            display: "Remote site"
+          },
+          text: "remote site"
+        }
+        : undefined]
+    })).resolves.toEqual({
+      system: "http://example.org/sites",
+      code: "REMOTE-SITE",
+      display: "Remote site",
+      i18n: undefined
+    });
+
+    await expect(getBodySiteTextAsync(
+      { system: "http://example.org/sites", code: "REMOTE-SITE" },
+      {
+        siteTextResolvers: [async (request) =>
+          request.originalCoding.code === "REMOTE-SITE" ? "remote site" : undefined]
+      }
+    )).resolves.toBe("remote site");
   });
 
   it("passes parsed spatial relation metadata to site terminology callbacks", () => {
