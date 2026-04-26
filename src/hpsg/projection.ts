@@ -139,11 +139,27 @@ export function projectHpsgSignToState(
   if (instructions?.length) {
     const existing = state.additionalInstructions.slice();
     for (const instruction of instructions) {
-      if (!existing.some((candidate) => candidate.text === instruction.text)) {
-        existing.push({ text: instruction.text });
+      if (
+        !existing.some((candidate) =>
+          candidate.text === instruction.text &&
+          candidate.coding?.code === instruction.coding?.code
+        )
+      ) {
+        existing.push({
+          text: instruction.text,
+          coding: instruction.coding,
+          frames: instruction.frames
+        });
       }
     }
     state.additionalInstructions = existing;
+  }
+
+  const patientInstruction = sign.synsem.valence.patientInstruction;
+  if (patientInstruction?.text) {
+    state.patientInstruction = state.patientInstruction
+      ? `${state.patientInstruction}; ${patientInstruction.text}`
+      : patientInstruction.text;
   }
 
   const dose = sign.synsem.head.dose;

@@ -1,6 +1,14 @@
 import { lexInput } from "../lexer/lex";
 import { annotateLexTokens } from "../lexer/meaning";
 import { Token } from "../parser-state";
+import { parseAdditionalInstructions } from "../advice";
+import { AdviceForce } from "../types";
+import {
+  CLAUSE_LEAD_WORDS,
+  HARD_SEGMENT_BOUNDARY_TOKENS,
+  LATERAL_MODIFIER_WORDS,
+  MERIDIEM_TOKENS
+} from "./lexical-classes";
 
 export interface HpsgSigSegment {
   text: string;
@@ -8,37 +16,39 @@ export interface HpsgSigSegment {
   end: number;
 }
 
-const HARD_BOUNDARY_TOKENS = new Set(["+", "|", "||", "//"]);
-const CLAUSE_LEAD_WORDS = new Set([
-  "apply",
-  "take",
-  "instill",
-  "inject",
-  "insert",
-  "spray",
-  "use",
-  "drink",
-  "swallow",
-  "inhale",
-  "gargle",
-  "rinse",
-  "od",
-  "os",
-  "ou",
-  "re",
-  "le",
-  "right",
-  "left",
-  "both",
-  "each"
-]);
-
 function isBoundaryToken(token: Token): boolean {
   const text = token.original.trim().toLowerCase();
-  return HARD_BOUNDARY_TOKENS.has(text) || text === "\n" || text === "\r";
+  return HARD_SEGMENT_BOUNDARY_TOKENS.has(text) || text === "\n" || text === "\r";
 }
 
-function isCommaClauseBoundary(tokens: Token[], index: number): boolean {
+function parsesAsInstructionContinuation(input: string, tokens: Token[], index: number): boolean {
+  const lead = tokens[index + 1];
+  const firstInstructionToken = tokens[index + 2];
+  if (!lead || !firstInstructionToken || !CLAUSE_LEAD_WORDS.has(lead.lower.replace(/[.,;:]/g, ""))) {
+    return false;
+  }
+  const start = firstInstructionToken.sourceStart;
+  let end = input.length;
+  for (let cursor = index + 2; cursor < tokens.length; cursor += 1) {
+    const token = tokens[cursor];
+    if (cursor > index + 2 && token.original === ",") {
+      end = token.sourceStart;
+      break;
+    }
+  }
+  const text = input.slice(start, end).replace(/\s+/g, " ").trim();
+  if (!text) {
+    return false;
+  }
+  const instructions = parseAdditionalInstructions(text, { start, end }, {
+    defaultPredicate: lead.lower.replace(/[.,;:]/g, "") || "take",
+    defaultForce: AdviceForce.Instruction,
+    allowFreeTextFallback: false
+  });
+  return instructions.some((instruction) => instruction.coding?.code || instruction.frames.length);
+}
+
+function isCommaClauseBoundary(input: string, tokens: Token[], index: number): boolean {
   const token = tokens[index];
   if (!token || token.original !== ",") {
     return false;
@@ -52,14 +62,20 @@ function isCommaClauseBoundary(tokens: Token[], index: number): boolean {
   const following = tokens[index + 2]?.lower.replace(/^\.+|\.+$/g, "");
   if (
     /^[0-9]{1,2}[:.][0-9]{2}$/.test(rawLower) ||
-    (/^[0-9]{1,2}$/.test(rawLower) && (following === "am" || following === "pm"))
+    (/^[0-9]{1,2}$/.test(rawLower) && Boolean(following && MERIDIEM_TOKENS.has(following)))
   ) {
     return false;
   }
   if (/^\d/.test(lower)) {
     return true;
   }
+  if (LATERAL_MODIFIER_WORDS.has(lower) && (!following || !/^\d/.test(following))) {
+    return false;
+  }
   if (!CLAUSE_LEAD_WORDS.has(lower)) {
+    return false;
+  }
+  if (parsesAsInstructionContinuation(input, tokens, index)) {
     return false;
   }
   return true;
@@ -106,18 +122,48 @@ export function parseSigSegments(input: string): HpsgSigSegment[] {
   const tokens = annotateLexTokens(lexInput(input));
   const segments: HpsgSigSegment[] = [];
   let start = 0;
+  let parenDepth = 0;
+  let scannedOffset = 0;
+
+  const scanParens = (end: number) => {
+    for (; scannedOffset < end; scannedOffset += 1) {
+      const char = input[scannedOffset];
+      if (char === "(") {
+        parenDepth += 1;
+      } else if (char === ")") {
+        parenDepth = Math.max(0, parenDepth - 1);
+      }
+    }
+  };
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
+    scanParens(token.sourceStart);
+    if (token.original === "(") {
+      parenDepth += 1;
+      scannedOffset = token.sourceEnd;
+      continue;
+    }
+    if (token.original === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      scannedOffset = token.sourceEnd;
+      continue;
+    }
+    if (parenDepth > 0) {
+      scannedOffset = token.sourceEnd;
+      continue;
+    }
     const isBoundary =
       isBoundaryToken(token) ||
-      isCommaClauseBoundary(tokens, index) ||
+      isCommaClauseBoundary(input, tokens, index) ||
       isSlashClauseBoundary(tokens, index);
     if (!isBoundary) {
+      scannedOffset = token.sourceEnd;
       continue;
     }
     pushSegment(segments, input, start, token.sourceStart);
     start = token.sourceEnd;
+    scannedOffset = token.sourceEnd;
   }
 
   pushSegment(segments, input, start, input.length);

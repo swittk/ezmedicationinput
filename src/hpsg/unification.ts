@@ -6,6 +6,7 @@ import {
   HpsgSign,
   HpsgSiteFeature,
   HpsgPrnFeature,
+  HpsgPatientInstructionFeature,
   HpsgInstructionFeature,
   HpsgSynsem
 } from "./signature";
@@ -168,11 +169,26 @@ function mergeInstructions(
 ): HpsgInstructionFeature[] | undefined {
   const result: HpsgInstructionFeature[] = [];
   for (const instruction of [...(left ?? []), ...(right ?? [])]) {
-    if (!result.some((candidate) => candidate.text === instruction.text)) {
+    if (
+      !result.some((candidate) =>
+        candidate.text === instruction.text &&
+        candidate.coding?.code === instruction.coding?.code
+      )
+    ) {
       result.push(instruction);
     }
   }
   return result.length ? result : undefined;
+}
+
+function mergePatientInstruction(
+  left: HpsgPatientInstructionFeature | undefined,
+  right: HpsgPatientInstructionFeature | undefined
+): HpsgPatientInstructionFeature | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  if (left.text === right.text) return left;
+  return { text: `${left.text}; ${right.text}` };
 }
 
 function mergeDose(
@@ -293,7 +309,11 @@ export function unifySynsem(
     valence: {
       site,
       prn,
-      instructions: mergeInstructions(left.valence.instructions, right.valence.instructions)
+      instructions: mergeInstructions(left.valence.instructions, right.valence.instructions),
+      patientInstruction: mergePatientInstruction(
+        left.valence.patientInstruction,
+        right.valence.patientInstruction
+      )
     },
     cont: {
       clauseKind: left.cont.clauseKind ?? right.cont.clauseKind

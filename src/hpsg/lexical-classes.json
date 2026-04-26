@@ -1,0 +1,247 @@
+{
+  "siteAnchors": ["to", "in", "into", "on", "onto", "at", "inside", "within", "around", "behind", "near", "outside", "external"],
+  "siteSelfDisplayAnchors": ["around", "behind", "near", "outside", "external"],
+  "siteFillers": ["the", "a", "an", "your", "his", "her", "their", "my"],
+  "bodySiteLocativeRelations": ["behind", "around", "under", "above", "below", "beneath", "near", "outside", "inside"],
+  "bodySiteLocativeRenderPrepositions": {
+    "inside": "in"
+  },
+  "bodySitePartitiveHeads": ["top", "back", "front", "side", "middle", "mid", "center", "centre", "palm", "sole"],
+  "bodySitePartitiveConnectors": ["of"],
+  "bodySiteBareNominalPrefixes": ["both", "each", "either", "every", "all", "bilateral"],
+  "oticSiteWords": ["ear", "ears", "canal"],
+  "ophthalmicSiteWords": ["eye", "eyes", "eyelid", "eyelids"],
+  "nasalSiteWords": ["nostril", "nostrils", "naris", "nares", "nose"],
+  "bodySiteAdjectiveSuffixes": ["al", "ial", "ual", "ic", "ous", "ive", "ary", "ory", "atic", "etic", "ular", "otic", "ile", "eal", "inal", "aneal", "enal"],
+  "bodySiteDisplayPenaltyWords": ["structure", "region", "entire", "proper", "body"],
+  "bodySiteFeatureScoreBonus": {
+    "nominal": 0,
+    "partitive": 8,
+    "locative": 6
+  },
+  "connectors": ["per", "to", "in", "into", "at", "a", "an", "the", "of", "and", "or", "on", "every", ","],
+  "routeSitePrepositions": ["per"],
+  "nonSiteAnchoredPhrases": ["empty stomach"],
+  "externalSiteLocativePrefixes": ["around", "behind", "near", "outside", "external"],
+  "routeBlockedByFollowingPartitiveHeads": ["top"],
+  "prnLeads": ["prn"],
+  "prnReasonLeadIns": ["for", "if", "when", "upon", "to"],
+  "prnStandaloneReasonLeads": ["for"],
+  "prnReasonMultiwordLeadIns": ["due to"],
+  "prnReasonSiteConnectors": ["at", "in", "on", "to"],
+  "prnReasonCoordinators": [",", "/", "and", "or", "and/or", "หรือ", "และ"],
+  "prnGenericLocatedHeads": {
+    "ache": "pain",
+    "aches": "pain",
+    "itchiness": "itch",
+    "itching": "itch",
+    "itchy": "itch",
+    "pains": "pain"
+  },
+  "prnDefaultSiteConnector": "at",
+  "prnCompactReasonSeparators": ["/"],
+  "siteRouteHintsAllowedInGrammar": [
+    "Transdermal route",
+    "Per vagina",
+    "Per rectum",
+    "Ophthalmic route",
+    "Ocular route (qualifier value)",
+    "Intravitreal route (qualifier value)",
+    "Otic route",
+    "Nasal route"
+  ],
+  "productMethodText": {
+    "apply": {
+      "sunscreen": "Apply sunscreen"
+    },
+    "reapply": {
+      "sunscreen": "Reapply sunscreen"
+    },
+    "use": {
+      "shampoo": "Use shampoo"
+    }
+  },
+  "productMethodThai": {
+    "Apply sunscreen": "ทากันแดด",
+    "Reapply sunscreen": "ทากันแดดซ้ำ",
+    "Use shampoo": "สระ"
+  },
+  "compoundDoseUnits": [
+    { "head": "cm", "tails": ["ribbon", "ribbons"], "unit": "cm ribbon" },
+    { "head": "fingertip", "tails": ["unit", "units"], "unit": "fingertip unit" }
+  ],
+  "millionDoseMultiplierTokens": ["m"],
+  "scheduleUnitSeparatorTokens": ["/"],
+  "compactListSeparators": ["/"],
+  "everyIntervalTokens": ["q", "every", "each"],
+  "countMarkerTokens": ["x", "*"],
+  "countConnectorWords": ["a", "an", "the", "total", "of", "up", "to", "no", "more", "than", "max", "maximum", "additional", "extra"],
+  "frequencySimpleWords": {
+    "once": 1,
+    "twice": 2,
+    "thrice": 3
+  },
+  "frequencyNumberWords": {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12
+  },
+  "frequencyTimesWords": ["time", "times", "x"],
+  "frequencyConnectorWords": ["per", "a", "an", "each", "every"],
+  "frequencyAdverbUnits": {
+    "daily": "Day",
+    "weekly": "Week",
+    "monthly": "Month",
+    "hourly": "Hour"
+  },
+  "intervalUnitTokens": {
+    "min": "Minute",
+    "mins": "Minute",
+    "minute": "Minute",
+    "minutes": "Minute",
+    "m": "Minute",
+    "h": "Hour",
+    "hr": "Hour",
+    "hrs": "Hour",
+    "hour": "Hour",
+    "hours": "Hour",
+    "d": "Day",
+    "day": "Day",
+    "days": "Day",
+    "wk": "Week",
+    "w": "Week",
+    "week": "Week",
+    "weeks": "Week",
+    "mo": "Month",
+    "month": "Month",
+    "months": "Month"
+  },
+  "workflowStartWords": ["after", "before", "with", "leave", "rinse", "wash", "cover", "clean", "dry"],
+  "workflowNouns": [
+    "bowel",
+    "change",
+    "dressing",
+    "exposure",
+    "menstruation",
+    "movement",
+    "rinse",
+    "shower",
+    "showering",
+    "sun",
+    "wash"
+  ],
+  "anteMeridiemTokens": ["am"],
+  "postMeridiemTokens": ["pm"],
+  "meridiemTokens": ["am", "pm"],
+  "listSeparators": [",", "and"],
+  "medicationObjectFillers": ["medication", "medicine", "drug"],
+  "clockLeadTokens": ["@", "at"],
+  "eventPrepositions": ["in", "at", "on", "every"],
+  "eventArticleTokens": ["the"],
+  "fixedEventPhrases": {
+    "early morning": "Early Morning"
+  },
+  "mealRelationTokens": {
+    "ac": "before",
+    "before": "before",
+    "pc": "after",
+    "after": "after",
+    "with": "with"
+  },
+  "mealTimingByRelation": {
+    "with": {
+      "Meal": "Meal",
+      "Breakfast": "Breakfast",
+      "Lunch": "Lunch",
+      "Dinner": "Dinner"
+    },
+    "before": {
+      "Meal": "Before Meal",
+      "Breakfast": "Before Breakfast",
+      "Lunch": "Before Lunch",
+      "Dinner": "Before Dinner"
+    },
+    "after": {
+      "Meal": "After Meal",
+      "Breakfast": "After Breakfast",
+      "Lunch": "After Lunch",
+      "Dinner": "After Dinner"
+    }
+  },
+  "sleepEventAliases": ["bed", "bedtime", "sleep"],
+  "wakeEventAliases": ["wake", "waking"],
+  "foodEventAliases": ["food", "meal", "meals"],
+  "dayRangeConnectors": ["to", "through", "-", "ถึง"],
+  "rangeConnectors": ["to", "through", "-"],
+  "durationLeadTokens": ["for"],
+  "instructionLeadingSeparators": [",", ";", ":", ".", "-"],
+  "instructionStartWords": [
+    "avoid",
+    "can",
+    "could",
+    "do",
+    "don't",
+    "dont",
+    "drink",
+    "empty",
+    "liberally",
+    "may",
+    "might",
+    "must",
+    "mustn't",
+    "mustnt",
+    "no",
+    "not",
+    "on",
+    "should",
+    "slowly",
+    "sparingly",
+    "use",
+    "with",
+    "without"
+  ],
+  "workflowContinuationLicenses": ["with each", "after each", "the *event", "sun exposure"],
+  "asNeededLeadPhrases": ["as needed"],
+  "prnBreakingCoordinators": [",", "/"],
+  "eyeSiteAbbreviations": ["od", "os", "ou", "re", "le", "be"],
+  "nonOcularDoseUnits": ["tab", "cap", "mg", "mcg", "g", "mL", "puff"],
+  "ocularRouteCodes": [
+    "Ophthalmic route",
+    "Ocular route (qualifier value)",
+    "Intravitreal route (qualifier value)"
+  ],
+  "hardSegmentBoundaryTokens": ["+", "|", "||", "//"],
+  "clauseLeadWords": [
+    "apply",
+    "take",
+    "instill",
+    "inject",
+    "insert",
+    "spray",
+    "use",
+    "drink",
+    "swallow",
+    "inhale",
+    "gargle",
+    "rinse",
+    "od",
+    "os",
+    "ou",
+    "re",
+    "le",
+    "right",
+    "left",
+    "both",
+    "each"
+  ],
+  "lateralModifierWords": ["left", "right"]
+}

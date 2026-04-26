@@ -287,7 +287,11 @@ function formatPatientInstructionSentence(text: string | undefined): string | un
   if (!trimmed) {
     return undefined;
   }
-  const sentence = /^[.!?]$/.test(trimmed.slice(-1)) ? trimmed : `${trimmed}.`;
+  const normalized = trimmed.toLowerCase();
+  const instruction = /^(after|before|with)\b/.test(normalized)
+    ? `Use ${trimmed}`
+    : trimmed;
+  const sentence = /^[.!?]$/.test(instruction.slice(-1)) ? instruction : `${instruction}.`;
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 

@@ -354,7 +354,15 @@ function resolvePrnReasonDefinitionSyncForRequest(
   const canonicals = collectPrnReasonLookupCanonicals(request);
   const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
   const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
-  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
+  const combinedCanonical = buildCombinedPrnReasonCanonical(request);
+  const hasExactCombinedDefinition = Boolean(
+    exactCustomDefinition ||
+    exactDefaultDefinition ||
+    (combinedCanonical && (
+      lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical) ||
+      lookupDefaultPrnReasonDefinition(combinedCanonical)
+    ))
+  );
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
     return buildPostcoordinatedPrnReasonDefinition(
@@ -397,7 +405,15 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
   const canonicals = collectPrnReasonLookupCanonicals(request);
   const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
   const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
-  const hasExactCombinedDefinition = Boolean(exactCustomDefinition || exactDefaultDefinition);
+  const combinedCanonical = buildCombinedPrnReasonCanonical(request);
+  const hasExactCombinedDefinition = Boolean(
+    exactCustomDefinition ||
+    exactDefaultDefinition ||
+    (combinedCanonical && (
+      lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical) ||
+      lookupDefaultPrnReasonDefinition(combinedCanonical)
+    ))
+  );
   const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
   if (customDefinition) {
     return buildPostcoordinatedPrnReasonDefinition(

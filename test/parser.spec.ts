@@ -335,7 +335,7 @@ describe("parseSig core scenarios", () => {
   it("omits redundant mouth sites when route is oral", () => {
     const result = parseSig("500 mg per mouth every 4 to 6 hours as needed for pain");
     expect(result.fhir.site).toBeUndefined();
-    expect(result.longText).toBe("Take 500 mg orally as needed for pain.");
+    expect(result.longText).toBe("Take 500 mg orally every 4 to 6 hours as needed for pain.");
   });
 
   it("treats descriptive route phrases as routes instead of sites", () => {

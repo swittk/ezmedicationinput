@@ -881,6 +881,9 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     return `ทุก ${stripTrailingZero(period)} วัน`;
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
+    if (schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1)) {
+      return undefined;
+    }
     if (period === 1 && (!periodMax || periodMax === 1)) {
       return "สัปดาห์ละครั้ง";
     }

@@ -1,5 +1,6 @@
 import {
   CanonicalDoseRange,
+  CanonicalAdditionalInstructionExpr,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
@@ -60,7 +61,9 @@ export interface HpsgPrnFeature {
   lookupRequests?: PrnReasonLookupRequest[];
 }
 
-export interface HpsgInstructionFeature {
+export interface HpsgInstructionFeature extends CanonicalAdditionalInstructionExpr {}
+
+export interface HpsgPatientInstructionFeature {
   text: string;
 }
 
@@ -97,6 +100,7 @@ export interface HpsgSynsem {
     site?: HpsgSiteFeature;
     prn?: HpsgPrnFeature;
     instructions?: HpsgInstructionFeature[];
+    patientInstruction?: HpsgPatientInstructionFeature;
   };
   cont: {
     clauseKind?: "administration";

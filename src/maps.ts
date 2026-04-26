@@ -583,6 +583,10 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "69536005", display: "Head structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["top of head"],
+      definition: { text: "top of head", routeHint: RouteCode["Topical route"] }
+    },
+    {
       names: ["back of head"],
       definition: {
         coding: { code: "182322006", display: "Entire back of head" },
@@ -780,7 +784,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
     },
     {
       names: ["vagina", "vaginal"],
-      definition: { coding: { code: "76784001", display: "Vagina" }, routeHint: RouteCode["Per vagina"] }
+      definition: { coding: { code: "76784001", display: "Vagina" }, text: "vagina", routeHint: RouteCode["Per vagina"] }
     },
     {
       names: ["penis", "penile"],
@@ -788,7 +792,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
     },
     {
       names: ["rectum", "rectal"],
-      definition: { coding: { code: "34402009", display: "Rectum" }, routeHint: RouteCode["Per rectum"] }
+      definition: { coding: { code: "34402009", display: "Rectum" }, text: "rectum", routeHint: RouteCode["Per rectum"] }
     },
     {
       names: ["anus"],
@@ -1129,7 +1133,17 @@ export const TIMING_ABBREVIATIONS: Record<string, FrequencyDescriptor> = {
   am: { code: "AM", when: [EventTiming.Morning] },
   pm: { code: "PM", when: [EventTiming.Evening] },
   qam: { code: "QAM", when: [EventTiming.Morning] },
-  qpm: { code: "QPM", when: [EventTiming.Evening] }
+  qpm: { code: "QPM", when: [EventTiming.Evening] },
+  bld: {
+    code: "BLD",
+    when: [EventTiming.Meal],
+    discouraged: "BLD"
+  },
+  "b-l-d": {
+    code: "BLD",
+    when: [EventTiming.Meal],
+    discouraged: "BLD"
+  }
 };
 
 export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {

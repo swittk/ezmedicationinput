@@ -83,6 +83,17 @@ const METHOD_TEXT_BY_VERB: Record<string, string> = {
   use: "Use"
 };
 
+const METHOD_THAI_BY_VERB: Record<string, string> = {
+  apply: "ทา",
+  drink: "รับประทาน",
+  insert: "สอด",
+  instill: "หยอด",
+  spray: "พ่น",
+  swallow: "รับประทาน",
+  take: "รับประทาน",
+  wash: "ล้าง"
+};
+
 export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
 }
@@ -160,13 +171,7 @@ function refreshMethodSurface(state: ParserState): void {
     return;
   }
   state.methodText = METHOD_TEXT_BY_VERB[verb] ?? verb.charAt(0).toUpperCase() + verb.slice(1);
-  const thai = verb === "apply"
-    ? "ทา"
-    : verb === "insert"
-      ? "สอด"
-      : verb === "instill"
-        ? "หยอด"
-        : undefined;
+  const thai = METHOD_THAI_BY_VERB[verb];
   state.methodTextElement = thai
     ? buildTranslationPrimitiveElement({ th: thai })
     : undefined;

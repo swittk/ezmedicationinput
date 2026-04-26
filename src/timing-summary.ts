@@ -113,7 +113,7 @@ export function getMealTimingGroup(
     }
     if (!relation) {
       relation = detail.relation;
-    } else if (relation !== detail.relation) {
+    } else if (relation !== detail.relation && detail.relation !== "with") {
       break;
     }
     meals.push(detail.meal);

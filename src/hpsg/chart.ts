@@ -32,6 +32,9 @@ function countSynsemFeatures(sign: HpsgSign): number {
   if (head.dose) count += 1;
   if (head.schedule) count += 1;
   if (valence.site) count += 1;
+  if (valence.prn) count += 1;
+  if (valence.instructions?.length) count += 1;
+  if (valence.patientInstruction) count += 1;
   if (cont.clauseKind) count += 1;
   return count;
 }
@@ -140,4 +143,3 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
 
   return { signs, best };
 }
-

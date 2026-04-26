@@ -1,58 +1,42 @@
 import { TIMING_ABBREVIATIONS } from "../maps";
 import { ParserState } from "../parser-state";
 import { FhirPeriodUnit } from "../types";
+import {
+  COUNT_CONNECTOR_WORDS_DATA,
+  COUNT_MARKER_TOKENS_DATA,
+  EVERY_INTERVAL_TOKENS_DATA,
+  FREQUENCY_ADVERB_UNITS_DATA,
+  FREQUENCY_CONNECTOR_WORDS_DATA,
+  FREQUENCY_NUMBER_WORDS_DATA,
+  FREQUENCY_SIMPLE_WORDS_DATA,
+  FREQUENCY_TIMES_WORDS_DATA,
+  INTERVAL_UNIT_TOKENS_DATA
+} from "./lexical-classes";
 import { HpsgScheduleFeature } from "./signature";
 
-export const EVERY_INTERVAL_TOKENS = new Set(["q", "every", "each"]);
-export const COUNT_MARKER_TOKENS = new Set(["x", "*"]);
+export const EVERY_INTERVAL_TOKENS = EVERY_INTERVAL_TOKENS_DATA;
+export const COUNT_MARKER_TOKENS = COUNT_MARKER_TOKENS_DATA;
+export const COUNT_CONNECTOR_WORDS = COUNT_CONNECTOR_WORDS_DATA;
+export const FREQUENCY_SIMPLE_WORDS: Record<string, number> = FREQUENCY_SIMPLE_WORDS_DATA;
+export const FREQUENCY_NUMBER_WORDS: Record<string, number> = FREQUENCY_NUMBER_WORDS_DATA;
+export const FREQUENCY_TIMES_WORDS = FREQUENCY_TIMES_WORDS_DATA;
+export const FREQUENCY_CONNECTOR_WORDS = FREQUENCY_CONNECTOR_WORDS_DATA;
 
-export const COUNT_CONNECTOR_WORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "total",
-  "of",
-  "up",
-  "to",
-  "no",
-  "more",
-  "than",
-  "max",
-  "maximum",
-  "additional",
-  "extra"
-]);
+function mapPeriodUnitLabel(label: string): FhirPeriodUnit | undefined {
+  return FhirPeriodUnit[label as keyof typeof FhirPeriodUnit];
+}
 
-export const FREQUENCY_SIMPLE_WORDS: Record<string, number> = {
-  once: 1,
-  twice: 2,
-  thrice: 3
-};
+const FREQUENCY_ADVERB_UNITS = new Map<string, FhirPeriodUnit>(
+  Array.from(FREQUENCY_ADVERB_UNITS_DATA.entries())
+    .map(([token, label]) => [token, mapPeriodUnitLabel(label)] as const)
+    .filter((entry): entry is readonly [string, FhirPeriodUnit] => Boolean(entry[1]))
+);
 
-export const FREQUENCY_NUMBER_WORDS: Record<string, number> = {
-  one: 1,
-  two: 2,
-  three: 3,
-  four: 4,
-  five: 5,
-  six: 6,
-  seven: 7,
-  eight: 8,
-  nine: 9,
-  ten: 10,
-  eleven: 11,
-  twelve: 12
-};
-
-export const FREQUENCY_TIMES_WORDS = new Set(["time", "times", "x"]);
-export const FREQUENCY_CONNECTOR_WORDS = new Set(["per", "a", "an", "each", "every"]);
-
-const FREQUENCY_ADVERB_UNITS: Record<string, FhirPeriodUnit> = {
-  daily: FhirPeriodUnit.Day,
-  weekly: FhirPeriodUnit.Week,
-  monthly: FhirPeriodUnit.Month,
-  hourly: FhirPeriodUnit.Hour
-};
+const INTERVAL_UNITS = new Map<string, FhirPeriodUnit>(
+  Array.from(INTERVAL_UNIT_TOKENS_DATA.entries())
+    .map(([token, label]) => [token, mapPeriodUnitLabel(label)] as const)
+    .filter((entry): entry is readonly [string, FhirPeriodUnit] => Boolean(entry[1]))
+);
 
 export function normalizePeriodValue(value: number, unit: FhirPeriodUnit): {
   value: number;
@@ -175,39 +159,18 @@ export function mapIntervalUnit(token: string):
   | FhirPeriodUnit.Week
   | FhirPeriodUnit.Month
   | undefined {
-  switch (token) {
-    case "min":
-    case "mins":
-    case "minute":
-    case "minutes":
-    case "m":
-      return FhirPeriodUnit.Minute;
-    case "h":
-    case "hr":
-    case "hrs":
-    case "hour":
-    case "hours":
-      return FhirPeriodUnit.Hour;
-    case "d":
-    case "day":
-    case "days":
-      return FhirPeriodUnit.Day;
-    case "wk":
-    case "w":
-    case "week":
-    case "weeks":
-      return FhirPeriodUnit.Week;
-    case "mo":
-    case "month":
-    case "months":
-      return FhirPeriodUnit.Month;
-    default:
-      return undefined;
-  }
+  const unit = INTERVAL_UNITS.get(token);
+  return unit === FhirPeriodUnit.Minute ||
+    unit === FhirPeriodUnit.Hour ||
+    unit === FhirPeriodUnit.Day ||
+    unit === FhirPeriodUnit.Week ||
+    unit === FhirPeriodUnit.Month
+    ? unit
+    : undefined;
 }
 
 export function mapFrequencyAdverb(token: string): FhirPeriodUnit | undefined {
-  return FREQUENCY_ADVERB_UNITS[token];
+  return FREQUENCY_ADVERB_UNITS.get(token);
 }
 
 export function parseNumericRange(

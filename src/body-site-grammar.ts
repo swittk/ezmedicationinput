@@ -1,66 +1,20 @@
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { objectEntries } from "./utils/object";
 import { BodySiteDefinition, FhirCoding, RouteCode } from "./types";
+import {
+  BODY_SITE_ADJECTIVE_SUFFIXES,
+  BODY_SITE_BARE_NOMINAL_PREFIXES,
+  BODY_SITE_DISPLAY_PENALTY_WORDS,
+  BODY_SITE_LOCATIVE_RELATIONS,
+  BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS,
+  BODY_SITE_PARTITIVE_CONNECTORS,
+  BODY_SITE_PARTITIVE_HEADS,
+  NASAL_SITE_WORDS,
+  OPHTHALMIC_SITE_WORDS,
+  OTIC_SITE_WORDS
+} from "./hpsg/lexical-classes";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
-
-const LOCATIVE_RELATIONS = new Set([
-  "behind",
-  "around",
-  "under",
-  "above",
-  "below",
-  "beneath",
-  "near",
-  "outside",
-  "inside"
-]);
-
-const PARTITIVE_HEADS = new Set([
-  "top",
-  "back",
-  "front",
-  "side",
-  "middle",
-  "mid",
-  "center",
-  "centre",
-  "palm",
-  "sole"
-]);
-
-const BARE_NOMINAL_PREFIXES = new Set([
-  "both",
-  "each",
-  "either",
-  "every",
-  "all",
-  "bilateral"
-]);
-
-const OTIC_SITE_WORDS = new Set(["ear", "ears", "canal"]);
-const OPHTHALMIC_SITE_WORDS = new Set(["eye", "eyes", "eyelid", "eyelids"]);
-const NASAL_SITE_WORDS = new Set(["nostril", "nostrils", "naris", "nares", "nose"]);
-
-const BODY_SITE_ADJECTIVE_SUFFIXES = [
-  "al",
-  "ial",
-  "ual",
-  "ic",
-  "ous",
-  "ive",
-  "ary",
-  "ory",
-  "atic",
-  "etic",
-  "ular",
-  "otic",
-  "ile",
-  "eal",
-  "inal",
-  "aneal",
-  "enal"
-] as const;
 
 const DEFAULT_SITE_SYNONYM_KEYS = (() => {
   const map = new Map<BodySiteDefinition, string[]>();
@@ -192,13 +146,7 @@ function scoreBodySitePhrase(phrase: string): number {
   const lower = phrase.toLowerCase();
   const words = lower.split(/\s+/).filter((part) => part.length > 0);
   let score = 0;
-  if (
-    !lower.includes("structure") &&
-    !lower.includes("region") &&
-    !lower.includes("entire") &&
-    !lower.includes("proper") &&
-    !lower.includes("body")
-  ) {
+  if (!Array.from(BODY_SITE_DISPLAY_PENALTY_WORDS).some((word) => lower.includes(word))) {
     score += 3;
   }
   if (!lower.includes(" of ")) {
@@ -364,7 +312,7 @@ function buildNominalFeatures(
     text,
     canonical,
     coding,
-    article: firstWord && BARE_NOMINAL_PREFIXES.has(firstWord) ? "bare" : "definite"
+    article: firstWord && BODY_SITE_BARE_NOMINAL_PREFIXES.has(firstWord) ? "bare" : "definite"
   };
 }
 
@@ -382,7 +330,7 @@ function parseBodySiteFeatures(
   }
 
   const firstWord = words[0];
-  if (firstWord && LOCATIVE_RELATIONS.has(firstWord) && words.length > 1) {
+  if (firstWord && BODY_SITE_LOCATIVE_RELATIONS.has(firstWord) && words.length > 1) {
     const targetText = words.slice(1).join(" ");
     const targetFeatures = parseBodySiteFeatures(targetText);
     return {
@@ -396,9 +344,10 @@ function parseBodySiteFeatures(
 
   if (
     words.length > 2 &&
-    words[1] === "of" &&
+    words[1] !== undefined &&
+    BODY_SITE_PARTITIVE_CONNECTORS.has(words[1]) &&
     firstWord &&
-    PARTITIVE_HEADS.has(firstWord)
+    BODY_SITE_PARTITIVE_HEADS.has(firstWord)
   ) {
     const wholeText = words.slice(2).join(" ");
     return {
@@ -420,7 +369,7 @@ function renderBodySiteObject(
 ): string {
   switch (features.kind) {
     case "locative":
-      return `${features.relation === "inside" ? "in" : features.relation} ${renderBodySiteObject(features.target)}`;
+      return `${BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS.get(features.relation) ?? features.relation} ${renderBodySiteObject(features.target)}`;
     case "partitive":
       return `the ${features.part} of ${renderNominalObject(features.whole)}`;
     case "nominal":
