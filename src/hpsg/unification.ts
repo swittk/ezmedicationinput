@@ -36,6 +36,16 @@ function sameCoding(left: FhirCoding | undefined, right: FhirCoding | undefined)
   );
 }
 
+function sameSpatialRelation(
+  left: HpsgSiteFeature["spatialRelation"] | undefined,
+  right: HpsgSiteFeature["spatialRelation"] | undefined
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function mergeMethod(
   left: HpsgMethodFeature | undefined,
   right: HpsgMethodFeature | undefined
@@ -92,10 +102,18 @@ function mergeSite(
   if (left.coding && right.coding && !sameCoding(left.coding, right.coding)) {
     return undefined;
   }
+  if (
+    left.spatialRelation &&
+    right.spatialRelation &&
+    !sameSpatialRelation(left.spatialRelation, right.spatialRelation)
+  ) {
+    return undefined;
+  }
   return {
     text: mergeOptionalScalar(left.text, right.text),
     source: mergeOptionalScalar(left.source, right.source),
     coding: mergeOptionalScalar(left.coding, right.coding),
+    spatialRelation: mergeOptionalScalar(left.spatialRelation, right.spatialRelation),
     lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest)
   };
 }

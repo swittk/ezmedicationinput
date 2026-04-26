@@ -90,7 +90,12 @@ function isSlashClauseBoundary(tokens: Token[], index: number): boolean {
   if (!next) {
     return false;
   }
+  const previous = tokens[index - 1];
+  const previousLower = previous?.lower.replace(/[.,;:]/g, "") ?? "";
   const lower = next.lower.replace(/[.,;:]/g, "");
+  if (/^\d+(?:\.\d+)?$/.test(previousLower) && /^\d+(?:\.\d+)?$/.test(lower)) {
+    return false;
+  }
   return /^\d/.test(lower) || CLAUSE_LEAD_WORDS.has(lower);
 }
 

@@ -101,6 +101,10 @@ function isLocatedReasonHead(text: string): boolean {
   return Boolean(canonical && (DEFAULT_PRN_REASON_DEFINITIONS[canonical] || PRN_GENERIC_LOCATED_HEADS.has(canonical)));
 }
 
+function normalizePredicativeReasonText(text: string): string {
+  return PRN_PREDICATE_REASON_NORMALIZATIONS.get(normalizePrnReasonKey(text) ?? "") ?? text;
+}
+
 function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boolean {
   const first = context.tokens[start];
   if (!first || context.state.consumed.has(first.index)) {
@@ -283,7 +287,7 @@ function parseLocatedPrnAtom(
     return undefined;
   }
   const predicativeText = options?.predicative
-    ? PRN_PREDICATE_REASON_NORMALIZATIONS.get(normalizePrnReasonKey(cleanDirectText) ?? "") ?? cleanDirectText
+    ? normalizePredicativeReasonText(cleanDirectText)
     : cleanDirectText;
   if (
     isKnownPrnReasonText(cleanDirectText) ||
@@ -297,35 +301,38 @@ function parseLocatedPrnAtom(
   );
   if (connectorIndex > 0 && connectorIndex < tokens.length - 1) {
     const headText = joinTokenText(tokens.slice(0, connectorIndex));
+    const normalizedHead = normalizePredicativeReasonText(headText);
     const siteText = joinTokenText(tokens.slice(connectorIndex + 1));
     if (headText && siteText) {
-      return createPrnReasonRequest(context, cleanDirectText, tokens, headText, siteText);
+      return createPrnReasonRequest(context, cleanDirectText, tokens, normalizedHead, siteText);
     }
   }
 
   for (let index = 1; index < tokens.length; index += 1) {
     const headText = joinTokenText(tokens.slice(0, index));
+    const normalizedHead = normalizePredicativeReasonText(headText);
     const siteText = joinTokenText(tokens.slice(index));
     if (
-      isLocatedReasonHead(headText) &&
+      isLocatedReasonHead(normalizedHead) &&
       resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
-      return createPrnReasonRequest(context, cleanDirectText, tokens, headText, siteText);
+      return createPrnReasonRequest(context, cleanDirectText, tokens, normalizedHead, siteText);
     }
   }
 
   for (let index = tokens.length - 1; index > 0; index -= 1) {
     const siteText = joinTokenText(tokens.slice(0, index));
     const headText = joinTokenText(tokens.slice(index));
+    const normalizedHead = normalizePredicativeReasonText(headText);
     if (
-      isLocatedReasonHead(headText) &&
+      isLocatedReasonHead(normalizedHead) &&
       resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
-      return createPrnReasonRequest(context, cleanDirectText, tokens, headText, siteText);
+      return createPrnReasonRequest(context, cleanDirectText, tokens, normalizedHead, siteText);
     }
   }
 
@@ -335,8 +342,9 @@ function parseLocatedPrnAtom(
       bodySiteContext: context.options?.context?.bodySiteContext
     })
   ) {
-    const text = `${previousLocatedHead.text} ${PRN_DEFAULT_SITE_CONNECTOR} ${cleanDirectText}`;
-    return createPrnReasonRequest(context, text, tokens, previousLocatedHead.text, cleanDirectText);
+    const normalizedHead = normalizePredicativeReasonText(previousLocatedHead.text);
+    const text = `${normalizedHead} ${PRN_DEFAULT_SITE_CONNECTOR} ${cleanDirectText}`;
+    return createPrnReasonRequest(context, text, tokens, normalizedHead, cleanDirectText);
   }
 
   return createPrnReasonRequest(context, cleanDirectText, tokens);

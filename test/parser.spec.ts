@@ -2833,6 +2833,13 @@ describe("parseSig core scenarios", () => {
     const directPrecoordinated = parseSig("apply to back of head");
     expect(directPrecoordinated.fhir.site?.coding?.[0]?.code).toBe("182322006");
 
+    const forcedPostcoordinated = parseSig("apply to back of head", {
+      bodySitePostcoordination: true
+    });
+    expect(forcedPostcoordinated.fhir.site?.coding?.[0]?.code).toBe(
+      topographicalSiteCode("69536005", "255551008")
+    );
+
     const disabled = parseSig("apply below ear bid", {
       bodySitePostcoordination: false
     });
@@ -2882,6 +2889,7 @@ describe("parseSig core scenarios", () => {
     expect(getBodySiteText(findingSiteCode("22253000", "723979003"))).toBe("left buttock");
     expect(getBodySiteText(topographicalSiteCode("69536005", "261183002"))).toBe("top of head");
     expect(getBodySiteText(lateralizedSiteCode("78883009", "24028007"))).toBe("right great toe");
+    expect(getBodySiteText(lateralizedSiteCode("56459004", "51440002"))).toBe("both feet");
     expect(
       getBodySiteText(findingSiteCode("22253000", "723979003"), {
         parsePostcoordination: false

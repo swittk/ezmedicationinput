@@ -5,7 +5,7 @@ import {
   FhirCoding,
   FhirExtension
 } from "./types";
-import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
+import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from "./fhir-translations";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -28,7 +28,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     display: coding.display,
     extension: cloneExtensions(coding.extension),
     _display: clonePrimitiveElement(coding._display),
-    i18n: coding.i18n
+    i18n: cloneI18nRecord(coding.i18n)
   };
 }
 
@@ -40,7 +40,7 @@ function cloneBodySiteCoding(coding: BodySiteCode | undefined): BodySiteCode | u
     system: coding.system,
     code: coding.code,
     display: coding.display,
-    i18n: coding.i18n
+    i18n: cloneI18nRecord(coding.i18n)
   };
 }
 
@@ -141,7 +141,7 @@ export function parseBodySiteSpatialRelationExtension(
     targetConcept?.text ??
     extension.extension.find((child) => child.url === TARGET_TEXT_URL)?.valueString;
   const sourceText = extension.extension.find((child) => child.url === SOURCE_TEXT_URL)?.valueString;
-  if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code) {
+  if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code && !sourceText) {
     return undefined;
   }
   return {

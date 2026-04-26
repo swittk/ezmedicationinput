@@ -943,7 +943,10 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
               })
             );
           }
-        } else if (unitToken.annotations?.wordClasses?.indexOf(TokenWordClass.CountKeyword) !== -1) {
+        } else if (
+          Array.isArray(unitToken.annotations?.wordClasses) &&
+          unitToken.annotations.wordClasses.indexOf(TokenWordClass.CountKeyword) !== -1
+        ) {
           signs.push(
             lexicalSign({
               type: "schedule-sign",

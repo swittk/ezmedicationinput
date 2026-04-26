@@ -24,6 +24,8 @@ import {
 import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
 
+const INSTRUCTION_PREDICATES = ["take", "apply", "use"] as const;
+
 export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.patientInstruction.workflow", (context, start) => {
     let cursor = start;
@@ -134,10 +136,9 @@ function parseInstructionCandidates(
   text: string,
   range: { start: number; end: number }
 ): CanonicalAdditionalInstructionExpr[] {
-  const predicates = ["take", "apply", "use"];
   let best: CanonicalAdditionalInstructionExpr[] = [];
   let bestScore = -1;
-  for (const predicate of predicates) {
+  for (const predicate of INSTRUCTION_PREDICATES) {
     const parsed = parseAdditionalInstructions(text, range, {
       defaultPredicate: predicate,
       defaultForce: AdviceForce.Instruction,

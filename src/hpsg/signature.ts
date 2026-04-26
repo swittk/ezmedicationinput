@@ -157,21 +157,27 @@ export function lexicalSign(args: {
   warnings?: string[];
   score?: number;
 }): HpsgSign {
-  const start = args.tokens[0]?.index ?? 0;
-  const end = (args.tokens[args.tokens.length - 1]?.index ?? start) + 1;
+  const tokenIndices = args.tokens
+    .map((token) => token.index)
+    .filter((index) => Number.isFinite(index));
+  if (!tokenIndices.length) {
+    throw new Error(`Cannot build lexical sign for ${args.rule} without token indices.`);
+  }
+  const start = Math.min(...tokenIndices);
+  const end = Math.max(...tokenIndices) + 1;
   return {
     type: args.type,
     span: { start, end },
     tokens: args.tokens,
     synsem: args.synsem,
     consumedTokenIndices:
-      args.consumedTokenIndices ?? args.tokens.map((token) => token.index),
+      args.consumedTokenIndices ?? tokenIndices,
     siteTokenIndices: args.siteTokenIndices,
     warnings: args.warnings,
     evidence: [
       {
         rule: args.rule,
-        tokenIndices: args.tokens.map((token) => token.index)
+        tokenIndices
       }
     ],
     score: args.score ?? 1

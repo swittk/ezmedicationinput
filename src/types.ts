@@ -528,6 +528,13 @@ export interface SiteCodeSuggestionsResult {
   suggestions: SiteCodeSuggestion[];
 }
 
+/**
+ * PRN reason lookup context. For located reasons such as "pain at hand",
+ * `headCanonical` is the symptom head ("pain"), `locativeSiteCanonical` is the
+ * parsed site key when known ("hand"), `locativeSiteCoding` is preferred for
+ * coded SNOMED/FHIR output when present, and `locativeSiteSpatialRelation`
+ * carries modifiers such as "below ear" that refine the locative site.
+ */
 export interface PrnReasonLookupRequest {
   originalText: string;
   text: string;
@@ -894,12 +901,24 @@ export interface ParseResult {
 export interface ParseNormalizedMeta {
   route?: RouteCode;
   unit?: string;
-  site?: { text?: string; coding?: BodySiteCode; spatialRelation?: BodySiteSpatialRelation };
+  site?: BodySiteDetail;
   method?: { text?: string; coding?: FhirCoding };
   patientInstruction?: string;
-  prnReason?: { text?: string; coding?: FhirCoding; spatialRelation?: BodySiteSpatialRelation };
-  prnReasons?: Array<{ text?: string; coding?: FhirCoding; spatialRelation?: BodySiteSpatialRelation }>;
+  prnReason?: ConceptSiteDetail;
+  prnReasons?: ConceptSiteDetail[];
   additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;
+}
+
+export interface BodySiteDetail {
+  text?: string;
+  coding?: BodySiteCode;
+  spatialRelation?: BodySiteSpatialRelation;
+}
+
+export interface ConceptSiteDetail {
+  text?: string;
+  coding?: FhirCoding;
+  spatialRelation?: BodySiteSpatialRelation;
 }
 
 export interface ParseBatchSegmentMeta {

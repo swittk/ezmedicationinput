@@ -60,7 +60,7 @@ For this codebase, the key commitments are:
    Phrase structure rules combine those contributions.
 
 5. Implemented HPSG in practice is not “one magical universal rule”.
-   DELPH-IN style grammars use a **rich inventory of constructions**, not a tiny
+   DELPH-IN-style grammars use a **rich inventory of constructions**, not a tiny
    theoretical rule set plus procedural rescue code.
 
 6. Computational HPSG implementations are usually **more conservative** than the
@@ -443,7 +443,7 @@ coverage and modularization inside the HPSG layer:
 - share typed structures across parse/coding/formatting
 - preserve original text separately from canonical semantics
 - test both parse coverage and round-trip behavior
-- keep treebank/regression style discipline
+- keep treebank/regression-style discipline
 
 ### Don’t
 

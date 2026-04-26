@@ -24,11 +24,19 @@ function routeCodeSet(labels: readonly string[]): Set<RouteCode> {
 
 function eventTimingMap(record: Record<string, string>): Map<string, EventTiming> {
   const map = new Map<string, EventTiming>();
+  const nodeEnv = (globalThis as { process?: { env?: { NODE_ENV?: string } } })
+    .process?.env?.NODE_ENV;
+  const shouldWarn = nodeEnv !== "production";
   for (const key in record) {
     if (Object.prototype.hasOwnProperty.call(record, key)) {
-      const value = EventTiming[record[key] as keyof typeof EventTiming];
+      const rawValue = record[key];
+      const value = EventTiming[rawValue as keyof typeof EventTiming];
       if (value) {
         map.set(key, value);
+      } else if (shouldWarn) {
+        console.warn(
+          `eventTimingMap skipped invalid EventTiming entry: key="${key}" value="${rawValue}"`
+        );
       }
     }
   }

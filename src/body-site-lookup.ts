@@ -167,6 +167,28 @@ const LATERALITY_TEXT_BY_CODE: Record<string, string> = {
   [SNOMED_CT_BILATERAL_QUALIFIER_CODE]: "both"
 };
 
+const BODY_SITE_PLURALS: Record<string, string> = {
+  foot: "feet",
+  goosefoot: "goosefeet",
+  index: "indices",
+  tooth: "teeth"
+};
+
+function pluralizeBodySiteText(text: string): string {
+  const normalized = text.trim();
+  const irregular = BODY_SITE_PLURALS[normalized];
+  if (irregular) {
+    return irregular;
+  }
+  if (/[^aeiou]y$/i.test(normalized)) {
+    return `${normalized.slice(0, -1)}ies`;
+  }
+  if (/(s|x|z|ch|sh)$/i.test(normalized)) {
+    return `${normalized}es`;
+  }
+  return `${normalized}s`;
+}
+
 function toBodySiteCode(coding: FhirCoding | BodySiteCode | undefined): BodySiteCode | undefined {
   if (!coding?.code) {
     return undefined;
@@ -251,7 +273,11 @@ function applySyncResolvers(
   resolved: ResolvedBodySitePhrase | undefined,
   options?: BodySiteLookupOptions
 ): BodySiteLookupResult | undefined {
-  for (const resolver of toArray(options?.siteCodeResolvers)) {
+  const resolvers = toArray(options?.siteCodeResolvers);
+  if (!resolvers.length) {
+    return result;
+  }
+  for (const resolver of resolvers) {
     const resolution = resolver(bodySiteLookupRequest(input, resolved, options));
     if (isPromise(resolution)) {
       throw new Error(
@@ -274,7 +300,11 @@ async function applyAsyncResolvers(
   resolved: ResolvedBodySitePhrase | undefined,
   options?: BodySiteLookupOptions
 ): Promise<BodySiteLookupResult | undefined> {
-  for (const resolver of toArray(options?.siteCodeResolvers)) {
+  const resolvers = toArray(options?.siteCodeResolvers);
+  if (!resolvers.length) {
+    return result;
+  }
+  for (const resolver of resolvers) {
     const resolution = await resolver(bodySiteLookupRequest(input, resolved, options));
     if (!resolution) {
       continue;
@@ -502,27 +532,28 @@ async function applyAsyncTextResolvers(
 }
 
 function scoreCandidate(query: string, candidate: string): number {
+  const stableScore = (score: number) => Math.round(score * 10) / 10;
   if (!query || !candidate) {
     return 0;
   }
   if (candidate === query) {
-    return 100;
+    return stableScore(100);
   }
   if (candidate.startsWith(query)) {
-    return 90 - Math.min(candidate.length - query.length, 20) * 0.2;
+    return stableScore(90 - Math.min(candidate.length - query.length, 20) * 0.2);
   }
   const candidateTokens = candidate.split(/\s+/).filter((token) => token.length > 0);
   for (const token of candidateTokens) {
     if (token.startsWith(query)) {
-      return 82 - Math.min(candidate.length - query.length, 20) * 0.2;
+      return stableScore(82 - Math.min(candidate.length - query.length, 20) * 0.2);
     }
   }
   if (candidate.includes(query)) {
-    return 72 - Math.min(candidate.length - query.length, 20) * 0.2;
+    return stableScore(72 - Math.min(candidate.length - query.length, 20) * 0.2);
   }
   const queryTokens = query.split(/\s+/).filter((token) => token.length > 0);
   if (queryTokens.length > 1 && queryTokens.every((token) => candidate.includes(token))) {
-    return 60 - Math.min(candidate.length - query.length, 20) * 0.2;
+    return stableScore(60 - Math.min(candidate.length - query.length, 20) * 0.2);
   }
   return 0;
 }
@@ -735,7 +766,7 @@ export function getBodySiteText(
     );
     const lateralityText = LATERALITY_TEXT_BY_CODE[parsed.laterality.lateralityCode];
     if (baseText && lateralityText) {
-      text = lateralityText === "both" ? `both ${baseText}s` : `${lateralityText} ${baseText}`;
+      text = lateralityText === "both" ? `both ${pluralizeBodySiteText(baseText)}` : `${lateralityText} ${baseText}`;
     }
   }
   return applySyncTextResolvers(

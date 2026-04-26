@@ -80,6 +80,24 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   );
 }
 
+function trimBraceRange(
+  input: string,
+  range: { start: number; end: number } | undefined
+): { start: number; end: number } | undefined {
+  if (!range) {
+    return undefined;
+  }
+  let start = range.start;
+  let end = range.end;
+  while (start < end && /[\s{}]/.test(input[start] ?? "")) {
+    start += 1;
+  }
+  while (end > start && /[\s{}]/.test(input[end - 1] ?? "")) {
+    end -= 1;
+  }
+  return { start, end };
+}
+
 function shouldUseSiteRouteHint(sourceText: string, routeHint: RouteCode | undefined): routeHint is RouteCode {
   if (!routeHint || !SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR.has(routeHint)) {
     return false;
@@ -328,7 +346,15 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (lowers.some((lower) => !lower || siteBoundary(lower, context))) {
         continue;
       }
-      const sourceText = joinTokenText(tokens).replace(/[{}]/g, "").trim();
+      const originalText = joinTokenText(tokens);
+      const isProbe = originalText.includes("{") || originalText.includes("}");
+      const rawRange = rangeFromTokens(tokens);
+      const trimmedRange = trimBraceRange(context.state.input, rawRange);
+      const sourceText = (
+        trimmedRange
+          ? context.state.input.slice(trimmedRange.start, trimmedRange.end)
+          : originalText
+      ).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
       const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       });
@@ -356,14 +382,14 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 coding: resolved.coding,
                 spatialRelation: resolved.spatialRelation,
                 lookupRequest: {
-                  originalText: sourceText,
+                  originalText,
                   text: sourceText,
                   normalized: sourceText.toLowerCase(),
                   canonical: resolved.resolutionCanonical ?? normalizeBodySiteKey(displayText),
-                  isProbe: false,
+                  isProbe,
                   inputText: context.state.input,
                   sourceText,
-                  range: rangeFromTokens(tokens),
+                  range: trimmedRange ?? rawRange,
                   spatialRelation: resolved.spatialRelation
                 }
               }

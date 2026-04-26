@@ -1,4 +1,4 @@
-import { buildTranslationPrimitiveElement } from "../fhir-translations";
+import { buildTranslationPrimitiveElement, clonePrimitiveElement } from "../fhir-translations";
 import { FhirCoding } from "../types";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -84,7 +84,6 @@ export function cloneMethodCoding(coding: FhirCoding | undefined): FhirCoding | 
     system: coding.system,
     code: coding.code,
     display: coding.display,
-    _display: coding._display
+    _display: clonePrimitiveElement(coding._display)
   };
 }
-

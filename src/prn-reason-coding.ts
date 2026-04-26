@@ -1,6 +1,9 @@
 import { collectParsedBodySiteCandidates } from "./body-site-resolution";
 import { cloneExtensions } from "./fhir-translations";
-import { buildSnomedFindingSiteCoding } from "./snomed-postcoordination";
+import {
+  buildSnomedFindingSiteCoding,
+  hasSnomedFindingSitePostcoordination
+} from "./snomed-postcoordination";
 import {
   DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_PRN_REASON_ENTRIES,
@@ -90,6 +93,7 @@ function buildPostcoordinatedPrnReasonDefinition(
   if (
     hasExactCombinedDefinition ||
     !definition?.coding?.code ||
+    hasSnomedFindingSitePostcoordination(definition.coding.code) ||
     !request.headCanonical ||
     !request.locativeSiteCoding?.code
   ) {

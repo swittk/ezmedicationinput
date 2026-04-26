@@ -1455,10 +1455,15 @@ function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
   system: string,
   code: string
 ) {
-  return (
-    findPrnReasonDefinitionByCoding(system, code) ??
-    findPrnReasonDefinitionByCoding(system, code.split(":")[0] ?? code)
-  );
+  const direct = findPrnReasonDefinitionByCoding(system, code);
+  if (direct) {
+    return direct;
+  }
+  const normalizedSystem = system.trim().toLowerCase();
+  if (!normalizedSystem.includes("snomed.info/sct")) {
+    return undefined;
+  }
+  return findPrnReasonDefinitionByCoding(system, code.split(":")[0] ?? code);
 }
 
 function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefined {

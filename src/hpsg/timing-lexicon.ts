@@ -42,6 +42,7 @@ export function normalizePeriodValue(value: number, unit: FhirPeriodUnit): {
   value: number;
   unit: FhirPeriodUnit;
 } {
+  // Avoid fractional-hour repeats in FHIR output: q0.5h/q0.25h become minutes.
   if (unit === FhirPeriodUnit.Hour && (!Number.isInteger(value) || value < 1)) {
     return { value: Math.round(value * 60 * 1000) / 1000, unit: FhirPeriodUnit.Minute };
   }
@@ -101,6 +102,32 @@ function maybeAssignTimingCode(
   }
 }
 
+function deriveDefaultTimingForPeriod(
+  value: number,
+  unit: FhirPeriodUnit,
+  currentTimingCode?: string
+): { frequency?: number; timingCode?: string } {
+  let timingCode = currentTimingCode;
+  const suffix = periodUnitSuffix(unit);
+  if (suffix) {
+    const key = `q${value}${suffix}`;
+    const descriptor = TIMING_ABBREVIATIONS[key];
+    if (descriptor?.code) {
+      timingCode = timingCode ?? descriptor.code;
+    }
+  }
+  if (unit === FhirPeriodUnit.Week && value === 1) {
+    timingCode = timingCode ?? "WK";
+  }
+  if (unit === FhirPeriodUnit.Month && value === 1) {
+    timingCode = timingCode ?? "MO";
+  }
+  return {
+    frequency: unit === FhirPeriodUnit.Day && value === 1 ? 1 : undefined,
+    timingCode
+  };
+}
+
 export function applyPeriod(
   internal: ParserState,
   period: number,
@@ -110,15 +137,15 @@ export function applyPeriod(
   internal.period = normalized.value;
   internal.periodUnit = normalized.unit;
   maybeAssignTimingCode(internal, normalized.value, normalized.unit);
-  if (normalized.unit === FhirPeriodUnit.Day && normalized.value === 1) {
-    internal.frequency = internal.frequency ?? 1;
+  const defaults = deriveDefaultTimingForPeriod(
+    normalized.value,
+    normalized.unit,
+    internal.timingCode
+  );
+  if (defaults.frequency !== undefined) {
+    internal.frequency = internal.frequency ?? defaults.frequency;
   }
-  if (normalized.unit === FhirPeriodUnit.Week && normalized.value === 1) {
-    internal.timingCode = internal.timingCode ?? "WK";
-  }
-  if (normalized.unit === FhirPeriodUnit.Month && normalized.value === 1) {
-    internal.timingCode = internal.timingCode ?? "MO";
-  }
+  internal.timingCode = defaults.timingCode;
 }
 
 export function buildPeriodScheduleFeature(
@@ -126,29 +153,12 @@ export function buildPeriodScheduleFeature(
   unit: FhirPeriodUnit
 ): HpsgScheduleFeature {
   const normalized = normalizePeriodValue(period, unit);
-  let timingCode: string | undefined;
-  const suffix = periodUnitSuffix(normalized.unit);
-  if (suffix) {
-    const key = `q${normalized.value}${suffix}`;
-    const descriptor = TIMING_ABBREVIATIONS[key];
-    if (descriptor?.code) {
-      timingCode = descriptor.code;
-    }
-  }
-  if (normalized.unit === FhirPeriodUnit.Week && normalized.value === 1) {
-    timingCode = timingCode ?? "WK";
-  }
-  if (normalized.unit === FhirPeriodUnit.Month && normalized.value === 1) {
-    timingCode = timingCode ?? "MO";
-  }
+  const defaults = deriveDefaultTimingForPeriod(normalized.value, normalized.unit);
   return {
     period: normalized.value,
     periodUnit: normalized.unit,
-    frequency:
-      normalized.unit === FhirPeriodUnit.Day && normalized.value === 1
-        ? 1
-        : undefined,
-    timingCode
+    frequency: defaults.frequency,
+    timingCode: defaults.timingCode
   };
 }
 

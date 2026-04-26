@@ -1,4 +1,4 @@
-import { resolveBodySitePhrase } from "./body-site-grammar";
+import { ResolvedBodySitePhrase, resolveBodySitePhrase } from "./body-site-grammar";
 import { normalizeBodySiteKey } from "./maps";
 import { ParserState } from "./parser-state";
 import { BodySiteSpatialRelation, FhirCoding } from "./types";
@@ -64,13 +64,29 @@ function pushSpatialRelationTarget(
 function pushResolvedSite(
   canonicals: string[],
   codings: FhirCoding[],
-  value: string | undefined
+  value:
+    | string
+    | ResolvedBodySitePhrase
+    | {
+      canonical?: string;
+      text?: string;
+      coding?: FhirCoding;
+      spatialRelation?: BodySiteSpatialRelation;
+    }
+    | undefined
 ): void {
-  const resolvedSite = value ? resolveBodySitePhrase(value, undefined) : undefined;
+  if (!value) {
+    return;
+  }
+  const resolvedSite =
+    typeof value === "string"
+      ? resolveBodySitePhrase(value, undefined)
+      : value;
   if (!resolvedSite) {
     return;
   }
   pushUniqueCanonical(canonicals, resolvedSite.canonical);
+  pushUniqueCanonical(canonicals, "displayText" in resolvedSite ? resolvedSite.displayText : resolvedSite.text);
   pushUniqueCoding(codings, resolvedSite.coding);
   pushSpatialRelationTarget(canonicals, codings, resolvedSite.spatialRelation);
 }
@@ -86,7 +102,18 @@ export function collectParsedBodySiteCandidates(
     ? normalizeBodySiteKey(siteCodingDisplay)
     : "";
 
-  pushResolvedSite(canonicals, codings, internal.siteLookupRequest?.text);
+  pushResolvedSite(
+    canonicals,
+    codings,
+    internal.siteLookupRequest
+      ? {
+        canonical: internal.siteLookupRequest.canonical,
+        text: internal.siteLookupRequest.text,
+        coding: internal.siteCoding,
+        spatialRelation: internal.siteLookupRequest.spatialRelation
+      }
+      : undefined
+  );
   pushResolvedSite(canonicals, codings, internal.siteText);
   pushUniqueCanonical(canonicals, internal.siteLookupRequest?.canonical);
   pushUniqueCanonical(canonicals, internal.siteText);

@@ -1,4 +1,5 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
+import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
@@ -334,7 +335,7 @@ export class ParserState {
     for (const reason of value) {
       reasons.push({
         text: reason.text,
-        spatialRelation: reason.spatialRelation,
+        spatialRelation: cloneBodySiteSpatialRelation(reason.spatialRelation),
         coding: reason.coding
           ? {
             code: reason.coding.code,

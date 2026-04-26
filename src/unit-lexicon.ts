@@ -53,12 +53,13 @@ const DISCRETE_UNIT_SET = new Set([
 ]);
 
 export function normalizeUnit(token: string, options?: ParseOptions): string | undefined {
-  const override = enforceHouseholdUnitPolicy(options?.unitMap?.[token], options);
+  const key = token.trim().toLowerCase();
+  const override = enforceHouseholdUnitPolicy(options?.unitMap?.[key], options);
   if (override) {
     return override;
   }
   const defaultUnit = enforceHouseholdUnitPolicy(
-    DEFAULT_UNIT_SYNONYMS[token],
+    DEFAULT_UNIT_SYNONYMS[key],
     options
   );
   if (defaultUnit) {

@@ -99,6 +99,34 @@ export interface BodySitePhraseContext {
 const AMBIGUOUS_DIGIT_SITE_KEYS = new Set(["ระหว่างนิ้ว", "between digits"]);
 const HAND_CONTEXT_KEYS = new Set(["hand", "hands", "finger", "fingers", "นิ้วมือ", "มือ"]);
 const FOOT_CONTEXT_KEYS = new Set(["foot", "feet", "toe", "toes", "นิ้วเท้า", "เท้า"]);
+const BODY_SITE_ALIAS_INDEXES = new WeakMap<
+  Record<string, BodySiteDefinition>,
+  Map<string, BodySiteDefinition>
+>();
+
+function buildOrGetBodySiteAliasIndex(
+  map: Record<string, BodySiteDefinition>
+): Map<string, BodySiteDefinition> {
+  const existing = BODY_SITE_ALIAS_INDEXES.get(map);
+  if (existing) {
+    return existing;
+  }
+  const index = new Map<string, BodySiteDefinition>();
+  for (const [key, definition] of objectEntries(map)) {
+    const normalizedKey = normalizeBodySiteKey(key);
+    if (normalizedKey) {
+      index.set(normalizedKey, definition);
+    }
+    for (const alias of definition.aliases ?? []) {
+      const normalizedAlias = normalizeBodySiteKey(alias);
+      if (normalizedAlias) {
+        index.set(normalizedAlias, definition);
+      }
+    }
+  }
+  BODY_SITE_ALIAS_INDEXES.set(map, index);
+  return index;
+}
 
 export function lookupBodySiteDefinition(
   map: Record<string, BodySiteDefinition> | undefined,
@@ -110,6 +138,10 @@ export function lookupBodySiteDefinition(
   const direct = map[canonical];
   if (direct) {
     return direct;
+  }
+  const indexed = buildOrGetBodySiteAliasIndex(map).get(canonical);
+  if (indexed) {
+    return indexed;
   }
   for (const [key, definition] of objectEntries(map)) {
     if (normalizeBodySiteKey(key) === canonical) {
@@ -342,6 +374,9 @@ function normalizeSiteDisplayText(
   }
 
   const words = canonicalInput.split(/\s+/).filter((word) => word.length > 0);
+  // Split words to detect adjectival variants where every prefix word resolves
+  // via isAdjectivalSitePhrase/resolvePreferred to the same canonical site as
+  // candidatePreferred; prefixMatches means the modifier is redundant anatomy wording.
   for (let index = 1; index < words.length; index += 1) {
     const prefix = words.slice(0, index);
     if (!prefix.every((word) => isAdjectivalSitePhrase(word))) {
@@ -403,6 +438,8 @@ function parseBodySiteFeatures(
   if (firstWord && BODY_SITE_LOCATIVE_RELATIONS.has(firstWord) && words.length > 1) {
     const targetText = words.slice(1).join(" ");
     const targetFeatures = parseBodySiteFeatures(targetText, undefined, customSiteMap);
+    // Nested locatives are flattened to a nominal target to avoid recursive
+    // relation stacks such as "inside below ear"; we preserve the outer relation.
     return {
       kind: "locative",
       relation: firstWord as BodySiteLocativeRelation,

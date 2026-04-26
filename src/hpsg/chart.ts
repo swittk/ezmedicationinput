@@ -80,12 +80,28 @@ function canCombine(rule: HpsgPhraseRule<HpsgChartContext>, left: HpsgSign, righ
   return typeMatches(left.type, rule.left) && typeMatches(right.type, rule.right);
 }
 
-function pushUnique(signs: HpsgSign[], seen: Set<string>, sign: HpsgSign): boolean {
-  const key = chartKey(sign);
-  if (seen.has(key)) {
-    return false;
+function isBetterDerivation(candidate: HpsgSign, existing: HpsgSign): boolean {
+  if (candidate.score !== existing.score) {
+    return candidate.score > existing.score;
   }
-  seen.add(key);
+  return candidate.evidence.length < existing.evidence.length;
+}
+
+function pushUnique(signs: HpsgSign[], seen: Map<string, HpsgSign>, sign: HpsgSign): boolean {
+  const key = chartKey(sign);
+  const existing = seen.get(key);
+  if (existing) {
+    if (!isBetterDerivation(sign, existing)) {
+      return false;
+    }
+    const index = signs.indexOf(existing);
+    if (index >= 0) {
+      signs[index] = sign;
+    }
+    seen.set(key, sign);
+    return true;
+  }
+  seen.set(key, sign);
   signs.push(sign);
   return true;
 }
@@ -98,7 +114,7 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
   const limit = options.limit ?? context.tokens.length;
   const maxIterations = options.maxIterations ?? Math.max(16, limit * limit * 2);
   const signs: HpsgSign[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, HpsgSign>();
 
   for (let index = 0; index < limit; index += 1) {
     for (const rule of grammar.lexicalRules) {
