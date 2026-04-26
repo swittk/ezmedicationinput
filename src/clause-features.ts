@@ -1,4 +1,5 @@
 import {
+  CanonicalDoseRange,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
@@ -27,6 +28,12 @@ export interface ClauseSiteContribution {
   lookupRequest?: SiteCodeLookupRequest;
 }
 
+export interface ClauseDoseContribution {
+  value?: number;
+  range?: CanonicalDoseRange;
+  unit?: string;
+}
+
 export interface ClauseScheduleContribution {
   timingCode?: string;
   count?: number;
@@ -50,6 +57,7 @@ export interface ClauseFeatureContribution {
   method?: ClauseMethodContribution;
   route?: ClauseRouteContribution;
   site?: ClauseSiteContribution;
+  dose?: ClauseDoseContribution;
   schedule?: ClauseScheduleContribution;
 }
 

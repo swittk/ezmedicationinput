@@ -77,30 +77,6 @@ export class ParserState {
     this.clauses = [this.clause];
   }
 
-  clone(): ParserState {
-    const clone = new ParserState(
-      this.input,
-      this.tokens,
-      this.customSiteHints ? new Set(this.customSiteHints) : undefined
-    );
-    clone.consumed = new Set(this.consumed);
-    clone.warnings = [...this.warnings];
-    clone.siteTokenIndices = new Set(this.siteTokenIndices);
-    clone.siteLookupRequest = this.siteLookupRequest
-      ? structuredClone(this.siteLookupRequest)
-      : undefined;
-    clone.siteLookups = structuredClone(this.siteLookups);
-    clone.prnReasonLookupRequest = this.prnReasonLookupRequest
-      ? structuredClone(this.prnReasonLookupRequest)
-      : undefined;
-    clone.prnReasonLookups = structuredClone(this.prnReasonLookups);
-    clone.methodVerb = this.methodVerb;
-    clone.productFormKey = this.productFormKey;
-    clone.clauses = structuredClone(this.clauses);
-    clone.clause = clone.clauses[0]!;
-    return clone;
-  }
-
   get primaryClause(): CanonicalSigClause {
     return this.clause;
   }

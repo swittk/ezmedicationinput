@@ -1832,3 +1832,124 @@ Still not “full HPSG” yet:
   procedural matchers
 
 But the center is no longer just a deterministic term-order walker.
+
+## 2026-04-26 Active clause inventory is now feature-only
+
+Pushed the parser center one step further:
+- the active `CLAUSE_GRAMMAR_RULES` inventory is now feature-only
+
+What changed:
+- introduced `ClauseDoseContribution` in `src/clause-features.ts`
+- extended clause contribution application/compatibility to include:
+  - dose value
+  - dose range
+  - unit
+- added `buildContributionFromStateDelta(...)`
+- added `liftImperativeMatcherToContribution(...)`
+
+Meaning:
+- the remaining legacy procedural builders can still exist internally
+- but they are no longer active parser-center rules in their raw imperative
+  form
+- they are lifted into typed clause contributions before the sign inventory sees
+  them
+
+This also fixed an important bug in the contribution layer:
+- schedule-only PRN probes parse subarrays of tokens
+- contribution application was incorrectly assuming `token.index === current
+  array position`
+- that broke cases like:
+  - `1 tab po prn q4-6hr for pain`
+- fixed by resolving consumed token identities by token index, not array slot
+
+Architectural consequence:
+- the active clause parser now chooses among typed sign contributions only
+- legacy matcher procedures are reduced to lower-level construction helpers
+  rather than being the active grammar formalism themselves
+
+Still not complete:
+- contribution generation for some families is still obtained by lifting state
+  deltas from legacy procedures instead of being born directly from fully
+  declarative lexical/construction constraints
+- that is the next cleanup target if this continues
+
+## 2026-04-26 Removed lifted state-delta rules from the active clause grammar
+
+This is the cleanup the HPSG guide demanded.
+
+What changed:
+- removed the active parser-center dependence on:
+  - `ParserState.clone()`
+  - `buildContributionFromStateDelta(...)`
+  - `liftImperativeMatcherToContribution(...)`
+  - imperative preview/ranking branches
+- removed the dead unused `parseScheduleTerm()` / `parseDoseTerm()`-style
+  wrapper path that still referenced imperative terminals
+- simplified `ClauseGrammarRule` so the active sign inventory is native
+  contribution rules only
+- replaced the remaining lifted active families with direct contribution
+  constructors for:
+  - separated interval cadence
+  - time-based schedule
+  - numeric cadence
+  - compact `q...` interval cadence
+  - multiplicative cadence
+  - combo event timings
+  - meal-anchor sequences
+  - custom `when`
+  - day ranges
+  - dose range / numeric dose / times-dose
+  - timing/generic connectors and anchors
+
+Meaning:
+- the active parser center no longer previews mutated legacy state to infer
+  clause features
+- active clause analysis now selects among native typed contributions directly
+- remaining old imperative helpers may still exist as lower-level support or
+  inactive compatibility code, but they are no longer the active grammar
+  formalism used by `parseCoreTerm()`
+
+Verification:
+- `npm run build`
+- `npm test`
+- 566 tests passing
+
+## 2026-04-26 Pulled the live clause engine and timing lexicon out of parser.ts
+
+The user complaint was correct: even with typed contributions, leaving the
+active engine and lexical timing inventory embedded inside `parser.ts` still
+was not an HPSG-shaped implementation.
+
+What changed:
+- moved live clause rule application / candidate preview / compatibility /
+  application into [src/clause-grammar-engine.ts](src/clause-grammar-engine.ts)
+- rewired `parseCoreTerm()` so `parser.ts` no longer owns the live candidate
+  loop
+- moved interval/count/frequency lexical inventory and schedule normalization
+  helpers into [src/clause-timing-lexicon.ts](src/clause-timing-lexicon.ts)
+  including:
+  - interval lead tokens
+  - count/frequency lexical sets
+  - period normalization
+  - duration/count normalization
+  - interval/frequency unit mapping
+
+Meaning:
+- `parser.ts` is still too large, but less of its size is now active grammar
+  engine or lexical timing inventory
+- the center is now split into:
+  - parser orchestration
+  - clause grammar engine
+  - timing/count lexicon + normalization
+- this is closer to the HPSG requirement that lexicon, constraints, and parser
+  control not collapse into one file
+
+Current measured footprint after this extraction:
+- `src/parser.ts`: 7378 lines
+- `src/clause-grammar-engine.ts`: 429 lines
+- `src/clause-timing-lexicon.ts`: 283 lines
+
+Verification:
+- `npm run build`
+- `npm test`
+- 566 tests passing
