@@ -1738,6 +1738,33 @@ describe("parseSig core scenarios", () => {
         }))
       };
       const codeOnlyRoundTripped = fromFhirDosage(codeOnlyFhir);
+      const extensionOnlyFhir = {
+        ...parsed.fhir,
+        asNeededFor: parsed.fhir.asNeededFor?.map((concept) => ({
+          ...concept,
+          text: undefined,
+          coding: concept.coding?.map((coding) => ({
+            ...coding,
+            display: "Pain"
+          })),
+          extension: [
+            ...(concept.extension?.filter(
+              (extension) => extension.url !== BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
+            ) ?? []),
+            {
+              url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL,
+              extension: [
+                { url: "relationText", valueString: "at" },
+                {
+                  url: "target",
+                  valueCodeableConcept: { text: reason.replace(/^pain at /, "") }
+                }
+              ]
+            }
+          ]
+        }))
+      };
+      const extensionOnlyRoundTripped = fromFhirDosage(extensionOnlyFhir);
 
       expect(parsed.fhir.asNeededFor?.[0]?.text).toBe(reason);
       expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
@@ -1746,6 +1773,10 @@ describe("parseSig core scenarios", () => {
       expect(roundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
       expect(codeOnlyRoundTripped.meta.normalized.prnReason?.text).toBe(reason);
       expect(codeOnlyRoundTripped.longText).toBe(`Take 1 tablet orally as needed for ${reason}.`);
+      expect(extensionOnlyRoundTripped.meta.normalized.prnReason?.text).toBe(reason);
+      expect(extensionOnlyRoundTripped.longText).toBe(
+        `Take 1 tablet orally as needed for ${reason}.`
+      );
     }
   });
 

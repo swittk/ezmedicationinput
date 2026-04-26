@@ -29,10 +29,13 @@ function sameCoding(left: FhirCoding | undefined, right: FhirCoding | undefined)
   if (!left?.code || !right?.code) {
     return left?.code === right?.code;
   }
+  const leftVersion = (left as FhirCoding & { version?: string }).version;
+  const rightVersion = (right as FhirCoding & { version?: string }).version;
   return (
     left.code === right.code &&
     (left.system ?? "http://snomed.info/sct") ===
-      (right.system ?? "http://snomed.info/sct")
+      (right.system ?? "http://snomed.info/sct") &&
+    leftVersion === rightVersion
   );
 }
 
@@ -206,12 +209,7 @@ function mergePrnLookupRequests(
 ): HpsgPrnFeature["lookupRequests"] | undefined {
   const result: NonNullable<HpsgPrnFeature["lookupRequests"]> = [];
   for (const request of [...(left ?? []), ...(right ?? [])]) {
-    const key = `${request.range?.start ?? ""}:${request.range?.end ?? ""}:${request.text}`;
-    if (
-      !result.some((candidate) =>
-        `${candidate.range?.start ?? ""}:${candidate.range?.end ?? ""}:${candidate.text}` === key
-      )
-    ) {
+    if (!result.some((candidate) => samePrnLookupRequest(candidate, request))) {
       result.push(request);
     }
   }
@@ -227,7 +225,7 @@ function mergeInstructions(
     if (
       !result.some((candidate) =>
         candidate.text === instruction.text &&
-        candidate.coding?.code === instruction.coding?.code
+        sameCoding(candidate.coding, instruction.coding)
       )
     ) {
       result.push(instruction);
@@ -386,6 +384,9 @@ export function combineSigns(
   if (!synsem) {
     return undefined;
   }
+  const tokenIndices = Array.from(
+    new Set([...left.consumedTokenIndices, ...right.consumedTokenIndices])
+  );
   return {
     type: "clause-sign",
     span: {
@@ -394,9 +395,7 @@ export function combineSigns(
     },
     tokens: [...left.tokens, ...right.tokens],
     synsem,
-    consumedTokenIndices: Array.from(
-      new Set([...left.consumedTokenIndices, ...right.consumedTokenIndices])
-    ),
+    consumedTokenIndices: tokenIndices,
     siteTokenIndices: appendUnique(left.siteTokenIndices, right.siteTokenIndices),
     warnings: appendUnique(left.warnings, right.warnings),
     evidence: [
@@ -404,9 +403,7 @@ export function combineSigns(
       ...right.evidence,
       {
         rule,
-        tokenIndices: Array.from(
-          new Set([...left.consumedTokenIndices, ...right.consumedTokenIndices])
-        )
+        tokenIndices
       }
     ],
     score: left.score + right.score + 1

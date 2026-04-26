@@ -24,6 +24,7 @@ import {
 import {
   CanonicalDoseRange,
   CanonicalSigClause,
+  BodySiteSpatialRelation,
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
@@ -144,25 +145,86 @@ function lowerFirst(value: string | undefined): string | undefined {
   return trimmed ? trimmed.charAt(0).toLowerCase() + trimmed.slice(1) : undefined;
 }
 
+function getSpatialPrnReasonSiteText(
+  spatialRelation: BodySiteSpatialRelation | undefined
+): string | undefined {
+  const sourceText = lowerFirst(spatialRelation?.sourceText);
+  if (sourceText) {
+    return sourceText;
+  }
+  const targetText =
+    lowerFirst(spatialRelation?.targetText) ??
+    (spatialRelation?.targetCoding ? getBodySiteText(spatialRelation.targetCoding) : undefined);
+  if (!targetText) {
+    return undefined;
+  }
+  const relationText = lowerFirst(spatialRelation?.relationText);
+  if (!relationText) {
+    return `at ${targetText}`;
+  }
+  switch (relationText) {
+    case "at":
+    case "in":
+    case "inside":
+    case "into":
+    case "on":
+    case "to":
+    case "above":
+    case "below":
+    case "beneath":
+    case "under":
+    case "behind":
+    case "around":
+    case "near":
+    case "between":
+    case "outside":
+      return `${relationText} ${targetText}`;
+    case "top":
+    case "back":
+    case "front":
+    case "left side":
+    case "right side":
+    case "both sides":
+      return `${relationText} of ${targetText}`;
+    default:
+      return relationText.endsWith(" of")
+        ? `${relationText} ${targetText}`
+        : `${relationText} of ${targetText}`;
+  }
+}
+
 function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): string | undefined {
   if (concept?.text) {
     return concept.text;
   }
   const coding = selectFirstCodingWithCode(concept);
+  const spatialRelation = parseBodySiteSpatialRelationExtension(concept);
+  const spatialSiteText = getSpatialPrnReasonSiteText(spatialRelation);
   const display = lowerFirst(coding?.display);
-  if (display) {
+  if (display && !spatialSiteText) {
     return display;
   }
   const parsed = parseSnomedFindingSitePostcoordinationCode(coding?.code);
+  const focus =
+    parsed && (coding?.system ?? SNOMED_SYSTEM) === SNOMED_SYSTEM
+      ? findPrnReasonDefinitionByCoding(SNOMED_SYSTEM, parsed.focusCode)
+      : undefined;
+  const focusText = lowerFirst(focus?.text ?? focus?.coding?.display) ?? display;
+  if (focusText && spatialSiteText) {
+    return spatialSiteText.toLowerCase().startsWith(`${focusText.toLowerCase()} `)
+      ? spatialSiteText
+      : `${focusText} ${spatialSiteText}`;
+  }
+  if (display) {
+    return display;
+  }
   if (!parsed || (coding?.system ?? SNOMED_SYSTEM) !== SNOMED_SYSTEM) {
     return undefined;
   }
-  const focus = findPrnReasonDefinitionByCoding(SNOMED_SYSTEM, parsed.focusCode);
   const siteText = getBodySiteText({
     system: SNOMED_SYSTEM,
     code: parsed.siteCode
   });
-  const focusText = lowerFirst(focus?.text ?? focus?.coding?.display);
   return focusText && siteText ? `${focusText} at ${siteText}` : focusText;
 }
 
@@ -820,6 +882,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         code: reasonCoding.code,
         display: reasonCoding.display,
         system: reasonCoding.system,
+        extension: cloneExtensions(reasonCoding.extension),
+        _display: clonePrimitiveElement(reasonCoding._display),
         i18n: defaultDef?.i18n
       };
     }
