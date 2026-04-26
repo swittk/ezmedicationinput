@@ -1914,6 +1914,41 @@ Verification:
 - `npm test`
 - 566 tests passing
 
+## 2026-04-26 Replaced PRN/advice tail cutoffs with token-segment tail grammar
+
+The user was correct that these functions were not grammar:
+- `findPrnReasonSeparator(...)`
+- `determinePrnReasonCutoff(...)`
+- `findStructuredPrnReasonCommaSeparator(...)`
+- `hasLeadingModalAdditionalInstruction(...)`
+- `hasInstructionSeparatorBeforeRange(...)`
+
+They were post-hoc placement heuristics over raw strings.
+
+What changed:
+- added [src/clause-tail-grammar.ts](src/clause-tail-grammar.ts)
+- PRN tail splitting now uses token segments plus structured-instruction
+  detection instead of character-offset separator hunting
+- additional-instruction collection now parses token segments rather than one
+  big raw-text group with ad hoc separator checks
+
+Meaning:
+- PRN reason vs instruction/warning tail boundaries now come from token
+  segmentation and typed instruction parsing, not substring cutoffs
+- this is still not the final HPSG shape, but it removes one of the most
+  obviously non-grammar procedural blocks from the live parser path
+
+Measured footprint after this cut:
+- `src/parser.ts`: 7205 lines
+- `src/clause-tail-grammar.ts`: 193 lines
+- `src/clause-grammar-engine.ts`: 429 lines
+- `src/clause-timing-lexicon.ts`: 283 lines
+
+Verification:
+- `npm run build`
+- `npm test`
+- 566 tests passing
+
 ## 2026-04-26 Pulled the live clause engine and timing lexicon out of parser.ts
 
 The user complaint was correct: even with typed contributions, leaving the

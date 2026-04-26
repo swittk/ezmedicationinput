@@ -24,6 +24,11 @@ import {
   ClauseScheduleContribution
 } from "./clause-features";
 import {
+  findStructuredInstructionTailOffset,
+  hasInstructionBoundaryBeforeToken,
+  parseInstructionTokenSegments
+} from "./clause-tail-grammar";
+import {
   EVERY_INTERVAL_TOKENS,
   COUNT_MARKER_TOKENS,
   COUNT_CONNECTOR_WORDS,
@@ -1753,35 +1758,23 @@ function collectPrnReasonText(
   let sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
   let range = computeTokenRange(state.input, tokens, sortedIndices);
   let sourceText = range ? state.input.slice(range.start, range.end) : undefined;
-  if (sourceText) {
-    const cutoff = determinePrnReasonCutoff(
+  if (reasonObjects.length > 0) {
+    const instructionTailOffset = findStructuredInstructionTailOffset(
+      state.input,
       reasonObjects,
-      sourceText,
-      inferAdditionalInstructionPredicate(state, tokens)
+      {
+        defaultPredicate: inferAdditionalInstructionPredicate(state, tokens),
+        allowFreeTextFallback: false
+      }
     );
-    if (cutoff !== undefined) {
-      for (let index = cutoff; index < reasonObjects.length; index++) {
-        state.consumed.delete(reasonObjects[index].index);
+    if (instructionTailOffset !== undefined) {
+      for (let cursor = instructionTailOffset; cursor < reasonObjects.length; cursor++) {
+        state.consumed.delete(reasonObjects[cursor].index);
       }
-      reasonObjects.splice(cutoff);
-      reasonTokens.splice(cutoff);
-      reasonIndices.splice(cutoff);
-      while (reasonTokens.length > 0) {
-        const lastToken = reasonTokens[reasonTokens.length - 1];
-        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
-          const removedObject = reasonObjects.pop();
-          if (removedObject) {
-            state.consumed.delete(removedObject.index);
-          }
-          reasonTokens.pop();
-          const removedIndex = reasonIndices.pop();
-          if (removedIndex !== undefined) {
-            state.consumed.delete(removedIndex);
-          }
-          continue;
-        }
-        break;
-      }
+      reasonObjects.splice(instructionTailOffset);
+      reasonTokens.splice(instructionTailOffset);
+      reasonIndices.splice(instructionTailOffset);
+      trimTrailingPunctuationTokens(reasonObjects, reasonTokens, reasonIndices);
       if (reasonTokens.length > 0) {
         sortedIndices = reasonIndices.slice().sort((a, b) => a - b);
         range = computeTokenRange(state.input, tokens, sortedIndices);
@@ -1878,16 +1871,7 @@ function collectPrnReasonText(
       reasonObjects.splice(trailingScheduleStart);
       reasonTokens.splice(trailingScheduleStart);
       reasonIndices.splice(trailingScheduleStart);
-      while (reasonTokens.length > 0) {
-        const lastToken = reasonTokens[reasonTokens.length - 1];
-        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
-          reasonTokens.pop();
-          reasonIndices.pop();
-          reasonObjects.pop();
-          continue;
-        }
-        break;
-      }
+      trimTrailingPunctuationTokens(reasonObjects, reasonTokens, reasonIndices);
     }
   }
 
@@ -1897,16 +1881,7 @@ function collectPrnReasonText(
       reasonObjects.splice(durationSuffixStart);
       reasonTokens.splice(durationSuffixStart);
       reasonIndices.splice(durationSuffixStart);
-      while (reasonTokens.length > 0) {
-        const lastToken = reasonTokens[reasonTokens.length - 1];
-        if (!lastToken || /^[;:.,-]+$/.test(lastToken.trim())) {
-          reasonTokens.pop();
-          reasonIndices.pop();
-          reasonObjects.pop();
-          continue;
-        }
-        break;
-      }
+      trimTrailingPunctuationTokens(reasonObjects, reasonTokens, reasonIndices);
     }
   }
 
@@ -6021,26 +5996,6 @@ function collectSuggestionResult(
   }
 }
 
-function hasInstructionSeparatorBeforeRange(
-  input: string,
-  range: TextRange | undefined
-): boolean {
-  if (!range) {
-    return false;
-  }
-  for (let cursor = range.start - 1; cursor >= 0; cursor--) {
-    const char = input[cursor];
-    if (char === "\n" || char === "\r") {
-      return true;
-    }
-    if (/\s/.test(char)) {
-      continue;
-    }
-    return char === ";" || char === ":" || char === "," || char === "-" || char === ".";
-  }
-  return false;
-}
-
 function inferAdditionalInstructionPredicate(
   internal: ParserState,
   tokens: Token[]
@@ -6132,6 +6087,22 @@ function hasMethodModifierLeadIn(
   }
 }
 
+function trimTrailingPunctuationTokens(
+  tokens: Token[],
+  originals?: string[],
+  indices?: number[]
+): void {
+  while (tokens.length > 0) {
+    const lastToken = tokens[tokens.length - 1];
+    if (!lastToken || !/^[;:.,-]+$/.test(lastToken.original.trim())) {
+      break;
+    }
+    tokens.pop();
+    originals?.pop();
+    indices?.pop();
+  }
+}
+
 function collectAdditionalInstructions(
   internal: ParserState,
   tokens: Token[]
@@ -6165,93 +6136,82 @@ function collectAdditionalInstructions(
       }
       continue;
     }
-    const range = group.range ?? computeTokenRange(
-      internal.input,
-      tokens,
-      group.tokens.map((token) => token.index)
-    );
-    let sourceText = "";
-    if (range) {
-      sourceText = internal.input.slice(range.start, range.end);
-    } else {
-      for (const token of group.tokens) {
-        if (sourceText) {
-          sourceText += " ";
-        }
-        sourceText += token.original;
-      }
-    }
-    sourceText = sourceText.replace(/\s+/g, " ").trim();
-    if (!sourceText) {
-      continue;
-    }
-    const separatorDetected =
-      sourceText.includes(";") ||
-      sourceText.includes(".") ||
-      sourceText.includes("\n") ||
-      sourceText.includes("\r") ||
-      hasInstructionSeparatorBeforeRange(internal.input, range);
     const methodModifierLeadIn = hasMethodModifierLeadIn(
       internal,
       tokens,
       group.tokens
     );
-    const parsed = parseAdditionalInstructions(
-      sourceText,
-      range ?? { start: 0, end: sourceText.length },
+    const parsedSegments = parseInstructionTokenSegments(
+      internal.input,
+      group.tokens,
       {
         defaultPredicate:
           methodModifierLeadIn && internal.methodVerb
             ? internal.methodVerb
             : defaultPredicate,
-        allowFreeTextFallback: separatorDetected
+        allowFreeTextFallback: hasInstructionBoundaryBeforeToken(
+          tokens,
+          group.tokens[0].index
+        )
       }
     );
-    if (!parsed.length) {
+    if (!parsedSegments.length) {
       continue;
     }
 
-    let groupAccepted = false;
-    for (const parsedInstruction of parsed) {
-      const plainText = parsedInstruction.text?.replace(/\s+/g, " ").trim();
-      const resolvedPlainText =
-        methodModifierLeadIn &&
-        plainText &&
-        !parsedInstruction.coding?.code &&
-        internal.methodText
-          ? `${internal.methodText} ${sourceText}`.replace(/\s+/g, " ").trim()
-          : plainText;
-      if (
-        !parsedInstruction.coding?.code &&
-        resolvedPlainText &&
-        isWorkflowPatientInstructionText(resolvedPlainText)
-      ) {
-        appendPatientInstruction(
-          internal,
-          normalizeWorkflowPatientInstructionText(sourceText) ?? resolvedPlainText
-        );
-        groupAccepted = true;
+    const acceptedTokenIndices = new Set<number>();
+    for (const parsedSegment of parsedSegments) {
+      let segmentAccepted = false;
+      for (const parsedInstruction of parsedSegment.instructions) {
+        const plainText = parsedInstruction.text?.replace(/\s+/g, " ").trim();
+        const resolvedPlainText =
+          methodModifierLeadIn &&
+          plainText &&
+          !parsedInstruction.coding?.code &&
+          internal.methodText
+            ? `${internal.methodText} ${parsedSegment.segment.text}`.replace(/\s+/g, " ").trim()
+            : plainText;
+        if (
+          !parsedInstruction.coding?.code &&
+          resolvedPlainText &&
+          isWorkflowPatientInstructionText(resolvedPlainText)
+        ) {
+          appendPatientInstruction(
+            internal,
+            normalizeWorkflowPatientInstructionText(parsedSegment.segment.text) ?? resolvedPlainText
+          );
+          segmentAccepted = true;
+          continue;
+        }
+        const key = parsedInstruction.coding?.code
+          ? `code:${parsedInstruction.coding.system ?? SNOMED_SYSTEM}|${parsedInstruction.coding.code}`
+          : resolvedPlainText
+            ? `text:${resolvedPlainText.toLowerCase()}`
+            : `frames:${parsedInstruction.frames.length}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        instructions.push({
+          text: resolvedPlainText,
+          coding: parsedInstruction.coding,
+          frames: parsedInstruction.frames
+        });
+        segmentAccepted = true;
+      }
+      if (!segmentAccepted) {
         continue;
       }
-      const key = parsedInstruction.coding?.code
-        ? `code:${parsedInstruction.coding.system ?? SNOMED_SYSTEM}|${parsedInstruction.coding.code}`
-        : resolvedPlainText
-          ? `text:${resolvedPlainText.toLowerCase()}`
-          : `frames:${parsedInstruction.frames.length}`;
-      if (seen.has(key)) {
-        continue;
+      for (const separatorToken of parsedSegment.segment.leadingSeparatorTokens) {
+        acceptedTokenIndices.add(separatorToken.index);
       }
-      seen.add(key);
-      instructions.push({
-        text: resolvedPlainText,
-        coding: parsedInstruction.coding,
-        frames: parsedInstruction.frames
-      });
-      groupAccepted = true;
+      for (const segmentToken of parsedSegment.segment.tokens) {
+        acceptedTokenIndices.add(segmentToken.index);
+      }
     }
 
-    if (groupAccepted) {
-      for (const token of group.tokens) {
+    for (const token of group.tokens) {
+      if (acceptedTokenIndices.has(token.index)) {
         mark(internal.consumed, token);
       }
     }
@@ -6260,139 +6220,6 @@ function collectAdditionalInstructions(
   if (instructions.length) {
     internal.additionalInstructions = instructions;
   }
-}
-
-function hasStructuredAdditionalInstructionTail(
-  sourceText: string,
-  defaultPredicate: string
-): boolean {
-  const parsed = parseAdditionalInstructions(
-    sourceText,
-    { start: 0, end: sourceText.length },
-    { defaultPredicate }
-  );
-  for (const instruction of parsed) {
-    if (instruction.coding?.code || instruction.frames.length > 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function findStructuredPrnReasonCommaSeparator(
-  sourceText: string,
-  defaultPredicate: string
-): number | undefined {
-  for (let index = 0; index < sourceText.length; index++) {
-    if (sourceText[index] !== ",") {
-      continue;
-    }
-    const tail = sourceText.slice(index + 1).trim();
-    if (!tail) {
-      continue;
-    }
-    if (hasStructuredAdditionalInstructionTail(tail, defaultPredicate)) {
-      return index;
-    }
-  }
-  return undefined;
-}
-
-function hasLeadingModalAdditionalInstruction(
-  sourceText: string,
-  defaultPredicate: string
-): boolean {
-  const trimmed = sourceText.trim();
-  if (!/^(may|can|might|could)\b/i.test(trimmed)) {
-    return false;
-  }
-  return hasStructuredAdditionalInstructionTail(trimmed, defaultPredicate);
-}
-
-function determinePrnReasonCutoff(
-  tokens: Token[],
-  sourceText: string,
-  defaultPredicate: string
-): number | undefined {
-  if (hasLeadingModalAdditionalInstruction(sourceText, defaultPredicate)) {
-    return 0;
-  }
-
-  const separatorIndex =
-    findPrnReasonSeparator(sourceText) ??
-    findStructuredPrnReasonCommaSeparator(sourceText, defaultPredicate);
-  if (separatorIndex === undefined) {
-    return undefined;
-  }
-
-  const lowerSource = sourceText.toLowerCase();
-  let searchOffset = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    const fragment = token.original.trim();
-    if (!fragment) {
-      continue;
-    }
-    const lowerFragment = fragment.toLowerCase();
-    const position = lowerSource.indexOf(lowerFragment, searchOffset);
-    if (position === -1) {
-      continue;
-    }
-    const end = position + lowerFragment.length;
-    searchOffset = end;
-    if (position >= separatorIndex) {
-      return i;
-    }
-  }
-
-  return undefined;
-}
-
-function findPrnReasonSeparator(sourceText: string): number | undefined {
-  for (let i = 0; i < sourceText.length; i++) {
-    const ch = sourceText[i];
-    if (ch === "\n" || ch === "\r") {
-      if (sourceText.slice(i + 1).trim().length > 0) {
-        return i;
-      }
-      continue;
-    }
-    if (ch === ";") {
-      if (sourceText.slice(i + 1).trim().length > 0) {
-        return i;
-      }
-      continue;
-    }
-    if (ch === "-") {
-      const prev = sourceText[i - 1];
-      const next = sourceText[i + 1];
-      const hasWhitespaceAround = (!prev || /\s/.test(prev)) && (!next || /\s/.test(next));
-      if (hasWhitespaceAround && sourceText.slice(i + 1).trim().length > 0) {
-        return i;
-      }
-      continue;
-    }
-    if (ch === ":" || ch === ".") {
-      const rest = sourceText.slice(i + 1);
-      if (!rest.trim().length) {
-        continue;
-      }
-      const nextChar = rest.replace(/^\s+/, "")[0];
-      if (!nextChar) {
-        continue;
-      }
-      if (
-        ch === "." &&
-        /[0-9]/.test(sourceText[i - 1] ?? "") &&
-        /[0-9]/.test(nextChar)
-      ) {
-        continue;
-      }
-      return i;
-    }
-  }
-
-  return undefined;
 }
 
 interface PrnSiteSuffixDetection {
