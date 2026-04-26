@@ -91,7 +91,6 @@ function buildPostcoordinatedPrnReasonDefinition(
     hasExactCombinedDefinition ||
     !definition?.coding?.code ||
     !request.headCanonical ||
-    request.canonical === request.headCanonical ||
     !request.locativeSiteCoding?.code
   ) {
     return definition;

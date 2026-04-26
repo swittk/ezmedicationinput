@@ -22,14 +22,17 @@ import {
   INSTRUCTION_START_WORDS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
+  PRN_CONDITIONAL_SITE_BOUNDARY_ANCHORS,
   PRN_DEFAULT_SITE_CONNECTOR,
   PRN_GENERIC_LOCATED_HEADS,
   PRN_LEADS,
+  PRN_PREDICATE_REASON_NORMALIZATIONS,
   PRN_REASON_COORDINATORS,
   PRN_REASON_LEAD_INS,
   PRN_REASON_MULTIWORD_LEAD_INS,
   PRN_REASON_SITE_CONNECTORS,
-  PRN_STANDALONE_REASON_LEADS
+  PRN_STANDALONE_REASON_LEADS,
+  SITE_DISPLAY_FILLERS
 } from "../lexical-classes";
 import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
 import {
@@ -74,6 +77,10 @@ interface ParsedPrnReasonAtom {
     text: string;
     canonical?: string;
   };
+}
+
+interface PrnReasonParseOptions {
+  predicative?: boolean;
 }
 
 function isKnownPrnReasonText(text: string): boolean {
@@ -140,6 +147,41 @@ function canContinuePrnReasonAfterSeparator(context: HpsgClauseContext, index: n
       continue;
     }
     return canStartPrnReasonAtom(context, cursor);
+  }
+  return false;
+}
+
+function startsDosageSiteComplement(context: HpsgClauseContext, start: number): boolean {
+  const anchor = context.tokens[start];
+  if (!anchor || !PRN_CONDITIONAL_SITE_BOUNDARY_ANCHORS.has(normalizeTokenLower(anchor))) {
+    return false;
+  }
+  const displayTokens: Token[] = [];
+  for (let cursor = start + 1; cursor < context.limit; cursor += 1) {
+    const token = context.tokens[cursor];
+    if (!token || context.state.consumed.has(token.index)) {
+      break;
+    }
+    const lower = normalizeTokenLower(token);
+    if (
+      !lower ||
+      PRN_REASON_COORDINATORS.has(lower) ||
+      prnReasonBoundary(lower, context)
+    ) {
+      break;
+    }
+    if (!SITE_DISPLAY_FILLERS.has(lower)) {
+      displayTokens.push(token);
+    }
+    const sourceText = joinTokenText(displayTokens).replace(/[{}]/g, "").trim();
+    if (
+      sourceText &&
+      resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      })
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -232,15 +274,22 @@ function createPrnReasonRequest(
 function parseLocatedPrnAtom(
   context: HpsgClauseContext,
   tokens: Token[],
-  previousLocatedHead?: ParsedPrnReasonAtom["locatedHead"]
+  previousLocatedHead?: ParsedPrnReasonAtom["locatedHead"],
+  options?: PrnReasonParseOptions
 ): ParsedPrnReasonAtom | undefined {
   const directText = joinTokenText(tokens);
   const cleanDirectText = directText.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
   if (!cleanDirectText) {
     return undefined;
   }
-  if (isKnownPrnReasonText(cleanDirectText)) {
-    return createPrnReasonRequest(context, cleanDirectText, tokens);
+  const predicativeText = options?.predicative
+    ? PRN_PREDICATE_REASON_NORMALIZATIONS.get(normalizePrnReasonKey(cleanDirectText) ?? "") ?? cleanDirectText
+    : cleanDirectText;
+  if (
+    isKnownPrnReasonText(cleanDirectText) ||
+    (predicativeText !== cleanDirectText && isKnownPrnReasonText(predicativeText))
+  ) {
+    return createPrnReasonRequest(context, predicativeText, tokens);
   }
 
   const connectorIndex = tokens.findIndex((token) =>
@@ -295,7 +344,8 @@ function parseLocatedPrnAtom(
 
 function parsePrnReasonAtoms(
   context: HpsgClauseContext,
-  reasonTokens: Token[]
+  reasonTokens: Token[],
+  options?: PrnReasonParseOptions
 ): ParsedPrnReasonAtom[] {
   if (reasonTokens.length === 1) {
     const token = reasonTokens[0];
@@ -313,7 +363,7 @@ function parsePrnReasonAtoms(
   const atoms: ParsedPrnReasonAtom[] = [];
   let previousLocatedHead: ParsedPrnReasonAtom["locatedHead"];
   for (const part of splitPrnReasonParts(reasonTokens)) {
-    const atom = parseLocatedPrnAtom(context, part, previousLocatedHead);
+    const atom = parseLocatedPrnAtom(context, part, previousLocatedHead, options);
     if (!atom) {
       continue;
     }
@@ -353,6 +403,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     } else if (!PRN_LEADS.has(leadLower)) {
       return [];
     }
+    const isStandaloneConditionalLead = PRN_STANDALONE_REASON_LEADS.has(leadLower);
     while (cursor < context.limit) {
       const leadIn = context.tokens[cursor];
       if (!leadIn || context.state.consumed.has(leadIn.index)) {
@@ -395,6 +446,13 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ) {
         break;
       }
+      if (
+        isStandaloneConditionalLead &&
+        reasonTokens.length > 0 &&
+        startsDosageSiteComplement(context, cursor)
+      ) {
+        break;
+      }
       tokens.push(candidate);
       reasonTokens.push(candidate);
     }
@@ -406,7 +464,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       .trim();
     const reasonText = rawReasonText.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
     const range = rangeFromTokens(reasonTokens);
-    const reasonAtoms = parsePrnReasonAtoms(context, reasonTokens);
+    const reasonAtoms = parsePrnReasonAtoms(context, reasonTokens, {
+      predicative: isStandaloneConditionalLead
+    });
     const primaryRequest = reasonAtoms[0]?.request;
     const canonical = normalizePrnReasonKey(reasonText);
     return [

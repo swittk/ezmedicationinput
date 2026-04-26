@@ -1480,6 +1480,41 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("treats conditional PRN adjuncts as movable grammar signs", () => {
+    const cases = [
+      "when itchy apply to left ear",
+      "if itchy apply to left ear",
+      "apply to left ear when itchy",
+      "apply when itchy to left ear"
+    ] as const;
+
+    for (const sig of cases) {
+      const result = parseSig(sig);
+      expect(result.longText).toBe("Apply the medication as needed for itch in the left ear.");
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.site?.coding?.[0]?.code).toBe("89644007");
+      expect(result.fhir.asNeededFor?.[0]?.text).toBe("itch");
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(
+        findingSiteCode("418363000", "89644007")
+      );
+    }
+  });
+
+  it("normalizes predicative conditional reason adjectives to coded condition nouns", () => {
+    const cases = [
+      ["when dizzy take 1 tab po", "dizziness", "404640003"],
+      ["when nauseous take 1 tab po", "nausea", "422587007"],
+      ["when feverish take 1 tab po", "fever", "386661006"]
+    ] as const;
+
+    for (const [sig, reason, code] of cases) {
+      const result = parseSig(sig, { context: TAB_CONTEXT });
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.asNeededFor?.[0]?.text).toBe(reason);
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe(code);
+    }
+  });
+
   it("codes Thai eye-itch reasons through localized PRN aliases", () => {
     const result = parseSig("1 drop to eye prn คันตา", { locale: "th" });
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({

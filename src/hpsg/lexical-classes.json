@@ -39,10 +39,21 @@
   "routeBlockedByFollowingPartitiveHeads": ["top"],
   "prnLeads": ["prn"],
   "prnReasonLeadIns": ["for", "if", "when", "upon", "to"],
-  "prnStandaloneReasonLeads": ["for"],
+  "prnStandaloneReasonLeads": ["for", "if", "when", "whenever"],
   "prnReasonMultiwordLeadIns": ["due to"],
   "prnReasonSiteConnectors": ["at", "in", "on", "to"],
   "prnReasonCoordinators": [",", "/", "and", "or", "and/or", "หรือ", "และ"],
+  "prnConditionalSiteBoundaryAnchors": ["to", "into", "onto"],
+  "prnPredicateReasonNormalizations": {
+    "dizzy": "dizziness",
+    "drowsy": "drowsiness",
+    "feverish": "fever",
+    "itchy": "itch",
+    "nauseous": "nausea",
+    "painful": "pain",
+    "queasy": "nausea",
+    "sleepy": "sleepiness"
+  },
   "prnGenericLocatedHeads": {
     "ache": "pain",
     "aches": "pain",

@@ -30,6 +30,7 @@ import {
   NON_SITE_ANCHORED_PHRASES,
   OCULAR_ROUTE_CODES,
   PRN_LEADS,
+  PRN_STANDALONE_REASON_LEADS,
   SITE_ANCHORS,
   SITE_DISPLAY_FILLERS,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
@@ -57,6 +58,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   return (
     isPunctuation(lower) ||
     PRN_LEADS.has(lower) ||
+    PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     Boolean(
       METHOD_ACTION_BY_VERB[lower] ||

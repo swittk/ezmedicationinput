@@ -139,6 +139,10 @@ export const PRN_STANDALONE_REASON_LEADS = setOf(source.prnStandaloneReasonLeads
 export const PRN_REASON_MULTIWORD_LEAD_INS = setOf(source.prnReasonMultiwordLeadIns);
 export const PRN_REASON_SITE_CONNECTORS = setOf(source.prnReasonSiteConnectors);
 export const PRN_REASON_COORDINATORS = setOf(source.prnReasonCoordinators);
+export const PRN_CONDITIONAL_SITE_BOUNDARY_ANCHORS = setOf(source.prnConditionalSiteBoundaryAnchors);
+export const PRN_PREDICATE_REASON_NORMALIZATIONS = new Map<string, string>(
+  stringEntries(source.prnPredicateReasonNormalizations)
+);
 export const PRN_GENERIC_LOCATED_HEADS = new Map<string, string>(
   stringEntries(source.prnGenericLocatedHeads)
 );
