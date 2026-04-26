@@ -120,7 +120,9 @@ function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boole
     }
   }
 
-  const resolvedSite = resolveBodySitePhrase(first.original, context.options?.siteCodeMap);
+  const resolvedSite = resolveBodySitePhrase(first.original, context.options?.siteCodeMap, {
+    bodySiteContext: context.options?.context?.bodySiteContext
+  });
   return Boolean(resolvedSite?.coding || resolvedSite?.definition);
 }
 
@@ -185,7 +187,11 @@ function createPrnReasonRequest(
     }
     effectiveRange = { start, end };
   }
-  const site = siteText ? resolveBodySitePhrase(siteText, context.options?.siteCodeMap) : undefined;
+  const site = siteText
+    ? resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    })
+    : undefined;
   const spatialTargetCoding = site?.spatialRelation?.targetCoding;
   const canonical = normalizePrnReasonKey(text);
   const headCanonical = headText ? normalizeLocatedReasonHead(headText) : undefined;
@@ -251,7 +257,12 @@ function parseLocatedPrnAtom(
   for (let index = 1; index < tokens.length; index += 1) {
     const headText = joinTokenText(tokens.slice(0, index));
     const siteText = joinTokenText(tokens.slice(index));
-    if (isLocatedReasonHead(headText) && resolveBodySitePhrase(siteText, context.options?.siteCodeMap)) {
+    if (
+      isLocatedReasonHead(headText) &&
+      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      })
+    ) {
       return createPrnReasonRequest(context, cleanDirectText, tokens, headText, siteText);
     }
   }
@@ -259,12 +270,22 @@ function parseLocatedPrnAtom(
   for (let index = tokens.length - 1; index > 0; index -= 1) {
     const siteText = joinTokenText(tokens.slice(0, index));
     const headText = joinTokenText(tokens.slice(index));
-    if (isLocatedReasonHead(headText) && resolveBodySitePhrase(siteText, context.options?.siteCodeMap)) {
+    if (
+      isLocatedReasonHead(headText) &&
+      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      })
+    ) {
       return createPrnReasonRequest(context, cleanDirectText, tokens, headText, siteText);
     }
   }
 
-  if (previousLocatedHead && resolveBodySitePhrase(cleanDirectText, context.options?.siteCodeMap)) {
+  if (
+    previousLocatedHead &&
+    resolveBodySitePhrase(cleanDirectText, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    })
+  ) {
     const text = `${previousLocatedHead.text} ${PRN_DEFAULT_SITE_CONNECTOR} ${cleanDirectText}`;
     return createPrnReasonRequest(context, text, tokens, previousLocatedHead.text, cleanDirectText);
   }

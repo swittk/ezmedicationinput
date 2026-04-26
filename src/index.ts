@@ -36,6 +36,41 @@ export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
 export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
 export {
+  buildBodySiteTopographicalModifierCoding,
+  getBodySiteCode,
+  getBodySiteText,
+  lookupBodySite,
+  suggestBodySites
+} from "./body-site-lookup";
+export type {
+  BodySiteLookupOptions,
+  BodySiteLookupResult,
+  BodySiteTextOptions
+} from "./body-site-lookup";
+export {
+  BODY_SITE_SPATIAL_RELATION_EXTENSION_URL,
+  buildBodySiteSpatialRelationExtension,
+  buildBodySiteSpatialRelationExtensions,
+  cloneBodySiteSpatialRelation,
+  parseBodySiteSpatialRelationExtension
+} from "./body-site-spatial";
+export {
+  SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
+  SNOMED_CT_FINDING_SITE_ATTRIBUTE_DISPLAY,
+  SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE,
+  SNOMED_CT_TOPOGRAPHICAL_MODIFIER_DISPLAY,
+  SNOMED_SYSTEM
+} from "./snomed";
+export {
+  buildSnomedBodySiteTopographicalModifierPostcoordinationCode,
+  buildSnomedFindingSiteCoding,
+  buildSnomedFindingSitePostcoordinationCode,
+  hasSnomedFindingSitePostcoordination,
+  hasSnomedTopographicalModifierPostcoordination,
+  parseSnomedBodySiteTopographicalModifierPostcoordinationCode,
+  parseSnomedFindingSitePostcoordinationCode
+} from "./snomed-postcoordination";
+export {
   getRegisteredSigLocalizations,
   registerSigLocalization,
   resolveSigLocalization,
@@ -600,7 +635,7 @@ export function fromFhirDosage(
     warnings: clause.warnings ?? [],
     meta: {
       consumedTokens: [],
-      normalized: buildNormalizedMetaFromClause(clause),
+      normalized: buildNormalizedMetaFromClause(clause, dosage),
       canonical: {
         clauses: [clause]
       }
@@ -660,7 +695,8 @@ function cloneBodySiteCoding(coding?: {
 }
 
 function buildNormalizedMetaFromClause(
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  fhir?: FhirDosage
 ): ParseResult["meta"]["normalized"] {
   const additionalInstructions = clause.additionalInstructions?.length
     ? clause.additionalInstructions.map((instruction) => ({
@@ -668,6 +704,8 @@ function buildNormalizedMetaFromClause(
       coding: cloneCoding(instruction.coding)
     }))
     : undefined;
+  const siteCoding = cloneBodySiteCoding(clause.site?.coding) ??
+    cloneBodySiteCoding(fhir?.site?.coding?.[0]);
 
   return {
     route: clause.route?.code,
@@ -676,7 +714,7 @@ function buildNormalizedMetaFromClause(
       clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation
         ? {
           text: clause.site?.text,
-          coding: cloneBodySiteCoding(clause.site?.coding),
+          coding: siteCoding,
           spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation)
         }
         : undefined,
@@ -716,7 +754,9 @@ function buildParseResult(
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const shortText = formatCanonicalClause(clause, "short", localization, options);
   const longText = formatCanonicalClause(clause, "long", localization, options);
-  const fhir = canonicalToFhir(clause, longText);
+  const fhir = canonicalToFhir(clause, longText, {
+    bodySitePostcoordination: options?.bodySitePostcoordination
+  });
 
   const consumedTokens: string[] = [];
   const leftoverParts: string[] = [];
@@ -776,7 +816,7 @@ function buildParseResult(
     meta: {
       consumedTokens,
       leftoverText: leftoverParts.length ? leftoverParts.join(" ") : undefined,
-      normalized: buildNormalizedMetaFromClause(clause),
+      normalized: buildNormalizedMetaFromClause(clause, fhir),
       canonical: {
         clauses: canonicalClauses
       },

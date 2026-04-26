@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, formatSig, parseSig, parseSigAsync } from "../src/index";
+import {
+  fromFhirDosage,
+  formatSig,
+  getBodySiteCode,
+  getBodySiteText,
+  lookupBodySite,
+  parseSig,
+  parseSigAsync,
+  suggestBodySites
+} from "../src/index";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
-import { SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE } from "../src/snomed";
+import {
+  SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
+  SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE
+} from "../src/snomed";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_UNIT_SYNONYMS,
@@ -23,6 +35,8 @@ const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
 const findingSiteCode = (focus: string, site: string) =>
   `${focus}:${SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE}=${site}`;
+const topographicalSiteCode = (site: string, modifier: string) =>
+  `${site}:${SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE}=${modifier}`;
 
 function expectPrimitiveTranslation(
   element: { extension?: Array<{ url: string; extension?: Array<{ url: string; valueCode?: string; valueString?: string }> }> } | undefined,
@@ -2554,6 +2568,7 @@ describe("parseSig core scenarios", () => {
   it("preserves unresolved topical site phrases and defaults them to topical route", () => {
     const cases = [
       { sig: "apply cream to left flank bid", site: "left flank" },
+      { sig: "apply cream to right flank bid", site: "right flank" },
       { sig: "apply cream to right big toe bid", site: "right big toe" },
       { sig: "apply cream to 2nd toe bid", site: "2nd toe" },
       { sig: "apply cream to top of head bid", site: "top of head" },
@@ -2563,6 +2578,11 @@ describe("parseSig core scenarios", () => {
       { sig: "apply at left side of hand bid", site: "left side of hand" },
       { sig: "apply to right side of abdomen bid", site: "right side of abdomen" },
       { sig: "apply between fingers", site: "between fingers" },
+      { sig: "apply ระหว่างนิ้ว", site: "between fingers" },
+      { sig: "apply ระหว่างนิ้วมือ", site: "between fingers" },
+      { sig: "apply ระหว่างนิ้วเท้า", site: "between toes" },
+      { sig: "apply to หัว", site: "head" },
+      { sig: "apply ที่หนังศีรษะ", site: "scalp" },
       { sig: "apply to area between fingers", site: "area between fingers" }
     ];
 
@@ -2616,6 +2636,16 @@ describe("parseSig core scenarios", () => {
       (extension) => extension.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
     );
 
+    expect(result.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: topographicalSiteCode("117590005", "351726001"),
+      display: "below ear"
+    });
+    expect(result.meta.normalized.site?.coding).toEqual({
+      system: "http://snomed.info/sct",
+      code: topographicalSiteCode("117590005", "351726001"),
+      display: "below ear"
+    });
     expect(relation?.extension).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2661,6 +2691,11 @@ describe("parseSig core scenarios", () => {
       targetText: "hand",
       targetCoding: { code: "85562004" }
     });
+    expect(side.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: topographicalSiteCode("85562004", "49370004"),
+      display: "left side of hand"
+    });
 
     const between = parseSig("apply to area between fingers");
     expect(between.meta.normalized.site?.spatialRelation).toMatchObject({
@@ -2668,6 +2703,96 @@ describe("parseSig core scenarios", () => {
       targetText: "fingers",
       targetCoding: { code: "7569003" }
     });
+
+    const topOfHead = parseSig("apply cream to top of head bid");
+    expect(topOfHead.fhir.site?.coding?.[0]).toEqual({
+      system: "http://snomed.info/sct",
+      code: topographicalSiteCode("69536005", "261183002"),
+      display: "top of head"
+    });
+
+    const directPrecoordinated = parseSig("apply to back of head");
+    expect(directPrecoordinated.fhir.site?.coding?.[0]?.code).toBe("182322006");
+
+    const disabled = parseSig("apply below ear bid", {
+      bodySitePostcoordination: false
+    });
+    expect(disabled.fhir.site?.coding).toBeUndefined();
+    expect(disabled.meta.normalized.site?.coding).toBeUndefined();
+    expect(disabled.fhir.site?.extension?.[0]?.url).toBe(BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+
+    const imported = fromFhirDosage({
+      site: {
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: topographicalSiteCode("69536005", "261183002")
+          }
+        ]
+      }
+    });
+    expect(imported.meta.normalized.site?.text).toBe("top of head");
+  });
+
+  it("exposes body-site lookup and suggest helpers for UI search", () => {
+    expect(getBodySiteCode("left ass")).toEqual({
+      system: "http://snomed.info/sct",
+      code: "723979003",
+      display: "Structure of left buttock",
+      i18n: undefined
+    });
+    expect(getBodySiteCode("top of head")).toEqual({
+      system: "http://snomed.info/sct",
+      code: topographicalSiteCode("69536005", "261183002"),
+      display: "top of head"
+    });
+    expect(getBodySiteCode("top of head", { postcoordination: false })).toBeUndefined();
+    expect(getBodySiteText("723979003")).toBe("left buttock");
+    expect(getBodySiteText(findingSiteCode("22253000", "723979003"))).toBe("left buttock");
+    expect(getBodySiteText(topographicalSiteCode("69536005", "261183002"))).toBe("top of head");
+    expect(
+      getBodySiteText(findingSiteCode("22253000", "723979003"), {
+        parsePostcoordination: false
+      })
+    ).toBeUndefined();
+    expect(
+      getBodySiteText(topographicalSiteCode("69536005", "261183002"), {
+        postcoordination: false
+      })
+    ).toBeUndefined();
+
+    const between = lookupBodySite("ระหว่างนิ้วมือ");
+    expect(between).toMatchObject({
+      text: "between fingers",
+      canonical: "between fingers",
+      spatialRelation: {
+        relationText: "between",
+        targetText: "fingers",
+        targetCoding: { code: "7569003" }
+      }
+    });
+
+    const contextualToes = lookupBodySite("ระหว่างนิ้ว", {
+      bodySiteContext: "feet"
+    });
+    expect(contextualToes).toMatchObject({
+      text: "between toes",
+      spatialRelation: {
+        relationText: "between",
+        targetText: "toes",
+        targetCoding: { code: "29707007" }
+      }
+    });
+
+    const scalpSuggestions = suggestBodySites("หนัง", { limit: 3 });
+    expect(scalpSuggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: "scalp",
+          coding: expect.objectContaining({ code: "41695006" })
+        })
+      ])
+    );
   });
 
   it("passes parsed spatial relation metadata to site terminology callbacks", () => {
@@ -3464,6 +3589,12 @@ describe("internationalization", () => {
       const result = parseSig("apply to head bid", { locale: "th" });
       expect(result.longText).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
       expect(result.fhir.text).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
+
+      const thaiHead = parseSig("apply to หัว", { locale: "th" });
+      expect(thaiHead.longText).toBe("ทา บริเวณศีรษะ.");
+
+      const thaiScalp = parseSig("apply ที่หนังศีรษะ", { locale: "th" });
+      expect(thaiScalp.longText).toBe("ทา บริเวณหนังศีรษะ.");
     });
 
     it("translates spatial body-site relations in Thai", () => {
@@ -3478,6 +3609,24 @@ describe("internationalization", () => {
 
       const betweenFingers = parseSig("apply to area between fingers", { locale: "th" });
       expect(betweenFingers.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+
+      const thaiBetweenFingers = parseSig("apply ระหว่างนิ้วมือ", { locale: "th" });
+      expect(thaiBetweenFingers.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+
+      const thaiBetweenDigits = parseSig("apply ระหว่างนิ้ว", { locale: "th" });
+      expect(thaiBetweenDigits.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+
+      const thaiBetweenToes = parseSig("apply ระหว่างนิ้วเท้า", { locale: "th" });
+      expect(thaiBetweenToes.longText).toBe("ทา บริเวณระหว่างนิ้วเท้า.");
+
+      const contextualThaiBetweenToes = parseSig("apply ระหว่างนิ้ว", {
+        locale: "th",
+        context: { bodySiteContext: "feet" }
+      });
+      expect(contextualThaiBetweenToes.longText).toBe("ทา บริเวณระหว่างนิ้วเท้า.");
+
+      const rightFlank = parseSig("apply to right flank", { locale: "th" });
+      expect(rightFlank.longText).toBe("ทา บริเวณสีข้างขวา.");
 
       const fromExtensionOnly = fromFhirDosage(
         {

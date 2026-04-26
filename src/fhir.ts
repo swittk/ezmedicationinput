@@ -6,6 +6,10 @@ import {
   buildBodySiteSpatialRelationExtensions,
   parseBodySiteSpatialRelationExtension
 } from "./body-site-spatial";
+import {
+  buildBodySiteTopographicalModifierCoding,
+  getBodySiteText
+} from "./body-site-lookup";
 import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
@@ -35,6 +39,15 @@ import { arrayIncludes } from "./utils/array";
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
+
+export interface FhirProjectionOptions {
+  /**
+   * Defaults to true. When true, structured spatial body-site phrases such as
+   * "top of head" can emit a SNOMED topographical modifier expression in
+   * Dosage.site.coding while preserving the spatial-relation extension.
+   */
+  bodySitePostcoordination?: boolean;
+}
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
   return {
@@ -75,6 +88,36 @@ function selectPreferredSiteCoding(site: FhirCodeableConcept | undefined): Codea
     }
   }
   return selectFirstCodingWithCode(site);
+}
+
+type CanonicalSite = NonNullable<CanonicalSigClause["site"]>;
+
+function selectCanonicalSiteCoding(
+  site: CanonicalSite | undefined,
+  options?: FhirProjectionOptions
+): CanonicalSite["coding"] | undefined {
+  return site?.coding ?? buildBodySiteTopographicalModifierCoding(
+    site?.spatialRelation,
+    site?.text,
+    {
+      postcoordination: options?.bodySitePostcoordination
+    }
+  );
+}
+
+function buildSiteCodingArray(
+  siteCoding: CanonicalSite["coding"] | undefined
+): CodeableConceptCoding[] | undefined {
+  if (!siteCoding?.code) {
+    return undefined;
+  }
+  return [
+    {
+      system: siteCoding.system ?? SNOMED_SYSTEM,
+      code: siteCoding.code,
+      display: siteCoding.display
+    }
+  ];
 }
 
 function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
@@ -273,7 +316,8 @@ function appendWarning(warnings: string[] | undefined, warning: string | undefin
 
 export function canonicalToFhir(
   clause: CanonicalSigClause,
-  textOverride?: string
+  textOverride?: string,
+  options?: FhirProjectionOptions
 ): FhirDosage {
   const dosage: FhirDosage = {};
   const repeat: FhirTimingRepeat = {};
@@ -379,19 +423,11 @@ export function canonicalToFhir(
     }
   }
 
-  if (clause.site?.text || clause.site?.coding?.code) {
-    const coding = clause.site?.coding?.code
-      ? [
-        {
-          system: clause.site.coding.system ?? SNOMED_SYSTEM,
-          code: clause.site.coding.code,
-          display: clause.site.coding.display
-        }
-      ]
-      : undefined;
+  if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation) {
+    const siteCoding = selectCanonicalSiteCoding(clause.site, options);
     dosage.site = {
       text: clause.site?.text,
-      coding,
+      coding: buildSiteCodingArray(siteCoding),
       extension: buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation)
     };
   }
@@ -492,9 +528,18 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   const siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
-  if (dosage.site?.text || siteCoding?.code || siteSpatialRelation) {
+  const siteText = dosage.site?.text ?? (
+    siteCoding?.code
+      ? getBodySiteText({
+        system: siteCoding.system,
+        code: siteCoding.code,
+        display: siteCoding.display
+      })
+      : undefined
+  );
+  if (siteText || siteCoding?.code || siteSpatialRelation) {
     clause.site = {
-      text: dosage.site?.text,
+      text: siteText,
       spatialRelation: siteSpatialRelation,
       coding: siteCoding?.code
         ? {

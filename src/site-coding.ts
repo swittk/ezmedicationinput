@@ -85,13 +85,16 @@ function runSiteCodingResolutionSync(
 
   const suggestionMap = new Map<string, SiteCodeSuggestion>();
   if (selection) {
-    addSuggestionToMap(suggestionMap, definitionToSuggestion(selection));
+    addSuggestionToMap(
+      suggestionMap,
+      definitionToSuggestion(selection, selection === defaultDefinition)
+    );
   }
   if (customDefinition) {
     addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
   }
   if (defaultDefinition) {
-    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition));
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition, true));
   }
 
   for (const resolver of toArray(options?.siteCodeSuggestionResolvers)) {
@@ -153,13 +156,16 @@ async function runSiteCodingResolutionAsync(
 
   const suggestionMap = new Map<string, SiteCodeSuggestion>();
   if (selection) {
-    addSuggestionToMap(suggestionMap, definitionToSuggestion(selection));
+    addSuggestionToMap(
+      suggestionMap,
+      definitionToSuggestion(selection, selection === defaultDefinition)
+    );
   }
   if (customDefinition) {
     addSuggestionToMap(suggestionMap, definitionToSuggestion(customDefinition));
   }
   if (defaultDefinition) {
-    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition));
+    addSuggestionToMap(suggestionMap, definitionToSuggestion(defaultDefinition, true));
   }
 
   for (const resolver of toArray(options?.siteCodeSuggestionResolvers)) {
@@ -270,19 +276,28 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
 }
 
 function definitionToSuggestion(
-  definition: BodySiteDefinition
+  definition: BodySiteDefinition,
+  omitRedundantText = false
 ): SiteCodeSuggestion | undefined {
   const coding = definition.coding;
   if (!coding?.code) {
     return undefined;
   }
+  const text =
+    omitRedundantText &&
+    definition.text &&
+    definition.text.trim().toLowerCase() !== coding.display?.trim().toLowerCase()
+      ? definition.text
+      : omitRedundantText
+        ? undefined
+        : definition.text;
   return {
     coding: {
       code: coding.code,
       display: coding.display,
       system: coding.system ?? SNOMED_SYSTEM
     },
-    text: definition.text
+    text
   };
 }
 

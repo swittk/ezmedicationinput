@@ -531,6 +531,60 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "7569003", display: "Finger structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["นิ้วมือ"],
+      definition: {
+        coding: { code: "7569003", display: "Finger structure" },
+        text: "fingers",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["between fingers", "ระหว่างนิ้ว", "ระหว่างนิ้วมือ"],
+      definition: {
+        text: "between fingers",
+        spatialRelation: {
+          relationText: "between",
+          targetText: "fingers",
+          targetCoding: {
+            system: SNOMED_SYSTEM,
+            code: "7569003",
+            display: "Finger structure"
+          },
+          sourceText: "between fingers"
+        },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["toe", "toes"],
+      definition: { coding: { code: "29707007", display: "Toe structure" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["นิ้วเท้า"],
+      definition: {
+        coding: { code: "29707007", display: "Toe structure" },
+        text: "toes",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["between toes", "ระหว่างนิ้วเท้า"],
+      definition: {
+        text: "between toes",
+        spatialRelation: {
+          relationText: "between",
+          targetText: "toes",
+          targetCoding: {
+            system: SNOMED_SYSTEM,
+            code: "29707007",
+            display: "Toe structure"
+          },
+          sourceText: "between toes"
+        },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["back of hand", "dorsum of hand"],
       definition: {
         coding: { code: "731077003", display: "Entire dorsum of hand" },
@@ -583,8 +637,12 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       }
     },
     {
-      names: ["head"],
-      definition: { coding: { code: "69536005", display: "Head structure" }, routeHint: RouteCode["Topical route"] }
+      names: ["head", "หัว", "ศีรษะ"],
+      definition: {
+        coding: { code: "69536005", display: "Head structure" },
+        text: "head",
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["top of head"],
@@ -711,8 +769,66 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "26893007", display: "Inguinal region structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["scalp"],
-      definition: { coding: { code: "41695006", display: "Scalp" }, routeHint: RouteCode["Topical route"] }
+      names: ["scalp", "หนังศีรษะ", "ที่หนังศีรษะ"],
+      definition: {
+        coding: { code: "41695006", display: "Scalp" },
+        text: "scalp",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["flank"],
+      definition: {
+        coding: { code: "58602004", display: "Flank" },
+        text: "flank",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["left flank"],
+      definition: {
+        coding: { code: "58602004", display: "Flank" },
+        text: "left flank",
+        spatialRelation: {
+          relationText: "left side",
+          relationCoding: {
+            system: SNOMED_SYSTEM,
+            code: "49370004",
+            display: "Lateral"
+          },
+          targetText: "flank",
+          targetCoding: {
+            system: SNOMED_SYSTEM,
+            code: "58602004",
+            display: "Flank"
+          },
+          sourceText: "left flank"
+        },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["right flank"],
+      definition: {
+        coding: { code: "58602004", display: "Flank" },
+        text: "right flank",
+        spatialRelation: {
+          relationText: "right side",
+          relationCoding: {
+            system: SNOMED_SYSTEM,
+            code: "49370004",
+            display: "Lateral"
+          },
+          targetText: "flank",
+          targetCoding: {
+            system: SNOMED_SYSTEM,
+            code: "58602004",
+            display: "Flank"
+          },
+          sourceText: "right flank"
+        },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["face"],
@@ -761,15 +877,15 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: Array<{
       definition: { coding: { code: "45048000", display: "Neck" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["buttock", "buttocks", "gluteal", "glute"],
+      names: ["buttock", "buttocks", "gluteal", "glute", "butt", "ass"],
       definition: { coding: { code: "46862004", display: "Buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {
-      names: ["left buttock", "left gluteal"],
+      names: ["left buttock", "left gluteal", "left butt", "left ass"],
       definition: { coding: { code: "723979003", display: "Structure of left buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {
-      names: ["right buttock", "right gluteal"],
+      names: ["right buttock", "right gluteal", "right butt", "right ass"],
       definition: { coding: { code: "723980000", display: "Structure of right buttock" }, routeHint: RouteCode["Intramuscular route"] }
     },
     {

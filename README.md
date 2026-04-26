@@ -17,6 +17,12 @@
 - Surfaces warnings when discouraged tokens (`QD`, `QOD`, `BLD`) are used and optionally rejects them.
 - Generates upcoming administration timestamps from FHIR dosage data via `nextDueDoses` using configurable clinic clocks.
 - Auto-codes common body-site phrases (e.g. "left arm", "right eye") with SNOMED CT anatomy concepts and supports interactive lookup flows for ambiguous sites.
+- Represents spatial body-site phrases such as `below ear`, `right side of abdomen`, `between fingers`, and Thai forms like `ระหว่างนิ้วมือ` through structured site metadata.
+- Exposes body-site lookup/suggestion helpers and SNOMED finding-site postcoordination helpers for UI search and terminology workflows.
+
+## Parser architecture
+
+The parser is built around an HPSG-style lexical/sign grammar: tokens become typed signs, signs unify into clause-level structures, and the final projection emits FHIR `Dosage`. It is **not** a pure academic HPSG implementation; deterministic projection is still required for FHIR shape, terminology lookup, formatting, and compatibility behavior.
 
 ## Installation
 
@@ -255,9 +261,108 @@ result.fhir.site?.coding?.[0];
 // → { system: "http://snomed.info/sct", code: "368208006", display: "Left upper arm structure" }
 ```
 
+Spatial site phrases are preserved as structured metadata on `Dosage.site.extension`
+and in `ParseResult.meta.normalized.site.spatialRelation`.
+
+```ts
+const result = parseSig("apply to area between fingers");
+
+result.fhir.site?.text;
+// → "area between fingers"
+
+result.meta.normalized.site?.spatialRelation;
+// → {
+//      relationText: "between",
+//      targetText: "fingers",
+//      targetCoding: {
+//        system: "http://snomed.info/sct",
+//        code: "7569003",
+//        display: "Finger structure"
+//      }
+//    }
+```
+
+Only relations that exist in the FHIR BodyStructure relative-location ValueSet
+receive `spatialRelation.relationCoding` (for example `Above`, `Beneath`,
+`Posterior`, `Upper`, `Lower`, and `Lateral`). Other useful spatial language,
+such as `between`, `around`, `near`, and `inside`, is preserved as
+`relationText` without pretending there is an official code for it.
+
+Thai and mixed-language site phrases resolve through the same site grammar:
+
+```ts
+parseSig("apply ระหว่างนิ้วมือ", { locale: "th" }).longText;
+// → "ทา บริเวณระหว่างนิ้วมือ."
+
+parseSig("apply ระหว่างนิ้วเท้า", { locale: "th" }).longText;
+// → "ทา บริเวณระหว่างนิ้วเท้า."
+
+parseSig("apply ระหว่างนิ้ว", {
+  locale: "th",
+  context: { bodySiteContext: "feet" }
+}).longText;
+// → "ทา บริเวณระหว่างนิ้วเท้า."
+```
+
 When the parser encounters an unfamiliar site, it leaves the text untouched and records nothing in `meta.siteLookups`. Wrapping the phrase in braces (e.g. `apply to {mole on scalp}`) preserves the same parsing behavior but flags the entry as a **probe** so `meta.siteLookups` always contains the request. This allows UIs to display lookup widgets even before a matching code exists. Braces are optional when the site is already recognized—they simply make the clinician's intent explicit.
 
 Unknown body sites still populate `Dosage.site.text` and `ParseResult.meta.normalized.site.text`, allowing UIs to echo the verbatim phrase while terminology lookups run asynchronously.
+
+For typeahead/search UI, use the exported body-site helpers directly:
+
+```ts
+import {
+  getBodySiteCode,
+  getBodySiteText,
+  lookupBodySite,
+  suggestBodySites
+} from "ezmedicationinput";
+
+getBodySiteCode("left ass");
+// → { system: "http://snomed.info/sct", code: "723979003", display: "Structure of left buttock" }
+
+getBodySiteText("723979003");
+// → "left buttock"
+
+getBodySiteText("22253000:363698007=723979003");
+// → "left buttock"
+
+getBodySiteCode("top of head");
+// → { system: "http://snomed.info/sct", code: "69536005:106233006=261183002", display: "top of head" }
+
+getBodySiteCode("top of head", { postcoordination: false });
+// → undefined
+
+getBodySiteText("69536005:106233006=261183002");
+// → "top of head"
+
+getBodySiteText("22253000:363698007=723979003", {
+  parsePostcoordination: false
+});
+// → undefined
+
+lookupBodySite("ระหว่างนิ้ว", { bodySiteContext: "feet" });
+// → { text: "between toes", spatialRelation: { relationText: "between", ... }, ... }
+
+suggestBodySites("หนัง", { limit: 5 });
+// → [{ text: "scalp", coding: { code: "41695006", ... }, ... }]
+```
+
+`getBodySiteCode` and `getBodySiteText` are convenience wrappers for the common
+phrase-to-code and code-to-label cases. `getBodySiteCode` returns direct
+pre-coordinated body-site codings when available; otherwise it can build a
+SNOMED topographical-modifier expression for coded spatial phrases such as
+`top of head` or `below ear`. Parsed medication orders use the same behavior for
+`Dosage.site.coding` by default and still preserve the structured spatial
+extension; pass `bodySitePostcoordination: false` to `parseSig` when a consumer
+only accepts literal body-site codes. `getBodySiteText` resolves both finding-site
+and topographical-modifier postcoordination by default. Pass
+`postcoordination: false` or `parsePostcoordination: false` to require literal
+body-site codes only. `lookupBodySite` returns the full resolved metadata,
+including spatial relation details. `suggestBodySites` returns ranked
+bundled/custom candidates for autocomplete. Lookup helpers accept `siteCodeMap`;
+phrase-based helpers also accept `bodySiteContext`, used only for genuinely
+ambiguous shorthand such as Thai `ระหว่างนิ้ว`.
 
 You can extend or replace the built-in codings via `ParseOptions`:
 
@@ -336,6 +441,7 @@ export interface SiteCodeLookupRequest {
   text: string;         // Brace-free, whitespace-collapsed site text
   normalized: string;   // Lower-case variant of `text`
   canonical: string;    // Normalized key for dictionary lookups
+  spatialRelation?: BodySiteSpatialRelation; // Parsed relation + target, when present
   isProbe: boolean;     // True when the sig used `{placeholder}` syntax
   inputText: string;    // Full sig string the parser received
   sourceText?: string;  // Substring extracted from `inputText`
@@ -361,6 +467,52 @@ export type SiteCodeSuggestionResolver = (
 
 Consumers that only need synchronous resolution can continue calling `parseSig`. If any synchronous resolver accidentally returns a Promise, an error is thrown with guidance to switch to `parseSigAsync`.
 
+#### SNOMED finding-site postcoordination helpers
+
+When a PRN reason has a symptom plus site (for example `pain at abdomen`), the
+library can represent the coded symptom with a SNOMED finding-site expression.
+The helpers are exported for callers that need the same representation outside
+the parser.
+
+This is separate from body-site topographical postcoordination. PRN findings
+use `363698007 | Finding site |`; spatial body-site phrases use
+`106233006 | Topographical modifier |`.
+
+```ts
+import {
+  buildSnomedFindingSiteCoding,
+  buildSnomedFindingSitePostcoordinationCode,
+  hasSnomedFindingSitePostcoordination
+} from "ezmedicationinput";
+
+buildSnomedFindingSitePostcoordinationCode("22253000", "85562004");
+// → "22253000:363698007=85562004"
+
+hasSnomedFindingSitePostcoordination("22253000:363698007=85562004");
+// → true
+
+buildSnomedFindingSiteCoding({
+  focusCoding: {
+    system: "http://snomed.info/sct",
+    code: "22253000",
+    display: "Pain"
+  },
+  siteCoding: {
+    system: "http://snomed.info/sct",
+    code: "85562004",
+    display: "Hand"
+  },
+  display: "Pain at hand"
+});
+```
+
+The spatial site extension helpers are also exported:
+`buildBodySiteSpatialRelationExtension`,
+`buildBodySiteSpatialRelationExtensions`,
+`parseBodySiteSpatialRelationExtension`,
+`cloneBodySiteSpatialRelation`, and
+`BODY_SITE_SPATIAL_RELATION_EXTENSION_URL`.
+
 You can specify the number of times (total count) the medication is supposed to be used by ending with `for {number} times`, `x {number} doses`, or simply `x {number}`
 
 ### Advanced parsing options
@@ -368,8 +520,12 @@ You can specify the number of times (total count) the medication is supposed to 
 `parseSig` accepts a `ParseOptions` object. Highlights:
 
 - `context`: optional medication context (dosage form, strength, container
-  metadata) used to infer default units when a sig omits explicit units. Pass
-  `null` to explicitly disable context-based inference.
+  metadata, and optional `bodySiteContext`) used to infer defaults and
+  disambiguate shorthand body-site phrases. Pass `null` to explicitly disable
+  context-based inference.
+- `context.bodySiteContext`: optional anatomical context for ambiguous site
+  shorthand. Example: Thai `ระหว่างนิ้ว` defaults to fingers, but resolves to
+  toes when `bodySiteContext` is `"feet"`, `"foot"`, or another foot/toe phrase.
 - `smartMealExpansion`: when `true`, generic AC/PC/C meal abbreviations and
   cadence-only instructions expand into concrete with-meal EventTiming
   combinations (e.g. `1x3` → breakfast/lunch/dinner). This also respects

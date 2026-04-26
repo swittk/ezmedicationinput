@@ -318,6 +318,12 @@ export const RouteCode = SNOMEDCTRouteCodes;
 
 export interface MedicationContext {
   dosageForm?: string;
+  /**
+   * Optional anatomical context used to disambiguate shorthand body-site
+   * phrases, e.g. Thai "ระหว่างนิ้ว" can mean fingers by default but toes
+   * when the active context is foot/feet/toes.
+   */
+  bodySiteContext?: string;
   /** "Simple" strength string; might be the only way strength is provided
    * for discrete units this is the amount of medication for unit e.g. "500 mg" (1 tablet), or for mixed tablets might be like "400 mg + 80 mg"
    * for things like creams or fluids or syrupsit might be "2%", 5 g/100g, 100mg/ 100 g, 262 mg/15 mL, 200 mg/2 mL, 1 mg/dL, or "400 mg/5mL + 80 mg/5mL"
@@ -714,6 +720,13 @@ export interface ParseOptions extends FormatOptions {
    * the default site dictionary (trimmed, lower-cased, collapsing whitespace).
    */
   siteCodeMap?: Record<string, BodySiteDefinition>;
+  /**
+   * Defaults to true. When true, parsed spatial body-site phrases without a
+   * direct pre-coordinated site code may emit SNOMED topographical modifier
+   * postcoordination in FHIR Dosage.site.coding while preserving the structured
+   * spatial-relation extension.
+   */
+  bodySitePostcoordination?: boolean;
   /**
    * Explicit selections that override automatic site resolution for matching
    * phrases. Useful when custom dictionaries provide multiple options but a UI

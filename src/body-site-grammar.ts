@@ -81,6 +81,7 @@ export type BodySiteFeatureStructure =
 
 export interface ResolvedBodySitePhrase {
   lookupCanonical: string;
+  resolutionCanonical: string;
   canonical: string;
   displayText: string;
   coding?: FhirCoding;
@@ -90,6 +91,14 @@ export interface ResolvedBodySitePhrase {
   englishObjectText: string;
   preferredPreposition?: "to" | "at" | "in" | "into";
 }
+
+export interface BodySitePhraseContext {
+  bodySiteContext?: string;
+}
+
+const AMBIGUOUS_DIGIT_SITE_KEYS = new Set(["ระหว่างนิ้ว", "between digits"]);
+const HAND_CONTEXT_KEYS = new Set(["hand", "hands", "finger", "fingers", "นิ้วมือ", "มือ"]);
+const FOOT_CONTEXT_KEYS = new Set(["foot", "feet", "toe", "toes", "นิ้วเท้า", "เท้า"]);
 
 export function lookupBodySiteDefinition(
   map: Record<string, BodySiteDefinition> | undefined,
@@ -113,6 +122,35 @@ export function lookupBodySiteDefinition(
         }
       }
     }
+  }
+  return undefined;
+}
+
+function contextContainsAny(context: string | undefined, keys: Set<string>): boolean {
+  const normalized = normalizeBodySiteKey(context ?? "");
+  if (!normalized) {
+    return false;
+  }
+  for (const key of keys) {
+    if (normalized === key || normalized.includes(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveContextualBodySiteAlias(
+  lookupCanonical: string,
+  context?: BodySitePhraseContext
+): string | undefined {
+  if (!AMBIGUOUS_DIGIT_SITE_KEYS.has(lookupCanonical)) {
+    return undefined;
+  }
+  if (contextContainsAny(context?.bodySiteContext, FOOT_CONTEXT_KEYS)) {
+    return "between toes";
+  }
+  if (contextContainsAny(context?.bodySiteContext, HAND_CONTEXT_KEYS)) {
+    return "between fingers";
   }
   return undefined;
 }
@@ -557,7 +595,8 @@ function inferPreferredPreposition(
 
 export function resolveBodySitePhrase(
   text: string,
-  customSiteMap?: Record<string, BodySiteDefinition>
+  customSiteMap?: Record<string, BodySiteDefinition>,
+  context?: BodySitePhraseContext
 ): ResolvedBodySitePhrase | undefined {
   const trimmed = text.trim().replace(/\s+/g, " ");
   if (!trimmed) {
@@ -565,10 +604,16 @@ export function resolveBodySitePhrase(
   }
 
   const lookupCanonical = normalizeBodySiteKey(trimmed);
-  const displayText = normalizeSiteDisplayText(trimmed, customSiteMap);
+  const contextualCanonical = resolveContextualBodySiteAlias(lookupCanonical, context);
+  const displaySourceText = contextualCanonical ?? trimmed;
+  const displayText = normalizeSiteDisplayText(displaySourceText, customSiteMap);
   const canonical = normalizeBodySiteKey(displayText);
   const definition =
     lookupBodySiteDefinition(customSiteMap, lookupCanonical) ??
+    (contextualCanonical
+      ? lookupBodySiteDefinition(customSiteMap, contextualCanonical)
+      : undefined) ??
+    (contextualCanonical ? DEFAULT_BODY_SITE_SNOMED[contextualCanonical] : undefined) ??
     DEFAULT_BODY_SITE_SNOMED[lookupCanonical] ??
     lookupBodySiteDefinition(customSiteMap, canonical) ??
     DEFAULT_BODY_SITE_SNOMED[canonical];
@@ -581,6 +626,7 @@ export function resolveBodySitePhrase(
 
   return {
     lookupCanonical,
+    resolutionCanonical: contextualCanonical ?? lookupCanonical,
     canonical: normalizeBodySiteKey(finalDisplayText) || canonical,
     displayText: finalDisplayText,
     coding,

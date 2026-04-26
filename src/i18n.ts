@@ -302,6 +302,10 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   hands: "มือทั้งสองข้าง",
   finger: "นิ้วมือ",
   fingers: "นิ้วมือ",
+  toe: "นิ้วเท้า",
+  toes: "นิ้วเท้า",
+  "between fingers": "ระหว่างนิ้วมือ",
+  "between toes": "ระหว่างนิ้วเท้า",
   "back of hand": "หลังมือ",
   "both backs of hands": "หลังมือทั้งสองข้าง",
   palm: "ฝ่ามือ",
@@ -322,6 +326,9 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   abdomen: "ท้อง",
   abdominal: "ท้อง",
   belly: "ท้อง",
+  flank: "สีข้าง",
+  "left flank": "สีข้างซ้าย",
+  "right flank": "สีข้างขวา",
   "affected area": "บริเวณที่เป็น",
   "affected site": "บริเวณที่เป็น",
   "บริเวณที่เป็น": "บริเวณที่เป็น",
@@ -382,10 +389,16 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   buttocks: "สะโพกทั้งสองข้าง",
   gluteal: "สะโพก",
   glute: "สะโพก",
+  butt: "สะโพก",
+  ass: "สะโพก",
   "left buttock": "สะโพกซ้าย",
   "left gluteal": "สะโพกซ้าย",
+  "left butt": "สะโพกซ้าย",
+  "left ass": "สะโพกซ้าย",
   "right buttock": "สะโพกขวา",
   "right gluteal": "สะโพกขวา",
+  "right butt": "สะโพกขวา",
+  "right ass": "สะโพกขวา",
   muscle: "กล้ามเนื้อ",
   muscles: "กล้ามเนื้อทั้งหมด",
   vein: "หลอดเลือดดำ",
@@ -1306,13 +1319,10 @@ function translateSiteThai(
   code?: string,
   spatialRelation?: BodySiteSpatialRelation
 ): string | undefined {
-  if (code) {
-    const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
-    if (translatedByCode) {
-      return translatedByCode;
-    }
-  }
   if (!site) {
+    if (code) {
+      return THAI_SITE_CODE_TRANSLATIONS[code];
+    }
     return undefined;
   }
   const normalized = normalizeBodySiteKey(site);
@@ -1324,7 +1334,16 @@ function translateSiteThai(
     return direct;
   }
   const spatial = translateSpatialSiteThai(site, spatialRelation);
-  return spatial ?? site;
+  if (spatial) {
+    return spatial;
+  }
+  if (code) {
+    const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
+    if (translatedByCode) {
+      return translatedByCode;
+    }
+  }
+  return site;
 }
 
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {

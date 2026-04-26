@@ -1,5 +1,5 @@
 {
-  "siteAnchors": ["to", "in", "into", "on", "onto", "at", "inside", "within", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
+  "siteAnchors": ["to", "in", "into", "on", "onto", "at", "ที่", "inside", "within", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
   "siteSelfDisplayAnchors": ["inside", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
   "siteFillers": ["the", "a", "an", "your", "his", "her", "their", "my"],
   "bodySiteLocativeRelations": ["behind", "around", "under", "above", "below", "beneath", "near", "outside", "inside", "between"],

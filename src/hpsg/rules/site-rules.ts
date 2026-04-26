@@ -51,7 +51,9 @@ import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
-  const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap));
+  const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap, {
+    bodySiteContext: context.options?.context?.bodySiteContext
+  }));
   return (
     isPunctuation(lower) ||
     PRN_LEADS.has(lower) ||
@@ -205,7 +207,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         if (
           !isPunctuation(candidateLower) ||
           !nextLower ||
-          !resolveBodySitePhrase(continuedText, context.options?.siteCodeMap)
+          !resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
+            bodySiteContext: context.options?.context?.bodySiteContext
+          })
         ) {
           break;
         }
@@ -229,12 +233,14 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {
       return signs;
     }
-    const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap);
+    const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
     const abbreviationCandidate = displayTokens.length === 1
       ? getPrimarySiteMeaningCandidate(displayTokens[0])
       : undefined;
     const displayText = abbreviationCandidate?.text ?? resolved?.displayText ?? sourceText;
-    const canonical = resolved?.lookupCanonical ?? normalizeBodySiteKey(displayText);
+    const canonical = resolved?.resolutionCanonical ?? normalizeBodySiteKey(displayText);
     const rawRange = rangeFromTokens(displayTokens);
     let range = rawRange;
     if (isProbe && rawRange) {
@@ -321,7 +327,9 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const sourceText = joinTokenText(tokens).replace(/[{}]/g, "").trim();
-      const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap);
+      const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      });
       if (!resolved?.coding && !resolved?.definition) {
         continue;
       }
@@ -349,7 +357,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                   originalText: sourceText,
                   text: sourceText,
                   normalized: sourceText.toLowerCase(),
-                  canonical: resolved.lookupCanonical ?? normalizeBodySiteKey(displayText),
+                  canonical: resolved.resolutionCanonical ?? normalizeBodySiteKey(displayText),
                   isProbe: false,
                   inputText: context.state.input,
                   sourceText,

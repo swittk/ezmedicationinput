@@ -180,7 +180,9 @@ function routeTokenIsPartitiveSiteHead(
     if (tokens.some((token) => context.state.consumed.has(token.index))) {
       return false;
     }
-    const resolved = resolveBodySitePhrase(joinTokenText(tokens), context.options?.siteCodeMap);
+    const resolved = resolveBodySitePhrase(joinTokenText(tokens), context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
     if (resolved?.features.kind === "partitive") {
       return true;
     }
@@ -196,7 +198,9 @@ function routeFromSitePrepositionPhrase(
     return undefined;
   }
   const siteText = tokens.slice(1).map((token) => token.original).join(" ");
-  const resolved = resolveBodySitePhrase(siteText, context.options?.siteCodeMap);
+  const resolved = resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+    bodySiteContext: context.options?.context?.bodySiteContext
+  });
   const routeHint = resolved?.definition?.routeHint ??
     DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
   return routeHint ? { code: routeHint, text: ROUTE_TEXT[routeHint] } : undefined;

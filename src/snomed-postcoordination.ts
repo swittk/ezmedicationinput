@@ -1,11 +1,13 @@
 import { buildBodySiteSpatialRelationExtensions } from "./body-site-spatial";
 import {
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
+  SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE,
   SNOMED_SYSTEM
 } from "./snomed";
 import { BodySiteSpatialRelation, FhirCoding } from "./types";
 
 const SNOMED_FINDING_SITE_ATTRIBUTE_MARKER = `:${SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE}=`;
+const SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER = `:${SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE}=`;
 
 export function hasSnomedFindingSitePostcoordination(code: string | undefined): boolean {
   return Boolean(code?.includes(SNOMED_FINDING_SITE_ATTRIBUTE_MARKER));
@@ -16,6 +18,51 @@ export function buildSnomedFindingSitePostcoordinationCode(
   siteCode: string
 ): string {
   return `${focusCode}${SNOMED_FINDING_SITE_ATTRIBUTE_MARKER}${siteCode}`;
+}
+
+export function hasSnomedTopographicalModifierPostcoordination(code: string | undefined): boolean {
+  return Boolean(code?.includes(SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER));
+}
+
+export function buildSnomedBodySiteTopographicalModifierPostcoordinationCode(
+  siteCode: string,
+  modifierCode: string
+): string {
+  return `${siteCode}${SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER}${modifierCode}`;
+}
+
+export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
+  code: string | undefined
+): { siteCode: string; modifierCode: string } | undefined {
+  const markerIndex = code?.indexOf(SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER) ?? -1;
+  if (!code || markerIndex < 0) {
+    return undefined;
+  }
+  const siteCode = code.slice(0, markerIndex).trim();
+  const modifierCode = code
+    .slice(markerIndex + SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER.length)
+    .trim();
+  if (!siteCode || !modifierCode) {
+    return undefined;
+  }
+  return { siteCode, modifierCode };
+}
+
+export function parseSnomedFindingSitePostcoordinationCode(
+  code: string | undefined
+): { focusCode: string; siteCode: string } | undefined {
+  const markerIndex = code?.indexOf(SNOMED_FINDING_SITE_ATTRIBUTE_MARKER) ?? -1;
+  if (!code || markerIndex < 0) {
+    return undefined;
+  }
+  const focusCode = code.slice(0, markerIndex).trim();
+  const siteCode = code
+    .slice(markerIndex + SNOMED_FINDING_SITE_ATTRIBUTE_MARKER.length)
+    .trim();
+  if (!focusCode || !siteCode) {
+    return undefined;
+  }
+  return { focusCode, siteCode };
 }
 
 export function buildSnomedFindingSiteCoding(params: {
@@ -43,4 +90,3 @@ export function buildSnomedFindingSiteCoding(params: {
     extension: buildBodySiteSpatialRelationExtensions(params.spatialRelation)
   };
 }
-
