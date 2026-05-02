@@ -2,13 +2,14 @@ import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { AdviceForce, CanonicalAdditionalInstructionExpr } from "../../types";
+import { AdviceArgumentRole, AdviceForce, CanonicalAdditionalInstructionExpr } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
   INSTRUCTION_LEADING_SEPARATORS,
   INSTRUCTION_START_WORDS,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
+  SITE_ANCHORS,
   WORKFLOW_CONTINUATION_LICENSES,
   WORKFLOW_NOUNS,
   WORKFLOW_START_WORDS
@@ -161,6 +162,29 @@ function parseInstructionCandidates(
   return best;
 }
 
+function bodyParsesAsStyleInstruction(
+  context: HpsgClauseContext,
+  bodyTokens: Token[]
+): boolean {
+  const range = rangeFromTokens(bodyTokens);
+  const text = range
+    ? context.state.input.slice(range.start, range.end).replace(/\s+/g, " ").trim()
+    : joinTokenText(bodyTokens);
+  if (!range || !text) {
+    return false;
+  }
+  return parseInstructionCandidates(text, range).some((instruction) =>
+    instruction.frames?.some((frame) =>
+      !frame.relation &&
+      frame.predicate.semanticClass === "administration" &&
+      frame.args.length > 0 &&
+      frame.args.every((arg) =>
+        arg.role === AdviceArgumentRole.Amount || arg.role === AdviceArgumentRole.Free
+      )
+    )
+  );
+}
+
 export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.instruction", (context, start) => {
     const first = context.tokens[start];
@@ -195,6 +219,13 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         return [];
       }
       if (bodyTokens.length && isScheduleLead(context, cursor)) {
+        break;
+      }
+      if (
+        bodyTokens.length &&
+        SITE_ANCHORS.has(normalizeTokenLower(token)) &&
+        bodyParsesAsStyleInstruction(context, bodyTokens)
+      ) {
         break;
       }
       bodyTokens.push(token);

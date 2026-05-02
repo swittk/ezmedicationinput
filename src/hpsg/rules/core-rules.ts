@@ -22,6 +22,10 @@ import {
   CLOCK_LEAD_TOKENS,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
+  DOSE_FRACTION_DENOMINATOR_WORDS,
+  DOSE_FRACTION_WORDS,
+  DOSE_NUMBER_WORDS,
+  DOSE_UNIT_CONNECTORS,
   LIST_SEPARATORS,
   MEDICATION_OBJECT_FILLERS,
   MILLION_DOSE_MULTIPLIER_TOKENS,
@@ -298,6 +302,10 @@ function unitAfter(context: HpsgClauseContext, start: number): { unit: string; t
     return undefined;
   }
   const lower = normalizeTokenLower(token);
+  if (DOSE_UNIT_CONNECTORS.has(lower)) {
+    const nested = unitAfter(context, start + 1);
+    return nested ? { unit: nested.unit, tokens: [token, ...nested.tokens] } : undefined;
+  }
   const compound = COMPOUND_DOSE_UNITS.find((entry) => entry.head === lower);
   if (compound) {
     const next = context.tokens[start + 1];
@@ -315,6 +323,13 @@ function unitAfter(context: HpsgClauseContext, start: number): { unit: string; t
   return undefined;
 }
 
+function doseNumeratorValue(token: Token, lower: string): number | undefined {
+  if (token.kind === LexKind.Number && token.value !== undefined) {
+    return token.value;
+  }
+  return DOSE_NUMBER_WORDS.get(lower);
+}
+
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.dose", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -325,6 +340,35 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const lower = normalizeTokenLower(token);
     if (isClockDoseContext(context, start, lower)) {
       return [];
+    }
+    const numerator = doseNumeratorValue(token, lower);
+    const denominatorToken = context.tokens[start + 1];
+    const denominatorLower = denominatorToken && !context.state.consumed.has(denominatorToken.index)
+      ? normalizeTokenLower(denominatorToken)
+      : undefined;
+    const denominator = denominatorLower
+      ? DOSE_FRACTION_DENOMINATOR_WORDS.get(denominatorLower)
+      : undefined;
+    if (numerator !== undefined && denominatorToken && denominator !== undefined) {
+      const unit = unitAfter(context, start + 2);
+      return [
+        lexicalSign({
+          type: "dose-sign",
+          rule: "hpsg.lex.dose.wordFractionNumerator",
+          tokens: unit ? [token, denominatorToken, ...unit.tokens] : [token, denominatorToken],
+          synsem: {
+            head: {
+              dose: {
+                value: numerator * denominator,
+                unit: unit?.unit
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: unit ? 10 : 5
+        })
+      ];
     }
     const range = parseNumericRange(lower);
     if (range) {
@@ -367,6 +411,28 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             cont: { clauseKind: "administration" }
           },
           score: unit ? 10 : 6
+        })
+      ];
+    }
+    const wordFraction = DOSE_FRACTION_WORDS.get(lower);
+    if (wordFraction !== undefined) {
+      const unit = unitAfter(context, start + 1);
+      return [
+        lexicalSign({
+          type: "dose-sign",
+          rule: "hpsg.lex.dose.wordFraction",
+          tokens: unit ? [...tokens, ...unit.tokens] : tokens,
+          synsem: {
+            head: {
+              dose: {
+                value: wordFraction,
+                unit: unit?.unit
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: unit ? 9 : 4
         })
       ];
     }

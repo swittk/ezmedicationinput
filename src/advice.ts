@@ -55,6 +55,7 @@ interface AdviceFrameTemplate {
 }
 
 interface AdviceDefinitionSource {
+  system?: string;
   code: string;
   display: string;
   text: string;
@@ -370,7 +371,7 @@ function cleanFreeText(value: string): string {
 function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalInstructionDefinition {
   return {
     coding: {
-      system: SNOMED_SYSTEM,
+      system: source.system ?? SNOMED_SYSTEM,
       code: source.code,
       display: source.display
     },

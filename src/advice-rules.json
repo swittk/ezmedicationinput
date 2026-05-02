@@ -619,6 +619,111 @@
       }
     },
     {
+      "id": "thin-layer",
+      "definition": {
+        "code": "420162004",
+        "display": "To be spread thinly",
+        "text": "Apply thinly",
+        "thai": "ทาบางๆ"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "apply", "semanticClass": "administration" },
+          "args": [{ "role": "amount", "text": "thin layer", "conceptId": "thin_layer" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "thinly",
+          "apply thinly",
+          "use thinly",
+          "thin layer",
+          "a thin layer",
+          "apply thin layer",
+          "apply a thin layer",
+          "use thin layer",
+          "use a thin layer",
+          "thin film",
+          "a thin film",
+          "apply thin film",
+          "apply a thin film",
+          "thin coat",
+          "a thin coat",
+          "apply thin coat",
+          "apply a thin coat",
+          "ทาบางๆ",
+          "ทาบาง ๆ",
+          "บางๆ",
+          "บาง ๆ"
+        ]
+      }
+    },
+    {
+      "id": "gently",
+      "definition": {
+        "code": "418449005",
+        "display": "Gently",
+        "text": "Apply gently",
+        "thai": "ทาเบาๆ"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "apply", "semanticClass": "administration" },
+          "args": [{ "role": "free", "text": "gently", "conceptId": "gently" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "gently",
+          "apply gently",
+          "use gently",
+          "เบาๆ",
+          "เบา ๆ",
+          "ทาเบาๆ",
+          "ทาเบา ๆ"
+        ]
+      }
+    },
+    {
+      "id": "thick-layer",
+      "definition": {
+        "code": "246703001",
+        "display": "Thick",
+        "text": "Apply thickly",
+        "thai": "ทาหนาๆ"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": { "lemma": "apply", "semanticClass": "administration" },
+          "args": [{ "role": "amount", "text": "thick layer", "conceptId": "thick_layer" }]
+        }
+      ],
+      "matcher": {
+        "normalizedTexts": [
+          "thickly",
+          "apply thickly",
+          "use thickly",
+          "thick layer",
+          "a thick layer",
+          "apply thick layer",
+          "apply a thick layer",
+          "use thick layer",
+          "use a thick layer",
+          "thick coat",
+          "a thick coat",
+          "apply thick coat",
+          "apply a thick coat",
+          "ทาหนาๆ",
+          "ทาหนา ๆ",
+          "หนาๆ",
+          "หนา ๆ"
+        ]
+      }
+    },
+    {
       "id": "slowly",
       "definition": {
         "code": "419443000",

@@ -2327,6 +2327,35 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "mL" });
   });
 
+  it("parses fractional topical container doses without treating slash fractions as clock times", () => {
+    const cases = [
+      ["apply half tube to arm", 0.5, "tube", "arm"],
+      ["apply a half tube", 0.5, "tube", undefined],
+      ["apply 1/2 tube", 0.5, "tube", undefined],
+      ["apply 1/4 tube", 0.25, "tube", undefined],
+      ["apply 1/4 container", 0.25, "container", undefined],
+      ["apply 1/3 of bottle", 1 / 3, "bottle", undefined],
+      ["apply half bottle", 0.5, "bottle", undefined],
+      ["apply fifth tube", 0.2, "tube", undefined],
+      ["apply sixth tube", 1 / 6, "tube", undefined],
+      ["apply two fifths of bottle", 2 / 5, "bottle", undefined],
+      ["apply 2 fifths of bottle", 2 / 5, "bottle", undefined],
+      ["apply three quarters tube", 3 / 4, "tube", undefined],
+      ["apply one twelfth container", 1 / 12, "container", undefined]
+    ] as const;
+
+    for (const [sig, value, unit, site] of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeCloseTo(value);
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity?.unit).toBe(unit);
+      expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
+      expect(result.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+      if (site) {
+        expect(result.fhir.site?.text).toBe(site);
+      }
+    }
+  });
+
   it("normalizes complex dosage forms from context", () => {
     const result = parseSig("1", { context: { dosageForm: "capsule, soft" } });
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "cap" });
@@ -2788,6 +2817,40 @@ describe("parseSig core scenarios", () => {
       const result = parseSig(sig);
       expect(result.longText).toBe(longText);
     }
+  });
+
+  it("keeps topical manner and thin-layer instructions separate from body-site text", () => {
+    const cases = [
+      ["apply to hairline gently", "hairline", "418449005", "Apply the medication to the hairline. Apply gently."],
+      ["apply gently to lesion", "lesion", "418449005", "Apply the medication to the lesion. Apply gently."],
+      ["apply to lesion gently", "lesion", "418449005", "Apply the medication to the lesion. Apply gently."],
+      ["apply thinly to face", "face", "420162004", "Apply the medication to the face. Apply thinly."],
+      ["apply thin layer to face", "face", "420162004", "Apply the medication to the face. Apply thinly."],
+      ["apply thinly to lesions", "lesions", "420162004", "Apply the medication to the lesions. Apply thinly."],
+      ["apply thinly to lesion", "lesion", "420162004", "Apply the medication to the lesion. Apply thinly."],
+      ["apply thickly to face", "face", "246703001", "Apply the medication to the face. Apply thickly."],
+      ["apply thick layer to face", "face", "246703001", "Apply the medication to the face. Apply thickly."],
+      ["apply to lesion thickly", "lesion", "246703001", "Apply the medication to the lesion. Apply thickly."]
+    ] as const;
+
+    for (const [sig, site, instructionCode, longText] of cases) {
+      const result = parseSig(sig);
+      expect(result.fhir.site?.text).toBe(site);
+      expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]).toMatchObject({
+        system: "http://snomed.info/sct",
+        code: instructionCode
+      });
+      expect(result.longText).toBe(longText);
+      expect(result.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+    }
+
+    const standalone = parseSig("apply thinly");
+    expect(standalone.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("420162004");
+    expect(standalone.longText).toBe("Apply the medication topically. Apply thinly.");
+
+    const thickStandalone = parseSig("apply thickly");
+    expect(thickStandalone.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("246703001");
+    expect(thickStandalone.longText).toBe("Apply the medication topically. Apply thickly.");
   });
 
   it("emits structured spatial relation metadata for body-site relation phrases", () => {

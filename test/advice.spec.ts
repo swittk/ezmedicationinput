@@ -206,6 +206,24 @@ describe("additional instruction rule inventory", () => {
     const liberally = parseAdditionalInstructions("use liberally", { start: 0, end: 13 });
     expect(liberally[0]?.coding?.code).toBe("419125005");
 
+    const thinly = parseAdditionalInstructions("apply thin layer", { start: 0, end: 16 });
+    expect(thinly[0]?.coding).toMatchObject({
+      system: SNOMED_SYSTEM,
+      code: "420162004"
+    });
+
+    const gently = parseAdditionalInstructions("apply gently", { start: 0, end: 13 });
+    expect(gently[0]?.coding).toMatchObject({
+      system: SNOMED_SYSTEM,
+      code: "418449005"
+    });
+
+    const thickly = parseAdditionalInstructions("apply thick layer", { start: 0, end: 17 });
+    expect(thickly[0]?.coding).toMatchObject({
+      system: SNOMED_SYSTEM,
+      code: "246703001"
+    });
+
     const dissolve = parseAdditionalInstructions("dissolve under the tongue", { start: 0, end: 25 });
     expect(dissolve[0]?.coding?.code).toBe("419529008");
 
@@ -278,5 +296,14 @@ describe("additional instruction rule inventory", () => {
 
     const sparingly = parseSig("apply sparingly", { locale: "th" });
     expect(sparingly.longText).toContain("ใช้เพียงเล็กน้อย");
+
+    const thinly = parseSig("apply thinly", { locale: "th" });
+    expect(thinly.longText).toContain("ทาบางๆ");
+
+    const gently = parseSig("apply gently", { locale: "th" });
+    expect(gently.longText).toContain("ทาเบาๆ");
+
+    const thickly = parseSig("apply thickly", { locale: "th" });
+    expect(thickly.longText).toContain("ทาหนาๆ");
   });
 });

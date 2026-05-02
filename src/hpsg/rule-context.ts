@@ -57,6 +57,9 @@ export function parseClockToken(
   if (lower.startsWith("@")) {
     lower = lower.slice(1);
   }
+  if (token.derived && token.sourceText?.includes("/") && /^[0-9]+(?:\.[0-9]+)?$/.test(lower)) {
+    return undefined;
+  }
   const meridiem = meridiemToken ? normalizeTokenLower(meridiemToken) : undefined;
   let hour: number;
   let minute = 0;

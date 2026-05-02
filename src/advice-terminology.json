@@ -45,6 +45,12 @@
     { "surface": "whole", "lemma": "whole", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "thin layer", "lemma": "thin layer", "partOfSpeech": "noun", "semanticClass": "amount_style" },
     { "surface": "thin film", "lemma": "thin film", "partOfSpeech": "noun", "semanticClass": "amount_style" },
+    { "surface": "thin coat", "lemma": "thin layer", "partOfSpeech": "noun", "semanticClass": "amount_style" },
+    { "surface": "thinly", "lemma": "thin layer", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
+    { "surface": "thick layer", "lemma": "thick layer", "partOfSpeech": "noun", "semanticClass": "amount_style" },
+    { "surface": "thick coat", "lemma": "thick layer", "partOfSpeech": "noun", "semanticClass": "amount_style" },
+    { "surface": "thickly", "lemma": "thick layer", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
+    { "surface": "gently", "lemma": "gently", "partOfSpeech": "modifier", "semanticClass": "manner_style" },
     { "surface": "sparingly", "lemma": "sparingly", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "liberally", "lemma": "liberally", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "slowly", "lemma": "slowly", "partOfSpeech": "modifier", "semanticClass": "manner_style" },
@@ -99,6 +105,14 @@
     { "surface": "dressing", "lemma": "dressing", "semanticClass": "material", "conceptId": "dressing" },
     { "surface": "affected area", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },
     { "surface": "affected areas", "lemma": "affected area", "semanticClass": "site", "conceptId": "affected_area" },
+    { "surface": "thinly", "lemma": "thin layer", "semanticClass": "amount_style", "conceptId": "thin_layer" },
+    { "surface": "thin layer", "lemma": "thin layer", "semanticClass": "amount_style", "conceptId": "thin_layer" },
+    { "surface": "thin film", "lemma": "thin layer", "semanticClass": "amount_style", "conceptId": "thin_layer" },
+    { "surface": "thin coat", "lemma": "thin layer", "semanticClass": "amount_style", "conceptId": "thin_layer" },
+    { "surface": "thickly", "lemma": "thick layer", "semanticClass": "amount_style", "conceptId": "thick_layer" },
+    { "surface": "thick layer", "lemma": "thick layer", "semanticClass": "amount_style", "conceptId": "thick_layer" },
+    { "surface": "thick coat", "lemma": "thick layer", "semanticClass": "amount_style", "conceptId": "thick_layer" },
+    { "surface": "gently", "lemma": "gently", "semanticClass": "manner_style", "conceptId": "gently" },
     { "surface": "slowly", "lemma": "slowly", "semanticClass": "manner_style", "conceptId": "slowly" }
   ]
 }

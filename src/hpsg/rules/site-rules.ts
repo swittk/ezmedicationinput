@@ -34,7 +34,8 @@ import {
   SITE_ANCHORS,
   SITE_DISPLAY_FILLERS,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
-  SITE_SELF_DISPLAY_ANCHORS
+  SITE_SELF_DISPLAY_ANCHORS,
+  SITE_TRAILING_INSTRUCTION_WORDS
 } from "../lexical-classes";
 import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
 import {
@@ -60,6 +61,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
     PRN_LEADS.has(lower) ||
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
+    SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
     Boolean(
       METHOD_ACTION_BY_VERB[lower] ||
       (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||

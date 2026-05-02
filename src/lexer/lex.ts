@@ -25,7 +25,7 @@ const PER_SLASH_UNITS = new Set([
 ]);
 
 const COMPACT_DISCRETE_UNITS_PATTERN =
-  /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|puff|puffs|spray|sprays|patch|patches)$/i;
+  /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|puff|puffs|spray|sprays|patch|patches|tube|tubes|bottle|bottles|container|containers)$/i;
 
 function classifyLexKind(value: string): {
   kind: LexKind;

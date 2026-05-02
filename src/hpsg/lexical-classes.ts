@@ -82,6 +82,16 @@ function numberRecord(record: Record<string, number>): Record<string, number> {
   return { ...record };
 }
 
+function numberEntries(record: Record<string, number>): Array<[string, number]> {
+  const entries: Array<[string, number]> = [];
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      entries.push([key, record[key]]);
+    }
+  }
+  return entries;
+}
+
 function periodUnitRecord(record: Record<string, string>) {
   const result = new Map<string, string>();
   for (const [token, label] of stringEntries(record)) {
@@ -161,6 +171,16 @@ export const SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR = routeCodeSet(source.siteRoute
 export const PRODUCT_METHOD_TEXT = source.productMethodText as Record<string, Partial<Record<string, string>>>;
 export const PRODUCT_METHOD_THAI = source.productMethodThai as Record<string, string>;
 export const COMPOUND_DOSE_UNITS = source.compoundDoseUnits as CompoundDoseUnit[];
+export const DOSE_FRACTION_WORDS = new Map<string, number>(
+  numberEntries(source.doseFractionWords as Record<string, number>)
+);
+export const DOSE_FRACTION_DENOMINATOR_WORDS = new Map<string, number>(
+  numberEntries(source.doseFractionDenominatorWords as Record<string, number>)
+);
+export const DOSE_NUMBER_WORDS = new Map<string, number>(
+  numberEntries(source.doseNumberWords as Record<string, number>)
+);
+export const DOSE_UNIT_CONNECTORS = setOf(source.doseUnitConnectors);
 export const MILLION_DOSE_MULTIPLIER_TOKENS = setOf(source.millionDoseMultiplierTokens);
 export const SCHEDULE_UNIT_SEPARATOR_TOKENS = setOf(source.scheduleUnitSeparatorTokens);
 export const COMPACT_LIST_SEPARATORS = setOf(source.compactListSeparators);
@@ -198,6 +218,7 @@ export const DURATION_LEAD_TOKENS = setOf(source.durationLeadTokens);
 
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
 export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);
+export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
 export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationLicenses);
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
