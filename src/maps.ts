@@ -1129,6 +1129,14 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "34797008", display: "Axilla structure" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["axillary hair", "armpit hair", "armpit hairs", "underarm hair", "underarm hairs"],
+      definition: {
+        coding: { code: "75703003", display: "Structure of hair of axilla" },
+        text: "axillary hair",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["groin"],
       definition: { coding: { code: "26893007", display: "Inguinal region structure" }, routeHint: RouteCode["Topical route"] }
     },
@@ -1197,6 +1205,71 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     {
       names: ["face"],
       definition: { coding: { code: "89545001", display: "Face" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["eyebrow", "brow"],
+      definition: {
+        coding: { code: "392262008", display: "Eyebrow structure" },
+        text: "eyebrow",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["eyebrows", "brows"],
+      definition: {
+        coding: { code: "392262008", display: "Eyebrow structure" },
+        text: "eyebrows",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["left eyebrow", "left brow"],
+      definition: {
+        coding: { code: "722011002", display: "Structure of eyebrow of left eye region" },
+        text: "left eyebrow",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["right eyebrow", "right brow"],
+      definition: {
+        coding: { code: "722012009", display: "Structure of eyebrow of right eye region" },
+        text: "right eyebrow",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: [
+        "both eyebrows",
+        "bilateral eyebrows",
+        "each eyebrow",
+        "left and right eyebrow",
+        "left and right eyebrows",
+        "right and left eyebrow",
+        "right and left eyebrows",
+        "left right eyebrow",
+        "left right eyebrows"
+      ],
+      definition: {
+        coding: {
+          code: buildSnomedBodySiteLateralityPostcoordinationCode(
+            "392262008",
+            SNOMED_CT_BILATERAL_QUALIFIER_CODE
+          ),
+          display: "both eyebrows"
+        },
+        text: "both eyebrows",
+        administrationTargetCount: 2,
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["eyebrow hair", "eyebrow hairs", "brow hair", "brow hairs"],
+      definition: {
+        coding: { code: "392261001", display: "Hair structure of eyebrow" },
+        text: "eyebrow hair",
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["eyelid", "eyelids"],
@@ -1319,6 +1392,30 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "243990009", display: "Entire perineum" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["mustache", "moustache", "mustache hair", "moustache hair"],
+      definition: {
+        coding: { code: "256925006", display: "Structure of hair of mustache" },
+        text: "mustache",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["beard", "beard hair", "facial hair"],
+      definition: {
+        coding: { code: "367576007", display: "Structure of beard hair" },
+        text: "beard",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["pubic hair"],
+      definition: {
+        coding: { code: "75776007", display: "Structure of hair of pubis" },
+        text: "pubic hair",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["skin"],
       definition: { coding: { code: "181469002", display: "Entire skin" }, routeHint: RouteCode["Topical route"] }
     },
@@ -1326,6 +1423,38 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       names: ["hair"],
       definition: {
         coding: { code: "386045008", display: "Hair structure (body structure)" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["joint"],
+      definition: {
+        coding: { code: "39352004", display: "Joint structure" },
+        text: "joint",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["joints"],
+      definition: {
+        coding: { code: "81087007", display: "Joints" },
+        text: "joints",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["finger joint", "finger joints"],
+      definition: {
+        coding: { code: "125682004", display: "Finger joint structure" },
+        text: "finger joints",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["knuckle", "knuckles"],
+      definition: {
+        coding: { code: "70420003", display: "Metacarpophalangeal joint structure" },
+        text: "knuckles",
         routeHint: RouteCode["Topical route"]
       }
     }

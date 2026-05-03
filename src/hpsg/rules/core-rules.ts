@@ -1,6 +1,7 @@
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
+  normalizeBodySiteKey,
   ROUTE_TEXT
 } from "../../maps";
 import {
@@ -34,7 +35,8 @@ import {
   PRODUCT_METHOD_TEXT,
   PRODUCT_METHOD_THAI,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
-  ROUTE_SITE_PREPOSITIONS
+  ROUTE_SITE_PREPOSITIONS,
+  SITE_ANCHORS
 } from "../lexical-classes";
 import {
   cloneMethodCoding,
@@ -308,6 +310,54 @@ function matchCompoundDoseUnit(
   start: number,
   lower: string
 ): UnitMatch | undefined {
+  const hasSiteMeaning = (lowerValue: string | undefined): boolean => Boolean(
+    lowerValue &&
+    (
+      DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(lowerValue)] ||
+      resolveBodySitePhrase(lowerValue, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      })
+    )
+  );
+  const matchesSiteContext = (): boolean => {
+    const next = context.tokens[start + 1];
+    const followingSiteHead = context.tokens[start + 2];
+    const nextLower = next && !context.state.consumed.has(next.index)
+      ? normalizeTokenLower(next)
+      : undefined;
+    const followingSiteHeadLower = followingSiteHead && !context.state.consumed.has(followingSiteHead.index)
+      ? normalizeTokenLower(followingSiteHead)
+      : undefined;
+    if (
+      nextLower &&
+      (ROUTE_SITE_PREPOSITIONS.has(nextLower) || SITE_ANCHORS.has(nextLower)) &&
+      hasSiteMeaning(followingSiteHeadLower)
+    ) {
+      return true;
+    }
+
+    const previous = context.tokens[start - 1];
+    const previousLower = previous && !context.state.consumed.has(previous.index)
+      ? normalizeTokenLower(previous)
+      : undefined;
+    const precedingSiteHead = previousLower && /^[0-9]+(?:\.[0-9]+)?$/.test(previousLower)
+      ? context.tokens[start - 2]
+      : previous;
+    const precedingAnchor = previousLower && /^[0-9]+(?:\.[0-9]+)?$/.test(previousLower)
+      ? context.tokens[start - 3]
+      : context.tokens[start - 2];
+    const precedingSiteHeadLower = precedingSiteHead && !context.state.consumed.has(precedingSiteHead.index)
+      ? normalizeTokenLower(precedingSiteHead)
+      : undefined;
+    const precedingAnchorLower = precedingAnchor && !context.state.consumed.has(precedingAnchor.index)
+      ? normalizeTokenLower(precedingAnchor)
+      : undefined;
+    return Boolean(
+      precedingAnchorLower &&
+      (ROUTE_SITE_PREPOSITIONS.has(precedingAnchorLower) || SITE_ANCHORS.has(precedingAnchorLower)) &&
+      hasSiteMeaning(precedingSiteHeadLower)
+    );
+  };
   for (const compound of COMPOUND_DOSE_UNITS) {
     if (compound.head !== lower) {
       continue;
@@ -341,6 +391,11 @@ function matchCompoundDoseUnit(
         const head = context.tokens[start];
         return head ? { unit: compound.unit, tokens: [head, next] } : undefined;
       }
+    }
+
+    if (compound.requiresSiteContext && matchesSiteContext()) {
+      const head = context.tokens[start];
+      return head ? { unit: compound.unit, tokens: [head] } : undefined;
     }
   }
   return undefined;

@@ -91,6 +91,7 @@
     "Use shampoo": "สระ"
   },
   "compoundDoseUnits": [
+    { "head": "cm", "tails": [], "requiresSiteContext": true, "unit": "cm line" },
     { "head": "cm", "tails": ["ribbon", "ribbons"], "unit": "cm ribbon" },
     { "head": "cm", "tails": ["strip", "strips"], "unit": "cm strip" },
     { "head": "cm", "tails": ["line", "lines"], "unit": "cm line" },
@@ -99,6 +100,8 @@
     { "head": "fingertip", "tails": ["unit", "units"], "unit": "FTU" },
     { "head": "eye", "tails": ["drop", "drops"], "unit": "drop" },
     { "head": "pea-sized", "tails": ["amount"], "unit": "pea-sized amount" },
+    { "head": "pea-size", "tails": ["amount"], "unit": "pea-sized amount" },
+    { "head": "peasize", "tails": [], "tailSequences": [[]], "unit": "pea-sized amount" },
     { "head": "เม็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
     { "head": "เม็ดถั่วเขียว", "tails": [], "unit": "pea-sized amount" },
     { "head": "เมล็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
@@ -108,7 +111,7 @@
     {
       "head": "pea",
       "tails": [],
-      "tailSequences": [["sized", "amount"], ["size", "amount"]],
+      "tailSequences": [["sized", "amount"], ["size", "amount"], ["amount"], ["sized"], ["size"], []],
       "unit": "pea-sized amount"
     },
     { "head": "hand", "tails": ["print", "prints"], "unit": "handprint" },

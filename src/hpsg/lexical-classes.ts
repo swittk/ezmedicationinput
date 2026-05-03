@@ -8,6 +8,7 @@ type CompoundDoseUnit = {
   head: string;
   tails: string[];
   tailSequences?: string[][];
+  requiresSiteContext?: boolean;
   unit: string;
 };
 

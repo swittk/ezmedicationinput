@@ -48,6 +48,11 @@
       "unit": "pea-sized amount",
       "kind": "product_specific_amount",
       "aliases": [
+        "pea",
+        "pea amount",
+        "peasize",
+        "pea-size",
+        "pea size",
         "pea sized amount",
         "pea-sized",
         "pea sized",

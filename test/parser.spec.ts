@@ -19,6 +19,7 @@ import {
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import {
+  SNOMED_CT_BILATERAL_QUALIFIER_CODE,
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
   SNOMED_CT_LATERALITY_ATTRIBUTE_CODE,
   SNOMED_CT_TOPOGRAPHICAL_MODIFIER_CODE
@@ -2460,6 +2461,90 @@ describe("parseSig core scenarios", () => {
     });
   });
 
+  it("codes eyebrow, hair-region, and joint body sites with SNOMED", () => {
+    const cases = [
+      {
+        sig: "apply ointment to eyebrow daily",
+        site: "eyebrow",
+        code: "392262008",
+        display: "Eyebrow structure"
+      },
+      {
+        sig: "apply ointment to left eyebrow daily",
+        site: "left eyebrow",
+        code: "722011002",
+        display: "Structure of eyebrow of left eye region"
+      },
+      {
+        sig: "apply ointment to both eyebrows daily",
+        site: "both eyebrows",
+        code: lateralizedSiteCode("392262008", SNOMED_CT_BILATERAL_QUALIFIER_CODE),
+        display: "both eyebrows",
+        administrationTargetCount: 2
+      },
+      {
+        sig: "apply ointment to left & right eyebrows daily",
+        site: "both eyebrows",
+        code: lateralizedSiteCode("392262008", SNOMED_CT_BILATERAL_QUALIFIER_CODE),
+        display: "both eyebrows",
+        administrationTargetCount: 2
+      },
+      {
+        sig: "apply ointment to moustache daily",
+        site: "mustache",
+        code: "256925006",
+        display: "Structure of hair of mustache"
+      },
+      {
+        sig: "apply ointment to pubic hair daily",
+        site: "pubic hair",
+        code: "75776007",
+        display: "Structure of hair of pubis"
+      },
+      {
+        sig: "apply ointment to armpit hair daily",
+        site: "axillary hair",
+        code: "75703003",
+        display: "Structure of hair of axilla"
+      },
+      {
+        sig: "apply ointment to knuckles daily",
+        site: "knuckles",
+        code: "70420003",
+        display: "Metacarpophalangeal joint structure"
+      },
+      {
+        sig: "apply ointment to joints daily",
+        site: "joints",
+        code: "81087007",
+        display: "Joints"
+      }
+    ];
+
+    for (const testCase of cases) {
+      const result = parseSig(testCase.sig);
+      expect(result.fhir.site?.text).toBe(testCase.site);
+      expect(result.fhir.site?.coding?.[0]).toEqual({
+        system: "http://snomed.info/sct",
+        code: testCase.code,
+        display: testCase.display
+      });
+      expect(result.meta.normalized.site?.coding).toEqual({
+        system: "http://snomed.info/sct",
+        code: testCase.code,
+        display: testCase.display
+      });
+      expect(result.fhir.route?.coding?.[0]?.code).toBe(
+        SNOMEDCTRouteCodes["Topical route"]
+      );
+      if (testCase.administrationTargetCount !== undefined) {
+        expect(result.meta.normalized.site?.administrationTargetCount).toBe(
+          testCase.administrationTargetCount
+        );
+      }
+    }
+  });
+
   it("provides lookup suggestions for probe syntax", () => {
     const input = "apply to {left arm} twice daily";
     const result = parseSig(input);
@@ -4816,6 +4901,21 @@ describe("topical product forms and workflow", () => {
       value: 0.5,
       unit: "cm ribbon"
     });
+
+    const contextualLine = parseSig("1 cm to arm");
+    expect(contextualLine.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "cm line"
+    });
+    expect(contextualLine.fhir.timing?.repeat?.when).toBeUndefined();
+
+    const trailingLine = parseSig("apply to arm 1cm");
+    expect(trailingLine.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "cm line"
+    });
+    expect(trailingLine.fhir.site?.text).toBe("arm");
+    expect(trailingLine.fhir.timing?.repeat?.when).toBeUndefined();
   });
 
   it("captures natural topical amount units with unit semantics", () => {
@@ -4916,7 +5016,42 @@ describe("topical product forms and workflow", () => {
         kind: "length_of_product"
       },
       {
+        sig: "1 cm to arm",
+        unit: "cm line",
+        kind: "length_of_product"
+      },
+      {
         sig: "apply pea-sized amount to face daily",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "1 pea-size to arm bid",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "1 peasize to arm",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "1 pea sized to arm",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "1 pea to arm",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "1 pea amount to arm",
         unit: "pea-sized amount",
         kind: "product_specific_amount",
         approximateQuantity: { value: 0.25, unit: "mL" }
@@ -5049,6 +5184,27 @@ describe("topical product forms and workflow", () => {
       kind: "infusion_rate",
       parseAsDose: false
     });
+  });
+
+  it("keeps bare cm meal timing outside the site-anchored dose grammar", () => {
+    const breakfast = parseSig("cm");
+    expect(breakfast.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
+    expect(breakfast.fhir.doseAndRate).toBeUndefined();
+
+    const oral = parseSig("1 tab cm");
+    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "tab"
+    });
+    expect(oral.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
+
+    const subcutaneous = parseSig("1 unit sc cm");
+    expect(subcutaneous.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "U"
+    });
+    expect(subcutaneous.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Subcutaneous route"]);
+    expect(subcutaneous.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
   });
 
   it("stores workflow phrases in patientInstruction", () => {
