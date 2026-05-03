@@ -25,6 +25,19 @@ function mergeOptionalScalar<T>(left: T | undefined, right: T | undefined): T | 
   return left !== undefined ? left : right;
 }
 
+function mergeI18nRecords(
+  left: Record<string, string> | undefined,
+  right: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!left && !right) {
+    return undefined;
+  }
+  return {
+    ...(left ?? {}),
+    ...(right ?? {})
+  };
+}
+
 function sameCoding(left: FhirCoding | undefined, right: FhirCoding | undefined): boolean {
   if (!left?.code || !right?.code) {
     return left?.code === right?.code;
@@ -124,6 +137,7 @@ function mergeSite(
   }
   return {
     text: mergeOptionalScalar(left.text, right.text),
+    i18n: mergeI18nRecords(left.i18n, right.i18n),
     source: mergeOptionalScalar(left.source, right.source),
     coding: mergeOptionalScalar(left.coding, right.coding),
     spatialRelation: mergeOptionalScalar(left.spatialRelation, right.spatialRelation),

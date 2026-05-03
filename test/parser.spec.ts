@@ -4682,6 +4682,22 @@ describe("topical workflow and timing", () => {
     expect(result.longText).toContain("รอยโรค");
     expect(result.longText).not.toContain("lesion");
   });
+
+  it("keeps topical lesion translations from bare-site parsing and site merging", () => {
+    const bare = parseSig("apply lesion twice daily", { locale: "th" });
+    expect(bare.fhir.site?.coding?.[0]?.code).toBe("95324001");
+    expectPrimitiveTranslation(bare.fhir.site?._text, "th", "รอยโรค");
+    expectPrimitiveTranslation(bare.fhir.site?.coding?.[0]?._display, "th", "รอยโรค");
+    expect(bare.longText).toContain("รอยโรค");
+    expect(bare.longText).not.toContain("lesion");
+
+    const merged = parseSig("apply lesion at lesion twice daily", { locale: "th" });
+    expect(merged.fhir.site?.coding?.[0]?.code).toBe("95324001");
+    expectPrimitiveTranslation(merged.fhir.site?._text, "th", "รอยโรค");
+    expectPrimitiveTranslation(merged.fhir.site?.coding?.[0]?._display, "th", "รอยโรค");
+    expect(merged.longText).toContain("รอยโรค");
+    expect(merged.longText).not.toContain("lesion");
+  });
 });
 
 describe("topical product forms and workflow", () => {
