@@ -35,9 +35,9 @@ export function filterLocalizedWhenEvents(
   schedule: CanonicalScheduleExpr | undefined
 ): EventTiming[] {
   const unique = uniqueWhenEvents(schedule);
-  let hasSpecificAfter = false;
-  let hasSpecificBefore = false;
-  let hasSpecificWith = false;
+  const specificAfter = new Set<EventTiming>();
+  const specificBefore = new Set<EventTiming>();
+  const specificWith = new Set<EventTiming>();
 
   for (const code of unique) {
     if (
@@ -45,29 +45,42 @@ export function filterLocalizedWhenEvents(
       code === EventTiming["After Lunch"] ||
       code === EventTiming["After Dinner"]
     ) {
-      hasSpecificAfter = true;
+      specificAfter.add(code);
     }
     if (
       code === EventTiming["Before Breakfast"] ||
       code === EventTiming["Before Lunch"] ||
       code === EventTiming["Before Dinner"]
     ) {
-      hasSpecificBefore = true;
+      specificBefore.add(code);
     }
     if (code === EventTiming.Breakfast || code === EventTiming.Lunch || code === EventTiming.Dinner) {
-      hasSpecificWith = true;
+      specificWith.add(code);
     }
   }
 
+  const hasAllAfter =
+    specificAfter.has(EventTiming["After Breakfast"]) &&
+    specificAfter.has(EventTiming["After Lunch"]) &&
+    specificAfter.has(EventTiming["After Dinner"]);
+  const hasAllBefore =
+    specificBefore.has(EventTiming["Before Breakfast"]) &&
+    specificBefore.has(EventTiming["Before Lunch"]) &&
+    specificBefore.has(EventTiming["Before Dinner"]);
+  const hasAllWith =
+    specificWith.has(EventTiming.Breakfast) &&
+    specificWith.has(EventTiming.Lunch) &&
+    specificWith.has(EventTiming.Dinner);
+
   const filtered: EventTiming[] = [];
   for (const code of unique) {
-    if (code === EventTiming["After Meal"] && hasSpecificAfter) {
+    if (code === EventTiming["After Meal"] && hasAllAfter) {
       continue;
     }
-    if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
+    if (code === EventTiming["Before Meal"] && hasAllBefore) {
       continue;
     }
-    if (code === EventTiming.Meal && hasSpecificWith) {
+    if (code === EventTiming.Meal && hasAllWith) {
       continue;
     }
     filtered.push(code);
