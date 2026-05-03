@@ -26,6 +26,7 @@ const PER_SLASH_UNITS = new Set([
 
 const COMPACT_DISCRETE_UNITS_PATTERN =
   /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|gtt|gtts|eyedrop|eyedrops|puff|puffs|spray|sprays|pump|pumps|ftu|ftus|patch|patches|ring|rings|tube|tubes|bottle|bottles|container|containers|palm|palms|handprint|handprints|click|clicks|vial|vials|ampule|ampules|packet|packets|sachet|sachets|stick-pack|stick-packs|pea-sized)$/i;
+const COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN = /^[A-Za-z-]+$/;
 
 function classifyLexKind(value: string): {
   kind: LexKind;
@@ -218,7 +219,7 @@ function splitCompactToken(token: string): string[] {
     return [token];
   }
 
-  const compactTimesWord = token.match(/^([0-9]+(?:\.[0-9]+)?[x*])([A-Za-z]+)$/i);
+  const compactTimesWord = token.match(/^([0-9]+(?:\.[0-9]+)?[x*])([A-Za-z-]+)$/i);
   if (compactTimesWord) {
     return [compactTimesWord[1], compactTimesWord[2]];
   }
@@ -232,12 +233,12 @@ function splitCompactToken(token: string): string[] {
     return [token];
   }
 
-  const qRange = token.match(/^q([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/i);
+  const qRange = token.match(/^q([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)([A-Za-z-]+)$/i);
   if (qRange) {
     return [token.charAt(0), `${qRange[1]}-${qRange[2]}`, qRange[3]];
   }
 
-  const match = token.match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/);
+  const match = token.match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z-]+)$/);
   if (match) {
     const [, numberPart, suffix] = match;
     if (/^(st|nd|rd|th)$/i.test(suffix)) {
@@ -492,9 +493,13 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
   }
 
   const compactDiscrete = surface.original.match(
-    /^([0-9]+(?:\.[0-9]+)?)([A-Za-z]+)$/
+    /^([0-9]+(?:\.[0-9]+)?)([A-Za-z-]+)$/
   );
-  if (compactDiscrete && COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])) {
+  if (
+    compactDiscrete &&
+    COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN.test(compactDiscrete[2]) &&
+    COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])
+  ) {
     pushSplitParts(output, surface, [compactDiscrete[1], compactDiscrete[2]], input);
     return;
   }

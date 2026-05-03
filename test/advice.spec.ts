@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseSig } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
+  __test__ as adviceTest,
   findAdditionalInstructionDefinitionByCoding,
   parseAdditionalInstructions
 } from "../src/advice";
@@ -16,6 +17,18 @@ import {
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
 describe("additional instruction rule inventory", () => {
+  it("normalizes blank advice coding systems to SNOMED", () => {
+    const definition = adviceTest.createDefinitionFromSource({
+      system: "   ",
+      code: "123",
+      display: "Test display",
+      text: "Test advice",
+      thai: "ทดสอบ"
+    });
+
+    expect(definition.coding?.system).toBe(SNOMED_SYSTEM);
+  });
+
   it("codes avoid-sunlight advice from declarative rule data", () => {
     const instructions = parseAdditionalInstructions("avoid sunlight", { start: 0, end: 14 });
     expect(instructions).toEqual([

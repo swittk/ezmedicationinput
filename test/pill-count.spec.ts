@@ -192,6 +192,45 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(1);
     });
 
+    it("counts package-unit doses as packages rather than dividing by inner amount", () => {
+        const parsed = parseSig("apply 3 bottles once");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                packageUnit: "bottle",
+                containerValue: 120,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(3);
+        expect(result.totalContainerQuantity).toEqual({ value: 360, unit: "mL" });
+        expect(result.totalContainers).toBe(3);
+    });
+
+    it("aggregates total container quantity across dosage arrays when units match", () => {
+        const first = parseSig("apply 1 pea-sized amount once daily to face").fhir;
+        const second = parseSig("apply 1 pea-sized amount once daily to arm").fhir;
+        const result = calculateTotalUnits({
+            dosage: [first, second],
+            durationValue: 20,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                containerValue: 5,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(40);
+        expect(result.totalApproximateQuantity).toMatchObject({ value: 10, unit: "mL" });
+        expect(result.totalContainerQuantity).toEqual({ value: 10, unit: "mL" });
+        expect(result.totalContainers).toBe(2);
+    });
+
     it("counts patch and ring presentation units as discrete administrations", () => {
         const patch = parseSig("apply 1 patch every 3 days for 9 days");
         const patchResult = calculateTotalUnits({

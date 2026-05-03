@@ -369,9 +369,10 @@ function cleanFreeText(value: string): string {
 }
 
 function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalInstructionDefinition {
+  const system = source.system?.trim() || SNOMED_SYSTEM;
   return {
     coding: {
-      system: source.system ?? SNOMED_SYSTEM,
+      system,
       code: source.code,
       display: source.display
     },
@@ -1965,6 +1966,18 @@ export function findAdditionalInstructionDefinitionByCoding(
 ): AdditionalInstructionDefinition | undefined {
   return findRuleByCoding(system, code)?.definition;
 }
+
+export const __test__: {
+  createDefinitionFromSource(source: {
+    system?: string;
+    code: string;
+    display: string;
+    text: string;
+    thai: string;
+  }): AdditionalInstructionDefinition;
+} = {
+  createDefinitionFromSource
+};
 
 export function buildAdditionalInstructionFramesFromCoding(
   system: string,

@@ -96,6 +96,18 @@ describe("lex normalization", () => {
     expect(tokens[0]?.kind).toBe(LexKind.Number);
     expect(tokens[1]?.kind).toBe(LexKind.Word);
   });
+
+  it("splits compact hyphenated natural units", () => {
+    const stickPack = lexInput("1stick-pack");
+    expect(stickPack.map((token) => token.original)).toEqual(["1", "stick-pack"]);
+    expect(stickPack[0]?.kind).toBe(LexKind.Number);
+    expect(stickPack[1]?.kind).toBe(LexKind.Word);
+
+    const peaSized = lexInput("1pea-sized");
+    expect(peaSized.map((token) => token.original)).toEqual(["1", "pea-sized"]);
+    expect(peaSized[0]?.kind).toBe(LexKind.Number);
+    expect(peaSized[1]?.kind).toBe(LexKind.Word);
+  });
 });
 
 describe("loose phrase normalization", () => {

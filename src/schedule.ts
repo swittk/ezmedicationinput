@@ -2038,6 +2038,7 @@ function calculateTotalUnitsSingle(
 
   if (containerValue && containerValue > 0) {
     let effectiveUnits = totalUnits;
+    let effectiveContainerValue = containerValue;
     if (
       containerUnit &&
       result.totalApproximateQuantity?.unit &&
@@ -2054,6 +2055,8 @@ function calculateTotalUnitsSingle(
       doseUnit &&
       doseUnit.trim().toLowerCase() === packageUnit.trim().toLowerCase()
     ) {
+      effectiveUnits = totalUnits;
+      effectiveContainerValue = 1;
       if (containerUnit) {
         result.totalContainerQuantity = {
           value: roundCalculatedUnits(totalUnits * containerValue),
@@ -2067,7 +2070,7 @@ function calculateTotalUnitsSingle(
         effectiveUnits = converted;
       }
     }
-    result.totalContainers = Math.ceil(effectiveUnits / containerValue);
+    result.totalContainers = Math.ceil(effectiveUnits / effectiveContainerValue);
   }
 
   return result;
@@ -2081,8 +2084,10 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     }
     let totalUnits = 0;
     let totalContainers = 0;
+    let totalContainerQuantity: TotalUnitsResult["totalContainerQuantity"];
     let totalApproximateQuantity: TotalUnitsResult["totalApproximateQuantity"];
     let totalApproximateIngredientQuantity: TotalUnitsResult["totalApproximateIngredientQuantity"];
+    let mixedTotalContainerQuantities = false;
     let mixedApproximateQuantities = false;
     let mixedApproximateIngredientQuantities = false;
     let sawContainers = false;
@@ -2133,10 +2138,28 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
         totalContainers += result.totalContainers;
         sawContainers = true;
       }
+      if (result.totalContainerQuantity && !mixedTotalContainerQuantities) {
+        if (
+          totalContainerQuantity &&
+          totalContainerQuantity.unit === result.totalContainerQuantity.unit &&
+          totalContainerQuantity.system === result.totalContainerQuantity.system &&
+          totalContainerQuantity.code === result.totalContainerQuantity.code
+        ) {
+          totalContainerQuantity.value = roundCalculatedUnits(
+            (totalContainerQuantity.value ?? 0) + (result.totalContainerQuantity.value ?? 0)
+          );
+        } else if (!totalContainerQuantity) {
+          totalContainerQuantity = { ...result.totalContainerQuantity };
+        } else {
+          totalContainerQuantity = undefined;
+          mixedTotalContainerQuantities = true;
+        }
+      }
     }
     return {
       totalUnits,
       ...(sawContainers ? { totalContainers } : {}),
+      ...(!mixedTotalContainerQuantities && totalContainerQuantity ? { totalContainerQuantity } : {}),
       ...(!mixedApproximateQuantities && totalApproximateQuantity ? { totalApproximateQuantity } : {}),
       ...(!mixedApproximateIngredientQuantities && totalApproximateIngredientQuantity
         ? { totalApproximateIngredientQuantity }
