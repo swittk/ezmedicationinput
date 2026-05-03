@@ -192,6 +192,111 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(1);
     });
 
+    it("estimates usage for natural product-specific amount units", () => {
+        const parsed = parseSig("apply 2 FTU to face twice daily");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(28);
+        expect(result.totalApproximateQuantity).toMatchObject({
+            value: 14,
+            unit: "g",
+            confidence: "approximate"
+        });
+    });
+
+    it("estimates ophthalmic drop volume from unit terminology", () => {
+        const parsed = parseSig("1 eyedrop right eye qid");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(28);
+        expect(result.totalApproximateQuantity).toMatchObject({
+            value: 1.4,
+            unit: "mL",
+            confidence: "approximate"
+        });
+    });
+
+    it("allows generic context overrides for product-specific amount approximations", () => {
+        const parsed = parseSig("apply 2 FTU to face twice daily");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                unitApproximationMap: {
+                    FTU: {
+                        value: 0.4,
+                        unit: "g",
+                        confidence: "approximate",
+                        basis: "site-specific product override"
+                    }
+                }
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(28);
+        expect(result.totalApproximateQuantity).toEqual({
+            value: 11.2,
+            unit: "g",
+            confidence: "approximate",
+            basis: "site-specific product override",
+            source: undefined
+        });
+    });
+
+    it("allows generic context overrides for drop approximations", () => {
+        const parsed = parseSig("1 drop right eye qid");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                unitApproximationMap: {
+                    drop: {
+                        value: 0.03,
+                        unit: "mL",
+                        confidence: "product_specific",
+                        basis: "label-specific drop size"
+                    }
+                }
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(28);
+        expect(result.totalApproximateQuantity).toEqual({
+            value: 0.84,
+            unit: "mL",
+            confidence: "product_specific",
+            basis: "label-specific drop size",
+            source: undefined
+        });
+    });
+
+    it("keeps non-convertible natural device units counted without invented estimates", () => {
+        const parsed = parseSig("inhale 2 puffs twice daily");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(28);
+        expect(result.totalApproximateQuantity).toBeUndefined();
+    });
+
     it("handles unit conversion for containers", () => {
         const dosage: FhirDosage = {
             doseAndRate: [{ doseQuantity: { value: 1000, unit: "mg" } }],

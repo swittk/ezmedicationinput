@@ -92,7 +92,9 @@
   },
   "compoundDoseUnits": [
     { "head": "cm", "tails": ["ribbon", "ribbons"], "unit": "cm ribbon" },
-    { "head": "fingertip", "tails": ["unit", "units"], "unit": "fingertip unit" }
+    { "head": "inch", "tails": ["ribbon", "ribbons", "strip", "strips"], "unit": "inch ribbon" },
+    { "head": "fingertip", "tails": ["unit", "units"], "unit": "FTU" },
+    { "head": "eye", "tails": ["drop", "drops"], "unit": "drop" }
   ],
   "doseFractionWords": {
     "half": 0.5,

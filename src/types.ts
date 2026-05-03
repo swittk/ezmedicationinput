@@ -36,6 +36,48 @@ export interface FhirQuantity {
   code?: string;
 }
 
+export type DoseUnitKind =
+  | "metric"
+  | "biologic_unit"
+  | "counted_presentation"
+  | "device_actuation"
+  | "product_specific_amount"
+  | "length_of_product"
+  | "body_area_proxy"
+  | "qualitative_amount";
+
+export type DoseUnitApproximationConfidence =
+  | "exact"
+  | "approximate"
+  | "product_specific";
+
+export interface DoseUnitApproximation {
+  value: number;
+  unit: string;
+  confidence: DoseUnitApproximationConfidence;
+  basis: string;
+  source?: string;
+}
+
+export interface DoseUnitTerminologyEntry {
+  unit: string;
+  kind: DoseUnitKind;
+  aliases?: string[];
+  approximateQuantity?: DoseUnitApproximation;
+}
+
+export interface DoseUnitSemantics {
+  unit: string;
+  kind: DoseUnitKind;
+  approximateQuantity?: DoseUnitApproximation;
+}
+
+export interface EstimatedQuantity extends FhirQuantity {
+  confidence?: DoseUnitApproximationConfidence;
+  basis?: string;
+  source?: string;
+}
+
 export interface FhirRange {
   low?: FhirQuantity;
   high?: FhirQuantity;
@@ -339,6 +381,12 @@ export interface MedicationContext {
    * containerValue/containerUnit describe the inner amount held by one package.
    */
   packageUnit?: string;
+  /**
+   * Optional per-unit approximation overrides keyed by normalized dose unit
+   * (for example FTU, drop, pump, applicatorful). These are used only for
+   * estimated amount reporting; they do not rewrite the parsed dose unit.
+   */
+  unitApproximationMap?: Record<string, DoseUnitApproximation>;
   containerValue?: number;
   containerUnit?: string;
   defaultUnit?: string;
@@ -907,6 +955,8 @@ export interface ParseResult {
 export interface ParseNormalizedMeta {
   route?: RouteCode;
   unit?: string;
+  unitKind?: DoseUnitKind;
+  unitSemantics?: DoseUnitSemantics;
   site?: BodySiteDetail;
   method?: { text?: string; coding?: FhirCoding };
   patientInstruction?: string;
@@ -1055,6 +1105,7 @@ export interface TotalUnitsResult {
   totalUnits: number;
   totalContainers?: number;
   totalContainerQuantity?: FhirQuantity;
+  totalApproximateQuantity?: EstimatedQuantity;
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {

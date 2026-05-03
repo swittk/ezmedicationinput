@@ -15,6 +15,7 @@ import {
 import { parseSigSegments } from "./hpsg/segmenter";
 import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions } from "./fhir-translations";
+import { getDoseUnitSemantics } from "./unit-lexicon";
 import {
   BodySiteCode,
   FhirDosage,
@@ -35,6 +36,12 @@ export { suggestSig } from "./suggest";
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
 export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
+export {
+  getDoseUnitApproximation,
+  getDoseUnitKind,
+  getDoseUnitSemantics,
+  listDoseUnitTerminology
+} from "./unit-lexicon";
 export {
   buildBodySiteTopographicalModifierCoding,
   getBodySiteCode,
@@ -658,7 +665,7 @@ export function fromFhirDosage(
     warnings: clause.warnings ?? [],
     meta: {
       consumedTokens: [],
-      normalized: buildNormalizedMetaFromClause(clause, dosage),
+      normalized: buildNormalizedMetaFromClause(clause, dosage, options),
       canonical: {
         clauses: [clause]
       }
@@ -719,7 +726,8 @@ function cloneBodySiteCoding(coding?: {
 
 function buildNormalizedMetaFromClause(
   clause: CanonicalSigClause,
-  fhir?: FhirDosage
+  fhir?: FhirDosage,
+  options?: ParseOptions | FormatOptions
 ): ParseResult["meta"]["normalized"] {
   const additionalInstructions = clause.additionalInstructions?.length
     ? clause.additionalInstructions.map((instruction) => ({
@@ -729,10 +737,16 @@ function buildNormalizedMetaFromClause(
     : undefined;
   const siteCoding = cloneBodySiteCoding(clause.site?.coding) ??
     cloneBodySiteCoding(fhir?.site?.coding?.[0]);
+  const parseContext = options && "context" in options
+    ? (options as ParseOptions).context
+    : undefined;
+  const unitSemantics = getDoseUnitSemantics(clause.dose?.unit, parseContext);
 
   return {
     route: clause.route?.code,
     unit: clause.dose?.unit,
+    unitKind: unitSemantics?.kind,
+    unitSemantics,
     site:
       clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation
         ? {
@@ -839,7 +853,7 @@ function buildParseResult(
     meta: {
       consumedTokens,
       leftoverText: leftoverParts.length ? leftoverParts.join(" ") : undefined,
-      normalized: buildNormalizedMetaFromClause(clause, fhir),
+      normalized: buildNormalizedMetaFromClause(clause, fhir, options),
       canonical: {
         clauses: canonicalClauses
       },

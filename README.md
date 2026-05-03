@@ -725,6 +725,24 @@ const result = calculateTotalUnits({
 
 It can also handle strength-based conversions (e.g. calculating how many 100mL bottles are needed for a 500mg TID dose of a 250mg/5mL suspension).
 
+Natural SIG units are classified from `unit-terminology.json` instead of being treated as one physics-style unit enum. Parsed results expose `meta.normalized.unitKind` / `unitSemantics`, and callers can inspect the same vocabulary with `listDoseUnitTerminology()` or `getDoseUnitSemantics(unit)`.
+
+```ts
+const parsed = parseSig("apply 2 FTU to face twice daily");
+
+calculateTotalUnits({
+  dosage: parsed.fhir,
+  from: "2024-01-01T08:00:00Z",
+  durationValue: 7,
+  durationUnit: "d",
+  timeZone: "Asia/Bangkok"
+});
+
+// → { totalUnits: 28, totalApproximateQuantity: { value: 14, unit: "g", ... } }
+```
+
+Built-in approximations are intentionally conservative and overridable. Current defaults include `FTU -> 0.5 g` and `drop -> 0.05 mL`; product/device-specific labels should pass `context.unitApproximationMap` when a better value is known. Package-level phrases such as `half bottle` can also be bridged to the inner amount by setting `context.packageUnit`, `containerValue`, and `containerUnit`.
+
 ### Strength parsing
 
 Use `parseStrength` to normalize medication strength strings into FHIR-compliant **Quantity** or **Ratio** structures. It understands percentages, ratios, and composite strengths.

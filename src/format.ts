@@ -237,6 +237,8 @@ function pluralize(unit: string, value: number): string {
         return "tablet";
       case "cap":
         return "capsule";
+      case "FTU":
+        return "FTU";
       default:
         return unit;
     }
@@ -274,6 +276,8 @@ function pluralize(unit: string, value: number): string {
       return "scoops";
     case "application":
       return "applications";
+    case "FTU":
+      return "FTU";
     case "fingertip unit":
       return "fingertip units";
     case "finger length":

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   fromFhirDosage,
   formatSig,
+  getDoseUnitSemantics,
   getBodySiteCode,
   getBodySiteCodeAsync,
   getBodySiteText,
@@ -11,6 +12,7 @@ import {
   lookupBodySite,
   parseSig,
   parseSigAsync,
+  listDoseUnitTerminology,
   suggestBodySiteText,
   suggestBodySites
 } from "../src/index";
@@ -4643,6 +4645,127 @@ describe("topical product forms and workflow", () => {
     expect(ribbon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
       value: 0.5,
       unit: "cm ribbon"
+    });
+  });
+
+  it("captures natural topical amount units with unit semantics", () => {
+    const fingertip = parseSig("apply 1 fingertip unit to affected area once daily");
+    expect(fingertip.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "FTU"
+    });
+    expect(fingertip.meta.normalized.unit).toBe("FTU");
+    expect(fingertip.meta.normalized.unitKind).toBe("product_specific_amount");
+    expect(fingertip.meta.normalized.unitSemantics).toMatchObject({
+      unit: "FTU",
+      kind: "product_specific_amount",
+      approximateQuantity: {
+        value: 0.5,
+        unit: "g",
+        confidence: "approximate"
+      }
+    });
+    expect(fingertip.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+
+    const compact = parseSig("apply 1 FTU to affected area once daily");
+    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "FTU"
+    });
+    expect(compact.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+  });
+
+  it("captures natural SIG unit vocabulary from terminology data", () => {
+    const fixtures = [
+      {
+        sig: "instill 1 gtt to eye once daily",
+        unit: "drop",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.05, unit: "mL" }
+      },
+      {
+        sig: "instill 1 eyedrop to eye once daily",
+        unit: "drop",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.05, unit: "mL" }
+      },
+      {
+        sig: "instill 1 eye drop to eye once daily",
+        unit: "drop",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.05, unit: "mL" }
+      },
+      {
+        sig: "inhale 2 puffs twice daily",
+        unit: "puff",
+        kind: "device_actuation"
+      },
+      {
+        sig: "spray 1 actuation in nostril once daily",
+        unit: "actuation",
+        kind: "device_actuation"
+      },
+      {
+        sig: "insert 1 applicatorful pv at bedtime",
+        unit: "applicatorful",
+        kind: "product_specific_amount"
+      },
+      {
+        sig: "take 1 lozenge orally once daily",
+        unit: "lozenge",
+        kind: "counted_presentation"
+      },
+      {
+        sig: "use 1 vial once daily",
+        unit: "vial",
+        kind: "counted_presentation"
+      },
+      {
+        sig: "insert 1 ring pv once",
+        unit: "ring",
+        kind: "counted_presentation"
+      },
+      {
+        sig: "apply 1 inch ribbon to eyelid nightly",
+        unit: "inch ribbon",
+        kind: "length_of_product"
+      }
+    ] as const;
+
+    for (const fixture of fixtures) {
+      const result = parseSig(fixture.sig);
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+        value: expect.any(Number),
+        unit: fixture.unit
+      });
+      expect(result.meta.normalized.unitKind).toBe(fixture.kind);
+      if ("approximateQuantity" in fixture) {
+        expect(result.meta.normalized.unitSemantics?.approximateQuantity).toMatchObject(
+          fixture.approximateQuantity
+        );
+      }
+    }
+  });
+
+  it("exposes unit terminology helpers for UI/search consumers", () => {
+    const units = listDoseUnitTerminology();
+    expect(units.some((entry) => entry.unit === "FTU")).toBe(true);
+    expect(getDoseUnitSemantics("drop")).toMatchObject({
+      unit: "drop",
+      kind: "product_specific_amount",
+      approximateQuantity: {
+        value: 0.05,
+        unit: "mL",
+        confidence: "approximate"
+      }
+    });
+    expect(getDoseUnitSemantics("gtt")).toMatchObject({
+      unit: "drop",
+      kind: "product_specific_amount"
+    });
+    expect(getDoseUnitSemantics("eyedrop")).toMatchObject({
+      unit: "drop",
+      kind: "product_specific_amount"
     });
   });
 

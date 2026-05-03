@@ -17,6 +17,7 @@ import { parseAdditionalInstructions } from "./advice";
 import { arrayIncludes } from "./utils/array";
 import { convertValue } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
+import { getDoseUnitSemantics } from "./unit-lexicon";
 
 /**
  * Default institution times used when a dosage only specifies frequency without
@@ -1969,6 +1970,17 @@ function calculateTotalUnitsSingle(
   const containerUnit = context?.containerUnit;
   const packageUnit = context?.packageUnit;
   const doseUnit = dosage.doseAndRate?.[0]?.doseQuantity?.unit;
+  const unitSemantics = getDoseUnitSemantics(doseUnit, context);
+  if (unitSemantics?.approximateQuantity) {
+    const approximation = unitSemantics.approximateQuantity;
+    result.totalApproximateQuantity = {
+      value: roundCalculatedUnits(totalUnits * approximation.value),
+      unit: approximation.unit,
+      confidence: approximation.confidence,
+      basis: approximation.basis,
+      source: approximation.source
+    };
+  }
 
   if (containerValue && containerValue > 0) {
     let effectiveUnits = totalUnits;
@@ -2008,6 +2020,8 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     }
     let totalUnits = 0;
     let totalContainers = 0;
+    let totalApproximateQuantity: TotalUnitsResult["totalApproximateQuantity"];
+    let mixedApproximateQuantities = false;
     let sawContainers = false;
     for (const dosage of options.dosage) {
       const result = calculateTotalUnitsSingle({
@@ -2015,12 +2029,34 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
         dosage
       });
       totalUnits = roundCalculatedUnits(totalUnits + result.totalUnits);
+      if (result.totalApproximateQuantity && !mixedApproximateQuantities) {
+        if (
+          totalApproximateQuantity &&
+          totalApproximateQuantity.unit === result.totalApproximateQuantity.unit &&
+          totalApproximateQuantity.confidence === result.totalApproximateQuantity.confidence &&
+          totalApproximateQuantity.basis === result.totalApproximateQuantity.basis &&
+          totalApproximateQuantity.source === result.totalApproximateQuantity.source
+        ) {
+          totalApproximateQuantity.value = roundCalculatedUnits(
+            (totalApproximateQuantity.value ?? 0) + (result.totalApproximateQuantity.value ?? 0)
+          );
+        } else if (!totalApproximateQuantity) {
+          totalApproximateQuantity = { ...result.totalApproximateQuantity };
+        } else {
+          totalApproximateQuantity = undefined;
+          mixedApproximateQuantities = true;
+        }
+      }
       if (result.totalContainers !== undefined) {
         totalContainers += result.totalContainers;
         sawContainers = true;
       }
     }
-    return sawContainers ? { totalUnits, totalContainers } : { totalUnits };
+    return {
+      totalUnits,
+      ...(sawContainers ? { totalContainers } : {}),
+      ...(!mixedApproximateQuantities && totalApproximateQuantity ? { totalApproximateQuantity } : {})
+    };
   }
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
 }
