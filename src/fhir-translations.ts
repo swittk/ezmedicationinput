@@ -151,8 +151,8 @@ export function mergeTranslationPrimitiveElement(
     if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
       continue;
     }
-    const { locale } = getTranslationParts(extension);
-    if (locale) {
+    const { locale, content } = getTranslationParts(extension);
+    if (locale && content) {
       existingTranslationLocales.add(locale);
     }
   }

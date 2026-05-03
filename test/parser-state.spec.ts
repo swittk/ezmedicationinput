@@ -236,6 +236,47 @@ describe("FHIR parser-state import", () => {
     expectTranslation(displayElement, "th", "อาการแห้ง");
   });
 
+  it("does not let empty base translation content block a valid coding i18n addition", () => {
+    const dosage = canonicalToFhir(
+      {
+        kind: "administration",
+        rawText: "",
+        raw: { start: 0, end: 0, text: "" },
+        leftovers: [],
+        evidence: [],
+        confidence: 1,
+        prn: {
+          enabled: true,
+          reason: {
+            text: "dryness",
+            coding: {
+              system: "http://example.org/reason",
+              code: "dryness",
+              display: "Dryness",
+              i18n: { th: "อาการแห้ง" },
+              _display: {
+                extension: [
+                  {
+                    url: "http://hl7.org/fhir/StructureDefinition/translation",
+                    extension: [
+                      { url: "lang", valueCode: "th" },
+                      { url: "content", valueString: "   " }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      undefined,
+      { includeTranslationExtensions: true }
+    );
+
+    const displayElement = dosage.asNeededFor?.[0]?.coding?.[0]?._display;
+    expectTranslation(displayElement, "th", "อาการแห้ง");
+  });
+
   it("selects the first coded PRN and additional-instruction entries when uncoded entries lead", () => {
     const state = parserStateFromFhir({
       asNeededBoolean: true,
