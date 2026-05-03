@@ -117,6 +117,81 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(3); // 300 / 120 = 2.5 -> 3
     });
 
+    it("calculates fractional topical package units from parsed sigs", () => {
+        const fixtures = [
+            ["apply half tube twice daily", 7, 7],
+            ["apply two fifths of bottle once daily", 2.8, 3],
+            ["apply three quarters tube q12h", 10.5, 11],
+            ["apply 1/4 container daily", 1.75, 2]
+        ] as const;
+
+        for (const [sig, totalUnits, totalContainers] of fixtures) {
+            const parsed = parseSig(sig);
+            const result = calculateTotalUnits({
+                dosage: parsed.fhir,
+                durationValue: 7,
+                durationUnit: FhirPeriodUnit.Day,
+                context: { containerValue: 1 },
+                ...BASE_OPTIONS
+            });
+
+            expect(result.totalUnits).toBe(totalUnits);
+            expect(result.totalContainers).toBe(totalContainers);
+        }
+    });
+
+    it("calculates one-time fractional topical package units when explicitly marked once", () => {
+        const parsed = parseSig("apply 1/4 tube once");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            context: { containerValue: 1 },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(0.25);
+        expect(result.totalContainers).toBe(1);
+    });
+
+    it("bridges fractional package-unit doses to inner container quantity when packageUnit is supplied", () => {
+        const parsed = parseSig("apply half bottle once");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                packageUnit: "bottle",
+                containerValue: 120,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(0.5);
+        expect(result.totalContainerQuantity).toEqual({ value: 60, unit: "mL" });
+        expect(result.totalContainers).toBe(1);
+    });
+
+    it("bridges repeated fractional package-unit doses to inner container quantity", () => {
+        const parsed = parseSig("apply half bottle twice daily");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 1,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                packageUnit: "bottle",
+                containerValue: 120,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(1);
+        expect(result.totalContainerQuantity).toEqual({ value: 120, unit: "mL" });
+        expect(result.totalContainers).toBe(1);
+    });
+
     it("handles unit conversion for containers", () => {
         const dosage: FhirDosage = {
             doseAndRate: [{ doseQuantity: { value: 1000, unit: "mg" } }],

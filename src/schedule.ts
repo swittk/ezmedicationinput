@@ -15,7 +15,7 @@ import {
 } from "./types";
 import { parseAdditionalInstructions } from "./advice";
 import { arrayIncludes } from "./utils/array";
-import { getUnitCategory, convertValue } from "./utils/units";
+import { convertValue } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
 
 /**
@@ -43,6 +43,7 @@ const DEFAULT_FREQUENCY_DEFAULTS: Required<FrequencyFallbackTimes> = {
 
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_DAY = 24 * 60;
+const TOTAL_UNITS_PRECISION = 1_000_000_000_000;
 
 /** Caches expensive Intl.DateTimeFormat objects per time zone. */
 const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>();
@@ -402,6 +403,13 @@ function coerceDate(value: Date | string, label: string): Date {
     throw new Error(`Invalid ${label} supplied to nextDueDoses`);
   }
   return date;
+}
+
+function roundCalculatedUnits(value: number): number {
+  if (!Number.isFinite(value)) {
+    return value;
+  }
+  return Math.round((value + Number.EPSILON) * TOTAL_UNITS_PRECISION) / TOTAL_UNITS_PRECISION;
 }
 
 /**
@@ -1948,10 +1956,10 @@ function calculateTotalUnitsSingle(
   );
 
   const doseQuantity = dosage.doseAndRate?.[0]?.doseQuantity?.value ?? 0;
-  let totalUnits = count * doseQuantity;
+  let totalUnits = roundCalculatedUnits(count * doseQuantity);
 
   if (roundToMultiple && roundToMultiple > 0) {
-    totalUnits = Math.ceil(totalUnits / roundToMultiple) * roundToMultiple;
+    totalUnits = roundCalculatedUnits(Math.ceil(totalUnits / roundToMultiple) * roundToMultiple);
   }
 
   const result: TotalUnitsResult = { totalUnits };
@@ -1959,11 +1967,23 @@ function calculateTotalUnitsSingle(
   // Handle containers
   const containerValue = context?.containerValue;
   const containerUnit = context?.containerUnit;
+  const packageUnit = context?.packageUnit;
   const doseUnit = dosage.doseAndRate?.[0]?.doseQuantity?.unit;
 
   if (containerValue && containerValue > 0) {
     let effectiveUnits = totalUnits;
-    if (containerUnit && doseUnit && containerUnit !== doseUnit) {
+    if (
+      packageUnit &&
+      doseUnit &&
+      doseUnit.trim().toLowerCase() === packageUnit.trim().toLowerCase()
+    ) {
+      if (containerUnit) {
+        result.totalContainerQuantity = {
+          value: roundCalculatedUnits(totalUnits * containerValue),
+          unit: containerUnit
+        };
+      }
+    } else if (containerUnit && doseUnit && containerUnit !== doseUnit) {
       let strength = context?.strengthRatio;
       if (!strength && context?.strength) {
         strength = parseStrengthIntoRatio(context.strength, context) || undefined;
@@ -1994,7 +2014,7 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
         ...options,
         dosage
       });
-      totalUnits += result.totalUnits;
+      totalUnits = roundCalculatedUnits(totalUnits + result.totalUnits);
       if (result.totalContainers !== undefined) {
         totalContainers += result.totalContainers;
         sawContainers = true;

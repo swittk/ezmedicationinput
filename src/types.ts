@@ -333,6 +333,12 @@ export interface MedicationContext {
   strengthQuantity?: FhirQuantity;
   strengthRatio?: FhirRatio;
   strengthCodeableConcept?: FhirCodeableConcept;
+  /**
+   * Canonical presentation/package unit for fractional package instructions
+   * such as "1/2 bottle". When the parsed dose unit matches this value,
+   * containerValue/containerUnit describe the inner amount held by one package.
+   */
+  packageUnit?: string;
   containerValue?: number;
   containerUnit?: string;
   defaultUnit?: string;
@@ -1048,6 +1054,7 @@ export interface NextDueDoseOptions {
 export interface TotalUnitsResult {
   totalUnits: number;
   totalContainers?: number;
+  totalContainerQuantity?: FhirQuantity;
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
