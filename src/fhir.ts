@@ -720,7 +720,12 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const siteText = getFallbackSiteText(dosage.site);
   const siteI18n = codeableConceptTranslationI18n(dosage.site, siteCoding);
   const siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
-  if (siteText || siteCoding?.code || siteSpatialRelation) {
+  if (
+    siteText ||
+    siteCoding?.code ||
+    siteSpatialRelation ||
+    siteAdministrationTargetCount !== undefined
+  ) {
     clause.site = {
       text: siteText,
       i18n: siteI18n.text,

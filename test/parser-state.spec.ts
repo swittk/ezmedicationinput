@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
+import { applySiteCoding } from "../src/site-coding";
 
 const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
@@ -233,6 +234,46 @@ describe("FHIR parser-state import", () => {
       url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
       valueInteger: 2
     });
+  });
+
+  it("preserves extension-only administration target counts when importing canonical site state", () => {
+    const clause = canonicalFromFhir({
+      site: {
+        extension: [
+          {
+            url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+            valueInteger: 2
+          }
+        ]
+      }
+    });
+
+    expect(clause.site).toEqual({
+      text: undefined,
+      i18n: undefined,
+      spatialRelation: undefined,
+      administrationTargetCount: 2,
+      coding: undefined,
+      source: "text"
+    });
+  });
+
+  it("keeps an existing administration target count when site coding resolution finds a definition without one", () => {
+    const state = new ParserState("", []);
+    state.siteText = "eye";
+    state.siteAdministrationTargetCount = 2;
+    state.siteLookupRequest = {
+      text: "eye",
+      canonical: "eye"
+    };
+
+    applySiteCoding(state);
+
+    expect(state.siteCoding).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "81745001"
+    });
+    expect(state.siteAdministrationTargetCount).toBe(2);
   });
 
   it("adds coding i18n translations without dropping existing display primitive extensions", () => {
