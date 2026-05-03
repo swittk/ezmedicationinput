@@ -67,6 +67,12 @@ export type {
   BodySiteVocabularyOptions
 } from "./body-site-lookup";
 export {
+  BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+  buildBodySiteAdministrationTargetCountExtension,
+  getBodySiteAdministrationTargetCount,
+  parseBodySiteAdministrationTargetCountExtension
+} from "./body-site-target";
+export {
   BODY_SITE_SPATIAL_RELATION_EXTENSION_URL,
   buildBodySiteSpatialRelationExtension,
   buildBodySiteSpatialRelationExtensions,
@@ -760,11 +766,15 @@ function buildNormalizedMetaFromClause(
     unitKind: unitSemantics?.kind,
     unitSemantics,
     site:
-      clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation
+      clause.site?.text ||
+      clause.site?.coding?.code ||
+      clause.site?.spatialRelation ||
+      clause.site?.administrationTargetCount !== undefined
         ? {
           text: clause.site?.text,
           coding: siteCoding,
-          spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation)
+          spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation),
+          administrationTargetCount: clause.site?.administrationTargetCount
         }
         : undefined,
     method:

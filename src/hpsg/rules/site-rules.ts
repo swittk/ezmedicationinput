@@ -33,6 +33,7 @@ import {
   PRN_STANDALONE_REASON_LEADS,
   SITE_ANCHORS,
   SITE_DISPLAY_FILLERS,
+  SITE_MULTIPLICITY_WORDS,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
   SITE_SELF_DISPLAY_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS
@@ -53,6 +54,9 @@ import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
+  if (SITE_MULTIPLICITY_WORDS.has(lower)) {
+    return false;
+  }
   const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   }));
@@ -242,7 +246,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       phraseTokens.push(candidate);
-      if (!SITE_DISPLAY_FILLERS.has(candidateLower)) {
+      if (
+        !SITE_DISPLAY_FILLERS.has(candidateLower) ||
+        SITE_MULTIPLICITY_WORDS.has(candidateLower)
+      ) {
         displayTokens.push(candidate);
       }
     }

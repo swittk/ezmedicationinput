@@ -373,6 +373,9 @@ function seedKnownSiteCoding(state: ParserState): void {
     display: definition.coding.display,
     i18n: mergeI18nRecords(definition.i18n, definition.coding.i18n)
   };
+  if (state.siteAdministrationTargetCount === undefined) {
+    state.siteAdministrationTargetCount = definition.administrationTargetCount;
+  }
 }
 
 export function parseClauseState(input: string, options?: ParseOptions): ParserState {

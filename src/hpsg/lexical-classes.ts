@@ -146,6 +146,7 @@ export const BODY_SITE_FEATURE_SCORE_BONUS = bodySiteFeatureScoreBonus(source.bo
 export const CONNECTORS = setOf(source.connectors);
 export const ROUTE_SITE_PREPOSITIONS = setOf(source.routeSitePrepositions);
 export const SITE_DISPLAY_FILLERS = SITE_FILLERS;
+export const SITE_MULTIPLICITY_WORDS = setOf(["both", "each", "bilateral"]);
 export const NON_SITE_ANCHORED_PHRASES = setOf(source.nonSiteAnchoredPhrases);
 export const EXTERNAL_SITE_LOCATIVE_PREFIXES = setOf(source.externalSiteLocativePrefixes);
 export const ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS = setOf(

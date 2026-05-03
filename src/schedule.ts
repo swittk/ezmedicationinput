@@ -1,4 +1,7 @@
 import {
+  getBodySiteAdministrationTargetCount
+} from "./body-site-target";
+import {
   EventTiming,
   EventClockMap,
   FhirDosage,
@@ -9,6 +12,7 @@ import {
   FrequencyFallbackTimes,
   EstimatedQuantity,
   MealOffsetMap,
+  MedicationContext,
   NextDueDoseConfig,
   NextDueDoseOptions,
   TotalUnitsOptions,
@@ -136,6 +140,28 @@ function normalizeClock(clock: string): string {
     throw new Error(`Invalid clock value: ${clock}`);
   }
   return `${pad(hour)}:${pad(minute)}:${pad(second)}`;
+}
+
+function doseUnitSupportsPerTargetMultiplication(
+  doseUnit: string | undefined,
+  context: MedicationContext | undefined
+): boolean {
+  const semantics = getDoseUnitSemantics(doseUnit, context);
+  if (!semantics) {
+    return false;
+  }
+  return semantics.kind !== "metric" && semantics.kind !== "biologic_unit";
+}
+
+function getAdministrationTargetMultiplier(
+  dosage: FhirDosage,
+  context: MedicationContext | undefined
+): number {
+  const doseUnit = dosage.doseAndRate?.[0]?.doseQuantity?.unit;
+  if (!doseUnitSupportsPerTargetMultiplication(doseUnit, context)) {
+    return 1;
+  }
+  return getBodySiteAdministrationTargetCount(dosage.site) ?? 1;
 }
 
 /** Retrieves (and caches) an Intl formatter for calendar components. */
@@ -2007,7 +2033,8 @@ function calculateTotalUnitsSingle(
   );
 
   const doseQuantity = dosage.doseAndRate?.[0]?.doseQuantity?.value ?? 0;
-  let totalUnits = roundCalculatedUnits(count * doseQuantity);
+  const targetMultiplier = getAdministrationTargetMultiplier(dosage, context);
+  let totalUnits = roundCalculatedUnits(count * doseQuantity * targetMultiplier);
 
   if (roundToMultiple && roundToMultiple > 0) {
     totalUnits = roundCalculatedUnits(Math.ceil(totalUnits / roundToMultiple) * roundToMultiple);

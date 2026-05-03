@@ -674,7 +674,74 @@ describe("calculateTotalUnits", () => {
       timeZone: "UTC"
     });
 
-    expect(res.totalUnits).toBe(8);
+    expect(res.totalUnits).toBe(16);
+  });
+
+  it("multiplies bilateral ophthalmic drop counts per eye", () => {
+    const parsed = parseSig("1 drop ou q2h");
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        dosageForm: "eye drops, solution",
+        containerValue: 5,
+        containerUnit: "mL"
+      }
+    });
+
+    expect(res.totalUnits).toBe(24);
+    expect(res.totalApproximateQuantity?.value).toBe(1.2);
+    expect(res.totalApproximateQuantity?.unit).toBe("mL");
+    expect(res.totalContainers).toBe(1);
+  });
+
+  it("multiplies bilateral nasal sprays per nostril", () => {
+    const parsed = parseSig("1 spray each nostril bid", {
+      context: { dosageForm: "nasal spray, solution" }
+    });
+
+    const res = calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 7,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: { dosageForm: "nasal spray, solution" }
+    });
+
+    expect(parsed.fhir.site?.text).toBe("both nostrils");
+    expect(res.totalUnits).toBe(28);
+  });
+
+  it("infers administration target count from coded bilateral sites when no site extension is present", () => {
+    const res = calculateTotalUnits({
+      dosage: {
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+        timing: { repeat: { period: 2, periodUnit: FhirPeriodUnit.Hour } },
+        site: {
+          coding: [
+            {
+              system: "http://snomed.info/sct",
+              code: "40638003",
+              display: "Structure of both eyes"
+            }
+          ]
+        }
+      },
+      from: "2024-01-01T09:00:00Z",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC",
+      context: {
+        dosageForm: "eye drops, solution"
+      }
+    });
+
+    expect(res.totalUnits).toBe(24);
   });
 
   it("caps count-limited fractional-hour intervals for calculateTotalUnits", () => {

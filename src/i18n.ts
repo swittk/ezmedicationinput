@@ -2,6 +2,11 @@ import { findAdditionalInstructionDefinitionByCoding } from "./advice";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
+  collectLocalizedWhenPhrases,
+  combineLocalizedFrequencyAndEvents,
+  type LocalizedTimingGrammar
+} from "./localized-timing";
+import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
   findPrnReasonDefinitionByCoding,
   normalizeBodySiteKey
@@ -1090,87 +1095,26 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
+const TH_TIMING_GRAMMAR: LocalizedTimingGrammar = {
+  whenText: WHEN_TEXT_THAI,
+  joinList: joinWithAndThai,
+  summarizeMealTimingGroup: summarizeMealTimingGroupThai,
+  bedtimeJoinStyle: (dailyCount) => {
+    if (dailyCount === 1) {
+      return "adjacent";
+    }
+    if (dailyCount === 2 || dailyCount === 3 || dailyCount === 4) {
+      return "conjunction";
+    }
+    return "separate";
+  }
+};
+
 function collectWhenPhrasesThai(
   schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  const when = schedule?.when ?? [];
-  if (!when.length) {
-    return [];
-  }
-  const unique: EventTiming[] = [];
-  const seen = new Set<EventTiming>();
-  let hasSpecificAfter = false;
-  let hasSpecificBefore = false;
-  let hasSpecificWith = false;
-
-  for (const code of when) {
-    if (!seen.has(code)) {
-      seen.add(code);
-      unique.push(code);
-      if (
-        code === EventTiming["After Breakfast"] ||
-        code === EventTiming["After Lunch"] ||
-        code === EventTiming["After Dinner"]
-      ) {
-        hasSpecificAfter = true;
-      }
-      if (
-        code === EventTiming["Before Breakfast"] ||
-        code === EventTiming["Before Lunch"] ||
-        code === EventTiming["Before Dinner"]
-      ) {
-        hasSpecificBefore = true;
-      }
-      if (code === EventTiming.Breakfast || code === EventTiming.Lunch || code === EventTiming.Dinner) {
-        hasSpecificWith = true;
-      }
-    }
-  }
-
-  const filtered: EventTiming[] = [];
-  for (const code of unique) {
-    if (code === EventTiming["After Meal"] && hasSpecificAfter) {
-      continue;
-    }
-    if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
-      continue;
-    }
-    if (code === EventTiming.Meal && hasSpecificWith) {
-      continue;
-    }
-    filtered.push(code);
-  }
-
-  const mealGroup = getMealTimingGroup(filtered, options);
-  if (!mealGroup) {
-    const phrases: string[] = [];
-    for (const code of filtered) {
-      const text = WHEN_TEXT_THAI[code];
-      if (text) {
-        phrases.push(text);
-      }
-    }
-    return phrases;
-  }
-
-  const groupedCodes = new Set<EventTiming>(mealGroup.codes);
-  const phrases: string[] = [];
-  let insertedGroup = false;
-  for (const code of filtered) {
-    if (groupedCodes.has(code)) {
-      if (!insertedGroup) {
-        phrases.push(summarizeMealTimingGroupThai(mealGroup));
-        insertedGroup = true;
-      }
-      continue;
-    }
-    const text = WHEN_TEXT_THAI[code];
-    if (text) {
-      phrases.push(text);
-    }
-  }
-  return phrases;
+  return collectLocalizedWhenPhrases(schedule, TH_TIMING_GRAMMAR, options);
 }
 
 function joinWithAndThai(parts: string[]): string {
@@ -1187,22 +1131,18 @@ function joinWithAndThai(parts: string[]): string {
 }
 
 function combineFrequencyAndEventsThai(
+  schedule: CanonicalScheduleExpr | undefined,
   frequency: string | undefined,
-  events: string[]
+  events: string[],
+  options?: TimingSummaryOptions
 ): { frequency?: string; event?: string } {
-  if (!frequency) {
-    if (!events.length) {
-      return {};
-    }
-    return { event: joinWithAndThai(events) };
-  }
-  if (!events.length) {
-    return { frequency };
-  }
-  if (events.length === 1 && events[0] === "ก่อนนอน" && frequency.includes("วันละ")) {
-    return { frequency: `${frequency} และ ${events[0]}` };
-  }
-  return { frequency, event: joinWithAndThai(events) };
+  return combineLocalizedFrequencyAndEvents(
+    schedule,
+    frequency,
+    events,
+    TH_TIMING_GRAMMAR,
+    options
+  );
 }
 
 function isOralRouteThai(clause: CanonicalSigClause): boolean {
@@ -1637,7 +1577,7 @@ function formatLongThai(
       eventParts.push(`เวลา ${timeStrings.join(", ")}`);
     }
   }
-  const timing = combineFrequencyAndEventsThai(frequencyPart, eventParts);
+  const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
   const countPart =
     schedule.count !== undefined && !standaloneOccurrenceCount

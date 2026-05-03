@@ -411,10 +411,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["both eyes", "bilateral eyes", "ตาทั้งสองข้าง", "ตาสองข้าง"],
+      names: ["both eyes", "bilateral eyes", "each eye", "ตาทั้งสองข้าง", "ตาสองข้าง"],
       definition: {
         coding: { code: "40638003", display: "Structure of both eyes" },
         text: "both eyes",
+        administrationTargetCount: 2,
         i18n: { th: "ตาทั้งสองข้าง" },
         routeHint: RouteCode["Ophthalmic route"]
       }
@@ -428,10 +429,19 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["ears", "both ears", "bilateral ears", "inside ears", "หูทั้งสองข้าง", "หูสองข้าง"],
+      names: [
+        "ears",
+        "both ears",
+        "bilateral ears",
+        "each ear",
+        "inside ears",
+        "หูทั้งสองข้าง",
+        "หูสองข้าง"
+      ],
       definition: {
         coding: { code: "34338003", display: "Both ears" },
         text: "both ears",
+        administrationTargetCount: 2,
         routeHint: RouteCode["Otic route"]
       }
     },
@@ -449,10 +459,18 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["ear canals", "both ear canals", "inside ear canals", "both external auditory canals"],
+      names: [
+        "ear canals",
+        "both ear canals",
+        "each ear canal",
+        "inside ear canals",
+        "both external auditory canals",
+        "each external auditory canal"
+      ],
       definition: {
         coding: { code: "181178004", display: "Entire external auditory canal" },
         text: "both ear canals",
+        administrationTargetCount: 2,
         routeHint: RouteCode["Otic route"]
       }
     },
@@ -489,8 +507,12 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["nostril", "nostrils"],
-      definition: { coding: { code: "1797002", display: "Naris" }, routeHint: RouteCode["Nasal route"] }
+      names: ["nostril"],
+      definition: {
+        coding: { code: "1797002", display: "Naris" },
+        text: "nostril",
+        routeHint: RouteCode["Nasal route"]
+      }
     },
     {
       names: ["left nostril", "left naris"],
@@ -507,8 +529,22 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["nares", "anterior nares"],
-      definition: { coding: { code: "244506005", display: "Anterior nares" }, routeHint: RouteCode["Nasal route"] }
+      names: [
+        "nostrils",
+        "both nostrils",
+        "bilateral nostrils",
+        "each nostril",
+        "nares",
+        "anterior nares",
+        "รูจมูกทั้งสองข้าง"
+      ],
+      definition: {
+        coding: { code: "244506005", display: "Anterior nares" },
+        text: "both nostrils",
+        administrationTargetCount: 2,
+        i18n: { th: "รูจมูกทั้งสองข้าง" },
+        routeHint: RouteCode["Nasal route"]
+      }
     },
     {
       names: ["nose"],

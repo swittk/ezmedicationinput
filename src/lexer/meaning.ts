@@ -162,6 +162,7 @@ const TOKEN_SITE_CANDIDATES: Record<string, SiteMeaningCandidate[]> = {
   le: [{ text: "left eye", route: RouteCode["Ophthalmic route"], source: "abbreviation" }],
   ou: [{ text: "both eyes", route: RouteCode["Ophthalmic route"], source: "abbreviation" }],
   be: [{ text: "both eyes", route: RouteCode["Ophthalmic route"], source: "abbreviation" }],
+  au: [{ text: "both ears", route: RouteCode["Otic route"], source: "abbreviation" }],
   vod: [
     {
       text: "right eye",

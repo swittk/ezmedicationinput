@@ -117,6 +117,26 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(3); // 300 / 120 = 2.5 -> 3
     });
 
+    it("multiplies bilateral eye drops and derives bottle counts", () => {
+        const parsed = parseSig("1 drop ou q2h");
+        const result = calculateTotalUnits({
+            dosage: parsed.fhir,
+            durationValue: 20,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                dosageForm: "eye drops, solution",
+                containerValue: 5,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(480);
+        expect(result.totalApproximateQuantity?.value).toBe(24);
+        expect(result.totalApproximateQuantity?.unit).toBe("mL");
+        expect(result.totalContainers).toBe(5);
+    });
+
     it("calculates fractional topical package units from parsed sigs", () => {
         const fixtures = [
             ["apply half tube twice daily", 7, 7],

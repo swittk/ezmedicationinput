@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
+import { applySiteCoding } from "../src/site-coding";
 
 const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
@@ -190,6 +192,88 @@ describe("FHIR parser-state import", () => {
     expect(state.primaryClause.prn?.reason?.i18n).toEqual({
       th: "แห้ง"
     });
+  });
+
+  it("infers administration target count from coded bilateral sites without requiring an extension", () => {
+    const state = parserStateFromFhir({
+      site: {
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "40638003",
+            display: "Structure of both eyes"
+          }
+        ]
+      }
+    });
+
+    expect(state.siteText).toBe("both eyes");
+    expect(state.siteAdministrationTargetCount).toBe(2);
+  });
+
+  it("exports administration target count as a private extension only when coding/text cannot carry it", () => {
+    const dosage = canonicalToFhir({
+      kind: "administration",
+      rawText: "",
+      raw: { start: 0, end: 0, text: "" },
+      leftovers: [],
+      evidence: [],
+      confidence: 1,
+      site: {
+        text: "custom paired site",
+        administrationTargetCount: 2,
+        coding: {
+          system: "http://example.org/site",
+          code: "custom-paired-site",
+          display: "Custom paired site"
+        }
+      }
+    });
+
+    expect(dosage.site?.extension).toContainEqual({
+      url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+      valueInteger: 2
+    });
+  });
+
+  it("preserves extension-only administration target counts when importing canonical site state", () => {
+    const clause = canonicalFromFhir({
+      site: {
+        extension: [
+          {
+            url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+            valueInteger: 2
+          }
+        ]
+      }
+    });
+
+    expect(clause.site).toEqual({
+      text: undefined,
+      i18n: undefined,
+      spatialRelation: undefined,
+      administrationTargetCount: 2,
+      coding: undefined,
+      source: "text"
+    });
+  });
+
+  it("keeps an existing administration target count when site coding resolution finds a definition without one", () => {
+    const state = new ParserState("", []);
+    state.siteText = "eye";
+    state.siteAdministrationTargetCount = 2;
+    state.siteLookupRequest = {
+      text: "eye",
+      canonical: "eye"
+    };
+
+    applySiteCoding(state);
+
+    expect(state.siteCoding).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "81745001"
+    });
+    expect(state.siteAdministrationTargetCount).toBe(2);
   });
 
   it("adds coding i18n translations without dropping existing display primitive extensions", () => {
