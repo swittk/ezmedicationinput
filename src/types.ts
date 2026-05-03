@@ -21,8 +21,21 @@ export interface FhirExtension {
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
+  valueBoolean?: boolean;
+  valueInteger?: number;
+  valueDecimal?: number;
+  valueQuantity?: FhirQuantity;
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
+}
+
+export interface FhirElement {
+  id?: string;
+  extension?: FhirExtension[];
+}
+
+export interface FhirBackboneElement extends FhirElement {
+  modifierExtension?: FhirExtension[];
 }
 
 export interface FhirPrimitiveElement {
@@ -341,7 +354,7 @@ export interface FhirTiming {
   code?: FhirCodeableConcept;
 }
 
-export interface FhirDoseAndRate {
+export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;
   doseRange?: FhirRange;
   doseQuantity?: FhirQuantity;
@@ -350,7 +363,7 @@ export interface FhirDoseAndRate {
   rateQuantity?: FhirQuantity;
 }
 
-export interface FhirDosage {
+export interface FhirDosage extends FhirBackboneElement {
   text?: string;
   patientInstruction?: string;
   timing?: FhirTiming;
