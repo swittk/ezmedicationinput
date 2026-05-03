@@ -1,4 +1,9 @@
 import { buildCanonicalSigClauses } from "./ir";
+import {
+  collectLocalizedWhenPhrases,
+  combineLocalizedFrequencyAndEvents,
+  type LocalizedTimingGrammar
+} from "./localized-timing";
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
@@ -555,87 +560,26 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
+const EN_TIMING_GRAMMAR: LocalizedTimingGrammar = {
+  whenText: WHEN_TEXT,
+  joinList: joinWithAnd,
+  summarizeMealTimingGroup,
+  bedtimeJoinStyle: (dailyCount) => {
+    if (dailyCount === 1) {
+      return "adjacent";
+    }
+    if (dailyCount === 2 || dailyCount === 3 || dailyCount === 4) {
+      return "conjunction";
+    }
+    return "separate";
+  }
+};
+
 function collectWhenPhrases(
   schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  const when = schedule?.when ?? [];
-  if (!when.length) {
-    return [];
-  }
-  const unique: EventTiming[] = [];
-  const seen = new Set<EventTiming>();
-  let hasSpecificAfter = false;
-  let hasSpecificBefore = false;
-  let hasSpecificWith = false;
-
-  for (const code of when) {
-    if (!seen.has(code)) {
-      seen.add(code);
-      unique.push(code);
-      if (
-        code === EventTiming["After Breakfast"] ||
-        code === EventTiming["After Lunch"] ||
-        code === EventTiming["After Dinner"]
-      ) {
-        hasSpecificAfter = true;
-      }
-      if (
-        code === EventTiming["Before Breakfast"] ||
-        code === EventTiming["Before Lunch"] ||
-        code === EventTiming["Before Dinner"]
-      ) {
-        hasSpecificBefore = true;
-      }
-      if (code === EventTiming.Breakfast || code === EventTiming.Lunch || code === EventTiming.Dinner) {
-        hasSpecificWith = true;
-      }
-    }
-  }
-
-  const filtered: EventTiming[] = [];
-  for (const code of unique) {
-    if (code === EventTiming["After Meal"] && hasSpecificAfter) {
-      continue;
-    }
-    if (code === EventTiming["Before Meal"] && hasSpecificBefore) {
-      continue;
-    }
-    if (code === EventTiming.Meal && hasSpecificWith) {
-      continue;
-    }
-    filtered.push(code);
-  }
-
-  const mealGroup = getMealTimingGroup(filtered, options);
-  if (!mealGroup) {
-    const phrases: string[] = [];
-    for (const code of filtered) {
-      const text = WHEN_TEXT[code] ?? code;
-      if (text) {
-        phrases.push(text);
-      }
-    }
-    return phrases;
-  }
-
-  const groupedCodes = new Set<EventTiming>(mealGroup.codes);
-  const phrases: string[] = [];
-  let insertedGroup = false;
-  for (const code of filtered) {
-    if (groupedCodes.has(code)) {
-      if (!insertedGroup) {
-        phrases.push(summarizeMealTimingGroup(mealGroup));
-        insertedGroup = true;
-      }
-      continue;
-    }
-    const text = WHEN_TEXT[code] ?? code;
-    if (text) {
-      phrases.push(text);
-    }
-  }
-  return phrases;
+  return collectLocalizedWhenPhrases(schedule, EN_TIMING_GRAMMAR, options);
 }
 
 function joinWithAnd(parts: string[]): string {
@@ -652,29 +596,18 @@ function joinWithAnd(parts: string[]): string {
 }
 
 function combineFrequencyAndEvents(
+  schedule: CanonicalScheduleExpr | undefined,
   frequency: string | undefined,
-  events: string[]
+  events: string[],
+  options?: TimingSummaryOptions
 ): { frequency?: string; event?: string } {
-  if (!frequency) {
-    if (!events.length) {
-      return {};
-    }
-    return { event: joinWithAnd(events) };
-  }
-  if (!events.length) {
-    return { frequency };
-  }
-  if (events.length === 1 && events[0] === "at bedtime") {
-    const lowerFrequency = frequency.toLowerCase();
-    if (
-      lowerFrequency === "twice daily" ||
-      lowerFrequency === "three times daily" ||
-      lowerFrequency === "four times daily"
-    ) {
-      return { frequency: `${frequency} and ${events[0]}` };
-    }
-  }
-  return { frequency, event: joinWithAnd(events) };
+  return combineLocalizedFrequencyAndEvents(
+    schedule,
+    frequency,
+    events,
+    EN_TIMING_GRAMMAR,
+    options
+  );
 }
 
 function buildRoutePhrase(
@@ -1026,7 +959,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       eventParts.push(`at ${timeStrings.join(", ")}`);
     }
   }
-  const timing = combineFrequencyAndEvents(frequencyPart, eventParts);
+  const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
   const countPart =
     schedule.count !== undefined && !standaloneOccurrenceCount

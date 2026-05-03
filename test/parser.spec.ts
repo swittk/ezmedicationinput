@@ -1060,6 +1060,11 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Take 1 mg orally at bedtime.");
   });
 
+  it("formats once-daily bedtime instructions without a string-level conjunction hack", () => {
+    const result = parseSig("1 drop ou qd hs");
+    expect(result.longText).toBe("Instill 1 drop once daily at bedtime in both eyes.");
+  });
+
   it("normalizes spelled metric dose units", () => {
     const result = parseSig("500 milligrams po q12h");
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
@@ -3973,6 +3978,12 @@ describe("internationalization", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
       expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
       expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
+    });
+
+    it("formats once-daily bedtime ocular dosing in Thai without splitting the timing", () => {
+      const result = parseSig("1 drop ou qd hs", { locale: "th" });
+      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
+      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
     });
 
     it("uses inhaler phrasing in Thai without สูดดม", () => {
