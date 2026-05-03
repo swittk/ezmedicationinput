@@ -1294,9 +1294,9 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   ) {
     return undefined;
   }
-  const translated = text
+  const translated = clause.site?.i18n?.th ?? clause.site?.coding?.i18n?.th ?? (text
     ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
-    : translateSpatialSiteThai(undefined, clause.site?.spatialRelation);
+    : translateSpatialSiteThai(undefined, clause.site?.spatialRelation));
   if (!translated) {
     return undefined;
   }

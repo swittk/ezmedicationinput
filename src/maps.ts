@@ -1035,6 +1035,24 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["lesion", "skin lesion"],
+      definition: {
+        coding: { code: "95324001", display: "Skin lesion" },
+        text: "lesion",
+        routeHint: RouteCode["Topical route"],
+        i18n: { th: "รอยโรค" }
+      }
+    },
+    {
+      names: ["lesions", "skin lesions"],
+      definition: {
+        coding: { code: "95324001", display: "Skin lesion" },
+        text: "lesions",
+        routeHint: RouteCode["Topical route"],
+        i18n: { th: "รอยโรค" }
+      }
+    },
+    {
       names: ["left head", "left side of head"],
       definition: { coding: { code: "64237003", display: "Structure of left half of head" }, routeHint: RouteCode["Topical route"] }
     },

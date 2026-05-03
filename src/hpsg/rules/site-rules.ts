@@ -297,6 +297,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           valence: {
             site: {
               text: displayText,
+              i18n: resolved?.definition?.i18n,
               source: "text",
               coding: resolved?.coding,
               spatialRelation: resolved?.spatialRelation,

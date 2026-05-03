@@ -4663,6 +4663,25 @@ describe("topical workflow and timing", () => {
     expect(twiceDaily.meta.leftoverText).toBeUndefined();
     expect(twiceDaily.longText).toBe("Apply the medication twice daily to the wound.");
   });
+
+  it("codes topical lesion sites as skin lesion with Thai translation metadata", () => {
+    const result = parseSig("apply twice daily at lesion", { locale: "th" });
+
+    expect(result.fhir.site?.text).toBe("lesion");
+    expect(result.fhir.site?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "95324001",
+      display: "Skin lesion"
+    });
+    expectPrimitiveTranslation(result.fhir.site?._text, "th", "รอยโรค");
+    expectPrimitiveTranslation(
+      result.fhir.site?.coding?.[0]?._display,
+      "th",
+      "รอยโรค"
+    );
+    expect(result.longText).toContain("รอยโรค");
+    expect(result.longText).not.toContain("lesion");
+  });
 });
 
 describe("topical product forms and workflow", () => {

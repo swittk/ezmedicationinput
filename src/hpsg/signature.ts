@@ -46,6 +46,7 @@ export interface HpsgRouteFeature {
 
 export interface HpsgSiteFeature {
   text?: string;
+  i18n?: Record<string, string>;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
