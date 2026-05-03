@@ -461,6 +461,8 @@ export interface BodySiteDefinition {
   text?: string;
   spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
+  /** Optional translations for different locales (e.g., { "th": "ตา" }) */
+  i18n?: Record<string, string>;
   /**
    * Optional phrases that should resolve to the same coding as this entry.
    * Aliases are normalized with the same logic as map keys so callers can

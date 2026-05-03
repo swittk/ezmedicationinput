@@ -153,7 +153,8 @@ function applyRouteSiteDefault(state: ParserState): void {
     state.siteCoding = {
       system: definition.coding.system ?? "http://snomed.info/sct",
       code: definition.coding.code,
-      display: definition.coding.display
+      display: definition.coding.display,
+      i18n: definition.i18n
     };
   }
 }

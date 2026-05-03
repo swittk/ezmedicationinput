@@ -197,7 +197,8 @@ function buildBodySiteCoding(
   return {
     code: coding.code,
     display: coding.display,
-    system: coding.system ?? SNOMED_SYSTEM
+    system: coding.system ?? SNOMED_SYSTEM,
+    i18n: definition?.i18n
   };
 }
 

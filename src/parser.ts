@@ -370,7 +370,8 @@ function seedKnownSiteCoding(state: ParserState): void {
   state.siteCoding = {
     system: definition.coding.system ?? SNOMED_SYSTEM,
     code: definition.coding.code,
-    display: definition.coding.display
+    display: definition.coding.display,
+    i18n: definition.i18n
   };
 }
 

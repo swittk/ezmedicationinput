@@ -3468,6 +3468,29 @@ describe("parseSig core scenarios", () => {
     expect(parsed.fhir.timing).toBeUndefined();
   });
 
+  it("emits standard primitive translation extensions for coded site and PRN reason text", () => {
+    const result = parseSig("1 drop ou q2h prn dry eyes");
+
+    expect(result.fhir.site?.text).toBe("both eyes");
+    expectPrimitiveTranslation(result.fhir.site?._text, "th", "ตาทั้งสองข้าง");
+    expectPrimitiveTranslation(
+      result.fhir.site?.coding?.[0]?._display,
+      "th",
+      "ตาทั้งสองข้าง"
+    );
+    expect(result.fhir.asNeededFor?.[0]?.text).toBe("dry eyes");
+    expectPrimitiveTranslation(
+      result.fhir.asNeededFor?.[0]?._text,
+      "th",
+      "ตาแห้ง"
+    );
+    expectPrimitiveTranslation(
+      result.fhir.asNeededFor?.[0]?.coding?.[0]?._display,
+      "th",
+      "ตาแห้ง"
+    );
+  });
+
   it("treats oral administration verbs as route cues instead of stray advice text", () => {
     const result = parseSig("drink 10 ml prn pain");
 

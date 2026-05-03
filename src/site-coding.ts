@@ -260,7 +260,8 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
     ? {
         code: coding.code,
         display: coding.display,
-        system: coding.system ?? SNOMED_SYSTEM
+        system: coding.system ?? SNOMED_SYSTEM,
+        i18n: definition.i18n
       }
     : undefined;
   if (definition.text) {

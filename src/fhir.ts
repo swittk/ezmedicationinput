@@ -10,7 +10,11 @@ import {
   buildBodySiteTopographicalModifierCoding,
   getBodySiteText
 } from "./body-site-lookup";
-import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
+import {
+  buildTranslationPrimitiveElement,
+  cloneExtensions,
+  clonePrimitiveElement
+} from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
@@ -117,11 +121,13 @@ function buildSiteCodingArray(
   if (!siteCoding?.code) {
     return undefined;
   }
+  const displayElement = buildTranslationPrimitiveElement(siteCoding.i18n);
   return [
     {
       system: siteCoding.system ?? SNOMED_SYSTEM,
       code: siteCoding.code,
-      display: siteCoding.display
+      display: siteCoding.display,
+      ...(displayElement ? { _display: displayElement } : {})
     }
   ];
 }
@@ -533,8 +539,10 @@ export function canonicalToFhir(
 
   if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation) {
     const siteCoding = selectCanonicalSiteCoding(clause.site, options);
+    const siteTextElement = buildTranslationPrimitiveElement(siteCoding?.i18n);
     dosage.site = {
       text: clause.site?.text,
+      ...(siteTextElement ? { _text: siteTextElement } : {}),
       coding: buildSiteCodingArray(siteCoding),
       extension: buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation)
     };
@@ -585,12 +593,20 @@ export function canonicalToFhir(
         if (reason.text) {
           concept.text = reason.text;
         }
+        const reasonTextElement = buildTranslationPrimitiveElement(reason.coding?.i18n);
+        if (reasonTextElement) {
+          concept._text = reasonTextElement;
+        }
         if (reason.coding?.code) {
+          const displayElement =
+            clonePrimitiveElement(reason.coding._display) ??
+            buildTranslationPrimitiveElement(reason.coding.i18n);
           concept.coding = [
             {
               system: reason.coding.system ?? SNOMED_SYSTEM,
               code: reason.coding.code,
               display: reason.coding.display,
+              ...(displayElement ? { _display: displayElement } : {}),
               extension: cloneExtensions(reason.coding.extension)
             }
           ];

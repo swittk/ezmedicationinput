@@ -388,6 +388,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "81745001", display: "Eye" },
         text: "eye",
+        i18n: { th: "ตา" },
         routeHint: RouteCode["Ophthalmic route"]
       }
     },
@@ -396,6 +397,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "1290031003", display: "Structure of left eye proper" },
         text: "left eye",
+        i18n: { th: "ตาซ้าย" },
         routeHint: RouteCode["Ophthalmic route"]
       }
     },
@@ -404,6 +406,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "1290032005", display: "Structure of right eye proper" },
         text: "right eye",
+        i18n: { th: "ตาขวา" },
         routeHint: RouteCode["Ophthalmic route"]
       }
     },
@@ -412,6 +415,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "40638003", display: "Structure of both eyes" },
         text: "both eyes",
+        i18n: { th: "ตาทั้งสองข้าง" },
         routeHint: RouteCode["Ophthalmic route"]
       }
     },
