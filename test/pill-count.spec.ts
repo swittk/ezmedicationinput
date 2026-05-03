@@ -369,6 +369,35 @@ describe("calculateTotalUnits", () => {
         }
     });
 
+    it("bridges semisolid topical size proxies into gram-dispensed container math", () => {
+        const result = calculateTotalUnits({
+            dosage: parseSig("apply 2 pea-sized amount once daily to skin").fhir,
+            durationValue: 20,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                dosageForm: "cream",
+                strength: "20 mg/100 g",
+                containerValue: 30,
+                containerUnit: "g"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalUnits).toBe(40);
+        expect(result.totalApproximateQuantity).toMatchObject({
+            value: 10,
+            unit: "g",
+            confidence: "approximate"
+        });
+        expect(result.totalApproximateIngredientQuantity).toMatchObject({
+            value: 2,
+            unit: "mg",
+            confidence: "approximate"
+        });
+        expect(result.totalContainerQuantity).toEqual({ value: 10, unit: "g" });
+        expect(result.totalContainers).toBe(1);
+    });
+
     it("uses approximate natural volume for container counts", () => {
         const twentyDays = calculateTotalUnits({
             dosage: parseSig("apply 1 pea-sized amount once daily to face").fhir,

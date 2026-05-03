@@ -1,6 +1,8 @@
 import {
+  DEFAULT_UNIT_BY_NORMALIZED_FORM,
   DEFAULT_UNIT_SYNONYMS,
-  HOUSEHOLD_VOLUME_UNITS
+  HOUSEHOLD_VOLUME_UNITS,
+  KNOWN_DOSAGE_FORMS_TO_DOSE
 } from "./maps";
 import unitTerminologySource from "./unit-terminology.json";
 import type {
@@ -11,6 +13,7 @@ import type {
   MedicationContext,
   ParseOptions
 } from "./types";
+import { MASS_UNITS, VOLUME_UNITS, getUnitCategory } from "./utils/units";
 
 const HOUSEHOLD_VOLUME_UNIT_SET = new Set(
   HOUSEHOLD_VOLUME_UNITS.map((unit) => unit.toLowerCase())
@@ -87,6 +90,60 @@ function unitApproximationOverride(
   return undefined;
 }
 
+function normalizeDosageFormKey(form: string | undefined): string | undefined {
+  const normalized = form?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return KNOWN_DOSAGE_FORMS_TO_DOSE[normalized] ?? normalized;
+}
+
+function getPreferredMassApproximationUnit(
+  context?: MedicationContext | null
+): string | undefined {
+  const containerUnit = context?.containerUnit?.trim();
+  if (containerUnit && getUnitCategory(containerUnit) === "mass") {
+    return containerUnit;
+  }
+
+  const normalizedDosageForm = normalizeDosageFormKey(context?.dosageForm);
+  const defaultUnit = normalizedDosageForm
+    ? DEFAULT_UNIT_BY_NORMALIZED_FORM[normalizedDosageForm]
+    : undefined;
+  return defaultUnit && getUnitCategory(defaultUnit) === "mass" ? defaultUnit : undefined;
+}
+
+function bridgeApproximationToMassDispensedTopical(
+  approximation: DoseUnitApproximation,
+  context?: MedicationContext | null
+): DoseUnitApproximation {
+  const preferredMassUnit = getPreferredMassApproximationUnit(context);
+  if (!preferredMassUnit || getUnitCategory(approximation.unit) !== "volume") {
+    return approximation;
+  }
+
+  const sourceVolumeFactor = VOLUME_UNITS[approximation.unit.toLowerCase()];
+  const targetMassFactor = MASS_UNITS[preferredMassUnit.toLowerCase()];
+  if (!sourceVolumeFactor || !targetMassFactor) {
+    return approximation;
+  }
+
+  const valueMl = approximation.value * sourceVolumeFactor;
+  const valueG = valueMl;
+  const convertedValue = (valueG * MASS_UNITS.g) / targetMassFactor;
+  const bridgeBasis =
+    "Mass-dispensed semisolid topical default bridge assumes 1 mL approximately equals 1 g unless a product-specific override is provided";
+
+  return {
+    ...approximation,
+    value: convertedValue,
+    unit: preferredMassUnit,
+    basis: approximation.basis
+      ? `${approximation.basis}; ${bridgeBasis}`
+      : bridgeBasis
+  };
+}
+
 function getDoseUnitTerminologyEntry(unit: string | undefined): DoseUnitTerminologyEntry | undefined {
   if (!unit) {
     return undefined;
@@ -111,7 +168,11 @@ export function getDoseUnitApproximation(
   if (override) {
     return override;
   }
-  return terminologyEntry?.approximateQuantity;
+  const approximation = terminologyEntry?.approximateQuantity;
+  if (!approximation) {
+    return undefined;
+  }
+  return bridgeApproximationToMassDispensedTopical(approximation, context);
 }
 
 export function getDoseUnitSemantics(

@@ -20,7 +20,7 @@ import {
 } from "./types";
 import { parseAdditionalInstructions } from "./advice";
 import { arrayIncludes } from "./utils/array";
-import { convertValue } from "./utils/units";
+import { convertValue, getBaseUnitFactor, getUnitCategory } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
 import { getDoseUnitSemantics } from "./unit-lexicon";
 
@@ -467,6 +467,26 @@ function estimateIngredientQuantity(
     denominator.value === undefined
   ) {
     return undefined;
+  }
+  const quantityCategory = getUnitCategory(quantity.unit);
+  const denominatorCategory = getUnitCategory(denominator.unit);
+  if (quantityCategory !== "other" && quantityCategory === denominatorCategory) {
+    const quantityInDenominatorBase = quantity.value * getBaseUnitFactor(quantity.unit);
+    const denominatorInBase = denominator.value * getBaseUnitFactor(denominator.unit);
+    const numeratorInBase = numerator.value * getBaseUnitFactor(numerator.unit);
+    if (denominatorInBase !== 0) {
+      return {
+        value: roundCalculatedUnits(
+          (quantityInDenominatorBase * numeratorInBase) /
+            denominatorInBase /
+            getBaseUnitFactor(numerator.unit)
+        ),
+        unit: numerator.unit,
+        confidence: quantity.confidence,
+        basis: quantity.basis,
+        source: quantity.source
+      };
+    }
   }
   const converted = convertValue(
     quantity.value,
