@@ -18,6 +18,25 @@ import { MASS_UNITS, VOLUME_UNITS, getUnitCategory } from "./utils/units";
 const HOUSEHOLD_VOLUME_UNIT_SET = new Set(
   HOUSEHOLD_VOLUME_UNITS.map((unit) => unit.toLowerCase())
 );
+const MASS_DISPENSED_SEMISOLID_DOSAGE_FORMS = new Set([
+  "cream",
+  "ointment",
+  "gel",
+  "paste",
+  "cutaneous paste",
+  "vaginal cream",
+  "vaginal gel",
+  "oral gel",
+  "oral paste",
+  "oromucosal gel",
+  "oromucosal paste",
+  "dental gel",
+  "dental paste",
+  "gingival gel",
+  "nasal gel",
+  "eye gel",
+  "eye ointment"
+]);
 
 const DOSE_UNIT_TERMINOLOGY = unitTerminologySource.terms as DoseUnitTerminologyEntry[];
 
@@ -101,12 +120,19 @@ function normalizeDosageFormKey(form: string | undefined): string | undefined {
 function getPreferredMassApproximationUnit(
   context?: MedicationContext | null
 ): string | undefined {
+  const normalizedDosageForm = normalizeDosageFormKey(context?.dosageForm);
+  if (
+    !normalizedDosageForm ||
+    !MASS_DISPENSED_SEMISOLID_DOSAGE_FORMS.has(normalizedDosageForm)
+  ) {
+    return undefined;
+  }
+
   const containerUnit = context?.containerUnit?.trim();
   if (containerUnit && getUnitCategory(containerUnit) === "mass") {
     return containerUnit;
   }
 
-  const normalizedDosageForm = normalizeDosageFormKey(context?.dosageForm);
   const defaultUnit = normalizedDosageForm
     ? DEFAULT_UNIT_BY_NORMALIZED_FORM[normalizedDosageForm]
     : undefined;

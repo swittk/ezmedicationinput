@@ -310,6 +310,7 @@ function matchCompoundDoseUnit(
   start: number,
   lower: string
 ): UnitMatch | undefined {
+  const MAX_SITE_CONTEXT_TOKENS = 3;
   const hasSiteMeaning = (lowerValue: string | undefined): boolean => Boolean(
     lowerValue &&
     (
@@ -319,44 +320,71 @@ function matchCompoundDoseUnit(
       })
     )
   );
+  const collectForwardSitePhrases = (phraseStart: number): string[] => {
+    const parts: string[] = [];
+    const phrases: string[] = [];
+    for (
+      let index = phraseStart;
+      index < context.limit && parts.length < MAX_SITE_CONTEXT_TOKENS;
+      index += 1
+    ) {
+      const token = context.tokens[index];
+      if (!token || context.state.consumed.has(token.index)) {
+        break;
+      }
+      const lowerValue = normalizeTokenLower(token);
+      if (!lowerValue || isPunctuation(lowerValue)) {
+        break;
+      }
+      parts.push(lowerValue);
+      phrases.push(parts.join(" "));
+    }
+    return phrases;
+  };
   const matchesSiteContext = (): boolean => {
     const next = context.tokens[start + 1];
-    const followingSiteHead = context.tokens[start + 2];
     const nextLower = next && !context.state.consumed.has(next.index)
       ? normalizeTokenLower(next)
       : undefined;
-    const followingSiteHeadLower = followingSiteHead && !context.state.consumed.has(followingSiteHead.index)
-      ? normalizeTokenLower(followingSiteHead)
-      : undefined;
     if (
       nextLower &&
-      (ROUTE_SITE_PREPOSITIONS.has(nextLower) || SITE_ANCHORS.has(nextLower)) &&
-      hasSiteMeaning(followingSiteHeadLower)
+      (ROUTE_SITE_PREPOSITIONS.has(nextLower) || SITE_ANCHORS.has(nextLower))
     ) {
-      return true;
+      const followingSitePhrases = collectForwardSitePhrases(start + 2);
+      if (followingSitePhrases.some((phrase) => hasSiteMeaning(phrase))) {
+        return true;
+      }
     }
 
     const previous = context.tokens[start - 1];
     const previousLower = previous && !context.state.consumed.has(previous.index)
       ? normalizeTokenLower(previous)
       : undefined;
-    const precedingSiteHead = previousLower && /^[0-9]+(?:\.[0-9]+)?$/.test(previousLower)
-      ? context.tokens[start - 2]
-      : previous;
-    const precedingAnchor = previousLower && /^[0-9]+(?:\.[0-9]+)?$/.test(previousLower)
-      ? context.tokens[start - 3]
-      : context.tokens[start - 2];
-    const precedingSiteHeadLower = precedingSiteHead && !context.state.consumed.has(precedingSiteHead.index)
-      ? normalizeTokenLower(precedingSiteHead)
-      : undefined;
-    const precedingAnchorLower = precedingAnchor && !context.state.consumed.has(precedingAnchor.index)
-      ? normalizeTokenLower(precedingAnchor)
-      : undefined;
-    return Boolean(
-      precedingAnchorLower &&
-      (ROUTE_SITE_PREPOSITIONS.has(precedingAnchorLower) || SITE_ANCHORS.has(precedingAnchorLower)) &&
-      hasSiteMeaning(precedingSiteHeadLower)
+    const trailingNumberBeforeUnit = Boolean(
+      previousLower && /^[0-9]+(?:\.[0-9]+)?$/.test(previousLower)
     );
+    const siteEnd = start - (trailingNumberBeforeUnit ? 2 : 1);
+    for (let phraseLength = 1; phraseLength <= MAX_SITE_CONTEXT_TOKENS; phraseLength += 1) {
+      const phraseStart = siteEnd - phraseLength + 1;
+      if (phraseStart < 0) {
+        break;
+      }
+      const precedingAnchor = context.tokens[phraseStart - 1];
+      const precedingAnchorLower = precedingAnchor && !context.state.consumed.has(precedingAnchor.index)
+        ? normalizeTokenLower(precedingAnchor)
+        : undefined;
+      if (
+        !precedingAnchorLower ||
+        (!ROUTE_SITE_PREPOSITIONS.has(precedingAnchorLower) && !SITE_ANCHORS.has(precedingAnchorLower))
+      ) {
+        continue;
+      }
+      const phrase = collectForwardSitePhrases(phraseStart)[phraseLength - 1];
+      if (hasSiteMeaning(phrase)) {
+        return true;
+      }
+    }
+    return false;
   };
   for (const compound of COMPOUND_DOSE_UNITS) {
     if (compound.head !== lower) {

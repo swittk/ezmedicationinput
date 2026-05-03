@@ -398,6 +398,28 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(1);
     });
 
+    it("does not apply the semisolid 1 mL≈1 g bridge outside whitelisted dosage forms", () => {
+        const result = calculateTotalUnits({
+            dosage: parseSig("apply 1 pea-sized amount once daily to face").fhir,
+            durationValue: 20,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                dosageForm: "powder for oral suspension",
+                strength: "500 mcg / 100 mL",
+                containerValue: 30,
+                containerUnit: "g"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(result.totalApproximateQuantity).toMatchObject({
+            value: 5,
+            unit: "mL",
+            confidence: "approximate"
+        });
+        expect(result.totalContainerQuantity).toBeUndefined();
+    });
+
     it("uses approximate natural volume for container counts", () => {
         const twentyDays = calculateTotalUnits({
             dosage: parseSig("apply 1 pea-sized amount once daily to face").fhir,

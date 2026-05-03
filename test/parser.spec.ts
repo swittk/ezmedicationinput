@@ -4916,6 +4916,20 @@ describe("topical product forms and workflow", () => {
     });
     expect(trailingLine.fhir.site?.text).toBe("arm");
     expect(trailingLine.fhir.timing?.repeat?.when).toBeUndefined();
+
+    const multiTokenFollowingSite = parseSig("apply 1 cm to affected area");
+    expect(multiTokenFollowingSite.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "cm line"
+    });
+    expect(multiTokenFollowingSite.fhir.site?.text).toBe("affected area");
+
+    const multiTokenTrailingSite = parseSig("apply to affected area 1 cm");
+    expect(multiTokenTrailingSite.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1,
+      unit: "cm line"
+    });
+    expect(multiTokenTrailingSite.fhir.site?.text).toBe("affected area");
   });
 
   it("captures natural topical amount units with unit semantics", () => {
