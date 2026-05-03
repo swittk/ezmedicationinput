@@ -333,9 +333,15 @@ export enum FhirDayOfWeek {
   Sunday = "sun"
 }
 
+export interface FhirPeriod {
+  start?: string;
+  end?: string;
+}
+
 export interface FhirTimingRepeat {
   count?: number;
   boundsDuration?: FhirQuantity;
+  boundsPeriod?: FhirPeriod;
   boundsRange?: FhirRange;
   frequency?: number;
   frequencyMax?: number;
