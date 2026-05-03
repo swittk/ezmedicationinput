@@ -1,6 +1,6 @@
 import { AnnotatedLexToken } from "./lexer/meaning";
 import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
-import { cloneExtensions, clonePrimitiveElement } from "./fhir-translations";
+import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
   BodySiteSpatialRelation,
@@ -335,6 +335,7 @@ export class ParserState {
     for (const reason of value) {
       reasons.push({
         text: reason.text,
+        i18n: cloneI18nRecord(reason.i18n),
         spatialRelation: cloneBodySiteSpatialRelation(reason.spatialRelation),
         coding: reason.coding
           ? {
@@ -343,7 +344,7 @@ export class ParserState {
             system: reason.coding.system,
             extension: cloneExtensions(reason.coding.extension),
             _display: clonePrimitiveElement(reason.coding._display),
-            i18n: reason.coding.i18n
+            i18n: cloneI18nRecord(reason.coding.i18n)
           }
           : undefined
       });
@@ -377,7 +378,7 @@ export class ParserState {
         system: value.system,
         extension: cloneExtensions(value.extension),
         _display: clonePrimitiveElement(value._display),
-        i18n: value.i18n
+        i18n: cloneI18nRecord(value.i18n)
       }
       : undefined;
   }
@@ -415,7 +416,7 @@ export class ParserState {
         code: value.code,
         display: value.display,
         system: value.system,
-        i18n: value.i18n
+        i18n: cloneI18nRecord(value.i18n)
       }
       : undefined;
   }

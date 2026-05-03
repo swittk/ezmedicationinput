@@ -140,6 +140,38 @@ export function buildTranslationPrimitiveElement(
   };
 }
 
+export function mergeTranslationPrimitiveElement(
+  base: FhirPrimitiveElement | undefined,
+  translations: Record<string, string> | undefined
+): FhirPrimitiveElement | undefined {
+  const nextExtensions = base?.extension?.map(cloneExtension) ?? [];
+  const existingTranslationLocales = new Set<string>();
+
+  for (const extension of nextExtensions) {
+    if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
+      continue;
+    }
+    const { locale } = getTranslationParts(extension);
+    if (locale) {
+      existingTranslationLocales.add(locale);
+    }
+  }
+
+  const additions = buildTranslationPrimitiveElement(translations)?.extension ?? [];
+  for (const extension of additions) {
+    const { locale } = getTranslationParts(extension);
+    if (locale && existingTranslationLocales.has(locale)) {
+      continue;
+    }
+    if (locale) {
+      existingTranslationLocales.add(locale);
+    }
+    nextExtensions.push(extension);
+  }
+
+  return nextExtensions.length ? { extension: nextExtensions } : undefined;
+}
+
 function getTranslationParts(
   extension: FhirExtension
 ): { locale?: string; content?: string } {

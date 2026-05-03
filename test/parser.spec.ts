@@ -3549,10 +3549,16 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.canonical.clauses[0]?.site?.coding?.i18n).toEqual({
       th: "พื้นผิวตา"
     });
+    expect(result.meta.canonical.clauses[0]?.site?.i18n).toEqual({
+      th: "ผิวตา"
+    });
     expect(
       result.meta.canonical.clauses[0]?.prn?.reasons?.[0]?.coding?.i18n
     ).toEqual({
       th: "อาการแห้ง"
+    });
+    expect(result.meta.canonical.clauses[0]?.prn?.reasons?.[0]?.i18n).toEqual({
+      th: "แห้ง"
     });
   });
 

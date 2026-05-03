@@ -15,7 +15,8 @@ import {
   cloneExtensions,
   clonePrimitiveElement,
   getPrimitiveTranslations,
-  mergeI18nRecords
+  mergeI18nRecords,
+  mergeTranslationPrimitiveElement
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import { ParserState } from "./parser-state";
@@ -160,13 +161,20 @@ function codeableConceptTranslationI18n(
   concept: FhirCodeableConcept | undefined,
   coding: CodeableConceptCoding | undefined,
   fallback?: Record<string, string>
-): Record<string, string> | undefined {
-  return mergeI18nRecords(
-    fallback,
-    coding?.i18n,
-    getPrimitiveTranslations(concept?._text),
-    getPrimitiveTranslations(coding?._display)
-  );
+): {
+  text?: Record<string, string>;
+  display?: Record<string, string>;
+} {
+  return {
+    text: mergeI18nRecords(
+      fallback,
+      getPrimitiveTranslations(concept?._text)
+    ),
+    display: mergeI18nRecords(
+      coding?.i18n,
+      getPrimitiveTranslations(coding?._display)
+    )
+  };
 }
 
 function lowerFirst(value: string | undefined): string | undefined {
@@ -563,7 +571,7 @@ export function canonicalToFhir(
   if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation) {
     const siteCoding = selectCanonicalSiteCoding(clause.site, options);
     const siteTextElement = options?.includeTranslationExtensions
-      ? buildTranslationPrimitiveElement(siteCoding?.i18n)
+      ? buildTranslationPrimitiveElement(clause.site.i18n ?? siteCoding?.i18n)
       : undefined;
     dosage.site = {
       text: clause.site?.text,
@@ -619,17 +627,19 @@ export function canonicalToFhir(
           concept.text = reason.text;
         }
         const reasonTextElement = options?.includeTranslationExtensions
-          ? buildTranslationPrimitiveElement(reason.coding?.i18n)
+          ? buildTranslationPrimitiveElement(reason.i18n ?? reason.coding?.i18n)
           : undefined;
         if (reasonTextElement) {
           concept._text = reasonTextElement;
         }
         if (reason.coding?.code) {
           const displayElement =
-            clonePrimitiveElement(reason.coding._display) ??
-            (options?.includeTranslationExtensions
-              ? buildTranslationPrimitiveElement(reason.coding.i18n)
-              : undefined);
+            options?.includeTranslationExtensions
+              ? mergeTranslationPrimitiveElement(
+                reason.coding._display,
+                reason.coding.i18n
+              )
+              : clonePrimitiveElement(reason.coding._display);
           concept.coding = [
             {
               system: reason.coding.system ?? SNOMED_SYSTEM,
@@ -686,13 +696,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   if (siteText || siteCoding?.code || siteSpatialRelation) {
     clause.site = {
       text: siteText,
+      i18n: siteI18n.text,
       spatialRelation: siteSpatialRelation,
       coding: siteCoding?.code
         ? {
           code: siteCoding.code,
           display: siteCoding.display,
           system: siteCoding.system,
-          i18n: siteI18n
+          i18n: siteI18n.display
         }
         : undefined,
       source: "text"
@@ -775,6 +786,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
       return {
         text: getFallbackPrnReasonText(concept),
+        i18n: i18n.text,
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
         coding: coding?.code
           ? {
@@ -783,7 +795,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
             system: coding.system,
             extension: cloneExtensions(coding.extension),
             _display: clonePrimitiveElement(coding._display),
-            i18n
+            i18n: i18n.display
           }
           : undefined
       };
@@ -868,6 +880,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
       const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
       return {
         text: getFallbackPrnReasonText(concept),
+        i18n: i18n.text,
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
         coding: coding?.code
           ? {
@@ -876,7 +889,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
             system: coding.system,
             extension: cloneExtensions(coding.extension),
             _display: clonePrimitiveElement(coding._display),
-            i18n
+            i18n: i18n.display
           }
           : undefined
       };
@@ -914,8 +927,14 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
       code: siteCoding.code,
       display: siteCoding.display,
       system: siteCoding.system,
-      i18n: siteI18n
+      i18n: siteI18n.display
     };
+    if (siteI18n.text) {
+      state.primaryClause.site = {
+        ...state.primaryClause.site,
+        i18n: siteI18n.text
+      };
+    }
     state.siteSource = "text";
   } else if (dosage.site?.text) {
     state.siteSource = "text";
@@ -949,8 +968,14 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         system: reasonCoding.system,
         extension: cloneExtensions(reasonCoding.extension),
         _display: clonePrimitiveElement(reasonCoding._display),
-        i18n
+        i18n: i18n.display
       };
+      if (i18n.text && state.primaryClause.prn?.reason) {
+        state.primaryClause.prn.reason = {
+          ...state.primaryClause.prn.reason,
+          i18n: i18n.text
+        };
+      }
     }
   }
 

@@ -870,6 +870,7 @@ export interface CanonicalRouteExpr {
 
 export interface CanonicalSiteExpr {
   text?: string;
+  i18n?: Record<string, string>;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
   source?: "abbreviation" | "text" | "selection" | "resolver";
@@ -903,6 +904,7 @@ export interface CanonicalScheduleExpr {
 
 export interface CanonicalPrnReasonExpr {
   text?: string;
+  i18n?: Record<string, string>;
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
 }

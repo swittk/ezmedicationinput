@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parserStateFromFhir } from "../src/fhir";
+import { canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 
 const FHIR_TRANSLATION_EXTENSION_URL =
@@ -17,6 +17,22 @@ function translationPrimitive(locale: string, value: string) {
       }
     ]
   };
+}
+
+function expectTranslation(
+  element: { extension?: Array<{ url: string; extension?: Array<{ url: string; valueCode?: string; valueString?: string }> }> } | undefined,
+  locale: string,
+  value: string
+): void {
+  expect(element?.extension).toContainEqual(
+    expect.objectContaining({
+      url: FHIR_TRANSLATION_EXTENSION_URL,
+      extension: expect.arrayContaining([
+        expect.objectContaining({ url: "lang", valueCode: locale }),
+        expect.objectContaining({ url: "content", valueString: value })
+      ])
+    })
+  );
 }
 
 describe("ParserState setters", () => {
@@ -157,14 +173,67 @@ describe("FHIR parser-state import", () => {
         th: "พื้นผิวตา"
       }
     });
+    expect(state.primaryClause.site?.i18n).toEqual({
+      th: "ผิวตา"
+    });
     expect(state.asNeededReasons[0]?.coding?.i18n).toEqual({
       en: "Dryness",
       th: "อาการแห้ง"
+    });
+    expect(state.asNeededReasons[0]?.i18n).toEqual({
+      th: "แห้ง"
     });
     expect(state.asNeededReasonCoding?.i18n).toEqual({
       en: "Dryness",
       th: "อาการแห้ง"
     });
+    expect(state.primaryClause.prn?.reason?.i18n).toEqual({
+      th: "แห้ง"
+    });
+  });
+
+  it("adds coding i18n translations without dropping existing display primitive extensions", () => {
+    const dosage = canonicalToFhir(
+      {
+        kind: "administration",
+        rawText: "",
+        raw: { start: 0, end: 0, text: "" },
+        leftovers: [],
+        evidence: [],
+        confidence: 1,
+        prn: {
+          enabled: true,
+          reason: {
+            text: "dryness",
+            coding: {
+              system: "http://example.org/reason",
+              code: "dryness",
+              display: "Dryness",
+              i18n: { th: "อาการแห้ง" },
+              _display: translationPrimitive("en", "Dryness")
+            }
+          },
+          reasons: [
+            {
+              text: "dryness",
+              coding: {
+                system: "http://example.org/reason",
+                code: "dryness",
+                display: "Dryness",
+                i18n: { th: "อาการแห้ง" },
+                _display: translationPrimitive("en", "Dryness")
+              }
+            }
+          ]
+        }
+      },
+      undefined,
+      { includeTranslationExtensions: true }
+    );
+
+    const displayElement = dosage.asNeededFor?.[0]?.coding?.[0]?._display;
+    expectTranslation(displayElement, "en", "Dryness");
+    expectTranslation(displayElement, "th", "อาการแห้ง");
   });
 
   it("selects the first coded PRN and additional-instruction entries when uncoded entries lead", () => {
@@ -204,11 +273,13 @@ describe("FHIR parser-state import", () => {
       ]
     });
 
-    expect(state.asNeededReasonCoding).toEqual({
+    expect(state.asNeededReasonCoding).toMatchObject({
       system: "http://snomed.info/sct",
       code: "418363000",
-      display: "Itching of skin",
-      i18n: { th: "คัน" }
+      display: "Itching of skin"
+    });
+    expect(state.primaryClause.prn?.reason?.i18n).toEqual({
+      th: "คัน"
     });
     expect(state.additionalInstructions[0]?.coding).toEqual({
       system: "http://snomed.info/sct",
