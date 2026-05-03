@@ -1,5 +1,6 @@
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { ParserState } from "./parser-state";
+import { mergeI18nRecords } from "./fhir-translations";
 import {
   BodySiteDefinition,
   ParseOptions,
@@ -261,7 +262,7 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
         code: coding.code,
         display: coding.display,
         system: coding.system ?? SNOMED_SYSTEM,
-        i18n: definition.i18n
+        i18n: mergeI18nRecords(definition.i18n, coding.i18n)
       }
     : undefined;
   if (definition.text) {

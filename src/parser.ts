@@ -1,6 +1,6 @@
 import { parseHpsgClause } from "./hpsg/clause-parser";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
-import { buildTranslationPrimitiveElement } from "./fhir-translations";
+import { buildTranslationPrimitiveElement, mergeI18nRecords } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
 import { annotateLexTokens } from "./lexer/meaning";
 import {
@@ -371,7 +371,7 @@ function seedKnownSiteCoding(state: ParserState): void {
     system: definition.coding.system ?? SNOMED_SYSTEM,
     code: definition.coding.code,
     display: definition.coding.display,
-    i18n: definition.i18n
+    i18n: mergeI18nRecords(definition.i18n, definition.coding.i18n)
   };
 }
 

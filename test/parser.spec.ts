@@ -74,6 +74,20 @@ function expectPrimitiveTranslation(
   );
 }
 
+function translationPrimitive(locale: string, value: string) {
+  return {
+    extension: [
+      {
+        url: FHIR_TRANSLATION_EXTENSION_URL,
+        extension: [
+          { url: "lang", valueCode: locale },
+          { url: "content", valueString: value }
+        ]
+      }
+    ]
+  };
+}
+
 describe("parseSig core scenarios", () => {
   it("parses 1x3 po pc", () => {
     const result = parseSig("1x3 po pc", { context: TAB_CONTEXT });
@@ -1530,11 +1544,16 @@ describe("parseSig core scenarios", () => {
 
   it("codes Thai eye-itch reasons through localized PRN aliases", () => {
     const result = parseSig("1 drop to eye prn คันตา", { locale: "th" });
-    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toMatchObject({
       system: "http://snomed.info/sct",
       code: "74776002",
       display: "Itching of eye"
     });
+    expectPrimitiveTranslation(
+      result.fhir.asNeededFor?.[0]?.coding?.[0]?._display,
+      "th",
+      "คันตา"
+    );
     expect(result.longText).toContain("คันตา");
   });
 
@@ -1570,7 +1589,7 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("1 tab po prn pain or fever", { context: TAB_CONTEXT });
 
     expect(result.longText).toBe("Take 1 tablet orally as needed for pain or fever.");
-    expect(result.fhir.asNeededFor).toEqual([
+    expect(result.fhir.asNeededFor).toMatchObject([
       {
         text: "pain",
         coding: [
@@ -1860,7 +1879,7 @@ describe("parseSig core scenarios", () => {
     });
 
     expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด หรือ ไข้.");
-    expect(result.fhir.asNeededFor).toEqual([
+    expect(result.fhir.asNeededFor).toMatchObject([
       {
         text: "pain",
         coding: [
@@ -1882,6 +1901,8 @@ describe("parseSig core scenarios", () => {
         ]
       }
     ]);
+    expectPrimitiveTranslation(result.fhir.asNeededFor?.[0]?._text, "th", "ปวด");
+    expectPrimitiveTranslation(result.fhir.asNeededFor?.[1]?._text, "th", "ไข้");
   });
 
   it("parses 1x2 subcutaneous", () => {
@@ -3469,7 +3490,7 @@ describe("parseSig core scenarios", () => {
   });
 
   it("emits standard primitive translation extensions for coded site and PRN reason text", () => {
-    const result = parseSig("1 drop ou q2h prn dry eyes");
+    const result = parseSig("1 drop ou q2h prn dry eyes", { locale: "th" });
 
     expect(result.fhir.site?.text).toBe("both eyes");
     expectPrimitiveTranslation(result.fhir.site?._text, "th", "ตาทั้งสองข้าง");
@@ -3489,6 +3510,50 @@ describe("parseSig core scenarios", () => {
       "th",
       "ตาแห้ง"
     );
+  });
+
+  it("preserves site and PRN translation primitives when importing FHIR dosage", () => {
+    const result = fromFhirDosage({
+      site: {
+        text: "ocular surface",
+        _text: translationPrimitive("th", "ผิวตา"),
+        coding: [
+          {
+            system: "http://example.org/site",
+            code: "ocular-surface",
+            display: "Ocular surface",
+            _display: translationPrimitive("th", "พื้นผิวตา")
+          }
+        ]
+      },
+      asNeededBoolean: true,
+      asNeededFor: [
+        {
+          text: "dryness",
+          _text: translationPrimitive("th", "แห้ง"),
+          coding: [
+            {
+              system: "http://example.org/reason",
+              code: "dryness",
+              display: "Dryness",
+              _display: translationPrimitive("th", "อาการแห้ง")
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.meta.normalized.site?.coding?.i18n).toEqual({
+      th: "พื้นผิวตา"
+    });
+    expect(result.meta.canonical.clauses[0]?.site?.coding?.i18n).toEqual({
+      th: "พื้นผิวตา"
+    });
+    expect(
+      result.meta.canonical.clauses[0]?.prn?.reasons?.[0]?.coding?.i18n
+    ).toEqual({
+      th: "อาการแห้ง"
+    });
   });
 
   it("treats oral administration verbs as route cues instead of stray advice text", () => {

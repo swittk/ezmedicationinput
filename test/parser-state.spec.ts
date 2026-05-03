@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 
+const FHIR_TRANSLATION_EXTENSION_URL =
+  "http://hl7.org/fhir/StructureDefinition/translation";
+
+function translationPrimitive(locale: string, value: string) {
+  return {
+    extension: [
+      {
+        url: FHIR_TRANSLATION_EXTENSION_URL,
+        extension: [
+          { url: "lang", valueCode: locale },
+          { url: "content", valueString: value }
+        ]
+      }
+    ]
+  };
+}
+
 describe("ParserState setters", () => {
   it("preserves PRN tri-state semantics and localized PRN coding metadata", () => {
     const state = new ParserState("", []);
@@ -95,6 +112,58 @@ describe("FHIR parser-state import", () => {
       system: "http://example.org/site",
       code: "coded-site",
       display: "Coded site"
+    });
+  });
+
+  it("imports site and PRN translation primitive metadata into i18n", () => {
+    const state = parserStateFromFhir({
+      site: {
+        text: "ocular surface",
+        _text: translationPrimitive("th", "ผิวตา"),
+        coding: [
+          {
+            system: "http://example.org/site",
+            code: "ocular-surface",
+            display: "Ocular surface",
+            i18n: { en: "Ocular surface" },
+            _display: translationPrimitive("th", "พื้นผิวตา")
+          }
+        ]
+      },
+      asNeededBoolean: true,
+      asNeededFor: [
+        {
+          text: "dryness",
+          _text: translationPrimitive("th", "แห้ง"),
+          coding: [
+            {
+              system: "http://example.org/reason",
+              code: "dryness",
+              display: "Dryness",
+              i18n: { en: "Dryness" },
+              _display: translationPrimitive("th", "อาการแห้ง")
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(state.siteCoding).toEqual({
+      system: "http://example.org/site",
+      code: "ocular-surface",
+      display: "Ocular surface",
+      i18n: {
+        en: "Ocular surface",
+        th: "พื้นผิวตา"
+      }
+    });
+    expect(state.asNeededReasons[0]?.coding?.i18n).toEqual({
+      en: "Dryness",
+      th: "อาการแห้ง"
+    });
+    expect(state.asNeededReasonCoding?.i18n).toEqual({
+      en: "Dryness",
+      th: "อาการแห้ง"
     });
   });
 

@@ -14,7 +14,7 @@ import {
 } from "./parser";
 import { parseSigSegments } from "./hpsg/segmenter";
 import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
-import { cloneExtensions } from "./fhir-translations";
+import { cloneExtensions, cloneI18nRecord } from "./fhir-translations";
 import { getDoseUnitSemantics } from "./unit-lexicon";
 import {
   BodySiteCode,
@@ -696,8 +696,18 @@ function getPrimaryClause(
 }
 
 function cloneCoding(
-  coding?: { code?: string; display?: string; system?: string; extension?: ReturnType<typeof cloneExtensions> }
-): { code?: string; display?: string; system?: string; extension?: ReturnType<typeof cloneExtensions> } | undefined {
+  coding?: {
+    code?: string;
+    display?: string;
+    system?: string;
+    extension?: ReturnType<typeof cloneExtensions>;
+  }
+): {
+  code?: string;
+  display?: string;
+  system?: string;
+  extension?: ReturnType<typeof cloneExtensions>;
+} | undefined {
   if (!coding?.code && !coding?.display && !coding?.system) {
     return undefined;
   }
@@ -713,6 +723,7 @@ function cloneBodySiteCoding(coding?: {
   code?: string;
   display?: string;
   system?: string;
+  i18n?: Record<string, string>;
 }): BodySiteCode | undefined {
   if (!coding?.code) {
     return undefined;
@@ -720,7 +731,8 @@ function cloneBodySiteCoding(coding?: {
   return {
     code: coding.code,
     display: coding.display,
-    system: coding.system
+    system: coding.system,
+    i18n: cloneI18nRecord(coding.i18n)
   };
 }
 
@@ -792,7 +804,8 @@ function buildParseResult(
   const shortText = formatCanonicalClause(clause, "short", localization, options);
   const longText = formatCanonicalClause(clause, "long", localization, options);
   const fhir = canonicalToFhir(clause, longText, {
-    bodySitePostcoordination: options?.bodySitePostcoordination
+    bodySitePostcoordination: options?.bodySitePostcoordination,
+    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
 
   const consumedTokens: string[] = [];

@@ -1,4 +1,5 @@
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
+import { mergeI18nRecords } from "./fhir-translations";
 import { objectEntries } from "./utils/object";
 import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
@@ -198,7 +199,7 @@ function buildBodySiteCoding(
     code: coding.code,
     display: coding.display,
     system: coding.system ?? SNOMED_SYSTEM,
-    i18n: definition?.i18n
+    i18n: mergeI18nRecords(definition?.i18n, coding.i18n)
   };
 }
 
@@ -212,7 +213,7 @@ function cloneBodySiteCode(
     code: coding.code,
     display: coding.display,
     system: coding.system ?? SNOMED_SYSTEM,
-    i18n: coding.i18n
+    i18n: mergeI18nRecords(coding.i18n)
   };
 }
 

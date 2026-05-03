@@ -6,6 +6,7 @@ import {
   ROUTE_TEXT
 } from "../maps";
 import { ParserState } from "../parser-state";
+import { mergeI18nRecords } from "../fhir-translations";
 import { EventTiming, FhirPeriodUnit, MedicationContext, ParseOptions, RouteCode } from "../types";
 import {
   enforceHouseholdUnitPolicy,
@@ -154,7 +155,7 @@ function applyRouteSiteDefault(state: ParserState): void {
       system: definition.coding.system ?? "http://snomed.info/sct",
       code: definition.coding.code,
       display: definition.coding.display,
-      i18n: definition.i18n
+      i18n: mergeI18nRecords(definition.i18n, definition.coding.i18n)
     };
   }
 }

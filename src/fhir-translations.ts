@@ -20,6 +20,26 @@ export function cloneI18nRecord(
   return i18n ? { ...i18n } : undefined;
 }
 
+export function mergeI18nRecords(
+  ...records: Array<Record<string, string> | undefined>
+): Record<string, string> | undefined {
+  const merged: Record<string, string> = {};
+  for (const record of records) {
+    if (!record) {
+      continue;
+    }
+    for (const locale in record) {
+      const normalizedLocale = normalizeLocaleKey(locale);
+      const content = record[locale]?.trim();
+      if (!normalizedLocale || !content) {
+        continue;
+      }
+      merged[normalizedLocale] = content;
+    }
+  }
+  return Object.keys(merged).length ? merged : undefined;
+}
+
 export function cloneExtension(extension: FhirExtension): FhirExtension {
   return {
     url: extension.url,
@@ -175,4 +195,26 @@ export function getPrimitiveTranslation(
   }
 
   return languagePrefixMatch;
+}
+
+export function getPrimitiveTranslations(
+  element: FhirPrimitiveElement | undefined
+): Record<string, string> | undefined {
+  if (!element?.extension?.length) {
+    return undefined;
+  }
+
+  const translations: Record<string, string> = {};
+  for (const extension of element.extension) {
+    if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
+      continue;
+    }
+    const { locale, content } = getTranslationParts(extension);
+    if (!locale || !content) {
+      continue;
+    }
+    translations[locale] = content;
+  }
+
+  return Object.keys(translations).length ? translations : undefined;
 }
