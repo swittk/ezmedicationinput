@@ -17,6 +17,7 @@ import {
   suggestBodySites
 } from "../src/index";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
+import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import {
   SNOMED_CT_FINDING_SITE_ATTRIBUTE_CODE,
   SNOMED_CT_LATERALITY_ATTRIBUTE_CODE,
@@ -4245,6 +4246,35 @@ describe("ocular and injection scenarios", () => {
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q1H");
     expect(result.fhir.site?.text).toBe("both eyes");
     expect(result.longText).toBe("Instill 1 drop every 1 hour in both eyes.");
+  });
+
+  it("normalizes each-eye phrasing to the bilateral ocular site", () => {
+    const result = parseSig("1 drop each eye q2h");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.site?.text).toBe("both eyes");
+    expect(result.fhir.site?.coding?.[0]?.code).toBe("40638003");
+    expect(
+      result.fhir.site?.extension?.find(
+        (extension) => extension.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL
+      )
+    ).toBeUndefined();
+  });
+
+  it("parses AU as both ears", () => {
+    const result = parseSig("1 drop au bid");
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.site?.text).toBe("both ears");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Otic route"]);
+  });
+
+  it("normalizes each-nostril phrasing to a bilateral nasal site", () => {
+    const result = parseSig("1 spray each nostril bid", {
+      context: { dosageForm: "nasal spray, solution" }
+    });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "spray" });
+    expect(result.fhir.site?.text).toBe("both nostrils");
+    expect(result.fhir.site?.coding?.[0]?.code).toBe("244506005");
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Nasal route"]);
   });
 
   it("formats combined qid and bedtime ocular dosing", () => {

@@ -3,6 +3,10 @@ import {
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
 import {
+  buildBodySiteAdministrationTargetCountExtension,
+  getBodySiteAdministrationTargetCount
+} from "./body-site-target";
+import {
   buildBodySiteSpatialRelationExtensions,
   parseBodySiteSpatialRelationExtension
 } from "./body-site-spatial";
@@ -573,11 +577,33 @@ export function canonicalToFhir(
     const siteTextElement = options?.includeTranslationExtensions
       ? buildTranslationPrimitiveElement(clause.site.i18n ?? siteCoding?.i18n)
       : undefined;
+    const siteTargetCount =
+      clause.site?.administrationTargetCount ??
+      getBodySiteAdministrationTargetCount(clause.site);
+    const inferredSiteTargetCount = getBodySiteAdministrationTargetCount({
+      text: clause.site?.text,
+      coding: siteCoding
+        ? {
+          code: siteCoding.code,
+          display: siteCoding.display,
+          system: siteCoding.system,
+          i18n: siteCoding.i18n
+        }
+        : undefined
+    });
+    const siteTargetCountExtension =
+      siteTargetCount !== undefined && siteTargetCount !== inferredSiteTargetCount
+        ? buildBodySiteAdministrationTargetCountExtension(siteTargetCount)
+        : undefined;
+    const siteExtensions = [
+      ...(buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation) ?? []),
+      ...(siteTargetCountExtension ? [siteTargetCountExtension] : [])
+    ];
     dosage.site = {
       text: clause.site?.text,
       ...(siteTextElement ? { _text: siteTextElement } : {}),
       coding: buildSiteCodingArray(siteCoding, options),
-      extension: buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation)
+      extension: siteExtensions.length ? siteExtensions : undefined
     };
   }
 
@@ -693,11 +719,13 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
   const siteText = getFallbackSiteText(dosage.site);
   const siteI18n = codeableConceptTranslationI18n(dosage.site, siteCoding);
+  const siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
   if (siteText || siteCoding?.code || siteSpatialRelation) {
     clause.site = {
       text: siteText,
       i18n: siteI18n.text,
       spatialRelation: siteSpatialRelation,
+      administrationTargetCount: siteAdministrationTargetCount,
       coding: siteCoding?.code
         ? {
           code: siteCoding.code,
@@ -867,6 +895,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   state.siteText = getFallbackSiteText(dosage.site);
   state.siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
+  state.siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;

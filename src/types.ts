@@ -461,6 +461,7 @@ export interface BodySiteDefinition {
   text?: string;
   spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
+  administrationTargetCount?: number;
   /** Optional translations for different locales (e.g., { "th": "ตา" }) */
   i18n?: Record<string, string>;
   /**
@@ -873,6 +874,7 @@ export interface CanonicalSiteExpr {
   i18n?: Record<string, string>;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  administrationTargetCount?: number;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   inferred?: boolean;
   evidence?: CanonicalEvidence[];
@@ -994,6 +996,7 @@ export interface BodySiteDetail {
   text?: string;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  administrationTargetCount?: number;
 }
 
 export interface ConceptSiteDetail {

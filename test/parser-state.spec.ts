@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 
@@ -189,6 +190,48 @@ describe("FHIR parser-state import", () => {
     });
     expect(state.primaryClause.prn?.reason?.i18n).toEqual({
       th: "แห้ง"
+    });
+  });
+
+  it("infers administration target count from coded bilateral sites without requiring an extension", () => {
+    const state = parserStateFromFhir({
+      site: {
+        coding: [
+          {
+            system: "http://snomed.info/sct",
+            code: "40638003",
+            display: "Structure of both eyes"
+          }
+        ]
+      }
+    });
+
+    expect(state.siteText).toBe("both eyes");
+    expect(state.siteAdministrationTargetCount).toBe(2);
+  });
+
+  it("exports administration target count as a private extension only when coding/text cannot carry it", () => {
+    const dosage = canonicalToFhir({
+      kind: "administration",
+      rawText: "",
+      raw: { start: 0, end: 0, text: "" },
+      leftovers: [],
+      evidence: [],
+      confidence: 1,
+      site: {
+        text: "custom paired site",
+        administrationTargetCount: 2,
+        coding: {
+          system: "http://example.org/site",
+          code: "custom-paired-site",
+          display: "Custom paired site"
+        }
+      }
+    });
+
+    expect(dosage.site?.extension).toContainEqual({
+      url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+      valueInteger: 2
     });
   });
 

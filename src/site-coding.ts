@@ -270,6 +270,7 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
   } else if (internal.siteLookupRequest?.text) {
     internal.siteText = internal.siteLookupRequest.text;
   }
+  internal.siteAdministrationTargetCount = definition.administrationTargetCount;
   if (definition.spatialRelation) {
     internal.siteSpatialRelation = definition.spatialRelation;
   } else if (internal.siteLookupRequest?.spatialRelation) {

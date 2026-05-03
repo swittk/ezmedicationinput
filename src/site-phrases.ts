@@ -14,6 +14,7 @@ import {
   isSiteSurfaceModifierWord,
   isWorkflowInstructionWord
 } from "./lexer/meaning";
+import { SITE_MULTIPLICITY_WORDS } from "./hpsg/lexical-classes";
 import { Token } from "./parser-state";
 import { BodySiteDefinition, ParseOptions, RouteCode } from "./types";
 
@@ -196,6 +197,10 @@ export function hasExternalSurfaceModifier(siteText: string): boolean {
   return false;
 }
 
+function isRetainedSiteFiller(lower: string): boolean {
+  return SITE_MULTIPLICITY_WORDS.has(lower);
+}
+
 export function extractExplicitSiteCandidate(
   tokens: Token[],
   consumed: Set<number>,
@@ -229,7 +234,11 @@ export function extractExplicitSiteCandidate(
     if (/^[;:(),]+$/.test(lower)) {
       break;
     }
-    if (services.siteFillerWords.has(lower) && contentWords.length === 0) {
+    if (
+      services.siteFillerWords.has(lower) &&
+      !isRetainedSiteFiller(lower) &&
+      contentWords.length === 0
+    ) {
       collected.push(candidate.index);
       candidateTextParts.push(candidate.original);
       continue;
@@ -242,7 +251,10 @@ export function extractExplicitSiteCandidate(
           break;
         }
         const lookaheadLower = services.normalizeTokenLower(lookaheadToken);
-        if (services.siteFillerWords.has(lookaheadLower)) {
+        if (
+          services.siteFillerWords.has(lookaheadLower) &&
+          !isRetainedSiteFiller(lookaheadLower)
+        ) {
           continue;
         }
         hasFollowingContent = !isExplicitSiteBoundaryToken(lookaheadLower, options, services);
@@ -270,7 +282,10 @@ export function extractExplicitSiteCandidate(
     }
     collected.push(candidate.index);
     candidateTextParts.push(candidate.original);
-    if (!services.siteConnectors.has(lower) && !services.siteFillerWords.has(lower)) {
+    if (
+      !services.siteConnectors.has(lower) &&
+      (!services.siteFillerWords.has(lower) || isRetainedSiteFiller(lower))
+    ) {
       contentWords.push(lower);
       if (
         services.isBodySiteHint(lower, services.customSiteHints) ||
@@ -328,7 +343,7 @@ export function selectBestResidualSiteCandidate(
       if (
         lower.length === 0 ||
         services.siteConnectors.has(lower) ||
-        services.siteFillerWords.has(lower) ||
+        (services.siteFillerWords.has(lower) && !isRetainedSiteFiller(lower)) ||
         isSiteListConnectorWord(lower) ||
         lower === ","
       ) {

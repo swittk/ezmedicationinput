@@ -458,6 +458,21 @@ export class ParserState {
     };
   }
 
+  get siteAdministrationTargetCount(): number | undefined {
+    return this.clause.site?.administrationTargetCount;
+  }
+
+  set siteAdministrationTargetCount(value: number | undefined) {
+    if (value === undefined) {
+      if (this.clause.site) {
+        delete this.clause.site.administrationTargetCount;
+        this.cleanupSite();
+      }
+      return;
+    }
+    this.ensureSite().administrationTargetCount = value;
+  }
+
   get additionalInstructions(): CanonicalAdditionalInstructionExpr[] {
     if (!this.clause.additionalInstructions) {
       this.clause.additionalInstructions = [];
@@ -548,6 +563,7 @@ export class ParserState {
       site.text === undefined &&
       site.coding === undefined &&
       site.spatialRelation === undefined &&
+      site.administrationTargetCount === undefined &&
       site.source === undefined &&
       site.inferred === undefined &&
       site.evidence === undefined
