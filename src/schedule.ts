@@ -7,6 +7,7 @@ import {
   FhirTiming,
   FhirTimingRepeat,
   FrequencyFallbackTimes,
+  EstimatedQuantity,
   MealOffsetMap,
   NextDueDoseConfig,
   NextDueDoseOptions,
@@ -411,6 +412,55 @@ function roundCalculatedUnits(value: number): number {
     return value;
   }
   return Math.round((value + Number.EPSILON) * TOTAL_UNITS_PRECISION) / TOTAL_UNITS_PRECISION;
+}
+
+function resolveContextStrengthRatio(
+  context?: TotalUnitsOptions["context"]
+): NonNullable<TotalUnitsOptions["context"]>["strengthRatio"] | undefined {
+  if (!context) {
+    return undefined;
+  }
+  return context.strengthRatio ??
+    (context.strength ? parseStrengthIntoRatio(context.strength, context) ?? undefined : undefined);
+}
+
+function estimateIngredientQuantity(
+  quantity: EstimatedQuantity,
+  context?: TotalUnitsOptions["context"]
+): EstimatedQuantity | undefined {
+  if (quantity.value === undefined || !quantity.unit) {
+    return undefined;
+  }
+  const strength = resolveContextStrengthRatio(context);
+  const numerator = strength?.numerator;
+  const denominator = strength?.denominator;
+  if (
+    !numerator?.unit ||
+    numerator.value === undefined ||
+    !denominator?.unit ||
+    denominator.value === undefined
+  ) {
+    return undefined;
+  }
+  const converted = convertValue(
+    quantity.value,
+    quantity.unit,
+    numerator.unit,
+    {
+      numerator: { value: numerator.value, unit: numerator.unit },
+      denominator: { value: denominator.value, unit: denominator.unit }
+    }
+  );
+  if (converted === null) {
+    return undefined;
+  }
+  return {
+    value: roundCalculatedUnits(converted),
+    unit: numerator.unit,
+    confidence: quantity.confidence,
+    basis: quantity.basis,
+    source: quantity.source
+  };
 }
 
 /**
@@ -1980,11 +2030,26 @@ function calculateTotalUnitsSingle(
       basis: approximation.basis,
       source: approximation.source
     };
+    result.totalApproximateIngredientQuantity = estimateIngredientQuantity(
+      result.totalApproximateQuantity,
+      context
+    );
   }
 
   if (containerValue && containerValue > 0) {
     let effectiveUnits = totalUnits;
     if (
+      containerUnit &&
+      result.totalApproximateQuantity?.unit &&
+      result.totalApproximateQuantity.value !== undefined &&
+      result.totalApproximateQuantity.unit.trim().toLowerCase() === containerUnit.trim().toLowerCase()
+    ) {
+      effectiveUnits = result.totalApproximateQuantity.value;
+      result.totalContainerQuantity = {
+        value: result.totalApproximateQuantity.value,
+        unit: containerUnit
+      };
+    } else if (
       packageUnit &&
       doseUnit &&
       doseUnit.trim().toLowerCase() === packageUnit.trim().toLowerCase()
@@ -1996,11 +2061,7 @@ function calculateTotalUnitsSingle(
         };
       }
     } else if (containerUnit && doseUnit && containerUnit !== doseUnit) {
-      let strength = context?.strengthRatio;
-      if (!strength && context?.strength) {
-        strength = parseStrengthIntoRatio(context.strength, context) || undefined;
-      }
-
+      const strength = resolveContextStrengthRatio(context);
       const converted = convertValue(totalUnits, doseUnit, containerUnit, strength as any);
       if (converted !== null) {
         effectiveUnits = converted;
@@ -2021,7 +2082,9 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     let totalUnits = 0;
     let totalContainers = 0;
     let totalApproximateQuantity: TotalUnitsResult["totalApproximateQuantity"];
+    let totalApproximateIngredientQuantity: TotalUnitsResult["totalApproximateIngredientQuantity"];
     let mixedApproximateQuantities = false;
+    let mixedApproximateIngredientQuantities = false;
     let sawContainers = false;
     for (const dosage of options.dosage) {
       const result = calculateTotalUnitsSingle({
@@ -2047,6 +2110,25 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
           mixedApproximateQuantities = true;
         }
       }
+      if (result.totalApproximateIngredientQuantity && !mixedApproximateIngredientQuantities) {
+        if (
+          totalApproximateIngredientQuantity &&
+          totalApproximateIngredientQuantity.unit === result.totalApproximateIngredientQuantity.unit &&
+          totalApproximateIngredientQuantity.confidence === result.totalApproximateIngredientQuantity.confidence &&
+          totalApproximateIngredientQuantity.basis === result.totalApproximateIngredientQuantity.basis &&
+          totalApproximateIngredientQuantity.source === result.totalApproximateIngredientQuantity.source
+        ) {
+          totalApproximateIngredientQuantity.value = roundCalculatedUnits(
+            (totalApproximateIngredientQuantity.value ?? 0) +
+            (result.totalApproximateIngredientQuantity.value ?? 0)
+          );
+        } else if (!totalApproximateIngredientQuantity) {
+          totalApproximateIngredientQuantity = { ...result.totalApproximateIngredientQuantity };
+        } else {
+          totalApproximateIngredientQuantity = undefined;
+          mixedApproximateIngredientQuantities = true;
+        }
+      }
       if (result.totalContainers !== undefined) {
         totalContainers += result.totalContainers;
         sawContainers = true;
@@ -2055,7 +2137,10 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     return {
       totalUnits,
       ...(sawContainers ? { totalContainers } : {}),
-      ...(!mixedApproximateQuantities && totalApproximateQuantity ? { totalApproximateQuantity } : {})
+      ...(!mixedApproximateQuantities && totalApproximateQuantity ? { totalApproximateQuantity } : {}),
+      ...(!mixedApproximateIngredientQuantities && totalApproximateIngredientQuantity
+        ? { totalApproximateIngredientQuantity }
+        : {})
     };
   }
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });

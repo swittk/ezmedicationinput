@@ -47,7 +47,19 @@
     {
       "unit": "pea-sized amount",
       "kind": "product_specific_amount",
-      "aliases": ["pea sized amount", "pea-sized", "pea sized", "pea size amount", "pea-size amount"],
+      "aliases": [
+        "pea sized amount",
+        "pea-sized",
+        "pea sized",
+        "pea size amount",
+        "pea-size amount",
+        "เม็ดถั่ว",
+        "เม็ดถั่วเขียว",
+        "เมล็ดถั่ว",
+        "ขนาดเม็ดถั่ว",
+        "ขนาดเม็ดถั่วเขียว",
+        "ขนาดเมล็ดถั่ว"
+      ],
       "approximateQuantity": {
         "value": 0.25,
         "unit": "mL",

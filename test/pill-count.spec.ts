@@ -274,6 +274,86 @@ describe("calculateTotalUnits", () => {
         });
     });
 
+    it("uses approximate natural volume and strength to estimate ingredient amount", () => {
+        const fixtures = [
+            "apply 1 pea-sized amount once daily to face",
+            "apply 1 เม็ดถั่ว once daily to face",
+            "apply 1 เม็ดถั่วเขียว once daily to face",
+            "apply 1 เมล็ดถั่ว once daily to face"
+        ];
+
+        for (const sig of fixtures) {
+            const result = calculateTotalUnits({
+                dosage: parseSig(sig).fhir,
+                durationValue: 1,
+                durationUnit: FhirPeriodUnit.Day,
+                context: {
+                    strength: "500 mcg / 100 mL",
+                    containerValue: 5,
+                    containerUnit: "mL"
+                },
+                ...BASE_OPTIONS
+            });
+
+            expect(result.totalUnits).toBe(1);
+            expect(result.totalApproximateQuantity).toMatchObject({
+                value: 0.25,
+                unit: "mL",
+                confidence: "approximate"
+            });
+            expect(result.totalApproximateIngredientQuantity).toMatchObject({
+                value: 1.25,
+                unit: "mcg",
+                confidence: "approximate"
+            });
+            expect(result.totalContainers).toBe(1);
+        }
+    });
+
+    it("uses approximate natural volume for container counts", () => {
+        const twentyDays = calculateTotalUnits({
+            dosage: parseSig("apply 1 pea-sized amount once daily to face").fhir,
+            durationValue: 20,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                strength: "500 mcg / 100 mL",
+                containerValue: 5,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(twentyDays.totalUnits).toBe(20);
+        expect(twentyDays.totalApproximateQuantity).toMatchObject({
+            value: 5,
+            unit: "mL"
+        });
+        expect(twentyDays.totalApproximateIngredientQuantity).toMatchObject({
+            value: 25,
+            unit: "mcg"
+        });
+        expect(twentyDays.totalContainerQuantity).toEqual({ value: 5, unit: "mL" });
+        expect(twentyDays.totalContainers).toBe(1);
+
+        const twentyOneDays = calculateTotalUnits({
+            dosage: parseSig("apply 1 pea-sized amount once daily to face").fhir,
+            durationValue: 21,
+            durationUnit: FhirPeriodUnit.Day,
+            context: {
+                strength: "500 mcg / 100 mL",
+                containerValue: 5,
+                containerUnit: "mL"
+            },
+            ...BASE_OPTIONS
+        });
+
+        expect(twentyOneDays.totalApproximateQuantity).toMatchObject({
+            value: 5.25,
+            unit: "mL"
+        });
+        expect(twentyOneDays.totalContainers).toBe(2);
+    });
+
     it("allows generic context overrides for product-specific amount approximations", () => {
         const parsed = parseSig("apply 2 FTU to face twice daily");
         const result = calculateTotalUnits({

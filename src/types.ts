@@ -1114,6 +1114,7 @@ export interface TotalUnitsResult {
   totalContainers?: number;
   totalContainerQuantity?: FhirQuantity;
   totalApproximateQuantity?: EstimatedQuantity;
+  totalApproximateIngredientQuantity?: EstimatedQuantity;
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {

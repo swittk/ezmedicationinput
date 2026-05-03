@@ -4758,6 +4758,24 @@ describe("topical product forms and workflow", () => {
         approximateQuantity: { value: 0.25, unit: "mL" }
       },
       {
+        sig: "apply 1 เม็ดถั่ว once daily to face",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "apply 1 เม็ดถั่วเขียว once daily to face",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "apply 1 เมล็ดถั่ว once daily to face",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
         sig: "apply 1 palm to burn daily",
         unit: "palm",
         kind: "body_area_proxy"
