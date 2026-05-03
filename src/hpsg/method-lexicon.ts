@@ -6,6 +6,8 @@ const SNOMED_SYSTEM = "http://snomed.info/sct";
 export enum MethodAction {
   Administer = "administer",
   Apply = "apply",
+  Inhale = "inhale",
+  Inject = "inject",
   Insert = "insert",
   Instill = "instill",
   Spray = "spray",
@@ -17,6 +19,8 @@ export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
   apply: MethodAction.Apply,
   dab: MethodAction.Apply,
   drink: MethodAction.Swallow,
+  inhale: MethodAction.Inhale,
+  inject: MethodAction.Inject,
   insert: MethodAction.Insert,
   instill: MethodAction.Instill,
   lather: MethodAction.Wash,
@@ -43,6 +47,18 @@ export const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
     code: "738991002",
     display: "Apply",
     _display: buildTranslationPrimitiveElement({ th: "ทา" })
+  },
+  [MethodAction.Inhale]: {
+    system: SNOMED_SYSTEM,
+    code: "740666001",
+    display: "Inhale",
+    _display: buildTranslationPrimitiveElement({ th: "สูด" })
+  },
+  [MethodAction.Inject]: {
+    system: SNOMED_SYSTEM,
+    code: "740685003",
+    display: "Inject",
+    _display: buildTranslationPrimitiveElement({ th: "ฉีด" })
   },
   [MethodAction.Insert]: {
     system: SNOMED_SYSTEM,

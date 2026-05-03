@@ -246,6 +246,9 @@ function pluralize(unit: string, value: number): string {
   if (unit.endsWith(" ribbon")) {
     return unit;
   }
+  if (unit.endsWith(" line")) {
+    return unit;
+  }
   switch (unit) {
     case "tab":
     case "tablet":
@@ -260,6 +263,8 @@ function pluralize(unit: string, value: number): string {
       return "puffs";
     case "patch":
       return "patches";
+    case "ring":
+      return "rings";
     case "drop":
       return "drops";
     case "suppository":
@@ -274,6 +279,24 @@ function pluralize(unit: string, value: number): string {
       return "capfuls";
     case "scoop":
       return "scoops";
+    case "palm":
+      return "palms";
+    case "handprint":
+      return "handprints";
+    case "shot glass":
+      return "shot glasses";
+    case "click":
+      return "clicks";
+    case "vial":
+      return "vials";
+    case "ampule":
+      return "ampules";
+    case "packet":
+      return "packets";
+    case "sachet":
+      return "sachets";
+    case "stick-pack":
+      return "stick-packs";
     case "application":
       return "applications";
     case "FTU":

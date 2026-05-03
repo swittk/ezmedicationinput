@@ -41,6 +41,7 @@ export type DoseUnitKind =
   | "biologic_unit"
   | "counted_presentation"
   | "device_actuation"
+  | "infusion_rate"
   | "product_specific_amount"
   | "length_of_product"
   | "body_area_proxy"
@@ -63,12 +64,19 @@ export interface DoseUnitTerminologyEntry {
   unit: string;
   kind: DoseUnitKind;
   aliases?: string[];
+  /**
+   * Defaults to true. Use false for terminology entries such as infusion-rate
+   * units that should be exposed to consumers but must not be accepted as a
+   * doseQuantity unit until rateQuantity parsing is implemented.
+   */
+  parseAsDose?: boolean;
   approximateQuantity?: DoseUnitApproximation;
 }
 
 export interface DoseUnitSemantics {
   unit: string;
   kind: DoseUnitKind;
+  parseAsDose?: boolean;
   approximateQuantity?: DoseUnitApproximation;
 }
 

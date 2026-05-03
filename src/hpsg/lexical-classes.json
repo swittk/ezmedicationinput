@@ -92,10 +92,56 @@
   },
   "compoundDoseUnits": [
     { "head": "cm", "tails": ["ribbon", "ribbons"], "unit": "cm ribbon" },
+    { "head": "cm", "tails": ["strip", "strips"], "unit": "cm strip" },
+    { "head": "cm", "tails": ["line", "lines"], "unit": "cm line" },
     { "head": "inch", "tails": ["ribbon", "ribbons", "strip", "strips"], "unit": "inch ribbon" },
+    { "head": "inch", "tails": ["line", "lines"], "unit": "inch line" },
     { "head": "fingertip", "tails": ["unit", "units"], "unit": "FTU" },
-    { "head": "eye", "tails": ["drop", "drops"], "unit": "drop" }
+    { "head": "eye", "tails": ["drop", "drops"], "unit": "drop" },
+    { "head": "pea-sized", "tails": ["amount"], "unit": "pea-sized amount" },
+    {
+      "head": "pea",
+      "tails": [],
+      "tailSequences": [["sized", "amount"], ["size", "amount"]],
+      "unit": "pea-sized amount"
+    },
+    { "head": "hand", "tails": ["print", "prints"], "unit": "handprint" },
+    { "head": "percent", "tails": ["bsa", "tbsa"], "unit": "% BSA" },
+    { "head": "shot", "tails": ["glass", "glasses"], "unit": "shot glass" },
+    { "head": "finger", "tails": ["length", "lengths"], "unit": "finger length" },
+    { "head": "two-finger", "tails": ["rule", "method"], "unit": "finger length" },
+    {
+      "head": "two",
+      "tails": [],
+      "tailSequences": [["finger", "rule"], ["finger", "method"]],
+      "unit": "finger length"
+    },
+    { "head": "full", "tails": ["applicator", "applicators"], "unit": "applicatorful" },
+    {
+      "head": "cap",
+      "tails": [],
+      "tailSequences": [["to", "line"], ["filled", "to", "line"]],
+      "unit": "capful"
+    },
+    { "head": "stick", "tails": ["pack", "packs"], "unit": "stick-pack" },
+    { "head": "unit-dose", "tails": ["vial", "vials"], "unit": "vial" },
+    {
+      "head": "unit",
+      "tails": [],
+      "tailSequences": [["dose", "vial"], ["dose", "vials"]],
+      "unit": "vial"
+    },
+    { "head": "insulin", "tails": ["unit", "units"], "unit": "U" },
+    { "head": "usp", "tails": ["unit", "units"], "unit": "U" },
+    { "head": "pen", "tails": ["click", "clicks"], "unit": "click" },
+    { "head": "dial", "tails": ["click", "clicks"], "unit": "click" },
+    { "head": "transdermal", "tails": ["system", "systems"], "unit": "patch" }
   ],
+  "implicitSingleDoseUnits": ["pea-sized amount", "finger length"],
+  "percentBodyAreaUnits": {
+    "bsa": "% BSA",
+    "tbsa": "% BSA"
+  },
   "doseFractionWords": {
     "half": 0.5,
     "quarter": 0.25,

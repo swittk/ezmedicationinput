@@ -206,6 +206,9 @@ describe("additional instruction rule inventory", () => {
     const liberally = parseAdditionalInstructions("use liberally", { start: 0, end: 13 });
     expect(liberally[0]?.coding?.code).toBe("419125005");
 
+    const liberalAmount = parseAdditionalInstructions("apply a liberal amount", { start: 0, end: 22 });
+    expect(liberalAmount[0]?.coding?.code).toBe("419125005");
+
     const thinly = parseAdditionalInstructions("apply thin layer", { start: 0, end: 16 });
     expect(thinly[0]?.coding).toMatchObject({
       system: SNOMED_SYSTEM,

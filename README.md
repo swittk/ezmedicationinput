@@ -741,7 +741,18 @@ calculateTotalUnits({
 // → { totalUnits: 28, totalApproximateQuantity: { value: 14, unit: "g", ... } }
 ```
 
-Built-in approximations are intentionally conservative and overridable. Current defaults include `FTU -> 0.5 g` and `drop -> 0.05 mL`; product/device-specific labels should pass `context.unitApproximationMap` when a better value is known. Package-level phrases such as `half bottle` can also be bridged to the inner amount by setting `context.packageUnit`, `containerValue`, and `containerUnit`.
+Built-in approximations are intentionally conservative and overridable. Current defaults include `FTU -> 0.5 g`, `drop -> 0.05 mL`, `pea-sized amount -> 0.25 mL`, and `shot glass -> 29.5735 mL`; product/device-specific labels should pass `context.unitApproximationMap` when a better value is known. Package-level phrases such as `half bottle` can also be bridged to the inner amount by setting `context.packageUnit`, `containerValue`, and `containerUnit`.
+
+The terminology layer also classifies non-metric SIG units that should not be blindly converted:
+
+- `body_area_proxy`: `palm`, `handprint`, `% BSA`
+- `product_specific_amount`: `pea-sized amount`, `shot glass`, `finger length`, `dropperful`, `applicatorful`, `capful`, `scoop`
+- `device_actuation`: `puff`, `spray`, `pump`, `actuation`, `click`
+- `length_of_product`: `cm ribbon`, `inch ribbon`, `cm strip`, `cm line`, `inch line`
+- `counted_presentation`: `patch`, `ring`, `vial`, `ampule`, `nebule`, `respule`, `packet`, `sachet`, `stick-pack`, and similar package/presentation units
+- `infusion_rate`: `drop/min` / `gtt/min`, exposed as terminology but not parsed as `doseQuantity` until rate parsing and drop-factor conversion are modeled
+
+`calculateTotalUnits` counts presentation units such as patches and rings as discrete administrations. It does not invent gram/mL conversions for puffs, pumps, applicatorfuls, capfuls, ribbons, body-area proxies, clicks, or release-rate products unless the caller supplies product-specific context.
 
 ### Strength parsing
 

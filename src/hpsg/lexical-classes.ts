@@ -7,6 +7,7 @@ type BodySiteFeatureKind = "nominal" | "partitive" | "locative";
 type CompoundDoseUnit = {
   head: string;
   tails: string[];
+  tailSequences?: string[][];
   unit: string;
 };
 
@@ -171,6 +172,10 @@ export const SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR = routeCodeSet(source.siteRoute
 export const PRODUCT_METHOD_TEXT = source.productMethodText as Record<string, Partial<Record<string, string>>>;
 export const PRODUCT_METHOD_THAI = source.productMethodThai as Record<string, string>;
 export const COMPOUND_DOSE_UNITS = source.compoundDoseUnits as CompoundDoseUnit[];
+export const IMPLICIT_SINGLE_DOSE_UNITS = setOf(source.implicitSingleDoseUnits);
+export const PERCENT_BODY_AREA_UNITS = new Map<string, string>(
+  stringEntries(source.percentBodyAreaUnits)
+);
 export const DOSE_FRACTION_WORDS = new Map<string, number>(
   numberEntries(source.doseFractionWords as Record<string, number>)
 );

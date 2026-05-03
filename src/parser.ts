@@ -86,6 +86,8 @@ const METHOD_TEXT_BY_VERB: Record<string, string> = {
 const METHOD_THAI_BY_VERB: Record<string, string> = {
   apply: "ทา",
   drink: "รับประทาน",
+  inhale: "สูด",
+  inject: "ฉีด",
   insert: "สอด",
   instill: "หยอด",
   spray: "พ่น",

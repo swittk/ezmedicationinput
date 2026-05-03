@@ -18,7 +18,7 @@
     { "unit": "tbsp", "kind": "metric", "aliases": ["tablespoon"] },
     { "unit": "U", "kind": "biologic_unit", "aliases": ["unit", "units"] },
     { "unit": "IU", "kind": "biologic_unit", "aliases": ["iu", "ius"] },
-    { "unit": "puff", "kind": "device_actuation", "aliases": ["puffs", "inhalation"] },
+    { "unit": "puff", "kind": "device_actuation", "aliases": ["puffs", "inhalation", "inhalations"] },
     { "unit": "spray", "kind": "device_actuation", "aliases": ["sprays"] },
     { "unit": "pump", "kind": "device_actuation", "aliases": ["pumps"] },
     { "unit": "actuation", "kind": "device_actuation", "aliases": ["actuations"] },
@@ -35,9 +35,40 @@
       }
     },
     { "unit": "dropperful", "kind": "product_specific_amount", "aliases": ["dropperfuls"] },
-    { "unit": "applicatorful", "kind": "product_specific_amount", "aliases": ["applicatorfuls"] },
-    { "unit": "capful", "kind": "product_specific_amount", "aliases": ["capfuls"] },
+    {
+      "unit": "drop/min",
+      "kind": "infusion_rate",
+      "aliases": ["drops/min", "gtt/min", "gtts/min", "drop per minute", "drops per minute"],
+      "parseAsDose": false
+    },
+    { "unit": "applicatorful", "kind": "product_specific_amount", "aliases": ["applicatorfuls", "applicator", "applicators", "full applicator", "full applicators"] },
+    { "unit": "capful", "kind": "product_specific_amount", "aliases": ["capfuls", "cap to line", "cap filled to line"] },
     { "unit": "scoop", "kind": "product_specific_amount", "aliases": ["scoops"] },
+    {
+      "unit": "pea-sized amount",
+      "kind": "product_specific_amount",
+      "aliases": ["pea sized amount", "pea-sized", "pea sized", "pea size amount", "pea-size amount"],
+      "approximateQuantity": {
+        "value": 0.25,
+        "unit": "mL",
+        "confidence": "approximate",
+        "basis": "Generic pea-sized volume proxy; product labels may define mass and should override when known",
+        "source": "https://www.accessdata.fda.gov/drugsatfda_docs/nda/2000/21-108_Renova_Medr_P1.pdf"
+      }
+    },
+    {
+      "unit": "shot glass",
+      "kind": "product_specific_amount",
+      "aliases": ["shotglass", "shot glasses"],
+      "approximateQuantity": {
+        "value": 29.5735,
+        "unit": "mL",
+        "confidence": "approximate",
+        "basis": "AAD sunscreen full-body adult amount: about 1 ounce, roughly a shot glass",
+        "source": "https://www.aad.org/media/stats-sunscreen"
+      }
+    },
+    { "unit": "finger length", "kind": "product_specific_amount", "aliases": ["finger lengths", "two-finger rule", "two finger rule", "two-finger method", "two finger method"] },
     {
       "unit": "FTU",
       "kind": "product_specific_amount",
@@ -53,9 +84,14 @@
     { "unit": "cm ribbon", "kind": "length_of_product" },
     { "unit": "inch ribbon", "kind": "length_of_product", "aliases": ["inch strip"] },
     { "unit": "cm strip", "kind": "length_of_product" },
+    { "unit": "cm line", "kind": "length_of_product" },
+    { "unit": "inch line", "kind": "length_of_product" },
+    { "unit": "palm", "kind": "body_area_proxy", "aliases": ["palms"] },
+    { "unit": "handprint", "kind": "body_area_proxy", "aliases": ["handprints", "hand print", "hand prints"] },
+    { "unit": "% BSA", "kind": "body_area_proxy", "aliases": ["%BSA", "% TBSA", "%TBSA", "percent BSA", "percent TBSA"] },
     { "unit": "tab", "kind": "counted_presentation", "aliases": ["tablet"] },
     { "unit": "cap", "kind": "counted_presentation", "aliases": ["capsule"] },
-    { "unit": "patch", "kind": "counted_presentation", "aliases": ["patches"] },
+    { "unit": "patch", "kind": "counted_presentation", "aliases": ["patches", "system", "systems", "transdermal system", "transdermal systems"] },
     { "unit": "ring", "kind": "counted_presentation", "aliases": ["rings"] },
     { "unit": "suppository", "kind": "counted_presentation", "aliases": ["suppositories"] },
     { "unit": "pessary", "kind": "counted_presentation", "aliases": ["pessaries"] },
@@ -66,6 +102,7 @@
     { "unit": "pad", "kind": "counted_presentation", "aliases": ["pads"] },
     { "unit": "wipe", "kind": "counted_presentation", "aliases": ["wipes"] },
     { "unit": "stick", "kind": "counted_presentation", "aliases": ["sticks"] },
+    { "unit": "stick-pack", "kind": "counted_presentation", "aliases": ["stick pack", "stick packs", "stick-packs"] },
     { "unit": "implant", "kind": "counted_presentation", "aliases": ["implants"] },
     { "unit": "pellet", "kind": "counted_presentation", "aliases": ["pellets"] },
     { "unit": "lozenge", "kind": "counted_presentation", "aliases": ["lozenges"] },
@@ -80,7 +117,7 @@
     { "unit": "jar", "kind": "counted_presentation", "aliases": ["jars"] },
     { "unit": "packet", "kind": "counted_presentation", "aliases": ["packets"] },
     { "unit": "sachet", "kind": "counted_presentation", "aliases": ["sachets"] },
-    { "unit": "vial", "kind": "counted_presentation", "aliases": ["vials"] },
+    { "unit": "vial", "kind": "counted_presentation", "aliases": ["vials", "unit-dose vial", "unit-dose vials", "unit dose vial", "unit dose vials"] },
     { "unit": "ampule", "kind": "counted_presentation", "aliases": ["amp", "amps", "ampules", "ampoule", "ampoules"] },
     { "unit": "nebule", "kind": "counted_presentation", "aliases": ["nebules"] },
     { "unit": "respule", "kind": "counted_presentation", "aliases": ["respules"] },
@@ -90,6 +127,7 @@
     { "unit": "canister", "kind": "counted_presentation", "aliases": ["canisters"] },
     { "unit": "blister", "kind": "counted_presentation", "aliases": ["blisters"] },
     { "unit": "bag", "kind": "counted_presentation", "aliases": ["bags"] },
-    { "unit": "pod", "kind": "counted_presentation", "aliases": ["pods"] }
+    { "unit": "pod", "kind": "counted_presentation", "aliases": ["pods"] },
+    { "unit": "click", "kind": "device_actuation", "aliases": ["clicks", "pen click", "pen clicks", "dial click", "dial clicks"] }
   ]
 }

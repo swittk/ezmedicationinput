@@ -4726,9 +4726,97 @@ describe("topical product forms and workflow", () => {
         kind: "counted_presentation"
       },
       {
+        sig: "apply 1 transdermal system every 3 days",
+        unit: "patch",
+        kind: "counted_presentation"
+      },
+      {
         sig: "apply 1 inch ribbon to eyelid nightly",
         unit: "inch ribbon",
         kind: "length_of_product"
+      },
+      {
+        sig: "apply 1 cm strip to eyelid nightly",
+        unit: "cm strip",
+        kind: "length_of_product"
+      },
+      {
+        sig: "apply 1 cm line to arm daily",
+        unit: "cm line",
+        kind: "length_of_product"
+      },
+      {
+        sig: "apply pea-sized amount to face daily",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "apply a pea-sized amount to face daily",
+        unit: "pea-sized amount",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 0.25, unit: "mL" }
+      },
+      {
+        sig: "apply 1 palm to burn daily",
+        unit: "palm",
+        kind: "body_area_proxy"
+      },
+      {
+        sig: "apply 1 handprint to burn daily",
+        unit: "handprint",
+        kind: "body_area_proxy"
+      },
+      {
+        sig: "apply 1% BSA to burn daily",
+        unit: "% BSA",
+        kind: "body_area_proxy"
+      },
+      {
+        sig: "apply 1 shot glass of sunscreen daily",
+        unit: "shot glass",
+        kind: "product_specific_amount",
+        approximateQuantity: { value: 29.5735, unit: "mL" }
+      },
+      {
+        sig: "apply 2 finger lengths of sunscreen daily",
+        unit: "finger length",
+        kind: "product_specific_amount"
+      },
+      {
+        sig: "apply two-finger rule sunscreen daily",
+        unit: "finger length",
+        kind: "product_specific_amount"
+      },
+      {
+        sig: "insert 1 full applicator pv at bedtime",
+        unit: "applicatorful",
+        kind: "product_specific_amount"
+      },
+      {
+        sig: "take 1 cap to line daily",
+        unit: "capful",
+        kind: "product_specific_amount"
+      },
+      {
+        sig: "take 1 stick pack daily",
+        unit: "stick-pack",
+        kind: "counted_presentation"
+      },
+      {
+        sig: "use 1 unit-dose vial daily",
+        unit: "vial",
+        kind: "counted_presentation"
+      },
+      {
+        sig: "inject 5 clicks daily",
+        unit: "click",
+        kind: "device_actuation"
+      },
+      {
+        sig: "inject 5 insulin units daily",
+        unit: "U",
+        kind: "biologic_unit"
       }
     ] as const;
 
@@ -4739,6 +4827,7 @@ describe("topical product forms and workflow", () => {
         unit: fixture.unit
       });
       expect(result.meta.normalized.unitKind).toBe(fixture.kind);
+      expect(result.meta.leftoverText).toBeUndefined();
       if ("approximateQuantity" in fixture) {
         expect(result.meta.normalized.unitSemantics?.approximateQuantity).toMatchObject(
           fixture.approximateQuantity
@@ -4766,6 +4855,11 @@ describe("topical product forms and workflow", () => {
     expect(getDoseUnitSemantics("eyedrop")).toMatchObject({
       unit: "drop",
       kind: "product_specific_amount"
+    });
+    expect(getDoseUnitSemantics("gtt/min")).toMatchObject({
+      unit: "drop/min",
+      kind: "infusion_rate",
+      parseAsDose: false
     });
   });
 

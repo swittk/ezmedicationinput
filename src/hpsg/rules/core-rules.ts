@@ -26,9 +26,11 @@ import {
   DOSE_FRACTION_WORDS,
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
+  IMPLICIT_SINGLE_DOSE_UNITS,
   LIST_SEPARATORS,
   MEDICATION_OBJECT_FILLERS,
   MILLION_DOSE_MULTIPLIER_TOKENS,
+  PERCENT_BODY_AREA_UNITS,
   PRODUCT_METHOD_TEXT,
   PRODUCT_METHOD_THAI,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
@@ -296,7 +298,55 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
-function unitAfter(context: HpsgClauseContext, start: number): { unit: string; tokens: Token[] } | undefined {
+type UnitMatch = {
+  unit: string;
+  tokens: Token[];
+};
+
+function matchCompoundDoseUnit(
+  context: HpsgClauseContext,
+  start: number,
+  lower: string
+): UnitMatch | undefined {
+  for (const compound of COMPOUND_DOSE_UNITS) {
+    if (compound.head !== lower) {
+      continue;
+    }
+    const sequences = compound.tailSequences ?? [];
+    for (const sequence of sequences) {
+      const matchedTokens: Token[] = [];
+      let matched = true;
+      for (let offset = 0; offset < sequence.length; offset += 1) {
+        const candidate = context.tokens[start + 1 + offset];
+        if (
+          !candidate ||
+          context.state.consumed.has(candidate.index) ||
+          normalizeTokenLower(candidate) !== sequence[offset]
+        ) {
+          matched = false;
+          break;
+        }
+        matchedTokens.push(candidate);
+      }
+      if (matched) {
+        const head = context.tokens[start];
+        return head ? { unit: compound.unit, tokens: [head, ...matchedTokens] } : undefined;
+      }
+    }
+
+    const next = context.tokens[start + 1];
+    if (next && !context.state.consumed.has(next.index)) {
+      const nextLower = normalizeTokenLower(next);
+      if (compound.tails.indexOf(nextLower) !== -1) {
+        const head = context.tokens[start];
+        return head ? { unit: compound.unit, tokens: [head, next] } : undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+function unitAfter(context: HpsgClauseContext, start: number): UnitMatch | undefined {
   const token = context.tokens[start];
   if (!token || context.state.consumed.has(token.index)) {
     return undefined;
@@ -306,15 +356,9 @@ function unitAfter(context: HpsgClauseContext, start: number): { unit: string; t
     const nested = unitAfter(context, start + 1);
     return nested ? { unit: nested.unit, tokens: [token, ...nested.tokens] } : undefined;
   }
-  const compound = COMPOUND_DOSE_UNITS.find((entry) => entry.head === lower);
+  const compound = matchCompoundDoseUnit(context, start, lower);
   if (compound) {
-    const next = context.tokens[start + 1];
-    if (next && !context.state.consumed.has(next.index)) {
-      const nextLower = normalizeTokenLower(next);
-      if (compound.tails.indexOf(nextLower) !== -1) {
-        return { unit: compound.unit, tokens: [token, next] };
-      }
-    }
+    return compound;
   }
   const direct = normalizeUnit(lower, context.options);
   if (direct) {
@@ -330,6 +374,47 @@ function doseNumeratorValue(token: Token, lower: string): number | undefined {
   return DOSE_NUMBER_WORDS.get(lower);
 }
 
+function percentBodyAreaDoseAfter(
+  context: HpsgClauseContext,
+  start: number,
+  lower: string
+): HpsgSign[] | undefined {
+  const percentMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)%$/);
+  if (!percentMatch) {
+    return undefined;
+  }
+  const unitToken = context.tokens[start + 1];
+  if (!unitToken || context.state.consumed.has(unitToken.index)) {
+    return undefined;
+  }
+  const unit = PERCENT_BODY_AREA_UNITS.get(normalizeTokenLower(unitToken));
+  if (!unit) {
+    return undefined;
+  }
+  const token = context.tokens[start];
+  if (!token) {
+    return undefined;
+  }
+  return [
+    lexicalSign({
+      type: "dose-sign",
+      rule: "hpsg.lex.dose.percentBodyArea",
+      tokens: [token, unitToken],
+      synsem: {
+        head: {
+          dose: {
+            value: parseFloat(percentMatch[1]),
+            unit
+          }
+        },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 10
+    })
+  ];
+}
+
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.dose", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -340,6 +425,10 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const lower = normalizeTokenLower(token);
     if (isClockDoseContext(context, start, lower)) {
       return [];
+    }
+    const percentBodyAreaDose = percentBodyAreaDoseAfter(context, start, lower);
+    if (percentBodyAreaDose) {
+      return percentBodyAreaDose;
     }
     const numerator = doseNumeratorValue(token, lower);
     const denominatorToken = context.tokens[start + 1];
@@ -433,6 +522,27 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             cont: { clauseKind: "administration" }
           },
           score: unit ? 9 : 4
+        })
+      ];
+    }
+    const implicitUnit = unitAfter(context, start);
+    if (implicitUnit && IMPLICIT_SINGLE_DOSE_UNITS.has(implicitUnit.unit)) {
+      return [
+        lexicalSign({
+          type: "dose-sign",
+          rule: "hpsg.lex.dose.implicitSingleUnit",
+          tokens: implicitUnit.tokens,
+          synsem: {
+            head: {
+              dose: {
+                value: 1,
+                unit: implicitUnit.unit
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 9
         })
       ];
     }

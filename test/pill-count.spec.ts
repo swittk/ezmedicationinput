@@ -192,6 +192,26 @@ describe("calculateTotalUnits", () => {
         expect(result.totalContainers).toBe(1);
     });
 
+    it("counts patch and ring presentation units as discrete administrations", () => {
+        const patch = parseSig("apply 1 patch every 3 days for 9 days");
+        const patchResult = calculateTotalUnits({
+            dosage: patch.fhir,
+            durationValue: 30,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(patchResult.totalUnits).toBe(3);
+
+        const ring = parseSig("insert 1 ring pv monthly");
+        const ringResult = calculateTotalUnits({
+            dosage: ring.fhir,
+            durationValue: 90,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(ringResult.totalUnits).toBe(3);
+    });
+
     it("estimates usage for natural product-specific amount units", () => {
         const parsed = parseSig("apply 2 FTU to face twice daily");
         const result = calculateTotalUnits({
@@ -221,6 +241,34 @@ describe("calculateTotalUnits", () => {
         expect(result.totalUnits).toBe(28);
         expect(result.totalApproximateQuantity).toMatchObject({
             value: 1.4,
+            unit: "mL",
+            confidence: "approximate"
+        });
+    });
+
+    it("estimates size-proxy topical amounts in volume units", () => {
+        const peaSized = calculateTotalUnits({
+            dosage: parseSig("apply pea-sized amount to face daily").fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(peaSized.totalUnits).toBe(7);
+        expect(peaSized.totalApproximateQuantity).toMatchObject({
+            value: 1.75,
+            unit: "mL",
+            confidence: "approximate"
+        });
+
+        const shotGlass = calculateTotalUnits({
+            dosage: parseSig("apply 1 shot glass of sunscreen daily").fhir,
+            durationValue: 2,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(shotGlass.totalUnits).toBe(2);
+        expect(shotGlass.totalApproximateQuantity?.value).toBeCloseTo(59.147);
+        expect(shotGlass.totalApproximateQuantity).toMatchObject({
             unit: "mL",
             confidence: "approximate"
         });
@@ -295,6 +343,17 @@ describe("calculateTotalUnits", () => {
 
         expect(result.totalUnits).toBe(28);
         expect(result.totalApproximateQuantity).toBeUndefined();
+    });
+
+    it("keeps body-area proxies counted without invented estimates", () => {
+        const areaProxy = calculateTotalUnits({
+            dosage: parseSig("apply 1 handprint to burn daily").fhir,
+            durationValue: 7,
+            durationUnit: FhirPeriodUnit.Day,
+            ...BASE_OPTIONS
+        });
+        expect(areaProxy.totalUnits).toBe(7);
+        expect(areaProxy.totalApproximateQuantity).toBeUndefined();
     });
 
     it("handles unit conversion for containers", () => {

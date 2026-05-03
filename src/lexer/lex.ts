@@ -25,7 +25,7 @@ const PER_SLASH_UNITS = new Set([
 ]);
 
 const COMPACT_DISCRETE_UNITS_PATTERN =
-  /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|gtt|gtts|eyedrop|eyedrops|puff|puffs|spray|sprays|pump|pumps|ftu|ftus|patch|patches|tube|tubes|bottle|bottles|container|containers)$/i;
+  /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|mg|mcg|ml|g|drops|drop|gtt|gtts|eyedrop|eyedrops|puff|puffs|spray|sprays|pump|pumps|ftu|ftus|patch|patches|ring|rings|tube|tubes|bottle|bottles|container|containers|palm|palms|handprint|handprints|click|clicks|vial|vials|ampule|ampules|packet|packets|sachet|sachets|stick-pack|stick-packs|pea-sized)$/i;
 
 function classifyLexKind(value: string): {
   kind: LexKind;

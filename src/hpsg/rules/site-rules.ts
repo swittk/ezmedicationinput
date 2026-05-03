@@ -66,7 +66,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
       METHOD_ACTION_BY_VERB[lower] ||
       (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||
       productRouteHint(lower) ||
-      normalizeUnit(lower, context.options) ||
+      (normalizeUnit(lower, context.options) && !siteLike) ||
       TIMING_ABBREVIATIONS[lower] ||
       WORD_FREQUENCIES[lower] ||
       FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||

@@ -50,7 +50,10 @@ export function normalizeUnit(token: string, options?: ParseOptions): string | u
   if (defaultUnit) {
     return defaultUnit;
   }
-  const terminologyUnit = getDoseUnitTerminologyEntry(token)?.unit;
+  const terminologyEntry = getDoseUnitTerminologyEntry(token);
+  const terminologyUnit = terminologyEntry?.parseAsDose === false
+    ? undefined
+    : terminologyEntry?.unit;
   const policyCheckedTerminologyUnit = enforceHouseholdUnitPolicy(terminologyUnit, options);
   if (policyCheckedTerminologyUnit) {
     return policyCheckedTerminologyUnit;
@@ -125,6 +128,7 @@ export function getDoseUnitSemantics(
   return {
     unit: terminologyEntry.unit,
     kind: terminologyEntry.kind,
+    parseAsDose: terminologyEntry.parseAsDose,
     approximateQuantity: getDoseUnitApproximation(unit, context)
   };
 }
@@ -133,6 +137,7 @@ export function listDoseUnitTerminology(): DoseUnitTerminologyEntry[] {
   return DOSE_UNIT_TERMINOLOGY.map((entry) => ({
     ...entry,
     aliases: entry.aliases ? [...entry.aliases] : undefined,
+    parseAsDose: entry.parseAsDose,
     approximateQuantity: entry.approximateQuantity
       ? { ...entry.approximateQuantity }
       : undefined
