@@ -1,7 +1,7 @@
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions } from "../../advice";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
-import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
@@ -26,6 +26,7 @@ import {
   MEAL_RELATION_BY_TOKEN,
   SITE_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS,
+  WORKFLOW_ACTION_RELATION_LEADS,
   WORKFLOW_CONTINUATION_LICENSES,
   WORKFLOW_NOUNS,
   WORKFLOW_START_WORDS
@@ -91,8 +92,7 @@ function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
   return getProceduralFrames(context).filter((frame) => {
     const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
     const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
-      frame.predicate.lemma === "consult" ||
-      frame.predicate.semanticClass === "medical_advice";
+      medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
     if (
       (!definition?.procedural && !scopedDirective) ||
       (definition?.primaryAdministrationHead && !scopedDirective) ||
@@ -247,18 +247,14 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         actionDefinition &&
         !actionDefinition.procedural &&
         METHOD_ACTION_BY_VERB[lower] &&
-        previousLower !== "before" &&
-        previousLower !== "after" &&
-        previousLower !== "with"
+        !WORKFLOW_ACTION_RELATION_LEADS.has(previousLower)
       ) {
         break;
       }
       if (
         bodyTokens.length &&
         (isExplicitDoseLead(context, cursor) || startsScheduledAdministration(context, cursor)) &&
-        previousLower !== "before" &&
-        previousLower !== "after" &&
-        previousLower !== "with"
+        !WORKFLOW_ACTION_RELATION_LEADS.has(previousLower)
       ) {
         break;
       }

@@ -8,7 +8,7 @@ import {
 } from "../../maps";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { LexKind } from "../../lexer/token-types";
-import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { Token } from "../../parser-state";
 import { PrnReasonLookupRequest } from "../../types";
@@ -396,10 +396,6 @@ function parsePrnReasonAtoms(
   return atoms;
 }
 
-function actionDefinitionIsSafetyAdvice(code: string, semanticClass: string | undefined): boolean {
-  return code === "consult" || code === "stop" || semanticClass === "medical_advice";
-}
-
 function hasSafetyConditionalActionAfter(
   context: HpsgClauseContext,
   start: number
@@ -408,7 +404,7 @@ function hasSafetyConditionalActionAfter(
   if (!lead) return false;
   return getProceduralFrames(context).some((frame) =>
     frame.span.start >= lead.sourceEnd &&
-    actionDefinitionIsSafetyAdvice(frame.predicate.lemma, frame.predicate.semanticClass)
+    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
   );
 }
 

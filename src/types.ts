@@ -789,6 +789,8 @@ export interface MedicationInstructionActionDefinition {
   procedural?: boolean;
   /** A method-capable procedural action that may serve as the primary administration head. */
   primaryAdministrationHead?: boolean;
+  /** Positive action whose condition belongs to safety/instruction scope, not PRN administration scope. */
+  safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
   /** Whether an amount argument on this action defines the medication dose. */
   definesDose?: boolean;

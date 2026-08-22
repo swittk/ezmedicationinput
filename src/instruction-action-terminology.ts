@@ -33,6 +33,7 @@ interface ActionSource {
   aliases?: string[];
   procedural?: boolean;
   primaryAdministrationHead?: boolean;
+  safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
   definesDose?: boolean;
   externalCodings?: FhirCoding[];
@@ -87,6 +88,7 @@ function cloneDefinition(
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     procedural: definition.procedural,
     primaryAdministrationHead: definition.primaryAdministrationHead,
+    safetyScopeTarget: definition.safetyScopeTarget,
     acceptsAmount: definition.acceptsAmount,
     definesDose: definition.definesDose,
     coding: cloneCoding(definition.coding),
@@ -104,6 +106,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     procedural: sourceDefinition.procedural,
     primaryAdministrationHead: sourceDefinition.primaryAdministrationHead,
+    safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
@@ -125,6 +128,7 @@ function normalizeCustomDefinition(
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     procedural: input.procedural ?? true,
     primaryAdministrationHead: input.primaryAdministrationHead,
+    safetyScopeTarget: input.safetyScopeTarget,
     acceptsAmount: input.acceptsAmount,
     definesDose: input.definesDose,
     coding: cloneCoding(input.coding),
@@ -147,6 +151,13 @@ function customDefinitionForSurface(
     }
   }
   return undefined;
+}
+
+export function medicationInstructionActionIsSafetyScopeTarget(
+  surface: string,
+  options?: ParseOptions
+): boolean {
+  return resolveMedicationInstructionAction(surface, options)?.safetyScopeTarget === true;
 }
 
 export function resolveMedicationInstructionAction(

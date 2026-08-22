@@ -1,5 +1,5 @@
 import { AdvicePolarity, AdviceRelation } from "../../types";
-import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { HpsgConditionFeature, HpsgLexicalRule, lexicalSign } from "../signature";
@@ -16,8 +16,7 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
   return Boolean(
     frame.polarity === AdvicePolarity.Negate ||
     definition?.procedural ||
-    frame.predicate.lemma === "consult" ||
-    frame.predicate.semanticClass === "medical_advice"
+    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
   );
 }
 
@@ -107,8 +106,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const fullText = context.state.input.slice(lead.sourceStart, targetEnd).trim();
       const safety = program.some((frame) => isScopeTarget(context, frame) && (
         frame.polarity === AdvicePolarity.Negate ||
-        frame.predicate.lemma === "consult" ||
-        frame.predicate.semanticClass === "medical_advice"
+        medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
       ));
       return [lexicalSign({
         type: "conditional-sign",
@@ -149,8 +147,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const text = context.state.input.slice(lead.sourceStart, sourceEnd).trim();
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
     const safety = previous.polarity === AdvicePolarity.Negate ||
-      previous.predicate.lemma === "consult" ||
-      previous.predicate.semanticClass === "medical_advice";
+      medicationInstructionActionIsSafetyScopeTarget(previous.predicate.lemma, context.options);
     return [lexicalSign({
       type: "conditional-sign",
       rule: "hpsg.lex.condition",

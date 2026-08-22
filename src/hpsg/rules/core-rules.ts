@@ -13,7 +13,7 @@ import {
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
-import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
+import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
@@ -25,29 +25,34 @@ import {
   CLOCK_LEAD_TOKENS,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
+  COORDINATED_NOUN_METHOD_VERBS,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_FRACTION_WORDS,
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
   IMPLICIT_SINGLE_DOSE_UNITS,
   LIST_SEPARATORS,
+  METHOD_NOUN_LEFT_CONTEXT,
   POSITIVE_DIRECTIVE_MARKERS,
   MEDICATION_OBJECT_FILLERS,
   MILLION_DOSE_MULTIPLIER_TOKENS,
   PERCENT_BODY_AREA_UNITS,
   RANGE_CONNECTORS,
+  PRODUCT_EXTERNAL_MODIFIERS,
   PRODUCT_FORM_MODIFIERS,
   PRODUCT_METHOD_TEXT,
   PRODUCT_METHOD_THAI,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
   ROUTE_SITE_PREPOSITIONS,
-  SITE_ANCHORS
+  SITE_ANCHORS,
+  THAI_METHOD_AUXILIARY_VERBS
 } from "../lexical-classes";
 import {
   cloneMethodCoding,
   METHOD_ACTION_BY_VERB,
+  METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE,
   METHOD_CODING_BY_ACTION,
-  MethodAction
+  METHOD_ROUTE_OVERRIDE_BY_VERB
 } from "../method-lexicon";
 import {
   HpsgClauseContext,
@@ -61,12 +66,8 @@ import {
 import { HpsgLexicalRule, HpsgSign, emptySynsem, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
 
-function methodProcedureFrames(context: HpsgClauseContext): AdviceFrame[] {
-  return getProceduralFrames(context);
-}
-
 function looksLikeThaiGiveAuxiliary(context: HpsgClauseContext, start: number, verb: string): boolean {
-  if (verb !== "give") return false;
+  if (!THAI_METHOD_AUXILIARY_VERBS.has(verb)) return false;
   const token = context.tokens.slice(start, start + 1)[0];
   if (!token || !/[\u0E00-\u0E7F]/.test(token.original)) return false;
   const next = context.tokens[start + 1];
@@ -75,28 +76,26 @@ function looksLikeThaiGiveAuxiliary(context: HpsgClauseContext, start: number, v
 }
 
 function looksLikeCoordinatedNoun(context: HpsgClauseContext, start: number, verb: string): boolean {
-  if (verb !== "drink" && verb !== "use") return false;
+  if (!COORDINATED_NOUN_METHOD_VERBS.has(verb)) return false;
   const previous = context.tokens[start - 1];
   const next = context.tokens[start + 1];
   const previousLower = previous ? normalizeTokenLower(previous) : "";
   const nextLower = next ? normalizeTokenLower(next) : "";
-  if (verb === "use" && new Set(["each", "first", "every", "after", "before"]).has(previousLower)) {
+  if (METHOD_NOUN_LEFT_CONTEXT.get(verb)?.has(previousLower)) {
     return true;
   }
   return previous?.original === "," && (next?.original === "," || nextLower === "or" || nextLower === "and");
 }
 
-function methodTokenBelongsToNonGlobalDirective(
+function methodTokenBelongsToNegatedDirective(
   context: HpsgClauseContext,
-  token: Token
+  item: Token
 ): boolean {
-  return methodProcedureFrames(context).some((frame) => {
-    if (frame.span.start > token.sourceStart || token.sourceEnd > frame.span.end) return false;
-    return frame.polarity === AdvicePolarity.Negate ||
-      frame.predicate.lemma === "consult" ||
-      frame.predicate.lemma === "stop" ||
-      frame.predicate.semanticClass === "medical_advice";
-  });
+  return getProceduralFrames(context).some((frame) =>
+    frame.polarity === AdvicePolarity.Negate &&
+    frame.span.start <= item.sourceStart &&
+    item.sourceEnd <= frame.span.end
+  );
 }
 
 export function directiveMarkerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -127,10 +126,10 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const verb = normalizeTokenLower(token);
+    if (methodTokenBelongsToNegatedDirective(context, token)) return [];
     if (looksLikeThaiGiveAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
       return [];
     }
-    if (methodTokenBelongsToNonGlobalDirective(context, token)) return [];
     if (
       !METHOD_ACTION_BY_VERB[verb] ||
       (
@@ -142,9 +141,10 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const action = METHOD_ACTION_BY_VERB[verb];
     const headClass = sourceRangeAttachmentClass(context, token.sourceStart, token.sourceEnd);
-    const route = verb === "apply_patch"
-      ? { code: RouteCode["Transdermal route"], text: ROUTE_TEXT[RouteCode["Transdermal route"]] }
-      : action === MethodAction.Apply
+    const routeOverride = METHOD_ROUTE_OVERRIDE_BY_VERB[verb];
+    const route = routeOverride
+      ? { code: routeOverride, text: ROUTE_TEXT[routeOverride] }
+      : METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE.has(action)
         ? undefined
         : getRouteMeaning(token);
     return [
@@ -304,7 +304,7 @@ export function fillerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!token) return [];
     const lower = normalizeTokenLower(token);
     const next = context.tokens[start + 1];
-    const externalProductModifier = lower === "external" && next &&
+    const externalProductModifier = PRODUCT_EXTERNAL_MODIFIERS.has(lower) && next &&
       Boolean(productRouteHint(normalizeTokenLower(next)));
     if (!MEDICATION_OBJECT_FILLERS.has(lower) && !externalProductModifier) {
       return [];
@@ -874,7 +874,7 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
-    if (!CONNECTORS.has(lower) && lower !== "via" && !isPunctuation(lower)) {
+    if (!CONNECTORS.has(lower) && !isPunctuation(lower)) {
       return [];
     }
     return [

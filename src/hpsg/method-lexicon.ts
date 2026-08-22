@@ -1,5 +1,5 @@
 import { buildTranslationPrimitiveElement, clonePrimitiveElement } from "../fhir-translations";
-import { FhirCoding } from "../types";
+import { FhirCoding, RouteCode } from "../types";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -47,6 +47,14 @@ export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
   use: MethodAction.Administer,
   wash: MethodAction.Wash
 };
+
+export const METHOD_ROUTE_OVERRIDE_BY_VERB: Partial<Record<string, RouteCode>> = {
+  apply_patch: RouteCode["Transdermal route"]
+};
+
+export const METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE = new Set<MethodAction>([
+  MethodAction.Apply
+]);
 
 export const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
   [MethodAction.Administer]: {

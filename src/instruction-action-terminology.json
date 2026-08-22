@@ -366,7 +366,8 @@
         "หยุด",
         "หยุดใช้"
       ],
-      "procedural": true
+      "procedural": true,
+      "safetyScopeTarget": true
     },
     {
       "code": "measure",
@@ -1115,7 +1116,8 @@
         "seek medical attention",
         "ปรึกษาแพทย์"
       ],
-      "procedural": true
+      "procedural": true,
+      "safetyScopeTarget": true
     },
     {
       "code": "adjust",

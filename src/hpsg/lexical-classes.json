@@ -206,7 +206,8 @@
     "on",
     "every",
     "then",
-    ","
+    ",",
+    "via"
   ],
   "routeSitePrepositions": [
     "per"
@@ -1056,5 +1057,29 @@
     "unless",
     "when",
     "while"
+  ],
+  "thaiMethodAuxiliaryVerbs": [
+    "give"
+  ],
+  "coordinatedNounMethodVerbs": [
+    "drink",
+    "use"
+  ],
+  "methodNounLeftContext": {
+    "use": [
+      "each",
+      "first",
+      "every",
+      "after",
+      "before"
+    ]
+  },
+  "productExternalModifiers": [
+    "external"
+  ],
+  "workflowActionRelationLeads": [
+    "before",
+    "after",
+    "with"
   ]
 }

@@ -44,6 +44,7 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
   if (sign.synsem.head.method) {
     traits.add("administration-head");
     if (sign.synsem.head.method.text) traits.add("method-specialization");
+    if (sign.synsem.head.method.headClass === "procedure") traits.add("procedure");
   }
   if (sign.synsem.head.route || sign.synsem.head.dose || sign.synsem.valence.site) traits.add("complement");
   if (

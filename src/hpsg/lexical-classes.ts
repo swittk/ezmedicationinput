@@ -84,6 +84,16 @@ function numberRecord(record: Record<string, number>): Record<string, number> {
   return { ...record };
 }
 
+function stringSetMap(record: Record<string, string[]>): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      result.set(key, setOf(record[key]));
+    }
+  }
+  return result;
+}
+
 function numberEntries(record: Record<string, number>): Array<[string, number]> {
   const entries: Array<[string, number]> = [];
   for (const key in record) {
@@ -146,6 +156,10 @@ export const BODY_SITE_ADJECTIVE_SUFFIXES = source.bodySiteAdjectiveSuffixes as 
 export const BODY_SITE_DISPLAY_PENALTY_WORDS = setOf(source.bodySiteDisplayPenaltyWords);
 export const BODY_SITE_FEATURE_SCORE_BONUS = bodySiteFeatureScoreBonus(source.bodySiteFeatureScoreBonus);
 export const CONNECTORS = setOf(source.connectors);
+export const THAI_METHOD_AUXILIARY_VERBS = setOf(source.thaiMethodAuxiliaryVerbs);
+export const COORDINATED_NOUN_METHOD_VERBS = setOf(source.coordinatedNounMethodVerbs);
+export const METHOD_NOUN_LEFT_CONTEXT = stringSetMap(source.methodNounLeftContext);
+export const PRODUCT_EXTERNAL_MODIFIERS = setOf(source.productExternalModifiers);
 export const ROUTE_SITE_PREPOSITIONS = setOf(source.routeSitePrepositions);
 export const SITE_DISPLAY_FILLERS = SITE_FILLERS;
 export const SITE_MULTIPLICITY_WORDS = setOf(["both", "each", "bilateral"]);
@@ -232,6 +246,7 @@ export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
 export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
 export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationLicenses);
+export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelationLeads);
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
 
