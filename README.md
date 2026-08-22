@@ -220,6 +220,14 @@ Highlights:
 - When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
   (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
 
+## Adversarial real-world parsing and HPSG performance
+
+The repository includes a 50-case TH/EN adversarial corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.
+
+`npm run bench:torture` builds the package and runs the same corpus repeatedly, reporting mean/p50/p95/p99 latency, throughput, and the slowest cases. This is intentionally a benchmark rather than a timing-sensitive unit test.
+
+The HPSG chart uses packed semantic state, an indexed agenda, and a compatible semantic cover across opaque gaps. Procedural constructions use typed local arguments so local instructions such as `wash hands`, `wait 30 minutes`, or inhaler priming do not overwrite the medication's global site, schedule, route, or dose.
+
 ## Procedural instruction semantics and opaque-span enrichment
 
 Complex directions may contain preparation/application workflow that does not fit

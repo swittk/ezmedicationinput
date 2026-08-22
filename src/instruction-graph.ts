@@ -1,5 +1,6 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
+import { normalizeUnit } from "./unit-lexicon";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -88,7 +89,17 @@ function actionMatchAt(
   for (let length = maxSpan; length >= 1; length -= 1) {
     for (const candidate of actionPhraseCandidates(parts, index, length)) {
       const definition = resolveMedicationInstructionAction(candidate, options);
-      if (definition) return { definition, length };
+      if (definition) {
+        const first = parts[index];
+        if (definition.code === "give" && first && /[\u0E00-\u0E7F]/.test(first.original)) {
+          const next = parts[index + length];
+          const nextDefinition = next
+            ? resolveMedicationInstructionAction(key(next), options)
+            : undefined;
+          if (nextDefinition) continue;
+        }
+        return { definition, length };
+      }
     }
   }
   return undefined;
@@ -203,6 +214,83 @@ function relationIndex(parts: Lexeme[], start: number, endExclusive: number): nu
   return -1;
 }
 
+const INSTRUCTION_NUMBER_WORDS: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+  seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12
+};
+
+function parseQuantityArgument(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  offset: number,
+  options?: ParseOptions
+): AdviceArgument | undefined {
+  for (let index = start; index + 1 < endExclusive; index += 1) {
+    const valueToken = parts[index];
+    const unitToken = parts[index + 1];
+    if (!valueToken || !unitToken) continue;
+    const unit = normalizeUnit(key(unitToken), options);
+    if (!unit) continue;
+    const wordValue = INSTRUCTION_NUMBER_WORDS[key(valueToken)];
+    if ((valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
+      const value = valueToken.kind === "NUMBER" ? valueToken.value : wordValue;
+      return {
+        role: AdviceArgumentRole.Amount,
+        text: sourceFor(parts, index, index + 2, input),
+        normalized: unit,
+        quantity: { value, unit },
+        span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
+      };
+    }
+    if (valueToken.kind === "NUMBER_RANGE") {
+      const match = valueToken.original.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
+      if (!match) continue;
+      return {
+        role: AdviceArgumentRole.Amount,
+        text: sourceFor(parts, index, index + 2, input),
+        normalized: unit,
+        quantity: { range: { low: Number(match[1]), high: Number(match[2]) }, unit },
+        span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
+      };
+    }
+  }
+  return undefined;
+}
+
+function durationUnitFromKey(unitKey: string): string | undefined {
+  if (unitKey === "second" || unitKey === "seconds" || unitKey === "sec" || unitKey === "secs") return "s";
+  if (unitKey === "minute" || unitKey === "minutes" || unitKey === "min" || unitKey === "mins") return "min";
+  if (unitKey === "hour" || unitKey === "hours" || unitKey === "hr" || unitKey === "hrs") return "h";
+  if (unitKey === "day" || unitKey === "days") return "d";
+  return undefined;
+}
+
+function parseAnyDurationArgument(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  offset: number
+): AdviceArgument | undefined {
+  for (let index = start; index + 1 < endExclusive; index += 1) {
+    const valueToken = parts[index];
+    const unitToken = parts[index + 1];
+    if (!valueToken || !unitToken || valueToken.kind !== "NUMBER" || valueToken.value === undefined) continue;
+    const unit = durationUnitFromKey(key(unitToken));
+    if (!unit) continue;
+    return {
+      role: AdviceArgumentRole.Duration,
+      text: sourceFor(parts, index, index + 2, input),
+      normalized: `${valueToken.value} ${unit}`,
+      quantity: { value: valueToken.value, unit },
+      span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
+    };
+  }
+  return undefined;
+}
+
 function parseDurationArgument(
   parts: Lexeme[],
   start: number,
@@ -215,14 +303,7 @@ function parseDurationArgument(
     const valueToken = parts.slice(index + 1, index + 2)[0];
     const unitToken = parts.slice(index + 2, index + 3)[0];
     if (!valueToken || !unitToken || valueToken.kind !== "NUMBER" || valueToken.value === undefined) continue;
-    const unitKey = key(unitToken);
-    const unit = unitKey === "minute" || unitKey === "minutes"
-      ? "min"
-      : unitKey === "hour" || unitKey === "hours"
-        ? "h"
-        : unitKey === "day" || unitKey === "days"
-          ? "d"
-          : undefined;
+    const unit = durationUnitFromKey(key(unitToken));
     if (!unit) continue;
     return {
       role: AdviceArgumentRole.Duration,
@@ -247,14 +328,7 @@ function parseBareDurationArgument(
   if (!valueToken || !unitToken || start + 1 >= endExclusive || valueToken.kind !== "NUMBER" || valueToken.value === undefined) {
     return undefined;
   }
-  const unitKey = key(unitToken);
-  const unit = unitKey === "minute" || unitKey === "minutes"
-    ? "min"
-    : unitKey === "hour" || unitKey === "hours"
-      ? "h"
-      : unitKey === "day" || unitKey === "days"
-        ? "d"
-        : undefined;
+  const unit = durationUnitFromKey(key(unitToken));
   if (!unit) return undefined;
   return {
     role: AdviceArgumentRole.Duration,
@@ -263,6 +337,18 @@ function parseBareDurationArgument(
     quantity: { value: valueToken.value, unit },
     span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
   };
+}
+
+function partIndexForAbsoluteSourceStart(
+  parts: Lexeme[],
+  sourceStart: number,
+  offset: number
+): number | undefined {
+  const relative = sourceStart - offset;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index].sourceStart === relative) return index;
+  }
+  return undefined;
 }
 
 function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumentRole {
@@ -297,16 +383,63 @@ function buildActionFrame(
   const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
   const relation = relIndex >= 0 ? RELATIONS[key(parts.slice(relIndex, relIndex + 1)[0])] : undefined;
+  const amount = definition.acceptsAmount
+    ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
+    : undefined;
+  const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
 
   switch (definition.code) {
     case "shake":
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Container, options));
       if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options));
       break;
-    case "pour":
+    case "pour": {
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Theme, options));
-      if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Destination, options));
+      const amountIndex = amount?.span
+        ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset)
+        : undefined;
+      if (relIndex >= 0) {
+        pushArgument(args, argumentFromParts(
+          parts,
+          relIndex + 1,
+          amountIndex !== undefined && amountIndex > relIndex ? amountIndex : segmentEnd,
+          input,
+          AdviceArgumentRole.Destination,
+          options
+        ));
+      }
+      pushArgument(args, amount);
       break;
+    }
+    case "measure":
+    case "draw_up":
+    case "prime": {
+      pushArgument(args, amount);
+      const amountIndex = amount?.span
+        ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset)
+        : undefined;
+      if (argumentStart < segmentEnd) {
+        const objectEnd = amountIndex !== undefined ? amountIndex : segmentEnd;
+        if (objectEnd > argumentStart) {
+          pushArgument(args, argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
+        }
+      }
+      break;
+    }
+    case "swish":
+    case "gargle": {
+      pushArgument(args, amount);
+      pushArgument(args, duration);
+      break;
+    }
+    case "hold":
+    case "keep": {
+      pushArgument(args, duration);
+      if (!duration) {
+        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Object, options));
+      }
+      break;
+    }
     case "mix": {
       const waterIndex = parts.slice(argumentStart, segmentEnd).findIndex((part) => {
         const currentKey = key(part);
@@ -344,17 +477,17 @@ function buildActionFrame(
       ));
       break;
     case "leave": {
-      const duration = parseDurationArgument(parts, argumentStart, segmentEnd, input, offset);
-      pushArgument(args, duration);
-      if (!duration) {
+      const leaveDuration = parseDurationArgument(parts, argumentStart, segmentEnd, input, offset) ?? duration;
+      pushArgument(args, leaveDuration);
+      if (!leaveDuration) {
         pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
       }
       break;
     }
     case "wait": {
-      const duration = parseBareDurationArgument(parts, argumentStart, segmentEnd, input, offset);
-      pushArgument(args, duration);
-      if (!duration) {
+      const waitDuration = parseBareDurationArgument(parts, argumentStart, segmentEnd, input, offset) ?? duration;
+      pushArgument(args, waitDuration);
+      if (!waitDuration) {
         pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
       }
       break;
@@ -376,6 +509,8 @@ function buildActionFrame(
       if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, undefined, options));
       break;
   }
+
+  pushArgument(args, amount);
 
   const codings = medicationInstructionActionCodings(definition);
   if (definition.code === "douche" && args.some((arg) => arg.coding?.code === "76784001" || arg.normalized === "vagina")) {
@@ -860,6 +995,32 @@ export function refreshInstructionGraphDerivedState(
   graph.coverage = buildInstructionCoverage(graph.actions, opaqueSpans);
 }
 
+function promoteDoseFromDefiningAction(
+  clause: CanonicalSigClause,
+  actions: AdviceFrame[],
+  options?: ParseOptions
+): void {
+  if (clause.dose?.value !== undefined || clause.dose?.range) return;
+  const candidates = actions
+    .filter((action) => resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose)
+    .map((action) => action.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity)
+    .filter((quantity): quantity is NonNullable<AdviceArgument["quantity"]> => Boolean(quantity));
+  if (!candidates.length) return;
+  const first = candidates[0];
+  const same = candidates.every((candidate) =>
+    candidate.value === first.value &&
+    candidate.unit === first.unit &&
+    candidate.range?.low === first.range?.low &&
+    candidate.range?.high === first.range?.high
+  );
+  if (!same) return;
+  clause.dose = {
+    value: first.value,
+    range: first.range ? { ...first.range } : undefined,
+    unit: first.unit
+  };
+}
+
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
@@ -907,6 +1068,7 @@ export function buildInstructionGraph(
     }
   }
   if (!actions.length && !opaqueSpans.length) return undefined;
+  promoteDoseFromDefiningAction(clause, actions, options);
   attachDoseToNearestAction(actions, clause, input, options);
   const graph: CanonicalInstructionGraph = {
     actions,

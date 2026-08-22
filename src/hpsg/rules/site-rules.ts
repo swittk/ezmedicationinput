@@ -9,9 +9,10 @@ import {
 import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { RouteCode } from "../../types";
+import { AdviceFrame, RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { inferRouteFromContext } from "../../context";
+import { getProceduralFrames } from "../procedural-context";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -52,6 +53,50 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
+
+const AMBIGUOUS_PROCEDURE_SITE_ACTIONS = new Set(["wash", "rinse"]);
+const LOCAL_PROCEDURE_SITE_ACTIONS = new Set([
+  "wash",
+  "rinse",
+  "touch",
+  "press",
+  "warm",
+  "keep",
+  "pump",
+  "part",
+  "prime",
+  "discard",
+  "fold",
+  "pinch",
+  "aim",
+  "close",
+  "squeeze"
+]);
+
+function localProcedureFrames(context: HpsgClauseContext): AdviceFrame[] {
+  return getProceduralFrames(context);
+}
+
+function siteRangeIsProcedureLocal(
+  context: HpsgClauseContext,
+  range: { start: number; end: number } | undefined
+): boolean {
+  if (!range) return false;
+  const frames = localProcedureFrames(context);
+  return frames.some((frame) => {
+    if (
+      !LOCAL_PROCEDURE_SITE_ACTIONS.has(frame.predicate.lemma) ||
+      range.start < frame.span.start ||
+      range.end > frame.span.end
+    ) {
+      return false;
+    }
+    if (!AMBIGUOUS_PROCEDURE_SITE_ACTIONS.has(frame.predicate.lemma)) {
+      return true;
+    }
+    return frames.some((candidate) => candidate.span.start < frame.span.start);
+  });
+}
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
@@ -283,6 +328,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       range = { start, end };
     }
+    if (siteRangeIsProcedureLocal(context, range)) {
+      return signs;
+    }
     const routeHint = resolved?.definition?.routeHint ??
       DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
     const featureScore = resolved
@@ -369,6 +417,9 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         bodySiteContext: context.options?.context?.bodySiteContext
       });
       if (!resolved?.coding && !resolved?.definition) {
+        continue;
+      }
+      if (siteRangeIsProcedureLocal(context, trimmedRange ?? rawRange)) {
         continue;
       }
       const displayText = resolved.displayText ?? sourceText;

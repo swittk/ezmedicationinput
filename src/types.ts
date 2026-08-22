@@ -780,6 +780,8 @@ export interface MedicationInstructionActionDefinition {
   /** Whether this is a procedural action rather than ordinary administration advice. */
   procedural?: boolean;
   acceptsAmount?: boolean;
+  /** Whether an amount argument on this action defines the medication dose. */
+  definesDose?: boolean;
   /** Optional primary coding when an institution owns the action terminology. */
   coding?: FhirCoding;
   /** Exact external terminology mappings; never fuzzy/approximate mappings. */

@@ -17,7 +17,8 @@
   "scripts": {
     "test:dist": "npm run build && vitest run test-dist",
     "build": "tsup && tsc -p tsconfig.types.json",
-    "test": "vitest run --dir test"
+    "test": "vitest run --dir test",
+    "bench:torture": "npm run build && node bench/real-world-torture.mjs"
   },
   "files": [
     "dist"

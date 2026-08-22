@@ -13,9 +13,11 @@ import {
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
-import { RouteCode } from "../../types";
+import { AdviceFrame, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getProceduralFrames } from "../procedural-context";
 import { parseNumericRange } from "../timing-lexicon";
 import {
   BODY_SITE_PARTITIVE_CONNECTORS,
@@ -56,6 +58,75 @@ import {
 import { HpsgLexicalRule, HpsgSign, emptySynsem, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
 
+function methodProcedureFrames(context: HpsgClauseContext): AdviceFrame[] {
+  return getProceduralFrames(context);
+}
+
+function procedureFrameIsDependent(
+  context: HpsgClauseContext,
+  frame: AdviceFrame
+): boolean {
+  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  if (!definition?.procedural) return false;
+  if (!METHOD_ACTION_BY_VERB[frame.predicate.lemma]) return true;
+  const frames = methodProcedureFrames(context);
+  return frames.some((candidate) => {
+    if (candidate.span.start >= frame.span.start) return false;
+    const prior = resolveMedicationInstructionAction(candidate.predicate.lemma, context.options);
+    return Boolean(prior && !prior.procedural);
+  }) || context.tokens.some((candidate) => {
+    if (candidate.sourceStart >= frame.span.start) return false;
+    const verb = normalizeTokenLower(candidate);
+    if (!METHOD_ACTION_BY_VERB[verb]) return false;
+    const prior = resolveMedicationInstructionAction(verb, context.options);
+    return !prior?.procedural;
+  });
+}
+
+function sourceRangeIsDependentProcedure(
+  context: HpsgClauseContext,
+  start: number,
+  end: number
+): boolean {
+  const frame = methodProcedureFrames(context).find((candidate) =>
+    candidate.span.start <= start && end <= candidate.span.end
+  );
+  return Boolean(frame && procedureFrameIsDependent(context, frame));
+}
+
+function looksLikeThaiGiveAuxiliary(context: HpsgClauseContext, start: number, verb: string): boolean {
+  if (verb !== "give") return false;
+  const token = context.tokens.slice(start, start + 1)[0];
+  if (!token || !/[\u0E00-\u0E7F]/.test(token.original)) return false;
+  const next = context.tokens[start + 1];
+  if (!next) return false;
+  return Boolean(resolveMedicationInstructionAction(normalizeTokenLower(next), context.options));
+}
+
+function looksLikeCoordinatedNoun(context: HpsgClauseContext, start: number, verb: string): boolean {
+  if (verb !== "drink" && verb !== "use") return false;
+  const previous = context.tokens[start - 1];
+  const next = context.tokens[start + 1];
+  const previousLower = previous ? normalizeTokenLower(previous) : "";
+  const nextLower = next ? normalizeTokenLower(next) : "";
+  if (verb === "use" && new Set(["each", "first", "every", "after", "before"]).has(previousLower)) {
+    return true;
+  }
+  return previous?.original === "," && (next?.original === "," || nextLower === "or" || nextLower === "and");
+}
+
+function methodTokenIsDependentProcedure(
+  context: HpsgClauseContext,
+  token: Token
+): boolean {
+  const frames = methodProcedureFrames(context);
+  const frame = frames.find((candidate) =>
+    candidate.span.start <= token.sourceStart && token.sourceEnd <= candidate.span.end
+  );
+  if (!frame) return false;
+  return procedureFrameIsDependent(context, frame);
+}
+
 export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.method", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -64,11 +135,17 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const verb = normalizeTokenLower(token);
+    if (looksLikeThaiGiveAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
+      return [];
+    }
+    if (methodTokenIsDependentProcedure(context, token)) {
+      return [];
+    }
     if (
       !METHOD_ACTION_BY_VERB[verb] ||
       (
         !hasTokenWordClass(token, TokenWordClass.AdministrationVerb) &&
-        !isAdministrationVerbWord(token.lower)
+        !isAdministrationVerbWord(verb)
       )
     ) {
       return [];
@@ -108,6 +185,11 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     for (let span = maxSpan; span >= 1; span -= 1) {
       const tokens = tokensAvailable(context, start, span);
       if (!tokens) {
+        continue;
+      }
+      const sourceStart = tokens[0]?.sourceStart ?? 0;
+      const sourceEnd = tokens[tokens.length - 1]?.sourceEnd ?? sourceStart;
+      if (sourceRangeIsDependentProcedure(context, sourceStart, sourceEnd)) {
         continue;
       }
       const phrase = tokens
@@ -607,6 +689,24 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           score: unit ? 9 : 4
         })
       ];
+    }
+    if (numerator !== undefined && token.kind !== LexKind.Number) {
+      const unit = unitAfter(context, start + 1);
+      if (unit) {
+        return [
+          lexicalSign({
+            type: "dose-sign",
+            rule: "hpsg.lex.dose.numberWord",
+            tokens: [token, ...unit.tokens],
+            synsem: {
+              head: { dose: { value: numerator, unit: unit.unit } },
+              valence: {},
+              cont: { clauseKind: "administration" }
+            },
+            score: 10
+          })
+        ];
+      }
     }
     const implicitUnit = unitAfter(context, start);
     if (implicitUnit && IMPLICIT_SINGLE_DOSE_UNITS.has(implicitUnit.unit)) {

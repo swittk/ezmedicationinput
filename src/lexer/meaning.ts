@@ -107,6 +107,8 @@ const APPLICATION_ROUTE_VERBS = new Set([
 ]);
 
 const ADMINISTRATION_METHOD_WORDS = new Set([
+  "administer",
+  "give",
   "apply",
   "rub",
   "massage",

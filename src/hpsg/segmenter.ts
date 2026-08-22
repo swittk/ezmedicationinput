@@ -2,7 +2,9 @@ import { lexInput } from "../lexer/lex";
 import { annotateLexTokens } from "../lexer/meaning";
 import { Token } from "../parser-state";
 import { parseAdditionalInstructions } from "../advice";
-import { AdviceForce } from "../types";
+import { parseInstructionActions } from "../instruction-graph";
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { AdviceForce, AdviceFrame, ParseOptions } from "../types";
 import {
   CLAUSE_LEAD_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS,
@@ -48,9 +50,45 @@ function parsesAsInstructionContinuation(input: string, tokens: Token[], index: 
   return instructions.some((instruction) => instruction.coding?.code || instruction.frames.length);
 }
 
-function isCommaClauseBoundary(input: string, tokens: Token[], index: number): boolean {
+function commaJoinsProceduralSequence(
+  token: Token,
+  actions: AdviceFrame[],
+  options?: ParseOptions
+): boolean {
+  let previous: AdviceFrame | undefined;
+  let next: AdviceFrame | undefined;
+  for (const action of actions) {
+    if (
+      action.span.start < token.sourceStart &&
+      action.span.end <= token.sourceEnd + 1
+    ) {
+      if (!previous || action.span.end > previous.span.end) previous = action;
+      continue;
+    }
+    if (action.span.start >= token.sourceEnd) {
+      if (!next || action.span.start < next.span.start) next = action;
+    }
+  }
+  if (!previous || !next) return false;
+  const previousDefinition = resolveMedicationInstructionAction(previous.predicate.lemma, options);
+  if (!previousDefinition?.procedural) return false;
+  const gapBefore = Math.max(0, token.sourceStart - previous.span.end);
+  const gapAfter = Math.max(0, next.span.start - token.sourceEnd);
+  return gapBefore <= 2 && gapAfter <= 2;
+}
+
+function isCommaClauseBoundary(
+  input: string,
+  tokens: Token[],
+  index: number,
+  actions: AdviceFrame[],
+  options?: ParseOptions
+): boolean {
   const token = tokens[index];
   if (!token || token.original !== ",") {
+    return false;
+  }
+  if (commaJoinsProceduralSequence(token, actions, options)) {
     return false;
   }
   const next = tokens[index + 1];
@@ -123,8 +161,9 @@ function pushSegment(
   });
 }
 
-export function parseSigSegments(input: string): HpsgSigSegment[] {
+export function parseSigSegments(input: string, options?: ParseOptions): HpsgSigSegment[] {
   const tokens = annotateLexTokens(lexInput(input));
+  const proceduralActions = parseInstructionActions(input, 0, options);
   const segments: HpsgSigSegment[] = [];
   let start = 0;
   let parenDepth = 0;
@@ -160,7 +199,7 @@ export function parseSigSegments(input: string): HpsgSigSegment[] {
     }
     const isBoundary =
       isBoundaryToken(token) ||
-      isCommaClauseBoundary(input, tokens, index) ||
+      isCommaClauseBoundary(input, tokens, index, proceduralActions, options) ||
       isSlashClauseBoundary(tokens, index);
     if (!isBoundary) {
       scannedOffset = token.sourceEnd;

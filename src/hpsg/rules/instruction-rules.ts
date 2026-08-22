@@ -1,9 +1,16 @@
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions } from "../../advice";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getProceduralFrames } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
-import { AdviceArgumentRole, AdviceForce, CanonicalAdditionalInstructionExpr } from "../../types";
+import {
+  AdviceArgumentRole,
+  AdviceForce,
+  AdviceFrame,
+  CanonicalAdditionalInstructionExpr
+} from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
   INSTRUCTION_LEADING_SEPARATORS,
@@ -56,6 +63,77 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   );
 }
 
+const HPSG_PRIMARY_METHOD_ACTIONS = new Set(["shampoo", "reapply", "swallow", "chew"]);
+
+function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
+  return getProceduralFrames(context).filter((frame) => {
+    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    if (
+      !definition?.procedural ||
+      HPSG_PRIMARY_METHOD_ACTIONS.has(frame.predicate.lemma) ||
+      WORKFLOW_START_WORDS.has(frame.predicate.lemma)
+    ) {
+      return false;
+    }
+    return !frame.args.some((arg) =>
+      !arg.conceptId &&
+      !arg.coding?.code &&
+      !arg.quantity &&
+      /(?:\band\b|\bor\b|และ|หรือ)/iu.test(arg.text)
+    );
+  });
+}
+
+function frameTokens(context: HpsgClauseContext, frame: AdviceFrame): Token[] {
+  return context.tokens.filter((token) =>
+    token.sourceStart >= frame.span.start && token.sourceEnd <= frame.span.end
+  );
+}
+
+function frameDose(
+  context: HpsgClauseContext,
+  frame: AdviceFrame
+): { value?: number; range?: { low?: number; high?: number }; unit?: string } | undefined {
+  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  if (!definition?.definesDose) return undefined;
+  const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
+  if (!amount?.quantity) return undefined;
+  return {
+    value: amount.quantity.value,
+    range: amount.quantity.range ? { ...amount.quantity.range } : undefined,
+    unit: amount.quantity.unit
+  };
+}
+
+export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.patientInstruction.procedure", (context, start) => {
+    const startToken = context.tokens[start];
+    if (!startToken || context.state.consumed.has(startToken.index)) return [];
+    const signs = [];
+    for (const frame of proceduralFrames(context)) {
+      if (frame.span.start !== startToken.sourceStart) continue;
+      const tokens = frameTokens(context, frame);
+      if (!tokens.length || tokens.some((token) => context.state.consumed.has(token.index))) continue;
+      const text = context.state.input.slice(frame.span.start, frame.span.end).trim();
+      if (!text) continue;
+      signs.push(
+        lexicalSign({
+          type: "instruction-sign",
+          rule: "hpsg.lex.patientInstruction.procedure",
+          tokens,
+          synsem: {
+            head: { dose: frameDose(context, frame) },
+            valence: { patientInstruction: { text } },
+            cont: { clauseKind: "administration" }
+          },
+          score: 18 + tokens.length + frame.args.length * 2
+        })
+      );
+    }
+    return signs;
+  });
+}
+
 export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.patientInstruction.workflow", (context, start) => {
     let cursor = start;
@@ -96,6 +174,18 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const lower = normalizeTokenLower(token);
       const previousLower = bodyTokens.length ? normalizeTokenLower(bodyTokens[bodyTokens.length - 1]) : "";
       const nextLower = context.tokens[cursor + 1] ? normalizeTokenLower(context.tokens[cursor + 1]) : "";
+      const actionDefinition = resolveMedicationInstructionAction(lower, context.options);
+      if (
+        bodyTokens.length &&
+        actionDefinition &&
+        !actionDefinition.procedural &&
+        METHOD_ACTION_BY_VERB[lower] &&
+        previousLower !== "before" &&
+        previousLower !== "after" &&
+        previousLower !== "with"
+      ) {
+        break;
+      }
       if (bodyTokens.length && (isExplicitDoseLead(context, cursor) || startsScheduledAdministration(context, cursor))) {
         break;
       }
@@ -251,8 +341,33 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       consumed.push(separator);
       cursor += 1;
     }
+    const sequenceLead = context.tokens[cursor];
+    if (
+      consumed.length > 0 &&
+      sequenceLead &&
+      normalizeTokenLower(sequenceLead) === "then"
+    ) {
+      const next = context.tokens[cursor + 1];
+      const nextLower = next ? normalizeTokenLower(next) : "";
+      const nextAction = resolveMedicationInstructionAction(nextLower, context.options);
+      if (nextAction && !nextAction.procedural && METHOD_ACTION_BY_VERB[nextLower]) {
+        cursor += 1;
+      }
+    }
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
+    }
+    const firstBodyToken = context.tokens[cursor];
+    const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";
+    const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
+    if (consumed.length && firstBodyAction && !firstBodyAction.procedural && METHOD_ACTION_BY_VERB[firstBodyLower]) {
+      const priorPrimaryMethod = context.tokens.slice(0, cursor).some((candidate) => {
+        const priorLower = normalizeTokenLower(candidate);
+        const method = METHOD_ACTION_BY_VERB[priorLower];
+        const definition = resolveMedicationInstructionAction(priorLower, context.options);
+        return Boolean(method && definition && !definition.procedural);
+      });
+      if (!priorPrimaryMethod) return [];
     }
 
     const bodyTokens: Token[] = [];

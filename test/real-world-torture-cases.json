@@ -1,0 +1,539 @@
+[
+  {
+    "name": "shake measure oral syringe",
+    "input": "shake well before each use, measure 5 mL with oral syringe, take by mouth twice daily, rinse syringe after each use",
+    "dose": [
+      5,
+      "mL"
+    ],
+    "actions": [
+      "shake",
+      "measure",
+      "rinse"
+    ]
+  },
+  {
+    "name": "shake and give liquid",
+    "input": "shake bottle; give 2.5 ml po q8h x 7 days",
+    "dose": [
+      2.5,
+      "mL"
+    ],
+    "route": "by mouth",
+    "timing": "Q8H",
+    "method": "Give",
+    "actions": [
+      "shake"
+    ]
+  },
+  {
+    "name": "mouth rinse swish spit",
+    "input": "measure 10 mL, swish vigorously for 1 minute then spit out; do not swallow; do not eat or drink for 30 minutes",
+    "dose": [
+      10,
+      "mL"
+    ],
+    "actions": [
+      "measure",
+      "swish",
+      "spit",
+      "swallow"
+    ]
+  },
+  {
+    "name": "swish swallow QID",
+    "input": "swish and swallow 5 mL four times daily after meals and at bedtime",
+    "dose": [
+      5,
+      "mL"
+    ],
+    "timing": "QID",
+    "actions": [
+      "swish"
+    ]
+  },
+  {
+    "name": "gargle timed then spit",
+    "input": "gargle 15 mL for 30 seconds then spit; no food for 30 min",
+    "dose": [
+      15,
+      "mL"
+    ],
+    "actions": [
+      "gargle",
+      "spit"
+    ]
+  },
+  {
+    "name": "dissolve packet in water",
+    "input": "dissolve one packet in 4 ounces of water, stir, drink immediately",
+    "dose": [
+      1,
+      "packet"
+    ],
+    "actions": [
+      "dissolve",
+      "stir"
+    ],
+    "forbiddenRoute": "intranasal"
+  },
+  {
+    "name": "crush mix applesauce",
+    "input": "crush tablet and mix with applesauce, swallow immediately, do not chew",
+    "actions": [
+      "crush",
+      "mix",
+      "swallow",
+      "chew"
+    ]
+  },
+  {
+    "name": "swallow whole no manipulation",
+    "input": "swallow whole; do not split crush chew or dissolve",
+    "actions": [
+      "crush",
+      "chew",
+      "dissolve"
+    ]
+  },
+  {
+    "name": "empty stomach wait before food",
+    "input": "take 1 tablet on empty stomach with water; wait 30 minutes before food, drink, or other meds",
+    "dose": [
+      1,
+      "tab"
+    ],
+    "route": "by mouth",
+    "method": "Take",
+    "actions": [
+      "wait"
+    ]
+  },
+  {
+    "name": "loading then maintenance dose",
+    "input": "take 2 tabs now then 1 tab q12h for 4 doses"
+  },
+  {
+    "name": "clean dry apply thin layer",
+    "input": "clean affected area and dry thoroughly; apply thin layer twice daily morning and night",
+    "route": "topical",
+    "timing": "BID",
+    "actions": [
+      "clean",
+      "dry"
+    ]
+  },
+  {
+    "name": "pea sized facial application",
+    "input": "apply pea-sized amount to face nightly, avoid eyes and lips",
+    "route": "topical",
+    "site": "face"
+  },
+  {
+    "name": "part hair apply scalp wash hands",
+    "input": "part hair, apply 1 mL to dry scalp twice daily, rub in gently, wash hands after",
+    "dose": [
+      1,
+      "mL"
+    ],
+    "route": "topical",
+    "timing": "BID",
+    "site": "scalp",
+    "method": "Apply",
+    "actions": [
+      "part",
+      "rub",
+      "wash"
+    ],
+    "forbiddenRoute": "intranasal"
+  },
+  {
+    "name": "massage leave rinse scalp",
+    "input": "massage into scalp, leave on 10 minutes then rinse",
+    "site": "scalp",
+    "actions": [
+      "massage",
+      "leave",
+      "rinse"
+    ]
+  },
+  {
+    "name": "lather leave rinse hair",
+    "input": "apply to wet hair, lather, leave 5 minutes, rinse thoroughly",
+    "route": "topical",
+    "site": "hair",
+    "actions": [
+      "lather",
+      "leave",
+      "rinse"
+    ],
+    "forbiddenDose": [
+      5,
+      null
+    ]
+  },
+  {
+    "name": "external vulva no vaginal insertion",
+    "input": "apply small amount to external vulva twice daily prn itching; do not insert into vagina",
+    "timing": "BID",
+    "site": "vulva"
+  },
+  {
+    "name": "vaginal applicator course",
+    "input": "insert one applicatorful vaginally at bedtime for 7 nights; wash applicator after each use",
+    "dose": [
+      1,
+      "applicatorful"
+    ],
+    "route": "vaginal",
+    "site": "vagina",
+    "method": "Insert",
+    "actions": [
+      "wash"
+    ]
+  },
+  {
+    "name": "FTU taper",
+    "input": "apply 1 fingertip unit to eczema patches twice daily for 5 days then once daily for 5 days",
+    "dose": [
+      1,
+      "FTU"
+    ],
+    "route": "topical",
+    "timing": "BID"
+  },
+  {
+    "name": "around not into wound",
+    "input": "apply thin film around wound, not into wound, once daily",
+    "route": "topical",
+    "site": "wound"
+  },
+  {
+    "name": "cover then change dressing",
+    "input": "cover with dressing after applying; change dressing daily",
+    "actions": [
+      "cover",
+      "change"
+    ]
+  },
+  {
+    "name": "inhaler rinse mouth",
+    "input": "shake inhaler well, inhale 2 puffs morning and evening, rinse mouth with water and spit after use",
+    "dose": [
+      2,
+      "puff"
+    ],
+    "route": "inhalation",
+    "actions": [
+      "shake",
+      "rinse",
+      "spit"
+    ]
+  },
+  {
+    "name": "prime inhaler local sprays",
+    "input": "prime inhaler with 4 sprays before first use; re-prime with 2 sprays if unused >7 days",
+    "actions": [
+      "prime"
+    ],
+    "forbiddenDose": [
+      4,
+      "spray"
+    ]
+  },
+  {
+    "name": "two puffs with breath hold",
+    "input": "inhale 1 puff, hold breath 10 seconds, wait 30 seconds, inhale second puff",
+    "dose": [
+      1,
+      "puff"
+    ],
+    "route": "inhalation",
+    "actions": [
+      "hold",
+      "wait"
+    ]
+  },
+  {
+    "name": "rinse mouth do not swallow",
+    "input": "rinse mouth after inhalation; do not swallow rinse water",
+    "actions": [
+      "rinse",
+      "swallow"
+    ]
+  },
+  {
+    "name": "nasal spray aim away septum",
+    "input": "spray 2 sprays in each nostril once daily, aim away from nasal septum",
+    "dose": [
+      2,
+      "spray"
+    ],
+    "route": "intranasal",
+    "timing": "QD",
+    "actions": [
+      "aim"
+    ]
+  },
+  {
+    "name": "nasal spray priming",
+    "input": "prime nasal spray until fine mist appears; re-prime if not used for 7 days",
+    "actions": [
+      "prime"
+    ],
+    "forbiddenDose": [
+      7,
+      null
+    ]
+  },
+  {
+    "name": "eye drop tip precaution",
+    "input": "instill 1 drop into left eye qid; do not touch dropper tip to eye",
+    "dose": [
+      1,
+      "drop"
+    ],
+    "route": "ophthalmic",
+    "timing": "QID",
+    "site": "left eye",
+    "actions": [
+      "touch"
+    ]
+  },
+  {
+    "name": "pull eyelid instill close eyes",
+    "input": "pull lower eyelid down, instill one drop into each eye, close eyes 2 minutes",
+    "dose": [
+      1,
+      "drop"
+    ],
+    "route": "ophthalmic",
+    "site": "both eyes",
+    "method": "Instill",
+    "actions": [
+      "pull",
+      "close"
+    ]
+  },
+  {
+    "name": "punctal occlusion",
+    "input": "instill 1 drop in affected eye; press inner corner for 1 minute",
+    "dose": [
+      1,
+      "drop"
+    ],
+    "actions": [
+      "press"
+    ]
+  },
+  {
+    "name": "discard first then 1-2 drops",
+    "input": "discard first drop, then instill 1-2 drops into each eye as needed",
+    "doseRange": [
+      1,
+      2,
+      "drop"
+    ],
+    "route": "ophthalmic",
+    "site": "both eyes",
+    "actions": [
+      "discard"
+    ]
+  },
+  {
+    "name": "warm ear drops keep ear up",
+    "input": "warm drops in hand, instill 5 drops into right ear twice daily, keep ear upward 5 minutes",
+    "dose": [
+      5,
+      "drop"
+    ],
+    "route": "otic",
+    "timing": "BID",
+    "site": "right ear",
+    "actions": [
+      "warm",
+      "keep"
+    ]
+  },
+  {
+    "name": "ear drops pump tragus",
+    "input": "insert 4 drops in ear, pump tragus 4 times",
+    "dose": [
+      4,
+      "drop"
+    ],
+    "route": "otic",
+    "actions": [
+      "pump"
+    ]
+  },
+  {
+    "name": "patch remove apply rotate",
+    "input": "remove old patch, apply new patch to clean dry hairless skin twice weekly; rotate sites",
+    "route": "transdermal",
+    "actions": [
+      "remove",
+      "rotate"
+    ]
+  },
+  {
+    "name": "patch falls off conditional",
+    "input": "if patch falls off, reapply; if it will not stick, apply a new patch to another site",
+    "route": "topical"
+  },
+  {
+    "name": "fold discard patch",
+    "input": "fold used patch sticky sides together and discard; do not flush",
+    "actions": [
+      "fold",
+      "discard"
+    ]
+  },
+  {
+    "name": "insulin rotate sites",
+    "input": "inject 10 units subcutaneously once daily at same time; rotate injection sites",
+    "dose": [
+      10,
+      "U"
+    ],
+    "route": "subcutaneous",
+    "timing": "QD",
+    "actions": [
+      "rotate"
+    ]
+  },
+  {
+    "name": "inject after wipe pinch",
+    "input": "wipe skin with alcohol and let dry, pinch skin, inject 0.25 mg subcutaneously, keep needle in 6 seconds",
+    "dose": [
+      0.25,
+      "mg"
+    ],
+    "route": "subcutaneous",
+    "method": "Inject",
+    "actions": [
+      "wipe",
+      "dry",
+      "pinch",
+      "keep"
+    ]
+  },
+  {
+    "name": "avoid damaged injection skin",
+    "input": "do not inject into bruised tender scarred or lumpy skin"
+  },
+  {
+    "name": "mealtime insulin",
+    "input": "inject 5 units 15 minutes before meal or immediately after meal",
+    "dose": [
+      5,
+      "U"
+    ],
+    "method": "Inject"
+  },
+  {
+    "name": "draw up mixed insulin",
+    "input": "draw up rapid acting insulin first, then NPH, inject immediately",
+    "actions": [
+      "draw_up"
+    ]
+  },
+  {
+    "name": "rectal suppository PRN",
+    "input": "use 1 suppository rectally at bedtime as needed for constipation",
+    "dose": [
+      1,
+      "suppository"
+    ],
+    "route": "rectal"
+  },
+  {
+    "name": "vaginal suppository course",
+    "input": "insert 1 suppository vaginally nightly for 3 nights",
+    "dose": [
+      1,
+      "suppository"
+    ],
+    "route": "vaginal"
+  },
+  {
+    "name": "rectal applicator squeeze",
+    "input": "insert applicator into rectum and squeeze contents, keep lying on left side 30 minutes",
+    "route": "rectal",
+    "actions": [
+      "squeeze",
+      "keep"
+    ]
+  },
+  {
+    "name": "ophthalmic ointment ribbon",
+    "input": "apply 1 inch ribbon of ointment inside lower eyelid at bedtime",
+    "dose": [
+      1,
+      "inch ribbon"
+    ],
+    "site": "lower eyelid"
+  },
+  {
+    "name": "Thai shake measure oral liquid",
+    "locale": "th",
+    "input": "เขย่าขวดก่อนใช้ ตวงยา 5 มล. ด้วยไซริงค์ รับประทานวันละ 3 ครั้ง หลังอาหาร",
+    "dose": [
+      5,
+      "mL"
+    ],
+    "timing": "TID",
+    "actions": [
+      "shake",
+      "measure"
+    ]
+  },
+  {
+    "name": "Thai mouth rinse spit",
+    "locale": "th",
+    "input": "กลั้วปาก 10 มล. 1 นาที แล้วบ้วนทิ้ง ห้ามกลืน และงดอาหารน้ำ 30 นาที",
+    "dose": [
+      10,
+      "mL"
+    ],
+    "actions": [
+      "swish",
+      "spit",
+      "swallow"
+    ]
+  },
+  {
+    "name": "Thai clean dry topical",
+    "locale": "th",
+    "input": "ทำความสะอาดผิวให้แห้ง ทาบางๆ บริเวณรอยโรค เช้าเย็น หลีกเลี่ยงรอบดวงตา",
+    "actions": [
+      "clean"
+    ],
+    "siteCode": "95324001"
+  },
+  {
+    "name": "Thai medicated shampoo",
+    "locale": "th",
+    "input": "สระผมด้วยยา ทิ้งไว้ 5 นาที แล้วล้างออกให้สะอาด ใช้สัปดาห์ละ 2 ครั้ง",
+    "actions": [
+      "shampoo",
+      "leave",
+      "rinse"
+    ]
+  },
+  {
+    "name": "Thai inhaler rinse mouth",
+    "locale": "th",
+    "input": "พ่นยาเข้าปาก 2 ครั้ง เช้าเย็น หลังพ่นให้บ้วนปากด้วยน้ำแล้วบ้วนทิ้ง",
+    "method": "Spray",
+    "actions": [
+      "spit"
+    ]
+  },
+  {
+    "name": "Thai SC injection rotate avoid",
+    "locale": "th",
+    "input": "ฉีดใต้ผิวหนังที่หน้าท้องหรือต้นขา สลับตำแหน่งทุกครั้ง ห้ามฉีดบริเวณช้ำหรือแข็ง",
+    "method": "Inject"
+  }
+]

@@ -16,6 +16,8 @@ export enum MethodAction {
 }
 
 export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
+  administer: MethodAction.Administer,
+  give: MethodAction.Administer,
   apply: MethodAction.Apply,
   dab: MethodAction.Apply,
   drink: MethodAction.Swallow,

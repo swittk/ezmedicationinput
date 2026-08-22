@@ -15,7 +15,11 @@ import {
   timingLexicalRule
 } from "./rules/timing-rules";
 import { prnLexicalRule } from "./rules/prn-rules";
-import { instructionLexicalRule, workflowLexicalRule } from "./rules/instruction-rules";
+import {
+  instructionLexicalRule,
+  proceduralActionLexicalRule,
+  workflowLexicalRule
+} from "./rules/instruction-rules";
 import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
   connectorLexicalRule,
@@ -50,6 +54,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       countAndDurationRule(),
       timeOfDayRule(),
       prnLexicalRule(),
+      proceduralActionLexicalRule(),
       workflowLexicalRule(),
       instructionLexicalRule(),
       siteLexicalRule(),
@@ -78,6 +83,49 @@ function hasUsefulAnalysis(sign: HpsgSign | undefined): sign is HpsgSign {
   );
 }
 
+function semanticFeatureCount(sign: HpsgSign): number {
+  const { head, valence } = sign.synsem;
+  let count = 0;
+  if (head.method) count += 1;
+  if (head.route) count += 1;
+  if (head.dose) count += 1;
+  if (head.schedule) count += 1;
+  if (valence.site) count += 1;
+  if (valence.prn) count += 1;
+  if (valence.instructions?.length) count += 1;
+  if (valence.patientInstruction) count += 1;
+  return count;
+}
+
+function signsOverlapTokens(left: HpsgSign, right: HpsgSign): boolean {
+  const leftTokens = new Set(left.consumedTokenIndices);
+  return right.consumedTokenIndices.some((index) => leftTokens.has(index));
+}
+
+function buildCompatibleSemanticCover(
+  context: HpsgClauseContext,
+  signs: HpsgSign[],
+  best: HpsgSign
+): HpsgSign {
+  let cover = best;
+  const candidates = signs
+    .filter((sign) => sign !== best && hasUsefulAnalysis(sign))
+    .sort((left, right) => {
+      const semanticDelta = semanticFeatureCount(right) - semanticFeatureCount(left);
+      if (semanticDelta) return semanticDelta;
+      const coverageDelta = right.consumedTokenIndices.length - left.consumedTokenIndices.length;
+      if (coverageDelta) return coverageDelta;
+      return right.score - left.score;
+    });
+
+  for (const candidate of candidates) {
+    if (signsOverlapTokens(cover, candidate)) continue;
+    const combined = combineSigns(cover, candidate, context.deps, "hpsg.cover.unify-gap");
+    if (combined) cover = combined;
+  }
+  return cover;
+}
+
 export function parseHpsgClause(context: HpsgClauseContext): HpsgSign | undefined {
   const result = parseHpsgChart(context, buildGrammar(context), {
     limit: context.limit
@@ -85,8 +133,9 @@ export function parseHpsgClause(context: HpsgClauseContext): HpsgSign | undefine
   if (!hasUsefulAnalysis(result.best)) {
     return undefined;
   }
+  const cover = buildCompatibleSemanticCover(context, result.signs, result.best);
   if (context.project) {
-    projectHpsgSignToState(result.best, context.state, context.tokens, context.deps);
+    projectHpsgSignToState(cover, context.state, context.tokens, context.deps);
   }
-  return result.best;
+  return cover;
 }

@@ -32,6 +32,7 @@ interface ActionSource {
   aliases?: string[];
   procedural?: boolean;
   acceptsAmount?: boolean;
+  definesDose?: boolean;
   externalCodings?: FhirCoding[];
 }
 
@@ -83,6 +84,7 @@ function cloneDefinition(
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     procedural: definition.procedural,
     acceptsAmount: definition.acceptsAmount,
+    definesDose: definition.definesDose,
     coding: cloneCoding(definition.coding),
     externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
@@ -97,6 +99,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     procedural: sourceDefinition.procedural,
     acceptsAmount: sourceDefinition.acceptsAmount,
+    definesDose: sourceDefinition.definesDose,
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -115,6 +118,7 @@ function normalizeCustomDefinition(
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     procedural: input.procedural ?? true,
     acceptsAmount: input.acceptsAmount,
+    definesDose: input.definesDose,
     coding: cloneCoding(input.coding),
     externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
   };

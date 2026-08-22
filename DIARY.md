@@ -2423,3 +2423,57 @@ Verification:
 - focused instruction-graph resolver tests pass
 - `npm test` -> 653 tests passing
 - `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 More formal HPSG attachment, 50-case torture corpus, and performance
+
+A researched 50-case TH/EN medication/product instruction corpus exposed that the
+remaining serious errors were primarily scope and attachment errors rather than
+missing dictionary entries. Real-label patterns include inhaler priming/rinsing,
+mouth-rinse swish/spit warnings, topical clean/dry/apply workflows, vaginal
+applicators, eye-drop precautions, patch replacement/disposal, insulin site
+rotation, and Thai colloquial action sequences.
+
+HPSG/parser changes:
+- replaced repeated all-sign x all-sign chart rescans with an indexed agenda
+  keyed by span boundaries
+- packed chart identity by semantic state (type + span + SYNSEM), no longer by
+  derivational consumed-token bookkeeping; equivalent derivations retain the
+  best token coverage/score
+- cached immutable chart keys and shared one procedural analysis cache across
+  method/site/instruction HPSG rule families
+- changed clause projection from one winning constituent to a compatible
+  semantic cover, allowing non-overlapping method/dose/site/schedule signs to
+  unify across deliberately opaque gaps
+- introduced declarative procedural HPSG lexical constructions; they complement
+  proven workflow rules rather than replacing them
+- separated procedure-local site/route/method arguments from global medication
+  site/route/method attachment (e.g. wash hands no longer steals Dosage.site;
+  rub in gently no longer implies intranasal route)
+- segment boundaries now preserve comma-linked procedural regimens when an
+  action sequence continues across punctuation
+- broad workflow/advice constituents yield before a new positive administration
+  head so preparatory actions can compose with a later APPLY/INSTILL/etc.
+- added ordinary number-word dose construction (one drop/packet/applicatorful)
+  and canonical-token-aware method classification for Thai
+- added typed contextual disambiguation such as Thai ให้ as auxiliary vs GIVE
+- action terminology now distinguishes acceptsAmount from definesDose, allowing
+  measure/swish/gargle/dissolve/pour and administration actions to promote real
+  dose amounts while prime/re-prime counts stay procedure-local
+
+The permanent `real-world-torture.spec.ts` now contains 50 semantic contracts and
+passes 50/50. Together with the pre-existing suite this yields 703/703 tests.
+The corpus includes explicit forbidden interpretations to catch dangerous false
+structure, such as inhaler priming spray counts becoming medication dose or
+procedure-local `in` becoming intranasal route.
+
+Performance baseline on the same 50 cases before this pass (HP host, warm, 5000
+parses): mean 6.22 ms, p50 3.41 ms, p95 7.52 ms, p99 119.8 ms, ~160.7 parses/s.
+An intermediate packed-chart build already reached ~4.54 ms mean / 84 ms p99.
+The finalized checked-in benchmark (`npm run bench:torture`, 20 warmup rounds +
+100 measured rounds = 5000 parses) reached mean 3.93 ms, p50 3.37 ms, p95
+8.32 ms, p99 12.49 ms, and ~254 parses/s. The former pathological topical
+workflow dropped from ~99 ms average to ~12.8 ms. This is roughly 37% lower
+mean latency, 58% higher throughput, and ~90% lower p99 than the pre-pass
+baseline while the grammar became more expressive. The benchmark script is
+checked in so future grammar changes can be compared on the same workload
+without flaky CI timing assertions.

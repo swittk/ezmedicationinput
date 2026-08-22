@@ -27,7 +27,8 @@
         "เท"
       ],
       "procedural": true,
-      "acceptsAmount": true
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "mix",
@@ -193,7 +194,9 @@
         "dissolve",
         "ละลาย"
       ],
-      "procedural": true
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "dilute",
@@ -344,7 +347,8 @@
         "ตวง"
       ],
       "procedural": true,
-      "acceptsAmount": true
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "crush",
@@ -403,7 +407,9 @@
         "gargle",
         "กลั้วคอ"
       ],
-      "procedural": true
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "swish",
@@ -416,7 +422,9 @@
         "swish",
         "กลั้ว"
       ],
-      "procedural": true
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "spit",
@@ -440,7 +448,8 @@
       "aliases": [
         "prime"
       ],
-      "procedural": true
+      "procedural": true,
+      "acceptsAmount": true
     },
     {
       "code": "draw_up",
@@ -450,7 +459,8 @@
         "draw up"
       ],
       "procedural": true,
-      "acceptsAmount": true
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "attach",
@@ -572,7 +582,9 @@
           "code": "738991002",
           "display": "Apply"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "use",
@@ -585,7 +597,9 @@
         "use",
         "ใช้"
       ],
-      "procedural": false
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "take",
@@ -599,7 +613,9 @@
         "รับประทาน",
         "กิน"
       ],
-      "procedural": false
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "drink",
@@ -612,7 +628,9 @@
         "drink",
         "ดื่ม"
       ],
-      "procedural": false
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "instill",
@@ -632,7 +650,9 @@
           "code": "738994005",
           "display": "Instill"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "spray",
@@ -652,7 +672,9 @@
           "code": "738996007",
           "display": "Spray"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "inhale",
@@ -672,7 +694,9 @@
           "code": "740666001",
           "display": "Inhale"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "inject",
@@ -692,7 +716,9 @@
           "code": "740685003",
           "display": "Inject"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "insert",
@@ -712,7 +738,9 @@
           "code": "738993004",
           "display": "Insert"
         }
-      ]
+      ],
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "infuse",
@@ -721,7 +749,9 @@
       "aliases": [
         "infuse"
       ],
-      "procedural": false
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "give",
@@ -734,7 +764,211 @@
         "give",
         "ให้"
       ],
-      "procedural": false
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true
+    },
+    {
+      "code": "part",
+      "semanticClass": "prepare_site",
+      "display": "Part",
+      "i18n": {
+        "th": "แหวก"
+      },
+      "aliases": [
+        "part",
+        "part hair",
+        "แหวก",
+        "แหวกผม"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "stir",
+      "semanticClass": "prepare",
+      "display": "Stir",
+      "i18n": {
+        "th": "คน"
+      },
+      "aliases": [
+        "stir",
+        "คน"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "hold",
+      "semanticClass": "retain",
+      "display": "Hold",
+      "i18n": {
+        "th": "กลั้น"
+      },
+      "aliases": [
+        "hold",
+        "hold breath",
+        "กลั้น",
+        "กลั้นหายใจ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "close",
+      "semanticClass": "manipulate",
+      "display": "Close",
+      "i18n": {
+        "th": "หลับ"
+      },
+      "aliases": [
+        "close",
+        "close eyes",
+        "หลับ",
+        "หลับตา"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "press",
+      "semanticClass": "apply_pressure",
+      "display": "Press",
+      "i18n": {
+        "th": "กด"
+      },
+      "aliases": [
+        "press",
+        "กด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "warm",
+      "semanticClass": "prepare",
+      "display": "Warm",
+      "i18n": {
+        "th": "อุ่น"
+      },
+      "aliases": [
+        "warm",
+        "อุ่น"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "keep",
+      "semanticClass": "retain",
+      "display": "Keep",
+      "i18n": {
+        "th": "คง"
+      },
+      "aliases": [
+        "keep",
+        "คง",
+        "ค้างไว้"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pump",
+      "semanticClass": "manipulate",
+      "display": "Pump",
+      "i18n": {
+        "th": "กด"
+      },
+      "aliases": [
+        "pump",
+        "กด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "fold",
+      "semanticClass": "manipulate",
+      "display": "Fold",
+      "i18n": {
+        "th": "พับ"
+      },
+      "aliases": [
+        "fold",
+        "พับ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pinch",
+      "semanticClass": "manipulate",
+      "display": "Pinch",
+      "i18n": {
+        "th": "หยิบจับ"
+      },
+      "aliases": [
+        "pinch",
+        "หยิบจับ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "aim",
+      "semanticClass": "position",
+      "display": "Aim",
+      "i18n": {
+        "th": "เล็ง"
+      },
+      "aliases": [
+        "aim",
+        "เล็ง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "touch",
+      "semanticClass": "contact",
+      "display": "Touch",
+      "i18n": {
+        "th": "สัมผัส"
+      },
+      "aliases": [
+        "touch",
+        "สัมผัส"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "change",
+      "semanticClass": "replace",
+      "display": "Change",
+      "i18n": {
+        "th": "เปลี่ยน"
+      },
+      "aliases": [
+        "change",
+        "เปลี่ยน"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "squeeze",
+      "semanticClass": "manipulate",
+      "display": "Squeeze",
+      "i18n": {
+        "th": "บีบ"
+      },
+      "aliases": [
+        "squeeze",
+        "บีบ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pull",
+      "semanticClass": "manipulate",
+      "display": "Pull",
+      "i18n": {
+        "th": "ดึง"
+      },
+      "aliases": [
+        "pull",
+        "ดึง"
+      ],
+      "procedural": true
     }
   ]
 }

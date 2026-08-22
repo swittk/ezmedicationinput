@@ -519,7 +519,7 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -558,7 +558,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: LintResult[] = [];
 
@@ -610,7 +610,7 @@ export async function parseSigAsync(
   input: string,
   options?: ParseOptions
 ): Promise<ParseBatchResult> {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
