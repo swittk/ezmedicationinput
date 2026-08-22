@@ -843,6 +843,23 @@ function proceduralFramesFromSpan(
     .filter((frame) => frameIsProcedural(frame, options));
 }
 
+export function refreshInstructionGraphDerivedState(
+  graph: CanonicalInstructionGraph
+): void {
+  graph.actions.sort((left, right) =>
+    left.span.start - right.span.start || left.span.end - right.span.end
+  );
+  for (let index = 0; index < graph.actions.length; index += 1) {
+    graph.actions[index].sequenceIndex = index;
+  }
+  const opaqueSpans = graph.opaqueSpans ?? [];
+  opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
+  graph.opaqueSpans = opaqueSpans.length ? opaqueSpans : undefined;
+  const relations = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
+  graph.relations = relations.length ? relations : undefined;
+  graph.coverage = buildInstructionCoverage(graph.actions, opaqueSpans);
+}
+
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
@@ -889,22 +906,16 @@ export function buildInstructionGraph(
       actions.splice(index, 1);
     }
   }
-  actions.sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
-  for (let index = 0; index < actions.length; index += 1) {
-    actions[index].sequenceIndex = index;
-  }
-  opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   if (!actions.length && !opaqueSpans.length) return undefined;
   attachDoseToNearestAction(actions, clause, input, options);
-  const relations = buildInstructionRelations(input, actions, opaqueSpans);
-  return {
+  const graph: CanonicalInstructionGraph = {
     actions,
-    relations: relations.length ? relations : undefined,
     opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
-    coverage: buildInstructionCoverage(actions, opaqueSpans),
     sourceText: input,
     sourceLocale: /[\u0E00-\u0E7F]/.test(input) ? "th" : "en"
   };
+  refreshInstructionGraphDerivedState(graph);
+  return graph;
 }
 
 function translatedArgument(arg: AdviceArgument, locale: string): string {

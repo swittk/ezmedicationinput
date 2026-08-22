@@ -94,6 +94,8 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
 function buildActionExtension(frame: AdviceFrame): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueInteger("sequenceIndex", frame.sequenceIndex));
+  add(nested, valueCode("origin", frame.origin));
+  add(nested, valueDecimal("confidence", frame.confidence));
   add(nested, valueCode("force", frame.force));
   add(nested, valueCode("polarity", frame.polarity));
   add(nested, valueCode("modality", frame.modality));
@@ -223,6 +225,8 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
   }
   return {
     force,
+    origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
+    confidence: child(extension, "confidence")?.valueDecimal,
     polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
     modality: child(extension, "modality")?.valueCode as AdviceModality | undefined,
     relation: child(extension, "relation")?.valueCode as AdviceRelation | undefined,

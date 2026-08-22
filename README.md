@@ -220,6 +220,59 @@ Highlights:
 - When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
   (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
 
+## Procedural instruction semantics and opaque-span enrichment
+
+Complex directions may contain preparation/application workflow that does not fit
+FHIR `Dosage` fields cleanly. `ParseResult.meta.normalized.instructionGraph`
+retains that meaning as ordered actions, typed arguments, relations, source
+spans, provenance, and semantic coverage. The same graph is carried through a
+FHIR extension while standard `Dosage.text`, `patientInstruction`, and
+`additionalInstruction` remain interoperable fallbacks.
+
+The built-in procedural action and argument vocabularies are declarative and can
+be extended with `instructionActionMap` / `instructionConceptMap`, including
+institution-owned coding systems. Exact external mappings (such as SNOMED CT)
+are additive rather than approximate.
+
+For opaque text that deterministic parsing deliberately leaves uninterpreted,
+applications may optionally register `instructionSemanticResolvers`. Resolver
+output is a proposal, not trusted parser state: ezmedicationinput revalidates
+source ranges, procedural action terminology, argument concepts/body sites, and
+units before accepting an action. Invalid proposals leave the source opaque.
+
+```ts
+const result = await parseSigAsync("shake bottle, then croon a song", {
+  instructionActionMap: {
+    sing: {
+      code: "sing",
+      semanticClass: "activity",
+      display: "Sing",
+      i18n: { th: "ร้องเพลง" },
+      procedural: true
+    }
+  },
+  instructionSemanticResolvers: async ({ sourceText }) => {
+    if (sourceText !== "croon a song") return undefined;
+    return {
+      actions: [
+        {
+          action: "sing",
+          range: { start: 0, end: sourceText.length },
+          confidence: 0.91
+        }
+      ]
+    };
+  }
+});
+```
+
+Resolver ranges are relative to the supplied opaque `sourceText`. Accepted
+actions are marked `origin: "semantic-resolver"`; optional resolver confidence
+is preserved separately from graph `coverage`, so learned semantics are never
+indistinguishable from grammar-derived semantics. A resolver failure preserves
+the original text and adds a warning. Synchronous resolvers may be used with
+`parseSig`; Promise-returning resolvers require `parseSigAsync`.
+
 ## Dictionaries
 
 The library exposes default dictionaries in `maps.ts` for routes, units, frequencies (Timing abbreviations + repeat defaults), and event timing tokens. You can extend or override them via the `ParseOptions` argument.

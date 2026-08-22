@@ -17,6 +17,10 @@ import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions, cloneI18nRecord } from "./fhir-translations";
 import { getDoseUnitSemantics } from "./unit-lexicon";
 import {
+  applyInstructionSemanticResolvers,
+  applyInstructionSemanticResolversAsync
+} from "./instruction-semantic-resolver";
+import {
   BodySiteCode,
   FhirDosage,
   FhirTimingRepeat,
@@ -524,6 +528,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
+    applyInstructionSemanticResolvers(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
@@ -614,6 +619,7 @@ export async function parseSigAsync(
     applyCarryForward(state, carry);
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
+    await applyInstructionSemanticResolversAsync(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
@@ -999,6 +1005,7 @@ function resolvePrimaryParseResult(
   const state = parseClauseState(input, options);
   applyPrnReasonCoding(state, options);
   applySiteCoding(state, options);
+  applyInstructionSemanticResolvers(state, options);
   return buildParseResult(state, options);
 }
 

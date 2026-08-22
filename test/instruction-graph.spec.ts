@@ -9,6 +9,7 @@ import {
   listMedicationInstructionConcepts,
   parseInstructionActions,
   parseSig,
+  parseSigAsync,
   realizeInstructionGraph
 } from "../src/index";
 
@@ -284,6 +285,132 @@ describe("procedural instruction graph", () => {
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
     expect(graph?.coverage).toMatchObject({ opaqueCharacters: 0, complete: true, ratio: 1 });
     expect(graph?.relations?.map((relation) => relation.kind)).toEqual(["then", "then"]);
+  });
+
+
+  it("accepts only terminology-valid semantic resolver proposals for opaque spans", () => {
+    const requests: string[] = [];
+    const parsed = parseSig("shake bottle before use and croon a song", {
+      instructionActionMap: {
+        sing: {
+          code: "sing",
+          semanticClass: "activity",
+          display: "Sing",
+          i18n: { th: "ร้องเพลง" },
+          procedural: true
+        }
+      },
+      instructionConceptMap: {
+        "a song": {
+          code: "song",
+          role: "object",
+          display: "a song",
+          i18n: { th: "เพลง" }
+        }
+      },
+      instructionSemanticResolvers: (request) => {
+        requests.push(request.sourceText);
+        expect(request.range).toEqual({ start: 28, end: 40 });
+        expect(request.existingGraph.opaqueSpans?.[0]?.text).toBe("croon a song");
+        return {
+          actions: [
+            {
+              action: "sing",
+              range: { start: 0, end: 12 },
+              confidence: 0.91,
+              args: [
+                {
+                  role: "object",
+                  range: { start: 6, end: 12 },
+                  concept: "a song"
+                }
+              ]
+            }
+          ]
+        };
+      }
+    });
+
+    expect(requests).toEqual(["croon a song"]);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["shake", "sing"]);
+    expect(graph?.opaqueSpans).toBeUndefined();
+    expect(graph?.coverage).toMatchObject({
+      opaqueCharacters: 0,
+      ratio: 1,
+      complete: true
+    });
+    expect(graph?.actions[1]).toMatchObject({
+      origin: "semantic-resolver",
+      confidence: 0.91,
+      predicate: { lemma: "sing", display: "Sing", i18n: { th: "ร้องเพลง" } },
+      args: [expect.objectContaining({ conceptId: "song", normalized: "a song" })]
+    });
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.actions[1]).toMatchObject({
+      origin: "semantic-resolver",
+      confidence: 0.91,
+      predicate: { lemma: "sing", display: "Sing" }
+    });
+  });
+
+  it("rejects unregistered or out-of-bounds semantic proposals without hiding opaque text", () => {
+    const unregistered = parseSig("croon a song", {
+      instructionSemanticResolvers: () => ({
+        actions: [{ action: "invented-action", range: { start: 0, end: 12 } }]
+      })
+    });
+    expect(unregistered.meta.canonical.clauses[0]?.instructionGraph?.actions).toEqual([]);
+    expect(unregistered.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans?.[0]?.text).toBe("croon a song");
+
+    const outOfBounds = parseSig("croon a song", {
+      instructionActionMap: {
+        sing: { code: "sing", semanticClass: "activity", display: "Sing", procedural: true }
+      },
+      instructionSemanticResolvers: () => ({
+        actions: [{ action: "sing", range: { start: 0, end: 100 } }]
+      })
+    });
+    expect(outOfBounds.meta.canonical.clauses[0]?.instructionGraph?.actions).toEqual([]);
+    expect(outOfBounds.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans?.[0]?.text).toBe("croon a song");
+  });
+
+  it("supports asynchronous model-backed semantic resolvers without changing parseSig sync safety", async () => {
+    const options = {
+      instructionActionMap: {
+        hum: { code: "hum", semanticClass: "activity", display: "Hum", procedural: true }
+      },
+      instructionSemanticResolvers: async (request: any) => ({
+        actions: [{ action: "hum", range: { start: 0, end: request.sourceText.length }, confidence: 0.8 }]
+      })
+    };
+
+    expect(() => parseSig("murmur quietly", options)).toThrow(/parseSigAsync/);
+    const parsed = await parseSigAsync("murmur quietly", options);
+    const action = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0];
+    expect(action).toMatchObject({
+      origin: "semantic-resolver",
+      confidence: 0.8,
+      predicate: { lemma: "hum" }
+    });
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.coverage).toMatchObject({
+      opaqueCharacters: 0,
+      complete: true,
+      ratio: 1
+    });
+  });
+
+  it("fails open to preserved opaque text when an async semantic resolver throws", async () => {
+    const parsed = await parseSigAsync("sing a song", {
+      instructionSemanticResolvers: async () => {
+        throw new Error("model unavailable");
+      }
+    });
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans?.[0]?.text).toBe("sing a song");
+    expect(parsed.warnings).toContain(
+      "Instruction semantic resolver failed; opaque clinician text was preserved."
+    );
   });
 
 });

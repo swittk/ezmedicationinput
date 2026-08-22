@@ -582,6 +582,8 @@ export interface AdviceFrame {
   span: TextRange;
   sourceText: string;
   sequenceIndex?: number;
+  origin?: "grammar" | "semantic-resolver";
+  confidence?: number;
   coding?: FhirCoding;
 }
 
@@ -804,6 +806,56 @@ export interface MedicationInstructionConceptInput
   role?: AdviceArgumentRole;
 }
 
+export interface InstructionSemanticArgumentProposal {
+  /** Typed argument role the resolver believes this phrase fills. */
+  role: AdviceArgumentRole;
+  /** Range relative to the opaque source span supplied in the resolver request. */
+  range: TextRange;
+  /** Registered instruction concept or body-site surface/code. */
+  concept?: string;
+  /** Explicit quantity, still validated against the parser's unit terminology. */
+  quantity?: {
+    value?: number;
+    low?: number;
+    high?: number;
+    unit?: string;
+  };
+}
+
+export interface InstructionSemanticActionProposal {
+  /** Registered instruction action surface/code. */
+  action: string;
+  /** Range relative to the opaque source span supplied in the resolver request. */
+  range: TextRange;
+  polarity?: AdvicePolarity;
+  /** Resolver confidence only; it never bypasses deterministic validation. */
+  confidence?: number;
+  args?: InstructionSemanticArgumentProposal[];
+}
+
+export interface InstructionSemanticResolution {
+  actions: InstructionSemanticActionProposal[];
+}
+
+export interface InstructionSemanticResolverRequest {
+  inputText: string;
+  sourceText: string;
+  /** Absolute range of sourceText within inputText. */
+  range: TextRange;
+  locale?: string;
+  context?: MedicationContext | null;
+  /** Read-only semantic context produced before learned enrichment. */
+  existingGraph: CanonicalInstructionGraph;
+}
+
+export type InstructionSemanticResolver = (
+  request: InstructionSemanticResolverRequest
+) =>
+  | InstructionSemanticResolution
+  | null
+  | undefined
+  | Promise<InstructionSemanticResolution | null | undefined>;
+
 export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
@@ -823,6 +875,13 @@ export interface ParseOptions extends FormatOptions {
    * results, activities, etc. Body sites still use the richer siteCodeMap.
    */
   instructionConceptMap?: Record<string, MedicationInstructionConceptInput>;
+  /**
+   * Optional learned/remote semantic proposal providers. They are used only by
+   * parseSigAsync(), and only against spans the deterministic parser left opaque.
+   * Proposals are validated against registered action/concept/site/unit vocabularies
+   * before they can enter the canonical graph.
+   */
+  instructionSemanticResolvers?: InstructionSemanticResolver | InstructionSemanticResolver[];
   freqMap?: Record<
     string,
     {

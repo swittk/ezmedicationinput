@@ -2372,3 +2372,54 @@ Verification:
 - `npm run build`
 - `npm test` -> 649 tests passing
 - `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 Validated opaque-span semantic resolver seam
+
+The instruction graph now has an optional hybrid semantic-enrichment seam for
+opaque text without granting learned/remote systems authority over canonical
+medication structure.
+
+Contract:
+- `ParseOptions.instructionSemanticResolvers` accepts sync or async proposal
+  providers
+- each provider receives exactly one deterministic `opaqueSpan` at a time,
+  including its absolute source range, locale/context, and a read-only clone of
+  the pre-enrichment graph
+- resolver action/argument ranges are relative to that opaque source text
+- proposals are locally revalidated before graph admission:
+  - action must resolve to registered/custom procedural action terminology
+  - argument concepts must resolve through instruction concept terminology or
+    the dedicated body-site grammar
+  - quantities must be finite and use accepted parser units
+  - argument ranges must remain inside the proposed action range
+  - action ranges must remain inside the supplied opaque span
+  - resolver actions cannot overlap deterministic graph actions or one another
+- unregistered, malformed, overlapping, or out-of-bounds proposals are ignored
+  and source text remains opaque
+- accepted actions are marked `origin: semantic-resolver` and may carry a
+  separately bounded 0..1 resolver confidence
+- origin/confidence survive the FHIR graph-extension round trip
+- semantic coverage is recomputed after enrichment; learned confidence is never
+  conflated with coverage
+
+Execution behavior:
+- synchronous resolvers may be explicitly used with `parseSig`
+- Promise-returning resolvers require `parseSigAsync`, matching the package's
+  existing sync/async resolver ergonomics
+- `parseSigAsync` awaits semantic resolvers after deterministic PRN/site coding
+  and before formatting/FHIR projection
+- resolver runtime failures fail open: opaque clinician text is preserved and a
+  warning is surfaced instead of emitting guessed structure
+- deterministic action aliases always win first, so registered literal text
+  does not need a model round trip; tests use real paraphrases such as
+  `croon a song -> sing` and `murmur quietly -> hum`
+
+This provides a safe neuro-symbolic integration point for local classifiers,
+LLMs, or remote clinical NLP without permitting them to overwrite deterministic
+dose, timing, route, PRN, or existing structured semantics.
+
+Verification:
+- `npm run build`
+- focused instruction-graph resolver tests pass
+- `npm test` -> 653 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing
