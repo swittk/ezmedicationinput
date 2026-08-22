@@ -55,7 +55,7 @@ function applyRouteDefault(
 
 function applyUnitDefault(
   state: ParserState,
-  tokens: readonly { lower: string; index: number }[],
+  tokens: readonly { lower: string; canonical?: string; index: number }[],
   context: MedicationContext | undefined,
   options: ParseOptions | undefined
 ): void {
@@ -66,7 +66,7 @@ function applyUnitDefault(
     if (state.consumed.has(token.index)) {
       continue;
     }
-    const unit = normalizeUnit(token.lower, options);
+    const unit = normalizeUnit(token.canonical ?? token.lower, options);
     if (unit) {
       state.unit = unit;
       state.consumed.add(token.index);
@@ -480,7 +480,7 @@ function applyWeeklyDefaultForDayFilters(state: ParserState): void {
 
 export function applyHpsgDefaultConstraints(
   state: ParserState,
-  tokens: readonly { lower: string; index: number }[],
+  tokens: readonly { lower: string; canonical?: string; index: number }[],
   options: ParseOptions | undefined,
   deps: HpsgDefaultConstraintDeps
 ): void {

@@ -266,7 +266,7 @@
     "month": "Month",
     "months": "Month"
   },
-  "workflowStartWords": ["after", "before", "with", "leave", "rinse", "wash", "cover", "clean", "dry"],
+  "workflowStartWords": ["after", "before", "with", "leave", "rinse", "wash", "cover", "clean", "dry", "shake", "mix"],
   "workflowNouns": [
     "bowel",
     "change",

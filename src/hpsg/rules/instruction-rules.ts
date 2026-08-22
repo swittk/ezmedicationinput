@@ -2,6 +2,7 @@ import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
+import { normalizeUnit } from "../../unit-lexicon";
 import { AdviceArgumentRole, AdviceForce, CanonicalAdditionalInstructionExpr } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -26,6 +27,34 @@ import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
 
 const INSTRUCTION_PREDICATES = ["take", "apply", "use"] as const;
+
+function isExplicitDoseLead(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens.slice(index, index + 1)[0];
+  const unitToken = context.tokens[index + 1];
+  if (
+    !token ||
+    !unitToken ||
+    context.state.consumed.has(token.index) ||
+    context.state.consumed.has(unitToken.index)
+  ) {
+    return false;
+  }
+  if (token.kind !== LexKind.Number && token.kind !== LexKind.NumberRange) {
+    return false;
+  }
+  return Boolean(normalizeUnit(normalizeTokenLower(unitToken), context.options));
+}
+
+function startsScheduledAdministration(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens.slice(index, index + 1)[0];
+  if (!token || context.state.consumed.has(token.index)) {
+    return false;
+  }
+  return Boolean(
+    METHOD_ACTION_BY_VERB[normalizeTokenLower(token)] &&
+    isScheduleLead(context, index + 1)
+  );
+}
 
 export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.patientInstruction.workflow", (context, start) => {
@@ -67,6 +96,9 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const lower = normalizeTokenLower(token);
       const previousLower = bodyTokens.length ? normalizeTokenLower(bodyTokens[bodyTokens.length - 1]) : "";
       const nextLower = context.tokens[cursor + 1] ? normalizeTokenLower(context.tokens[cursor + 1]) : "";
+      if (bodyTokens.length && (isExplicitDoseLead(context, cursor) || startsScheduledAdministration(context, cursor))) {
+        break;
+      }
       if (bodyTokens.length && isInstructionSeparator(token)) {
         break;
       }
@@ -92,7 +124,10 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!bodyTokens.length) {
       return [];
     }
-    const text = joinTokenText(bodyTokens);
+    const range = rangeFromTokens(bodyTokens);
+    const text = range
+      ? context.state.input.slice(range.start, range.end).trim()
+      : joinTokenText(bodyTokens);
     if (!text) {
       return [];
     }
@@ -185,6 +220,20 @@ function bodyParsesAsStyleInstruction(
   );
 }
 
+const FREE_TEXT_DIRECTIVE_STARTS = new Set([
+  "avoid",
+  "do",
+  "don't",
+  "dont",
+  "must",
+  "mustn't",
+  "mustnt",
+  "no",
+  "not",
+  "should",
+  "without"
+]);
+
 export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.instruction", (context, start) => {
     const first = context.tokens[start];
@@ -247,7 +296,10 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const hasStructuredInstruction = instructions.some((instruction) =>
       instruction.coding?.code || instruction.frames?.length
     );
-    if (!hasStructuredInstruction && !consumed.length) {
+    const explicitFreeTextDirective = FREE_TEXT_DIRECTIVE_STARTS.has(
+      normalizeTokenLower(bodyTokens[0])
+    );
+    if (!hasStructuredInstruction && !consumed.length && !explicitFreeTextDirective) {
       return [];
     }
     return [

@@ -1,6 +1,7 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
+import { applyLocaleLexicon } from "./locale";
 
 const PER_SLASH_UNITS = new Set([
   "d",
@@ -583,9 +584,5 @@ export function lexInput(input: string): LexToken[] {
     index += 1;
   }
 
-  for (let tokenIndex = 0; tokenIndex < output.length; tokenIndex += 1) {
-    output[tokenIndex].index = tokenIndex;
-  }
-
-  return output;
+  return applyLocaleLexicon(output, input);
 }

@@ -330,6 +330,63 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+/**
+ * Parses languages and clinical shorthand that place the cadence adverb before
+ * the count, e.g. `daily 2 times`. Thai `วันละ 2 ครั้ง` is normalized by the
+ * locale lexer to exactly this feature sequence, without pretending Thai has
+ * English word order.
+ */
+export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.cadenceFirstFrequency", (context, start) => {
+    const cadence = tokensAvailable(context, start, 1)?.[0];
+    if (!cadence) {
+      return [];
+    }
+    const periodUnit = mapFrequencyAdverb(normalizeTokenLower(cadence));
+    if (!periodUnit) {
+      return [];
+    }
+    const count = context.tokens[start + 1];
+    const times = context.tokens[start + 2];
+    if (
+      !count ||
+      !times ||
+      context.state.consumed.has(count.index) ||
+      context.state.consumed.has(times.index) ||
+      count.kind !== LexKind.Number ||
+      count.value === undefined ||
+      count.value <= 0 ||
+      !FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(times))
+    ) {
+      return [];
+    }
+    const normalizedPeriod = normalizePeriodValue(1, periodUnit);
+    return [
+      lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.cadenceFirstFrequency",
+        tokens: [cadence, count, times],
+        synsem: {
+          head: {
+            schedule: {
+              frequency: count.value,
+              period: normalizedPeriod.value,
+              periodUnit: normalizedPeriod.unit,
+              timingCode:
+                normalizedPeriod.value === 1 && normalizedPeriod.unit === FhirPeriodUnit.Day
+                  ? timingCodeForDailyFrequency(count.value)
+                  : undefined
+            }
+          },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 13
+      })
+    ];
+  });
+}
+
 export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.frequency", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -517,6 +574,18 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const wordFrequency = WORD_FREQUENCIES[lower];
     if (wordFrequency) {
+      const followingCount = context.tokens[start + 1];
+      const followingTimes = context.tokens[start + 2];
+      const beginsCadenceFirstFrequency = Boolean(
+        mapFrequencyAdverb(lower) &&
+        followingCount?.kind === LexKind.Number &&
+        followingCount.value !== undefined &&
+        followingTimes &&
+        FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(followingTimes))
+      );
+      if (beginsCadenceFirstFrequency) {
+        return [];
+      }
       return [
         lexicalSign({
           type: "schedule-sign",

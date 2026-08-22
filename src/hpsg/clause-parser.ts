@@ -4,6 +4,7 @@ import { HpsgGrammar, HpsgPhraseRule, HpsgSign } from "./signature";
 import { combineSigns } from "./unification";
 import {
   compactIntervalRule,
+  cadenceFirstFrequencyRule,
   countAndDurationRule,
   countFrequencyRule,
   dayRangeLexicalRule,
@@ -41,6 +42,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       doseLexicalRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
+      cadenceFirstFrequencyRule(),
       countFrequencyRule(),
       eventTimingPhraseRule(),
       dayRangeLexicalRule(),

@@ -1,0 +1,294 @@
+import {
+  DAY_OF_WEEK_TOKENS,
+  DEFAULT_BODY_SITE_SNOMED,
+  DEFAULT_PRN_REASON_DEFINITIONS,
+  DEFAULT_ROUTE_SYNONYMS,
+  DEFAULT_UNIT_SYNONYMS,
+  EVENT_TIMING_TOKENS,
+  TIMING_ABBREVIATIONS
+} from "../maps";
+import unitTerminologySource from "../unit-terminology.json";
+import { LexKind, LexToken } from "./token-types";
+
+/**
+ * Locale-aware lexical normalization belongs between surface segmentation and
+ * the grammar. The grammar consumes canonical medication-language lexemes,
+ * while `original`/source offsets always retain the clinician's exact text.
+ *
+ * This deliberately is not a general translator. Only words/phrases whose
+ * medication semantics are stable enough to feed deterministic grammar rules
+ * belong here. Unknown prose remains untouched and can still be preserved as
+ * patient instructions.
+ */
+const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
+  // administration / workflow
+  "เขย่า": "shake",
+  "ใช้": "use",
+  "รับประทาน": "take",
+  "กิน": "take",
+  "ทา": "apply",
+  "หยอด": "instill",
+  "พ่น": "spray",
+  "สูด": "inhale",
+  "ฉีด": "inject",
+  "สอด": "insert",
+  "ผสม": "mix",
+  "ล้าง": "rinse",
+  "ถู": "rub",
+
+  // grammar / relations
+  "ก่อน": "before",
+  "หลัง": "after",
+  "พร้อม": "with",
+  "ทุก": "every",
+  "และ": "and",
+  "หรือ": "or",
+  "ที่": "at",
+  "ใน": "in",
+  "บน": "on",
+  "ภายนอก": "external",
+  "ห้าม": "avoid",
+
+  // cadence / event timing
+  "ครั้ง": "times",
+  "เช้า": "morning",
+  "เที่ยง": "noon",
+  "กลางวัน": "noon",
+  "บ่าย": "afternoon",
+  "เย็น": "evening",
+  "กลางคืน": "night",
+  "นอน": "sleep",
+  "อาหาร": "meal",
+  "นาที": "minute",
+  "ชั่วโมง": "hour",
+  "วัน": "day",
+  "สัปดาห์": "week",
+  "เดือน": "month",
+
+  // dose units
+  "มิลลิลิตร": "ml",
+  "มล": "ml",
+  "มล.": "ml",
+  "มิลลิกรัม": "mg",
+  "ไมโครกรัม": "mcg",
+  "กรัม": "g",
+  "เม็ด": "tab",
+  "แคปซูล": "cap",
+  "หยด": "drop",
+  "พัฟ": "puff"
+};
+
+interface LocalePhrase {
+  parts: readonly string[];
+  canonical: string;
+}
+
+interface UnitTerminologySource {
+  terms?: Array<{ unit?: string; aliases?: string[] }>;
+}
+
+const LEGACY_THAI_GROUP_TERMS = [
+  "วันธรรมดา",
+  "วันทำงาน",
+  "วันหยุด",
+  "วันเสาร์อาทิตย์",
+  "สุดสัปดาห์",
+  "เสาร์อาทิตย์",
+  "จันทร์ถึงศุกร์"
+] as const;
+
+const KNOWN_THAI_DOMAIN_TERMS = new Set<string>();
+
+function registerKnownThaiTerms(values: Iterable<string>): void {
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized && /[\u0E00-\u0E7F]/.test(normalized) && !/\s/.test(normalized)) {
+      KNOWN_THAI_DOMAIN_TERMS.add(normalized);
+    }
+  }
+}
+
+registerKnownThaiTerms(Object.keys(DEFAULT_BODY_SITE_SNOMED));
+registerKnownThaiTerms(Object.keys(DEFAULT_PRN_REASON_DEFINITIONS));
+registerKnownThaiTerms(Object.keys(DEFAULT_ROUTE_SYNONYMS));
+registerKnownThaiTerms(Object.keys(DEFAULT_UNIT_SYNONYMS));
+registerKnownThaiTerms(Object.keys(DAY_OF_WEEK_TOKENS));
+registerKnownThaiTerms(Object.keys(EVENT_TIMING_TOKENS));
+registerKnownThaiTerms(Object.keys(TIMING_ABBREVIATIONS));
+registerKnownThaiTerms(LEGACY_THAI_GROUP_TERMS);
+for (const term of (unitTerminologySource as UnitTerminologySource).terms ?? []) {
+  registerKnownThaiTerms([term.unit ?? "", ...(term.aliases ?? [])]);
+}
+
+function isKnownThaiDomainTerm(value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (KNOWN_THAI_DOMAIN_TERMS.has(normalized)) {
+    return true;
+  }
+  const range = normalized.match(/^(.+?)(?:ถึง|จนถึง)(.+)$/u);
+  return Boolean(
+    range &&
+    DAY_OF_WEEK_TOKENS[range[1]] &&
+    DAY_OF_WEEK_TOKENS[range[2]]
+  );
+}
+
+// Longest phrases first. ICU segments Thai compounds into linguistic words;
+// this layer recomposes medication-specific multiword lexemes where the grammar
+// benefits from a single canonical item.
+const THAI_PHRASES: readonly LocalePhrase[] = [
+  { parts: ["รับ", "ประทาน"], canonical: "take" },
+  { parts: ["วัน", "ละ", "ครั้ง"], canonical: "daily" },
+  { parts: ["ทำความ", "สะอาด"], canonical: "clean" },
+  { parts: ["ทุก", "สัปดาห์"], canonical: "weekly" },
+  { parts: ["ทุก", "เดือน"], canonical: "monthly" },
+  { parts: ["ทุก", "วัน"], canonical: "daily" },
+  { parts: ["จาก", "นั้น"], canonical: "then" },
+  { parts: ["สวน", "ล้าง"], canonical: "douche" },
+  { parts: ["ชั่วโมง", "ละ"], canonical: "hourly" },
+  { parts: ["สัปดาห์", "ละ"], canonical: "weekly" },
+  { parts: ["เดือน", "ละ"], canonical: "monthly" },
+  { parts: ["วัน", "ละ"], canonical: "daily" }
+];
+
+function mergeSourceSpan(
+  tokens: readonly LexToken[],
+  start: number,
+  endInclusive: number,
+  input: string,
+  canonical?: string
+): LexToken {
+  const parts = tokens.slice(start, endInclusive + 1);
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  const sourceStart = first.sourceStart;
+  const sourceEnd = last.sourceEnd;
+  const sourceText = input.slice(sourceStart, sourceEnd);
+  const surfaceIndices: number[] = [];
+  for (const part of parts) {
+    for (const surfaceIndex of part.surfaceIndices) {
+      if (surfaceIndices.indexOf(surfaceIndex) === -1) {
+        surfaceIndices.push(surfaceIndex);
+      }
+    }
+  }
+  return {
+    original: sourceText,
+    lower: sourceText.toLowerCase(),
+    canonical,
+    index: -1,
+    kind: LexKind.Word,
+    sourceStart,
+    sourceEnd,
+    surfaceIndices,
+    sourceText,
+    derived: true
+  };
+}
+
+function knownDomainCompoundAt(
+  tokens: readonly LexToken[],
+  start: number,
+  input: string
+): { token: LexToken; length: number } | undefined {
+  const first = tokens[start];
+  if (!first || first.kind !== LexKind.Word || !/[\u0E00-\u0E7F]/.test(first.original)) {
+    return undefined;
+  }
+  let bestEnd = -1;
+  const maxEnd = Math.min(tokens.length - 1, start + 7);
+  for (let end = start + 1; end <= maxEnd; end += 1) {
+    const previous = tokens[end - 1];
+    const current = tokens[end];
+    if (
+      !current ||
+      current.kind !== LexKind.Word ||
+      previous.sourceEnd !== current.sourceStart
+    ) {
+      break;
+    }
+    const sourceText = input.slice(first.sourceStart, current.sourceEnd);
+    if (isKnownThaiDomainTerm(sourceText)) {
+      bestEnd = end;
+    }
+  }
+  if (bestEnd < 0) {
+    return undefined;
+  }
+  const sourceText = input.slice(first.sourceStart, tokens[bestEnd].sourceEnd).toLowerCase();
+  return {
+    token: mergeSourceSpan(
+      tokens,
+      start,
+      bestEnd,
+      input,
+      THAI_LEXEME_ALIASES[sourceText]
+    ),
+    length: bestEnd - start + 1
+  };
+}
+
+function phraseMatches(tokens: readonly LexToken[], start: number, phrase: LocalePhrase): boolean {
+  if (start + phrase.parts.length > tokens.length) {
+    return false;
+  }
+  for (let offset = 0; offset < phrase.parts.length; offset += 1) {
+    const token = tokens[start + offset];
+    if (!token || token.kind !== LexKind.Word || token.lower !== phrase.parts[offset]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function mergePhrase(
+  tokens: readonly LexToken[],
+  start: number,
+  phrase: LocalePhrase,
+  input: string
+): LexToken {
+  return mergeSourceSpan(
+    tokens,
+    start,
+    start + phrase.parts.length - 1,
+    input,
+    phrase.canonical
+  );
+}
+
+export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
+  const normalized: LexToken[] = [];
+  let cursor = 0;
+
+  while (cursor < tokens.length) {
+    const knownCompound = knownDomainCompoundAt(tokens, cursor, input);
+    if (knownCompound) {
+      normalized.push(knownCompound.token);
+      cursor += knownCompound.length;
+      continue;
+    }
+
+    let matchedPhrase: LocalePhrase | undefined;
+    for (const phrase of THAI_PHRASES) {
+      if (phraseMatches(tokens, cursor, phrase)) {
+        matchedPhrase = phrase;
+        break;
+      }
+    }
+    if (matchedPhrase) {
+      normalized.push(mergePhrase(tokens, cursor, matchedPhrase, input));
+      cursor += matchedPhrase.parts.length;
+      continue;
+    }
+
+    const token = tokens[cursor];
+    const canonical = THAI_LEXEME_ALIASES[token.lower];
+    normalized.push(canonical ? { ...token, canonical } : { ...token });
+    cursor += 1;
+  }
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    normalized[index].index = index;
+  }
+  return normalized;
+}

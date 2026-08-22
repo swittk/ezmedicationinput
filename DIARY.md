@@ -2149,3 +2149,44 @@ Checked smoke cases:
 
 Verification:
 - `npm run build`
+
+## 2026-08-22 Thai free-text segmentation and complex instruction parsing
+
+A real-world Thai clinician instruction exposed a lexical-boundary gap rather
+than a weakness in the HPSG semantic model. Thai prose without inter-word
+spaces reached the grammar as opaque surface blobs, so dose units, cadence,
+event timing, and safety instructions could not participate in existing rules.
+
+What changed:
+- added locale-aware Thai word segmentation at the lexer boundary using
+  `Intl.Segmenter`, while retaining exact source offsets and falling back to the
+  previous opaque-token behavior when the runtime lacks a segmenter
+- added a canonical locale lexeme layer so stable Thai medication terms feed
+  the existing HPSG grammar without translating or discarding unknown prose
+- added maximal-munch recomposition of existing Thai clinical dictionary terms
+  after segmentation, preserving established aliases such as PRN reasons, body
+  sites, weekday groups, and natural dose units
+- added a cadence-first HPSG construction for forms such as `วันละ 2 ครั้ง`
+  (`daily 2 times`) so the value is a frequency, not a total-count constraint
+- made workflow spans stop before explicit structured doses and before a new
+  scheduled administration, preventing procedural prose from swallowing dose
+  or timing semantics
+- preserved workflow text from exact source ranges and allowed explicit
+  free-text warning/directive clauses to survive when no safe terminology code
+  exists
+
+Regression fixture:
+`เขย่าขวดก่อนใช้ เทผลิตภัณฑ์ลงฝ่ามือ 1-2 มิลลิลิตร ผสมน้ำเล็กน้อยถูให้เกิดฟอง ทำความสะอาดบริเวณภายนอกจุดซ่อนเร้น จากนั้นล้างด้วยน้ำสะอาด ใช้วันละ 2 ครั้ง เช้าเย็น (ห้ามสวนล้างช่องคลอด).`
+
+It now yields:
+- dose range 1-2 mL
+- frequency 2 per 1 day with BID code
+- event timings morning + evening
+- preserved free-text no-douching instruction
+- source-faithful preparation / cleansing patient instruction
+- no unparsed-token lint issues
+
+Verification:
+- `npm run build`
+- `npm test`
+- `npm run test:dist`

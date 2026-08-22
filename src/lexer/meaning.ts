@@ -417,7 +417,7 @@ export function resolveDayMeaning(tokenLower: string): FhirDayOfWeek[] | undefin
 }
 
 export function annotateLexToken(token: LexToken): AnnotatedLexToken {
-  const normalized = normalizeMeaningKey(token.lower);
+  const normalized = normalizeMeaningKey(token.canonical ?? token.lower);
   let annotations: TokenAnnotations | undefined;
 
   const eventTiming = EVENT_TIMING_TOKENS[normalized];
