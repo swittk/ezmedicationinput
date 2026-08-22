@@ -317,6 +317,22 @@
       "procedural": true
     },
     {
+      "code": "stop",
+      "semanticClass": "stop",
+      "display": "Stop",
+      "i18n": {
+        "th": "หยุดใช้"
+      },
+      "aliases": [
+        "stop",
+        "stop use",
+        "stop using",
+        "หยุด",
+        "หยุดใช้"
+      ],
+      "procedural": true
+    },
+    {
       "code": "measure",
       "semanticClass": "measure",
       "display": "Measure",

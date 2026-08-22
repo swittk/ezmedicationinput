@@ -6,7 +6,9 @@ import {
   AdviceModality,
   AdvicePolarity,
   AdviceRelation,
+  CanonicalInstructionCoverage,
   CanonicalInstructionGraph,
+  CanonicalInstructionRelation,
   CanonicalSourceSpan,
   FhirCoding,
   FhirExtension
@@ -35,6 +37,9 @@ function valueInteger(url: string, value: number | undefined): FhirExtension | u
 }
 function valueDecimal(url: string, value: number | undefined): FhirExtension | undefined {
   return value === undefined ? undefined : { url, valueDecimal: value };
+}
+function valueBoolean(url: string, value: boolean | undefined): FhirExtension | undefined {
+  return value === undefined ? undefined : { url, valueBoolean: value };
 }
 function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension | undefined {
   if (!value) return undefined;
@@ -123,6 +128,26 @@ export function buildInstructionGraphExtension(
   add(nested, valueString("sourceText", graph.sourceText));
   add(nested, valueCode("sourceLocale", graph.sourceLocale));
   for (const action of graph.actions) nested.push(buildActionExtension(action));
+  for (const relation of graph.relations ?? []) {
+    const relationNested: FhirExtension[] = [];
+    add(relationNested, valueCode("kind", relation.kind));
+    add(relationNested, valueInteger("fromActionIndex", relation.fromActionIndex));
+    add(relationNested, valueInteger("toActionIndex", relation.toActionIndex));
+    add(relationNested, valueString("text", relation.text));
+    if (relation.span) {
+      add(relationNested, valueInteger("spanStart", relation.span.start));
+      add(relationNested, valueInteger("spanEnd", relation.span.end));
+    }
+    nested.push({ url: "graphRelation", extension: relationNested });
+  }
+  if (graph.coverage) {
+    const coverage: FhirExtension[] = [];
+    add(coverage, valueInteger("understoodCharacters", graph.coverage.understoodCharacters));
+    add(coverage, valueInteger("opaqueCharacters", graph.coverage.opaqueCharacters));
+    add(coverage, valueDecimal("ratio", graph.coverage.ratio));
+    add(coverage, valueBoolean("complete", graph.coverage.complete));
+    nested.push({ url: "coverage", extension: coverage });
+  }
   for (const opaque of graph.opaqueSpans ?? []) {
     const opaqueNested: FhirExtension[] = [
       { url: "start", valueInteger: opaque.start },
@@ -227,6 +252,39 @@ export function parseInstructionGraphExtension(
     const action = parseActionExtension(actionExtension);
     if (action) actions.push(action);
   }
+  const relations: CanonicalInstructionRelation[] = [];
+  for (const entry of children(extension, "graphRelation")) {
+    const kind = child(entry, "kind")?.valueCode as AdviceRelation | undefined;
+    const toActionIndex = child(entry, "toActionIndex")?.valueInteger;
+    if (!kind || toActionIndex === undefined) continue;
+    const spanStart = child(entry, "spanStart")?.valueInteger;
+    const spanEnd = child(entry, "spanEnd")?.valueInteger;
+    relations.push({
+      kind,
+      fromActionIndex: child(entry, "fromActionIndex")?.valueInteger,
+      toActionIndex,
+      text: child(entry, "text")?.valueString,
+      span: spanStart !== undefined && spanEnd !== undefined
+        ? { start: spanStart, end: spanEnd }
+        : undefined
+    });
+  }
+  const coverageExtension = child(extension, "coverage");
+  let coverage: CanonicalInstructionCoverage | undefined;
+  if (coverageExtension) {
+    const understoodCharacters = child(coverageExtension, "understoodCharacters")?.valueInteger;
+    const opaqueCharacters = child(coverageExtension, "opaqueCharacters")?.valueInteger;
+    const ratio = child(coverageExtension, "ratio")?.valueDecimal;
+    const complete = child(coverageExtension, "complete")?.valueBoolean;
+    if (
+      understoodCharacters !== undefined &&
+      opaqueCharacters !== undefined &&
+      ratio !== undefined &&
+      complete !== undefined
+    ) {
+      coverage = { understoodCharacters, opaqueCharacters, ratio, complete };
+    }
+  }
   const opaqueSpans: CanonicalSourceSpan[] = [];
   for (const entry of children(extension, "opaque")) {
     const start = child(entry, "start")?.valueInteger;
@@ -247,7 +305,9 @@ export function parseInstructionGraphExtension(
   actions.sort((left, right) => (left.sequenceIndex ?? 0) - (right.sequenceIndex ?? 0));
   return {
     actions,
+    relations: relations.length ? relations : undefined,
     opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
+    coverage,
     sourceText: child(extension, "sourceText")?.valueString ?? "",
     sourceLocale: child(extension, "sourceLocale")?.valueCode
   };

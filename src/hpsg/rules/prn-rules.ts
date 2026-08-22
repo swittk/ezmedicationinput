@@ -8,6 +8,7 @@ import {
 } from "../../maps";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { LexKind } from "../../lexer/token-types";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { Token } from "../../parser-state";
 import { PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
@@ -383,6 +384,19 @@ function parsePrnReasonAtoms(
   return atoms;
 }
 
+function hasProceduralInstructionActionAfter(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  for (let index = start + 1; index < context.limit; index += 1) {
+    const token = context.tokens[index];
+    if (!token || context.state.consumed.has(token.index)) continue;
+    const definition = resolveMedicationInstructionAction(normalizeTokenLower(token), context.options);
+    if (definition?.procedural) return true;
+  }
+  return false;
+}
+
 export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
@@ -400,6 +414,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       tokens.push(nextLead);
       cursor = start + 2;
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {
+      if (start === 0 && hasProceduralInstructionActionAfter(context, start)) {
+        return [];
+      }
       const next = context.tokens[start + 1];
       const nextLower = next && !context.state.consumed.has(next.index)
         ? normalizeTokenLower(next)

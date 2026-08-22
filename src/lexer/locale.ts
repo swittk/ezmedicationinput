@@ -57,6 +57,13 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ห้าม": "avoid",
   "แล้ว": "then",
   "ต่อมา": "then",
+  "ถ้า": "if",
+  "หาก": "if",
+  "เมื่อ": "when",
+  "ขณะ": "while",
+  "ขณะที่": "while",
+  "จนกว่า": "until",
+  "เว้นแต่": "unless",
 
   // cadence / event timing
   "ครั้ง": "times",

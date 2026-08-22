@@ -253,6 +253,12 @@ export function shiftCanonicalSigClauses(
         opaque.start += offset;
         opaque.end += offset;
       }
+      for (const relation of clause.instructionGraph.relations ?? []) {
+        if (relation.span) {
+          relation.span.start += offset;
+          relation.span.end += offset;
+        }
+      }
     }
 
     if (clause.additionalInstructions) {

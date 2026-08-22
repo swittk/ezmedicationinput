@@ -2319,3 +2319,56 @@ Verification:
 - `npm run build`
 - `npm test` -> 646 tests passing
 - `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 Typed instruction relations, coverage, and conditional-vs-PRN disambiguation
+
+The declarative instruction graph was extended from an ordered action list into
+a more honest semantic graph with explicit relationships and measurable partial
+understanding.
+
+What changed:
+- added typed graph relations for THEN, BEFORE, AFTER, DURING/WHILE, UNTIL, IF,
+  UNLESS, and WHEN
+- relations are serialized through the package FHIR graph extension and their
+  source spans are rebased correctly in multi-segment parsing
+- added graph semantic coverage:
+  - understoodCharacters
+  - opaqueCharacters
+  - ratio
+  - complete
+- coverage survives FHIR round-trip; opaque conditional bodies are therefore
+  visibly partial rather than silently counted as understood
+- added common Thai conditional lexemes: ถ้า, หาก, เมื่อ, ขณะ/ขณะที่, จนกว่า,
+  เว้นแต่
+- added `stop / stop use / หยุด / หยุดใช้` as a procedural action and modeled
+  `use` as its activity argument when present
+
+HPSG ambiguity fixed:
+- clause-leading `if/หาก ...` was previously captured by the standalone PRN
+  construction even when it introduced a procedural instruction
+- the PRN lexical rule now yields when a clause-leading condition is followed
+  by an explicitly licensed procedural action
+- classic medication shorthand such as `1 tab po if pain` remains PRN
+
+Examples:
+- `if irritation occurs stop use` -> relation IF -> stop(activity=use), with the
+  condition body retained opaque and coverage ~0.2857 until its condition
+  semantics are further modeled
+- human realization is `if irritation occurs, stop use`
+- `หากระคายเคืองให้หยุดใช้` -> the same IF -> stop(use) structure and natural
+  source-language realization
+- `เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ` remains fully understood with
+  complete coverage and explicit THEN relations
+
+Safety hardening:
+- whole-clause enrichment no longer prefers a wider span merely because it
+  consumes more text; overlapping same-action candidates are selected by
+  structured semantic richness (quantity/coding/concept/typed argument)
+- canonical dosage method semantics dominate redundant graph actions when the
+  graph contributes no additional structured meaning, preventing duplicate
+  `swallow`, `shampoo`, or `reapply` text
+
+Verification:
+- `npm run build`
+- `npm test` -> 649 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing

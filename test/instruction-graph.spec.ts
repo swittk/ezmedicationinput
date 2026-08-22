@@ -243,4 +243,47 @@ describe("procedural instruction graph", () => {
     );
   });
 
+
+  it("distinguishes clause-leading procedural conditions from PRN and round-trips relation coverage", () => {
+    const parsed = parseSig("if irritation occurs stop use");
+    expect(parsed.fhir.asNeededFor).toBeUndefined();
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions).toHaveLength(1);
+    expect(graph?.actions[0]).toMatchObject({
+      predicate: { lemma: "stop" },
+      args: [expect.objectContaining({ role: "activity", conceptId: "use" })]
+    });
+    expect(graph?.relations).toEqual([
+      expect.objectContaining({
+        kind: "if",
+        toActionIndex: 0,
+        text: "if irritation occurs"
+      })
+    ]);
+    expect(graph?.coverage).toMatchObject({
+      understoodCharacters: 8,
+      opaqueCharacters: 20,
+      complete: false
+    });
+    expect(graph?.coverage?.ratio).toBeCloseTo(0.2857, 4);
+    expect(realizeInstructionGraph(graph!, "en")).toBe("if irritation occurs, stop use");
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.relations).toEqual(graph?.relations);
+    expect(restored?.coverage).toEqual(graph?.coverage);
+  });
+
+  it("keeps classic medication conditional shorthand as PRN", () => {
+    const parsed = parseSig("1 tab po if pain", { context: { dosageForm: "tablet" } });
+    expect(parsed.fhir.asNeededBoolean).toBe(true);
+    expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
+  });
+
+  it("tracks complete semantic coverage for colloquial Thai action sequences", () => {
+    const parsed = parseSig("เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ", { locale: "th" });
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.coverage).toMatchObject({ opaqueCharacters: 0, complete: true, ratio: 1 });
+    expect(graph?.relations?.map((relation) => relation.kind)).toEqual(["then", "then"]);
+  });
+
 });

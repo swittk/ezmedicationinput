@@ -7,6 +7,7 @@ import {
 import {
   getMedicationInstructionAction,
   medicationInstructionActionCodings,
+  normalizeActionSurface,
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import {
@@ -17,7 +18,9 @@ import {
   AdvicePolarity,
   AdviceRelation,
   CanonicalDoseExpr,
+  CanonicalInstructionCoverage,
   CanonicalInstructionGraph,
+  CanonicalInstructionRelation,
   CanonicalSigClause,
   CanonicalSourceSpan,
   MedicationInstructionActionDefinition,
@@ -37,7 +40,13 @@ const RELATIONS: Readonly<Record<string, AdviceRelation>> = {
   into: AdviceRelation.Into,
   in: AdviceRelation.In,
   on: AdviceRelation.On,
-  to: AdviceRelation.To
+  to: AdviceRelation.To,
+  if: AdviceRelation.If,
+  unless: AdviceRelation.Unless,
+  when: AdviceRelation.When,
+  while: AdviceRelation.While,
+  during: AdviceRelation.During,
+  until: AdviceRelation.Until
 };
 
 function key(part: Lexeme | undefined): string {
@@ -350,6 +359,15 @@ function buildActionFrame(
       }
       break;
     }
+    case "stop": {
+      const matchedSurface = sourceFor(parts, actionIndex, argumentStart, input);
+      if (/\buse\b/i.test(matchedSurface) || /ใช้/u.test(matchedSurface)) {
+        pushArgument(args, internalArgument("use", matchedSurface, options));
+      } else {
+        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Activity, options));
+      }
+      break;
+    }
     case "douche":
       pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Site, options));
       break;
@@ -627,15 +645,189 @@ function attachDoseToNearestAction(
   best.sourceText = input.slice(best.span.start, best.span.end);
 }
 
+const CONDITION_RELATIONS = new Set<AdviceRelation>([
+  AdviceRelation.If,
+  AdviceRelation.Unless,
+  AdviceRelation.When,
+  AdviceRelation.While,
+  AdviceRelation.Before,
+  AdviceRelation.After,
+  AdviceRelation.Until
+]);
+
+function relationFromSourceText(text: string): AdviceRelation | undefined {
+  const keys = lexInput(text).map((token) => key(token)).filter(Boolean);
+  for (const candidate of keys) {
+    const relation = RELATIONS[candidate];
+    if (relation === AdviceRelation.Before ||
+      relation === AdviceRelation.After ||
+      relation === AdviceRelation.During ||
+      relation === AdviceRelation.While ||
+      relation === AdviceRelation.Until ||
+      relation === AdviceRelation.If ||
+      relation === AdviceRelation.Unless ||
+      relation === AdviceRelation.When) {
+      return relation;
+    }
+    if (candidate === "then" || candidate === "and") return AdviceRelation.Then;
+  }
+  return undefined;
+}
+
+function buildInstructionRelations(
+  input: string,
+  actions: AdviceFrame[],
+  opaqueSpans: CanonicalSourceSpan[]
+): CanonicalInstructionRelation[] {
+  const relations: CanonicalInstructionRelation[] = [];
+  for (let index = 1; index < actions.length; index += 1) {
+    const previous = actions[index - 1];
+    const current = actions[index];
+    const gapStart = previous.span.end;
+    const gapEnd = current.span.start;
+    const source = gapEnd > gapStart ? input.slice(gapStart, gapEnd) : "";
+    const trimmed = source.trim();
+    relations.push({
+      kind: relationFromSourceText(source) ?? AdviceRelation.Then,
+      fromActionIndex: index - 1,
+      toActionIndex: index,
+      text: trimmed || undefined,
+      span: gapEnd > gapStart ? { start: gapStart, end: gapEnd } : undefined
+    });
+  }
+
+  for (const opaque of opaqueSpans) {
+    const kind = relationFromSourceText(opaque.text);
+    if (!kind || !CONDITION_RELATIONS.has(kind)) continue;
+    const target = actions.findIndex((action) => action.span.start >= opaque.end);
+    if (target < 0) continue;
+    if (relations.some((relation) =>
+      relation.kind === kind &&
+      relation.toActionIndex === target &&
+      relation.fromActionIndex === undefined &&
+      relation.span?.start === opaque.start &&
+      relation.span?.end === opaque.end
+    )) continue;
+    relations.push({
+      kind,
+      toActionIndex: target,
+      text: opaque.text,
+      span: { start: opaque.start, end: opaque.end }
+    });
+  }
+
+  return relations;
+}
+
+function mergedSpanLength(spans: TextRange[]): number {
+  if (!spans.length) return 0;
+  const ordered = spans
+    .filter((span) => span.end > span.start)
+    .slice()
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  if (!ordered.length) return 0;
+  let total = 0;
+  let start = ordered[0].start;
+  let end = ordered[0].end;
+  for (let index = 1; index < ordered.length; index += 1) {
+    const span = ordered[index];
+    if (span.start <= end) {
+      end = Math.max(end, span.end);
+      continue;
+    }
+    total += end - start;
+    start = span.start;
+    end = span.end;
+  }
+  return total + end - start;
+}
+
+function buildInstructionCoverage(
+  actions: AdviceFrame[],
+  opaqueSpans: CanonicalSourceSpan[]
+): CanonicalInstructionCoverage {
+  const understoodCharacters = mergedSpanLength(actions.map((action) => action.span));
+  const opaqueCharacters = mergedSpanLength(opaqueSpans.map((span) => ({ start: span.start, end: span.end })));
+  const total = understoodCharacters + opaqueCharacters;
+  return {
+    understoodCharacters,
+    opaqueCharacters,
+    ratio: total > 0 ? Math.round((understoodCharacters / total) * 10000) / 10000 : 0,
+    complete: opaqueCharacters === 0
+  };
+}
+
+function actionSemanticScore(frame: AdviceFrame): number {
+  let score = frame.predicate.codings?.length ? 2 : 0;
+  for (const arg of frame.args) {
+    if (arg.quantity) score += 6;
+    if (arg.coding?.code) score += 4;
+    if (arg.codings?.length) score += 2;
+    if (arg.conceptId) score += 3;
+    if (arg.role !== AdviceArgumentRole.Object && arg.role !== AdviceArgumentRole.Free) score += 1;
+  }
+  return score;
+}
+
+function actionAddsStructuredMeaning(frame: AdviceFrame): boolean {
+  return frame.args.some((arg) =>
+    Boolean(
+      arg.quantity ||
+      arg.coding?.code ||
+      arg.codings?.length ||
+      arg.conceptId ||
+      (arg.role !== AdviceArgumentRole.Object && arg.role !== AdviceArgumentRole.Free)
+    )
+  );
+}
+
+function actionDominatedByCanonicalMethod(
+  frame: AdviceFrame,
+  clause: CanonicalSigClause,
+  options?: ParseOptions
+): boolean {
+  const method = clause.method;
+  if (!method || actionAddsStructuredMeaning(frame)) return false;
+  if (method.coding?.code && frame.predicate.codings?.some((coding) =>
+    coding.code === method.coding?.code &&
+    (coding.system ?? "http://snomed.info/sct") ===
+      (method.coding?.system ?? "http://snomed.info/sct")
+  )) {
+    return true;
+  }
+  const methodText = normalizeActionSurface(method.text ?? "");
+  if (!methodText) return false;
+  const definition = frameActionDefinition(frame, options);
+  const candidates = [
+    frame.predicate.lemma,
+    frame.predicate.display ?? "",
+    definition?.display ?? "",
+    ...(definition?.aliases ?? [])
+  ]
+    .map(normalizeActionSurface)
+    .filter((candidate) => candidate.length > 0);
+  return candidates.some((candidate) =>
+    methodText === candidate ||
+    methodText.startsWith(`${candidate} `) ||
+    methodText.endsWith(` ${candidate}`) ||
+    methodText.includes(` ${candidate} `)
+  );
+}
+
 function pushActionIfUnique(
   target: AdviceFrame[],
   frame: AdviceFrame
 ): boolean {
-  if (target.some((candidate) =>
+  const existingIndex = target.findIndex((candidate) =>
     candidate.predicate.lemma === frame.predicate.lemma &&
-    candidate.span.start === frame.span.start &&
-    candidate.span.end === frame.span.end
-  )) {
+    candidate.span.start < frame.span.end &&
+    frame.span.start < candidate.span.end
+  );
+  if (existingIndex >= 0) {
+    const existing = target[existingIndex];
+    const existingScore = actionSemanticScore(existing);
+    const nextScore = actionSemanticScore(frame);
+    if (nextScore > existingScore) target[existingIndex] = frame;
     return false;
   }
   target.push(frame);
@@ -689,6 +881,14 @@ export function buildInstructionGraph(
       pushOpaqueSpan(opaqueSpans, span);
     }
   }
+  for (const frame of parseInstructionActions(input, 0, options)) {
+    if (frameIsProcedural(frame, options)) pushActionIfUnique(actions, frame);
+  }
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    if (actionDominatedByCanonicalMethod(actions[index], clause, options)) {
+      actions.splice(index, 1);
+    }
+  }
   actions.sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
   for (let index = 0; index < actions.length; index += 1) {
     actions[index].sequenceIndex = index;
@@ -696,9 +896,12 @@ export function buildInstructionGraph(
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   if (!actions.length && !opaqueSpans.length) return undefined;
   attachDoseToNearestAction(actions, clause, input, options);
+  const relations = buildInstructionRelations(input, actions, opaqueSpans);
   return {
     actions,
+    relations: relations.length ? relations : undefined,
     opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
+    coverage: buildInstructionCoverage(actions, opaqueSpans),
     sourceText: input,
     sourceLocale: /[\u0E00-\u0E7F]/.test(input) ? "th" : "en"
   };
@@ -796,6 +999,11 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
       const duration = first(AdviceArgumentRole.Duration);
       return `${label}${duration ? ` ${duration}` : ""}`;
     }
+    case "stop": {
+      const activity = first(AdviceArgumentRole.Activity);
+      if (thai) return activity === "ใช้" || !activity ? label : `${label}${activity}`;
+      return `${label}${activity ? ` ${activity}` : ""}`;
+    }
     default: {
       const object = theme ?? site ?? substance;
       return thai ? `${label}${object ?? ""}` : `${label}${object ? ` ${object}` : ""}`;
@@ -814,15 +1022,29 @@ export function realizeInstructionGraph(
     return options?.includeWarnings !== false || !warning;
   });
   const thai = locale.toLowerCase().startsWith("th");
-  const nodes: Array<{ start: number; text: string; understood: boolean }> = [];
+  const nodes: Array<{
+    start: number;
+    end: number;
+    text: string;
+    understood: boolean;
+    actionIndex?: number;
+  }> = [];
   for (const frame of frames) {
     const text = realizeAction(frame, locale);
-    if (text) nodes.push({ start: frame.span.start, text, understood: true });
+    if (text) {
+      nodes.push({
+        start: frame.span.start,
+        end: frame.span.end,
+        text,
+        understood: true,
+        actionIndex: frame.sequenceIndex
+      });
+    }
   }
   if (!options?.onlyWarnings) {
     for (const opaque of graph.opaqueSpans ?? []) {
       const text = opaque.text.trim();
-      if (text) nodes.push({ start: opaque.start, text, understood: false });
+      if (text) nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
     }
   }
   if (!nodes.length) return undefined;
@@ -835,6 +1057,23 @@ export function realizeInstructionGraph(
       continue;
     }
     const previous = nodes[index - 1];
+    const conditional = !previous?.understood && node.understood
+      ? graph.relations?.find((relation) =>
+        relation.fromActionIndex === undefined &&
+        relation.toActionIndex === node.actionIndex &&
+        relation.span?.start === previous.start &&
+        relation.span?.end === previous.end
+      )
+      : undefined;
+    if (conditional) {
+      if (thai) {
+        output += node.text;
+      } else {
+        const lowered = node.text.charAt(0).toLowerCase() + node.text.slice(1);
+        output += `, ${lowered}`;
+      }
+      continue;
+    }
     output += previous?.understood && node.understood
       ? (thai ? " จากนั้น" : "; then ")
       : "; ";

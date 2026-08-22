@@ -524,7 +524,11 @@ export enum AdviceRelation {
   In = "in",
   Into = "into",
   On = "on",
-  To = "to"
+  To = "to",
+  If = "if",
+  Unless = "unless",
+  When = "when",
+  While = "while"
 }
 
 export enum AdviceArgumentRole {
@@ -998,11 +1002,29 @@ export interface CanonicalAdditionalInstructionExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalInstructionRelation {
+  kind: AdviceRelation;
+  fromActionIndex?: number;
+  toActionIndex: number;
+  text?: string;
+  span?: TextRange;
+}
+
+export interface CanonicalInstructionCoverage {
+  understoodCharacters: number;
+  opaqueCharacters: number;
+  ratio: number;
+  complete: boolean;
+}
+
 export interface CanonicalInstructionGraph {
   /** Ordered, language-neutral procedural/administration actions. */
   actions: AdviceFrame[];
+  /** Explicit temporal/conditional relationships between actions or source clauses. */
+  relations?: CanonicalInstructionRelation[];
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];
+  coverage?: CanonicalInstructionCoverage;
   /** Exact original source represented by this graph. */
   sourceText: string;
   /** Source language when it can be determined without guessing. */
