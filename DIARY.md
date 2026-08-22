@@ -2477,3 +2477,48 @@ mean latency, 58% higher throughput, and ~90% lower p99 than the pre-pass
 baseline while the grammar became more expressive. The benchmark script is
 checked in so future grammar changes can be compared on the same workload
 without flaky CI timing assertions.
+
+## 2026-08-22 Formal typed-feature HPSG substrate
+
+Follow-up formalization after the 50-case HPSG/torture checkpoint:
+
+- introduced a real typed feature-structure runtime with:
+  - declared type hierarchy and multiple inheritance
+  - inherited feature appropriateness constraints
+  - required appropriate features
+  - general graph unification
+  - atom conflict detection
+  - reentrancy / token-identity preservation
+  - canonical serialization that emits references for shared structure
+- declared the sign hierarchy (`sign`, `word-sign`, `phrase-sign`,
+  `clause-sign`, lexical sign subtypes) plus typed SYNSEM / HEAD / VALENCE /
+  CONT and medication-domain feature types
+- every lexical HPSG sign now carries a validated typed feature graph
+- phrase combination unifies daughter SYNSEM feature structures into a typed
+  clause-sign mother; the existing domain-specific SYNSEM merge remains the
+  leaf-value compatibility layer during migration
+- chart type matching now follows formal subtype inheritance rather than flat
+  string equality / clause-sign special casing
+- added dedicated tests for subtype/multiple inheritance, appropriateness,
+  general unification conflicts, reentrancy preservation, and existing
+  medication sign materialization
+
+Performance:
+- naive typed AVM construction/unification initially cost too much: mean 5.76
+  ms, p99 31.44 ms, ~174 parses/s on the 50-case benchmark
+- structural SYNSEM/sign/mother AVMs are immutable and highly repetitive, so
+  memoizing equivalent typed shapes recovered nearly all cost
+- final formal-HPSG benchmark: mean 4.06 ms, p50 3.46 ms, p95 8.78 ms, p99
+  13.08 ms, ~246 parses/s over 5000 parses
+- this is ~3% slower than the immediately preceding non-formal checkpoint but
+  still ~35% lower mean latency and ~89% lower p99 than the original baseline
+
+Validation after memoization: 709/709 source tests passing, including all 50
+real-world torture contracts and 6 formal typed-feature tests.
+
+Boundary: this is now a genuine typed-feature HPSG substrate, but not yet a
+fully declarative DELPH-IN-style grammar. Route refinement, schedule merging,
+and several domain leaf constraints still live in specialized TypeScript
+unification functions, and the semantic pivot is the medication instruction
+graph rather than MRS. Those are the next formalization targets if further HPSG
+purity produces measurable product value.

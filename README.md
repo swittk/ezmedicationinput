@@ -220,6 +220,12 @@ Highlights:
 - When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
   (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
 
+## Formal HPSG substrate
+
+The HPSG core now uses an actual typed-feature-structure runtime on the live parse path. Signs participate in a subtype hierarchy, feature appropriateness is validated, general feature unification preserves reentrancy/structure sharing, and phrase mothers unify daughter `SYNSEM` structures rather than relying only on flat TypeScript object merging. Structural AVMs are immutable and memoized because the medication grammar reuses a small number of SYNSEM shapes heavily.
+
+This is intentionally an incremental formalization rather than a claim that the entire grammar is already equivalent to a DELPH-IN grammar: domain leaf-value compatibility (for example route refinement and medication-specific schedule semantics) is still partly implemented in specialized constraint functions, and the semantic representation is the package medication instruction graph rather than MRS. The typed substrate allows those remaining constraints to migrate into declarative feature logic without rewriting the working parser.
+
 ## Adversarial real-world parsing and HPSG performance
 
 The repository includes a 50-case TH/EN adversarial corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.

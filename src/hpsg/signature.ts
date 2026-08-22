@@ -12,6 +12,8 @@ import {
   SiteCodeLookupRequest
 } from "../types";
 import { Token } from "../parser-state";
+import { signFeatureStructure } from "./feature-structure";
+import type { HpsgFeatureNode } from "./type-system";
 
 export type HpsgType =
   | "sign"
@@ -115,6 +117,8 @@ export interface HpsgSign {
   span: { start: number; end: number };
   tokens: Token[];
   synsem: HpsgSynsem;
+  /** Formal typed feature graph used by the HPSG constraint substrate. */
+  fs: HpsgFeatureNode;
   consumedTokenIndices: number[];
   siteTokenIndices?: number[];
   warnings?: string[];
@@ -171,6 +175,7 @@ export function lexicalSign(args: {
     span: { start, end },
     tokens: args.tokens,
     synsem: args.synsem,
+    fs: signFeatureStructure(args.type, args.synsem),
     consumedTokenIndices:
       args.consumedTokenIndices ?? tokenIndices,
     siteTokenIndices: args.siteTokenIndices,

@@ -10,6 +10,7 @@ import {
   HpsgInstructionFeature,
   HpsgSynsem
 } from "./signature";
+import { combineSignFeatureStructures } from "./feature-structure";
 import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
@@ -398,6 +399,10 @@ export function combineSigns(
   if (!synsem) {
     return undefined;
   }
+  const fs = combineSignFeatureStructures(left.fs, right.fs, "clause-sign");
+  if (!fs) {
+    return undefined;
+  }
   const tokenIndices = Array.from(
     new Set([...left.consumedTokenIndices, ...right.consumedTokenIndices])
   );
@@ -409,6 +414,7 @@ export function combineSigns(
     },
     tokens: [...left.tokens, ...right.tokens],
     synsem,
+    fs,
     consumedTokenIndices: tokenIndices,
     siteTokenIndices: appendUnique(left.siteTokenIndices, right.siteTokenIndices),
     warnings: appendUnique(left.warnings, right.warnings),

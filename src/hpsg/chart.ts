@@ -5,6 +5,7 @@ import {
   HpsgSign,
   HpsgType
 } from "./signature";
+import { HPSG_TYPE_SYSTEM } from "./type-system";
 
 export interface HpsgChartContext {
   tokens: Token[];
@@ -63,7 +64,7 @@ function isBetterSign(candidate: HpsgSign, best: HpsgSign | undefined): boolean 
 }
 
 function typeMatches(actual: HpsgType, expected: HpsgType | undefined): boolean {
-  return expected === undefined || actual === expected || actual === "clause-sign";
+  return expected === undefined || HPSG_TYPE_SYSTEM.isSubtype(actual, expected);
 }
 
 const CHART_KEY_CACHE = new WeakMap<HpsgSign, string>();
