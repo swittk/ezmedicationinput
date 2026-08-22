@@ -75,7 +75,14 @@
         "massage",
         "นวด"
       ],
-      "procedural": true
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "360222005",
+          "display": "Massage - action"
+        }
+      ]
     },
     {
       "code": "spread",
@@ -140,9 +147,9 @@
         "rinse",
         "rinse off",
         "wash off",
-        "ล้าง",
         "rinsing",
-        "ล้างออก"
+        "ล้างออก",
+        "ล้างด้วย"
       ],
       "procedural": true,
       "externalCodings": [
@@ -151,7 +158,10 @@
           "code": "782155003",
           "display": "Rinse"
         }
-      ]
+      ],
+      "roundtripI18n": {
+        "th": "ล้างออก"
+      }
     },
     {
       "code": "wash",
@@ -161,14 +171,21 @@
         "th": "ล้าง"
       },
       "aliases": [
-        "wash"
+        "wash",
+        "ล้าง"
       ],
       "procedural": true,
+      "primaryAdministrationHead": true,
       "externalCodings": [
         {
           "system": "http://snomed.info/sct",
           "code": "422152000",
           "display": "Wash - dosing instruction imperative"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "785900008",
+          "display": "Rinse or wash"
         }
       ]
     },
@@ -198,7 +215,14 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421682005",
+          "display": "Dissolve - dosing instruction imperative"
+        }
+      ]
     },
     {
       "code": "dilute",
@@ -211,7 +235,14 @@
         "dilute",
         "เจือจาง"
       ],
-      "procedural": true
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421399004",
+          "display": "Dilute - dosing instruction imperative"
+        }
+      ]
     },
     {
       "code": "dry",
@@ -363,7 +394,14 @@
         "crush",
         "บด"
       ],
-      "procedural": true
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "129400007",
+          "display": "Crushing - action"
+        }
+      ]
     },
     {
       "code": "chew",
@@ -376,7 +414,20 @@
         "chew",
         "เคี้ยว"
       ],
-      "procedural": true
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419747000",
+          "display": "Chew - dosing instruction imperative"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738992009",
+          "display": "Chew"
+        }
+      ],
+      "primaryAdministrationHead": true
     },
     {
       "code": "swallow",
@@ -395,8 +446,14 @@
           "system": "http://snomed.info/sct",
           "code": "738995006",
           "display": "Swallow"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421521009",
+          "display": "Swallow - dosing instruction imperative"
         }
-      ]
+      ],
+      "primaryAdministrationHead": true
     },
     {
       "code": "gargle",
@@ -411,7 +468,15 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "782168006",
+          "display": "Gargle"
+        }
+      ],
+      "primaryAdministrationHead": true
     },
     {
       "code": "swish",
@@ -426,7 +491,14 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421805007",
+          "display": "Swish - dosing instruction imperative"
+        }
+      ]
     },
     {
       "code": "spit",
@@ -530,7 +602,8 @@
         "apply again",
         "ทาซ้ำ"
       ],
-      "procedural": true
+      "procedural": true,
+      "primaryAdministrationHead": true
     },
     {
       "code": "shampoo",
@@ -543,7 +616,8 @@
         "shampoo",
         "สระ"
       ],
-      "procedural": true
+      "procedural": true,
+      "primaryAdministrationHead": true
     },
     {
       "code": "soak",
@@ -591,6 +665,11 @@
           "system": "http://snomed.info/sct",
           "code": "738991002",
           "display": "Apply"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "417924000",
+          "display": "Apply - dosing instruction imperative"
         }
       ],
       "acceptsAmount": true,
@@ -625,7 +704,14 @@
       ],
       "procedural": false,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419652001",
+          "display": "Take - dosing instruction imperative"
+        }
+      ]
     },
     {
       "code": "drink",
@@ -659,6 +745,11 @@
           "system": "http://snomed.info/sct",
           "code": "738994005",
           "display": "Instill"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421538008",
+          "display": "Instill - dosing instruction imperative"
         }
       ],
       "acceptsAmount": true,
@@ -703,6 +794,11 @@
           "system": "http://snomed.info/sct",
           "code": "740666001",
           "display": "Inhale"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421134003",
+          "display": "Inhale - dosing instruction imperative"
         }
       ],
       "acceptsAmount": true,
@@ -725,6 +821,11 @@
           "system": "http://snomed.info/sct",
           "code": "740685003",
           "display": "Inject"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "422145002",
+          "display": "Inject - dosing instruction imperative"
         }
       ],
       "acceptsAmount": true,
@@ -747,6 +848,11 @@
           "system": "http://snomed.info/sct",
           "code": "738993004",
           "display": "Insert"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421257003",
+          "display": "Insert - dosing instruction imperative"
         }
       ],
       "acceptsAmount": true,
@@ -761,7 +867,14 @@
       ],
       "procedural": false,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "764794000",
+          "display": "Infuse"
+        }
+      ]
     },
     {
       "code": "give",
@@ -776,7 +889,14 @@
       ],
       "procedural": false,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419582001",
+          "display": "Give - dosing instruction imperative"
+        }
+      ]
     },
     {
       "code": "part",
@@ -1031,6 +1151,11 @@
           "system": "http://snomed.info/sct",
           "code": "738991002",
           "display": "Apply"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "417924000",
+          "display": "Apply - dosing instruction imperative"
         }
       ]
     },

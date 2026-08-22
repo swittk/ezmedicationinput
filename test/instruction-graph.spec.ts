@@ -263,10 +263,10 @@ describe("procedural instruction graph", () => {
     ]);
     expect(graph?.coverage).toMatchObject({
       understoodCharacters: 8,
-      opaqueCharacters: 20,
-      complete: false
+      opaqueCharacters: 0,
+      complete: true
     });
-    expect(graph?.coverage?.ratio).toBeCloseTo(0.2857, 4);
+    expect(graph?.coverage?.ratio).toBe(1);
     expect(realizeInstructionGraph(graph!, "en")).toBe("if irritation occurs, stop use");
 
     const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;

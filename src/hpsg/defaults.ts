@@ -52,7 +52,7 @@ function applyRouteDefault(
     deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
     return;
   }
-  if (state.methodCoding?.code === "785900008" && state.siteText) {
+  if (["785900008", "782155003"].indexOf(state.methodCoding?.code ?? "") >= 0 && state.siteText) {
     const siteDefinition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(state.siteText)];
     if (siteDefinition?.routeHint === RouteCode["Topical route"]) {
       deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);

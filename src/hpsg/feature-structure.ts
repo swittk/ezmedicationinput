@@ -26,6 +26,10 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.valence.prn ? "P" : "",
     synsem.valence.instructions?.length ? "I" : "",
     synsem.valence.patientInstruction ? "U" : "",
+    synsem.cont.condition ? "C" : "",
+    synsem.cont.scopedAdministrations?.length ? "X" : "",
+    synsem.cont.scopeClosed ? "K" : "",
+    synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
 }
@@ -58,15 +62,26 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
   if (instructions) valenceFeatures.INSTRUCTIONS = instructions;
   if (patientInstruction) valenceFeatures.PATIENT_INSTRUCTION = patientInstruction;
 
-  const contentFeatures: Record<string, ReturnType<typeof featureAtom>> = {};
+  const contentFeatures: Record<string, HpsgFeatureNode | ReturnType<typeof featureAtom>> = {};
   if (synsem.cont.clauseKind) {
     contentFeatures.CLAUSE_KIND = featureAtom(synsem.cont.clauseKind);
+  }
+  if (synsem.cont.condition) contentFeatures.CONDITION = featureNode("condition-feature");
+  if (synsem.cont.scopedAdministrations?.length) {
+    contentFeatures.SCOPED_ADMINISTRATION = featureNode("scoped-administration-feature");
+  }
+  if (synsem.cont.scopeClosed) contentFeatures.SCOPE_CLOSED = featureAtom(true, "boolean");
+
+  const nonlocalFeatures: Record<string, HpsgFeatureNode> = {};
+  if (synsem.nonlocal?.scopeRequirements?.length) {
+    nonlocalFeatures.SCOPE_REQUIREMENT = featureNode("scope-requirement-feature");
   }
 
   const result = featureNode("synsem", {
     HEAD: featureNode("head", headFeatures),
     VALENCE: featureNode("valence", valenceFeatures),
-    CONT: featureNode("content", contentFeatures)
+    CONT: featureNode("content", contentFeatures),
+    NONLOC: featureNode("nonlocal", nonlocalFeatures)
   });
   SYNSEM_CACHE.set(cacheKey, result);
   return result;
@@ -89,7 +104,8 @@ export function combineSignFeatureStructures(
   left: HpsgFeatureNode,
   right: HpsgFeatureNode,
   motherType: HpsgType,
-  headSide?: "left" | "right"
+  headSide?: "left" | "right",
+  synsemOverride?: HpsgSynsem
 ): HpsgFeatureNode | undefined {
   let byRight = COMBINE_CACHE.get(left);
   if (!byRight) {
@@ -101,7 +117,7 @@ export function combineSignFeatureStructures(
     byType = new Map();
     byRight.set(right, byType);
   }
-  const cacheType = `${motherType}|${headSide ?? "none"}`;
+  const cacheType = `${motherType}|${headSide ?? "none"}|${synsemOverride ? synsemShapeKey(synsemOverride) : "unify"}`;
   if (byType.has(cacheType)) return byType.get(cacheType) ?? undefined;
   const leftSynsem = left.features.SYNSEM;
   const rightSynsem = right.features.SYNSEM;
@@ -109,13 +125,19 @@ export function combineSignFeatureStructures(
     byType.set(cacheType, null);
     return undefined;
   }
-  const unified = unifyFeatureStructures(leftSynsem, rightSynsem, HPSG_TYPE_SYSTEM);
-  if (!unified.value || unified.value.kind !== "node") {
-    byType.set(cacheType, null);
-    return undefined;
+  let motherSynsem: HpsgFeatureNode;
+  if (synsemOverride) {
+    motherSynsem = synsemFeatureStructure(synsemOverride);
+  } else {
+    const unified = unifyFeatureStructures(leftSynsem, rightSynsem, HPSG_TYPE_SYSTEM);
+    if (!unified.value || unified.value.kind !== "node") {
+      byType.set(cacheType, null);
+      return undefined;
+    }
+    motherSynsem = unified.value;
   }
   const motherFeatures: Record<string, HpsgFeatureNode> = {
-    SYNSEM: unified.value,
+    SYNSEM: motherSynsem,
     LEFT_DTR: left,
     RIGHT_DTR: right
   };

@@ -29,8 +29,10 @@ interface ActionSource {
   semanticClass: string;
   display: string;
   i18n?: Record<string, string>;
+  roundtripI18n?: Record<string, string>;
   aliases?: string[];
   procedural?: boolean;
+  primaryAdministrationHead?: boolean;
   acceptsAmount?: boolean;
   definesDose?: boolean;
   externalCodings?: FhirCoding[];
@@ -81,8 +83,10 @@ function cloneDefinition(
     semanticClass: definition.semanticClass,
     display: definition.display,
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
+    roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     procedural: definition.procedural,
+    primaryAdministrationHead: definition.primaryAdministrationHead,
     acceptsAmount: definition.acceptsAmount,
     definesDose: definition.definesDose,
     coding: cloneCoding(definition.coding),
@@ -96,8 +100,10 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     semanticClass: sourceDefinition.semanticClass,
     display: sourceDefinition.display,
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
+    roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     procedural: sourceDefinition.procedural,
+    primaryAdministrationHead: sourceDefinition.primaryAdministrationHead,
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
@@ -115,8 +121,10 @@ function normalizeCustomDefinition(
     semanticClass: input.semanticClass?.trim() || "procedure",
     display: input.display?.trim() || surface.trim() || code,
     i18n: input.i18n ? { ...input.i18n } : undefined,
+    roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     procedural: input.procedural ?? true,
+    primaryAdministrationHead: input.primaryAdministrationHead,
     acceptsAmount: input.acceptsAmount,
     definesDose: input.definesDose,
     coding: cloneCoding(input.coding),

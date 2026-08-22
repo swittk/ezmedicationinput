@@ -781,10 +781,14 @@ export interface MedicationInstructionActionDefinition {
   display: string;
   /** Alternate human-readable labels keyed by BCP-47-ish language tag. */
   i18n?: Record<string, string>;
+  /** Unambiguous parser-safe labels used only for semantic round-trip realization. */
+  roundtripI18n?: Record<string, string>;
   /** Surface forms that should resolve to this action. */
   aliases?: string[];
   /** Whether this is a procedural action rather than ordinary administration advice. */
   procedural?: boolean;
+  /** A method-capable procedural action that may serve as the primary administration head. */
+  primaryAdministrationHead?: boolean;
   acceptsAmount?: boolean;
   /** Whether an amount argument on this action defines the medication dose. */
   definesDose?: boolean;

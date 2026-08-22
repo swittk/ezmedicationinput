@@ -190,6 +190,31 @@ function buildClauseConfidence(internal: ParserState, leftovers: CanonicalSource
   return clampConfidence(confidence);
 }
 
+export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigClause): boolean {
+  const schedule = clause.schedule;
+  const hasSchedule = Boolean(schedule && (
+    schedule.frequency !== undefined ||
+    schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined ||
+    schedule.periodMax !== undefined ||
+    schedule.duration !== undefined ||
+    schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined ||
+    schedule.count !== undefined ||
+    schedule.timingCode ||
+    schedule.dayOfWeek?.length ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+  return Boolean(
+    clause.method?.coding?.code || clause.method?.text ||
+    clause.route?.code || clause.route?.text ||
+    clause.site?.coding?.code || clause.site?.text ||
+    clause.dose?.value !== undefined || clause.dose?.range || clause.dose?.unit ||
+    clause.prn?.enabled || hasSchedule
+  );
+}
+
 export function buildCanonicalSigClauses(
   internal: ParserState
 ): CanonicalSigClause[] {

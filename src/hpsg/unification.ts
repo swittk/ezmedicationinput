@@ -8,6 +8,8 @@ import {
   HpsgPrnFeature,
   HpsgPatientInstructionFeature,
   HpsgInstructionFeature,
+  HpsgConditionFeature,
+  HpsgScopedAdministrationFeature,
   HpsgSynsem
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
@@ -80,15 +82,32 @@ function mergeMethod(
 ): HpsgMethodFeature | undefined {
   if (!left) return right;
   if (!right) return left;
-  if (left.verb !== right.verb) {
-    return undefined;
-  }
+  const leftClass = left.headClass ?? "administration";
+  const rightClass = right.headClass ?? "administration";
+  if (leftClass !== rightClass) return leftClass === "administration" ? left : right;
+  if (left.verb !== right.verb) return undefined;
+  const preferred = (right.text?.length ?? 0) > (left.text?.length ?? 0) ? right : left;
+  const other = preferred === left ? right : left;
   return {
     verb: left.verb,
-    text: mergeOptionalScalar(left.text, right.text),
-    textElement: mergeOptionalScalar(left.textElement, right.textElement),
-    coding: mergeOptionalScalar(left.coding, right.coding)
+    headClass: leftClass,
+    text: preferred.text ?? other.text,
+    textElement: preferred.textElement ?? other.textElement,
+    coding: preferred.coding ?? other.coding
   };
+}
+
+type AttachmentClass = "administration" | "procedure";
+
+function attachmentClass(value: AttachmentClass | undefined): AttachmentClass {
+  return value ?? "administration";
+}
+
+function preferredAttachment<T extends { attachmentClass?: AttachmentClass }>(left: T, right: T): T | undefined {
+  const leftClass = attachmentClass(left.attachmentClass);
+  const rightClass = attachmentClass(right.attachmentClass);
+  if (leftClass === rightClass) return undefined;
+  return leftClass === "administration" ? left : right;
 }
 
 function mergeRoute(
@@ -98,17 +117,21 @@ function mergeRoute(
 ): HpsgRouteFeature | undefined {
   if (!left) return right;
   if (!right) return left;
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return preferred;
+  const mergedClass = attachmentClass(left.attachmentClass);
   if (left.code === right.code) {
     return {
       code: left.code,
+      attachmentClass: mergedClass,
       text: mergeOptionalScalar(left.text, right.text)
     };
   }
   if (context.isCompatibleRouteRefinement(left.code, right.code)) {
-    return { code: right.code, text: right.text };
+    return { code: right.code, attachmentClass: mergedClass, text: right.text };
   }
   if (context.isCompatibleRouteRefinement(right.code, left.code)) {
-    return { code: left.code, text: left.text };
+    return { code: left.code, attachmentClass: mergedClass, text: left.text };
   }
   return undefined;
 }
@@ -120,6 +143,9 @@ function mergeSite(
 ): HpsgSiteFeature | undefined {
   if (!left) return right;
   if (!right) return left;
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return preferred;
+  const mergedClass = attachmentClass(left.attachmentClass);
   if (
     left.text &&
     right.text &&
@@ -138,6 +164,7 @@ function mergeSite(
     return undefined;
   }
   return {
+    attachmentClass: mergedClass,
     text: mergeOptionalScalar(left.text, right.text),
     i18n: mergeI18nRecords(left.i18n, right.i18n),
     source: mergeOptionalScalar(left.source, right.source),
@@ -266,6 +293,9 @@ function mergeDose(
 ): HpsgDoseFeature | undefined {
   if (!left) return right;
   if (!right) return left;
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return preferred;
+  const mergedClass = attachmentClass(left.attachmentClass);
   if (!sameOptionalScalar(left.value, right.value)) {
     return undefined;
   }
@@ -280,6 +310,7 @@ function mergeDose(
     return undefined;
   }
   return {
+    attachmentClass: mergedClass,
     value: mergeOptionalScalar(left.value, right.value),
     range: mergeOptionalScalar(left.range, right.range),
     unit: mergeOptionalScalar(left.unit, right.unit)
@@ -307,6 +338,9 @@ function mergeSchedule(
 ): HpsgScheduleFeature | undefined {
   if (!left) return right;
   if (!right) return left;
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return preferred;
+  const mergedClass = attachmentClass(left.attachmentClass);
   if (
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
     !sameOptionalScalar(left.count, right.count) ||
@@ -322,6 +356,7 @@ function mergeSchedule(
     return undefined;
   }
   return {
+    attachmentClass: mergedClass,
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     count: mergeOptionalScalar(left.count, right.count),
     duration: mergeOptionalScalar(left.duration, right.duration),
@@ -335,6 +370,104 @@ function mergeSchedule(
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay)
+  };
+}
+
+function sameCondition(left: HpsgConditionFeature | undefined, right: HpsgConditionFeature | undefined): boolean {
+  if (!left || !right) return left === right;
+  return left.relation === right.relation &&
+    left.sourceStart === right.sourceStart && left.sourceEnd === right.sourceEnd &&
+    left.targetStart === right.targetStart && left.targetEnd === right.targetEnd;
+}
+
+function mergeCondition(
+  left: HpsgConditionFeature | undefined,
+  right: HpsgConditionFeature | undefined
+): HpsgConditionFeature | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return sameCondition(left, right) ? left : undefined;
+}
+
+function mergeScopedAdministrations(
+  left: HpsgScopedAdministrationFeature[] | undefined,
+  right: HpsgScopedAdministrationFeature[] | undefined
+): HpsgScopedAdministrationFeature[] | undefined {
+  const result: HpsgScopedAdministrationFeature[] = [];
+  for (const value of [...(left ?? []), ...(right ?? [])]) {
+    if (!result.some((candidate) => sameCondition(candidate.condition, value.condition))) result.push(value);
+  }
+  return result.length ? result : undefined;
+}
+
+function mergeScopeRequirements(
+  left: HpsgConditionFeature[] | undefined,
+  right: HpsgConditionFeature[] | undefined
+): HpsgConditionFeature[] | undefined {
+  const result: HpsgConditionFeature[] = [];
+  for (const value of [...(left ?? []), ...(right ?? [])]) {
+    if (!result.some((candidate) => sameCondition(candidate, value))) result.push(value);
+  }
+  return result.length ? result : undefined;
+}
+
+function normalizedInstruction(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+function scopedInstruction(
+  condition: HpsgConditionFeature,
+  target: HpsgSynsem
+): HpsgInstructionFeature[] | undefined {
+  if (!condition.safety) return target.valence.instructions;
+  const full = normalizedInstruction(condition.fullText);
+  const targetInstructions = (target.valence.instructions ?? []).filter((instruction) => {
+    const candidate = normalizedInstruction(instruction.text);
+    return !candidate || !full.includes(candidate);
+  });
+  return mergeInstructions(
+    [{ text: condition.fullText, frames: condition.frames }],
+    targetInstructions
+  );
+}
+
+function scopeSynsem(conditionSign: HpsgSign, targetSign: HpsgSign): HpsgSynsem | undefined {
+  const condition = conditionSign.synsem.cont.condition;
+  if (!condition) return undefined;
+  const target = targetSign.synsem;
+  const targetRequirements = target.nonlocal?.scopeRequirements ?? [];
+  if (!targetRequirements.some((requirement) => sameCondition(requirement, condition))) return undefined;
+  const remainingRequirements = targetRequirements.filter((requirement) => !sameCondition(requirement, condition));
+  const scoped: HpsgScopedAdministrationFeature = {
+    condition,
+    head: { ...target.head },
+    site: target.valence.site,
+    prn: target.valence.prn,
+    instructions: target.valence.instructions,
+    patientInstruction: target.valence.patientInstruction
+  };
+  const existingScopes = mergeScopedAdministrations(
+    conditionSign.synsem.cont.scopedAdministrations,
+    target.cont.scopedAdministrations
+  );
+  const scopes = mergeScopedAdministrations(existingScopes, [scoped]);
+  return {
+    head: {},
+    valence: {
+      instructions: scopedInstruction(condition, target),
+      patientInstruction: condition.safety ? target.valence.patientInstruction : { text: condition.fullText }
+    },
+    cont: {
+      clauseKind: conditionSign.synsem.cont.clauseKind ?? target.cont.clauseKind,
+      scopedAdministrations: scopes,
+      scopeClosed: true
+    },
+    nonlocal: {
+      scopeRequirements: mergeScopeRequirements(
+        conditionSign.synsem.nonlocal?.scopeRequirements,
+        remainingRequirements
+      )
+    }
   };
 }
 
@@ -367,6 +500,8 @@ export function unifySynsem(
   if (prn === undefined && left.valence.prn && right.valence.prn) {
     return undefined;
   }
+  const condition = mergeCondition(left.cont.condition, right.cont.condition);
+  if (condition === undefined && left.cont.condition && right.cont.condition) return undefined;
 
   return {
     head: {
@@ -385,7 +520,19 @@ export function unifySynsem(
       )
     },
     cont: {
-      clauseKind: left.cont.clauseKind ?? right.cont.clauseKind
+      clauseKind: left.cont.clauseKind ?? right.cont.clauseKind,
+      condition,
+      scopedAdministrations: mergeScopedAdministrations(
+        left.cont.scopedAdministrations,
+        right.cont.scopedAdministrations
+      ),
+      scopeClosed: left.cont.scopeClosed || right.cont.scopeClosed ? true : undefined
+    },
+    nonlocal: {
+      scopeRequirements: mergeScopeRequirements(
+        left.nonlocal?.scopeRequirements,
+        right.nonlocal?.scopeRequirements
+      )
     }
   };
 }
@@ -396,16 +543,20 @@ export function combineSigns(
   context: HpsgUnificationContext,
   rule: string
 ): HpsgSign | undefined {
-  const synsem = unifySynsem(left.synsem, right.synsem, context);
-  if (!synsem) {
-    return undefined;
-  }
   const selectedConstruction = selectHpsgConstruction(left, right);
+  if (!selectedConstruction) return undefined;
+  const target = selectedConstruction.construction.headSide === "left" ? left : right;
+  const condition = selectedConstruction.construction.headSide === "left" ? right : left;
+  const synsem = selectedConstruction.construction.operation === "scope"
+    ? scopeSynsem(condition, target)
+    : unifySynsem(left.synsem, right.synsem, context);
+  if (!synsem) return undefined;
   const fs = combineSignFeatureStructures(
     left.fs,
     right.fs,
     selectedConstruction.motherType,
-    selectedConstruction.construction.headSide
+    selectedConstruction.construction.headSide,
+    selectedConstruction.construction.operation === "scope" ? synsem : undefined
   );
   if (!fs) {
     return undefined;

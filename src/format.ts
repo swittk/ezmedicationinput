@@ -1,4 +1,4 @@
-import { buildCanonicalSigClauses } from "./ir";
+import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
   combineLocalizedFrequencyAndEvents,
@@ -9,12 +9,14 @@ import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
 import {
   instructionGraphHasNovelNonWarningContent,
+  instructionGraphPrimaryAdministrationModality,
   instructionGraphRepresentsText,
   realizeInstructionGraph
 } from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
+  AdviceModality,
   AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
@@ -949,17 +951,34 @@ function formatShort(clause: CanonicalSigClause): string {
   return parts.filter(Boolean).join(" ");
 }
 
+const ENGLISH_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "May",
+  [AdviceModality.Can]: "Can",
+  [AdviceModality.Might]: "Might",
+  [AdviceModality.Could]: "Could",
+  [AdviceModality.Should]: "Should",
+  [AdviceModality.Must]: "Must"
+};
+
+function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigClause): string {
+  const modality = instructionGraphPrimaryAdministrationModality(clause);
+  const prefix = modality ? ENGLISH_MODALITY_PREFIX[modality] : undefined;
+  if (!prefix) return verb;
+  return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+}
+
 function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
-  const verb = resolveMethodVerb(clause, grammar);
+  const baseVerb = resolveMethodVerb(clause, grammar);
+  const verb = applyEnglishAdministrationModality(baseVerb, clause);
   const explicitDosePart = formatDoseLong(clause.dose);
   const dosePart = explicitDosePart ?? (
     shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
   );
   const sitePart = formatSite(clause, grammar);
   const roundTrip = options?.realizationMode === "roundtrip";
-  let routePart = shouldSuppressRoutePhrase(clause, grammar, verb)
+  let routePart = shouldSuppressRoutePhrase(clause, grammar, baseVerb)
     ? undefined
     : buildRoutePhrase(clause, grammar, Boolean(sitePart));
   if (roundTrip && clause.route?.code) {
@@ -1099,6 +1118,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
           includeWarnings: true,
           omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts
         })
       : undefined;
@@ -1113,6 +1133,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
           onlyWarnings: true,
           omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts
         })
       : undefined;
@@ -1132,6 +1153,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
         includeWarnings: true,
         omitCanonicalAdministration: clause,
         preferSourceText: true,
+        roundtripSafe: true,
         omitSourceTexts: additionalSemanticSourceTexts,
         position: "pre"
       })
@@ -1144,6 +1166,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
         includeWarnings: true,
         omitCanonicalAdministration: clause,
         preferSourceText: true,
+        roundtripSafe: true,
         omitSourceTexts: postGraphOmissions,
         position: "post"
       })
@@ -1155,6 +1178,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
           includeWarnings: false,
           omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts
         })
       : undefined
@@ -1164,6 +1188,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   );
   if (patientInstruction) instructionPhrases.push(patientInstruction);
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
+  if (!canonicalClauseHasAdministrationSemantics(clause) && trailingInstructionText) {
+    return trailingInstructionText;
+  }
   const leadingInstructionText = preGraphInstruction
     ? formatPatientInstructionSentence(preGraphInstruction)
     : undefined;

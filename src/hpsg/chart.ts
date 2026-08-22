@@ -44,6 +44,9 @@ function isBetterSign(candidate: HpsgSign, best: HpsgSign | undefined): boolean 
   if (!best) {
     return true;
   }
+  const candidateScopes = candidate.synsem.nonlocal?.scopeRequirements?.length ?? 0;
+  const bestScopes = best.synsem.nonlocal?.scopeRequirements?.length ?? 0;
+  if (candidateScopes !== bestScopes) return candidateScopes < bestScopes;
   if (candidate.consumedTokenIndices.length !== best.consumedTokenIndices.length) {
     return candidate.consumedTokenIndices.length > best.consumedTokenIndices.length;
   }
@@ -92,6 +95,9 @@ function canCombine(rule: HpsgPhraseRule<HpsgChartContext>, left: HpsgSign, righ
 }
 
 function isBetterDerivation(candidate: HpsgSign, existing: HpsgSign): boolean {
+  const candidateScopes = candidate.synsem.nonlocal?.scopeRequirements?.length ?? 0;
+  const existingScopes = existing.synsem.nonlocal?.scopeRequirements?.length ?? 0;
+  if (candidateScopes !== existingScopes) return candidateScopes < existingScopes;
   if (candidate.consumedTokenIndices.length !== existing.consumedTokenIndices.length) {
     return candidate.consumedTokenIndices.length > existing.consumedTokenIndices.length;
   }

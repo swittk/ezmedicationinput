@@ -6,12 +6,16 @@ const SNOMED_SYSTEM = "http://snomed.info/sct";
 export enum MethodAction {
   Administer = "administer",
   Apply = "apply",
+  Chew = "chew",
+  Gargle = "gargle",
   Inhale = "inhale",
   Inject = "inject",
   Insert = "insert",
   Instill = "instill",
   Spray = "spray",
   Swallow = "swallow",
+  Infuse = "infuse",
+  Rinse = "rinse",
   Wash = "wash"
 }
 
@@ -20,16 +24,19 @@ export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
   give: MethodAction.Administer,
   apply: MethodAction.Apply,
   apply_patch: MethodAction.Apply,
+  chew: MethodAction.Chew,
   dab: MethodAction.Apply,
   drink: MethodAction.Swallow,
+  gargle: MethodAction.Gargle,
   inhale: MethodAction.Inhale,
   inject: MethodAction.Inject,
+  infuse: MethodAction.Infuse,
   insert: MethodAction.Insert,
   instill: MethodAction.Instill,
   lather: MethodAction.Wash,
   massage: MethodAction.Apply,
   reapply: MethodAction.Apply,
-  rinse: MethodAction.Wash,
+  rinse: MethodAction.Rinse,
   rub: MethodAction.Apply,
   shampoo: MethodAction.Wash,
   spray: MethodAction.Spray,
@@ -52,6 +59,16 @@ export const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
     code: "738991002",
     display: "Apply",
     _display: buildTranslationPrimitiveElement({ th: "ทา" })
+  },
+  [MethodAction.Chew]: {
+    system: SNOMED_SYSTEM,
+    code: "738992009",
+    display: "Chew"
+  },
+  [MethodAction.Gargle]: {
+    system: SNOMED_SYSTEM,
+    code: "782168006",
+    display: "Gargle"
   },
   [MethodAction.Inhale]: {
     system: SNOMED_SYSTEM,
@@ -88,6 +105,17 @@ export const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
     code: "738995006",
     display: "Swallow",
     _display: buildTranslationPrimitiveElement({ th: "รับประทาน" })
+  },
+  [MethodAction.Infuse]: {
+    system: SNOMED_SYSTEM,
+    code: "764794000",
+    display: "Infuse"
+  },
+  [MethodAction.Rinse]: {
+    system: SNOMED_SYSTEM,
+    code: "782155003",
+    display: "Rinse",
+    _display: buildTranslationPrimitiveElement({ th: "ล้าง" })
   },
   [MethodAction.Wash]: {
     system: SNOMED_SYSTEM,

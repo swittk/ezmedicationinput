@@ -1,4 +1,6 @@
 import {
+  AdviceFrame,
+  AdviceRelation,
   CanonicalDoseRange,
   CanonicalAdditionalInstructionExpr,
   BodySiteSpatialRelation,
@@ -54,8 +56,11 @@ export type HpsgConstructionKind =
   | "administration-clause"
   | "generic";
 
+export type HpsgConstructionOperation = "unify" | "scope";
+
 export interface HpsgConstruction {
   kind: HpsgConstructionKind;
+  operation?: HpsgConstructionOperation;
   headSide?: "left" | "right";
   leftType: HpsgType;
   rightType: HpsgType;
@@ -64,6 +69,7 @@ export interface HpsgConstruction {
 
 export interface HpsgMethodFeature {
   verb: string;
+  headClass?: "administration" | "procedure";
   text?: string;
   textElement?: FhirPrimitiveElement;
   coding?: FhirCoding;
@@ -71,10 +77,12 @@ export interface HpsgMethodFeature {
 
 export interface HpsgRouteFeature {
   code: RouteCode;
+  attachmentClass?: "administration" | "procedure";
   text?: string;
 }
 
 export interface HpsgSiteFeature {
+  attachmentClass?: "administration" | "procedure";
   text?: string;
   i18n?: Record<string, string>;
   source?: "abbreviation" | "text" | "selection" | "resolver";
@@ -100,13 +108,36 @@ export interface HpsgPatientInstructionFeature {
   text: string;
 }
 
+export interface HpsgConditionFeature {
+  relation: AdviceRelation;
+  text: string;
+  fullText: string;
+  sourceStart: number;
+  sourceEnd: number;
+  targetStart: number;
+  targetEnd: number;
+  safety: boolean;
+  frames: AdviceFrame[];
+}
+
+export interface HpsgScopedAdministrationFeature {
+  condition: HpsgConditionFeature;
+  head: HpsgSynsem["head"];
+  site?: HpsgSiteFeature;
+  prn?: HpsgPrnFeature;
+  instructions?: HpsgInstructionFeature[];
+  patientInstruction?: HpsgPatientInstructionFeature;
+}
+
 export interface HpsgDoseFeature {
+  attachmentClass?: "administration" | "procedure";
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
 }
 
 export interface HpsgScheduleFeature {
+  attachmentClass?: "administration" | "procedure";
   timingCode?: string;
   count?: number;
   duration?: number;
@@ -137,6 +168,12 @@ export interface HpsgSynsem {
   };
   cont: {
     clauseKind?: "administration";
+    condition?: HpsgConditionFeature;
+    scopedAdministrations?: HpsgScopedAdministrationFeature[];
+    scopeClosed?: true;
+  };
+  nonlocal?: {
+    scopeRequirements?: HpsgConditionFeature[];
   };
 }
 
@@ -178,7 +215,8 @@ export function emptySynsem(): HpsgSynsem {
   return {
     head: {},
     valence: {},
-    cont: {}
+    cont: {},
+    nonlocal: {}
   };
 }
 

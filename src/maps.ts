@@ -1691,6 +1691,7 @@ export interface ProductFormHint {
 }
 
 export const PRODUCT_FORM_HINTS: Record<string, ProductFormHint> = {
+  patch: { routeHint: RouteCode["Transdermal route"] },
   cream: { routeHint: RouteCode["Topical route"] },
   ointment: { routeHint: RouteCode["Topical route"] },
   gel: { routeHint: RouteCode["Topical route"] },

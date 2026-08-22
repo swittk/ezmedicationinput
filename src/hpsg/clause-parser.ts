@@ -1,7 +1,7 @@
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
-import { sourceRangeIsInsideLeadingConditionalProgram } from "./conditional-context";
+import { signFeatureStructure } from "./feature-structure";
 import { combineSigns } from "./unification";
 import {
   compactIntervalRule,
@@ -18,14 +18,16 @@ import {
 } from "./rules/timing-rules";
 import { prnLexicalRule, symptomAdjustmentLexicalRule } from "./rules/prn-rules";
 import {
-  conditionalAdviceLexicalRule,
   instructionLexicalRule,
   proceduralActionLexicalRule,
   workflowLexicalRule
 } from "./rules/instruction-rules";
+import { conditionLexicalRule, getConditionFeatures } from "./rules/condition-rules";
+import { sourceRangeAttachmentClass } from "./procedural-context";
 import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
   connectorLexicalRule,
+  directiveMarkerLexicalRule,
   doseLexicalRule,
   fillerLexicalRule,
   methodLexicalRule,
@@ -34,27 +36,47 @@ import {
 } from "./rules/core-rules";
 import { HpsgClauseContext } from "./rule-context";
 
-const CONDITIONAL_LOCAL_SIGN_TYPES = new Set([
-  "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign"
-]);
-
-function conditionalScopeAware(
+function withScopeRequirements(
   rule: HpsgLexicalRule<HpsgClauseContext>
 ): HpsgLexicalRule<HpsgClauseContext> {
   return {
-    ...rule,
+    id: rule.id,
+    type: rule.type,
     match(context, start) {
-      return rule.match(context, start).filter((sign) => {
-        const firstToken = sign.tokens[0];
-        const lastToken = sign.tokens[sign.tokens.length - 1];
-        const insideConditional = firstToken && lastToken
-          ? sourceRangeIsInsideLeadingConditionalProgram(
-              context,
-              firstToken.sourceStart,
-              lastToken.sourceEnd
-            )
-          : false;
-        return !(CONDITIONAL_LOCAL_SIGN_TYPES.has(sign.type) && insideConditional);
+      const conditions = getConditionFeatures(context);
+      return rule.match(context, start).map((sign) => {
+        if (!sign.tokens.length || sign.type === "conditional-sign") return sign;
+        const sourceStart = Math.min(...sign.tokens.map((item) => item.sourceStart));
+        const sourceEnd = Math.max(...sign.tokens.map((item) => item.sourceEnd));
+        const requirements = conditions.filter((condition) =>
+          sourceStart >= condition.targetStart && sourceEnd <= condition.targetEnd
+        );
+        const existing = sign.synsem.nonlocal?.scopeRequirements ?? [];
+        const merged = [...existing];
+        for (const requirement of requirements) {
+          if (!merged.some((candidate) =>
+            candidate.sourceStart === requirement.sourceStart &&
+            candidate.sourceEnd === requirement.sourceEnd &&
+            candidate.targetStart === requirement.targetStart &&
+            candidate.targetEnd === requirement.targetEnd
+          )) merged.push(requirement);
+        }
+        const attachmentClass = sourceRangeAttachmentClass(context, sourceStart, sourceEnd);
+        const synsem = {
+          ...sign.synsem,
+          head: {
+            ...sign.synsem.head,
+            route: sign.synsem.head.route ? { ...sign.synsem.head.route, attachmentClass } : undefined,
+            dose: sign.synsem.head.dose ? { ...sign.synsem.head.dose, attachmentClass } : undefined,
+            schedule: sign.synsem.head.schedule ? { ...sign.synsem.head.schedule, attachmentClass } : undefined
+          },
+          valence: {
+            ...sign.synsem.valence,
+            site: sign.synsem.valence.site ? { ...sign.synsem.valence.site, attachmentClass } : undefined
+          },
+          nonlocal: { ...sign.synsem.nonlocal, scopeRequirements: merged }
+        };
+        return { ...sign, synsem, fs: signFeatureStructure(sign.type, synsem) };
       });
     }
   };
@@ -68,6 +90,9 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
   };
   return {
     lexicalRules: [
+      conditionLexicalRule(),
+      ...[
+      directiveMarkerLexicalRule(),
       methodLexicalRule(),
       routeLexicalRule(),
       productLexicalRule(),
@@ -83,7 +108,6 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       timingLexicalRule(),
       countAndDurationRule(),
       timeOfDayRule(),
-      conditionalAdviceLexicalRule(),
       symptomAdjustmentLexicalRule(),
       prnLexicalRule(),
       proceduralActionLexicalRule(),
@@ -93,13 +117,14 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       bareSiteLexicalRule(),
       fillerLexicalRule(),
       connectorLexicalRule()
-    ].map(conditionalScopeAware),
+      ].map(withScopeRequirements)
+    ],
     phraseRules: [combineRule]
   };
 }
 
 function hasUsefulAnalysis(sign: HpsgSign | undefined): sign is HpsgSign {
-  if (!sign) {
+  if (!sign || sign.synsem.nonlocal?.scopeRequirements?.length) {
     return false;
   }
   const { head, valence } = sign.synsem;

@@ -20,6 +20,7 @@ export {
   applySiteCodingAsync
 } from "./site-coding";
 import {
+  AdvicePolarity,
   BodySiteDefinition,
   CanonicalSigClause,
   EventTiming,
@@ -309,6 +310,43 @@ function cleanupClause(state: ParserState): void {
   }
 }
 
+function normalizedSafetyText(value: string): string {
+  return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+function promoteGraphWarningsToAdditionalInstructions(clause: CanonicalSigClause): void {
+  const warnings = clause.instructionGraph?.actions.filter((frame) =>
+    frame.polarity === AdvicePolarity.Negate && Boolean(frame.sourceText.trim())
+  ) ?? [];
+  if (!warnings.length) return;
+  const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
+  for (const warning of warnings) {
+    const text = warning.sourceText.trim();
+    const normalized = normalizedSafetyText(text);
+    if (!normalized) continue;
+    const alreadyRepresentedByFrame = instructions.some((instruction) =>
+      instruction.frames?.some((frame) =>
+        frame.span.start === warning.span.start &&
+        frame.span.end === warning.span.end &&
+        frame.polarity === warning.polarity
+      )
+    );
+    if (alreadyRepresentedByFrame) continue;
+    const overlapIndex = instructions.findIndex((instruction) => {
+      const existing = normalizedSafetyText(instruction.text ?? "");
+      return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
+    });
+    if (overlapIndex >= 0) {
+      const existing = instructions[overlapIndex];
+      if (normalizedSafetyText(existing.text ?? "").length < normalized.length) {
+        instructions[overlapIndex] = { ...existing, text };
+      }
+      continue;
+    }
+    instructions.push({ text, frames: [warning] });
+  }
+}
+
 function finalizeClause(state: ParserState, options?: ParseOptions): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
@@ -320,6 +358,7 @@ function finalizeClause(state: ParserState, options?: ParseOptions): void {
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
   clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
+  promoteGraphWarningsToAdditionalInstructions(clause);
 }
 
 export function findUnparsedTokenGroups(

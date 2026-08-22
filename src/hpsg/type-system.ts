@@ -335,7 +335,8 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
     features: {
       HEAD: { valueType: "head", required: true },
       VALENCE: { valueType: "valence", required: true },
-      CONT: { valueType: "content", required: true }
+      CONT: { valueType: "content", required: true },
+      NONLOC: { valueType: "nonlocal", required: true }
     }
   },
   {
@@ -358,7 +359,16 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
       PATIENT_INSTRUCTION: { valueType: "patient-instruction-feature" }
     }
   },
-  { name: "content", parents: ["top"], features: { CLAUSE_KIND: { valueType: "string" } } },
+  {
+    name: "content",
+    parents: ["top"],
+    features: {
+      CLAUSE_KIND: { valueType: "string" },
+      CONDITION: { valueType: "condition-feature" },
+      SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },
+      SCOPE_CLOSED: { valueType: "boolean" }
+    }
+  },
   { name: "method-feature", parents: ["top"] },
   { name: "route-feature", parents: ["top"] },
   { name: "dose-feature", parents: ["top"] },
@@ -366,5 +376,13 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "site-feature", parents: ["top"] },
   { name: "prn-feature", parents: ["top"] },
   { name: "instruction-feature", parents: ["top"] },
-  { name: "patient-instruction-feature", parents: ["top"] }
+  { name: "patient-instruction-feature", parents: ["top"] },
+  { name: "condition-feature", parents: ["top"] },
+  { name: "scoped-administration-feature", parents: ["top"] },
+  {
+    name: "nonlocal",
+    parents: ["top"],
+    features: { SCOPE_REQUIREMENT: { valueType: "scope-requirement-feature" } }
+  },
+  { name: "scope-requirement-feature", parents: ["top"] }
 ]);

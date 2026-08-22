@@ -38,7 +38,7 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ฉีด": "inject",
   "สอด": "insert",
   "ผสม": "mix",
-  "ล้าง": "rinse",
+  "ล้าง": "wash",
   "ถู": "rub",
   "ฝ่ามือ": "palm",
   "ช่องคลอด": "vagina",

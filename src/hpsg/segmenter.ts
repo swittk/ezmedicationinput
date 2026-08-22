@@ -1,6 +1,7 @@
 import { lexInput } from "../lexer/lex";
 import { annotateLexTokens } from "../lexer/meaning";
 import { Token } from "../parser-state";
+import { findUnparsedTokenGroups, parseClauseState } from "../parser";
 import { parseAdditionalInstructions } from "../advice";
 import { parseInstructionActions } from "../instruction-graph";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
@@ -77,12 +78,96 @@ function commaJoinsProceduralSequence(
   return gapBefore <= 2 && gapAfter <= 2;
 }
 
+function hasMeaningfulSchedule(state: ReturnType<typeof parseClauseState>): boolean {
+  const schedule = state.primaryClause.schedule;
+  return Boolean(schedule && (
+    schedule.frequency !== undefined ||
+    schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined ||
+    schedule.periodMax !== undefined ||
+    schedule.duration !== undefined ||
+    schedule.durationMax !== undefined ||
+    schedule.count !== undefined ||
+    schedule.timingCode ||
+    schedule.dayOfWeek?.length ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+}
+
+function hasAdministrationHead(state: ReturnType<typeof parseClauseState>): boolean {
+  const clause = state.primaryClause;
+  return Boolean(
+    clause.method?.coding?.code || clause.method?.text ||
+    clause.dose?.value !== undefined || clause.dose?.range ||
+    clause.site?.coding?.code || clause.site?.text ||
+    clause.patientInstruction || clause.additionalInstructions?.length
+  );
+}
+
+function nextSegmentationProbeEnd(
+  input: string,
+  tokens: Token[],
+  commaIndex: number
+): number {
+  for (let cursor = commaIndex + 1; cursor < tokens.length; cursor += 1) {
+    const token = tokens[cursor];
+    if (!token) continue;
+    if (cursor > commaIndex + 1 && (
+      token.original === "," ||
+      isBoundaryToken(token) ||
+      isSlashClauseBoundary(tokens, cursor)
+    )) return token.sourceStart;
+  }
+  return input.length;
+}
+
+/**
+ * A comma before a clause-leading head is not a clause boundary when the
+ * material before it is a licensed fronted adjunct/condition and HPSG can
+ * compose that material with the following administration as one complete
+ * clause. This keeps segmentation from defeating the grammar's symmetric
+ * head-adjunct/conditional linearization.
+ */
+function commaContinuesFrontedHpsgClause(
+  input: string,
+  tokens: Token[],
+  index: number,
+  segmentStart: number,
+  options?: ParseOptions
+): boolean {
+  const comma = tokens[index];
+  if (!comma || comma.original !== ",") return false;
+  const prefixText = input.slice(segmentStart, comma.sourceStart).trim();
+  if (!prefixText) return false;
+
+  const probeEnd = nextSegmentationProbeEnd(input, tokens, index);
+  const fullText = input.slice(segmentStart, probeEnd).trim();
+  if (!fullText) return false;
+
+  const prefix = parseClauseState(prefixText, options);
+  const prefixClause = prefix.primaryClause;
+  const frontedAdjunct = !hasAdministrationHead(prefix) && (
+    prefixClause.prn?.enabled === true || hasMeaningfulSchedule(prefix)
+  );
+
+  const full = parseClauseState(fullText, options);
+  if (findUnparsedTokenGroups(full).length || !hasAdministrationHead(full)) return false;
+  const commaOffset = comma.sourceStart - segmentStart;
+  const frontedCondition = full.primaryClause.evidence.some((item) =>
+    item.rule === "hpsg.lex.condition" &&
+    item.spans.some((span) => span.start < commaOffset)
+  );
+  return frontedAdjunct || frontedCondition;
+}
+
 function isCommaClauseBoundary(
   input: string,
   tokens: Token[],
   index: number,
   actions: AdviceFrame[],
-  options?: ParseOptions
+  options?: ParseOptions,
+  segmentStart = 0
 ): boolean {
   const token = tokens[index];
   if (!token || token.original !== ",") {
@@ -114,6 +199,9 @@ function isCommaClauseBoundary(
     return false;
   }
   if (parsesAsInstructionContinuation(input, tokens, index)) {
+    return false;
+  }
+  if (commaContinuesFrontedHpsgClause(input, tokens, index, segmentStart, options)) {
     return false;
   }
   return true;
@@ -199,7 +287,7 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
     }
     const isBoundary =
       isBoundaryToken(token) ||
-      isCommaClauseBoundary(input, tokens, index, proceduralActions, options) ||
+      isCommaClauseBoundary(input, tokens, index, proceduralActions, options, start) ||
       isSlashClauseBoundary(tokens, index);
     if (!isBoundary) {
       scannedOffset = token.sourceEnd;

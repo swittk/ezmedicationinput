@@ -2,6 +2,7 @@ import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS } from "./maps";
+import { MEAL_TIMING_BY_RELATION } from "./hpsg/lexical-classes";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -26,6 +27,7 @@ import {
   CanonicalInstructionRelation,
   CanonicalSigClause,
   CanonicalSourceSpan,
+  EventTiming,
   MedicationInstructionActionDefinition,
   ParseOptions,
   TextRange
@@ -241,7 +243,8 @@ function argumentFromParts(
   const canonical = canonicalParts.join(" ");
   const direct = internalArgument(canonical, text, options);
   if (direct) {
-    if (preferredRole) direct.role = preferredRole;
+    // A terminology entry's typed role is stronger evidence than a
+    // constructional fallback. The fallback is only for opaque/free text.
     return direct;
   }
   const resolvedSite = codingFromSite(text, options);
@@ -249,18 +252,14 @@ function argumentFromParts(
     if (preferredRole === AdviceArgumentRole.Destination) resolvedSite.role = AdviceArgumentRole.Destination;
     return resolvedSite;
   }
-  for (const currentKey of canonicalParts) {
-    const contained = internalArgument(currentKey, text, options);
-    if (contained && (
-      contained.role === AdviceArgumentRole.Substance ||
-      contained.role === AdviceArgumentRole.Result ||
-      contained.role === AdviceArgumentRole.Site
-    )) {
-      if (preferredRole) contained.role = preferredRole;
-      return contained;
-    }
-  }
-  return { role: preferredRole ?? AdviceArgumentRole.Object, text, normalized: canonical || text.toLowerCase() };
+  const allPartsCanonical = parts
+    .slice(start, endExclusive)
+    .every((part) => Boolean(part.canonical));
+  return {
+    role: preferredRole ?? AdviceArgumentRole.Object,
+    text,
+    normalized: allPartsCanonical && canonical ? canonical : text.toLowerCase()
+  };
 }
 
 function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefined): void {
@@ -469,12 +468,18 @@ function buildActionFrame(
   const args: AdviceArgument[] = [];
   const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
-  const relation = relIndex >= 0 ? RELATIONS[key(parts.slice(relIndex, relIndex + 1)[0])] : undefined;
+  const rawRelation = relIndex >= 0 ? RELATIONS[key(parts.slice(relIndex, relIndex + 1)[0])] : undefined;
+  const nextRelationIndex = relIndex >= 0 ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
+  const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
+  const conditionalTail = rawRelation === AdviceRelation.If ||
+    rawRelation === AdviceRelation.Unless ||
+    rawRelation === AdviceRelation.When;
+  const relation = conditionalTail ? undefined : rawRelation;
   const amount = definition.acceptsAmount
     ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
     : undefined;
   const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
-  let semanticEnd = segmentEnd;
+  let semanticEnd = conditionalTail && relIndex >= 0 ? relIndex : segmentEnd;
 
   switch (definition.code) {
     case "shake": {
@@ -643,11 +648,27 @@ function buildActionFrame(
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, undefined, options));
       if (relation === AdviceRelation.For && duration) {
         pushArgument(args, duration);
-      } else if (relIndex >= 0) {
-        const time = (relation === AdviceRelation.In || relation === AdviceRelation.On)
-          ? timeArgumentFromParts(parts, relIndex + 1, segmentEnd, input)
+      } else if (relIndex >= 0 && !conditionalTail) {
+        const time = (
+          relation === AdviceRelation.In ||
+          relation === AdviceRelation.On ||
+          relation === AdviceRelation.Before ||
+          relation === AdviceRelation.After
+        ) ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+        const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
+          ? AdviceArgumentRole.Activity
           : undefined;
-        pushArgument(args, time ?? argumentFromParts(parts, relIndex + 1, segmentEnd, input, undefined, options));
+        pushArgument(
+          args,
+          time ?? argumentFromParts(
+            parts,
+            relIndex + 1,
+            relationTargetEnd,
+            input,
+            fallbackRole,
+            options
+          )
+        );
       }
       break;
   }
@@ -689,49 +710,47 @@ interface PrefixedActionMatch {
   modality?: AdviceModality;
 }
 
+interface ActionDirectivePrefix {
+  parts: readonly string[];
+  polarity?: AdvicePolarity;
+  modality?: AdviceModality;
+}
+
+const ACTION_DIRECTIVE_PREFIXES: readonly ActionDirectivePrefix[] = [
+  { parts: ["do", "not"], polarity: AdvicePolarity.Negate },
+  { parts: ["should", "not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Should },
+  { parts: ["must", "not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Must },
+  { parts: ["should-not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Should },
+  { parts: ["don't"], polarity: AdvicePolarity.Negate },
+  { parts: ["dont"], polarity: AdvicePolarity.Negate },
+  { parts: ["avoid"], polarity: AdvicePolarity.Negate },
+  { parts: ["should"], modality: AdviceModality.Should },
+  { parts: ["must"], modality: AdviceModality.Must }
+];
+
+function directivePrefixMatches(parts: Lexeme[], index: number, prefix: ActionDirectivePrefix): boolean {
+  return prefix.parts.every((part, offset) => key(parts[index + offset]) === part);
+}
+
 function prefixedActionAt(
   parts: Lexeme[],
   index: number,
   options?: ParseOptions
 ): PrefixedActionMatch | undefined {
-  const current = key(parts[index]);
-  const next = key(parts[index + 1]);
-  const afterNext = key(parts[index + 2]);
-  let actionIndex: number | undefined;
-  let polarity: AdvicePolarity | undefined;
-  let modality: AdviceModality | undefined;
-
-  if (current === "avoid") {
-    actionIndex = index + 1;
-    polarity = AdvicePolarity.Negate;
-  } else if (current === "do" && next === "not") {
-    actionIndex = index + 2;
-    polarity = AdvicePolarity.Negate;
-  } else if (current === "don't" || current === "dont") {
-    actionIndex = index + 1;
-    polarity = AdvicePolarity.Negate;
-  } else if (current === "should-not") {
-    actionIndex = index + 1;
-    polarity = AdvicePolarity.Negate;
-    modality = AdviceModality.Should;
-  } else if (current === "should" && next === "not") {
-    actionIndex = index + 2;
-    polarity = AdvicePolarity.Negate;
-    modality = AdviceModality.Should;
-  } else if (current === "must" && next === "not") {
-    actionIndex = index + 2;
-    polarity = AdvicePolarity.Negate;
-    modality = AdviceModality.Must;
-  } else if (current === "should") {
-    actionIndex = index + 1;
-    modality = AdviceModality.Should;
-  } else if (current === "must" && afterNext !== "not") {
-    actionIndex = index + 1;
-    modality = AdviceModality.Must;
+  for (const prefix of ACTION_DIRECTIVE_PREFIXES) {
+    if (!directivePrefixMatches(parts, index, prefix)) continue;
+    const actionIndex = index + prefix.parts.length;
+    const match = actionMatchAt(parts, actionIndex, options);
+    if (match) {
+      return {
+        actionIndex,
+        match,
+        polarity: prefix.polarity,
+        modality: prefix.modality
+      };
+    }
   }
-  if (actionIndex === undefined) return undefined;
-  const match = actionMatchAt(parts, actionIndex, options);
-  return match ? { actionIndex, match, polarity, modality } : undefined;
+  return undefined;
 }
 
 function negatedActionAt(
@@ -783,9 +802,73 @@ function actionCandidateBelongsToCurrentFrame(
   return false;
 }
 
-const ACTION_DIRECTIVE_BOUNDARIES = new Set([
-  "avoid", "should-not", "should", "must", "not", "do", "don't", "dont"
+const ACTION_DIRECTIVE_BOUNDARIES = new Set(
+  ACTION_DIRECTIVE_PREFIXES.map((prefix) => prefix.parts[0])
+);
+
+const PREPOSED_ACTION_RELATIONS = new Set<AdviceRelation>([
+  AdviceRelation.Before,
+  AdviceRelation.After,
+  AdviceRelation.During,
+  AdviceRelation.Until
 ]);
+
+interface PreposedActionRelation {
+  relation: AdviceRelation;
+  relationIndex: number;
+  targetStart: number;
+  targetEnd: number;
+}
+
+function preposedActionRelation(
+  parts: Lexeme[],
+  cursor: number,
+  actionStart: number
+): PreposedActionRelation | undefined {
+  if (cursor >= actionStart) return undefined;
+  const relation = RELATIONS[key(parts[cursor])];
+  if (!relation || !PREPOSED_ACTION_RELATIONS.has(relation)) return undefined;
+  const targetStart = cursor + 1;
+  if (targetStart >= actionStart) return undefined;
+  return { relation, relationIndex: cursor, targetStart, targetEnd: actionStart };
+}
+
+function attachPreposedActionRelation(
+  frame: AdviceFrame,
+  attachment: PreposedActionRelation,
+  parts: Lexeme[],
+  sourceText: string,
+  baseOffset: number,
+  options?: ParseOptions
+): void {
+  if (frame.relation !== undefined) return;
+  frame.relation = attachment.relation;
+  const time = timeArgumentFromParts(
+    parts,
+    attachment.targetStart,
+    attachment.targetEnd,
+    sourceText
+  );
+  const fallbackRole = attachment.relation === AdviceRelation.Before ||
+    attachment.relation === AdviceRelation.After
+    ? AdviceArgumentRole.Activity
+    : undefined;
+  pushArgument(
+    frame.args,
+    time ?? argumentFromParts(
+      parts,
+      attachment.targetStart,
+      attachment.targetEnd,
+      sourceText,
+      fallbackRole,
+      options
+    )
+  );
+  const first = parts[attachment.relationIndex];
+  if (!first) return;
+  frame.span.start = baseOffset + first.sourceStart;
+  frame.sourceText = sourceText.slice(first.sourceStart, frame.span.end - baseOffset);
+}
 
 export function parseInstructionActions(
   sourceText: string,
@@ -847,6 +930,10 @@ export function parseInstructionActions(
 
     const frame = buildActionFrame(parts, start, end, sourceText, baseOffset, sequenceIndex, options);
     if (frame) {
+      const preposed = preposedActionRelation(parts, cursor, start);
+      if (preposed) {
+        attachPreposedActionRelation(frame, preposed, parts, sourceText, baseOffset, options);
+      }
       frames.push(frame);
       sequenceIndex += 1;
     }
@@ -876,6 +963,12 @@ function frameIsProcedural(frame: AdviceFrame, options?: ParseOptions): boolean 
   return frameActionDefinition(frame, options)?.procedural ?? false;
 }
 
+function definitionCanRepresentPrimaryAdministration(
+  definition: ActionDefinition | undefined
+): boolean {
+  return Boolean(definition && (!definition.procedural || definition.primaryAdministrationHead));
+}
+
 function frameOverlapsPrimaryMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
   for (const evidence of clause.evidence) {
     if (evidence.rule !== "hpsg.lex.method") continue;
@@ -893,7 +986,7 @@ function frameIsSecondaryAdministration(
 ): boolean {
   if (frame.polarity === AdvicePolarity.Negate) return true;
   const definition = frameActionDefinition(frame, options);
-  if (!definition || definition.procedural) return false;
+  if (!definitionCanRepresentPrimaryAdministration(definition)) return false;
   if (!clause.method) return true;
   return !frameOverlapsPrimaryMethod(frame, clause);
 }
@@ -906,9 +999,9 @@ function frameIsPrimaryAdministrationWithExtraMeaning(
   if (frame.polarity === AdvicePolarity.Negate || !clause.method) return false;
   const definition = frameActionDefinition(frame, options);
   return Boolean(
-    definition && !definition.procedural &&
+    definitionCanRepresentPrimaryAdministration(definition) &&
     frameOverlapsPrimaryMethod(frame, clause) &&
-    actionAddsPrimaryObjectMeaning(frame, options)
+    (frame.modality !== undefined || actionAddsPrimaryObjectMeaning(frame, options))
   );
 }
 
@@ -1108,6 +1201,16 @@ function buildInstructionRelations(
     const explicitRelation = relationFromSourceText(source);
     const onlyStructuralGap = !trimmed || /^[,;:.()\-]+$/.test(trimmed);
     if (!explicitRelation && !onlyStructuralGap) continue;
+    if (explicitRelation && CONDITION_RELATIONS.has(explicitRelation)) {
+      const conditionTargetsCurrent = /^[,;:.()\-]/.test(trimmed);
+      relations.push({
+        kind: explicitRelation,
+        toActionIndex: conditionTargetsCurrent ? index : index - 1,
+        text: trimmed || undefined,
+        span: gapEnd > gapStart ? { start: gapStart, end: gapEnd } : undefined
+      });
+      continue;
+    }
     relations.push({
       kind: explicitRelation ?? AdviceRelation.Then,
       fromActionIndex: index - 1,
@@ -1120,7 +1223,17 @@ function buildInstructionRelations(
   for (const opaque of opaqueSpans) {
     const kind = relationFromSourceText(opaque.text);
     if (!kind || !CONDITION_RELATIONS.has(kind)) continue;
-    const target = actions.findIndex((action) => action.span.start >= opaque.end);
+    const after = actions.findIndex((action) => action.span.start >= opaque.end);
+    let before = -1;
+    for (let index = actions.length - 1; index >= 0; index -= 1) {
+      if (actions[index].span.end <= opaque.start) { before = index; break; }
+    }
+    let target = after;
+    if (before >= 0 && after >= 0) {
+      const beforeDistance = opaque.start - actions[before].span.end;
+      const afterDistance = actions[after].span.start - opaque.end;
+      if (beforeDistance <= afterDistance) target = before;
+    } else if (before >= 0) target = before;
     if (target < 0) continue;
     if (relations.some((relation) =>
       relation.kind === kind &&
@@ -1237,10 +1350,11 @@ function actionDominatedByCanonicalMethod(
   primaryAdministrationSpan?: TextRange
 ): boolean {
   const method = clause.method;
+  const definition = frameActionDefinition(frame, options);
+  if (!definitionCanRepresentPrimaryAdministration(definition)) return false;
   if (!method || actionAddsStructuredMeaning(frame) || actionAddsPrimaryObjectMeaning(frame, options)) return false;
 
   const methodText = normalizeActionSurface(method.text ?? "");
-  const definition = frameActionDefinition(frame, options);
   const candidates = [
     frame.predicate.lemma,
     frame.predicate.display ?? "",
@@ -1361,6 +1475,44 @@ function reconcileOpaqueWithActionCoverage(
   return result;
 }
 
+function conditionRelationsFromHpsgEvidence(
+  clause: CanonicalSigClause,
+  input: string,
+  actions: AdviceFrame[]
+): CanonicalInstructionRelation[] {
+  const result: CanonicalInstructionRelation[] = [];
+  for (const evidence of clause.evidence) {
+    if (evidence.rule !== "hpsg.lex.condition") continue;
+    for (const span of evidence.spans) {
+      const conditionText = input.slice(span.start, span.end).trim();
+      const kind = relationFromSourceText(conditionText);
+      if (!kind || !CONDITION_RELATIONS.has(kind)) continue;
+      let target = -1;
+      let distance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < actions.length; index += 1) {
+        const action = actions[index];
+        const current = action.span.start >= span.end
+          ? action.span.start - span.end
+          : action.span.end <= span.start
+            ? span.start - action.span.end
+            : 0;
+        if (current < distance) {
+          distance = current;
+          target = index;
+        }
+      }
+      if (target < 0) continue;
+      result.push({
+        kind,
+        toActionIndex: target,
+        text: conditionText,
+        span: { start: span.start, end: span.end }
+      });
+    }
+  }
+  return result;
+}
+
 export function refreshInstructionGraphDerivedState(
   graph: CanonicalInstructionGraph
 ): void {
@@ -1373,7 +1525,24 @@ export function refreshInstructionGraphDerivedState(
   const opaqueSpans = graph.opaqueSpans ?? [];
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   graph.opaqueSpans = opaqueSpans.length ? opaqueSpans : undefined;
-  const relations = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
+  const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
+  const preserved = (graph.relations ?? []).filter((relation) =>
+    CONDITION_RELATIONS.has(relation.kind) && relation.fromActionIndex === undefined
+  );
+  const relations = derived.slice();
+  for (const relation of preserved) {
+    const relationText = normalizedInstructionSurface(relation.text ?? "");
+    if (!relations.some((candidate) => {
+      if (candidate.kind !== relation.kind || candidate.toActionIndex !== relation.toActionIndex) return false;
+      const candidateText = normalizedInstructionSurface(candidate.text ?? "");
+      if (relationText && candidateText) {
+        return relationText === candidateText ||
+          relationText.includes(candidateText) ||
+          candidateText.includes(relationText);
+      }
+      return candidate.span?.start === relation.span?.start && candidate.span?.end === relation.span?.end;
+    })) relations.push(relation);
+  }
   graph.relations = relations.length ? relations : undefined;
   graph.coverage = buildInstructionCoverage(graph.actions, opaqueSpans);
 }
@@ -1482,8 +1651,18 @@ export function buildInstructionGraph(
   }
   for (let index = actions.length - 1; index >= 0; index -= 1) {
     const definition = frameActionDefinition(actions[index], options);
+    const participatesInProcedureSequence = Boolean(
+      definition?.procedural &&
+      actions.some((candidate, candidateIndex) =>
+        candidateIndex !== index &&
+        candidate.polarity !== AdvicePolarity.Negate &&
+        frameActionDefinition(candidate, options)?.procedural
+      )
+    );
     const redundantCanonicalAdministration = Boolean(
-      definition && !definition.procedural &&
+      definitionCanRepresentPrimaryAdministration(definition) &&
+      actions[index].modality === undefined &&
+      !participatesInProcedureSequence &&
       primaryActionCoveredByCanonicalClause(actions[index], actions, clause)
     );
     if (
@@ -1511,6 +1690,8 @@ export function buildInstructionGraph(
     sourceText: input,
     sourceLocale: /[\u0E00-\u0E7F]/.test(input) ? "th" : "en"
   };
+  const hpsgConditionRelations = conditionRelationsFromHpsgEvidence(clause, input, actions);
+  graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
   refreshInstructionGraphDerivedState(graph);
   return graph;
 }
@@ -1540,10 +1721,11 @@ function translatedArgument(arg: AdviceArgument, locale: string): string {
   return arg.i18n?.[language] ?? arg.normalized ?? arg.text;
 }
 
-function actionLabel(frame: AdviceFrame, locale: string): string {
+function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const definition = getMedicationInstructionAction(frame.predicate.lemma);
-  return frame.predicate.i18n?.[language] ??
+  return (roundtripSafe ? definition?.roundtripI18n?.[language] : undefined) ??
+    frame.predicate.i18n?.[language] ??
     (language === "en" ? frame.predicate.display : undefined) ??
     definition?.i18n?.[language] ??
     definition?.display ??
@@ -1551,13 +1733,13 @@ function actionLabel(frame: AdviceFrame, locale: string): string {
     frame.predicate.lemma;
 }
 
-function realizeAction(frame: AdviceFrame, locale: string): string {
+function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
   const thai = locale.toLowerCase().startsWith("th");
   const first = (role: AdviceArgumentRole): string | undefined => {
     const arg = frame.args.filter((candidate) => candidate.role === role).slice(0, 1)[0];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
-  const label = actionLabel(frame, locale);
+  const label = actionLabel(frame, locale, roundtripSafe);
   const amount = first(AdviceArgumentRole.Amount);
   const theme = first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
   const container = first(AdviceArgumentRole.Container);
@@ -1566,14 +1748,25 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
   const substance = first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
+  const time = first(AdviceArgumentRole.Time);
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
 
   if (frame.polarity === AdvicePolarity.Negate) {
-    const object = site ?? theme ?? substance ?? activity ?? material;
+    const object = site ?? theme ?? substance ?? material;
+    const relationTarget = activity ?? time;
+    if (relationTarget && (frame.relation === AdviceRelation.Before || frame.relation === AdviceRelation.After)) {
+      const relationText = frame.relation === AdviceRelation.Before
+        ? (thai ? "ก่อน" : "before")
+        : (thai ? "หลัง" : "after");
+      return thai
+        ? `ห้าม${label}${object ?? ""}${relationText}${relationTarget}`
+        : `Do not ${label.toLowerCase()}${object ? ` ${object}` : ""} ${relationText} ${relationTarget}`;
+    }
+    const fallbackObject = object ?? relationTarget;
     return thai
-      ? `ห้าม${label}${object ?? ""}`
-      : `Do not ${label.toLowerCase()}${object ? ` ${object}` : ""}`;
+      ? `ห้าม${label}${fallbackObject ?? ""}`
+      : `Do not ${label.toLowerCase()}${fallbackObject ? ` ${fallbackObject}` : ""}`;
   }
 
   switch (frame.predicate.lemma) {
@@ -1606,16 +1799,16 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
       return thai ? `${label}${site ?? theme ?? ""}` : `${label}${site ? ` ${site}` : theme ? ` ${theme}` : ""}`;
     case "rinse":
     case "wash": {
-      const time = first(AdviceArgumentRole.Time);
-      if (time) {
+      const relationTarget = time ?? activity;
+      if (relationTarget) {
         const target = site ? (thai ? `${site}` : ` ${site}`) : "";
         const relationText = frame.relation === AdviceRelation.Before ? (thai ? "ก่อน" : "before")
           : frame.relation === AdviceRelation.After ? (thai ? "หลัง" : "after")
           : frame.relation === AdviceRelation.On ? (thai ? "เมื่อ" : "on")
           : (thai ? "ใน" : "in");
         return thai
-          ? `${label}${target}${relationText}${time}`
-          : `${label}${target} ${relationText} ${time}`;
+          ? `${label}${target}${relationText}${relationTarget}`
+          : `${label}${target} ${relationText} ${relationTarget}`;
       }
       if (site) {
         if (thai) return `${label}${site}${substance ? `ด้วย${substance}` : ""}`;
@@ -1778,6 +1971,42 @@ function freeArgumentCoveredByCanonicalAdministration(
   );
 }
 
+function argumentCoveredByCanonicalText(
+  arg: AdviceArgument,
+  clause: CanonicalSigClause
+): boolean {
+  if (arg.role !== AdviceArgumentRole.Object && arg.role !== AdviceArgumentRole.Theme && arg.role !== AdviceArgumentRole.Free) {
+    return false;
+  }
+  const argument = normalizeActionSurface(arg.normalized ?? arg.text);
+  if (!argument) return true;
+  const representedTexts = [
+    clause.method?.text ?? "",
+    ...(clause.additionalInstructions ?? []).map((instruction) => instruction.text ?? "")
+  ].map(normalizeActionSurface).filter(Boolean);
+  return representedTexts.some((text) =>
+    text === argument || text.includes(` ${argument}`) || text.startsWith(`${argument} `) || text.endsWith(` ${argument}`)
+  );
+}
+
+function timeArgumentCoveredBySchedule(
+  frame: AdviceFrame,
+  arg: AdviceArgument,
+  clause: CanonicalSigClause
+): boolean {
+  if (arg.role !== AdviceArgumentRole.Time || !arg.normalized || !clause.schedule?.when?.length) {
+    return false;
+  }
+  const timing = arg.normalized as EventTiming;
+  if (clause.schedule.when.indexOf(timing) >= 0) return true;
+  const relation = frame.relation === AdviceRelation.Before ? "before"
+    : frame.relation === AdviceRelation.After ? "after"
+    : frame.relation === AdviceRelation.With ? "with"
+    : undefined;
+  const related = relation ? MEAL_TIMING_BY_RELATION.get(relation)?.get(timing) : undefined;
+  return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
+}
+
 function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
@@ -1792,8 +2021,28 @@ function primaryActionCoveredByCanonicalClause(
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
     (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
+    timeArgumentCoveredBySchedule(frame, arg, clause) ||
+    argumentCoveredByCanonicalText(arg, clause) ||
     freeArgumentCoveredByCanonicalAdministration(arg, clause)
   );
+}
+
+export function instructionGraphPrimaryAdministrationModality(
+  clause: CanonicalSigClause
+): AdviceModality | undefined {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  if (!graph || !primary) return undefined;
+  return graph.actions
+    .filter((action) =>
+      action.polarity !== AdvicePolarity.Negate &&
+      action.modality !== undefined &&
+      action.span.start < primary.end && primary.start < action.span.end &&
+      actionMatchesCanonicalMethod(action, clause)
+    )
+    .sort((left, right) =>
+      left.span.start - right.span.start || left.span.end - right.span.end
+    )[0]?.modality;
 }
 
 export function instructionGraphHasNovelNonWarningContent(
@@ -1814,6 +2063,16 @@ export function instructionGraphHasNovelNonWarningContent(
   return false;
 }
 
+function sourceTextCoversFrameMeaning(frame: AdviceFrame): boolean {
+  const source = normalizedInstructionSurface(frame.sourceText);
+  if (!source) return false;
+  return frame.args.every((arg) => {
+    const surface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
+    if (!surface) return true;
+    return source.includes(surface) || surface.includes(source);
+  });
+}
+
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
@@ -1827,6 +2086,8 @@ export function realizeInstructionGraph(
     omitSourceTexts?: readonly string[];
     /** Restrict realization around the canonical primary administration source span. */
     position?: "all" | "pre" | "post";
+    /** Prefer deliberately unambiguous lexical labels when generating parse-safe text. */
+    roundtripSafe?: boolean;
   }
 ): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
@@ -1864,10 +2125,12 @@ export function realizeInstructionGraph(
   const targetLanguage = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const sourceLanguage = (graph.sourceLocale ?? "en").toLowerCase().startsWith("th") ? "th" : "en";
   for (const frame of frames) {
-    const sourceFaithful = options?.preferSourceText && targetLanguage === sourceLanguage
+    const sourceFaithful = options?.preferSourceText &&
+      targetLanguage === sourceLanguage &&
+      sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)
       : undefined;
-    const text = sourceFaithful || realizeAction(frame, locale);
+    const text = sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
     if (text) {
       nodes.push({
         start: frame.span.start,
@@ -1875,6 +2138,32 @@ export function realizeInstructionGraph(
         text,
         understood: true,
         actionIndex: frame.sequenceIndex
+      });
+    }
+  }
+  const selectedActionIndices = new Set(frames.map((frame) => frame.sequenceIndex));
+  for (const relation of graph.relations ?? []) {
+    if (relation.fromActionIndex !== undefined || relation.toActionIndex === undefined) continue;
+    if (!selectedActionIndices.has(relation.toActionIndex)) continue;
+    if (!relation.text || !relation.span || !inRequestedPosition(relation.span.start, relation.span.end)) continue;
+    const target = frames.find((frame) => frame.sequenceIndex === relation.toActionIndex);
+    if (!target) continue;
+    const normalizedRelation = normalizedInstructionSurface(relation.text);
+    const representedByTarget = target.args.some((arg) => {
+      const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
+      return Boolean(
+        normalizedRelation && argSurface &&
+        (normalizedRelation.includes(argSurface) || argSurface.includes(normalizedRelation))
+      );
+    });
+    if (representedByTarget) continue;
+    const relationText = trimSemanticText(relation.text);
+    if (relationText) {
+      nodes.push({
+        start: relation.span.start,
+        end: relation.span.end,
+        text: relationText,
+        understood: false
       });
     }
   }

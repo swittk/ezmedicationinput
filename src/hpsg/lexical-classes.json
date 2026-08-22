@@ -1,49 +1,269 @@
 {
-  "siteAnchors": ["to", "in", "into", "on", "onto", "over", "at", "ที่", "บริเวณ", "inside", "within", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
-  "siteSelfDisplayAnchors": ["inside", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
-  "siteFillers": ["the", "a", "an", "your", "his", "her", "their", "my"],
-  "bodySiteLocativeRelations": ["behind", "around", "under", "above", "below", "beneath", "near", "outside", "inside", "between"],
+  "siteAnchors": [
+    "to",
+    "in",
+    "into",
+    "on",
+    "onto",
+    "over",
+    "at",
+    "ที่",
+    "บริเวณ",
+    "inside",
+    "within",
+    "around",
+    "behind",
+    "near",
+    "outside",
+    "external",
+    "under",
+    "above",
+    "below",
+    "beneath",
+    "between"
+  ],
+  "siteSelfDisplayAnchors": [
+    "inside",
+    "around",
+    "behind",
+    "near",
+    "outside",
+    "external",
+    "under",
+    "above",
+    "below",
+    "beneath",
+    "between"
+  ],
+  "siteFillers": [
+    "the",
+    "a",
+    "an",
+    "your",
+    "his",
+    "her",
+    "their",
+    "my"
+  ],
+  "bodySiteLocativeRelations": [
+    "behind",
+    "around",
+    "under",
+    "above",
+    "below",
+    "beneath",
+    "near",
+    "outside",
+    "inside",
+    "between"
+  ],
   "bodySiteLocativeRenderPrepositions": {
     "inside": "in"
   },
   "bodySiteSpatialRelationCodings": {
-    "above": { "system": "http://snomed.info/sct", "code": "352730000", "display": "Above" },
-    "back": { "system": "http://snomed.info/sct", "code": "255551008", "display": "Posterior" },
-    "behind": { "system": "http://snomed.info/sct", "code": "255551008", "display": "Posterior" },
-    "below": { "system": "http://snomed.info/sct", "code": "351726001", "display": "Beneath" },
-    "beneath": { "system": "http://snomed.info/sct", "code": "351726001", "display": "Beneath" },
-    "lower": { "system": "http://snomed.info/sct", "code": "261122009", "display": "Lower" },
-    "side": { "system": "http://snomed.info/sct", "code": "49370004", "display": "Lateral" },
-    "top": { "system": "http://snomed.info/sct", "code": "261183002", "display": "Upper" },
-    "under": { "system": "http://snomed.info/sct", "code": "351726001", "display": "Beneath" },
-    "upper": { "system": "http://snomed.info/sct", "code": "261183002", "display": "Upper" }
+    "above": {
+      "system": "http://snomed.info/sct",
+      "code": "352730000",
+      "display": "Above"
+    },
+    "back": {
+      "system": "http://snomed.info/sct",
+      "code": "255551008",
+      "display": "Posterior"
+    },
+    "behind": {
+      "system": "http://snomed.info/sct",
+      "code": "255551008",
+      "display": "Posterior"
+    },
+    "below": {
+      "system": "http://snomed.info/sct",
+      "code": "351726001",
+      "display": "Beneath"
+    },
+    "beneath": {
+      "system": "http://snomed.info/sct",
+      "code": "351726001",
+      "display": "Beneath"
+    },
+    "lower": {
+      "system": "http://snomed.info/sct",
+      "code": "261122009",
+      "display": "Lower"
+    },
+    "side": {
+      "system": "http://snomed.info/sct",
+      "code": "49370004",
+      "display": "Lateral"
+    },
+    "top": {
+      "system": "http://snomed.info/sct",
+      "code": "261183002",
+      "display": "Upper"
+    },
+    "under": {
+      "system": "http://snomed.info/sct",
+      "code": "351726001",
+      "display": "Beneath"
+    },
+    "upper": {
+      "system": "http://snomed.info/sct",
+      "code": "261183002",
+      "display": "Upper"
+    }
   },
-  "bodySitePartitiveHeads": ["top", "back", "front", "side", "sides", "middle", "mid", "center", "centre", "palm", "sole"],
-  "bodySitePartitiveModifiers": ["left", "right", "both", "bilateral"],
-  "bodySitePartitiveConnectors": ["of"],
-  "bodySiteBareNominalPrefixes": ["both", "each", "either", "every", "all", "bilateral"],
-  "oticSiteWords": ["ear", "ears", "canal"],
-  "ophthalmicSiteWords": ["eye", "eyes", "eyelid", "eyelids"],
-  "nasalSiteWords": ["nostril", "nostrils", "naris", "nares", "nose"],
-  "bodySiteAdjectiveSuffixes": ["al", "ial", "ual", "ic", "ous", "ive", "ary", "ory", "atic", "etic", "ular", "otic", "ile", "eal", "inal", "aneal", "enal"],
-  "bodySiteDisplayPenaltyWords": ["structure", "region", "entire", "proper", "body"],
+  "bodySitePartitiveHeads": [
+    "top",
+    "back",
+    "front",
+    "side",
+    "sides",
+    "middle",
+    "mid",
+    "center",
+    "centre",
+    "palm",
+    "sole"
+  ],
+  "bodySitePartitiveModifiers": [
+    "left",
+    "right",
+    "both",
+    "bilateral"
+  ],
+  "bodySitePartitiveConnectors": [
+    "of"
+  ],
+  "bodySiteBareNominalPrefixes": [
+    "both",
+    "each",
+    "either",
+    "every",
+    "all",
+    "bilateral"
+  ],
+  "oticSiteWords": [
+    "ear",
+    "ears",
+    "canal"
+  ],
+  "ophthalmicSiteWords": [
+    "eye",
+    "eyes",
+    "eyelid",
+    "eyelids"
+  ],
+  "nasalSiteWords": [
+    "nostril",
+    "nostrils",
+    "naris",
+    "nares",
+    "nose"
+  ],
+  "bodySiteAdjectiveSuffixes": [
+    "al",
+    "ial",
+    "ual",
+    "ic",
+    "ous",
+    "ive",
+    "ary",
+    "ory",
+    "atic",
+    "etic",
+    "ular",
+    "otic",
+    "ile",
+    "eal",
+    "inal",
+    "aneal",
+    "enal"
+  ],
+  "bodySiteDisplayPenaltyWords": [
+    "structure",
+    "region",
+    "entire",
+    "proper",
+    "body"
+  ],
   "bodySiteFeatureScoreBonus": {
     "nominal": 0,
     "partitive": 8,
     "locative": 6
   },
-  "connectors": ["per", "to", "in", "into", "at", "a", "an", "the", "of", "and", "or", "on", "every", "then", ","],
-  "routeSitePrepositions": ["per"],
-  "nonSiteAnchoredPhrases": ["empty stomach"],
-  "externalSiteLocativePrefixes": ["around", "behind", "near", "outside", "external", "between"],
-  "routeBlockedByFollowingPartitiveHeads": ["top"],
-  "prnLeads": ["prn"],
-  "prnReasonLeadIns": ["for", "if", "when", "upon", "to"],
-  "prnStandaloneReasonLeads": ["for", "if", "when", "whenever"],
-  "prnReasonMultiwordLeadIns": ["due to"],
-  "prnReasonSiteConnectors": ["at", "in", "on", "to"],
-  "prnReasonCoordinators": [",", "/", "and", "or", "and/or", "หรือ", "และ"],
-  "prnConditionalSiteBoundaryAnchors": ["to", "into", "onto"],
+  "connectors": [
+    "per",
+    "to",
+    "in",
+    "into",
+    "at",
+    "a",
+    "an",
+    "the",
+    "of",
+    "and",
+    "or",
+    "on",
+    "every",
+    "then",
+    ","
+  ],
+  "routeSitePrepositions": [
+    "per"
+  ],
+  "nonSiteAnchoredPhrases": [
+    "empty stomach"
+  ],
+  "externalSiteLocativePrefixes": [
+    "around",
+    "behind",
+    "near",
+    "outside",
+    "external",
+    "between"
+  ],
+  "routeBlockedByFollowingPartitiveHeads": [
+    "top"
+  ],
+  "prnLeads": [
+    "prn"
+  ],
+  "prnReasonLeadIns": [
+    "for",
+    "if",
+    "when",
+    "upon",
+    "to"
+  ],
+  "prnStandaloneReasonLeads": [
+    "for",
+    "if",
+    "when",
+    "whenever"
+  ],
+  "prnReasonMultiwordLeadIns": [
+    "due to"
+  ],
+  "prnReasonSiteConnectors": [
+    "at",
+    "in",
+    "on",
+    "to"
+  ],
+  "prnReasonCoordinators": [
+    ",",
+    "/",
+    "and",
+    "or",
+    "and/or",
+    "หรือ",
+    "และ"
+  ],
+  "prnConditionalSiteBoundaryAnchors": [
+    "to",
+    "into",
+    "onto"
+  ],
   "prnPredicateReasonNormalizations": {
     "dizzy": "dizziness",
     "drowsy": "drowsiness",
@@ -63,7 +283,9 @@
     "pains": "pain"
   },
   "prnDefaultSiteConnector": "at",
-  "prnCompactReasonSeparators": ["/"],
+  "prnCompactReasonSeparators": [
+    "/"
+  ],
   "siteRouteHintsAllowedInGrammar": [
     "Transdermal route",
     "Per vagina",
@@ -91,62 +313,302 @@
     "Use shampoo": "สระ"
   },
   "compoundDoseUnits": [
-    { "head": "cm", "tails": [], "requiresSiteContext": true, "unit": "cm line" },
-    { "head": "cm", "tails": ["ribbon", "ribbons"], "unit": "cm ribbon" },
-    { "head": "cm", "tails": ["strip", "strips"], "unit": "cm strip" },
-    { "head": "cm", "tails": ["line", "lines"], "unit": "cm line" },
-    { "head": "inch", "tails": ["ribbon", "ribbons", "strip", "strips"], "unit": "inch ribbon" },
-    { "head": "inch", "tails": ["line", "lines"], "unit": "inch line" },
-    { "head": "fingertip", "tails": ["unit", "units"], "unit": "FTU" },
-    { "head": "eye", "tails": ["drop", "drops"], "unit": "drop" },
-    { "head": "pea-sized", "tails": ["amount"], "unit": "pea-sized amount" },
-    { "head": "pea-size", "tails": ["amount"], "unit": "pea-sized amount" },
-    { "head": "peasize", "tails": [], "tailSequences": [[]], "unit": "pea-sized amount" },
-    { "head": "เม็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
-    { "head": "เม็ดถั่วเขียว", "tails": [], "unit": "pea-sized amount" },
-    { "head": "เมล็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
-    { "head": "ขนาดเม็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
-    { "head": "ขนาดเม็ดถั่วเขียว", "tails": [], "unit": "pea-sized amount" },
-    { "head": "ขนาดเมล็ดถั่ว", "tails": [], "unit": "pea-sized amount" },
+    {
+      "head": "cm",
+      "tails": [],
+      "requiresSiteContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "cm",
+      "tails": [
+        "ribbon",
+        "ribbons"
+      ],
+      "unit": "cm ribbon"
+    },
+    {
+      "head": "cm",
+      "tails": [
+        "strip",
+        "strips"
+      ],
+      "unit": "cm strip"
+    },
+    {
+      "head": "cm",
+      "tails": [
+        "line",
+        "lines"
+      ],
+      "unit": "cm line"
+    },
+    {
+      "head": "inch",
+      "tails": [
+        "ribbon",
+        "ribbons",
+        "strip",
+        "strips"
+      ],
+      "unit": "inch ribbon"
+    },
+    {
+      "head": "inch",
+      "tails": [
+        "line",
+        "lines"
+      ],
+      "unit": "inch line"
+    },
+    {
+      "head": "fingertip",
+      "tails": [
+        "unit",
+        "units"
+      ],
+      "unit": "FTU"
+    },
+    {
+      "head": "eye",
+      "tails": [
+        "drop",
+        "drops"
+      ],
+      "unit": "drop"
+    },
+    {
+      "head": "pea-sized",
+      "tails": [
+        "amount"
+      ],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "pea-size",
+      "tails": [
+        "amount"
+      ],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "peasize",
+      "tails": [],
+      "tailSequences": [
+        []
+      ],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "เม็ดถั่ว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "เม็ดถั่วเขียว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "เมล็ดถั่ว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "ขนาดเม็ดถั่ว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "ขนาดเม็ดถั่วเขียว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
+    {
+      "head": "ขนาดเมล็ดถั่ว",
+      "tails": [],
+      "unit": "pea-sized amount"
+    },
     {
       "head": "pea",
       "tails": [],
-      "tailSequences": [["sized", "amount"], ["size", "amount"], ["amount"], ["sized"], ["size"], []],
+      "tailSequences": [
+        [
+          "sized",
+          "amount"
+        ],
+        [
+          "size",
+          "amount"
+        ],
+        [
+          "amount"
+        ],
+        [
+          "sized"
+        ],
+        [
+          "size"
+        ],
+        []
+      ],
       "unit": "pea-sized amount"
     },
-    { "head": "hand", "tails": ["print", "prints"], "unit": "handprint" },
-    { "head": "percent", "tails": ["bsa", "tbsa"], "unit": "% BSA" },
-    { "head": "shot", "tails": ["glass", "glasses"], "unit": "shot glass" },
-    { "head": "finger", "tails": ["length", "lengths"], "unit": "finger length" },
-    { "head": "two-finger", "tails": ["rule", "method"], "unit": "finger length" },
+    {
+      "head": "hand",
+      "tails": [
+        "print",
+        "prints"
+      ],
+      "unit": "handprint"
+    },
+    {
+      "head": "percent",
+      "tails": [
+        "bsa",
+        "tbsa"
+      ],
+      "unit": "% BSA"
+    },
+    {
+      "head": "shot",
+      "tails": [
+        "glass",
+        "glasses"
+      ],
+      "unit": "shot glass"
+    },
+    {
+      "head": "finger",
+      "tails": [
+        "length",
+        "lengths"
+      ],
+      "unit": "finger length"
+    },
+    {
+      "head": "two-finger",
+      "tails": [
+        "rule",
+        "method"
+      ],
+      "unit": "finger length"
+    },
     {
       "head": "two",
       "tails": [],
-      "tailSequences": [["finger", "rule"], ["finger", "method"]],
+      "tailSequences": [
+        [
+          "finger",
+          "rule"
+        ],
+        [
+          "finger",
+          "method"
+        ]
+      ],
       "unit": "finger length"
     },
-    { "head": "full", "tails": ["applicator", "applicators"], "unit": "applicatorful" },
+    {
+      "head": "full",
+      "tails": [
+        "applicator",
+        "applicators"
+      ],
+      "unit": "applicatorful"
+    },
     {
       "head": "cap",
       "tails": [],
-      "tailSequences": [["to", "line"], ["filled", "to", "line"]],
+      "tailSequences": [
+        [
+          "to",
+          "line"
+        ],
+        [
+          "filled",
+          "to",
+          "line"
+        ]
+      ],
       "unit": "capful"
     },
-    { "head": "stick", "tails": ["pack", "packs"], "unit": "stick-pack" },
-    { "head": "unit-dose", "tails": ["vial", "vials"], "unit": "vial" },
+    {
+      "head": "stick",
+      "tails": [
+        "pack",
+        "packs"
+      ],
+      "unit": "stick-pack"
+    },
+    {
+      "head": "unit-dose",
+      "tails": [
+        "vial",
+        "vials"
+      ],
+      "unit": "vial"
+    },
     {
       "head": "unit",
       "tails": [],
-      "tailSequences": [["dose", "vial"], ["dose", "vials"]],
+      "tailSequences": [
+        [
+          "dose",
+          "vial"
+        ],
+        [
+          "dose",
+          "vials"
+        ]
+      ],
       "unit": "vial"
     },
-    { "head": "insulin", "tails": ["unit", "units"], "unit": "U" },
-    { "head": "usp", "tails": ["unit", "units"], "unit": "U" },
-    { "head": "pen", "tails": ["click", "clicks"], "unit": "click" },
-    { "head": "dial", "tails": ["click", "clicks"], "unit": "click" },
-    { "head": "transdermal", "tails": ["system", "systems"], "unit": "patch" }
+    {
+      "head": "insulin",
+      "tails": [
+        "unit",
+        "units"
+      ],
+      "unit": "U"
+    },
+    {
+      "head": "usp",
+      "tails": [
+        "unit",
+        "units"
+      ],
+      "unit": "U"
+    },
+    {
+      "head": "pen",
+      "tails": [
+        "click",
+        "clicks"
+      ],
+      "unit": "click"
+    },
+    {
+      "head": "dial",
+      "tails": [
+        "click",
+        "clicks"
+      ],
+      "unit": "click"
+    },
+    {
+      "head": "transdermal",
+      "tails": [
+        "system",
+        "systems"
+      ],
+      "unit": "patch"
+    }
   ],
-  "implicitSingleDoseUnits": ["pea-sized amount", "finger length"],
+  "implicitSingleDoseUnits": [
+    "pea-sized amount",
+    "finger length"
+  ],
   "percentBodyAreaUnits": {
     "bsa": "% BSA",
     "tbsa": "% BSA"
@@ -210,13 +672,46 @@
     "eleven": 11,
     "twelve": 12
   },
-  "doseUnitConnectors": ["of", "a", "an", "the"],
-  "millionDoseMultiplierTokens": ["m"],
-  "scheduleUnitSeparatorTokens": ["/"],
-  "compactListSeparators": ["/"],
-  "everyIntervalTokens": ["q", "every", "each"],
-  "countMarkerTokens": ["x", "*"],
-  "countConnectorWords": ["a", "an", "the", "total", "of", "up", "to", "no", "more", "than", "max", "maximum", "additional", "extra"],
+  "doseUnitConnectors": [
+    "of",
+    "a",
+    "an",
+    "the"
+  ],
+  "millionDoseMultiplierTokens": [
+    "m"
+  ],
+  "scheduleUnitSeparatorTokens": [
+    "/"
+  ],
+  "compactListSeparators": [
+    "/"
+  ],
+  "everyIntervalTokens": [
+    "q",
+    "every",
+    "each"
+  ],
+  "countMarkerTokens": [
+    "x",
+    "*"
+  ],
+  "countConnectorWords": [
+    "a",
+    "an",
+    "the",
+    "total",
+    "of",
+    "up",
+    "to",
+    "no",
+    "more",
+    "than",
+    "max",
+    "maximum",
+    "additional",
+    "extra"
+  ],
   "frequencySimpleWords": {
     "once": 1,
     "twice": 2,
@@ -236,8 +731,18 @@
     "eleven": 11,
     "twelve": 12
   },
-  "frequencyTimesWords": ["time", "times", "x"],
-  "frequencyConnectorWords": ["per", "a", "an", "each", "every"],
+  "frequencyTimesWords": [
+    "time",
+    "times",
+    "x"
+  ],
+  "frequencyConnectorWords": [
+    "per",
+    "a",
+    "an",
+    "each",
+    "every"
+  ],
   "frequencyAdverbUnits": {
     "daily": "Day",
     "weekly": "Week",
@@ -268,7 +773,19 @@
     "night": "Day",
     "nights": "Day"
   },
-  "workflowStartWords": ["after", "before", "with", "leave", "rinse", "wash", "cover", "clean", "dry", "shake", "mix"],
+  "workflowStartWords": [
+    "after",
+    "before",
+    "with",
+    "leave",
+    "rinse",
+    "wash",
+    "cover",
+    "clean",
+    "dry",
+    "shake",
+    "mix"
+  ],
   "workflowNouns": [
     "bowel",
     "change",
@@ -282,14 +799,38 @@
     "sun",
     "wash"
   ],
-  "anteMeridiemTokens": ["am"],
-  "postMeridiemTokens": ["pm"],
-  "meridiemTokens": ["am", "pm"],
-  "listSeparators": [",", "and"],
-  "medicationObjectFillers": ["medication", "medicine", "drug"],
-  "clockLeadTokens": ["@", "at"],
-  "eventPrepositions": ["in", "at", "on", "every"],
-  "eventArticleTokens": ["the"],
+  "anteMeridiemTokens": [
+    "am"
+  ],
+  "postMeridiemTokens": [
+    "pm"
+  ],
+  "meridiemTokens": [
+    "am",
+    "pm"
+  ],
+  "listSeparators": [
+    ",",
+    "and"
+  ],
+  "medicationObjectFillers": [
+    "medication",
+    "medicine",
+    "drug"
+  ],
+  "clockLeadTokens": [
+    "@",
+    "at"
+  ],
+  "eventPrepositions": [
+    "in",
+    "at",
+    "on",
+    "every"
+  ],
+  "eventArticleTokens": [
+    "the"
+  ],
   "fixedEventPhrases": {
     "early morning": "Early Morning"
   },
@@ -320,13 +861,42 @@
       "Dinner": "After Dinner"
     }
   },
-  "sleepEventAliases": ["bed", "bedtime", "sleep"],
-  "wakeEventAliases": ["wake", "waking"],
-  "foodEventAliases": ["food", "meal", "meals"],
-  "dayRangeConnectors": ["to", "through", "-", "ถึง"],
-  "rangeConnectors": ["to", "through", "-", "ถึง"],
-  "durationLeadTokens": ["for"],
-  "instructionLeadingSeparators": [",", ";", ":", ".", "-"],
+  "sleepEventAliases": [
+    "bed",
+    "bedtime",
+    "sleep"
+  ],
+  "wakeEventAliases": [
+    "wake",
+    "waking"
+  ],
+  "foodEventAliases": [
+    "food",
+    "meal",
+    "meals"
+  ],
+  "dayRangeConnectors": [
+    "to",
+    "through",
+    "-",
+    "ถึง"
+  ],
+  "rangeConnectors": [
+    "to",
+    "through",
+    "-",
+    "ถึง"
+  ],
+  "durationLeadTokens": [
+    "for"
+  ],
+  "instructionLeadingSeparators": [
+    ",",
+    ";",
+    ":",
+    ".",
+    "-"
+  ],
   "instructionStartWords": [
     "avoid",
     "can",
@@ -369,17 +939,54 @@
     "thinly",
     "up"
   ],
-  "workflowContinuationLicenses": ["with each", "after each", "before use", "after use", "leave on", "rinse with", "wash with", "clean with", "mix with", "the *event", "sun exposure"],
-  "asNeededLeadPhrases": ["as needed"],
-  "prnBreakingCoordinators": [",", "/"],
-  "eyeSiteAbbreviations": ["od", "os", "ou", "re", "le", "be"],
-  "nonOcularDoseUnits": ["tab", "cap", "mg", "mcg", "g", "mL", "puff"],
+  "workflowContinuationLicenses": [
+    "with each",
+    "after each",
+    "before use",
+    "after use",
+    "leave on",
+    "rinse with",
+    "wash with",
+    "clean with",
+    "mix with",
+    "the *event",
+    "sun exposure"
+  ],
+  "asNeededLeadPhrases": [
+    "as needed"
+  ],
+  "prnBreakingCoordinators": [
+    ",",
+    "/"
+  ],
+  "eyeSiteAbbreviations": [
+    "od",
+    "os",
+    "ou",
+    "re",
+    "le",
+    "be"
+  ],
+  "nonOcularDoseUnits": [
+    "tab",
+    "cap",
+    "mg",
+    "mcg",
+    "g",
+    "mL",
+    "puff"
+  ],
   "ocularRouteCodes": [
     "Ophthalmic route",
     "Ocular route (qualifier value)",
     "Intravitreal route (qualifier value)"
   ],
-  "hardSegmentBoundaryTokens": ["+", "|", "||", "//"],
+  "hardSegmentBoundaryTokens": [
+    "+",
+    "|",
+    "||",
+    "//"
+  ],
   "clauseLeadWords": [
     "apply",
     "take",
@@ -403,5 +1010,51 @@
     "both",
     "each"
   ],
-  "lateralModifierWords": ["left", "right"]
+  "lateralModifierWords": [
+    "left",
+    "right"
+  ],
+  "productFormModifiers": [
+    "new",
+    "replacement",
+    "fresh",
+    "old"
+  ],
+  "bodySiteAttributiveModifiers": [
+    "dry",
+    "clean",
+    "hairless",
+    "affected",
+    "broken",
+    "intact",
+    "painful",
+    "external",
+    "irritated",
+    "inflamed",
+    "wet",
+    "moist"
+  ],
+  "positiveDirectiveMarkers": [
+    "should",
+    "must"
+  ],
+  "freeTextDirectiveStarts": [
+    "avoid",
+    "do",
+    "don't",
+    "dont",
+    "must",
+    "mustn't",
+    "mustnt",
+    "no",
+    "not",
+    "should",
+    "without"
+  ],
+  "conditionalInstructionExclusiveLeads": [
+    "if",
+    "unless",
+    "when",
+    "while"
+  ]
 }

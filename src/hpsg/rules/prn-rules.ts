@@ -52,6 +52,15 @@ import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
 import { productRouteHint } from "./product-route";
 
+function startsDoseComplement(context: HpsgClauseContext, start: number): boolean {
+  const amount = context.tokens[start];
+  const unit = context.tokens[start + 1];
+  if (!amount || amount.kind !== LexKind.Number || !unit || context.state.consumed.has(unit.index)) {
+    return false;
+  }
+  return Boolean(normalizeUnit(normalizeTokenLower(unit), context.options));
+}
+
 function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {
   return (
     /^x[0-9]+(?:\.[0-9]+)?$/.test(lower) ||
@@ -578,7 +587,11 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       if (
         !PRN_REASON_COORDINATORS.has(lower) &&
-        (prnReasonBoundary(lower, context) || (reasonTokens.length > 0 && isScheduleLead(context, cursor))) &&
+        (
+          prnReasonBoundary(lower, context) ||
+          startsDoseComplement(context, cursor) ||
+          (reasonTokens.length > 0 && isScheduleLead(context, cursor))
+        ) &&
         !isKnownPrnReasonText(lower)
       ) {
         break;

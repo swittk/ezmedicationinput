@@ -80,7 +80,7 @@ export function projectHpsgSignToState(
   deps: HpsgProjectionDeps
 ): void {
   const method = sign.synsem.head.method;
-  if (method) {
+  if (method && method.headClass !== "procedure") {
     state.methodVerb = method.verb;
     if (method.text !== undefined) {
       state.methodText = method.text;
@@ -96,12 +96,12 @@ export function projectHpsgSignToState(
   }
 
   const route = sign.synsem.head.route;
-  if (route) {
+  if (route && route.attachmentClass !== "procedure") {
     deps.setRoute(state, route.code, route.text);
   }
 
   const site = sign.synsem.valence.site;
-  if (site) {
+  if (site && site.attachmentClass !== "procedure") {
     if (site.text !== undefined) {
       state.siteText = site.text;
     }
@@ -166,7 +166,7 @@ export function projectHpsgSignToState(
   }
 
   const dose = sign.synsem.head.dose;
-  if (dose) {
+  if (dose && dose.attachmentClass !== "procedure") {
     if (dose.value !== undefined) {
       state.dose = dose.value;
     }
@@ -179,7 +179,7 @@ export function projectHpsgSignToState(
   }
 
   const schedule = sign.synsem.head.schedule;
-  if (schedule) {
+  if (schedule && schedule.attachmentClass !== "procedure") {
     applySchedule(state, schedule, deps);
   }
 
