@@ -9,6 +9,10 @@ const TAB_CONTEXT_LITERAL =
 function runNode(args: string[], code: string): {
   parseSigType: string;
   formatSigType: string;
+  parseInstructionActionsType?: string;
+  realizeInstructionGraphType?: string;
+  listMedicationInstructionActionsType?: string;
+  buildMedicationInstructionActionCodeSystemType?: string;
   longText: string;
 } {
   const output = execFileSync(process.execPath, [...args, "-e", code], {
@@ -60,4 +64,34 @@ describe("published package entrypoints", () => {
       longText: "Take 1 tablet orally once daily."
     });
   });
+
+  it("publishes procedural graph parsing, realization, and terminology APIs", () => {
+    const result = runNode(
+      ["--input-type=module"],
+      `
+        const mod = await import("ezmedicationinput");
+        const actions = mod.parseInstructionActions("shake bottle then rinse");
+        process.stdout.write(JSON.stringify({
+          parseSigType: typeof mod.parseSig,
+          formatSigType: typeof mod.formatSig,
+          parseInstructionActionsType: typeof mod.parseInstructionActions,
+          realizeInstructionGraphType: typeof mod.realizeInstructionGraph,
+          listMedicationInstructionActionsType: typeof mod.listMedicationInstructionActions,
+          buildMedicationInstructionActionCodeSystemType: typeof mod.buildMedicationInstructionActionCodeSystem,
+          longText: actions.map((action) => action.predicate.lemma).join(",")
+        }));
+      `
+    );
+
+    expect(result).toEqual({
+      parseSigType: "function",
+      formatSigType: "function",
+      parseInstructionActionsType: "function",
+      realizeInstructionGraphType: "function",
+      listMedicationInstructionActionsType: "function",
+      buildMedicationInstructionActionCodeSystemType: "function",
+      longText: "shake,rinse"
+    });
+  });
+
 });

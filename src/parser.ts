@@ -10,6 +10,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
+import { buildInstructionGraph } from "./instruction-graph";
 export {
   applyPrnReasonCoding,
   applyPrnReasonCodingAsync
@@ -306,7 +307,7 @@ function cleanupClause(state: ParserState): void {
   }
 }
 
-function finalizeClause(state: ParserState): void {
+function finalizeClause(state: ParserState, options?: ParseOptions): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
   clause.rawText = state.input;
@@ -316,6 +317,7 @@ function finalizeClause(state: ParserState): void {
   clause.warnings = state.warnings.length ? state.warnings.slice() : undefined;
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
+  clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
 }
 
 export function findUnparsedTokenGroups(
@@ -403,6 +405,6 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);
   seedKnownSiteCoding(state);
-  finalizeClause(state);
+  finalizeClause(state, options);
   return state;
 }

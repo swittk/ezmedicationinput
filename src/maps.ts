@@ -935,7 +935,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["palm", "palm of hand", "palm of the hand"],
+      names: ["palm", "palm of hand", "palm of the hand", "ฝ่ามือ"],
       definition: {
         coding: { code: "731973001", display: "Entire palm (region)" },
         text: "palm",
@@ -1344,7 +1344,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "181367001", display: "Entire vein" }, routeHint: RouteCode["Intravenous route"] }
     },
     {
-      names: ["vagina", "vaginal"],
+      names: ["vagina", "vaginal", "ช่องคลอด"],
       definition: { coding: { code: "76784001", display: "Vagina" }, text: "vagina", routeHint: RouteCode["Per vagina"] }
     },
     {

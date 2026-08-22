@@ -522,7 +522,9 @@ export enum AdviceRelation {
   Until = "until",
   For = "for",
   In = "in",
-  On = "on"
+  Into = "into",
+  On = "on",
+  To = "to"
 }
 
 export enum AdviceArgumentRole {
@@ -533,6 +535,10 @@ export enum AdviceArgumentRole {
   Activity = "activity",
   Material = "material",
   Site = "site",
+  Destination = "destination",
+  Result = "result",
+  Container = "container",
+  Manner = "manner",
   Amount = "amount",
   Duration = "duration",
   Time = "time",
@@ -544,6 +550,13 @@ export interface AdviceArgument {
   text: string;
   normalized?: string;
   conceptId?: string;
+  coding?: FhirCoding;
+  i18n?: Record<string, string>;
+  quantity?: {
+    value?: number;
+    range?: CanonicalDoseRange;
+    unit?: string;
+  };
   span?: TextRange;
 }
 
@@ -554,6 +567,8 @@ export interface AdviceFrame {
   predicate: {
     lemma: string;
     semanticClass?: string;
+    /** Internal action coding followed by any trustworthy external mappings. */
+    codings?: FhirCoding[];
   };
   relation?: AdviceRelation;
   args: AdviceArgument[];
@@ -931,6 +946,17 @@ export interface CanonicalAdditionalInstructionExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalInstructionGraph {
+  /** Ordered, language-neutral procedural/administration actions. */
+  actions: AdviceFrame[];
+  /** Source fragments the parser deliberately did not assign semantics to. */
+  opaqueSpans?: CanonicalSourceSpan[];
+  /** Exact original source represented by this graph. */
+  sourceText: string;
+  /** Source language when it can be determined without guessing. */
+  sourceLocale?: string;
+}
+
 export interface CanonicalSourceSpan extends TextRange {
   text: string;
   tokenIndices?: number[];
@@ -955,6 +981,7 @@ export interface CanonicalSigClause {
   schedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
   patientInstruction?: string;
+  instructionGraph?: CanonicalInstructionGraph;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];
   leftovers: CanonicalSourceSpan[];
   evidence: CanonicalEvidence[];
@@ -993,6 +1020,7 @@ export interface ParseNormalizedMeta {
   site?: BodySiteDetail;
   method?: { text?: string; coding?: FhirCoding };
   patientInstruction?: string;
+  instructionGraph?: CanonicalInstructionGraph;
   prnReason?: ConceptSiteDetail;
   prnReasons?: ConceptSiteDetail[];
   additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;

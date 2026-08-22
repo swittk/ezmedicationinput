@@ -7,6 +7,7 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { realizeInstructionGraph } from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
@@ -999,12 +1000,20 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const instructionPhrases: string[] = [];
-  const instructionText = formatAdditionalInstructions(clause);
+  const graphWarning = clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "en", { onlyWarnings: true })
+    : undefined;
+  const instructionText = graphWarning
+    ? formatPatientInstructionSentence(graphWarning)
+    : formatAdditionalInstructions(clause);
   if (instructionText) {
     instructionPhrases.push(instructionText);
   }
+  const graphInstruction = clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "en", { includeWarnings: false })
+    : undefined;
   const patientInstruction = formatPatientInstructionSentence(
-    clause.patientInstruction
+    graphInstruction ?? clause.patientInstruction
   );
   if (patientInstruction) {
     instructionPhrases.push(patientInstruction);

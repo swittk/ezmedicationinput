@@ -23,6 +23,7 @@ import {
   mergeTranslationPrimitiveElement
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
 import { parseSnomedFindingSitePostcoordinationCode } from "./snomed-postcoordination";
@@ -469,6 +470,10 @@ export function canonicalToFhir(
   options?: FhirProjectionOptions
 ): FhirDosage {
   const dosage: FhirDosage = {};
+  const instructionGraphExtension = buildInstructionGraphExtension(clause.instructionGraph);
+  if (instructionGraphExtension) {
+    dosage.extension = [instructionGraphExtension];
+  }
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
@@ -702,6 +707,7 @@ export function toFhir(state: ParserState): FhirDosage {
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
+  clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
   let routeCode: RouteCode | undefined;
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);

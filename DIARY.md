@@ -2190,3 +2190,68 @@ Verification:
 - `npm run build`
 - `npm test`
 - `npm run test:dist`
+
+## 2026-08-22 Procedural instruction semantic graph and bidirectional realization
+
+The Thai free-text pass proved that extracting dose/timing while leaving the
+rest as one patientInstruction string was safe but not sufficient. Complex
+preparation/application instructions now project into an ordered semantic
+graph that is richer than FHIR Dosage while remaining lossless.
+
+Architecture:
+- added a canonical `instructionGraph` made of ordered typed action frames
+- action frames carry predicate, semantic class, polarity, relation, typed
+  arguments, quantities, source spans, and multiple codings
+- added the stable package-owned CodeSystem URI
+  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-action`
+  and public terminology enumeration/lookup APIs plus a FHIR-shaped CodeSystem
+  resource generator
+- external terminology is additive: exact SNOMED mappings are attached where
+  appropriate; actions without an honest SNOMED equivalent retain the internal
+  action code rather than being coerced to a nearby concept
+- added a FHIR extension
+  `https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph`
+  so the semantic graph survives Dosage serialization/deserialization while
+  standard Dosage.text, patientInstruction and additionalInstruction remain
+  conventional interoperable fallbacks
+- added Thai and English realization from the same graph
+- added realization -> parse action-sequence invariance tests in both languages
+- preserved unparsed fragments as ordered opaque source spans; unknown text is
+  emitted verbatim instead of silently disappearing or receiving invented
+  semantics
+
+Local SNOMED validation used the owner-provided International RF2 snapshot
+`SnomedCT_InternationalRF2_PRODUCTION_20260401`. The archive remains local and
+is ignored by Git. Confirmed active concepts used by this pass include:
+- 731973001 Entire palm (region)
+- 76784001 Vagina
+- 21397001 Douche of vagina (procedure)
+- 782155003 Rinse (administration method)
+- 422152000 Wash - dosing instruction imperative (qualifier value)
+- 421826007 Mix (qualifier value)
+
+No honest generic SNOMED `pour` action was found in the supplied snapshot, so
+`pour` intentionally remains an internal action with its destination separately
+coded when possible.
+
+The original torture-test instruction now yields ordered actions:
+1. shake(container=bottle, before=use)
+2. pour(theme=product, destination=palm[SNOMED 731973001], amount=1-2 mL)
+3. mix(substance=water, amount=small)
+4. rub(result=foam)
+5. clean(site=external intimate area; deliberately not over-coded)
+6. rinse(substance=clean water)
+7. NOT douche(site=vagina[SNOMED 76784001]), with action mapping SNOMED 21397001
+
+The same stored graph realizes to understandable Thai and English. Existing
+workflow semantics were also strengthened for duration (`leave on for 10
+minutes then rinse`) and temporal workflow arguments (`rinse in the morning`).
+Generic medication advice such as warfarin/grapefruit cautions remains owned by
+the existing advice subsystem rather than being duplicated into the procedural
+graph.
+
+Verification:
+- `npm run build`
+- `npm test` -> 640 tests passing
+- `npm run test:dist` -> published ESM/CJS graph exports verified
+- `git diff --check`

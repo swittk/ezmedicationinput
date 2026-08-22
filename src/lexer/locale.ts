@@ -23,6 +23,9 @@ import { LexKind, LexToken } from "./token-types";
 const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   // administration / workflow
   "เขย่า": "shake",
+  "เท": "pour",
+  "ผลิตภัณฑ์": "product",
+  "ขวด": "bottle",
   "ใช้": "use",
   "รับประทาน": "take",
   "กิน": "take",
@@ -35,6 +38,8 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ผสม": "mix",
   "ล้าง": "rinse",
   "ถู": "rub",
+  "ฝ่ามือ": "palm",
+  "ช่องคลอด": "vagina",
 
   // grammar / relations
   "ก่อน": "before",
@@ -46,6 +51,8 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ที่": "at",
   "ใน": "in",
   "บน": "on",
+  "ลง": "into",
+  "ด้วย": "with",
   "ภายนอก": "external",
   "ห้าม": "avoid",
 
@@ -59,6 +66,8 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "กลางคืน": "night",
   "นอน": "sleep",
   "อาหาร": "meal",
+  "น้ำ": "water",
+  "ฟอง": "foam",
   "นาที": "minute",
   "ชั่วโมง": "hour",
   "วัน": "day",
@@ -137,6 +146,10 @@ function isKnownThaiDomainTerm(value: string): boolean {
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
+  { parts: ["บริเวณ", "ภายนอก", "จุด", "ซ่อน", "เร้น"], canonical: "external-intimate-area" },
+  { parts: ["ให้", "เกิด", "ฟอง"], canonical: "foam-result" },
+  { parts: ["น้ำ", "สะอาด"], canonical: "clean-water" },
+  { parts: ["เล็ก", "น้อย"], canonical: "small" },
   { parts: ["รับ", "ประทาน"], canonical: "take" },
   { parts: ["วัน", "ละ", "ครั้ง"], canonical: "daily" },
   { parts: ["ทำความ", "สะอาด"], canonical: "clean" },

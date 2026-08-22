@@ -12,6 +12,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { realizeInstructionGraph } from "./instruction-graph";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -1624,12 +1625,20 @@ function formatLongThai(
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const instructionPhrases: string[] = [];
-  const instructionText = formatAdditionalInstructionsThai(clause);
+  const graphWarning = clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "th", { onlyWarnings: true })
+    : undefined;
+  const instructionText = graphWarning
+    ? formatPatientInstructionSentence(graphWarning)
+    : formatAdditionalInstructionsThai(clause);
   if (instructionText) {
     instructionPhrases.push(instructionText);
   }
+  const graphInstruction = clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "th", { includeWarnings: false })
+    : undefined;
   const patientInstruction = formatPatientInstructionSentence(
-    clause.patientInstruction
+    graphInstruction ?? clause.patientInstruction
   );
   if (patientInstruction) {
     instructionPhrases.push(patientInstruction);

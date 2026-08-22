@@ -33,6 +33,19 @@ import {
   TextRange
 } from "./types";
 export { suggestSig } from "./suggest";
+export {
+  MEDICATION_INSTRUCTION_ACTION_SYSTEM,
+  buildMedicationInstructionActionCodeSystem,
+  getMedicationInstructionAction,
+  listMedicationInstructionActions,
+  parseInstructionActions,
+  realizeInstructionGraph
+} from "./instruction-graph";
+export {
+  MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+  buildInstructionGraphExtension,
+  parseInstructionGraphExtension
+} from "./instruction-graph-fhir";
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
 export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
@@ -785,6 +798,7 @@ function buildNormalizedMetaFromClause(
         }
         : undefined,
     patientInstruction: clause.patientInstruction,
+    instructionGraph: clause.instructionGraph,
     prnReason:
       clause.prn?.reason?.text || clause.prn?.reason?.coding?.code
         ? {

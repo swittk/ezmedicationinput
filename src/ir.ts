@@ -238,6 +238,23 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
+    if (clause.instructionGraph) {
+      for (const action of clause.instructionGraph.actions) {
+        action.span.start += offset;
+        action.span.end += offset;
+        for (const arg of action.args) {
+          if (arg.span) {
+            arg.span.start += offset;
+            arg.span.end += offset;
+          }
+        }
+      }
+      for (const opaque of clause.instructionGraph.opaqueSpans ?? []) {
+        opaque.start += offset;
+        opaque.end += offset;
+      }
+    }
+
     if (clause.additionalInstructions) {
       for (const instruction of clause.additionalInstructions) {
         shiftEvidenceSpans(instruction.evidence);
