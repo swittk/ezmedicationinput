@@ -425,6 +425,12 @@ export interface MedicationContext {
 
 export interface FormatOptions {
   locale?: "en" | "th" | string;
+  /**
+   * `normalized` favors compact natural wording. `roundtrip` stays human-readable
+   * but emits explicit attachment/route cues so parse -> realize -> parse can
+   * preserve canonical semantics. Defaults to `normalized`.
+   */
+  realizationMode?: "normalized" | "roundtrip";
   i18n?: SigTranslationConfig;
   /**
    * Collapses repeated meal relation phrases into a grouped phrase when all
@@ -1083,6 +1089,8 @@ export interface CanonicalInstructionGraph {
   actions: AdviceFrame[];
   /** Explicit temporal/conditional relationships between actions or source clauses. */
   relations?: CanonicalInstructionRelation[];
+  /** Source span of the canonical primary administration head, when known. */
+  primaryAdministrationSpan?: TextRange;
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];
   coverage?: CanonicalInstructionCoverage;

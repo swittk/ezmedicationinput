@@ -74,8 +74,11 @@ function chartKey(sign: HpsgSign): string {
   if (cached !== undefined) {
     return cached;
   }
+  const packedType = HPSG_TYPE_SYSTEM.isSubtype(sign.type, "phrase-sign")
+    ? "phrase-sign"
+    : sign.type;
   const key = [
-    sign.type,
+    packedType,
     sign.span.start,
     sign.span.end,
     JSON.stringify(sign.synsem)
@@ -95,7 +98,12 @@ function isBetterDerivation(candidate: HpsgSign, existing: HpsgSign): boolean {
   if (candidate.score !== existing.score) {
     return candidate.score > existing.score;
   }
-  return candidate.evidence.length < existing.evidence.length;
+  if (candidate.evidence.length !== existing.evidence.length) {
+    return candidate.evidence.length < existing.evidence.length;
+  }
+  const candidateSpecific = candidate.type !== "clause-sign" && candidate.type !== "phrase-sign";
+  const existingSpecific = existing.type !== "clause-sign" && existing.type !== "phrase-sign";
+  return candidateSpecific && !existingSpecific;
 }
 
 function pushUnique(signs: HpsgSign[], seen: Map<string, HpsgSign>, sign: HpsgSign): boolean {

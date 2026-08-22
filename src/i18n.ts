@@ -12,7 +12,11 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
-import { instructionGraphHasNovelNonWarningContent, realizeInstructionGraph } from "./instruction-graph";
+import {
+  instructionGraphHasNovelNonWarningContent,
+  instructionGraphRepresentsText,
+  realizeInstructionGraph
+} from "./instruction-graph";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -38,6 +42,7 @@ export interface SigFormatContext {
   readonly defaultText: string;
   readonly groupMealTimingsByRelation: boolean;
   readonly includeTimesPerDaySummary: boolean;
+  readonly realizationMode: "normalized" | "roundtrip";
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -152,11 +157,13 @@ function createThaiLocalization(): SigLocalization {
     formatLong: ({
       clause,
       groupMealTimingsByRelation,
-      includeTimesPerDaySummary
+      includeTimesPerDaySummary,
+      realizationMode
     }) =>
       formatLongThai(clause, {
         groupMealTimingsByRelation,
-        includeTimesPerDaySummary
+        includeTimesPerDaySummary,
+        realizationMode
       })
   };
 }
@@ -1534,10 +1541,32 @@ function formatShortThai(clause: CanonicalSigClause): string {
   return parts.filter(Boolean).join(" ");
 }
 
+function makeThaiRoundTripSurface(text: string): string {
+  return text
+    .replace(/ครั้งละ\s*/gu, "")
+    .replace(/ตอนเช้า/gu, "เช้า")
+    .replace(/ตอนเที่ยง/gu, "เที่ยง")
+    .replace(/ตอนกลางวัน/gu, "กลางวัน")
+    .replace(/ตอนบ่าย/gu, "บ่าย")
+    .replace(/ตอนเย็น/gu, "เย็น")
+    .replace(/ตอนกลางคืน/gu, "กลางคืน")
+    .replace(/([0-9]+(?:\.[0-9]+)?)\s+ถึง\s+([0-9]+(?:\.[0-9]+)?)/gu, "$1-$2")
+    .replace(/ใช้เมื่อจำเป็นสำหรับ\s+/gu, "เมื่อมี")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 function formatLongThai(
   clause: CanonicalSigClause,
   options?: TimingSummaryOptions
 ): string {
+  if (
+    options?.realizationMode === "roundtrip" &&
+    clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
+    clause.instructionGraph.sourceText.trim()
+  ) {
+    return clause.instructionGraph.sourceText.trim();
+  }
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
   const verb = resolveThaiMethodVerb(clause, grammar);
@@ -1628,15 +1657,35 @@ function formatLongThai(
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const instructionPhrases: string[] = [];
-  const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction) => instruction.coding?.code)
+  const roundTripCrossLanguage = Boolean(
+    options?.realizationMode === "roundtrip" &&
+    clause.instructionGraph &&
+    !clause.instructionGraph.sourceLocale?.toLowerCase().startsWith("th")
   );
-  const graphWarning = clause.instructionGraph && !hasCodedAdditionalInstruction
-    ? realizeInstructionGraph(clause.instructionGraph, "th", { onlyWarnings: true })
+  const graphOwnedAdditional = roundTripCrossLanguage
+    ? (clause.additionalInstructions ?? []).filter((instruction) =>
+        Boolean(instruction.text && clause.instructionGraph &&
+          instructionGraphRepresentsText(clause.instructionGraph, instruction.text))
+      )
+    : [];
+  const directAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
+    graphOwnedAdditional.indexOf(instruction) === -1
+  );
+  const hasCodedAdditionalInstruction = Boolean(
+    directAdditional.some((instruction) => instruction.coding?.code)
+  );
+  const graphWarning = clause.instructionGraph && (roundTripCrossLanguage || !hasCodedAdditionalInstruction)
+    ? realizeInstructionGraph(clause.instructionGraph, "th", {
+        onlyWarnings: true,
+        omitCanonicalAdministration: clause
+      })
     : undefined;
-  const instructionText = graphWarning
-    ? formatPatientInstructionSentence(graphWarning)
-    : formatAdditionalInstructionsThai(clause);
+  const directInstruction = formatAdditionalInstructionsThai({
+    ...clause,
+    additionalInstructions: directAdditional
+  });
+  const warningInstruction = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
+  const instructionText = [directInstruction, warningInstruction].filter(Boolean).join(" ").trim() || undefined;
   if (instructionText) {
     instructionPhrases.push(instructionText);
   }
@@ -1645,7 +1694,10 @@ function formatLongThai(
     .filter((text): text is string => Boolean(text));
   const graphInstruction = clause.instructionGraph &&
     instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
-    ? realizeInstructionGraph(clause.instructionGraph, "th", { includeWarnings: false })
+    ? realizeInstructionGraph(clause.instructionGraph, "th", {
+        includeWarnings: false,
+        omitCanonicalAdministration: roundTripCrossLanguage ? clause : undefined
+      })
     : undefined;
   const patientInstruction = formatPatientInstructionSentence(
     graphInstruction ?? clause.patientInstruction
@@ -1655,10 +1707,10 @@ function formatLongThai(
   }
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
   const baseSentence = `${joinThaiVerbAndBody(verb, body)}.`;
-  if (!body) {
-    return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
-  }
-  return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
+  const rendered = trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
+  return options?.realizationMode === "roundtrip"
+    ? makeThaiRoundTripSurface(rendered)
+    : rendered;
 }
 
 function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | undefined {

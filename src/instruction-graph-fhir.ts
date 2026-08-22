@@ -129,6 +129,8 @@ export function buildInstructionGraphExtension(
   const nested: FhirExtension[] = [];
   add(nested, valueString("sourceText", graph.sourceText));
   add(nested, valueCode("sourceLocale", graph.sourceLocale));
+  add(nested, valueInteger("primaryAdministrationStart", graph.primaryAdministrationSpan?.start));
+  add(nested, valueInteger("primaryAdministrationEnd", graph.primaryAdministrationSpan?.end));
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
@@ -307,8 +309,14 @@ export function parseInstructionGraphExtension(
   }
   if (!actions.length && !opaqueSpans.length) return undefined;
   actions.sort((left, right) => (left.sequenceIndex ?? 0) - (right.sequenceIndex ?? 0));
+  const primaryAdministrationStart = child(extension, "primaryAdministrationStart")?.valueInteger;
+  const primaryAdministrationEnd = child(extension, "primaryAdministrationEnd")?.valueInteger;
   return {
     actions,
+    primaryAdministrationSpan:
+      primaryAdministrationStart !== undefined && primaryAdministrationEnd !== undefined
+        ? { start: primaryAdministrationStart, end: primaryAdministrationEnd }
+        : undefined,
     relations: relations.length ? relations : undefined,
     opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
     coverage,

@@ -23,7 +23,7 @@ export function normalizeTokenLower(token: Token): string {
 }
 
 export function isPunctuation(lower: string): boolean {
-  return !lower || /^[;:(),]+$/.test(lower);
+  return !lower || /^[;:(),.]+$/.test(lower) || lower === "!" || lower === "?";
 }
 
 export function isClockLikeLower(lower: string): boolean {

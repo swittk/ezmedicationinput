@@ -13,6 +13,7 @@ import { AdviceFrame, RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { inferRouteFromContext } from "../../context";
 import { getProceduralFrames } from "../procedural-context";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -59,6 +60,9 @@ const AMBIGUOUS_PROCEDURE_SITE_ACTIONS = new Set(["wash", "rinse"]);
 const LOCAL_PROCEDURE_SITE_ACTIONS = new Set([
   "wash",
   "rinse",
+  "wipe",
+  "clean",
+  "dry",
   "touch",
   "press",
   "warm",
@@ -95,11 +99,32 @@ function siteRangeIsProcedureLocal(
     if (!AMBIGUOUS_PROCEDURE_SITE_ACTIONS.has(frame.predicate.lemma)) {
       return true;
     }
-    return frames.some((candidate) => candidate.span.start < frame.span.start);
+    const hasPriorProcedure = frames.some((candidate) => candidate.span.start < frame.span.start);
+    const hasLaterExplicitAdministration = frames.some((candidate) => {
+      if (candidate.span.start <= frame.span.start) return false;
+      const definition = resolveMedicationInstructionAction(candidate.predicate.lemma, context.options);
+      return Boolean(definition && !definition.procedural && METHOD_ACTION_BY_VERB[candidate.predicate.lemma]);
+    });
+    return hasPriorProcedure || hasLaterExplicitAdministration;
   });
 }
 
-const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not"]);
+function anchoredSiteHasPriorAdministrationHead(
+  context: HpsgClauseContext,
+  anchorIndex: number
+): boolean {
+  for (let index = 0; index < anchorIndex; index += 1) {
+    const candidate = context.tokens[index];
+    if (!candidate || context.state.consumed.has(candidate.index)) continue;
+    const lower = normalizeTokenLower(candidate);
+    if (!METHOD_ACTION_BY_VERB[lower]) continue;
+    const definition = resolveMedicationInstructionAction(lower, context.options);
+    if (definition && !definition.procedural) return true;
+  }
+  return false;
+}
+
+const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
@@ -312,7 +337,11 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const rawSourceText = joinTokenText(displayTokens);
     const isProbe = rawSourceText.includes("{") || rawSourceText.includes("}");
-    const sourceText = rawSourceText.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
+    const sourceText = rawSourceText
+      .replace(/[{}]/g, "")
+      .replace(/[.,;:!?]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {
       return signs;
     }
@@ -337,7 +366,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       range = { start, end };
     }
-    if (siteRangeIsProcedureLocal(context, range)) {
+    if (
+      siteRangeIsProcedureLocal(context, range) &&
+      !anchoredSiteHasPriorAdministrationHead(context, start)
+    ) {
       return signs;
     }
     const routeHint = resolved?.definition?.routeHint ??

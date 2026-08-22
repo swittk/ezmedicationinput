@@ -11,6 +11,7 @@ import {
   HpsgSynsem
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
+import { selectHpsgConstruction } from "./constructions";
 import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
@@ -399,7 +400,13 @@ export function combineSigns(
   if (!synsem) {
     return undefined;
   }
-  const fs = combineSignFeatureStructures(left.fs, right.fs, "clause-sign");
+  const selectedConstruction = selectHpsgConstruction(left, right);
+  const fs = combineSignFeatureStructures(
+    left.fs,
+    right.fs,
+    selectedConstruction.motherType,
+    selectedConstruction.construction.headSide
+  );
   if (!fs) {
     return undefined;
   }
@@ -407,7 +414,7 @@ export function combineSigns(
     new Set([...left.consumedTokenIndices, ...right.consumedTokenIndices])
   );
   return {
-    type: "clause-sign",
+    type: selectedConstruction.motherType,
     span: {
       start: Math.min(left.span.start, right.span.start),
       end: Math.max(left.span.end, right.span.end)
@@ -415,6 +422,7 @@ export function combineSigns(
     tokens: [...left.tokens, ...right.tokens],
     synsem,
     fs,
+    construction: selectedConstruction.construction,
     consumedTokenIndices: tokenIndices,
     siteTokenIndices: appendUnique(left.siteTokenIndices, right.siteTokenIndices),
     warnings: appendUnique(left.warnings, right.warnings),

@@ -1,6 +1,7 @@
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "./types";
 
 export interface TimingSummaryOptions {
+  realizationMode?: "normalized" | "roundtrip";
   groupMealTimingsByRelation?: boolean;
   includeTimesPerDaySummary?: boolean;
 }

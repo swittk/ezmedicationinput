@@ -182,6 +182,55 @@
         "บริเวณภายนอกจุดซ่อนเร้น",
         "external-intimate-area"
       ]
+    },
+    {
+      "code": "nasal_spray",
+      "role": "object",
+      "display": "nasal spray",
+      "i18n": {
+        "th": "ยาพ่นจมูก"
+      },
+      "aliases": [
+        "nasal spray",
+        "ยาพ่นจมูก"
+      ]
+    },
+    {
+      "code": "inhaler",
+      "role": "object",
+      "display": "inhaler",
+      "i18n": {
+        "th": "ยาสูดพ่น"
+      },
+      "aliases": [
+        "inhaler",
+        "ยาสูดพ่น"
+      ]
+    },
+    {
+      "code": "before_first_use",
+      "role": "material",
+      "display": "before first use",
+      "i18n": {
+        "th": "ก่อนใช้ครั้งแรก"
+      },
+      "aliases": [
+        "before first use",
+        "ก่อนใช้ครั้งแรก"
+      ]
+    },
+    {
+      "code": "occlusive_dressing",
+      "role": "material",
+      "display": "an occlusive dressing",
+      "i18n": {
+        "th": "แผ่นปิดแบบทึบ"
+      },
+      "aliases": [
+        "occlusive dressing",
+        "an occlusive dressing",
+        "แผ่นปิดแบบทึบ"
+      ]
     }
   ]
 }

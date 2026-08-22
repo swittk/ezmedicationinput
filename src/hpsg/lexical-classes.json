@@ -369,7 +369,7 @@
     "thinly",
     "up"
   ],
-  "workflowContinuationLicenses": ["with each", "after each", "before use", "after use", "rinse with", "wash with", "clean with", "mix with", "the *event", "sun exposure"],
+  "workflowContinuationLicenses": ["with each", "after each", "before use", "after use", "leave on", "rinse with", "wash with", "clean with", "mix with", "the *event", "sun exposure"],
   "asNeededLeadPhrases": ["as needed"],
   "prnBreakingCoordinators": [",", "/"],
   "eyeSiteAbbreviations": ["od", "os", "ou", "re", "le", "be"],

@@ -8,7 +8,7 @@ import {
   unifyFeatureStructures,
   validateFeatureStructure
 } from "../src/hpsg/type-system";
-import { signFeatureStructure } from "../src/hpsg/feature-structure";
+import { combineSignFeatureStructures, signFeatureStructure } from "../src/hpsg/feature-structure";
 
 describe("formal HPSG typed feature structures", () => {
   it("uses a real subtype hierarchy for signs", () => {
@@ -76,6 +76,38 @@ describe("formal HPSG typed feature structures", () => {
     if (!unified || unified.kind !== "node") return;
     expect(unified.features.LEFT).toBe(unified.features.RIGHT);
     expect(canonicalFeatureStructure(unified)).toContain('"ref"');
+  });
+
+  it("types headed phrase constructions with the expected inheritance", () => {
+    expect(HPSG_TYPE_SYSTEM.isSubtype("head-complement-phrase", "headed-phrase")).toBe(true);
+    expect(HPSG_TYPE_SYSTEM.isSubtype("head-adjunct-phrase", "phrase-sign")).toBe(true);
+    expect(HPSG_TYPE_SYSTEM.isSubtype("administration-clause", "clause-sign")).toBe(true);
+    expect(HPSG_TYPE_SYSTEM.isSubtype("administration-clause", "headed-phrase")).toBe(true);
+  });
+
+  it("stores formal head and non-head daughter identity on headed phrase AVMs", () => {
+    const head = signFeatureStructure("method-sign", {
+      head: { method: { verb: "apply" } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    });
+    const complement = signFeatureStructure("site-sign", {
+      head: {},
+      valence: { site: { text: "lesion" } },
+      cont: { clauseKind: "administration" }
+    });
+    const mother = combineSignFeatureStructures(
+      head,
+      complement,
+      "head-complement-phrase",
+      "left"
+    );
+    expect(mother).toBeDefined();
+    expect(mother?.features.HEAD_DTR).toBe(head);
+    expect(mother?.features.NON_HEAD_DTR).toBe(complement);
+    expect(mother?.features.LEFT_DTR).toBe(head);
+    expect(mother?.features.RIGHT_DTR).toBe(complement);
+    expect(mother ? validateFeatureStructure(mother, HPSG_TYPE_SYSTEM) : []).toEqual([]);
   });
 
   it("materializes existing medication SYNSEM as an appropriate typed sign", () => {

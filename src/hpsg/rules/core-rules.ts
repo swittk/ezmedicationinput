@@ -13,7 +13,7 @@ import {
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
-import { AdviceFrame, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
+import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
@@ -71,6 +71,12 @@ function procedureFrameIsDependent(
   if (!definition?.procedural) return false;
   if (!METHOD_ACTION_BY_VERB[frame.predicate.lemma]) return true;
   const frames = methodProcedureFrames(context);
+  const laterExplicitAdministration = frames.some((candidate) => {
+    if (candidate.span.start <= frame.span.start || candidate.polarity === AdvicePolarity.Negate) return false;
+    const later = resolveMedicationInstructionAction(candidate.predicate.lemma, context.options);
+    return Boolean(later && !later.procedural && METHOD_ACTION_BY_VERB[candidate.predicate.lemma]);
+  });
+  if (laterExplicitAdministration) return true;
   return frames.some((candidate) => {
     if (candidate.span.start >= frame.span.start || candidate.polarity === AdvicePolarity.Negate) return false;
     const prior = resolveMedicationInstructionAction(candidate.predicate.lemma, context.options);
@@ -333,7 +339,12 @@ function routePhraseCandidates(phrase: string): string[] {
 export function fillerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.filler.medicationObject", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
-    if (!token || !MEDICATION_OBJECT_FILLERS.has(normalizeTokenLower(token))) {
+    if (!token) return [];
+    const lower = normalizeTokenLower(token);
+    const next = context.tokens[start + 1];
+    const externalProductModifier = lower === "external" && next &&
+      Boolean(productRouteHint(normalizeTokenLower(next)));
+    if (!MEDICATION_OBJECT_FILLERS.has(lower) && !externalProductModifier) {
       return [];
     }
     return [
@@ -600,6 +611,22 @@ function percentBodyAreaDoseAfter(
   ];
 }
 
+function numericTokenIsProcedureLocalQuantity(
+  context: HpsgClauseContext,
+  token: Token
+): boolean {
+  for (const frame of getProceduralFrames(context)) {
+    if (token.sourceStart < frame.span.start || token.sourceEnd > frame.span.end) continue;
+    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    for (const arg of frame.args) {
+      if (!arg.span || token.sourceStart < arg.span.start || token.sourceEnd > arg.span.end) continue;
+      if (arg.role === AdviceArgumentRole.Duration) return true;
+      if (arg.role === AdviceArgumentRole.Amount && !definition?.definesDose) return true;
+    }
+  }
+  return false;
+}
+
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.dose", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -666,6 +693,39 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
+    if (token.kind === LexKind.Number && token.value !== undefined) {
+      const connector = context.tokens[start + 1];
+      const high = context.tokens[start + 2];
+      const connectorLower = connector ? normalizeTokenLower(connector) : "";
+      if (
+        connector && RANGE_CONNECTORS.has(connectorLower) &&
+        high?.kind === LexKind.Number && high.value !== undefined &&
+        high.value >= token.value
+      ) {
+        const separatedUnit = unitAfter(context, start + 3);
+        if (separatedUnit) {
+          return [
+            lexicalSign({
+              type: "dose-sign",
+              rule: "hpsg.lex.dose.separatedRange",
+              tokens: [token, connector, high, ...separatedUnit.tokens],
+              synsem: {
+                head: {
+                  dose: {
+                    range: { low: token.value, high: high.value },
+                    unit: separatedUnit.unit
+                  }
+                },
+                valence: {},
+                cont: { clauseKind: "administration" }
+              },
+              score: 12
+            })
+          ];
+        }
+      }
+    }
+
     const millionMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)m$/);
     if (millionMatch) {
       const unit = unitAfter(context, start + 1);
@@ -748,6 +808,9 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           score: 9
         })
       ];
+    }
+    if (token.kind === LexKind.Number && token.value !== undefined && numericTokenIsProcedureLocalQuantity(context, token)) {
+      return [];
     }
     if (token.kind !== LexKind.Number || token.value === undefined) {
       const timesMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);
@@ -847,7 +910,7 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
-    if (!CONNECTORS.has(lower) && !isPunctuation(lower)) {
+    if (!CONNECTORS.has(lower) && lower !== "via" && !isPunctuation(lower)) {
       return [];
     }
     return [

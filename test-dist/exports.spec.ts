@@ -16,6 +16,9 @@ function runNode(args: string[], code: string): {
   listMedicationInstructionConceptsType?: string;
   buildMedicationInstructionConceptCodeSystemType?: string;
   timingFrequencyMinExtensionUrl?: string;
+  roundTripText?: string;
+  roundTripSiteCode?: string;
+  roundTripFrequency?: number;
   longText: string;
 } {
   const output = execFileSync(process.execPath, [...args, "-e", code], {
@@ -101,6 +104,33 @@ describe("published package entrypoints", () => {
       timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
       longText: "shake,rinse"
     });
+  });
+
+  it("publishes roundtrip-safe TH/EN realization through the built entrypoint", () => {
+    const result = runNode(
+      ["--input-type=module"],
+      `
+        const mod = await import("ezmedicationinput");
+        const source = "หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน";
+        const parsed = mod.parseSig(source, { locale: "th" });
+        const roundTripText = mod.formatSig(parsed.fhir, "long", {
+          locale: "th",
+          realizationMode: "roundtrip"
+        });
+        const reparsed = mod.parseSig(roundTripText, { locale: "th" });
+        process.stdout.write(JSON.stringify({
+          parseSigType: typeof mod.parseSig,
+          formatSigType: typeof mod.formatSig,
+          roundTripText,
+          roundTripSiteCode: reparsed.fhir.site?.coding?.[0]?.code,
+          roundTripFrequency: reparsed.fhir.timing?.repeat?.frequency,
+          longText: reparsed.longText
+        }));
+      `
+    );
+    expect(result.roundTripText).toBe("หยอด วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.roundTripSiteCode).toBe("1290032005");
+    expect(result.roundTripFrequency).toBe(4);
   });
 
 });

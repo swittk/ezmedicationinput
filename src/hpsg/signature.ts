@@ -19,7 +19,15 @@ export type HpsgType =
   | "sign"
   | "word-sign"
   | "phrase-sign"
+  | "headed-phrase"
+  | "head-complement-phrase"
+  | "head-adjunct-phrase"
+  | "head-marker-phrase"
+  | "procedure-sequence-phrase"
+  | "conditional-instruction-phrase"
+  | "coordination-phrase"
   | "clause-sign"
+  | "administration-clause"
   | "method-sign"
   | "route-sign"
   | "site-sign"
@@ -35,6 +43,24 @@ export interface HpsgEvidence {
   rule: string;
   tokenIndices: number[];
 }
+
+export type HpsgConstructionKind =
+  | "head-complement"
+  | "head-adjunct"
+  | "head-marker"
+  | "procedure-sequence"
+  | "conditional-instruction"
+  | "coordination"
+  | "administration-clause"
+  | "generic";
+
+export interface HpsgConstruction {
+  kind: HpsgConstructionKind;
+  headSide?: "left" | "right";
+  leftType: HpsgType;
+  rightType: HpsgType;
+}
+
 
 export interface HpsgMethodFeature {
   verb: string;
@@ -121,6 +147,8 @@ export interface HpsgSign {
   synsem: HpsgSynsem;
   /** Formal typed feature graph used by the HPSG constraint substrate. */
   fs: HpsgFeatureNode;
+  /** Immediate phrase-construction provenance for non-lexical signs. */
+  construction?: HpsgConstruction;
   consumedTokenIndices: number[];
   siteTokenIndices?: number[];
   warnings?: string[];

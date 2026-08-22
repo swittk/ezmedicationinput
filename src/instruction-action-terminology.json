@@ -141,7 +141,8 @@
         "rinse off",
         "wash off",
         "ล้าง",
-        "rinsing"
+        "rinsing",
+        "ล้างออก"
       ],
       "procedural": true,
       "externalCodings": [
@@ -447,10 +448,16 @@
       "semanticClass": "prepare_device",
       "display": "Prime",
       "aliases": [
-        "prime"
+        "prime",
+        "เตรียม",
+        "เตรียมหัวพ่น",
+        "เตรียมอุปกรณ์พ่น"
       ],
       "procedural": true,
-      "acceptsAmount": true
+      "acceptsAmount": true,
+      "i18n": {
+        "th": "เตรียม"
+      }
     },
     {
       "code": "draw_up",
@@ -1026,6 +1033,101 @@
           "display": "Apply"
         }
       ]
+    },
+    {
+      "code": "cut",
+      "semanticClass": "manipulate",
+      "display": "Cut",
+      "i18n": {
+        "th": "ตัด"
+      },
+      "aliases": [
+        "cut",
+        "ตัด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "wear",
+      "semanticClass": "retain",
+      "display": "Wear",
+      "i18n": {
+        "th": "ติดไว้"
+      },
+      "aliases": [
+        "wear",
+        "wearing",
+        "ติดไว้"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": false
+    },
+    {
+      "code": "exhale",
+      "semanticClass": "breathing",
+      "display": "Exhale",
+      "i18n": {
+        "th": "หายใจออก"
+      },
+      "aliases": [
+        "exhale",
+        "breathe out",
+        "หายใจออก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "blow",
+      "semanticClass": "prepare_site",
+      "display": "Blow",
+      "i18n": {
+        "th": "สั่งน้ำมูก"
+      },
+      "aliases": [
+        "blow",
+        "สั่งน้ำมูก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "tilt",
+      "semanticClass": "position",
+      "display": "Tilt",
+      "i18n": {
+        "th": "เอียง"
+      },
+      "aliases": [
+        "tilt",
+        "เอียง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "blink",
+      "semanticClass": "manipulate",
+      "display": "Blink",
+      "i18n": {
+        "th": "กะพริบตา"
+      },
+      "aliases": [
+        "blink",
+        "กะพริบตา"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "repeat",
+      "semanticClass": "repeat",
+      "display": "Repeat",
+      "i18n": {
+        "th": "ทำซ้ำ"
+      },
+      "aliases": [
+        "repeat",
+        "ทำซ้ำ"
+      ],
+      "procedural": true
     }
   ]
 }

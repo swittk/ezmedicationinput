@@ -88,6 +88,26 @@ function isStandaloneSurfaceChar(char: string): boolean {
   return classifySurfaceKind(char) !== undefined;
 }
 
+function isSentenceBoundaryChar(input: string, index: number): boolean {
+  const char = input[index];
+  if (char === "!" || char === "?") {
+    const before = index > 0 ? input[index - 1] : "";
+    const after = index + 1 < input.length ? input[index + 1] : "";
+    return before !== char && after !== char;
+  }
+  if (char !== ".") return false;
+  const before = index > 0 ? input[index - 1] : "";
+  const after = index + 1 < input.length ? input[index + 1] : "";
+  // Keep decimal points inside numeric tokens (e.g. 1.5 mL).
+  if (/\d/.test(before) && /\d/.test(after)) return false;
+  // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.).
+  if (/[A-Za-z]/.test(before) && /[A-Za-z]/.test(after)) return false;
+  const preceding = input.slice(Math.max(0, index - 3), index);
+  if (/[A-Za-z]\.[A-Za-z]$/.test(preceding)) return false;
+  return true;
+}
+
+
 export function scanSurfaceTokens(input: string): SurfaceToken[] {
   const tokens: SurfaceToken[] = [];
   let cursor = 0;
@@ -96,6 +116,19 @@ export function scanSurfaceTokens(input: string): SurfaceToken[] {
     const char = input[cursor];
 
     if (isWhitespaceChar(char)) {
+      cursor += 1;
+      continue;
+    }
+
+    if (isSentenceBoundaryChar(input, cursor)) {
+      tokens.push({
+        original: char,
+        lower: char.toLowerCase(),
+        index: tokens.length,
+        kind: SurfaceTokenKind.Separator,
+        start: cursor,
+        end: cursor + 1
+      });
       cursor += 1;
       continue;
     }
@@ -118,7 +151,7 @@ export function scanSurfaceTokens(input: string): SurfaceToken[] {
     cursor += 1;
     while (cursor < input.length) {
       const next = input[cursor];
-      if (isWhitespaceChar(next) || isStandaloneSurfaceChar(next)) {
+      if (isWhitespaceChar(next) || isStandaloneSurfaceChar(next) || isSentenceBoundaryChar(input, cursor)) {
         break;
       }
       cursor += 1;

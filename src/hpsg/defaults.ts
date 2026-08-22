@@ -3,7 +3,8 @@ import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
-  ROUTE_TEXT
+  ROUTE_TEXT,
+  normalizeBodySiteKey
 } from "../maps";
 import { ParserState } from "../parser-state";
 import { mergeI18nRecords } from "../fhir-translations";
@@ -50,6 +51,13 @@ function applyRouteDefault(
   if (state.methodCoding?.code === "738991002" || state.methodText?.toLowerCase() === "apply") {
     deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
     return;
+  }
+  if (state.methodCoding?.code === "785900008" && state.siteText) {
+    const siteDefinition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(state.siteText)];
+    if (siteDefinition?.routeHint === RouteCode["Topical route"]) {
+      deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
+      return;
+    }
   }
   const route = inferRouteFromContext(context);
   if (route !== undefined) {

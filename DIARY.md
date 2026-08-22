@@ -2590,3 +2590,93 @@ DELPH-IN-style grammar purity: typed feature structures, subtype constraints,
 head/valence attachment, and these new constructions are formal HPSG machinery;
 some medication-specific leaf compatibility and semantic assembly remain
 specialized TypeScript constraints where that is currently clearer and safer.
+
+
+## 2026-08-23 Headed HPSG constructions and bidirectional realization
+
+This pass pushed the formal HPSG core and the realization side together instead
+of treating generation as a formatter afterthought.
+
+The phrase inventory is now explicit in the live chart rather than collapsing
+every successful combination to one generic clause type. Construction subtypes
+include headed complement/adjunct/marker structures, coordination,
+procedure-sequence/conditional structures, and administration clauses. Phrase
+AVMs carry the actual `LEFT_DTR`/`RIGHT_DTR` daughter graphs; headed phrase types
+add required `HEAD_DTR` and `NON_HEAD_DTR` features whose values are the real
+daughter objects, preserving reentrancy/identity. Appropriateness validates
+those features. Parser-time mother validation is incremental because daughters
+and SYNSEM have already been validated; the full recursive validator remains
+available and is exercised by the formal tests.
+
+Construction typing initially expanded equivalent chart derivations and caused
+a substantial latency regression. Chart packing now keys semantically equivalent
+phrase construction alternatives under their `phrase-sign` state while retaining
+the winning derivation's concrete construction subtype and daughter AVM. The
+immutable type system also memoizes subtype, appropriateness, and compatible-type
+queries. This keeps the formal structure without paying for every derivational
+variant independently.
+
+Conditional procedural programs gained proper scope. A leading condition whose
+first governed action is procedural is represented as a nested action program,
+so e.g. `if vivid dreams -> remove patch at bedtime -> apply new patch in the
+morning` does not leak Apply/transdermal/MORN into the standing global Dosage.
+Leading `if pain take...`/`if itchy apply...` still follows the established PRN
+administration grammar. Action-local event times survive in the graph.
+
+The instruction graph now records `primaryAdministrationSpan` and persists it in
+the package FHIR graph extension. Round-trip-safe realization uses that provenance
+to keep pre-administration actions before the canonical dosage and post-actions
+behind it. A rich primary event can replace a generic dosage sentence when it
+contains meaning FHIR cannot express, such as replacement-patch identity or
+`rinse AFTER inhalation`. `THEN` is generated only from an actual graph relation;
+warnings no longer become fictitious sequential actions.
+
+`FormatOptions.realizationMode` now has an explicit `roundtrip` contract and is
+forwarded through localization callbacks. Same-locale Thai graphs use their exact
+source-faithful clinician wording. Pure structured Thai dosage output uses
+parser-safe natural forms for event words, PRN wording, and numeric ranges.
+Cross-language realization uses the typed semantic graph. Declarative Thai
+terminology aliases are consumed directly by the locale lexer, but display/i18n
+translations are not parse aliases unless explicitly declared; this preserves
+richer compositional readings such as `ถู` + foam-result rather than collapsing
+them into a coarse translated Lather label.
+
+Generation is now a permanent semantic regression target:
+
+- 50 English label-style parse -> realize -> reparse cases
+- 25 Thai/code-switched same-language cases, including the five new clinician
+  torture examples and the original complex wash/mix/lather example
+- 12 TH<->EN cross-language cases whose equivalence normalizes only syntax that
+  is already represented by typed argument roles/canonical administration truth
+
+The combined generation suite is 87/87. The cross-language fingerprint remains
+strict on method/route/site/dose/timing/PRN, coded arguments and quantities,
+polarity/modality, real temporal/conditional relations, graph sequence relations,
+and opaque information loss. It only ignores language-specific prepositions and
+a redundant canonical primary graph action when FHIR already contains that
+whole administration fact.
+
+Additional hardening discovered by those corpora includes numeric action/unit
+ambiguity (`2 sprays` cannot start a second Spray action), Thai `เข้า` as a real
+`into` relation, `ล้างมือหลังใช้` retaining both local hand site and AFTER-use
+scope, `ล้างออก` as one Rinse alias, coded `บางๆ` as a real head-adjunct
+instruction, and bilingual declarative concepts for nasal spray/inhaler/device
+priming and occlusive dressings.
+
+Final validation for this checkpoint is 828/828 source tests across 18 files and
+4/4 published ESM/CJS tests. The checked-in performance workloads on the HP host
+measured:
+
+- 50-case parser: 4.3956 ms mean, 3.7133 p50, 9.1160 p95, 18.8618 p99,
+  ~227.5 parses/s
+- 78-case combined parser: 4.0728 ms mean, 3.4333 p50, 8.0788 p95,
+  18.8883 p99, ~245.5 parses/s
+- 87-case parse -> round-trip-safe realization -> reparse: 11.8255 ms mean,
+  6.7607 p50, 43.6639 p95, 53.3277 p99, ~84.6 complete round-trips/s
+
+This is materially more formal HPSG than the previous checkpoint: the parser has
+real typed headed constructions and daughter feature structures, not only typed
+SYNSEM leaves. It is still intentionally not advertised as a fully declarative
+DELPH-IN/ERG grammar because some medication-specific leaf compatibility,
+semantic assembly, and terminology defaults remain explicit TypeScript domain
+constraints where that is clearer and safer.

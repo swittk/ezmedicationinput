@@ -7,7 +7,7 @@ import {
 import { getDayOfWeekMeaning, TokenWordClass } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "../../types";
+import { AdviceArgumentRole, EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "../../types";
 import {
   EVERY_INTERVAL_TOKENS,
   COUNT_MARKER_TOKENS,
@@ -51,6 +51,8 @@ import {
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
+import { getProceduralFrames } from "../procedural-context";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
   switch (value) {
@@ -263,6 +265,23 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const quantityLower = normalizeTokenLower(quantity);
+    const otherUnitToken = context.tokens[start + 2];
+    const otherUnit = quantityLower === "other" && otherUnitToken && !context.state.consumed.has(otherUnitToken.index)
+      ? mapIntervalUnit(normalizeTokenLower(otherUnitToken))
+      : undefined;
+    if (otherUnit) {
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.everyOtherInterval",
+        tokens: [lead, quantity, otherUnitToken],
+        synsem: {
+          head: { schedule: buildPeriodScheduleFeature(2, otherUnit) },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 13
+      })];
+    }
     const directUnit = mapIntervalUnit(quantityLower);
     if (directUnit) {
       return [
@@ -1042,6 +1061,22 @@ export function dayRangeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function timingRangeIsProcedureLocalDuration(
+  context: HpsgClauseContext,
+  start: number,
+  end: number
+): boolean {
+  for (const frame of getProceduralFrames(context)) {
+    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    if (!definition?.procedural) continue;
+    for (const arg of frame.args) {
+      if (arg.role !== AdviceArgumentRole.Duration || !arg.span) continue;
+      if (arg.span.start <= start && end <= arg.span.end) return true;
+    }
+  }
+  return false;
+}
+
 export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.limit", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -1052,6 +1087,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     const signs: HpsgSign[] = [];
     const compactDuration = lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)(min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|wk|w|week|weeks|mo|month|months)$/);
     if (compactDuration) {
+      if (timingRangeIsProcedureLocalDuration(context, token.sourceStart, token.sourceEnd)) return signs;
       const schedule = buildDurationScheduleFeature(
         parseFloat(compactDuration[1]),
         mapIntervalUnit(compactDuration[2])
@@ -1075,6 +1111,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         ? mapIntervalUnit(normalizeTokenLower(unitToken))
         : undefined;
       if (unit) {
+        if (timingRangeIsProcedureLocalDuration(context, token.sourceStart, unitToken.sourceEnd)) return signs;
         const schedule = buildDurationScheduleFeature(parseFloat(countMatch[1]), unit);
         if (schedule) {
           signs.push(
@@ -1111,6 +1148,9 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           ? mapIntervalUnit(normalizeTokenLower(unitToken))
           : undefined;
         const tokens = unit ? [token, valueToken, unitToken] : [token, valueToken];
+        if (unit && timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken?.sourceEnd ?? valueToken.sourceEnd)) {
+          return signs;
+        }
         const schedule = unit
           ? buildDurationScheduleFeature(valueToken.value, unit)
           : { count: valueToken.value };
@@ -1142,6 +1182,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       ) {
         const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
         if (unit) {
+          if (timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken.sourceEnd)) return signs;
           const schedule = buildDurationScheduleFeature(valueToken.value, unit);
           if (schedule) {
             signs.push(

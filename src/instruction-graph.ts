@@ -1,6 +1,7 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
+import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS } from "./maps";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -42,6 +43,7 @@ const RELATIONS: Readonly<Record<string, AdviceRelation>> = {
   into: AdviceRelation.Into,
   in: AdviceRelation.In,
   on: AdviceRelation.On,
+  at: AdviceRelation.On,
   to: AdviceRelation.To,
   if: AdviceRelation.If,
   unless: AdviceRelation.Unless,
@@ -117,7 +119,10 @@ function rangeFor(parts: Lexeme[], start: number, endExclusive: number, offset: 
 }
 
 function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | undefined {
-  const lookupText = text.replace(/^\s*บริเวณ\s*/u, "").trim() || text;
+  const lookupText = text
+    .replace(/^\s*บริเวณ\s*/u, "")
+    .replace(/^\s*(?:the|a|an)\s+/i, "")
+    .trim() || text;
   const resolved = resolveBodySitePhrase(lookupText, options?.siteCodeMap, {
     bodySiteContext: options?.context?.bodySiteContext
   });
@@ -187,6 +192,30 @@ function trimActionRange(input: string, range: TextRange, offset: number): TextR
   while (start < end && /[\s([{]/u.test(input[start - offset] ?? "")) start += 1;
   while (end > start && /[\s)\]}.!,;:]/u.test(input[end - offset - 1] ?? "")) end -= 1;
   return { start, end };
+}
+
+function timeArgumentFromParts(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string
+): AdviceArgument | undefined {
+  let event: string | undefined;
+  for (let index = start; index < endExclusive; index += 1) {
+    const candidate = EVENT_TIMING_TOKENS[key(parts[index])];
+    if (candidate) {
+      event = candidate;
+      break;
+    }
+  }
+  if (!event) return undefined;
+  const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
+  if (!text) return undefined;
+  return {
+    role: AdviceArgumentRole.Time,
+    text,
+    normalized: event
+  };
 }
 
 function argumentFromParts(
@@ -490,10 +519,18 @@ function buildActionFrame(
         ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset)
         : undefined;
       if (argumentStart < segmentEnd) {
-        const objectEnd = amountIndex !== undefined ? amountIndex : segmentEnd;
+        let objectEnd = amountIndex !== undefined ? amountIndex : segmentEnd;
+        if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
         if (objectEnd > argumentStart) {
           pushArgument(args, argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
         }
+      }
+      const tailStart = amountIndex !== undefined
+        ? Math.min(segmentEnd, amountIndex + 2)
+        : relIndex >= 0 ? relIndex + 1 : segmentEnd;
+      if (tailStart < segmentEnd) {
+        const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
+        if (relation === AdviceRelation.With || tail?.conceptId) pushArgument(args, tail);
       }
       break;
     }
@@ -505,10 +542,15 @@ function buildActionFrame(
     }
     case "hold":
     case "keep": {
-      pushArgument(args, duration);
-      if (!duration) {
-        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Object, options));
+      const durationIndex = duration?.span
+        ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset)
+        : undefined;
+      let objectEnd = durationIndex !== undefined ? durationIndex : segmentEnd;
+      if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
+      if (objectEnd > argumentStart) {
+        pushArgument(args, argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
       }
+      pushArgument(args, duration);
       break;
     }
     case "mix": {
@@ -519,7 +561,10 @@ function buildActionFrame(
       if (waterIndex >= 0) {
         const absoluteWater = argumentStart + waterIndex;
         pushArgument(args, argumentFromParts(parts, absoluteWater, absoluteWater + 1, input, AdviceArgumentRole.Substance, options));
-        const afterWater = parts.slice(absoluteWater + 1, segmentEnd).find((part) => key(part) === "small");
+        const afterWater = parts.slice(absoluteWater + 1, segmentEnd).find((part) => {
+          const currentKey = key(part);
+          return currentKey === "small" || currentKey === "small_amount";
+        });
         if (afterWater) pushArgument(args, internalArgument("small", afterWater.sourceText ?? afterWater.original, options));
       } else pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
       break;
@@ -537,16 +582,35 @@ function buildActionFrame(
       pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Site, options));
       break;
     case "rinse":
-    case "wash":
-      pushArgument(args, argumentFromParts(
-        parts,
-        relIndex >= 0 ? relIndex + 1 : argumentStart,
-        segmentEnd,
-        input,
-        preferredRinseRole(relation),
-        options
-      ));
+    case "wash": {
+      if (relIndex > argumentStart) {
+        const localTarget = argumentFromParts(
+          parts,
+          argumentStart,
+          relIndex,
+          input,
+          AdviceArgumentRole.Site,
+          options
+        );
+        if (localTarget?.coding?.code || localTarget?.conceptId) pushArgument(args, localTarget);
+        else pushArgument(args, argumentFromParts(parts, argumentStart, relIndex, input, undefined, options));
+      }
+      if (relIndex >= 0) {
+        pushArgument(args, argumentFromParts(
+          parts,
+          relIndex + 1,
+          segmentEnd,
+          input,
+          preferredRinseRole(relation),
+          options
+        ));
+      } else {
+        pushArgument(args, argumentFromParts(
+          parts, argumentStart, segmentEnd, input, preferredRinseRole(relation), options
+        ));
+      }
       break;
+    }
     case "leave": {
       const leaveDuration = parseDurationArgument(parts, argumentStart, segmentEnd, input, offset) ?? duration;
       pushArgument(args, leaveDuration);
@@ -577,7 +641,14 @@ function buildActionFrame(
       break;
     default:
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, undefined, options));
-      if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, undefined, options));
+      if (relation === AdviceRelation.For && duration) {
+        pushArgument(args, duration);
+      } else if (relIndex >= 0) {
+        const time = (relation === AdviceRelation.In || relation === AdviceRelation.On)
+          ? timeArgumentFromParts(parts, relIndex + 1, segmentEnd, input)
+          : undefined;
+        pushArgument(args, time ?? argumentFromParts(parts, relIndex + 1, segmentEnd, input, undefined, options));
+      }
       break;
   }
 
@@ -672,6 +743,46 @@ function negatedActionAt(
   return match?.polarity === AdvicePolarity.Negate ? match : undefined;
 }
 
+function actionCandidateIsDoseUnit(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): boolean {
+  const current = parts[index];
+  const previous = parts[index - 1];
+  if (!current || !previous) return false;
+  if (previous.kind !== "NUMBER" && previous.kind !== "NUMBER_RANGE") return false;
+  return Boolean(normalizeUnit(key(current), options));
+}
+
+function actionCandidateBelongsToCurrentFrame(
+  parts: Lexeme[],
+  index: number,
+  current: ActionDefinition | undefined
+): boolean {
+  if (!current) return false;
+  const candidate = key(parts[index]);
+  if (candidate === "spray") {
+    if (current.code === "aim") return true;
+    if (current.code === "prime") {
+      const previous = key(parts[index - 1]);
+      const previousPart = parts[index - 1];
+      return previous === "nasal" || previous === "inhaler" || previous === "device" ||
+        previousPart?.kind === "NUMBER" || previousPart?.kind === "NUMBER_RANGE";
+    }
+  }
+  if (candidate === "use") {
+    for (let cursor = Math.max(0, index - 3); cursor < index; cursor += 1) {
+      const relation = key(parts[cursor]);
+      if (relation === "before" || relation === "after") return true;
+    }
+  }
+  if (candidate === "rinse" && current.code === "swallow" && key(parts[index + 1]) === "water") {
+    return true;
+  }
+  return false;
+}
+
 const ACTION_DIRECTIVE_BOUNDARIES = new Set([
   "avoid", "should-not", "should", "must", "not", "do", "don't", "dont"
 ]);
@@ -696,7 +807,7 @@ export function parseInstructionActions(
         negative = prefixed.polarity === AdvicePolarity.Negate;
         break;
       }
-      if (actionMatchAt(parts, index, options)) {
+      if (actionMatchAt(parts, index, options) && !actionCandidateIsDoseUnit(parts, index, options)) {
         start = index;
         break;
       }
@@ -722,8 +833,14 @@ export function parseInstructionActions(
         end = index;
         break;
       }
-      if (actionMatchAt(parts, index, options)) {
-        end = index;
+      const nextActionMatch = actionMatchAt(parts, index, options);
+      if (
+        nextActionMatch &&
+        !actionCandidateIsDoseUnit(parts, index, options) &&
+        !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition)
+      ) {
+        const previousKey = key(parts.slice(index - 1, index)[0]);
+        end = previousKey === "and" || previousKey === "or" ? index - 1 : index;
         break;
       }
     }
@@ -757,6 +874,42 @@ function frameActionDefinition(
 
 function frameIsProcedural(frame: AdviceFrame, options?: ParseOptions): boolean {
   return frameActionDefinition(frame, options)?.procedural ?? false;
+}
+
+function frameOverlapsPrimaryMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
+  for (const evidence of clause.evidence) {
+    if (evidence.rule !== "hpsg.lex.method") continue;
+    for (const span of evidence.spans) {
+      if (frame.span.start < span.end && span.start < frame.span.end) return true;
+    }
+  }
+  return false;
+}
+
+function frameIsSecondaryAdministration(
+  frame: AdviceFrame,
+  clause: CanonicalSigClause,
+  options?: ParseOptions
+): boolean {
+  if (frame.polarity === AdvicePolarity.Negate) return true;
+  const definition = frameActionDefinition(frame, options);
+  if (!definition || definition.procedural) return false;
+  if (!clause.method) return true;
+  return !frameOverlapsPrimaryMethod(frame, clause);
+}
+
+function frameIsPrimaryAdministrationWithExtraMeaning(
+  frame: AdviceFrame,
+  clause: CanonicalSigClause,
+  options?: ParseOptions
+): boolean {
+  if (frame.polarity === AdvicePolarity.Negate || !clause.method) return false;
+  const definition = frameActionDefinition(frame, options);
+  return Boolean(
+    definition && !definition.procedural &&
+    frameOverlapsPrimaryMethod(frame, clause) &&
+    actionAddsPrimaryObjectMeaning(frame, options)
+  );
 }
 
 
@@ -1049,13 +1202,42 @@ function actionAddsStructuredMeaning(frame: AdviceFrame): boolean {
   );
 }
 
+function actionAddsPrimaryObjectMeaning(frame: AdviceFrame, options?: ParseOptions): boolean {
+  return frame.args.some((arg) => {
+    if (arg.role !== AdviceArgumentRole.Object && arg.role !== AdviceArgumentRole.Theme) return false;
+    const normalized = normalizeActionSurface(arg.normalized ?? arg.text);
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const hasReplacementModifier = words.some((word) =>
+      ["new", "replacement", "another", "fresh"].indexOf(word) >= 0
+    );
+    if (!hasReplacementModifier) return false;
+    return words.some((word) =>
+      Boolean(normalizeUnit(word, options) || PRODUCT_FORM_HINTS[word]?.routeHint)
+    );
+  });
+}
+
+function actionContainedInCanonicalSite(
+  frame: AdviceFrame,
+  clause: CanonicalSigClause
+): boolean {
+  for (const evidence of clause.evidence) {
+    if (!evidence.rule.startsWith("hpsg.lex.site")) continue;
+    for (const span of evidence.spans) {
+      if (span.start <= frame.span.start && frame.span.end <= span.end) return true;
+    }
+  }
+  return false;
+}
+
 function actionDominatedByCanonicalMethod(
   frame: AdviceFrame,
   clause: CanonicalSigClause,
-  options?: ParseOptions
+  options?: ParseOptions,
+  primaryAdministrationSpan?: TextRange
 ): boolean {
   const method = clause.method;
-  if (!method || actionAddsStructuredMeaning(frame)) return false;
+  if (!method || actionAddsStructuredMeaning(frame) || actionAddsPrimaryObjectMeaning(frame, options)) return false;
 
   const methodText = normalizeActionSurface(method.text ?? "");
   const definition = frameActionDefinition(frame, options);
@@ -1074,10 +1256,14 @@ function actionDominatedByCanonicalMethod(
     methodText.includes(` ${candidate} `)
   );
 
-  const methodSpans: CanonicalSourceSpan[] = [];
-  for (const evidence of clause.evidence) {
-    if (evidence.rule !== "hpsg.lex.method") continue;
-    for (const span of evidence.spans) methodSpans.push(span);
+  const methodSpans: TextRange[] = primaryAdministrationSpan
+    ? [primaryAdministrationSpan]
+    : [];
+  if (!methodSpans.length) {
+    for (const evidence of clause.evidence) {
+      if (evidence.rule !== "hpsg.lex.method") continue;
+      for (const span of evidence.spans) methodSpans.push({ start: span.start, end: span.end });
+    }
   }
   if (methodSpans.length) {
     const overlapsPrimaryMethod = methodSpans.some((span) =>
@@ -1218,6 +1404,25 @@ function promoteDoseFromDefiningAction(
   };
 }
 
+function canonicalPrimaryAdministrationSpan(
+  clause: CanonicalSigClause,
+  frames: readonly AdviceFrame[]
+): TextRange | undefined {
+  const semantic = frames
+    .filter((frame) => frame.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(frame, clause))
+    .slice()
+    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)[0];
+  if (semantic) return { start: semantic.span.start, end: semantic.span.end };
+  const spans: TextRange[] = [];
+  for (const evidence of clause.evidence) {
+    if (evidence.rule !== "hpsg.lex.method") continue;
+    for (const span of evidence.spans) spans.push({ start: span.start, end: span.end });
+  }
+  if (!spans.length) return undefined;
+  spans.sort((left, right) => left.start - right.start || left.end - right.end);
+  return spans[0];
+}
+
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
@@ -1225,6 +1430,8 @@ export function buildInstructionGraph(
 ): CanonicalInstructionGraph | undefined {
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
+  const fullInputFrames = parseInstructionActions(input, 0, options);
+  const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   for (const range of semanticSourceSpans(clause)) {
     const parsed = parseInstructionActions(input.slice(range.start, range.end), range.start, options);
     const accepted: AdviceFrame[] = [];
@@ -1264,11 +1471,26 @@ export function buildInstructionGraph(
       pushOpaqueSpan(opaqueSpans, span);
     }
   }
-  for (const frame of parseInstructionActions(input, 0, options)) {
-    if (frameIsProcedural(frame, options)) pushActionIfUnique(actions, frame);
+  for (const frame of fullInputFrames) {
+    if (
+      frameIsProcedural(frame, options) ||
+      frameIsSecondaryAdministration(frame, clause, options) ||
+      frameIsPrimaryAdministrationWithExtraMeaning(frame, clause, options)
+    ) {
+      pushActionIfUnique(actions, frame);
+    }
   }
   for (let index = actions.length - 1; index >= 0; index -= 1) {
-    if (actionDominatedByCanonicalMethod(actions[index], clause, options)) {
+    const definition = frameActionDefinition(actions[index], options);
+    const redundantCanonicalAdministration = Boolean(
+      definition && !definition.procedural &&
+      primaryActionCoveredByCanonicalClause(actions[index], actions, clause)
+    );
+    if (
+      redundantCanonicalAdministration ||
+      actionContainedInCanonicalSite(actions[index], clause) ||
+      actionDominatedByCanonicalMethod(actions[index], clause, options, primaryAdministrationSpan)
+    ) {
       actions.splice(index, 1);
     }
   }
@@ -1284,6 +1506,7 @@ export function buildInstructionGraph(
   }
   const graph: CanonicalInstructionGraph = {
     actions,
+    primaryAdministrationSpan,
     opaqueSpans: reconciledOpaque.length ? reconciledOpaque : undefined,
     sourceText: input,
     sourceLocale: /[\u0E00-\u0E7F]/.test(input) ? "th" : "en"
@@ -1295,15 +1518,20 @@ export function buildInstructionGraph(
 function translatedArgument(arg: AdviceArgument, locale: string): string {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   if (arg.quantity) {
+    const singular = arg.quantity.value === 1 && !arg.quantity.range;
     const unit = arg.quantity.unit === "mL"
       ? (language === "th" ? "มิลลิลิตร" : "mL")
       : arg.quantity.unit === "min"
-        ? (language === "th" ? "นาที" : "minutes")
+        ? (language === "th" ? "นาที" : (singular ? "minute" : "minutes"))
+        : arg.quantity.unit === "s"
+          ? (language === "th" ? "วินาที" : (singular ? "second" : "seconds"))
         : arg.quantity.unit === "h"
-          ? (language === "th" ? "ชั่วโมง" : "hours")
+          ? (language === "th" ? "ชั่วโมง" : (singular ? "hour" : "hours"))
           : arg.quantity.unit === "d"
-            ? (language === "th" ? "วัน" : "days")
-            : (arg.quantity.unit ?? "");
+            ? (language === "th" ? "วัน" : (singular ? "day" : "days"))
+            : arg.quantity.unit === "spray"
+              ? (language === "th" ? "พ่น" : (singular ? "spray" : "sprays"))
+              : (arg.quantity.unit ?? "");
     if (arg.quantity.range) {
       return `${arg.quantity.range.low ?? ""}-${arg.quantity.range.high ?? ""} ${unit}`.trim();
     }
@@ -1338,9 +1566,11 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
   const substance = first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
+  const duration = first(AdviceArgumentRole.Duration);
+  const material = first(AdviceArgumentRole.Material);
 
   if (frame.polarity === AdvicePolarity.Negate) {
-    const object = site ?? theme;
+    const object = site ?? theme ?? substance ?? activity ?? material;
     return thai
       ? `ห้าม${label}${object ?? ""}`
       : `Do not ${label.toLowerCase()}${object ? ` ${object}` : ""}`;
@@ -1378,15 +1608,63 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
     case "wash": {
       const time = first(AdviceArgumentRole.Time);
       if (time) {
-        if (thai) return `${label}${time}`;
-        const preposition = frame.relation === AdviceRelation.On ? "on" : "in";
-        return `${label} ${preposition} ${time}`;
+        const target = site ? (thai ? `${site}` : ` ${site}`) : "";
+        const relationText = frame.relation === AdviceRelation.Before ? (thai ? "ก่อน" : "before")
+          : frame.relation === AdviceRelation.After ? (thai ? "หลัง" : "after")
+          : frame.relation === AdviceRelation.On ? (thai ? "เมื่อ" : "on")
+          : (thai ? "ใน" : "in");
+        return thai
+          ? `${label}${target}${relationText}${time}`
+          : `${label}${target} ${relationText} ${time}`;
       }
       if (site) {
         if (thai) return `${label}${site}${substance ? `ด้วย${substance}` : ""}`;
         return `${label} ${site}${substance ? ` with ${substance}` : ""}`;
       }
       return thai ? `${label}${substance ? `ด้วย${substance}` : ""}` : `${label}${substance ? ` with ${substance}` : ""}`;
+    }
+    case "measure":
+    case "draw_up": {
+      const object = theme ?? first(AdviceArgumentRole.Object) ?? container;
+      if (thai) {
+        return `${label}${object ?? ""}${amount ? ` ${amount}` : ""}${material ? `ด้วย${material}` : ""}`;
+      }
+      return `${label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${material ? ` with ${material}` : ""}`;
+    }
+    case "prime": {
+      const object = theme ?? first(AdviceArgumentRole.Object) ?? container;
+      if (thai) {
+        return `${label}${object ?? "อุปกรณ์พ่น"}${amount ? ` ${amount}` : ""}${material ? ` ${material}` : ""}`;
+      }
+      return `${label}${object ? ` ${object}` : ""}${amount ? ` with ${amount}` : ""}${material ? ` ${material}` : ""}`;
+    }
+    case "swish":
+    case "gargle":
+      return thai
+        ? `${label}${amount ? ` ${amount}` : ""}${duration ? ` นาน ${duration}` : ""}`
+        : `${label}${amount ? ` ${amount}` : ""}${duration ? ` for ${duration}` : ""}`;
+    case "hold":
+    case "keep":
+    case "press": {
+      const object = theme ?? site ?? first(AdviceArgumentRole.Object);
+      return thai
+        ? `${label}${object ?? ""}${duration ? ` ${duration}` : ""}`
+        : `${label}${object ? ` ${object}` : ""}${duration ? ` for ${duration}` : ""}`;
+    }
+    case "discard":
+    case "remove": {
+      const object = theme ?? site ?? first(AdviceArgumentRole.Object);
+      if (duration && frame.relation === AdviceRelation.After) {
+        return thai
+          ? `${label}${object ?? ""}หลัง ${duration}`
+          : `${label}${object ? ` ${object}` : ""} after ${duration}`;
+      }
+      if (duration && frame.relation === AdviceRelation.Before) {
+        return thai
+          ? `${label}${object ?? ""}ก่อน ${duration}`
+          : `${label}${object ? ` ${object}` : ""} before ${duration}`;
+      }
+      return thai ? `${label}${object ?? ""}` : `${label}${object ? ` ${object}` : ""}`;
     }
     case "leave": {
       const duration = first(AdviceArgumentRole.Duration);
@@ -1403,14 +1681,119 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
       return `${label}${activity ? ` ${activity}` : ""}`;
     }
     default: {
-      const object = theme ?? site ?? substance;
-      return thai ? `${label}${object ?? ""}` : `${label}${object ? ` ${object}` : ""}`;
+      const object = theme ?? site ?? substance ?? first(AdviceArgumentRole.Object);
+      if (thai) {
+        return `${label}${object ?? ""}${amount ? ` ${amount}` : ""}${duration ? ` ${duration}` : ""}`;
+      }
+      return `${label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${duration ? ` for ${duration}` : ""}`;
     }
   }
 }
 
 function normalizedInstructionSurface(value: string): string {
   return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+export function instructionGraphRepresentsText(
+  graph: CanonicalInstructionGraph,
+  text: string
+): boolean {
+  const normalized = normalizedInstructionSurface(text);
+  if (!normalized) return false;
+  return graph.actions.some((action) => {
+    const candidate = normalizedInstructionSurface(action.sourceText);
+    return Boolean(candidate && (
+      candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)
+    ));
+  });
+}
+
+function codingEquivalent(
+  left: { system?: string; code?: string } | undefined,
+  right: { system?: string; code?: string } | undefined
+): boolean {
+  if (!left?.code || !right?.code) return false;
+  return left.code === right.code &&
+    (left.system ?? SNOMED_SYSTEM) === (right.system ?? SNOMED_SYSTEM);
+}
+
+function quantityCoveredByDose(arg: AdviceArgument, dose: CanonicalDoseExpr | undefined): boolean {
+  if (!arg.quantity || !dose) return false;
+  return arg.quantity.value === dose.value &&
+    arg.quantity.range?.low === dose.range?.low &&
+    arg.quantity.range?.high === dose.range?.high &&
+    arg.quantity.unit === dose.unit;
+}
+
+function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigClause): boolean {
+  if (arg.role !== AdviceArgumentRole.Site || !clause.site) return false;
+  if (codingEquivalent(arg.coding, clause.site.coding)) return true;
+  const left = normalizeActionSurface(arg.normalized ?? arg.text);
+  const right = normalizeActionSurface(clause.site.text ?? "");
+  return Boolean(left && right && left === right);
+}
+
+function actionMatchesCanonicalMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
+  const method = clause.method;
+  if (!method) return false;
+  if (method.coding?.code && frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) {
+    return true;
+  }
+  const methodText = normalizeActionSurface(method.text ?? "");
+  if (!methodText) return false;
+  const definition = getMedicationInstructionAction(frame.predicate.lemma);
+  const candidates = [
+    frame.predicate.lemma,
+    frame.predicate.display ?? "",
+    definition?.display ?? "",
+    ...(definition?.aliases ?? [])
+  ].map(normalizeActionSurface).filter(Boolean);
+  return candidates.some((candidate) =>
+    methodText === candidate || methodText.includes(candidate) || candidate.includes(methodText)
+  );
+}
+
+const CANONICAL_ADMIN_FILLER_WORDS = new Set([
+  "a", "an", "the", "medication", "medicine", "drug",
+  "via", "route", "oral", "orally", "ophthalmic", "otic", "nasal",
+  "intravitreal", "inhalation", "topical", "topically", "transdermal",
+  "transdermally", "subcutaneous", "subcutaneously", "intramuscular",
+  "intramuscularly", "intravenous", "intravenously", "rectal", "rectally",
+  "vaginal", "vaginally", "once", "twice", "daily", "day", "per", "times",
+  "every", "hour", "hours", "week", "weeks", "month", "months",
+  "tab", "tablet", "tablets", "cap", "capsule", "capsules", "drop", "drops",
+  "puff", "puffs", "spray", "sprays", "patch", "patches", "ml", "mg", "mcg", "g", "u"
+]);
+
+function freeArgumentCoveredByCanonicalAdministration(
+  arg: AdviceArgument,
+  clause: CanonicalSigClause
+): boolean {
+  if (arg.role !== AdviceArgumentRole.Object && arg.role !== AdviceArgumentRole.Theme) return false;
+  const words = normalizeActionSurface(arg.text).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  return words.every((word) =>
+    CANONICAL_ADMIN_FILLER_WORDS.has(word) ||
+    /^[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?$/.test(word)
+  );
+}
+
+function primaryActionCoveredByCanonicalClause(
+  frame: AdviceFrame,
+  actions: readonly AdviceFrame[],
+  clause: CanonicalSigClause
+): boolean {
+  if (!actionMatchesCanonicalMethod(frame, clause)) return false;
+  const matching = actions
+    .filter((candidate) => candidate.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(candidate, clause))
+    .slice()
+    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
+  if (!matching.length || matching[0] !== frame) return false;
+  return frame.args.every((arg) =>
+    (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
+    (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
+    freeArgumentCoveredByCanonicalAdministration(arg, clause)
+  );
 }
 
 export function instructionGraphHasNovelNonWarningContent(
@@ -1434,9 +1817,38 @@ export function instructionGraphHasNovelNonWarningContent(
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
-  options?: { includeWarnings?: boolean; onlyWarnings?: boolean }
+  options?: {
+    includeWarnings?: boolean;
+    onlyWarnings?: boolean;
+    omitCanonicalAdministration?: CanonicalSigClause;
+    /** Prefer each understood action's exact source wording when source and target locales match. */
+    preferSourceText?: boolean;
+    /** Source phrases already rendered through another semantic channel. */
+    omitSourceTexts?: readonly string[];
+    /** Restrict realization around the canonical primary administration source span. */
+    position?: "all" | "pre" | "post";
+  }
 ): string | undefined {
+  const omittedSources = (options?.omitSourceTexts ?? [])
+    .map(normalizedInstructionSurface)
+    .filter(Boolean);
+  const position = options?.position ?? "all";
+  const primary = graph.primaryAdministrationSpan;
+  const inRequestedPosition = (start: number, end: number): boolean => {
+    if (!primary || position === "all") return true;
+    if (position === "pre") return end <= primary.start;
+    return start >= primary.start;
+  };
   const frames = graph.actions.filter((frame) => {
+    if (!inRequestedPosition(frame.span.start, frame.span.end)) return false;
+    const frameSource = normalizedInstructionSurface(frame.sourceText);
+    if (frameSource && omittedSources.some((candidate) =>
+      candidate === frameSource || candidate.includes(frameSource) || frameSource.includes(candidate)
+    )) return false;
+    if (options?.omitCanonicalAdministration &&
+      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
+      return false;
+    }
     const warning = frame.polarity === AdvicePolarity.Negate;
     if (options?.onlyWarnings) return warning;
     return options?.includeWarnings !== false || !warning;
@@ -1449,8 +1861,13 @@ export function realizeInstructionGraph(
     understood: boolean;
     actionIndex?: number;
   }> = [];
+  const targetLanguage = locale.toLowerCase().startsWith("th") ? "th" : "en";
+  const sourceLanguage = (graph.sourceLocale ?? "en").toLowerCase().startsWith("th") ? "th" : "en";
   for (const frame of frames) {
-    const text = realizeAction(frame, locale);
+    const sourceFaithful = options?.preferSourceText && targetLanguage === sourceLanguage
+      ? trimSemanticText(frame.sourceText)
+      : undefined;
+    const text = sourceFaithful || realizeAction(frame, locale);
     if (text) {
       nodes.push({
         start: frame.span.start,
@@ -1463,6 +1880,7 @@ export function realizeInstructionGraph(
   }
   if (!options?.onlyWarnings) {
     for (const opaque of graph.opaqueSpans ?? []) {
+      if (!inRequestedPosition(opaque.start, opaque.end)) continue;
       const text = opaque.text.trim();
       if (text) nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
     }
@@ -1494,7 +1912,13 @@ export function realizeInstructionGraph(
       }
       continue;
     }
-    output += previous?.understood && node.understood
+    const explicitRelation = previous?.understood && node.understood
+      ? graph.relations?.find((relation) =>
+          relation.fromActionIndex === previous.actionIndex &&
+          relation.toActionIndex === node.actionIndex
+        )
+      : undefined;
+    output += previous?.understood && node.understood && explicitRelation?.kind === AdviceRelation.Then
       ? (thai ? " จากนั้น" : "; then ")
       : "; ";
     output += node.text;

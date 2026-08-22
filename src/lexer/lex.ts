@@ -61,7 +61,7 @@ function classifyLexKind(value: string): {
     return { kind: LexKind.TimeLike };
   }
 
-  if (lower === "," || lower === ";") {
+  if (lower === "," || lower === ";" || lower === "." || lower === "!" || lower === "?") {
     return { kind: LexKind.Separator };
   }
 
@@ -559,7 +559,7 @@ export function lexInput(input: string): LexToken[] {
     }
 
     if (current.kind === SurfaceTokenKind.Separator) {
-      if (current.original === "," || current.original === ";") {
+      if ([",", ";", ".", "!", "?"].indexOf(current.original) >= 0) {
         output.push(buildToken(current.original, [current], input));
       }
       index += 1;

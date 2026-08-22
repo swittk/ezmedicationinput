@@ -3,6 +3,7 @@ import { parseAdditionalInstructions } from "../../advice";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
+import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -14,11 +15,14 @@ import {
 } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
+  EVENT_ARTICLE_TOKENS,
+  EVENT_PREPOSITIONS,
   INSTRUCTION_LEADING_SEPARATORS,
   INSTRUCTION_START_WORDS,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
   SITE_ANCHORS,
+  SITE_TRAILING_INSTRUCTION_WORDS,
   WORKFLOW_CONTINUATION_LICENSES,
   WORKFLOW_NOUNS,
   WORKFLOW_START_WORDS
@@ -40,6 +44,17 @@ import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
 
 const INSTRUCTION_PREDICATES = ["take", "apply", "use"] as const;
+
+function startsEventTimingPhrase(context: HpsgClauseContext, index: number): boolean {
+  const lead = context.tokens[index];
+  if (!lead || !EVENT_PREPOSITIONS.has(normalizeTokenLower(lead))) return false;
+  const second = context.tokens[index + 1];
+  const secondLower = second ? normalizeTokenLower(second) : "";
+  if (EVENT_TIMING_TOKENS[secondLower]) return true;
+  if (!EVENT_ARTICLE_TOKENS.has(secondLower)) return false;
+  const third = context.tokens[index + 2];
+  return Boolean(third && EVENT_TIMING_TOKENS[normalizeTokenLower(third)]);
+}
 
 function isExplicitDoseLead(context: HpsgClauseContext, index: number): boolean {
   const token = context.tokens.slice(index, index + 1)[0];
@@ -115,6 +130,7 @@ const CONDITIONAL_ADVICE_LEADS = new Set([
   "if", "unless", "when", "while", "during", "should-not", "should", "must", "avoid", "do", "don't", "dont", "consult", "seek"
 ]);
 const CONDITIONAL_RELATIONS = new Set(["if", "unless", "when", "while", "during"]);
+const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = new Set(["if", "unless", "when", "while", "during"]);
 
 function frameIsConditionalSafetyAdvice(frame: AdviceFrame): boolean {
   if (frame.polarity === AdvicePolarity.Negate) return true;
@@ -294,19 +310,27 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const firstWorkflowFrame = getProceduralFrames(context).find((frame) =>
       frame.span.start === first.sourceStart && frame.polarity !== AdvicePolarity.Negate
     );
-    const hasPriorPositiveAction = getProceduralFrames(context).some((frame) =>
+    const allFrames = getProceduralFrames(context);
+    const hasPriorPositiveAction = allFrames.some((frame) =>
       frame.span.start < first.sourceStart && frame.polarity !== AdvicePolarity.Negate
     );
-    const headAction = !hasPriorPositiveAction
+    const hasLaterExplicitAdministration = allFrames.some((frame) => {
+      if (frame.span.start <= first.sourceStart || frame.polarity === AdvicePolarity.Negate) return false;
+      const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+      return Boolean(definition && !definition.procedural && METHOD_ACTION_BY_VERB[frame.predicate.lemma]);
+    });
+    const canDonateHead = !hasPriorPositiveAction && !hasLaterExplicitAdministration;
+    const headAction = canDonateHead
       ? (firstWorkflowFrame
           ? METHOD_ACTION_BY_VERB[firstWorkflowFrame.predicate.lemma]
           : METHOD_ACTION_BY_VERB[firstLower])
       : undefined;
-    const headSite = !hasPriorPositiveAction
+    const headSite = canDonateHead
       ? firstWorkflowFrame?.args.find((arg) =>
           arg.role === AdviceArgumentRole.Site && Boolean(arg.coding?.code || arg.conceptId)
         )
       : undefined;
+    const headRoute = canDonateHead ? getRouteMeaning(first) : undefined;
     return [
       lexicalSign({
         type: "instruction-sign",
@@ -319,7 +343,8 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                   verb: firstWorkflowFrame?.predicate.lemma ?? firstLower,
                   coding: cloneMethodCoding(METHOD_CODING_BY_ACTION[headAction])
                 }
-              : undefined
+              : undefined,
+            route: headRoute ? { code: headRoute.code, text: headRoute.text } : undefined
           },
           valence: {
             patientInstruction: { text },
@@ -400,15 +425,11 @@ function bodyParsesAsStyleInstruction(
   if (!range || !text) {
     return false;
   }
-  return parseInstructionCandidates(text, range).some((instruction) =>
-    instruction.frames?.some((frame) =>
-      !frame.relation &&
-      frame.predicate.semanticClass === "administration" &&
-      frame.args.length > 0 &&
-      frame.args.every((arg) =>
-        arg.role === AdviceArgumentRole.Amount || arg.role === AdviceArgumentRole.Free
-      )
-    )
+  const hasStyleLexeme = bodyTokens.some((token) =>
+    SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(token))
+  );
+  return hasStyleLexeme && parseInstructionCandidates(text, range).some((instruction) =>
+    Boolean(instruction.coding?.code || instruction.frames?.length)
   );
 }
 
@@ -455,15 +476,20 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (nextAction?.procedural) {
         return [];
       }
-      if (nextAction && !nextAction.procedural && METHOD_ACTION_BY_VERB[nextLower]) {
+      if (
+        (nextAction && !nextAction.procedural && METHOD_ACTION_BY_VERB[nextLower]) ||
+        FREE_TEXT_DIRECTIVE_STARTS.has(nextLower)
+      ) {
         cursor += 1;
       }
     }
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
     }
+    if (consumed.length > 0 && startsEventTimingPhrase(context, cursor)) return [];
     const firstBodyToken = context.tokens[cursor];
     const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";
+    if (CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS.has(firstBodyLower)) return [];
     const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
     if (
       !consumed.length &&

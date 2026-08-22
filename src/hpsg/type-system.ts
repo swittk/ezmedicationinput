@@ -35,6 +35,9 @@ export interface HpsgUnificationResult {
 
 export class HpsgTypeSystem {
   private readonly definitions = new Map<string, HpsgTypeDefinition>();
+  private readonly subtypeCache = new Map<string, boolean>();
+  private readonly appropriateCache = new Map<string, Record<string, HpsgAppropriateFeature>>();
+  private readonly compatibleTypeCache = new Map<string, string | null>();
 
   constructor(definitions: HpsgTypeDefinition[] = []) {
     for (const definition of definitions) this.addType(definition);
@@ -42,6 +45,9 @@ export class HpsgTypeSystem {
 
   addType(definition: HpsgTypeDefinition): void {
     if (!definition.name) throw new Error("HPSG type name cannot be empty.");
+    this.subtypeCache.clear();
+    this.appropriateCache.clear();
+    this.compatibleTypeCache.clear();
     this.definitions.set(definition.name, {
       name: definition.name,
       parents: (definition.parents ?? []).slice(),
@@ -59,36 +65,52 @@ export class HpsgTypeSystem {
 
   isSubtype(actual: string, expected: string): boolean {
     if (actual === expected) return true;
+    const cacheKey = `${actual}\u0000${expected}`;
+    const cached = this.subtypeCache.get(cacheKey);
+    if (cached !== undefined) return cached;
     const visited = new Set<string>();
     const agenda = [actual];
+    let result = false;
     while (agenda.length) {
       const current = agenda.pop() as string;
       if (visited.has(current)) continue;
       visited.add(current);
       for (const parent of this.definitions.get(current)?.parents ?? []) {
-        if (parent === expected) return true;
+        if (parent === expected) {
+          result = true;
+          agenda.length = 0;
+          break;
+        }
         agenda.push(parent);
       }
     }
-    return false;
+    this.subtypeCache.set(cacheKey, result);
+    return result;
   }
 
   mostSpecificCompatibleType(left: string, right: string): string | undefined {
-    if (this.isSubtype(left, right)) return left;
-    if (this.isSubtype(right, left)) return right;
+    const cacheKey = left <= right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+    const cached = this.compatibleTypeCache.get(cacheKey);
+    if (cached !== undefined) return cached ?? undefined;
+    if (this.isSubtype(left, right)) { this.compatibleTypeCache.set(cacheKey, left); return left; }
+    if (this.isSubtype(right, left)) { this.compatibleTypeCache.set(cacheKey, right); return right; }
     const candidates = Array.from(this.definitions.keys()).filter((candidate) =>
       this.isSubtype(candidate, left) && this.isSubtype(candidate, right)
     );
-    if (!candidates.length) return undefined;
+    if (!candidates.length) { this.compatibleTypeCache.set(cacheKey, null); return undefined; }
     candidates.sort((a, b) => {
       if (this.isSubtype(a, b) && !this.isSubtype(b, a)) return -1;
       if (this.isSubtype(b, a) && !this.isSubtype(a, b)) return 1;
       return a.localeCompare(b);
     });
-    return candidates[0];
+    const result = candidates[0];
+    this.compatibleTypeCache.set(cacheKey, result);
+    return result;
   }
 
   appropriateFeatures(type: string): Record<string, HpsgAppropriateFeature> {
+    const cached = this.appropriateCache.get(type);
+    if (cached) return cached;
     const result: Record<string, HpsgAppropriateFeature> = {};
     const visited = new Set<string>();
     const apply = (current: string) => {
@@ -101,6 +123,7 @@ export class HpsgTypeSystem {
       }
     };
     apply(type);
+    this.appropriateCache.set(type, result);
     return result;
   }
 }
@@ -119,6 +142,34 @@ export function featureAtom(value: unknown, type?: HpsgFeatureAtom["type"]): Hps
   return { kind: "atom", type: inferred, value };
 }
 
+
+export function validateFeatureStructureShallow(
+  value: HpsgFeatureNode,
+  typeSystem: HpsgTypeSystem,
+  path = "$"
+): HpsgFeatureValidationIssue[] {
+  const definition = typeSystem.definition(value.type);
+  if (!definition) return [{ path, message: `Unknown feature-structure type ${value.type}.` }];
+  const appropriate = typeSystem.appropriateFeatures(value.type);
+  const issues: HpsgFeatureValidationIssue[] = [];
+  for (const feature of Object.keys(value.features)) {
+    const spec = appropriate[feature];
+    if (!spec) {
+      issues.push({ path: `${path}.${feature}`, message: `Feature ${feature} is not appropriate for type ${value.type}.` });
+      continue;
+    }
+    const child = value.features[feature];
+    if (!typeSystem.isSubtype(child.type, spec.valueType)) {
+      issues.push({ path: `${path}.${feature}`, message: `Feature ${feature} expects ${spec.valueType}, got ${child.type}.` });
+    }
+  }
+  for (const feature of Object.keys(appropriate)) {
+    if (appropriate[feature].required && value.features[feature] === undefined) {
+      issues.push({ path, message: `Required feature ${feature} is missing from type ${value.type}.` });
+    }
+  }
+  return issues;
+}
 
 export function validateFeatureStructure(
   value: HpsgFeatureValue,
@@ -253,8 +304,30 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "json", parents: ["atom"] },
   { name: "sign", parents: ["top"], features: { SYNSEM: { valueType: "synsem", required: true } } },
   { name: "word-sign", parents: ["sign"] },
-  { name: "phrase-sign", parents: ["sign"] },
+  {
+    name: "phrase-sign",
+    parents: ["sign"],
+    features: {
+      LEFT_DTR: { valueType: "sign" },
+      RIGHT_DTR: { valueType: "sign" }
+    }
+  },
+  {
+    name: "headed-phrase",
+    parents: ["phrase-sign"],
+    features: {
+      HEAD_DTR: { valueType: "sign", required: true },
+      NON_HEAD_DTR: { valueType: "sign", required: true }
+    }
+  },
+  { name: "head-complement-phrase", parents: ["headed-phrase"] },
+  { name: "head-adjunct-phrase", parents: ["headed-phrase"] },
+  { name: "head-marker-phrase", parents: ["headed-phrase"] },
+  { name: "procedure-sequence-phrase", parents: ["phrase-sign"] },
+  { name: "conditional-instruction-phrase", parents: ["phrase-sign"] },
+  { name: "coordination-phrase", parents: ["phrase-sign"] },
   { name: "clause-sign", parents: ["phrase-sign"] },
+  { name: "administration-clause", parents: ["clause-sign", "headed-phrase"] },
   ...SIGN_TYPES.map((name) => ({ name, parents: ["word-sign"] })),
   {
     name: "synsem",

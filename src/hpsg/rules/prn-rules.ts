@@ -220,6 +220,8 @@ function createPrnReasonRequest(
   headText?: string,
   siteText?: string
 ): ParsedPrnReasonAtom {
+  text = text.replace(/[.,;:!?]+$/g, "").trim();
+  if (siteText) siteText = siteText.replace(/[.,;:!?]+$/g, "").trim();
   const range = rangeFromTokens(tokens);
   const rawText = joinTokenText(tokens);
   const isProbe = rawText.includes("{") || rawText.includes("}");

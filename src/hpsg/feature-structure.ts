@@ -5,6 +5,7 @@ import {
   featureNode,
   unifyFeatureStructures,
   validateFeatureStructure,
+  validateFeatureStructureShallow,
   type HpsgFeatureNode
 } from "./type-system";
 
@@ -87,7 +88,8 @@ export function signFeatureStructure(type: HpsgType, synsem: HpsgSynsem): HpsgFe
 export function combineSignFeatureStructures(
   left: HpsgFeatureNode,
   right: HpsgFeatureNode,
-  motherType: HpsgType
+  motherType: HpsgType,
+  headSide?: "left" | "right"
 ): HpsgFeatureNode | undefined {
   let byRight = COMBINE_CACHE.get(left);
   if (!byRight) {
@@ -99,23 +101,33 @@ export function combineSignFeatureStructures(
     byType = new Map();
     byRight.set(right, byType);
   }
-  if (byType.has(motherType)) return byType.get(motherType) ?? undefined;
+  const cacheType = `${motherType}|${headSide ?? "none"}`;
+  if (byType.has(cacheType)) return byType.get(cacheType) ?? undefined;
   const leftSynsem = left.features.SYNSEM;
   const rightSynsem = right.features.SYNSEM;
   if (!leftSynsem || !rightSynsem) {
-    byType.set(motherType, null);
+    byType.set(cacheType, null);
     return undefined;
   }
   const unified = unifyFeatureStructures(leftSynsem, rightSynsem, HPSG_TYPE_SYSTEM);
   if (!unified.value || unified.value.kind !== "node") {
-    byType.set(motherType, null);
+    byType.set(cacheType, null);
     return undefined;
   }
-  const mother = featureNode(motherType, { SYNSEM: unified.value });
-  if (validateFeatureStructure(mother, HPSG_TYPE_SYSTEM).length) {
-    byType.set(motherType, null);
+  const motherFeatures: Record<string, HpsgFeatureNode> = {
+    SYNSEM: unified.value,
+    LEFT_DTR: left,
+    RIGHT_DTR: right
+  };
+  if (HPSG_TYPE_SYSTEM.isSubtype(motherType, "headed-phrase") && headSide) {
+    motherFeatures.HEAD_DTR = headSide === "left" ? left : right;
+    motherFeatures.NON_HEAD_DTR = headSide === "left" ? right : left;
+  }
+  const mother = featureNode(motherType, motherFeatures);
+  if (validateFeatureStructureShallow(mother, HPSG_TYPE_SYSTEM).length) {
+    byType.set(cacheType, null);
     return undefined;
   }
-  byType.set(motherType, mother);
+  byType.set(cacheType, mother);
   return mother;
 }

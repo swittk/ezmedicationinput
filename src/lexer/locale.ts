@@ -8,6 +8,8 @@ import {
   TIMING_ABBREVIATIONS
 } from "../maps";
 import unitTerminologySource from "../unit-terminology.json";
+import instructionActionSource from "../instruction-action-terminology.json";
+import instructionConceptSource from "../instruction-concept-terminology.json";
 import { LexKind, LexToken } from "./token-types";
 
 /**
@@ -52,8 +54,10 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ใน": "in",
   "บน": "on",
   "ลง": "into",
+  "เข้า": "into",
   "ด้วย": "with",
   "ภายนอก": "external",
+  "บางๆ": "thinly",
   "ห้าม": "avoid",
   "ควร": "should",
   "ปรึกษา": "consult",
@@ -103,6 +107,36 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "พัฟ": "puff"
 };
 
+interface DeclarativeTerminologySource {
+  actions?: Array<{ code?: string; aliases?: string[]; i18n?: Record<string, string> }>;
+  concepts?: Array<{ code?: string; aliases?: string[]; i18n?: Record<string, string> }>;
+}
+
+const DECLARATIVE_THAI_CANONICAL: Record<string, string> = {};
+function registerDeclarativeThaiAliases(
+  entries: Array<{ code?: string; aliases?: string[]; i18n?: Record<string, string> }> | undefined
+): void {
+  for (const entry of entries ?? []) {
+    if (!entry.code) continue;
+    const candidates = entry.aliases ?? [];
+    for (const candidate of candidates) {
+      const normalized = candidate.trim().toLowerCase();
+      if (
+        normalized && /[\u0E00-\u0E7F]/.test(normalized) &&
+        DECLARATIVE_THAI_CANONICAL[normalized] === undefined
+      ) {
+        DECLARATIVE_THAI_CANONICAL[normalized] = entry.code;
+      }
+    }
+  }
+}
+registerDeclarativeThaiAliases((instructionActionSource as DeclarativeTerminologySource).actions);
+registerDeclarativeThaiAliases((instructionConceptSource as DeclarativeTerminologySource).concepts);
+
+function canonicalThaiLexeme(value: string): string | undefined {
+  return THAI_LEXEME_ALIASES[value] ?? DECLARATIVE_THAI_CANONICAL[value];
+}
+
 interface LocalePhrase {
   parts: readonly string[];
   canonical: string;
@@ -144,6 +178,7 @@ registerKnownThaiTerms(LEGACY_THAI_GROUP_TERMS);
 for (const term of (unitTerminologySource as UnitTerminologySource).terms ?? []) {
   registerKnownThaiTerms([term.unit ?? "", ...(term.aliases ?? [])]);
 }
+registerKnownThaiTerms(Object.keys(DECLARATIVE_THAI_CANONICAL));
 
 function isKnownThaiDomainTerm(value: string): boolean {
   const normalized = value.toLowerCase();
@@ -255,7 +290,7 @@ function knownDomainCompoundAt(
       start,
       bestEnd,
       input,
-      THAI_LEXEME_ALIASES[sourceText]
+      canonicalThaiLexeme(sourceText)
     ),
     length: bestEnd - start + 1
   };
@@ -315,7 +350,7 @@ export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): 
     }
 
     const token = tokens[cursor];
-    const canonical = THAI_LEXEME_ALIASES[token.lower];
+    const canonical = canonicalThaiLexeme(token.lower);
     normalized.push(canonical ? { ...token, canonical } : { ...token });
     cursor += 1;
   }

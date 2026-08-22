@@ -155,13 +155,13 @@ describe("Thai clinician free-text parsing", () => {
     expect(realizeInstructionGraph(graph, "th")).toBe(
       "เขย่าขวดก่อนใช้ จากนั้นเทผลิตภัณฑ์ลงฝ่ามือ 1-2 มิลลิลิตร จากนั้นผสมน้ำเล็กน้อย " +
       "จากนั้นถูให้เกิดฟอง จากนั้นทำความสะอาดบริเวณภายนอกจุดซ่อนเร้น " +
-      "จากนั้นล้างด้วยน้ำสะอาด จากนั้นห้ามสวนล้างช่องคลอด"
+      "จากนั้นล้างด้วยน้ำสะอาด; ห้ามสวนล้างช่องคลอด"
     );
     expect(realizeInstructionGraph(graph, "en")).toBe(
       "Shake bottle before use; then Pour product 1-2 mL into the palm; " +
       "then Mix with a small amount of water; then Rub to form foam; " +
       "then Clean external intimate area; then Rinse with clean water; " +
-      "then Do not douche the vagina"
+      "Do not douche the vagina"
     );
   });
 

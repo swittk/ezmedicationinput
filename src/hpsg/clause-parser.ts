@@ -1,6 +1,7 @@
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
-import { HpsgGrammar, HpsgPhraseRule, HpsgSign } from "./signature";
+import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
+import { sourceRangeIsInsideLeadingConditionalProgram } from "./conditional-context";
 import { combineSigns } from "./unification";
 import {
   compactIntervalRule,
@@ -32,6 +33,32 @@ import {
   routeLexicalRule
 } from "./rules/core-rules";
 import { HpsgClauseContext } from "./rule-context";
+
+const CONDITIONAL_LOCAL_SIGN_TYPES = new Set([
+  "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign"
+]);
+
+function conditionalScopeAware(
+  rule: HpsgLexicalRule<HpsgClauseContext>
+): HpsgLexicalRule<HpsgClauseContext> {
+  return {
+    ...rule,
+    match(context, start) {
+      return rule.match(context, start).filter((sign) => {
+        const firstToken = sign.tokens[0];
+        const lastToken = sign.tokens[sign.tokens.length - 1];
+        const insideConditional = firstToken && lastToken
+          ? sourceRangeIsInsideLeadingConditionalProgram(
+              context,
+              firstToken.sourceStart,
+              lastToken.sourceEnd
+            )
+          : false;
+        return !(CONDITIONAL_LOCAL_SIGN_TYPES.has(sign.type) && insideConditional);
+      });
+    }
+  };
+}
 
 function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext> {
   const combineRule: HpsgPhraseRule<HpsgClauseContext> = {
@@ -66,7 +93,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       bareSiteLexicalRule(),
       fillerLexicalRule(),
       connectorLexicalRule()
-    ],
+    ].map(conditionalScopeAware),
     phraseRules: [combineRule]
   };
 }

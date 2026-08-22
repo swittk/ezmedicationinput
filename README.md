@@ -163,6 +163,10 @@ const shortFromFhir = formatSigBatch(batch.items.map((item) => item.fhir), "shor
 Formatting options:
 
 - `locale`: selects the registered localization, such as `"en"` or `"th"`.
+- `realizationMode`: defaults to `"normalized"`. Use `"roundtrip"` when the
+  generated text is expected to be parsed again: it chooses attachment-safe
+  wording, preserves source-faithful clinician text when the semantic graph has
+  same-locale provenance, and realizes typed graph semantics across locales.
 - `i18n`: overrides or augments the registered localization callbacks.
 - `groupMealTimingsByRelation`: compacts repeated meal relation phrases when all
   meal anchors share the same relation.
@@ -230,7 +234,7 @@ This is intentionally an incremental formalization rather than a claim that the 
 
 The repository includes a 50-case TH/EN real-world torture corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. A second 28-case weird-clinician corpus stresses eye-drop event sets, safety-condition scope, 0–2/day symptom-adjusted use, ranged leave-on/rinse workflows, patch application, abbreviations, punctuation variants, and TH/EN code-switching. Together they provide 78 adversarial directions plus dedicated FHIR round-trip invariants. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.
 
-`npm run bench:torture` preserves the original 50-case apples-to-apples performance workload. `npm run bench:adversarial` runs the combined 78-case corpus. Both report mean/p50/p95/p99 latency, throughput, and the slowest cases; they are intentionally benchmarks rather than timing-sensitive unit tests.
+`npm run bench:torture` preserves the original 50-case apples-to-apples performance workload. `npm run bench:adversarial` runs the combined 78-case parser corpus. `npm run bench:roundtrip` measures the 87-case EN/TH/cross-language parse -> human realization -> reparse workload. The parse benchmarks report mean/p50/p95/p99 latency, throughput, and the slowest cases; they are intentionally benchmarks rather than timing-sensitive unit tests.
 
 The HPSG chart uses packed semantic state, an indexed agenda, and a compatible semantic cover across opaque gaps. Procedural constructions use typed local arguments so local instructions such as `wash hands`, `wait 30 minutes`, or inhaler priming do not overwrite the medication's global site, schedule, route, or dose. Additional typed constructions now distinguish safety-condition advice from PRN, symptom-adjusted use from fixed schedules, and the first workflow action (the possible administration head) from later dependent procedure actions. Separated and compact frequency ranges are grammatical schedule constituents, so `0 to 2 times per day` cannot be stolen by the dose grammar.
 
