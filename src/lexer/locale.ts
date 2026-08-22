@@ -55,6 +55,8 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ด้วย": "with",
   "ภายนอก": "external",
   "ห้าม": "avoid",
+  "แล้ว": "then",
+  "ต่อมา": "then",
 
   // cadence / event timing
   "ครั้ง": "times",
@@ -146,6 +148,7 @@ function isKnownThaiDomainTerm(value: string): boolean {
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
+  { parts: ["แล้ว", "จึง"], canonical: "then" },
   { parts: ["บริเวณ", "ภายนอก", "จุด", "ซ่อน", "เร้น"], canonical: "external-intimate-area" },
   { parts: ["ให้", "เกิด", "ฟอง"], canonical: "foam-result" },
   { parts: ["น้ำ", "สะอาด"], canonical: "clean-water" },

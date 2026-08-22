@@ -57,6 +57,9 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
   add(nested, valueCoding("coding", argument.coding));
+  for (const coding of argument.codings ?? []) {
+    nested.push({ url: "argumentCoding", valueCoding: { ...coding } });
+  }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
     add(nested, valueInteger("spanEnd", argument.span.end));
@@ -91,7 +94,19 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueCode("modality", frame.modality));
   add(nested, valueCode("relation", frame.relation));
   add(nested, valueString("predicateLemma", frame.predicate.lemma));
+  add(nested, valueString("predicateDisplay", frame.predicate.display));
   add(nested, valueString("semanticClass", frame.predicate.semanticClass));
+  for (const locale of Object.keys(frame.predicate.i18n ?? {})) {
+    const text = frame.predicate.i18n?.[locale];
+    if (!text) continue;
+    nested.push({
+      url: "predicateTranslation",
+      extension: [
+        { url: "locale", valueCode: locale },
+        { url: "text", valueString: text }
+      ]
+    });
+  }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: { ...coding } });
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
@@ -131,7 +146,10 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
     text,
     normalized: child(extension, "normalized")?.valueString,
     conceptId: child(extension, "conceptId")?.valueString,
-    coding: child(extension, "coding")?.valueCoding
+    coding: child(extension, "coding")?.valueCoding,
+    codings: children(extension, "argumentCoding")
+      .map((entry) => entry.valueCoding)
+      .filter((entry): entry is FhirCoding => Boolean(entry))
   };
   const spanStart = child(extension, "spanStart")?.valueInteger;
   const spanEnd = child(extension, "spanEnd")?.valueInteger;
@@ -172,6 +190,12 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const argument = parseArgumentExtension(argumentExtension);
     if (argument) args.push(argument);
   }
+  const predicateI18n: Record<string, string> = {};
+  for (const translation of children(extension, "predicateTranslation")) {
+    const locale = child(translation, "locale")?.valueCode;
+    const translated = child(translation, "text")?.valueString;
+    if (locale && translated) predicateI18n[locale] = translated;
+  }
   return {
     force,
     polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
@@ -179,6 +203,8 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     relation: child(extension, "relation")?.valueCode as AdviceRelation | undefined,
     predicate: {
       lemma,
+      display: child(extension, "predicateDisplay")?.valueString,
+      i18n: Object.keys(predicateI18n).length ? predicateI18n : undefined,
       semanticClass: child(extension, "semanticClass")?.valueString,
       codings: children(extension, "predicateCoding")
         .map((entry) => entry.valueCoding)

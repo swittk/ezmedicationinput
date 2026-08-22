@@ -1000,7 +1000,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const instructionPhrases: string[] = [];
-  const graphWarning = clause.instructionGraph
+  const hasCodedAdditionalInstruction = Boolean(
+    clause.additionalInstructions?.some((instruction) => instruction.coding?.code)
+  );
+  const graphWarning = clause.instructionGraph && !hasCodedAdditionalInstruction
     ? realizeInstructionGraph(clause.instructionGraph, "en", { onlyWarnings: true })
     : undefined;
   const instructionText = graphWarning

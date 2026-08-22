@@ -13,6 +13,8 @@ function runNode(args: string[], code: string): {
   realizeInstructionGraphType?: string;
   listMedicationInstructionActionsType?: string;
   buildMedicationInstructionActionCodeSystemType?: string;
+  listMedicationInstructionConceptsType?: string;
+  buildMedicationInstructionConceptCodeSystemType?: string;
   longText: string;
 } {
   const output = execFileSync(process.execPath, [...args, "-e", code], {
@@ -78,6 +80,8 @@ describe("published package entrypoints", () => {
           realizeInstructionGraphType: typeof mod.realizeInstructionGraph,
           listMedicationInstructionActionsType: typeof mod.listMedicationInstructionActions,
           buildMedicationInstructionActionCodeSystemType: typeof mod.buildMedicationInstructionActionCodeSystem,
+          listMedicationInstructionConceptsType: typeof mod.listMedicationInstructionConcepts,
+          buildMedicationInstructionConceptCodeSystemType: typeof mod.buildMedicationInstructionConceptCodeSystem,
           longText: actions.map((action) => action.predicate.lemma).join(",")
         }));
       `
@@ -90,6 +94,8 @@ describe("published package entrypoints", () => {
       realizeInstructionGraphType: "function",
       listMedicationInstructionActionsType: "function",
       buildMedicationInstructionActionCodeSystemType: "function",
+      listMedicationInstructionConceptsType: "function",
+      buildMedicationInstructionConceptCodeSystemType: "function",
       longText: "shake,rinse"
     });
   });

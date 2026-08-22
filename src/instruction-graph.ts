@@ -1,6 +1,15 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import {
+  medicationInstructionConceptCodings,
+  resolveMedicationInstructionConcept
+} from "./instruction-concept-terminology";
+import {
+  getMedicationInstructionAction,
+  medicationInstructionActionCodings,
+  resolveMedicationInstructionAction
+} from "./instruction-action-terminology";
+import {
   AdviceArgument,
   AdviceArgumentRole,
   AdviceForce,
@@ -11,131 +20,14 @@ import {
   CanonicalInstructionGraph,
   CanonicalSigClause,
   CanonicalSourceSpan,
-  FhirCoding,
+  MedicationInstructionActionDefinition,
   ParseOptions,
   TextRange
 } from "./types";
 
-export const MEDICATION_INSTRUCTION_ACTION_SYSTEM =
-  "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action";
-const SNOMED_SYSTEM = "http://snomed.info/sct";
+type ActionDefinition = MedicationInstructionActionDefinition;
 type Lexeme = ReturnType<typeof lexInput>[number];
-
-export interface MedicationInstructionActionDefinition {
-  code: string;
-  semanticClass: string;
-  display: string;
-  i18n: Record<string, string>;
-  acceptsAmount?: boolean;
-  externalCodings?: FhirCoding[];
-}
-
-interface ActionDefinition {
-  lemma: string;
-  semanticClass: string;
-  en: string;
-  th: string;
-  acceptsAmount?: boolean;
-  externalCodings?: FhirCoding[];
-}
-
-const ACTIONS: Readonly<Record<string, ActionDefinition>> = {
-  shake: { lemma: "shake", semanticClass: "prepare", en: "Shake", th: "เขย่า" },
-  pour: { lemma: "pour", semanticClass: "transfer", en: "Pour", th: "เท", acceptsAmount: true },
-  mix: { lemma: "mix", semanticClass: "prepare", en: "Mix", th: "ผสม", externalCodings: [{ system: SNOMED_SYSTEM, code: "421826007", display: "Mix" }] },
-  rub: { lemma: "rub", semanticClass: "apply", en: "Rub", th: "ถู" },
-  lather: { lemma: "lather", semanticClass: "prepare", en: "Lather", th: "ถูให้เกิดฟอง" },
-  clean: { lemma: "clean", semanticClass: "cleanse", en: "Clean", th: "ทำความสะอาด" },
-  rinse: { lemma: "rinse", semanticClass: "cleanse", en: "Rinse", th: "ล้าง", externalCodings: [{ system: SNOMED_SYSTEM, code: "782155003", display: "Rinse" }] },
-  wash: { lemma: "wash", semanticClass: "cleanse", en: "Wash", th: "ล้าง", externalCodings: [{ system: SNOMED_SYSTEM, code: "422152000", display: "Wash - dosing instruction imperative" }] },
-  douche: { lemma: "douche", semanticClass: "cleanse", en: "Douche", th: "สวนล้าง" },
-  dissolve: { lemma: "dissolve", semanticClass: "prepare", en: "Dissolve", th: "ละลาย" },
-  dry: { lemma: "dry", semanticClass: "cleanse", en: "Dry", th: "ทำให้แห้ง" },
-  cover: { lemma: "cover", semanticClass: "cover", en: "Cover", th: "ปิดคลุม" },
-  leave: { lemma: "leave", semanticClass: "retain", en: "Leave", th: "ทิ้งไว้" },
-  apply: { lemma: "apply", semanticClass: "administration", en: "Apply", th: "ทา" },
-  use: { lemma: "use", semanticClass: "administration", en: "Use", th: "ใช้" },
-  take: { lemma: "take", semanticClass: "administration", en: "Take", th: "รับประทาน" },
-  drink: { lemma: "drink", semanticClass: "administration", en: "Drink", th: "ดื่ม" },
-  instill: { lemma: "instill", semanticClass: "administration", en: "Instill", th: "หยอด" },
-  spray: { lemma: "spray", semanticClass: "administration", en: "Spray", th: "พ่น" },
-  inhale: { lemma: "inhale", semanticClass: "administration", en: "Inhale", th: "สูด" },
-  inject: { lemma: "inject", semanticClass: "administration", en: "Inject", th: "ฉีด" },
-  insert: { lemma: "insert", semanticClass: "administration", en: "Insert", th: "สอด" }
-};
-
-export interface MedicationInstructionActionCodeSystem {
-  resourceType: "CodeSystem";
-  url: string;
-  name: string;
-  title: string;
-  status: "active";
-  experimental: boolean;
-  caseSensitive: boolean;
-  content: "complete";
-  concept: Array<{
-    code: string;
-    display: string;
-    designation?: Array<{ language: string; value: string }>;
-  }>;
-}
-
-export function buildMedicationInstructionActionCodeSystem(): MedicationInstructionActionCodeSystem {
-  return {
-    resourceType: "CodeSystem",
-    url: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
-    name: "MedicationInstructionAction",
-    title: "SolubleLabs Medication Instruction Action",
-    status: "active",
-    experimental: false,
-    caseSensitive: true,
-    content: "complete",
-    concept: Object.keys(ACTIONS).map((key) => {
-      const definition = ACTIONS[key];
-      return {
-        code: definition.lemma,
-        display: definition.en,
-        designation: [{ language: "th", value: definition.th }]
-      };
-    })
-  };
-}
-
-export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {
-  return Object.keys(ACTIONS).map((key) => {
-    const definition = ACTIONS[key];
-    return {
-      code: definition.lemma,
-      semanticClass: definition.semanticClass,
-      display: definition.en,
-      i18n: { th: definition.th },
-      acceptsAmount: definition.acceptsAmount,
-      externalCodings: definition.externalCodings?.map((coding) => ({ ...coding }))
-    };
-  });
-}
-
-export function getMedicationInstructionAction(
-  code: string
-): MedicationInstructionActionDefinition | undefined {
-  let definition: ActionDefinition | undefined;
-  for (const key of Object.keys(ACTIONS)) {
-    const candidate = ACTIONS[key];
-    if (candidate.lemma === code) {
-      definition = candidate;
-      break;
-    }
-  }
-  if (!definition) return undefined;
-  return {
-    code: definition.lemma,
-    semanticClass: definition.semanticClass,
-    display: definition.en,
-    i18n: { th: definition.th },
-    acceptsAmount: definition.acceptsAmount,
-    externalCodings: definition.externalCodings?.map((coding: FhirCoding) => ({ ...coding }))
-  };
-}
+const SNOMED_SYSTEM = "http://snomed.info/sct";
 
 const RELATIONS: Readonly<Record<string, AdviceRelation>> = {
   before: AdviceRelation.Before,
@@ -148,38 +40,49 @@ const RELATIONS: Readonly<Record<string, AdviceRelation>> = {
   to: AdviceRelation.To
 };
 
-const INTERNAL_ARGUMENTS: Readonly<Record<string, { role: AdviceArgumentRole; conceptId: string; en: string; th: string }>> = {
-  product: { role: AdviceArgumentRole.Theme, conceptId: "product", en: "product", th: "ผลิตภัณฑ์" },
-  bottle: { role: AdviceArgumentRole.Container, conceptId: "bottle", en: "bottle", th: "ขวด" },
-  water: { role: AdviceArgumentRole.Substance, conceptId: "water", en: "water", th: "น้ำ" },
-  "clean-water": { role: AdviceArgumentRole.Substance, conceptId: "clean_water", en: "clean water", th: "น้ำสะอาด" },
-  small: { role: AdviceArgumentRole.Amount, conceptId: "small_amount", en: "a small amount", th: "เล็กน้อย" },
-  foam: { role: AdviceArgumentRole.Result, conceptId: "foam", en: "foam", th: "ฟอง" },
-  "foam-result": { role: AdviceArgumentRole.Result, conceptId: "foam", en: "foam", th: "ฟอง" },
-  use: { role: AdviceArgumentRole.Activity, conceptId: "use", en: "use", th: "ใช้" },
-  morning: { role: AdviceArgumentRole.Time, conceptId: "morning", en: "the morning", th: "ตอนเช้า" },
-  noon: { role: AdviceArgumentRole.Time, conceptId: "noon", en: "noon", th: "ตอนเที่ยง" },
-  afternoon: { role: AdviceArgumentRole.Time, conceptId: "afternoon", en: "the afternoon", th: "ตอนบ่าย" },
-  evening: { role: AdviceArgumentRole.Time, conceptId: "evening", en: "the evening", th: "ตอนเย็น" },
-  night: { role: AdviceArgumentRole.Time, conceptId: "night", en: "night", th: "กลางคืน" },
-  "external-intimate-area": { role: AdviceArgumentRole.Site, conceptId: "external_intimate_area", en: "external intimate area", th: "บริเวณภายนอกจุดซ่อนเร้น" }
-};
-
 function key(part: Lexeme | undefined): string {
   return part ? (part.canonical ?? part.lower).replace(/^\.+|\.+$/g, "") : "";
 }
-function internalActionCoding(definition: ActionDefinition): FhirCoding {
-  return { system: MEDICATION_INSTRUCTION_ACTION_SYSTEM, code: definition.lemma, display: definition.en, i18n: { th: definition.th } };
+
+interface ActionMatch {
+  definition: ActionDefinition;
+  length: number;
 }
-function actionCodings(definition: ActionDefinition): FhirCoding[] {
-  return [internalActionCoding(definition), ...(definition.externalCodings ?? [])];
+
+function actionPhraseCandidates(parts: Lexeme[], index: number, length: number): string[] {
+  const slice = parts.slice(index, index + length);
+  if (slice.length !== length) return [];
+  const canonical = slice.map((part) => key(part)).filter(Boolean);
+  if (canonical.length !== length) return [];
+  const candidates = new Set<string>();
+  candidates.add(canonical.join(" "));
+  candidates.add(slice.map((part) => part.original).join(" "));
+  let contiguous = true;
+  for (let offset = 1; offset < slice.length; offset += 1) {
+    if (slice[offset - 1].sourceEnd !== slice[offset].sourceStart) {
+      contiguous = false;
+      break;
+    }
+  }
+  if (contiguous) candidates.add(slice.map((part) => part.original).join(""));
+  return Array.from(candidates).filter((candidate) => candidate.trim().length > 0);
 }
-function actionDefinitionAt(parts: Lexeme[], index: number): ActionDefinition | undefined {
-  const current = parts.slice(index, index + 1)[0];
-  const definition = current ? ACTIONS[key(current)] : undefined;
-  if (!definition) return undefined;
+
+function actionMatchAt(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): ActionMatch | undefined {
   const previous = parts.slice(index - 1, index)[0];
-  return previous && RELATIONS[key(previous)] ? undefined : definition;
+  if (previous && RELATIONS[key(previous)]) return undefined;
+  const maxSpan = Math.min(4, parts.length - index);
+  for (let length = maxSpan; length >= 1; length -= 1) {
+    for (const candidate of actionPhraseCandidates(parts, index, length)) {
+      const definition = resolveMedicationInstructionAction(candidate, options);
+      if (definition) return { definition, length };
+    }
+  }
+  return undefined;
 }
 function sourceFor(parts: Lexeme[], start: number, endExclusive: number, input: string): string {
   const first = parts.slice(start, start + 1)[0];
@@ -203,6 +106,7 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
     normalized: resolved.canonical,
     conceptId: resolved.canonical,
     coding: resolved.coding,
+    codings: resolved.coding ? [resolved.coding] : undefined,
     i18n: {
       en: resolved.englishObjectText,
       ...(resolved.definition?.i18n ?? {}),
@@ -211,15 +115,27 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
   };
 }
 
-function internalArgument(canonical: string, sourceText: string): AdviceArgument | undefined {
-  const definition = INTERNAL_ARGUMENTS[canonical];
+function internalArgument(
+  canonical: string,
+  sourceText: string,
+  options?: ParseOptions
+): AdviceArgument | undefined {
+  const definition = resolveMedicationInstructionConcept(canonical, options);
   if (!definition) return undefined;
+  const codings = medicationInstructionConceptCodings(definition);
+  const preferredCoding = definition.coding
+    ? codings[0]
+    : definition.externalCodings?.length
+      ? codings[1]
+      : codings[0];
   return {
     role: definition.role,
     text: sourceText,
-    normalized: definition.en,
-    conceptId: definition.conceptId,
-    i18n: { en: definition.en, th: definition.th }
+    normalized: definition.display,
+    conceptId: definition.code,
+    coding: preferredCoding,
+    codings,
+    i18n: { en: definition.display, ...(definition.i18n ?? {}) }
   };
 }
 
@@ -240,7 +156,7 @@ function argumentFromParts(
     if (currentKey) canonicalParts.push(currentKey);
   }
   const canonical = canonicalParts.join(" ");
-  const direct = canonicalParts.length === 1 ? internalArgument(canonicalParts[0], text) : undefined;
+  const direct = internalArgument(canonical, text, options);
   if (direct) {
     if (preferredRole) direct.role = preferredRole;
     return direct;
@@ -251,7 +167,7 @@ function argumentFromParts(
     return resolvedSite;
   }
   for (const currentKey of canonicalParts) {
-    const contained = internalArgument(currentKey, text);
+    const contained = internalArgument(currentKey, text, options);
     if (contained && (
       contained.role === AdviceArgumentRole.Substance ||
       contained.role === AdviceArgumentRole.Result ||
@@ -310,6 +226,36 @@ function parseDurationArgument(
   return undefined;
 }
 
+function parseBareDurationArgument(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  offset: number
+): AdviceArgument | undefined {
+  const valueToken = parts.slice(start, start + 1)[0];
+  const unitToken = parts.slice(start + 1, start + 2)[0];
+  if (!valueToken || !unitToken || start + 1 >= endExclusive || valueToken.kind !== "NUMBER" || valueToken.value === undefined) {
+    return undefined;
+  }
+  const unitKey = key(unitToken);
+  const unit = unitKey === "minute" || unitKey === "minutes"
+    ? "min"
+    : unitKey === "hour" || unitKey === "hours"
+      ? "h"
+      : unitKey === "day" || unitKey === "days"
+        ? "d"
+        : undefined;
+  if (!unit) return undefined;
+  return {
+    role: AdviceArgumentRole.Duration,
+    text: sourceFor(parts, start, start + 2, input),
+    normalized: `${valueToken.value} ${unit}`,
+    quantity: { value: valueToken.value, unit },
+    span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
+  };
+}
+
 function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumentRole {
   return relation === AdviceRelation.In ||
     relation === AdviceRelation.On ||
@@ -330,19 +276,20 @@ function buildActionFrame(
 ): AdviceFrame | undefined {
   let actionIndex = segmentStart;
   let polarity: AdvicePolarity | undefined;
-  const negatedIndex = negatedActionAt(parts, segmentStart);
-  if (negatedIndex !== undefined) {
+  const negated = negatedActionAt(parts, segmentStart, options);
+  if (negated) {
     polarity = AdvicePolarity.Negate;
-    actionIndex = negatedIndex;
+    actionIndex = negated.actionIndex;
   }
-  const definition = ACTIONS[key(parts.slice(actionIndex, actionIndex + 1)[0])];
-  if (!definition) return undefined;
+  const actionMatch = negated?.match ?? actionMatchAt(parts, actionIndex, options);
+  if (!actionMatch) return undefined;
+  const definition = actionMatch.definition;
   const args: AdviceArgument[] = [];
-  const argumentStart = actionIndex + 1;
+  const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
   const relation = relIndex >= 0 ? RELATIONS[key(parts.slice(relIndex, relIndex + 1)[0])] : undefined;
 
-  switch (definition.lemma) {
+  switch (definition.code) {
     case "shake":
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Container, options));
       if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options));
@@ -360,7 +307,7 @@ function buildActionFrame(
         const absoluteWater = argumentStart + waterIndex;
         pushArgument(args, argumentFromParts(parts, absoluteWater, absoluteWater + 1, input, AdviceArgumentRole.Substance, options));
         const afterWater = parts.slice(absoluteWater + 1, segmentEnd).find((part) => key(part) === "small");
-        if (afterWater) pushArgument(args, internalArgument("small", afterWater.sourceText ?? afterWater.original));
+        if (afterWater) pushArgument(args, internalArgument("small", afterWater.sourceText ?? afterWater.original, options));
       } else pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
       break;
     }
@@ -369,7 +316,7 @@ function buildActionFrame(
         const currentKey = key(part);
         return currentKey === "foam" || currentKey === "foam-result";
       });
-      if (resultPart) pushArgument(args, internalArgument("foam-result", resultPart.sourceText ?? resultPart.original));
+      if (resultPart) pushArgument(args, internalArgument("foam-result", resultPart.sourceText ?? resultPart.original, options));
       else pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
       break;
     }
@@ -395,6 +342,14 @@ function buildActionFrame(
       }
       break;
     }
+    case "wait": {
+      const duration = parseBareDurationArgument(parts, argumentStart, segmentEnd, input, offset);
+      pushArgument(args, duration);
+      if (!duration) {
+        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
+      }
+      break;
+    }
     case "douche":
       pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Site, options));
       break;
@@ -404,15 +359,21 @@ function buildActionFrame(
       break;
   }
 
-  const codings = actionCodings(definition);
-  if (definition.lemma === "douche" && args.some((arg) => arg.coding?.code === "76784001" || arg.normalized === "vagina")) {
+  const codings = medicationInstructionActionCodings(definition);
+  if (definition.code === "douche" && args.some((arg) => arg.coding?.code === "76784001" || arg.normalized === "vagina")) {
     codings.push({ system: SNOMED_SYSTEM, code: "21397001", display: "Douche of vagina" });
   }
   const span = rangeFor(parts, segmentStart, segmentEnd, offset);
   return {
     force: polarity === AdvicePolarity.Negate ? AdviceForce.Warning : AdviceForce.Sequence,
     polarity,
-    predicate: { lemma: definition.lemma, semanticClass: definition.semanticClass, codings },
+    predicate: {
+      lemma: definition.code,
+      semanticClass: definition.semanticClass,
+      display: definition.display,
+      i18n: definition.i18n ? { ...definition.i18n } : undefined,
+      codings
+    },
     relation,
     args,
     span,
@@ -421,11 +382,25 @@ function buildActionFrame(
   };
 }
 
-function negatedActionAt(parts: Lexeme[], index: number): number | undefined {
+interface NegatedActionMatch {
+  actionIndex: number;
+  match: ActionMatch;
+}
+
+function negatedActionAt(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): NegatedActionMatch | undefined {
   const current = key(parts.slice(index, index + 1)[0]);
-  if (current === "avoid" && ACTIONS[key(parts.slice(index + 1, index + 2)[0])]) return index + 1;
-  if (current === "do" && key(parts.slice(index + 1, index + 2)[0]) === "not" && ACTIONS[key(parts.slice(index + 2, index + 3)[0])]) return index + 2;
-  if ((current === "don't" || current === "dont") && ACTIONS[key(parts.slice(index + 1, index + 2)[0])]) return index + 1;
+  const candidates: number[] = [];
+  if (current === "avoid") candidates.push(index + 1);
+  if (current === "do" && key(parts.slice(index + 1, index + 2)[0]) === "not") candidates.push(index + 2);
+  if (current === "don't" || current === "dont") candidates.push(index + 1);
+  for (const actionIndex of candidates) {
+    const match = actionMatchAt(parts, actionIndex, options);
+    if (match) return { actionIndex, match };
+  }
   return undefined;
 }
 
@@ -443,32 +418,34 @@ export function parseInstructionActions(
     let start = -1;
     let negative = false;
     for (let index = cursor; index < parts.length; index += 1) {
-      const currentKey = key(parts.slice(index, index + 1)[0]);
-      if (negatedActionAt(parts, index) !== undefined) {
+      if (negatedActionAt(parts, index, options)) {
         start = index;
         negative = true;
         break;
       }
-      if (actionDefinitionAt(parts, index)) {
+      if (actionMatchAt(parts, index, options)) {
         start = index;
         break;
       }
     }
     if (start < 0) break;
 
-    const actionStart = negative ? (negatedActionAt(parts, start) ?? start) : start;
+    const negated = negative ? negatedActionAt(parts, start, options) : undefined;
+    const actionStart = negated?.actionIndex ?? start;
+    const startingMatch = negated?.match ?? actionMatchAt(parts, actionStart, options);
     let end = parts.length;
-    for (let index = actionStart + 1; index < parts.length; index += 1) {
+    for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
       const currentKey = key(parts.slice(index, index + 1)[0]);
       if (currentKey === "then") {
+        const previousKey = key(parts.slice(index - 1, index)[0]);
+        end = previousKey === "and" ? index - 1 : index;
+        break;
+      }
+      if (negatedActionAt(parts, index, options)) {
         end = index;
         break;
       }
-      if (negatedActionAt(parts, index) !== undefined) {
-        end = index;
-        break;
-      }
-      if (actionDefinitionAt(parts, index)) {
+      if (actionMatchAt(parts, index, options)) {
         end = index;
         break;
       }
@@ -493,21 +470,18 @@ interface SemanticSourceSpan extends TextRange {
   kind: SemanticSourceKind;
 }
 
-const PROCEDURAL_INSTRUCTION_ACTIONS = new Set([
-  "shake",
-  "pour",
-  "mix",
-  "rub",
-  "lather",
-  "clean",
-  "rinse",
-  "wash",
-  "douche",
-  "dissolve",
-  "dry",
-  "cover",
-  "leave"
-]);
+function frameActionDefinition(
+  frame: AdviceFrame,
+  options?: ParseOptions
+): ActionDefinition | undefined {
+  return resolveMedicationInstructionAction(frame.predicate.lemma, options) ??
+    getMedicationInstructionAction(frame.predicate.lemma);
+}
+
+function frameIsProcedural(frame: AdviceFrame, options?: ParseOptions): boolean {
+  return frameActionDefinition(frame, options)?.procedural ?? false;
+}
+
 
 function semanticSourceSpans(clause: CanonicalSigClause): SemanticSourceSpan[] {
   const ranges: SemanticSourceSpan[] = [];
@@ -554,6 +528,9 @@ function opaqueTextIsMeaningful(text: string): boolean {
     return false;
   }
   const tokens = lexInput(trimmed).map((token) => key(token)).filter(Boolean);
+  if (tokens.length && tokens.every((token) => token === "then" || token === "and")) {
+    return false;
+  }
   return !tokens.length || !tokens.every((token) => REDUNDANT_OPAQUE_TOKENS.has(token));
 }
 
@@ -612,14 +589,19 @@ function amountText(dose: CanonicalDoseExpr, source: string): string {
   return `${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
 }
 
-function attachDoseToNearestAction(actions: AdviceFrame[], clause: CanonicalSigClause, input: string): void {
+function attachDoseToNearestAction(
+  actions: AdviceFrame[],
+  clause: CanonicalSigClause,
+  input: string,
+  options?: ParseOptions
+): void {
   if (!clause.dose) return;
   const range = doseSourceRange(clause);
   if (!range) return;
   let best: AdviceFrame | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const action of actions) {
-    const definition = ACTIONS[action.predicate.lemma];
+    const definition = frameActionDefinition(action, options);
     if (!definition?.acceptsAmount || action.span.end > range.start) continue;
     const gap = input.slice(action.span.end, range.start);
     if (gap.trim() || gap.length > 8) continue;
@@ -645,6 +627,30 @@ function attachDoseToNearestAction(actions: AdviceFrame[], clause: CanonicalSigC
   best.sourceText = input.slice(best.span.start, best.span.end);
 }
 
+function pushActionIfUnique(
+  target: AdviceFrame[],
+  frame: AdviceFrame
+): boolean {
+  if (target.some((candidate) =>
+    candidate.predicate.lemma === frame.predicate.lemma &&
+    candidate.span.start === frame.span.start &&
+    candidate.span.end === frame.span.end
+  )) {
+    return false;
+  }
+  target.push(frame);
+  return true;
+}
+
+function proceduralFramesFromSpan(
+  input: string,
+  span: CanonicalSourceSpan,
+  options?: ParseOptions
+): AdviceFrame[] {
+  return parseInstructionActions(input.slice(span.start, span.end), span.start, options)
+    .filter((frame) => frameIsProcedural(frame, options));
+}
+
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
@@ -656,23 +662,40 @@ export function buildInstructionGraph(
     const parsed = parseInstructionActions(input.slice(range.start, range.end), range.start, options);
     const accepted: AdviceFrame[] = [];
     for (const frame of parsed) {
-      if (range.kind === "instruction" && !PROCEDURAL_INSTRUCTION_ACTIONS.has(frame.predicate.lemma)) {
+      if (range.kind === "instruction" && !frameIsProcedural(frame, options)) {
         continue;
       }
-      frame.sequenceIndex = actions.length;
-      actions.push(frame);
-      accepted.push(frame);
+      if (pushActionIfUnique(actions, frame)) accepted.push(frame);
     }
     for (const opaque of workflowOpaqueGaps(input, range, accepted)) {
       pushOpaqueSpan(opaqueSpans, opaque);
     }
   }
   for (const span of clause.leftovers) {
-    if (opaqueTextIsMeaningful(span.text)) pushOpaqueSpan(opaqueSpans, span);
+    const accepted: AdviceFrame[] = [];
+    for (const frame of proceduralFramesFromSpan(input, span, options)) {
+      if (pushActionIfUnique(actions, frame)) accepted.push(frame);
+    }
+    if (accepted.length) {
+      const synthetic: SemanticSourceSpan = {
+        start: span.start,
+        end: span.end,
+        kind: "workflow"
+      };
+      for (const opaque of workflowOpaqueGaps(input, synthetic, accepted)) {
+        pushOpaqueSpan(opaqueSpans, opaque);
+      }
+    } else if (opaqueTextIsMeaningful(span.text)) {
+      pushOpaqueSpan(opaqueSpans, span);
+    }
+  }
+  actions.sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
+  for (let index = 0; index < actions.length; index += 1) {
+    actions[index].sequenceIndex = index;
   }
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   if (!actions.length && !opaqueSpans.length) return undefined;
-  attachDoseToNearestAction(actions, clause, input);
+  attachDoseToNearestAction(actions, clause, input, options);
   return {
     actions,
     opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
@@ -702,9 +725,14 @@ function translatedArgument(arg: AdviceArgument, locale: string): string {
 }
 
 function actionLabel(frame: AdviceFrame, locale: string): string {
-  const definition = ACTIONS[frame.predicate.lemma];
-  if (!definition) return frame.predicate.lemma;
-  return locale.toLowerCase().startsWith("th") ? definition.th : definition.en;
+  const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
+  const definition = getMedicationInstructionAction(frame.predicate.lemma);
+  return frame.predicate.i18n?.[language] ??
+    (language === "en" ? frame.predicate.display : undefined) ??
+    definition?.i18n?.[language] ??
+    definition?.display ??
+    frame.predicate.display ??
+    frame.predicate.lemma;
 }
 
 function realizeAction(frame: AdviceFrame, locale: string): string {
@@ -763,6 +791,10 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
       const duration = first(AdviceArgumentRole.Duration);
       if (thai) return `${label}${duration ? ` ${duration}` : ""}`;
       return `${label} on${duration ? ` for ${duration}` : ""}`;
+    }
+    case "wait": {
+      const duration = first(AdviceArgumentRole.Duration);
+      return `${label}${duration ? ` ${duration}` : ""}`;
     }
     default: {
       const object = theme ?? site ?? substance;

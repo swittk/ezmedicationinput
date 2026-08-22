@@ -34,13 +34,25 @@ import {
 } from "./types";
 export { suggestSig } from "./suggest";
 export {
+  parseInstructionActions,
+  realizeInstructionGraph
+} from "./instruction-graph";
+export {
   MEDICATION_INSTRUCTION_ACTION_SYSTEM,
   buildMedicationInstructionActionCodeSystem,
   getMedicationInstructionAction,
   listMedicationInstructionActions,
-  parseInstructionActions,
-  realizeInstructionGraph
-} from "./instruction-graph";
+  resolveMedicationInstructionAction
+} from "./instruction-action-terminology";
+export type { MedicationInstructionActionCodeSystem } from "./instruction-action-terminology";
+export {
+  MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
+  buildMedicationInstructionConceptCodeSystem,
+  getMedicationInstructionConcept,
+  listMedicationInstructionConcepts,
+  resolveMedicationInstructionConcept
+} from "./instruction-concept-terminology";
+export type { MedicationInstructionConceptCodeSystem } from "./instruction-concept-terminology";
 export {
   MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
   buildInstructionGraphExtension,

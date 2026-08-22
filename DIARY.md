@@ -2255,3 +2255,67 @@ Verification:
 - `npm test` -> 640 tests passing
 - `npm run test:dist` -> published ESM/CJS graph exports verified
 - `git diff --check`
+
+## 2026-08-22 Declarative procedural terminology and conservative leftover enrichment
+
+The procedural semantic graph checkpoint was generalized so expanding the
+language/domain vocabulary no longer requires editing imperative parser maps.
+
+What changed:
+- moved default procedural actions into `instruction-action-terminology.json`
+  and a typed runtime
+- default catalog now contains 50 TH/EN action concepts and aliases spanning
+  preparation, cleansing, device manipulation, oral/topical workflow, and
+  administration verbs
+- action matching is longest-first over canonical, spaced source, and contiguous
+  source forms, so aliases such as `shake well`, `pat dry`, `draw up`, and Thai
+  no-space forms can resolve without ad-hoc parser branches
+- added `ParseOptions.instructionActionMap` for caller-owned action concepts,
+  aliases, labels, procedural scope, amount capability, and arbitrary coding
+  systems
+- custom action display/i18n/codings are stored in the semantic graph and FHIR
+  extension, so they remain realizable after serialization without requiring
+  the original custom map again
+- HPSG leftovers are conservatively re-parsed only through explicitly licensed
+  procedural terminology; recognized portions become graph actions and all
+  remaining text stays opaque/lossless
+- existing coded additional-instruction semantics retain human-realization
+  precedence, avoiding degradation of mature advice such as “swallow whole; do
+  not crush or chew”
+
+Argument semantics were generalized in parallel:
+- added package-owned
+  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept`
+- moved common instruction concepts into declarative terminology: product,
+  bottle, water, clean water, small amount, foam, use, event times, and the
+  deliberately broad external-intimate-area concept
+- added `ParseOptions.instructionConceptMap` for institution/application-owned
+  argument vocabulary and arbitrary coding systems
+- arguments now retain plural codings while keeping a preferred coding for
+  compatibility
+- local RF2 2026-04-01 confirmed `11713004 |Water (substance)|`; water therefore
+  carries both the package semantic concept and exact SNOMED mapping
+- `clean water` is intentionally NOT coerced to potable/sterile/purified water
+  because those are stronger claims than the source text
+
+Language improvements:
+- Thai `แล้ว`, `แล้วจึง`, and `ต่อมา` normalize to sequence semantics
+- English `and then` is treated as sequence glue rather than contaminating the
+  prior argument
+- Thai `รอยโรค` was added as a body-site alias for the existing SNOMED skin
+  lesion concept, preserving natural no-space Thai parsing
+- example `เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ` now becomes:
+  wipe(site=lesion) -> wait(duration=5 min) -> rinse(substance=water), with no
+  opaque sequence glue, and realizes cleanly in Thai and English
+
+Custom terminology proof:
+- a caller-defined `zap` surface can map to semantic action `phototreat`, Thai
+  `ฉายแสง`, and `http://example.org/action|P1`
+- a caller-defined `magicgel` can map to a substance concept, Thai `เจลวิเศษ`,
+  and `http://example.org/concept|MG`
+- both survive FHIR graph-extension round-trip and remain bilingual-realizable
+
+Verification:
+- `npm run build`
+- `npm test` -> 646 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing

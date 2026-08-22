@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMedicationInstructionActionCodeSystem,
+  buildMedicationInstructionConceptCodeSystem,
   fromFhirDosage,
   getMedicationInstructionAction,
+  getMedicationInstructionConcept,
   listMedicationInstructionActions,
+  listMedicationInstructionConcepts,
+  parseInstructionActions,
   parseSig,
   realizeInstructionGraph
 } from "../src/index";
@@ -64,4 +68,179 @@ describe("procedural instruction graph", () => {
       expect.objectContaining({ code: "pour", display: "Pour" })
     );
   });
+
+  it("recognizes declarative multiword/default actions even when HPSG left them opaque", () => {
+    const parsed = parseSig("wipe lesion then wait 5 minutes then rinse");
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual([
+      "wipe",
+      "wait",
+      "rinse"
+    ]);
+    expect(graph?.actions[0]?.args[0]).toMatchObject({
+      role: "site",
+      coding: { system: "http://snomed.info/sct", code: "95324001" }
+    });
+    expect(graph?.actions[1]?.args[0]).toMatchObject({
+      role: "duration",
+      quantity: { value: 5, unit: "min" }
+    });
+    expect(graph?.opaqueSpans).toBeUndefined();
+    expect(realizeInstructionGraph(graph!, "en")).toBe(
+      "Wipe the lesion; then Wait 5 minutes; then Rinse"
+    );
+  });
+
+  it("supports caller-owned procedural actions and preserves their coding and labels through FHIR", () => {
+    const options = {
+      instructionActionMap: {
+        zap: {
+          code: "phototreat",
+          semanticClass: "procedure",
+          display: "Phototreat",
+          i18n: { th: "ฉายแสง" },
+          coding: {
+            system: "http://example.org/action",
+            code: "P1",
+            display: "Phototreat"
+          },
+          procedural: true
+        }
+      }
+    };
+    const parsed = parseSig("zap lesion then rinse", options);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual([
+      "phototreat",
+      "rinse"
+    ]);
+    expect(graph?.actions[0]?.predicate).toMatchObject({
+      display: "Phototreat",
+      i18n: { th: "ฉายแสง" }
+    });
+    expect(graph?.actions[0]?.predicate.codings).toEqual([
+      expect.objectContaining({
+        system: "http://example.org/action",
+        code: "P1",
+        display: "Phototreat"
+      })
+    ]);
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.actions[0]?.predicate).toMatchObject({
+      lemma: "phototreat",
+      display: "Phototreat",
+      i18n: { th: "ฉายแสง" },
+      codings: [
+        expect.objectContaining({
+          system: "http://example.org/action",
+          code: "P1"
+        })
+      ]
+    });
+    expect(realizeInstructionGraph(restored!, "en")).toContain("Phototreat the lesion");
+    expect(realizeInstructionGraph(restored!, "th")).toContain("ฉายแสงรอยโรค");
+  });
+
+  it("uses longest action aliases from the declarative terminology", () => {
+    const frames = parseInstructionActions("shake well bottle then rinse off with water");
+    expect(frames.map((frame) => frame.predicate.lemma)).toEqual(["shake", "rinse"]);
+    expect(frames[0]?.args[0]).toMatchObject({ role: "container", normalized: "bottle" });
+  });
+
+
+  it("parses colloquial Thai sequencing into coded actions without opaque glue", () => {
+    const parsed = parseSig("เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ", { locale: "th" });
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual([
+      "wipe",
+      "wait",
+      "rinse"
+    ]);
+    expect(graph?.opaqueSpans).toBeUndefined();
+    expect(graph?.actions[0]?.args[0]).toMatchObject({
+      role: "site",
+      coding: { system: "http://snomed.info/sct", code: "95324001" }
+    });
+    expect(graph?.actions[1]?.args[0]).toMatchObject({
+      role: "duration",
+      quantity: { value: 5, unit: "min" }
+    });
+    expect(graph?.actions[2]?.args[0]).toMatchObject({
+      role: "substance",
+      coding: { system: "http://snomed.info/sct", code: "11713004" }
+    });
+    expect(graph?.actions[2]?.args[0]?.codings).toContainEqual(
+      expect.objectContaining({
+        system: "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+        code: "water"
+      })
+    );
+    expect(realizeInstructionGraph(graph!, "th")).toBe(
+      "เช็ดรอยโรค จากนั้นรอ 5 นาที จากนั้นล้างด้วยน้ำ"
+    );
+    expect(realizeInstructionGraph(graph!, "en")).toBe(
+      "Wipe the lesion; then Wait 5 minutes; then Rinse with water"
+    );
+  });
+
+  it("supports caller-owned argument concepts and preserves them through FHIR", () => {
+    const parsed = parseSig("zap magicgel then rinse", {
+      instructionActionMap: {
+        zap: {
+          code: "phototreat",
+          semanticClass: "procedure",
+          display: "Phototreat",
+          i18n: { th: "ฉายแสง" },
+          coding: { system: "http://example.org/action", code: "P1", display: "Phototreat" }
+        }
+      },
+      instructionConceptMap: {
+        magicgel: {
+          code: "magic-gel",
+          role: "substance",
+          display: "magic gel",
+          i18n: { th: "เจลวิเศษ" },
+          coding: { system: "http://example.org/concept", code: "MG", display: "Magic gel" }
+        }
+      }
+    });
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions[0]?.args[0]).toMatchObject({
+      role: "substance",
+      conceptId: "magic-gel",
+      coding: { system: "http://example.org/concept", code: "MG" },
+      i18n: { en: "magic gel", th: "เจลวิเศษ" }
+    });
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.actions[0]?.args[0]).toMatchObject({
+      conceptId: "magic-gel",
+      coding: { system: "http://example.org/concept", code: "MG" },
+      i18n: { en: "magic gel", th: "เจลวิเศษ" }
+    });
+    expect(realizeInstructionGraph(restored!, "en")).toContain("Phototreat magic gel");
+    expect(realizeInstructionGraph(restored!, "th")).toContain("ฉายแสงเจลวิเศษ");
+  });
+
+  it("publishes the package-owned concept terminology as a FHIR CodeSystem", () => {
+    expect(listMedicationInstructionConcepts().length).toBeGreaterThan(10);
+    expect(getMedicationInstructionConcept("water")).toMatchObject({
+      code: "water",
+      role: "substance",
+      display: "water"
+    });
+    expect(getMedicationInstructionConcept("water")?.externalCodings).toContainEqual(
+      expect.objectContaining({ system: "http://snomed.info/sct", code: "11713004" })
+    );
+    const codeSystem = buildMedicationInstructionConceptCodeSystem();
+    expect(codeSystem).toMatchObject({
+      resourceType: "CodeSystem",
+      status: "active",
+      content: "complete"
+    });
+    expect(codeSystem.concept).toContainEqual(
+      expect.objectContaining({ code: "water", display: "water" })
+    );
+  });
+
 });

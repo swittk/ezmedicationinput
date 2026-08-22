@@ -1071,7 +1071,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["lesion", "skin lesion"],
+      names: ["lesion", "skin lesion", "รอยโรค"],
       definition: {
         coding: { code: "95324001", display: "Skin lesion" },
         text: "lesion",

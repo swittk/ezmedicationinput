@@ -551,6 +551,7 @@ export interface AdviceArgument {
   normalized?: string;
   conceptId?: string;
   coding?: FhirCoding;
+  codings?: FhirCoding[];
   i18n?: Record<string, string>;
   quantity?: {
     value?: number;
@@ -567,7 +568,9 @@ export interface AdviceFrame {
   predicate: {
     lemma: string;
     semanticClass?: string;
-    /** Internal action coding followed by any trustworthy external mappings. */
+    display?: string;
+    i18n?: Record<string, string>;
+    /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
   };
   relation?: AdviceRelation;
@@ -759,6 +762,44 @@ export interface SmartMealExpansionScope {
   excludeDosageForms?: string[];
 }
 
+export interface MedicationInstructionActionDefinition {
+  /** Stable semantic action code. */
+  code: string;
+  semanticClass: string;
+  display: string;
+  /** Alternate human-readable labels keyed by BCP-47-ish language tag. */
+  i18n?: Record<string, string>;
+  /** Surface forms that should resolve to this action. */
+  aliases?: string[];
+  /** Whether this is a procedural action rather than ordinary administration advice. */
+  procedural?: boolean;
+  acceptsAmount?: boolean;
+  /** Optional primary coding when an institution owns the action terminology. */
+  coding?: FhirCoding;
+  /** Exact external terminology mappings; never fuzzy/approximate mappings. */
+  externalCodings?: FhirCoding[];
+}
+
+export interface MedicationInstructionActionInput
+  extends Partial<MedicationInstructionActionDefinition> {
+  semanticClass?: string;
+}
+
+export interface MedicationInstructionConceptDefinition {
+  code: string;
+  role: AdviceArgumentRole;
+  display: string;
+  i18n?: Record<string, string>;
+  aliases?: string[];
+  coding?: FhirCoding;
+  externalCodings?: FhirCoding[];
+}
+
+export interface MedicationInstructionConceptInput
+  extends Partial<MedicationInstructionConceptDefinition> {
+  role?: AdviceArgumentRole;
+}
+
 export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
@@ -767,6 +808,17 @@ export interface ParseOptions extends FormatOptions {
   context?: MedicationContext | null;
   routeMap?: Record<string, RouteCode>;
   unitMap?: Record<string, string>;
+  /**
+   * Institution/application procedural vocabulary. Map keys are accepted
+   * surface forms; definitions may use any coding system and may add aliases.
+   * Unknown text still remains opaque rather than being guessed.
+   */
+  instructionActionMap?: Record<string, MedicationInstructionActionInput>;
+  /**
+   * Institution/application argument vocabulary for substances, containers,
+   * results, activities, etc. Body sites still use the richer siteCodeMap.
+   */
+  instructionConceptMap?: Record<string, MedicationInstructionConceptInput>;
   freqMap?: Record<
     string,
     {
