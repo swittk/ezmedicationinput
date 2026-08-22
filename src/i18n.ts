@@ -12,7 +12,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
-import { realizeInstructionGraph } from "./instruction-graph";
+import { instructionGraphHasNovelNonWarningContent, realizeInstructionGraph } from "./instruction-graph";
 import {
   AdviceArgumentRole,
   AdviceRelation,
@@ -1245,6 +1245,9 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
     return `เข้า${translated}`;
   }
   const preposition = grammar.sitePreposition ?? "ที่";
+  if (translated.startsWith(preposition)) {
+    return translated;
+  }
   const separator = /^[\u0E00-\u0E7F]/.test(translated) ? "" : " ";
   return `${preposition}${separator}${translated}`.trim();
 }
@@ -1637,7 +1640,11 @@ function formatLongThai(
   if (instructionText) {
     instructionPhrases.push(instructionText);
   }
-  const graphInstruction = clause.instructionGraph
+  const representedInstructionTexts = (clause.additionalInstructions ?? [])
+    .map((instruction) => instruction.text)
+    .filter((text): text is string => Boolean(text));
+  const graphInstruction = clause.instructionGraph &&
+    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
     ? realizeInstructionGraph(clause.instructionGraph, "th", { includeWarnings: false })
     : undefined;
   const patientInstruction = formatPatientInstructionSentence(

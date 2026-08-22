@@ -186,7 +186,7 @@ export function mapFrequencyAdverb(token: string): FhirPeriodUnit | undefined {
 export function parseNumericRange(
   token: string
 ): { low: number; high: number } | undefined {
-  const rangeMatch = token.match(/^([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)$/);
+  const rangeMatch = token.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
   if (!rangeMatch) {
     return undefined;
   }

@@ -47,6 +47,10 @@ function applyRouteDefault(
     deps.setRoute(state, RouteCode["Respiratory tract route (qualifier value)"], ROUTE_TEXT[RouteCode["Respiratory tract route (qualifier value)"]]);
     return;
   }
+  if (state.methodCoding?.code === "738991002" || state.methodText?.toLowerCase() === "apply") {
+    deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
+    return;
+  }
   const route = inferRouteFromContext(context);
   if (route !== undefined) {
     deps.setRoute(state, route, ROUTE_TEXT[route]);

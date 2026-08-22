@@ -2522,3 +2522,71 @@ and several domain leaf constraints still live in specialized TypeScript
 unification functions, and the semantic pivot is the medication instruction
 graph rather than MRS. Those are the next formalization targets if further HPSG
 purity produces measurable product value.
+
+## 2026-08-22 Weird TH/EN safety scope and workflow-head HPSG
+
+A second adversarial pass started from five deliberately awkward Thai clinician
+instructions: four-times-daily eye drops with four event times, bedtime drops
+with conditional medical advice, 0-2/day symptom-adjusted eye drops, a
+wash/leave/rinse topical workflow with a wound warning, and patch application
+with a menstrual warning. The same semantic families were expanded into
+English, shorthand, Unicode-range, punctuation, separated-range, and TH/EN
+code-switched variants.
+
+The failures were mostly scope/attachment rather than missing vocabulary, so the
+fixes intentionally moved more structure into HPSG:
+
+- added typed `conditional-sign` and `adjustment-sign` lexical constructions
+- separated conditional safety advice from PRN: `if irritation -> consult` and
+  `should not use if wound` do not make the medication itself PRN
+- added symptom-adjusted administration for `adjust`, `depending`, `according`,
+  and safely-resolved `during <symptom> periods`
+- added compact, cadence-first, and separated frequency-range constructions,
+  including `0-2x/day`, `วันละ 0-2 ครั้ง`, `0 to 2 times per day`, and
+  `0 ถึง 2 ครั้ง/วัน`
+- prevented a number starting a separated frequency range from also becoming a
+  numeric dose lexical sign
+- added approximate, Unicode-dash, and separated procedural duration ranges
+  (`about 5-10 min`, `5–10 minutes`, `5 to 10 minutes`)
+- made the first positive method-capable workflow action the possible HPSG
+  workflow head; later wash/rinse actions remain dependent procedure actions
+- made generic Apply->topical a defeasible default rather than a lexical fact;
+  `apply patch`/Thai `แปะ` is a specific Apply variant with transdermal route
+- preserved `แปะ` as the human-facing Thai method while retaining SNOMED Apply
+- tightened body-site scope around `during`, `depending`, `not`, punctuation,
+  and conditional/directive boundaries
+- made workflow argument and action spans source-faithful around punctuation,
+  and reconciled opaque spans against richer understood action spans
+- stopped instruction-graph relations from inventing THEN across arbitrary
+  structured text such as medication schedule material
+
+FHIR `Timing.repeat.frequency` is positiveInt and cannot encode the explicit
+lower bound 0. The canonical graph therefore projects frequency=0 through the
+package-owned extension
+`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+while `frequencyMax`, period, and periodUnit remain standard FHIR fields. The
+extension round-trips through `fromFhirDosage()` and is exported publicly.
+Negated graph actions are also projected to standard
+`Dosage.additionalInstruction.text` when not already represented, so ordinary
+FHIR consumers retain critical warnings even without understanding the rich
+instruction-graph extension.
+
+A new 28-case `weird-clinician-cases.json` corpus plus two dedicated FHIR
+round-trip tests now contributes 30 tests. Combined with the pre-existing
+50-case real-world torture corpus there are 78 adversarial directions spanning
+TH/EN/code-switching. Full source validation is 739/739 tests and published
+ESM/CJS validation is 3/3.
+
+Performance remained bounded. The original pre-HPSG baseline on the old 50-case
+workload was ~6.22 ms mean with ~119.8 ms p99. The formal-HPSG checkpoint was
+~4.06 ms mean / 13.08 ms p99. This richer pass varies with host load around
+~4.47-4.93 ms mean and ~17.8-20.3 ms p99 on the same 50 cases. The new combined
+78-case benchmark measured 3.99 ms mean, 3.41 ms p50, 8.68 ms p95, 16.71 ms
+p99, and ~250 parses/s over 7800 measured parses. `bench:torture` preserves the
+50-case apples-to-apples workload; `bench:adversarial` runs all 78 cases.
+
+The architecture remains intentionally hybrid rather than claiming total
+DELPH-IN-style grammar purity: typed feature structures, subtype constraints,
+head/valence attachment, and these new constructions are formal HPSG machinery;
+some medication-specific leaf compatibility and semantic assembly remain
+specialized TypeScript constraints where that is currently clearer and safer.

@@ -34,6 +34,7 @@ import {
   findPrnReasonDefinitionByCoding
 } from "./maps";
 import {
+  AdvicePolarity,
   CanonicalDoseRange,
   CanonicalSigClause,
   BodySiteSpatialRelation,
@@ -49,6 +50,8 @@ import {
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
+
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
@@ -478,8 +481,14 @@ export function canonicalToFhir(
   let hasRepeat = false;
   const schedule = clause.schedule;
 
-  if (schedule?.frequency !== undefined) {
+  if (schedule?.frequency !== undefined && schedule.frequency > 0) {
     repeat.frequency = schedule.frequency;
+    hasRepeat = true;
+  } else if (schedule?.frequency === 0) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }
+    ];
     hasRepeat = true;
   }
   if (schedule?.count !== undefined) {
@@ -629,9 +638,29 @@ export function canonicalToFhir(
     };
   }
 
-  if (clause.additionalInstructions?.length) {
+  const additionalInstructions: Array<{
+    text: string;
+    coding?: { system?: string; code?: string; display?: string };
+  }> = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    const text = instruction.text?.trim();
+    if (!text) continue;
+    additionalInstructions.push({ text, coding: instruction.coding });
+  }
+  for (const action of clause.instructionGraph?.actions ?? []) {
+    if (action.polarity !== AdvicePolarity.Negate) continue;
+    const text = action.sourceText.trim();
+    if (!text) continue;
+    const normalized = text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+    const alreadyRepresented = additionalInstructions.some((instruction) => {
+      const candidate = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    });
+    if (!alreadyRepresented) additionalInstructions.push({ text, coding: undefined });
+  }
+  if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
-    for (const instruction of clause.additionalInstructions) {
+    for (const instruction of additionalInstructions) {
       dosage.additionalInstruction.push({
         text: instruction.text,
         coding: instruction.coding?.code
@@ -766,6 +795,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const repeat = dosage.timing?.repeat;
+  const frequencyMinExtension = repeat?.extension?.find(
+    (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
+  )?.valueInteger;
   const timingBounds = extractCanonicalTimingBounds(repeat);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
@@ -773,6 +805,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
+    frequencyMinExtension !== undefined ||
     repeat?.frequencyMax !== undefined ||
     repeat?.period !== undefined ||
     repeat?.periodMax !== undefined ||
@@ -787,7 +820,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
-      frequency: repeat?.frequency,
+      frequency: repeat?.frequency ?? frequencyMinExtension,
       frequencyMax: repeat?.frequencyMax,
       period: repeat?.period,
       periodMax: repeat?.periodMax,

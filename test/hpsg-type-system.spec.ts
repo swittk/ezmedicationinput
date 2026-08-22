@@ -15,6 +15,8 @@ describe("formal HPSG typed feature structures", () => {
     expect(HPSG_TYPE_SYSTEM.isSubtype("method-sign", "word-sign")).toBe(true);
     expect(HPSG_TYPE_SYSTEM.isSubtype("method-sign", "sign")).toBe(true);
     expect(HPSG_TYPE_SYSTEM.isSubtype("clause-sign", "phrase-sign")).toBe(true);
+    expect(HPSG_TYPE_SYSTEM.isSubtype("conditional-sign", "word-sign")).toBe(true);
+    expect(HPSG_TYPE_SYSTEM.isSubtype("adjustment-sign", "word-sign")).toBe(true);
     expect(HPSG_TYPE_SYSTEM.isSubtype("clause-sign", "word-sign")).toBe(false);
   });
 

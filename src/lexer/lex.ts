@@ -41,7 +41,7 @@ function classifyLexKind(value: string): {
     return { kind: LexKind.Number, value: parseFloat(value) };
   }
 
-  const rangeMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)$/);
+  const rangeMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
   if (rangeMatch) {
     return {
       kind: LexKind.NumberRange,

@@ -27,6 +27,7 @@ import {
   DURATION_LEAD_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
+  INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
   OCULAR_ROUTE_CODES,
@@ -98,6 +99,8 @@ function siteRangeIsProcedureLocal(
   });
 }
 
+const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not"]);
+
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
@@ -111,6 +114,8 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
+    SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
+    INSTRUCTION_START_WORDS.has(lower) ||
     Boolean(
       METHOD_ACTION_BY_VERB[lower] ||
       (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||
@@ -275,12 +280,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         const continuedText = nextLower
           ? [...displayTokens, next].map((part) => part.original).join(" ")
           : "";
+        const continuedSite = continuedText
+          ? resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
+              bodySiteContext: context.options?.context?.bodySiteContext
+            })
+          : undefined;
         if (
           !isPunctuation(candidateLower) ||
           !nextLower ||
-          !resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
-            bodySiteContext: context.options?.context?.bodySiteContext
-          })
+          !continuedSite ||
+          (!continuedSite.coding && !continuedSite.definition)
         ) {
           break;
         }
@@ -301,7 +310,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!displayTokens.length) {
       return signs;
     }
-    const rawSourceText = displayTokens.map((part) => part.original).join(" ").replace(/\s+/g, " ").trim();
+    const rawSourceText = joinTokenText(displayTokens);
     const isProbe = rawSourceText.includes("{") || rawSourceText.includes("}");
     const sourceText = rawSourceText.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {

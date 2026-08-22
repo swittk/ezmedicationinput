@@ -379,7 +379,7 @@
   {
     "name": "patch falls off conditional",
     "input": "if patch falls off, reapply; if it will not stick, apply a new patch to another site",
-    "route": "topical"
+    "route": "transdermal"
   },
   {
     "name": "fold discard patch",

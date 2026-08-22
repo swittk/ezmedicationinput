@@ -27,6 +27,8 @@ export type HpsgType =
   | "schedule-sign"
   | "prn-sign"
   | "instruction-sign"
+  | "conditional-sign"
+  | "adjustment-sign"
   | "connector-sign";
 
 export interface HpsgEvidence {

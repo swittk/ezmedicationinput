@@ -139,6 +139,47 @@ export function compactIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
+    const compactFrequencyRange = lower.match(/^([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)x\/(day|d|week|wk|w|month|mo|hour|h)$/);
+    if (compactFrequencyRange) {
+      const unit = mapIntervalUnit(compactFrequencyRange[3]);
+      const low = parseFloat(compactFrequencyRange[1]);
+      const high = parseFloat(compactFrequencyRange[2]);
+      if (!unit || low < 0 || high <= 0 || high < low) return [];
+      const normalizedPeriod = normalizePeriodValue(1, unit);
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.compactFrequencyRange",
+        tokens,
+        synsem: {
+          head: { schedule: { frequency: low, frequencyMax: high, period: normalizedPeriod.value, periodUnit: normalizedPeriod.unit } },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 16
+      })];
+    }
+    const compactFrequency = lower.match(/^([0-9]+(?:\.[0-9]+)?)x\/(day|d|week|wk|w|month|mo|hour|h)$/);
+    if (compactFrequency) {
+      const unit = mapIntervalUnit(compactFrequency[2]);
+      const frequency = parseFloat(compactFrequency[1]);
+      if (!unit || frequency <= 0) return [];
+      const normalizedPeriod = normalizePeriodValue(1, unit);
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.compactFrequency",
+        tokens,
+        synsem: {
+          head: { schedule: {
+            frequency, period: normalizedPeriod.value, periodUnit: normalizedPeriod.unit,
+            timingCode: normalizedPeriod.value === 1 && normalizedPeriod.unit === FhirPeriodUnit.Day
+              ? timingCodeForDailyFrequency(frequency) : undefined
+          } },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 15
+      })];
+    }
     const rangeMatch = lower.match(/^q([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)([a-z]+)$/);
     if (rangeMatch) {
       const unit = mapIntervalUnit(rangeMatch[3]);
@@ -336,6 +377,67 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
  * locale lexer to exactly this feature sequence, without pretending Thai has
  * English word order.
  */
+export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.separatedFrequencyRange", (context, start) => {
+    const lowToken = tokensAvailable(context, start, 1)?.[0];
+    const connector = context.tokens[start + 1];
+    const highToken = context.tokens[start + 2];
+    const timesToken = context.tokens[start + 3];
+    if (
+      !lowToken || lowToken.kind !== LexKind.Number || lowToken.value === undefined || lowToken.value < 0 ||
+      !connector || !RANGE_CONNECTORS.has(normalizeTokenLower(connector)) ||
+      !highToken || highToken.kind !== LexKind.Number || highToken.value === undefined || highToken.value <= 0 ||
+      highToken.value < lowToken.value ||
+      !timesToken || !FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(timesToken))
+    ) return [];
+
+    let cursor = start + 4;
+    const consumed = [lowToken, connector, highToken, timesToken];
+    let unit: FhirPeriodUnit | undefined;
+    const next = context.tokens[cursor];
+    const nextLower = next ? normalizeTokenLower(next) : "";
+    if (next && SCHEDULE_UNIT_SEPARATOR_TOKENS.has(nextLower)) {
+      const unitToken = context.tokens[cursor + 1];
+      const mapped = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken)) : undefined;
+      if (mapped && unitToken) {
+        consumed.push(next, unitToken);
+        unit = mapped;
+      }
+    } else if (next && FREQUENCY_CONNECTOR_WORDS.has(nextLower)) {
+      const unitToken = context.tokens[cursor + 1];
+      const mapped = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken)) : undefined;
+      if (mapped && unitToken) {
+        consumed.push(next, unitToken);
+        unit = mapped;
+      }
+    } else if (next) {
+      const mapped = mapFrequencyAdverb(nextLower) ?? mapIntervalUnit(nextLower);
+      if (mapped) {
+        consumed.push(next);
+        unit = mapped;
+      }
+    }
+    if (!unit) return [];
+    const normalized = normalizePeriodValue(1, unit);
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.separatedFrequencyRange",
+      tokens: consumed,
+      synsem: {
+        head: { schedule: {
+          frequency: lowToken.value,
+          frequencyMax: highToken.value,
+          period: normalized.value,
+          periodUnit: normalized.unit
+        } },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 18
+    })];
+  });
+}
+
 export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.cadenceFirstFrequency", (context, start) => {
     const cadence = tokensAvailable(context, start, 1)?.[0];
@@ -353,14 +455,47 @@ export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> 
       !times ||
       context.state.consumed.has(count.index) ||
       context.state.consumed.has(times.index) ||
-      count.kind !== LexKind.Number ||
-      count.value === undefined ||
-      count.value <= 0 ||
       !FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(times))
     ) {
       return [];
     }
     const normalizedPeriod = normalizePeriodValue(1, periodUnit);
+    const range = count.kind === LexKind.NumberRange
+      ? parseNumericRange(normalizeTokenLower(count))
+      : undefined;
+    if (range) {
+      if (range.low < 0 || range.high <= 0 || range.high < range.low) return [];
+      return [
+        lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.cadenceFirstFrequencyRange",
+          tokens: [cadence, count, times],
+          synsem: {
+            head: {
+              schedule: {
+                frequency: range.low,
+                frequencyMax: range.high,
+                period: normalizedPeriod.value,
+                periodUnit: normalizedPeriod.unit,
+                timingCode:
+                  range.low === range.high &&
+                  range.low > 0 &&
+                  normalizedPeriod.value === 1 &&
+                  normalizedPeriod.unit === FhirPeriodUnit.Day
+                    ? timingCodeForDailyFrequency(range.low)
+                    : undefined
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 15
+        })
+      ];
+    }
+    if (count.kind !== LexKind.Number || count.value === undefined || count.value <= 0) {
+      return [];
+    }
     return [
       lexicalSign({
         type: "schedule-sign",
@@ -394,13 +529,16 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
+    const frequencyRange = token.kind === LexKind.NumberRange ? parseNumericRange(lower) : undefined;
     const value =
       FREQUENCY_SIMPLE_WORDS[lower] ??
       FREQUENCY_NUMBER_WORDS[lower] ??
-      (token.kind === LexKind.Number ? token.value : undefined);
-    if (value === undefined || value <= 0) {
+      (token.kind === LexKind.Number ? token.value : frequencyRange?.low);
+    const valueMax = frequencyRange?.high;
+    if (value === undefined || value < 0 || (value === 0 && valueMax === undefined)) {
       return [];
     }
+    if (valueMax !== undefined && (valueMax <= 0 || valueMax < value)) return [];
     const consumed = [token];
     let cursor = start + 1;
     let sawCue = lower in FREQUENCY_SIMPLE_WORDS;
@@ -477,7 +615,7 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       const unit = mapIntervalUnit(candidateLower);
       if (unit) {
-        if (!sawCue && token.kind === LexKind.Number) {
+        if (!sawCue && (token.kind === LexKind.Number || token.kind === LexKind.NumberRange)) {
           return [];
         }
         sawCadenceContinuation = true;
@@ -488,6 +626,7 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
       break;
     }
     if (!periodUnit) {
+      if (valueMax !== undefined) return [];
       if (sawCue && sawCadenceContinuation && lower in FREQUENCY_SIMPLE_WORDS) {
         periodUnit = FhirPeriodUnit.Day;
       } else if (lower in FREQUENCY_SIMPLE_WORDS || sawCue) {
@@ -518,9 +657,12 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
           head: {
             schedule: {
               frequency: value,
+              frequencyMax: valueMax,
               period: normalizedPeriod.value,
               periodUnit: normalizedPeriod.unit,
               timingCode:
+                valueMax === undefined &&
+                value > 0 &&
                 normalizedPeriod.value === 1 && normalizedPeriod.unit === FhirPeriodUnit.Day
                   ? timingCodeForDailyFrequency(value)
                   : undefined
@@ -1111,6 +1253,12 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return false;
   }
   const lower = normalizeTokenLower(token);
+  if (
+    /^\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower) ||
+    /^\d+(?:\.\d+)?[-–—]\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower)
+  ) {
+    return true;
+  }
   if (
     TIMING_ABBREVIATIONS[lower] ||
     WORD_FREQUENCIES[lower] ||

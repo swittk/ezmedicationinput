@@ -13,12 +13,12 @@ import {
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
-import { AdviceFrame, RouteCode } from "../../types";
+import { AdviceFrame, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
-import { parseNumericRange } from "../timing-lexicon";
+import { FREQUENCY_TIMES_WORDS, parseNumericRange } from "../timing-lexicon";
 import {
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
@@ -34,6 +34,7 @@ import {
   MEDICATION_OBJECT_FILLERS,
   MILLION_DOSE_MULTIPLIER_TOKENS,
   PERCENT_BODY_AREA_UNITS,
+  RANGE_CONNECTORS,
   PRODUCT_METHOD_TEXT,
   PRODUCT_METHOD_THAI,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
@@ -71,9 +72,9 @@ function procedureFrameIsDependent(
   if (!METHOD_ACTION_BY_VERB[frame.predicate.lemma]) return true;
   const frames = methodProcedureFrames(context);
   return frames.some((candidate) => {
-    if (candidate.span.start >= frame.span.start) return false;
+    if (candidate.span.start >= frame.span.start || candidate.polarity === AdvicePolarity.Negate) return false;
     const prior = resolveMedicationInstructionAction(candidate.predicate.lemma, context.options);
-    return Boolean(prior && !prior.procedural);
+    return Boolean(prior);
   }) || context.tokens.some((candidate) => {
     if (candidate.sourceStart >= frame.span.start) return false;
     const verb = normalizeTokenLower(candidate);
@@ -115,6 +116,25 @@ function looksLikeCoordinatedNoun(context: HpsgClauseContext, start: number, ver
   return previous?.original === "," && (next?.original === "," || nextLower === "or" || nextLower === "and");
 }
 
+function methodTokenIsInsideSafetyConditional(
+  context: HpsgClauseContext,
+  token: Token
+): boolean {
+  return methodProcedureFrames(context).some((frame) => {
+    if (frame.span.start > token.sourceStart || token.sourceEnd > frame.span.end) return false;
+    const conditional = frame.relation === AdviceRelation.If ||
+      frame.relation === AdviceRelation.Unless ||
+      frame.relation === AdviceRelation.When ||
+      frame.relation === AdviceRelation.While ||
+      frame.relation === AdviceRelation.During;
+    const safety = frame.polarity === AdvicePolarity.Negate ||
+      frame.predicate.lemma === "consult" ||
+      frame.predicate.lemma === "stop" ||
+      frame.predicate.semanticClass === "medical_advice";
+    return conditional && safety;
+  });
+}
+
 function methodTokenIsDependentProcedure(
   context: HpsgClauseContext,
   token: Token
@@ -138,7 +158,7 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (looksLikeThaiGiveAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
       return [];
     }
-    if (methodTokenIsDependentProcedure(context, token)) {
+    if (methodTokenIsInsideSafetyConditional(context, token) || methodTokenIsDependentProcedure(context, token)) {
       return [];
     }
     if (
@@ -151,11 +171,11 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const action = METHOD_ACTION_BY_VERB[verb];
-    const route = getRouteMeaning(token) ?? (
-      action === MethodAction.Apply
-        ? { code: RouteCode["Topical route"], text: ROUTE_TEXT[RouteCode["Topical route"]] }
-        : undefined
-    );
+    const route = verb === "apply_patch"
+      ? { code: RouteCode["Transdermal route"], text: ROUTE_TEXT[RouteCode["Transdermal route"]] }
+      : action === MethodAction.Apply
+        ? undefined
+        : getRouteMeaning(token);
     return [
       lexicalSign({
         type: "method-sign",
@@ -752,6 +772,15 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const nextLower = nextToken && !context.state.consumed.has(nextToken.index)
       ? normalizeTokenLower(nextToken)
       : undefined;
+    const rangeHigh = context.tokens[start + 2];
+    const rangeTimes = context.tokens[start + 3];
+    if (
+      nextLower && RANGE_CONNECTORS.has(nextLower) &&
+      rangeHigh?.kind === LexKind.Number && rangeHigh.value !== undefined &&
+      rangeTimes && FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(rangeTimes))
+    ) {
+      return [];
+    }
     if (nextLower && MILLION_DOSE_MULTIPLIER_TOKENS.has(nextLower)) {
       const unit = unitAfter(context, start + 2);
       return [

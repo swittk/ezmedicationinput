@@ -411,7 +411,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["both eyes", "bilateral eyes", "each eye", "ตาทั้งสองข้าง", "ตาสองข้าง"],
+      names: ["both eyes", "bilateral eyes", "each eye", "ตาทั้งสองข้าง", "ตาสองข้าง", "สองตา"],
       definition: {
         coding: { code: "40638003", display: "Structure of both eyes" },
         text: "both eyes",
@@ -1067,7 +1067,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["affected area", "affected areas", "affected site", "บริเวณที่เป็น"],
+      names: [
+        "affected area", "affected areas", "affected site",
+        "painful area", "painful spot", "painful site", "area that hurts", "area that is painful", "where it hurts",
+        "บริเวณที่เป็น", "บริเวณที่มีอาการปวด", "ตรงที่ปวด", "ที่ปวด"
+      ],
       definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
     },
     {
@@ -1761,6 +1765,13 @@ export const TIMING_ABBREVIATIONS: Record<string, FrequencyDescriptor> = {
     frequency: 4,
     period: 1,
     periodUnit: FhirPeriodUnit.Day
+  },
+  qhs: {
+    code: "QHS",
+    frequency: 1,
+    period: 1,
+    periodUnit: FhirPeriodUnit.Day,
+    when: [EventTiming["Before Sleep"]]
   },
   q1h: { code: "Q1H", period: 1, periodUnit: FhirPeriodUnit.Hour },
   q2h: { code: "Q2H", period: 2, periodUnit: FhirPeriodUnit.Hour },

@@ -228,11 +228,15 @@ This is intentionally an incremental formalization rather than a claim that the 
 
 ## Adversarial real-world parsing and HPSG performance
 
-The repository includes a 50-case TH/EN adversarial corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.
+The repository includes a 50-case TH/EN real-world torture corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. A second 28-case weird-clinician corpus stresses eye-drop event sets, safety-condition scope, 0–2/day symptom-adjusted use, ranged leave-on/rinse workflows, patch application, abbreviations, punctuation variants, and TH/EN code-switching. Together they provide 78 adversarial directions plus dedicated FHIR round-trip invariants. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.
 
-`npm run bench:torture` builds the package and runs the same corpus repeatedly, reporting mean/p50/p95/p99 latency, throughput, and the slowest cases. This is intentionally a benchmark rather than a timing-sensitive unit test.
+`npm run bench:torture` preserves the original 50-case apples-to-apples performance workload. `npm run bench:adversarial` runs the combined 78-case corpus. Both report mean/p50/p95/p99 latency, throughput, and the slowest cases; they are intentionally benchmarks rather than timing-sensitive unit tests.
 
-The HPSG chart uses packed semantic state, an indexed agenda, and a compatible semantic cover across opaque gaps. Procedural constructions use typed local arguments so local instructions such as `wash hands`, `wait 30 minutes`, or inhaler priming do not overwrite the medication's global site, schedule, route, or dose.
+The HPSG chart uses packed semantic state, an indexed agenda, and a compatible semantic cover across opaque gaps. Procedural constructions use typed local arguments so local instructions such as `wash hands`, `wait 30 minutes`, or inhaler priming do not overwrite the medication's global site, schedule, route, or dose. Additional typed constructions now distinguish safety-condition advice from PRN, symptom-adjusted use from fixed schedules, and the first workflow action (the possible administration head) from later dependent procedure actions. Separated and compact frequency ranges are grammatical schedule constituents, so `0 to 2 times per day` cannot be stolen by the dose grammar.
+
+FHIR cannot represent zero as `Timing.repeat.frequency` because the primitive is positive; a package-owned extension preserves an explicit lower bound of zero while `frequencyMax`, `period`, and `periodUnit` remain standard fields:
+
+`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
 
 ## Procedural instruction semantics and opaque-span enrichment
 

@@ -10,12 +10,14 @@ import {
   dayRangeLexicalRule,
   eventTimingPhraseRule,
   multiplicativeDoseFrequencyRule,
+  separatedFrequencyRangeRule,
   separatedIntervalRule,
   timeOfDayRule,
   timingLexicalRule
 } from "./rules/timing-rules";
-import { prnLexicalRule } from "./rules/prn-rules";
+import { prnLexicalRule, symptomAdjustmentLexicalRule } from "./rules/prn-rules";
 import {
+  conditionalAdviceLexicalRule,
   instructionLexicalRule,
   proceduralActionLexicalRule,
   workflowLexicalRule
@@ -47,12 +49,15 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       compactIntervalRule(),
       separatedIntervalRule(),
       cadenceFirstFrequencyRule(),
+      separatedFrequencyRangeRule(),
       countFrequencyRule(),
       eventTimingPhraseRule(),
       dayRangeLexicalRule(),
       timingLexicalRule(),
       countAndDurationRule(),
       timeOfDayRule(),
+      conditionalAdviceLexicalRule(),
+      symptomAdjustmentLexicalRule(),
       prnLexicalRule(),
       proceduralActionLexicalRule(),
       workflowLexicalRule(),

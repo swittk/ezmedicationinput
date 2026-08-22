@@ -7,7 +7,7 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
-import { realizeInstructionGraph } from "./instruction-graph";
+import { instructionGraphHasNovelNonWarningContent, realizeInstructionGraph } from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
@@ -1012,7 +1012,11 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   if (instructionText) {
     instructionPhrases.push(instructionText);
   }
-  const graphInstruction = clause.instructionGraph
+  const representedInstructionTexts = (clause.additionalInstructions ?? [])
+    .map((instruction) => instruction.text)
+    .filter((text): text is string => Boolean(text));
+  const graphInstruction = clause.instructionGraph &&
+    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
     ? realizeInstructionGraph(clause.instructionGraph, "en", { includeWarnings: false })
     : undefined;
   const patientInstruction = formatPatientInstructionSentence(

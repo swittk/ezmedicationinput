@@ -1,5 +1,5 @@
 {
-  "siteAnchors": ["to", "in", "into", "on", "onto", "at", "ที่", "บริเวณ", "inside", "within", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
+  "siteAnchors": ["to", "in", "into", "on", "onto", "over", "at", "ที่", "บริเวณ", "inside", "within", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
   "siteSelfDisplayAnchors": ["inside", "around", "behind", "near", "outside", "external", "under", "above", "below", "beneath", "between"],
   "siteFillers": ["the", "a", "an", "your", "his", "her", "their", "my"],
   "bodySiteLocativeRelations": ["behind", "around", "under", "above", "below", "beneath", "near", "outside", "inside", "between"],
@@ -32,7 +32,7 @@
     "partitive": 8,
     "locative": 6
   },
-  "connectors": ["per", "to", "in", "into", "at", "a", "an", "the", "of", "and", "or", "on", "every", ","],
+  "connectors": ["per", "to", "in", "into", "at", "a", "an", "the", "of", "and", "or", "on", "every", "then", ","],
   "routeSitePrepositions": ["per"],
   "nonSiteAnchoredPhrases": ["empty stomach"],
   "externalSiteLocativePrefixes": ["around", "behind", "near", "outside", "external", "between"],
@@ -324,7 +324,7 @@
   "wakeEventAliases": ["wake", "waking"],
   "foodEventAliases": ["food", "meal", "meals"],
   "dayRangeConnectors": ["to", "through", "-", "ถึง"],
-  "rangeConnectors": ["to", "through", "-"],
+  "rangeConnectors": ["to", "through", "-", "ถึง"],
   "durationLeadTokens": ["for"],
   "instructionLeadingSeparators": [",", ";", ":", ".", "-"],
   "instructionStartWords": [
@@ -347,6 +347,7 @@
     "not",
     "on",
     "should",
+    "should-not",
     "slowly",
     "sparingly",
     "thickly",
@@ -365,9 +366,10 @@
     "thick",
     "thickly",
     "thin",
-    "thinly"
+    "thinly",
+    "up"
   ],
-  "workflowContinuationLicenses": ["with each", "after each", "the *event", "sun exposure"],
+  "workflowContinuationLicenses": ["with each", "after each", "before use", "after use", "rinse with", "wash with", "clean with", "mix with", "the *event", "sun exposure"],
   "asNeededLeadPhrases": ["as needed"],
   "prnBreakingCoordinators": [",", "/"],
   "eyeSiteAbbreviations": ["od", "os", "ou", "re", "le", "be"],

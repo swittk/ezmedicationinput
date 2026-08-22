@@ -9,6 +9,7 @@ import {
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { LexKind } from "../../lexer/token-types";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getProceduralFrames } from "../procedural-context";
 import { Token } from "../../parser-state";
 import { PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
@@ -384,6 +385,43 @@ function parsePrnReasonAtoms(
   return atoms;
 }
 
+function actionDefinitionIsSafetyAdvice(code: string, semanticClass: string | undefined): boolean {
+  return code === "consult" || code === "stop" || semanticClass === "medical_advice";
+}
+
+function hasSafetyConditionalActionAfter(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const lead = context.tokens[start];
+  if (!lead) return false;
+  return getProceduralFrames(context).some((frame) =>
+    frame.span.start >= lead.sourceEnd &&
+    actionDefinitionIsSafetyAdvice(frame.predicate.lemma, frame.predicate.semanticClass)
+  );
+}
+
+function conditionalLeadBelongsToSafetyActionBefore(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const action = context.tokens[start - 1];
+  if (!action) return false;
+  const actionLower = normalizeTokenLower(action);
+  if (!METHOD_ACTION_BY_VERB[actionLower] && !resolveMedicationInstructionAction(actionLower, context.options)) {
+    return false;
+  }
+  const prefix = context.tokens[start - 2];
+  const prefixLower = prefix ? normalizeTokenLower(prefix) : "";
+  if (["avoid", "should-not", "don't", "dont"].indexOf(prefixLower) >= 0) return true;
+  if (prefixLower === "not") {
+    const modal = context.tokens[start - 3];
+    const modalLower = modal ? normalizeTokenLower(modal) : "";
+    return modalLower === "do" || modalLower === "should" || modalLower === "must";
+  }
+  return false;
+}
+
 function hasProceduralInstructionActionAfter(
   context: HpsgClauseContext,
   start: number
@@ -395,6 +433,72 @@ function hasProceduralInstructionActionAfter(
     if (definition?.procedural) return true;
   }
   return false;
+}
+
+const SYMPTOM_ADJUSTMENT_LEADS = new Set(["adjust", "depending", "according", "during"]);
+
+export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.symptomAdjustment", (context, start) => {
+    const lead = tokensAvailable(context, start, 1)?.[0];
+    if (!lead || !SYMPTOM_ADJUSTMENT_LEADS.has(normalizeTokenLower(lead))) return [];
+
+    const body: Token[] = [];
+    for (let cursor = start; cursor < context.limit; cursor += 1) {
+      const token = context.tokens[cursor];
+      if (!token || context.state.consumed.has(token.index)) break;
+      body.push(token);
+    }
+    if (body.length < 2) return [];
+
+    let reasonTokens: Token[] | undefined;
+    for (let index = 1; index < body.length; index += 1) {
+      const candidate = body.slice(index);
+      if (isKnownPrnReasonText(joinTokenText(candidate))) {
+        reasonTokens = candidate;
+        break;
+      }
+    }
+    if (!reasonTokens) {
+      for (let index = 1; index < body.length; index += 1) {
+        const candidate = [body[index]];
+        if (isKnownPrnReasonText(joinTokenText(candidate))) {
+          reasonTokens = candidate;
+          break;
+        }
+      }
+    }
+    if (!reasonTokens) return [];
+    const atoms = parsePrnReasonAtoms(context, reasonTokens, { predicative: true });
+    if (!atoms.length) return [];
+    const range = rangeFromTokens(body);
+    if (!range) return [];
+    const text = context.state.input.slice(range.start, range.end).trim();
+    const reasonText = joinTokenText(reasonTokens);
+    const canonical = normalizePrnReasonKey(reasonText);
+
+    return [
+      lexicalSign({
+        type: "adjustment-sign",
+        rule: "hpsg.lex.symptomAdjustment",
+        tokens: body,
+        synsem: {
+          head: {},
+          valence: {
+            prn: {
+              enabled: true,
+              reasonText,
+              lookupRequest: atoms.length === 1 ? atoms[0].request : undefined,
+              reasons: atoms.map((atom) => ({ text: atom.text, lookupRequest: atom.request })),
+              lookupRequests: atoms.map((atom) => atom.request)
+            },
+            patientInstruction: normalizeTokenLower(lead) === "adjust" ? { text } : undefined
+          },
+          cont: { clauseKind: "administration" }
+        },
+        score: 24 + body.length + (canonical ? 4 : 0)
+      })
+    ];
+  });
 }
 
 export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -414,7 +518,13 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       tokens.push(nextLead);
       cursor = start + 2;
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {
-      if (start === 0 && hasProceduralInstructionActionAfter(context, start)) {
+      const previousLower = context.tokens[start - 1] ? normalizeTokenLower(context.tokens[start - 1]) : "";
+      if (
+        previousLower === "not" ||
+        hasSafetyConditionalActionAfter(context, start) ||
+        conditionalLeadBelongsToSafetyActionBefore(context, start) ||
+        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+      ) {
         return [];
       }
       const next = context.tokens[start + 1];

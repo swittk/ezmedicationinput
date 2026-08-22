@@ -1,0 +1,393 @@
+[
+  {
+    "name": "TH right eye QID four events",
+    "input": "หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "1290032005",
+    "frequency": 4,
+    "when": [
+      "MORN",
+      "NOON",
+      "EVE",
+      "HS"
+    ],
+    "noPrn": true,
+    "noLeftover": true
+  },
+  {
+    "name": "EN right eye four times four events",
+    "input": "instill into right eye four times daily morning noon evening and bedtime",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "1290032005",
+    "frequency": 4,
+    "when": [
+      "MORN",
+      "NOON",
+      "EVE",
+      "HS"
+    ],
+    "noPrn": true,
+    "noLeftover": true
+  },
+  {
+    "name": "EN shorthand OD QID events",
+    "input": "1 gtt OD qid morning noon evening hs",
+    "route": "ophthalmic",
+    "siteCode": "1290032005",
+    "frequency": 4,
+    "when": [
+      "MORN",
+      "NOON",
+      "EVE",
+      "HS"
+    ],
+    "noPrn": true,
+    "noLeftover": true
+  },
+  {
+    "name": "mixed TH EN right eye QID",
+    "input": "หยอดตาขวา QID เช้า noon เย็น HS",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "1290032005",
+    "frequency": 4,
+    "when": [
+      "MORN",
+      "NOON",
+      "EVE",
+      "HS"
+    ],
+    "noPrn": true,
+    "noLeftover": true
+  },
+  {
+    "name": "EN right eye QID unpunctuated",
+    "input": "instill right eye four times daily morning noon evening bedtime",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "1290032005",
+    "frequency": 4,
+    "when": [
+      "MORN",
+      "NOON",
+      "EVE",
+      "HS"
+    ],
+    "noPrn": true
+  },
+  {
+    "name": "TH both eyes bedtime consult",
+    "input": "หยอดสองตาวันละครั้งก่อนนอน หากมีอาการเคืองตาควรปรึกษาแพทย์",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 1,
+    "when": [
+      "HS"
+    ],
+    "noPrn": true,
+    "warningContains": "ปรึกษาแพทย์",
+    "actions": [
+      "consult"
+    ],
+    "noLeftover": true
+  },
+  {
+    "name": "EN both eyes bedtime consult",
+    "input": "instill both eyes once daily at bedtime; if irritation occurs consult a doctor",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 1,
+    "when": [
+      "HS"
+    ],
+    "noPrn": true,
+    "warningContains": "consult a doctor",
+    "actions": [
+      "consult"
+    ]
+  },
+  {
+    "name": "EN shorthand OU QHS medical advice",
+    "input": "1 gtt OU qhs. If eye irritation occurs, seek medical advice",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 1,
+    "when": [
+      "HS"
+    ],
+    "noPrn": true,
+    "warningContains": "medical advice",
+    "actions": [
+      "consult"
+    ]
+  },
+  {
+    "name": "mixed OU bedtime consult",
+    "input": "หยอด OU วันละครั้ง HS if irritation consult doctor",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 1,
+    "when": [
+      "HS"
+    ],
+    "noPrn": true,
+    "warningContains": "consult doctor",
+    "actions": [
+      "consult"
+    ]
+  },
+  {
+    "name": "EN both eyes bedtime seek advice",
+    "input": "instill one drop in both eyes at bedtime; if irritation occurs seek medical advice",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "noPrn": true,
+    "warningContains": "medical advice",
+    "actions": [
+      "consult"
+    ]
+  },
+  {
+    "name": "TH both eyes zero to two adjust itch",
+    "input": "หยอดตาทั้งสองข้าง วันละ 0-2 ครั้ง ปรับตามช่วงที่มีอาการคันตา",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "คันตา",
+    "forbidDose": true,
+    "actions": [
+      "adjust"
+    ]
+  },
+  {
+    "name": "EN zero to two depending itchy eyes",
+    "input": "instill both eyes 0-2 times daily depending on itchy eyes",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "itchy eyes",
+    "forbidDose": true
+  },
+  {
+    "name": "EN compact zero to two during itch",
+    "input": "use 0-2x/day in both eyes during itchy periods",
+    "method": "Use",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "itch",
+    "forbidDose": true,
+    "noLeftover": true
+  },
+  {
+    "name": "mixed compact zero to two PRN",
+    "input": "หยอดตาทั้งสองข้าง 0-2x/day PRN คันตา",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "คันตา",
+    "forbidDose": true,
+    "noLeftover": true
+  },
+  {
+    "name": "TH separated zero to two per day",
+    "input": "หยอดสองตา 0 ถึง 2 ครั้ง/วัน ตามอาการคันตา",
+    "locale": "th",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "คันตา",
+    "forbidDose": true,
+    "noLeftover": true
+  },
+  {
+    "name": "EN separated zero to two per day",
+    "input": "instill both eyes 0 to 2 times per day depending on itchy eyes",
+    "method": "Instill",
+    "route": "ophthalmic",
+    "siteCode": "40638003",
+    "frequency": 0,
+    "frequencyMax": 2,
+    "prnReason": "itchy eyes",
+    "forbidDose": true,
+    "noLeftover": true
+  },
+  {
+    "name": "TH wash head leave rinse wound",
+    "input": "ล้างบริเวณศีรษะ ทิ้งไว้ประมาณ 5-10 นาที จากนั้นล้างออก ไม่ควรใช้หากมีแผล",
+    "locale": "th",
+    "method": "Rinse",
+    "siteCode": "69536005",
+    "noPrn": true,
+    "warningContains": "มีแผล",
+    "actions": [
+      "rinse",
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ],
+    "noLeftover": true
+  },
+  {
+    "name": "EN wash scalp leave rinse wound",
+    "input": "wash scalp, leave about 5-10 min then rinse off; do not use if open wound",
+    "method": "Wash",
+    "route": "topical",
+    "siteCode": "41695006",
+    "noPrn": true,
+    "warningContains": "open wound",
+    "actions": [
+      "wash",
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "EN rinse scalp leave wash sores",
+    "input": "rinse scalp and leave approximately 5-10 minutes, then wash off; should not use if sores",
+    "method": "Rinse",
+    "siteCode": "41695006",
+    "noPrn": true,
+    "warningContains": "sores",
+    "actions": [
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "mixed wash scalp leave rinse wound",
+    "input": "ล้าง scalp ทิ้งไว้ about 5-10 min then rinse off ไม่ควรใช้ if มีแผล",
+    "locale": "th",
+    "noPrn": true,
+    "warningContains": "มีแผล",
+    "actions": [
+      "rinse",
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "EN unicode duration range",
+    "input": "wash head leave 5–10 minutes then rinse, avoid on broken skin",
+    "method": "Wash",
+    "siteCode": "69536005",
+    "noPrn": true,
+    "warningContains": "broken skin",
+    "actions": [
+      "wash",
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "EN separated duration range",
+    "input": "wash scalp; leave 5 to 10 minutes; then rinse off. do not use on broken skin",
+    "method": "Wash",
+    "route": "topical",
+    "siteCode": "41695006",
+    "noPrn": true,
+    "warningContains": "broken skin",
+    "actions": [
+      "wash",
+      "leave",
+      "rinse"
+    ],
+    "durationRange": [
+      5,
+      10
+    ]
+  },
+  {
+    "name": "TH patch painful area menstrual warning",
+    "input": "แปะบริเวณที่มีอาการปวด ไม่ควรใช้หากมีประจำเดือน",
+    "locale": "th",
+    "method": "Apply patch",
+    "route": "transdermal",
+    "noPrn": true,
+    "warningContains": "มีประจำเดือน",
+    "noLeftover": true
+  },
+  {
+    "name": "EN patch painful area menstruation",
+    "input": "apply patch to painful area; should not use during menstruation",
+    "method": "Apply",
+    "route": "transdermal",
+    "noPrn": true,
+    "warningContains": "menstruation",
+    "noLeftover": true
+  },
+  {
+    "name": "EN topical painful area menstruating",
+    "input": "apply to painful area; do not use if menstruating",
+    "method": "Apply",
+    "route": "topical",
+    "noPrn": true,
+    "warningContains": "menstruating",
+    "noLeftover": true
+  },
+  {
+    "name": "mixed patch painful area period",
+    "input": "แปะ painful area, do not use during period",
+    "locale": "th",
+    "method": "Apply patch",
+    "route": "transdermal",
+    "noPrn": true,
+    "warningContains": "period"
+  },
+  {
+    "name": "EN patch over painful area avoid period",
+    "input": "apply patch over painful area. avoid use if on period",
+    "method": "Apply",
+    "route": "transdermal",
+    "noPrn": true,
+    "warningContains": "period",
+    "noLeftover": true
+  },
+  {
+    "name": "EN patch site pain bare not-if",
+    "input": "apply patch to site of pain, not if having period",
+    "method": "Apply",
+    "route": "transdermal",
+    "noPrn": true,
+    "warningContains": "period"
+  }
+]

@@ -9,6 +9,7 @@ import {
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
+  AdvicePolarity,
   CanonicalAdditionalInstructionExpr
 } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
@@ -22,13 +23,18 @@ import {
   WORKFLOW_NOUNS,
   WORKFLOW_START_WORDS
 } from "../lexical-classes";
-import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
+import {
+  METHOD_ACTION_BY_VERB,
+  METHOD_CODING_BY_ACTION,
+  cloneMethodCoding
+} from "../method-lexicon";
 import {
   HpsgClauseContext,
   joinTokenText,
   lexicalRule,
   normalizeTokenLower,
-  rangeFromTokens
+  rangeFromTokens,
+  tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
@@ -105,6 +111,58 @@ function frameDose(
   };
 }
 
+const CONDITIONAL_ADVICE_LEADS = new Set([
+  "if", "unless", "when", "while", "during", "should-not", "should", "must", "avoid", "do", "don't", "dont", "consult", "seek"
+]);
+const CONDITIONAL_RELATIONS = new Set(["if", "unless", "when", "while", "during"]);
+
+function frameIsConditionalSafetyAdvice(frame: AdviceFrame): boolean {
+  if (frame.polarity === AdvicePolarity.Negate) return true;
+  if (frame.predicate.lemma === "consult") return true;
+  return frame.predicate.semanticClass === "medical_advice";
+}
+
+export function conditionalAdviceLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.conditionalAdvice", (context, start) => {
+    const first = tokensAvailable(context, start, 1)?.[0];
+    if (!first || !CONDITIONAL_ADVICE_LEADS.has(normalizeTokenLower(first))) return [];
+
+    const tokens: Token[] = [];
+    for (let cursor = start; cursor < context.limit; cursor += 1) {
+      const token = context.tokens[cursor];
+      if (!token || context.state.consumed.has(token.index)) break;
+      tokens.push(token);
+    }
+    if (!tokens.length || !tokens.some((token) => CONDITIONAL_RELATIONS.has(normalizeTokenLower(token)))) {
+      return [];
+    }
+    const range = rangeFromTokens(tokens);
+    if (!range) return [];
+    const text = context.state.input.slice(range.start, range.end).trim();
+    if (!text) return [];
+    const frames = getProceduralFrames(context).filter((frame) =>
+      frame.span.start >= range.start && frame.span.end <= range.end
+    );
+    if (!frames.some(frameIsConditionalSafetyAdvice)) return [];
+
+    return [
+      lexicalSign({
+        type: "conditional-sign",
+        rule: "hpsg.lex.conditionalAdvice",
+        tokens,
+        synsem: {
+          head: {},
+          valence: {
+            instructions: [{ text, frames }]
+          },
+          cont: { clauseKind: "administration" }
+        },
+        score: 32 + tokens.length + frames.length * 3
+      })
+    ];
+  });
+}
+
 export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.patientInstruction.procedure", (context, start) => {
     const startToken = context.tokens[start];
@@ -123,7 +181,9 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
           tokens,
           synsem: {
             head: { dose: frameDose(context, frame) },
-            valence: { patientInstruction: { text } },
+            valence: frame.polarity === AdvicePolarity.Negate
+              ? { instructions: [{ text, frames: [frame] }] }
+              : { patientInstruction: { text } },
             cont: { clauseKind: "administration" }
           },
           score: 18 + tokens.length + frame.args.length * 2
@@ -186,16 +246,26 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ) {
         break;
       }
-      if (bodyTokens.length && (isExplicitDoseLead(context, cursor) || startsScheduledAdministration(context, cursor))) {
+      if (
+        bodyTokens.length &&
+        (isExplicitDoseLead(context, cursor) || startsScheduledAdministration(context, cursor)) &&
+        previousLower !== "before" &&
+        previousLower !== "after" &&
+        previousLower !== "with"
+      ) {
         break;
       }
-      if (bodyTokens.length && isInstructionSeparator(token)) {
+      if (
+        bodyTokens.length &&
+        (isInstructionSeparator(token) || INSTRUCTION_START_WORDS.has(lower)) &&
+        !WORKFLOW_CONTINUATION_LICENSES.has(`${previousLower} ${lower}`)
+      ) {
         break;
       }
       if (
         bodyTokens.length &&
         isScheduleLead(context, cursor) &&
-        !(bodyTokens[bodyTokens.length - 1]?.kind === LexKind.Number && mapIntervalUnit(lower)) &&
+        !([LexKind.Number, LexKind.NumberRange].indexOf(bodyTokens[bodyTokens.length - 1]?.kind as LexKind) >= 0 && mapIntervalUnit(lower)) &&
         !WORKFLOW_CONTINUATION_LICENSES.has(`${previousLower} ${lower}`) &&
         !(
           previousLower &&
@@ -221,14 +291,46 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!text) {
       return [];
     }
+    const firstWorkflowFrame = getProceduralFrames(context).find((frame) =>
+      frame.span.start === first.sourceStart && frame.polarity !== AdvicePolarity.Negate
+    );
+    const hasPriorPositiveAction = getProceduralFrames(context).some((frame) =>
+      frame.span.start < first.sourceStart && frame.polarity !== AdvicePolarity.Negate
+    );
+    const headAction = !hasPriorPositiveAction
+      ? (firstWorkflowFrame
+          ? METHOD_ACTION_BY_VERB[firstWorkflowFrame.predicate.lemma]
+          : METHOD_ACTION_BY_VERB[firstLower])
+      : undefined;
+    const headSite = !hasPriorPositiveAction
+      ? firstWorkflowFrame?.args.find((arg) =>
+          arg.role === AdviceArgumentRole.Site && Boolean(arg.coding?.code || arg.conceptId)
+        )
+      : undefined;
     return [
       lexicalSign({
         type: "instruction-sign",
         rule: "hpsg.lex.patientInstruction.workflow",
         tokens: [...consumed, ...bodyTokens],
         synsem: {
-          head: {},
-          valence: { patientInstruction: { text } },
+          head: {
+            method: headAction
+              ? {
+                  verb: firstWorkflowFrame?.predicate.lemma ?? firstLower,
+                  coding: cloneMethodCoding(METHOD_CODING_BY_ACTION[headAction])
+                }
+              : undefined
+          },
+          valence: {
+            patientInstruction: { text },
+            site: headSite
+              ? {
+                  text: headSite.normalized ?? headSite.text,
+                  coding: headSite.coding,
+                  source: "text"
+                }
+              : undefined
+          },
           cont: { clauseKind: "administration" }
         },
         score: 12 + bodyTokens.length
@@ -350,6 +452,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const next = context.tokens[cursor + 1];
       const nextLower = next ? normalizeTokenLower(next) : "";
       const nextAction = resolveMedicationInstructionAction(nextLower, context.options);
+      if (nextAction?.procedural) {
+        return [];
+      }
       if (nextAction && !nextAction.procedural && METHOD_ACTION_BY_VERB[nextLower]) {
         cursor += 1;
       }
@@ -360,6 +465,15 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const firstBodyToken = context.tokens[cursor];
     const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";
     const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
+    if (
+      !consumed.length &&
+      firstBodyAction &&
+      !firstBodyAction.procedural &&
+      METHOD_ACTION_BY_VERB[firstBodyLower] &&
+      isScheduleLead(context, cursor + 1)
+    ) {
+      return [];
+    }
     if (consumed.length && firstBodyAction && !firstBodyAction.procedural && METHOD_ACTION_BY_VERB[firstBodyLower]) {
       const priorPrimaryMethod = context.tokens.slice(0, cursor).some((candidate) => {
         const priorLower = normalizeTokenLower(candidate);

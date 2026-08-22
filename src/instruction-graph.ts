@@ -16,6 +16,7 @@ import {
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
+  AdviceModality,
   AdvicePolarity,
   AdviceRelation,
   CanonicalDoseExpr,
@@ -116,7 +117,8 @@ function rangeFor(parts: Lexeme[], start: number, endExclusive: number, offset: 
 }
 
 function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | undefined {
-  const resolved = resolveBodySitePhrase(text, options?.siteCodeMap, {
+  const lookupText = text.replace(/^\s*บริเวณ\s*/u, "").trim() || text;
+  const resolved = resolveBodySitePhrase(lookupText, options?.siteCodeMap, {
     bodySiteContext: options?.context?.bodySiteContext
   });
   if (!resolved || (!resolved.coding && !resolved.definition)) return undefined;
@@ -159,6 +161,34 @@ function internalArgument(
   };
 }
 
+function semanticArgumentBounds(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number
+): { start: number; endExclusive: number } {
+  let first = start;
+  let end = endExclusive;
+  const punctuation = /^[,.;:!?()[\]{}]+$/;
+  while (first < end && punctuation.test(parts[first]?.original ?? "")) first += 1;
+  while (end > first && punctuation.test(parts[end - 1]?.original ?? "")) end -= 1;
+  return { start: first, endExclusive: end };
+}
+
+function trimSemanticText(value: string): string {
+  return value
+    .replace(/^[\s([{]+/u, "")
+    .replace(/[\s)\]}.!,;:]+$/u, "")
+    .trim();
+}
+
+function trimActionRange(input: string, range: TextRange, offset: number): TextRange {
+  let start = range.start;
+  let end = range.end;
+  while (start < end && /[\s([{]/u.test(input[start - offset] ?? "")) start += 1;
+  while (end > start && /[\s)\]}.!,;:]/u.test(input[end - offset - 1] ?? "")) end -= 1;
+  return { start, end };
+}
+
 function argumentFromParts(
   parts: Lexeme[],
   start: number,
@@ -168,7 +198,11 @@ function argumentFromParts(
   options?: ParseOptions
 ): AdviceArgument | undefined {
   if (endExclusive <= start) return undefined;
-  const text = sourceFor(parts, start, endExclusive, input).trim();
+  const bounds = semanticArgumentBounds(parts, start, endExclusive);
+  start = bounds.start;
+  endExclusive = bounds.endExclusive;
+  if (endExclusive <= start) return undefined;
+  const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
   if (!text) return undefined;
   const canonicalParts: string[] = [];
   for (let index = start; index < endExclusive; index += 1) {
@@ -267,6 +301,64 @@ function durationUnitFromKey(unitKey: string): string | undefined {
   return undefined;
 }
 
+function durationArgumentAt(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  offset: number
+): AdviceArgument | undefined {
+  let cursor = start;
+  const lead = parts[cursor];
+  if (lead && ["about", "approximately", "approx", "around"].indexOf(key(lead)) >= 0) {
+    cursor += 1;
+  }
+  const valueToken = parts[cursor];
+  if (!valueToken) return undefined;
+  const rangeConnector = parts[cursor + 1];
+  const rangeHigh = parts[cursor + 2];
+  const rangeUnitToken = parts[cursor + 3];
+  const separatedRange =
+    valueToken.kind === "NUMBER" && valueToken.value !== undefined &&
+    rangeConnector && ["to", "through", "ถึง"].indexOf(key(rangeConnector)) >= 0 &&
+    rangeHigh?.kind === "NUMBER" && rangeHigh.value !== undefined &&
+    rangeUnitToken && durationUnitFromKey(key(rangeUnitToken));
+  if (separatedRange) {
+    const unit = durationUnitFromKey(key(rangeUnitToken)) as string;
+    return {
+      role: AdviceArgumentRole.Duration,
+      text: sourceFor(parts, start, cursor + 4, input),
+      normalized: `${valueToken.value}-${rangeHigh.value} ${unit}`,
+      quantity: { range: { low: valueToken.value, high: rangeHigh.value }, unit },
+      span: { start: offset + parts[start].sourceStart, end: offset + rangeUnitToken.sourceEnd }
+    };
+  }
+  const unitToken = parts[cursor + 1];
+  if (!unitToken || cursor + 1 >= endExclusive) return undefined;
+  const unit = durationUnitFromKey(key(unitToken));
+  if (!unit) return undefined;
+
+  let quantity: AdviceArgument["quantity"] | undefined;
+  if (valueToken.kind === "NUMBER" && valueToken.value !== undefined) {
+    quantity = { value: valueToken.value, unit };
+  } else if (valueToken.kind === "NUMBER_RANGE") {
+    const range = valueToken.original.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
+    if (range) {
+      quantity = { range: { low: Number(range[1]), high: Number(range[2]) }, unit };
+    }
+  }
+  if (!quantity) return undefined;
+  return {
+    role: AdviceArgumentRole.Duration,
+    text: sourceFor(parts, start, cursor + 2, input),
+    normalized: valueToken.kind === "NUMBER_RANGE"
+      ? `${valueToken.original} ${unit}`
+      : `${valueToken.value} ${unit}`,
+    quantity,
+    span: { start: offset + parts[start].sourceStart, end: offset + unitToken.sourceEnd }
+  };
+}
+
 function parseAnyDurationArgument(
   parts: Lexeme[],
   start: number,
@@ -274,19 +366,9 @@ function parseAnyDurationArgument(
   input: string,
   offset: number
 ): AdviceArgument | undefined {
-  for (let index = start; index + 1 < endExclusive; index += 1) {
-    const valueToken = parts[index];
-    const unitToken = parts[index + 1];
-    if (!valueToken || !unitToken || valueToken.kind !== "NUMBER" || valueToken.value === undefined) continue;
-    const unit = durationUnitFromKey(key(unitToken));
-    if (!unit) continue;
-    return {
-      role: AdviceArgumentRole.Duration,
-      text: sourceFor(parts, index, index + 2, input),
-      normalized: `${valueToken.value} ${unit}`,
-      quantity: { value: valueToken.value, unit },
-      span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
-    };
+  for (let index = start; index < endExclusive; index += 1) {
+    const parsed = durationArgumentAt(parts, index, endExclusive, input, offset);
+    if (parsed) return parsed;
   }
   return undefined;
 }
@@ -298,20 +380,10 @@ function parseDurationArgument(
   input: string,
   offset: number
 ): AdviceArgument | undefined {
-  for (let index = start; index + 2 < endExclusive; index += 1) {
-    if (key(parts.slice(index, index + 1)[0]) !== "for") continue;
-    const valueToken = parts.slice(index + 1, index + 2)[0];
-    const unitToken = parts.slice(index + 2, index + 3)[0];
-    if (!valueToken || !unitToken || valueToken.kind !== "NUMBER" || valueToken.value === undefined) continue;
-    const unit = durationUnitFromKey(key(unitToken));
-    if (!unit) continue;
-    return {
-      role: AdviceArgumentRole.Duration,
-      text: sourceFor(parts, index + 1, index + 3, input),
-      normalized: `${valueToken.value} ${unit}`,
-      quantity: { value: valueToken.value, unit },
-      span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
-    };
+  for (let index = start; index + 1 < endExclusive; index += 1) {
+    if (key(parts[index]) !== "for") continue;
+    const parsed = durationArgumentAt(parts, index + 1, endExclusive, input, offset);
+    if (parsed) return parsed;
   }
   return undefined;
 }
@@ -323,20 +395,7 @@ function parseBareDurationArgument(
   input: string,
   offset: number
 ): AdviceArgument | undefined {
-  const valueToken = parts.slice(start, start + 1)[0];
-  const unitToken = parts.slice(start + 1, start + 2)[0];
-  if (!valueToken || !unitToken || start + 1 >= endExclusive || valueToken.kind !== "NUMBER" || valueToken.value === undefined) {
-    return undefined;
-  }
-  const unit = durationUnitFromKey(key(unitToken));
-  if (!unit) return undefined;
-  return {
-    role: AdviceArgumentRole.Duration,
-    text: sourceFor(parts, start, start + 2, input),
-    normalized: `${valueToken.value} ${unit}`,
-    quantity: { value: valueToken.value, unit },
-    span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
-  };
+  return durationArgumentAt(parts, start, endExclusive, input, offset);
 }
 
 function partIndexForAbsoluteSourceStart(
@@ -351,7 +410,8 @@ function partIndexForAbsoluteSourceStart(
   return undefined;
 }
 
-function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumentRole {
+function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumentRole | undefined {
+  if (relation === undefined) return undefined;
   return relation === AdviceRelation.In ||
     relation === AdviceRelation.On ||
     relation === AdviceRelation.Before ||
@@ -370,13 +430,11 @@ function buildActionFrame(
   options?: ParseOptions
 ): AdviceFrame | undefined {
   let actionIndex = segmentStart;
-  let polarity: AdvicePolarity | undefined;
-  const negated = negatedActionAt(parts, segmentStart, options);
-  if (negated) {
-    polarity = AdvicePolarity.Negate;
-    actionIndex = negated.actionIndex;
-  }
-  const actionMatch = negated?.match ?? actionMatchAt(parts, actionIndex, options);
+  const prefixed = prefixedActionAt(parts, segmentStart, options);
+  const polarity = prefixed?.polarity;
+  const modality = prefixed?.modality;
+  if (prefixed) actionIndex = prefixed.actionIndex;
+  const actionMatch = prefixed?.match ?? actionMatchAt(parts, actionIndex, options);
   if (!actionMatch) return undefined;
   const definition = actionMatch.definition;
   const args: AdviceArgument[] = [];
@@ -387,12 +445,25 @@ function buildActionFrame(
     ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
     : undefined;
   const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
+  let semanticEnd = segmentEnd;
 
   switch (definition.code) {
-    case "shake":
+    case "shake": {
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Container, options));
-      if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options));
+      if (relIndex >= 0) {
+        let activityEnd = segmentEnd;
+        for (let index = relIndex + 1; index < segmentEnd; index += 1) {
+          const current = key(parts[index]);
+          if ((current === "and" || current === "or") && index > relIndex + 1) {
+            activityEnd = index;
+            semanticEnd = index;
+            break;
+          }
+        }
+        pushArgument(args, argumentFromParts(parts, relIndex + 1, activityEnd, input, AdviceArgumentRole.Activity, options));
+      }
       break;
+    }
     case "pour": {
       pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Theme, options));
       const amountIndex = amount?.span
@@ -516,10 +587,15 @@ function buildActionFrame(
   if (definition.code === "douche" && args.some((arg) => arg.coding?.code === "76784001" || arg.normalized === "vagina")) {
     codings.push({ system: SNOMED_SYSTEM, code: "21397001", display: "Douche of vagina" });
   }
-  const span = rangeFor(parts, segmentStart, segmentEnd, offset);
+  const span = trimActionRange(input, rangeFor(parts, segmentStart, semanticEnd, offset), offset);
   return {
-    force: polarity === AdvicePolarity.Negate ? AdviceForce.Warning : AdviceForce.Sequence,
+    force: polarity === AdvicePolarity.Negate
+      ? AdviceForce.Warning
+      : modality === AdviceModality.Should
+        ? AdviceForce.Instruction
+        : AdviceForce.Sequence,
     polarity,
+    modality,
     predicate: {
       lemma: definition.code,
       semanticClass: definition.semanticClass,
@@ -535,27 +611,70 @@ function buildActionFrame(
   };
 }
 
-interface NegatedActionMatch {
+interface PrefixedActionMatch {
   actionIndex: number;
   match: ActionMatch;
+  polarity?: AdvicePolarity;
+  modality?: AdviceModality;
+}
+
+function prefixedActionAt(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): PrefixedActionMatch | undefined {
+  const current = key(parts[index]);
+  const next = key(parts[index + 1]);
+  const afterNext = key(parts[index + 2]);
+  let actionIndex: number | undefined;
+  let polarity: AdvicePolarity | undefined;
+  let modality: AdviceModality | undefined;
+
+  if (current === "avoid") {
+    actionIndex = index + 1;
+    polarity = AdvicePolarity.Negate;
+  } else if (current === "do" && next === "not") {
+    actionIndex = index + 2;
+    polarity = AdvicePolarity.Negate;
+  } else if (current === "don't" || current === "dont") {
+    actionIndex = index + 1;
+    polarity = AdvicePolarity.Negate;
+  } else if (current === "should-not") {
+    actionIndex = index + 1;
+    polarity = AdvicePolarity.Negate;
+    modality = AdviceModality.Should;
+  } else if (current === "should" && next === "not") {
+    actionIndex = index + 2;
+    polarity = AdvicePolarity.Negate;
+    modality = AdviceModality.Should;
+  } else if (current === "must" && next === "not") {
+    actionIndex = index + 2;
+    polarity = AdvicePolarity.Negate;
+    modality = AdviceModality.Must;
+  } else if (current === "should") {
+    actionIndex = index + 1;
+    modality = AdviceModality.Should;
+  } else if (current === "must" && afterNext !== "not") {
+    actionIndex = index + 1;
+    modality = AdviceModality.Must;
+  }
+  if (actionIndex === undefined) return undefined;
+  const match = actionMatchAt(parts, actionIndex, options);
+  return match ? { actionIndex, match, polarity, modality } : undefined;
 }
 
 function negatedActionAt(
   parts: Lexeme[],
   index: number,
   options?: ParseOptions
-): NegatedActionMatch | undefined {
-  const current = key(parts.slice(index, index + 1)[0]);
-  const candidates: number[] = [];
-  if (current === "avoid") candidates.push(index + 1);
-  if (current === "do" && key(parts.slice(index + 1, index + 2)[0]) === "not") candidates.push(index + 2);
-  if (current === "don't" || current === "dont") candidates.push(index + 1);
-  for (const actionIndex of candidates) {
-    const match = actionMatchAt(parts, actionIndex, options);
-    if (match) return { actionIndex, match };
-  }
-  return undefined;
+): PrefixedActionMatch | undefined {
+  const match = prefixedActionAt(parts, index, options);
+  return match?.polarity === AdvicePolarity.Negate ? match : undefined;
 }
+
+const ACTION_DIRECTIVE_BOUNDARIES = new Set([
+  "avoid", "should-not", "should", "must", "not", "do", "don't", "dont"
+]);
 
 export function parseInstructionActions(
   sourceText: string,
@@ -571,9 +690,10 @@ export function parseInstructionActions(
     let start = -1;
     let negative = false;
     for (let index = cursor; index < parts.length; index += 1) {
-      if (negatedActionAt(parts, index, options)) {
+      const prefixed = prefixedActionAt(parts, index, options);
+      if (prefixed) {
         start = index;
-        negative = true;
+        negative = prefixed.polarity === AdvicePolarity.Negate;
         break;
       }
       if (actionMatchAt(parts, index, options)) {
@@ -583,9 +703,9 @@ export function parseInstructionActions(
     }
     if (start < 0) break;
 
-    const negated = negative ? negatedActionAt(parts, start, options) : undefined;
-    const actionStart = negated?.actionIndex ?? start;
-    const startingMatch = negated?.match ?? actionMatchAt(parts, actionStart, options);
+    const prefixed = prefixedActionAt(parts, start, options);
+    const actionStart = prefixed?.actionIndex ?? start;
+    const startingMatch = prefixed?.match ?? actionMatchAt(parts, actionStart, options);
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
       const currentKey = key(parts.slice(index, index + 1)[0]);
@@ -594,7 +714,11 @@ export function parseInstructionActions(
         end = previousKey === "and" ? index - 1 : index;
         break;
       }
-      if (negatedActionAt(parts, index, options)) {
+      if (ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) && !prefixedActionAt(parts, index, options)) {
+        end = index;
+        break;
+      }
+      if (prefixedActionAt(parts, index, options)) {
         end = index;
         break;
       }
@@ -642,7 +766,7 @@ function semanticSourceSpans(clause: CanonicalSigClause): SemanticSourceSpan[] {
     const kind: SemanticSourceKind | undefined =
       evidence.rule === "hpsg.lex.patientInstruction.workflow"
         ? "workflow"
-        : evidence.rule === "hpsg.lex.instruction"
+        : evidence.rule === "hpsg.lex.instruction" || evidence.rule === "hpsg.lex.conditionalAdvice"
           ? "instruction"
           : undefined;
     if (!kind) continue;
@@ -690,6 +814,12 @@ function opaqueTextIsMeaningful(text: string): boolean {
 function trimOpaqueSpan(input: string, start: number, end: number): CanonicalSourceSpan | undefined {
   while (start < end && /[\s,;:.()]/.test(input[start] ?? "")) start += 1;
   while (end > start && /[\s,;:.()]/.test(input[end - 1] ?? "")) end -= 1;
+  if (end <= start) return undefined;
+  const leading = input.slice(start, end).match(/^(?:(?:and|or|then)\b\s*|(?:และ|หรือ|จากนั้น|แล้ว)\s*)/iu);
+  if (leading?.[0]) {
+    start += leading[0].length;
+    while (start < end && /[\s,;:.()]/.test(input[start] ?? "")) start += 1;
+  }
   if (end <= start) return undefined;
   const text = input.slice(start, end);
   if (!opaqueTextIsMeaningful(text)) return undefined;
@@ -822,8 +952,11 @@ function buildInstructionRelations(
     const gapEnd = current.span.start;
     const source = gapEnd > gapStart ? input.slice(gapStart, gapEnd) : "";
     const trimmed = source.trim();
+    const explicitRelation = relationFromSourceText(source);
+    const onlyStructuralGap = !trimmed || /^[,;:.()\-]+$/.test(trimmed);
+    if (!explicitRelation && !onlyStructuralGap) continue;
     relations.push({
-      kind: relationFromSourceText(source) ?? AdviceRelation.Then,
+      kind: explicitRelation ?? AdviceRelation.Then,
       fromActionIndex: index - 1,
       toActionIndex: index,
       text: trimmed || undefined,
@@ -923,15 +1056,8 @@ function actionDominatedByCanonicalMethod(
 ): boolean {
   const method = clause.method;
   if (!method || actionAddsStructuredMeaning(frame)) return false;
-  if (method.coding?.code && frame.predicate.codings?.some((coding) =>
-    coding.code === method.coding?.code &&
-    (coding.system ?? "http://snomed.info/sct") ===
-      (method.coding?.system ?? "http://snomed.info/sct")
-  )) {
-    return true;
-  }
+
   const methodText = normalizeActionSurface(method.text ?? "");
-  if (!methodText) return false;
   const definition = frameActionDefinition(frame, options);
   const candidates = [
     frame.predicate.lemma,
@@ -941,12 +1067,50 @@ function actionDominatedByCanonicalMethod(
   ]
     .map(normalizeActionSurface)
     .filter((candidate) => candidate.length > 0);
-  return candidates.some((candidate) =>
+  const textMatch = candidates.some((candidate) =>
     methodText === candidate ||
     methodText.startsWith(`${candidate} `) ||
     methodText.endsWith(` ${candidate}`) ||
     methodText.includes(` ${candidate} `)
   );
+
+  const methodSpans: CanonicalSourceSpan[] = [];
+  for (const evidence of clause.evidence) {
+    if (evidence.rule !== "hpsg.lex.method") continue;
+    for (const span of evidence.spans) methodSpans.push(span);
+  }
+  if (methodSpans.length) {
+    const overlapsPrimaryMethod = methodSpans.some((span) =>
+      frame.span.start < span.end && span.start < frame.span.end
+    );
+    if (!overlapsPrimaryMethod) {
+      // Product methods such as "Use shampoo" are composed from a primary
+      // USE head plus a product sign. The action is already represented when
+      // the composite method text names it; an exact later RINSE/WASH action
+      // is not dominated merely because it shares the method coding.
+      const exactMethodText = candidates.some((candidate) => methodText === candidate);
+      return Boolean(textMatch && !exactMethodText);
+    }
+  } else {
+    const workflowStarts: number[] = [];
+    for (const evidence of clause.evidence) {
+      if (evidence.rule !== "hpsg.lex.patientInstruction.workflow") continue;
+      for (const span of evidence.spans) workflowStarts.push(span.start);
+    }
+    if (workflowStarts.length) {
+      const primaryWorkflowStart = Math.min(...workflowStarts);
+      if (frame.span.start !== primaryWorkflowStart) return false;
+    }
+  }
+
+  if (method.coding?.code && frame.predicate.codings?.some((coding) =>
+    coding.code === method.coding?.code &&
+    (coding.system ?? "http://snomed.info/sct") ===
+      (method.coding?.system ?? "http://snomed.info/sct")
+  )) {
+    return true;
+  }
+  return textMatch;
 }
 
 function pushActionIfUnique(
@@ -976,6 +1140,39 @@ function proceduralFramesFromSpan(
 ): AdviceFrame[] {
   return parseInstructionActions(input.slice(span.start, span.end), span.start, options)
     .filter((frame) => frameIsProcedural(frame, options));
+}
+
+function reconcileOpaqueWithActionCoverage(
+  input: string,
+  opaqueSpans: CanonicalSourceSpan[],
+  actions: AdviceFrame[]
+): CanonicalSourceSpan[] {
+  const result: CanonicalSourceSpan[] = [];
+  for (const opaque of opaqueSpans) {
+    let fragments: TextRange[] = [{ start: opaque.start, end: opaque.end }];
+    for (const action of actions) {
+      const next: TextRange[] = [];
+      for (const fragment of fragments) {
+        if (action.span.end <= fragment.start || action.span.start >= fragment.end) {
+          next.push(fragment);
+          continue;
+        }
+        if (action.span.start > fragment.start) {
+          next.push({ start: fragment.start, end: action.span.start });
+        }
+        if (action.span.end < fragment.end) {
+          next.push({ start: action.span.end, end: fragment.end });
+        }
+      }
+      fragments = next;
+      if (!fragments.length) break;
+    }
+    for (const fragment of fragments) {
+      const trimmed = trimOpaqueSpan(input, fragment.start, fragment.end);
+      if (trimmed) pushOpaqueSpan(result, trimmed);
+    }
+  }
+  return result;
 }
 
 export function refreshInstructionGraphDerivedState(
@@ -1040,6 +1237,14 @@ export function buildInstructionGraph(
     for (const opaque of workflowOpaqueGaps(input, range, accepted)) {
       pushOpaqueSpan(opaqueSpans, opaque);
     }
+    if (
+      range.kind === "instruction" &&
+      accepted.length === 0 &&
+      actions.some((action) => action.span.start < range.end && range.start < action.span.end)
+    ) {
+      const opaque = trimOpaqueSpan(input, range.start, range.end);
+      if (opaque) pushOpaqueSpan(opaqueSpans, opaque);
+    }
   }
   for (const span of clause.leftovers) {
     const accepted: AdviceFrame[] = [];
@@ -1070,9 +1275,16 @@ export function buildInstructionGraph(
   if (!actions.length && !opaqueSpans.length) return undefined;
   promoteDoseFromDefiningAction(clause, actions, options);
   attachDoseToNearestAction(actions, clause, input, options);
+  const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions);
+  if (!clause.method && actions.length) {
+    const firstStart = Math.min(...actions.map((action) => action.span.start));
+    const lastEnd = Math.max(...actions.map((action) => action.span.end));
+    const exactProcedureText = input.slice(firstStart, lastEnd).trim();
+    if (exactProcedureText) clause.patientInstruction = exactProcedureText;
+  }
   const graph: CanonicalInstructionGraph = {
     actions,
-    opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
+    opaqueSpans: reconciledOpaque.length ? reconciledOpaque : undefined,
     sourceText: input,
     sourceLocale: /[\u0E00-\u0E7F]/.test(input) ? "th" : "en"
   };
@@ -1135,6 +1347,15 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
   }
 
   switch (frame.predicate.lemma) {
+    case "adjust": {
+      const sourceIsThai = /[\u0E00-\u0E7F]/.test(frame.sourceText);
+      if (thai && sourceIsThai) return frame.sourceText;
+      if (!thai && !sourceIsThai) {
+        const text = frame.sourceText.trim();
+        return text ? text.charAt(0).toUpperCase() + text.slice(1) : label;
+      }
+      return thai ? "ปรับการใช้ตามอาการ" : "Adjust use according to symptoms";
+    }
     case "shake":
       return thai
         ? `${label}${container ?? ""}${activity ? `ก่อน${activity}` : ""}`
@@ -1161,6 +1382,10 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
         const preposition = frame.relation === AdviceRelation.On ? "on" : "in";
         return `${label} ${preposition} ${time}`;
       }
+      if (site) {
+        if (thai) return `${label}${site}${substance ? `ด้วย${substance}` : ""}`;
+        return `${label} ${site}${substance ? ` with ${substance}` : ""}`;
+      }
       return thai ? `${label}${substance ? `ด้วย${substance}` : ""}` : `${label}${substance ? ` with ${substance}` : ""}`;
     }
     case "leave": {
@@ -1182,6 +1407,28 @@ function realizeAction(frame: AdviceFrame, locale: string): string {
       return thai ? `${label}${object ?? ""}` : `${label}${object ? ` ${object}` : ""}`;
     }
   }
+}
+
+function normalizedInstructionSurface(value: string): string {
+  return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+export function instructionGraphHasNovelNonWarningContent(
+  graph: CanonicalInstructionGraph,
+  representedTexts: readonly string[]
+): boolean {
+  const represented = representedTexts.map(normalizedInstructionSurface).filter(Boolean);
+  const isRepresented = (text: string): boolean => {
+    const normalized = normalizedInstructionSurface(text);
+    return Boolean(normalized && represented.some((candidate) => candidate.includes(normalized)));
+  };
+  for (const action of graph.actions) {
+    if (action.polarity !== AdvicePolarity.Negate && !isRepresented(action.sourceText)) return true;
+  }
+  for (const opaque of graph.opaqueSpans ?? []) {
+    if (!isRepresented(opaque.text)) return true;
+  }
+  return false;
 }
 
 export function realizeInstructionGraph(

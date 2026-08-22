@@ -102,6 +102,7 @@ const APPLICATION_ROUTE_VERBS = new Set([
   "rub",
   "massage",
   "spread",
+  "stick",
   "dab",
   "lather"
 ]);
@@ -110,9 +111,11 @@ const ADMINISTRATION_METHOD_WORDS = new Set([
   "administer",
   "give",
   "apply",
+  "apply_patch",
   "rub",
   "massage",
   "spread",
+  "stick",
   "dab",
   "lather",
   "spray",
@@ -125,6 +128,7 @@ const ADMINISTRATION_METHOD_WORDS = new Set([
   "insert",
   "instill",
   "reapply",
+  "rinse",
   "wash",
   "shampoo"
 ]);
@@ -134,6 +138,7 @@ const ADMINISTRATION_ROUTE_HINTS: Record<string, RouteCode> = {
   rub: RouteCode["Topical route"],
   massage: RouteCode["Topical route"],
   spread: RouteCode["Topical route"],
+  stick: RouteCode["Topical route"],
   dab: RouteCode["Topical route"],
   lather: RouteCode["Topical route"],
   reapply: RouteCode["Topical route"],

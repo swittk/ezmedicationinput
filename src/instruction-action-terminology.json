@@ -140,7 +140,8 @@
         "rinse",
         "rinse off",
         "wash off",
-        "ล้าง"
+        "ล้าง",
+        "rinsing"
       ],
       "procedural": true,
       "externalCodings": [
@@ -573,7 +574,9 @@
       },
       "aliases": [
         "apply",
-        "ทา"
+        "ทา",
+        "stick",
+        "stick patch"
       ],
       "procedural": false,
       "externalCodings": [
@@ -969,6 +972,60 @@
         "ดึง"
       ],
       "procedural": true
+    },
+    {
+      "code": "consult",
+      "semanticClass": "medical_advice",
+      "display": "Consult a doctor",
+      "i18n": {
+        "th": "ปรึกษาแพทย์"
+      },
+      "aliases": [
+        "consult",
+        "consult a doctor",
+        "consult doctor",
+        "seek medical advice",
+        "seek medical attention",
+        "ปรึกษาแพทย์"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "adjust",
+      "semanticClass": "administration_pattern",
+      "display": "Adjust use",
+      "i18n": {
+        "th": "ปรับการใช้"
+      },
+      "aliases": [
+        "adjust",
+        "adjust use",
+        "adjust according to symptoms",
+        "ปรับ",
+        "ปรับการใช้"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "apply_patch",
+      "semanticClass": "administration",
+      "display": "Apply patch",
+      "i18n": {
+        "th": "แปะ"
+      },
+      "aliases": [
+        "apply patch",
+        "apply_patch",
+        "แปะ"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738991002",
+          "display": "Apply"
+        }
+      ]
     }
   ]
 }

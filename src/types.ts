@@ -338,7 +338,7 @@ export interface FhirPeriod {
   end?: string;
 }
 
-export interface FhirTimingRepeat {
+export interface FhirTimingRepeat extends FhirElement {
   count?: number;
   boundsDuration?: FhirQuantity;
   boundsPeriod?: FhirPeriod;

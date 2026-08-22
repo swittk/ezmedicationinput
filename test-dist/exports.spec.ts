@@ -15,6 +15,7 @@ function runNode(args: string[], code: string): {
   buildMedicationInstructionActionCodeSystemType?: string;
   listMedicationInstructionConceptsType?: string;
   buildMedicationInstructionConceptCodeSystemType?: string;
+  timingFrequencyMinExtensionUrl?: string;
   longText: string;
 } {
   const output = execFileSync(process.execPath, [...args, "-e", code], {
@@ -82,6 +83,7 @@ describe("published package entrypoints", () => {
           buildMedicationInstructionActionCodeSystemType: typeof mod.buildMedicationInstructionActionCodeSystem,
           listMedicationInstructionConceptsType: typeof mod.listMedicationInstructionConcepts,
           buildMedicationInstructionConceptCodeSystemType: typeof mod.buildMedicationInstructionConceptCodeSystem,
+          timingFrequencyMinExtensionUrl: mod.TIMING_FREQUENCY_MIN_EXTENSION_URL,
           longText: actions.map((action) => action.predicate.lemma).join(",")
         }));
       `
@@ -96,6 +98,7 @@ describe("published package entrypoints", () => {
       buildMedicationInstructionActionCodeSystemType: "function",
       listMedicationInstructionConceptsType: "function",
       buildMedicationInstructionConceptCodeSystemType: "function",
+      timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
       longText: "shake,rinse"
     });
   });

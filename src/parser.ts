@@ -69,6 +69,7 @@ const ROUTE_REFINEMENTS = new Map<RouteCode, ReadonlySet<RouteCode>>([
 const METHOD_TEXT_BY_VERB: Record<string, string> = {
   administer: "Administer",
   apply: "Apply",
+  apply_patch: "Apply patch",
   bathe: "Bathe",
   chew: "Chew",
   drink: "Drink",
@@ -86,6 +87,7 @@ const METHOD_TEXT_BY_VERB: Record<string, string> = {
 
 const METHOD_THAI_BY_VERB: Record<string, string> = {
   apply: "ทา",
+  apply_patch: "แปะ",
   drink: "รับประทาน",
   inhale: "สูด",
   inject: "ฉีด",

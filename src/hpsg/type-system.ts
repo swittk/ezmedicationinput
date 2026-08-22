@@ -241,7 +241,7 @@ export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
 
 const SIGN_TYPES = [
   "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign",
-  "prn-sign", "instruction-sign", "connector-sign"
+  "prn-sign", "instruction-sign", "conditional-sign", "adjustment-sign", "connector-sign"
 ];
 
 export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
