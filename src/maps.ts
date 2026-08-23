@@ -1450,8 +1450,12 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["skin"],
-      definition: { coding: { code: "181469002", display: "Entire skin" }, routeHint: RouteCode["Topical route"] }
+      names: ["skin", "ผิวหนัง"],
+      definition: {
+        coding: { code: "181469002", display: "Entire skin" },
+        i18n: { th: "ผิวหนัง" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["hair"],

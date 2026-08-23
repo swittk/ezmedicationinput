@@ -2,8 +2,20 @@ import { inferUnitFromContext } from "./context";
 import { listSupportedBodySiteText } from "./body-site-lookup";
 import { listMedicationInstructionActions } from "./instruction-action-terminology";
 import { listMedicationLocaleLexemes } from "./lexer/locale";
+import {
+  EYE_SITE_ABBREVIATIONS,
+  FOOD_EVENT_ALIASES,
+  FREQUENCY_ADVERB_UNITS_DATA,
+  MEAL_TIMING_BY_RELATION,
+  SLEEP_EVENT_ALIASES,
+  WAKE_EVENT_ALIASES,
+  WORKFLOW_ACTION_RELATION_LEADS
+} from "./hpsg/lexical-classes";
+import { normalizeUnit } from "./unit-lexicon";
 import { findUnparsedTokenGroups, parseClauseState } from "./parser";
 import {
+  DAY_OF_WEEK_TOKENS,
+  DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
@@ -43,6 +55,16 @@ interface UnitRoutePreference {
 }
 
 const DEFAULT_LIMIT = 10;
+
+const THAI_SUGGESTION_LEXEMES = listMedicationLocaleLexemes("th");
+const DEFAULT_SUGGESTION_ACTIONS = listMedicationInstructionActions();
+let defaultSupportedBodySiteTextCache: string[] | undefined;
+function defaultSupportedBodySiteText(): string[] {
+  if (!defaultSupportedBodySiteTextCache) {
+    defaultSupportedBodySiteTextCache = listSupportedBodySiteText();
+  }
+  return defaultSupportedBodySiteTextCache;
+}
 
 const HOUSEHOLD_VOLUME_UNIT_SET = new Set(
   HOUSEHOLD_VOLUME_UNITS.map((unit) => unit.trim().toLowerCase()),
@@ -518,12 +540,20 @@ function directThaiPrnReasonSuggestions(
 }
 
 function localeLexemeByCanonical(locale: string, canonical: string, preferred?: string): string | undefined {
-  const matches = listMedicationLocaleLexemes(locale).filter((lexeme) => lexeme.canonical === canonical);
+  const lexemes = locale.toLowerCase().startsWith("th")
+    ? THAI_SUGGESTION_LEXEMES
+    : listMedicationLocaleLexemes(locale);
+  const matches = lexemes.filter((lexeme) => lexeme.canonical === canonical);
   if (preferred) {
     const exact = matches.find((lexeme) => lexeme.surface === preferred);
     if (exact) return exact.surface;
   }
   return matches.sort((left, right) => left.surface.length - right.surface.length)[0]?.surface;
+}
+
+function parserAcceptsSuggestion(candidate: string, options?: SuggestSigOptions): boolean {
+  const state = parseClauseState(candidate, options);
+  return !state.primaryClause.leftovers?.length && findUnparsedTokenGroups(state).length === 0;
 }
 
 function directPrnReasonSuggestions(
@@ -547,17 +577,22 @@ function directUnitSuggestions(
   limit: number,
 ): string[] | undefined {
   const normalized = normalizeSpacing(input);
-  const match = normalized.match(/^(\d+(?:\.\d+)?(?:\/\d+(?:\.\d+)?)?)\s+([^\s]+)$/i);
+  const match = normalized.match(/^(.*?)(\d+(?:\.\d+)?(?:\/\d+(?:\.\d+)?)?)\s+([^\s]+)$/i);
   if (!match) return undefined;
-  const dose = match[1];
-  const fragment = match[2].toLowerCase();
+  const leading = normalizeSpacing(match[1] ?? "");
+  const dose = match[2];
+  const fragment = match[3].toLowerCase();
   if (/^(?:po|prn|q\d|qd|od|bid|tid|qid)$/i.test(fragment)) return undefined;
+  const thai = suggestionLocale(input, options) === "th";
   const pairs = buildUnitRoutePairs(inferUnitFromContext(options?.context ?? undefined), options);
   const suggestions: string[] = [];
   const seen = new Set<string>();
   const add = (surface: string, unit: string, route: string): boolean => {
     if (!surface.toLowerCase().startsWith(fragment)) return false;
-    const candidate = `${dose} ${surface} ${route} qd`;
+    const prefix = leading ? `${leading} ` : "";
+    const candidate = thai
+      ? `${prefix}${dose} ${surface}`
+      : `${prefix}${dose} ${surface} ${route} qd`;
     const key = candidate.toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
@@ -576,10 +611,18 @@ function directUnitSuggestions(
     }
   }
 
-  for (const pair of pairs) {
-    for (const variant of getUnitVariants(pair.unit)) {
-      if (!variant.lower.startsWith(fragment)) continue;
-      if (add(variant.value, pair.unit, pair.route)) return suggestions;
+  if (thai) {
+    for (const lexeme of THAI_SUGGESTION_LEXEMES) {
+      const unit = normalizeUnit(lexeme.canonical, options);
+      if (!unit) continue;
+      const pair = buildUnitRoutePairs(unit, options)[0] ?? { unit, route: "po" };
+      if (add(lexeme.surface, unit, pair.route)) return suggestions;
+    }
+  } else {
+    for (const pair of pairs) {
+      for (const variant of getUnitVariants(pair.unit)) {
+        if (add(variant.value, pair.unit, pair.route)) return suggestions;
+      }
     }
   }
   return suggestions.length ? suggestions : undefined;
@@ -608,28 +651,62 @@ function directBodySiteSuggestions(
   limit: number,
 ): string[] | undefined {
   const normalized = normalizeSpacing(input);
-  const match = normalized.match(/^(.*(?:\bto|\bat|\bon|\bin|\binto|ที่|บริเวณ))\s*([^\s]*)$/iu);
+  const match = normalized.match(/^(.*?(?:\bto|\bat|\bon|\bin|\binto|ที่|บริเวณ))\s*(.*)$/iu);
   if (!match) return undefined;
   const lead = normalizeSpacing(match[1]);
-  const partial = (match[2] ?? "").toLowerCase();
+  const partial = normalizeSpacing(match[2] ?? "").toLowerCase();
   const thai = suggestionLocale(input, options) === "th";
-  const vocabulary = listSupportedBodySiteText({
-    siteCodeMap: options?.siteCodeMap,
-    bodySiteContext: options?.context?.bodySiteContext
-  });
   const suggestions: string[] = [];
   const seen = new Set<string>();
-  for (const surface of vocabulary) {
+  const add = (surface: string): boolean => {
     const clean = normalizeSpacing(surface);
-    if (!clean || (thai ? !THAI_SCRIPT.test(clean) : THAI_SCRIPT.test(clean))) continue;
+    if (!clean || (thai ? !THAI_SCRIPT.test(clean) : THAI_SCRIPT.test(clean))) return false;
     const lower = clean.toLowerCase();
-    if (partial && !lower.startsWith(partial)) continue;
-    const candidate = `${lead} ${clean}`;
+    if (partial && !lower.startsWith(partial)) return false;
+    const candidate = thai ? `${lead}${clean}` : `${lead} ${clean}`;
     const key = candidate.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return false;
     seen.add(key);
     suggestions.push(candidate);
-    if (suggestions.length >= limit) break;
+    return suggestions.length >= limit;
+  };
+
+  if (!thai) {
+    for (const abbreviation of EYE_SITE_ABBREVIATIONS) {
+      if (add(abbreviation)) return suggestions;
+    }
+  } else {
+    for (const surface in DEFAULT_BODY_SITE_SNOMED) {
+      if (Object.prototype.hasOwnProperty.call(DEFAULT_BODY_SITE_SNOMED, surface) && add(surface)) {
+        return suggestions;
+      }
+    }
+    const customSites = options?.siteCodeMap;
+    if (customSites) {
+      for (const surface in customSites) {
+        if (!Object.prototype.hasOwnProperty.call(customSites, surface)) continue;
+        const definition = customSites[surface];
+        if (add(surface) || (definition.i18n?.th && add(definition.i18n.th))) return suggestions;
+        for (const alias of definition.aliases ?? []) {
+          if (add(alias)) return suggestions;
+        }
+      }
+    }
+  }
+
+  for (const surface of defaultSupportedBodySiteText()) {
+    if (add(surface)) return suggestions;
+  }
+  const customSites = options?.siteCodeMap;
+  if (customSites && !thai) {
+    for (const surface in customSites) {
+      if (!Object.prototype.hasOwnProperty.call(customSites, surface)) continue;
+      const definition = customSites[surface];
+      if (add(surface) || (definition.text && add(definition.text))) return suggestions;
+      for (const alias of definition.aliases ?? []) {
+        if (add(alias)) return suggestions;
+      }
+    }
   }
   return suggestions.length ? suggestions : undefined;
 }
@@ -645,34 +722,164 @@ function directRouteSuggestions(
   const base = normalizeSpacing(match[1]);
   const partial = match[2].toLowerCase();
   if (!base || !partial || THAI_SCRIPT.test(partial)) return undefined;
-  const surfaces: string[] = [];
-  const seenSurface = new Set<string>();
-  const addSurface = (surface: string) => {
+
+  const baseState = parseClauseState(base, options);
+  if (baseState.primaryClause.route?.code) return undefined;
+
+  type RouteCandidate = { surface: string; code: RouteCode; rank: number };
+  const byCode = new Map<RouteCode, RouteCandidate>();
+  const add = (surface: string, code: RouteCode | undefined, rank: number) => {
+    if (!code) return;
     const clean = normalizeSpacing(surface);
     const lower = clean.toLowerCase();
-    if (!clean || seenSurface.has(lower)) return;
-    seenSurface.add(lower);
-    surfaces.push(clean);
+    if (!clean || THAI_SCRIPT.test(clean) || !lower.startsWith(partial)) return;
+    const existing = byCode.get(code);
+    if (!existing || rank < existing.rank || (rank === existing.rank && clean.length < existing.surface.length)) {
+      byCode.set(code, { surface: clean, code, rank });
+    }
   };
-  for (const preferred of ["po", "oph", "inh", "in", "topical", "transdermal", "pr", "pv"]) {
-    if (DEFAULT_ROUTE_SYNONYMS[preferred] || options?.routeMap?.[preferred]) addSurface(preferred);
-  }
+
   const custom = options?.routeMap;
   if (custom) {
     for (const surface in custom) {
-      if (Object.prototype.hasOwnProperty.call(custom, surface)) addSurface(surface);
+      if (Object.prototype.hasOwnProperty.call(custom, surface)) add(surface, custom[surface], 0);
     }
   }
-  for (const surface in DEFAULT_ROUTE_SYNONYMS) {
-    if (Object.prototype.hasOwnProperty.call(DEFAULT_ROUTE_SYNONYMS, surface)) addSurface(surface);
+  for (const preferred of ["po", "oph", "inh", "in", "topical", "transdermal", "pr", "pv"]) {
+    add(preferred, options?.routeMap?.[preferred] ?? DEFAULT_ROUTE_SYNONYMS[preferred]?.code, 1);
   }
+  for (const surface in DEFAULT_ROUTE_SYNONYMS) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_ROUTE_SYNONYMS, surface)) continue;
+    add(surface, DEFAULT_ROUTE_SYNONYMS[surface]?.code, 2);
+  }
+
+  const doseUnit = baseState.primaryClause.dose?.unit;
+  const defaultRouteToken = doseUnit ? ROUTE_TOKEN_BY_UNIT.get(normalizeKey(doseUnit)) : undefined;
+  const defaultRouteCode = defaultRouteToken
+    ? DEFAULT_ROUTE_SYNONYMS[defaultRouteToken]?.code
+    : undefined;
+  const candidates = [...byCode.values()].sort((left, right) => {
+    const leftPreferred = left.code === defaultRouteCode ? 0 : 1;
+    const rightPreferred = right.code === defaultRouteCode ? 0 : 1;
+    return leftPreferred - rightPreferred ||
+      left.rank - right.rank ||
+      left.surface.length - right.surface.length ||
+      left.surface.localeCompare(right.surface);
+  });
+  const suggestions = candidates
+    .slice(0, limit)
+    .map((candidate) => `${base} ${candidate.surface}`);
+  return suggestions.length ? suggestions : undefined;
+}
+
+function naturalEventCompletionSurfaces(): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const add = (surface: string) => {
+    const clean = normalizeSpacing(surface);
+    const key = clean.toLowerCase();
+    if (clean && !seen.has(key)) {
+      seen.add(key);
+      result.push(clean);
+    }
+  };
+  for (const surface of FOOD_EVENT_ALIASES) add(surface);
+  for (const surface of SLEEP_EVENT_ALIASES) add(surface);
+  for (const surface of WAKE_EVENT_ALIASES) add(surface);
+  for (const surface of WHEN_TOKENS) {
+    if (surface.length > 2) add(surface);
+  }
+  return result;
+}
+
+function relationAcceptsEventSurface(relation: string, event: string): boolean {
+  const timing = EVENT_TIMING_TOKENS[event];
+  const mealMap = MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with");
+  if (timing && mealMap?.has(timing)) return true;
+  if (relation === "before" && SLEEP_EVENT_ALIASES.has(event)) return true;
+  if (relation === "after" && WAKE_EVENT_ALIASES.has(event)) return true;
+  return false;
+}
+
+function directEnglishRelationSuggestions(
+  input: string,
+  options: SuggestSigOptions | undefined,
+  limit: number,
+): string[] | undefined {
+  if (suggestionLocale(input, options) !== "en") return undefined;
+  const normalized = normalizeSpacing(input);
+  const words = normalized.split(" ");
+  if (!words.length) return undefined;
+  const relations = [...WORKFLOW_ACTION_RELATION_LEADS].filter((surface) => surface.length > 2);
+  const events = naturalEventCompletionSurfaces();
   const suggestions: string[] = [];
-  for (const surface of surfaces) {
-    if (!surface.toLowerCase().startsWith(partial)) continue;
-    suggestions.push(`${base} ${surface}`);
-    if (suggestions.length >= limit) break;
+  const seen = new Set<string>();
+  const add = (candidate: string) => {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    suggestions.push(candidate);
+  };
+
+  if (words.length >= 2 && relations.indexOf(words[words.length - 2].toLowerCase()) !== -1) {
+    const relation = words[words.length - 2].toLowerCase();
+    const partial = words[words.length - 1].toLowerCase();
+    const base = words.slice(0, -2).join(" ");
+    for (const event of events) {
+      if (!event.toLowerCase().startsWith(partial) || !relationAcceptsEventSurface(relation, event)) continue;
+      add(`${base} ${relation} ${event}`.trim());
+      if (suggestions.length >= limit) return suggestions;
+    }
+    return suggestions.length ? suggestions : undefined;
+  }
+
+  const partialRelation = words[words.length - 1].toLowerCase();
+  if (partialRelation.length < 3) return undefined;
+  const base = words.slice(0, -1).join(" ");
+  for (const relation of relations) {
+    if (!relation.startsWith(partialRelation)) continue;
+    for (const event of events) {
+      if (!relationAcceptsEventSurface(relation, event)) continue;
+      add(`${base} ${relation} ${event}`.trim());
+      if (suggestions.length >= limit) return suggestions;
+    }
   }
   return suggestions.length ? suggestions : undefined;
+}
+
+function directThaiRelationSuggestions(
+  input: string,
+  options: SuggestSigOptions | undefined,
+  limit: number,
+): string[] | undefined {
+  if (suggestionLocale(input, options) !== "th") return undefined;
+  const normalized = normalizeSpacing(input);
+  const lexemes = THAI_SUGGESTION_LEXEMES;
+  const relations = lexemes
+    .filter((lexeme) => WORKFLOW_ACTION_RELATION_LEADS.has(lexeme.canonical))
+    .sort((left, right) => right.surface.length - left.surface.length);
+  const eventLexemes = lexemes.filter((lexeme) => EVENT_TIMING_TOKENS[lexeme.canonical] !== undefined);
+  for (const relation of relations) {
+    const index = normalized.lastIndexOf(relation.surface);
+    if (index < 0) continue;
+    const relationEnd = index + relation.surface.length;
+    const tail = normalized.slice(relationEnd);
+    if (/\s/u.test(tail)) continue;
+    const prefix = normalized.slice(0, relationEnd);
+    const suggestions: string[] = [];
+    const seen = new Set<string>();
+    for (const event of eventLexemes) {
+      if (tail && !event.surface.startsWith(tail)) continue;
+      const candidate = `${prefix}${event.surface}`;
+      const key = candidate.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      suggestions.push(candidate);
+      if (suggestions.length >= limit) break;
+    }
+    if (suggestions.length) return suggestions;
+  }
+  return undefined;
 }
 
 function directTimingSuggestions(
@@ -716,7 +923,7 @@ function defaultDirectionSuggestions(
   const pairs = buildUnitRoutePairs(contextUnit, options);
   if (locale === "th") {
     const unit = pairs[0]?.unit ?? "tab";
-    const take = listMedicationInstructionActions()
+    const take = DEFAULT_SUGGESTION_ACTIONS
       .find((definition) => definition.code === "take")?.i18n?.th ??
       localeLexemeByCanonical("th", "take") ?? "รับประทาน";
     const unitSurface = localeLexemeByCanonical("th", unit) ?? unit;
@@ -780,12 +987,69 @@ function localeLexemePrefixSuggestions(
   if (!normalized) return undefined;
   const suggestions: string[] = [];
   const seen = new Set<string>();
-  for (const lexeme of listMedicationLocaleLexemes(locale)) {
+  for (const lexeme of (locale === "th" ? THAI_SUGGESTION_LEXEMES : listMedicationLocaleLexemes(locale))) {
     const surface = normalizeSpacing(lexeme.surface);
     const lower = surface.toLowerCase();
     if (!lower.startsWith(normalized) || seen.has(lower)) continue;
     seen.add(lower);
     suggestions.push(surface);
+    if (suggestions.length >= limit) break;
+  }
+  return suggestions.length ? suggestions : undefined;
+}
+
+function localeLexemeTailSuggestions(
+  input: string,
+  options: SuggestSigOptions | undefined,
+  limit: number,
+): string[] | undefined {
+  const locale = suggestionLocale(input, options);
+  if (locale !== "th") return undefined;
+  const normalized = normalizeSpacing(input);
+  const split = normalized.lastIndexOf(" ");
+  if (split < 0) return undefined;
+  const base = normalized.slice(0, split).trim();
+  const partial = normalized.slice(split + 1).toLowerCase();
+  if (!base || !partial) return undefined;
+
+  type TailCandidate = { surface: string; candidate: string; score: number; semanticKey: string; trusted: boolean };
+  const grouped = new Map<string, TailCandidate>();
+  for (const lexeme of THAI_SUGGESTION_LEXEMES) {
+    const surface = normalizeSpacing(lexeme.surface);
+    if (!surface.toLowerCase().startsWith(partial)) continue;
+    const days = DAY_OF_WEEK_TOKENS[surface] ?? DAY_OF_WEEK_TOKENS[lexeme.canonical];
+    const event = EVENT_TIMING_TOKENS[lexeme.canonical] ?? EVENT_TIMING_TOKENS[surface];
+    const cadence = FREQUENCY_ADVERB_UNITS_DATA.has(lexeme.canonical);
+    const semanticKey = days?.length
+      ? `day:${[...days].sort().join(",")}`
+      : event
+        ? `event:${event}`
+        : cadence
+          ? `cadence:${lexeme.canonical}`
+          : `lexeme:${lexeme.canonical}`;
+    const score = cadence || event ? 3 : days?.length ? 2 : 0;
+    const entry: TailCandidate = {
+      surface,
+      candidate: `${base} ${surface}`,
+      score,
+      semanticKey,
+      trusted: Boolean(cadence || event || days?.length)
+    };
+    const existing = grouped.get(semanticKey);
+    if (!existing || surface.length > existing.surface.length) {
+      grouped.set(semanticKey, entry);
+    }
+  }
+
+  const ranked = [...grouped.values()].sort((left, right) =>
+    right.score - left.score || left.candidate.length - right.candidate.length
+  );
+  const hasSemanticCompletions = ranked.some((entry) => entry.score > 0);
+  const suggestions: string[] = [];
+  for (const entry of ranked) {
+    if (hasSemanticCompletions && entry.score === 0) continue;
+    if (!entry.trusted && !parserAcceptsSuggestion(entry.candidate, options)) continue;
+    suggestions.push(entry.candidate);
     if (suggestions.length >= limit) break;
   }
   return suggestions.length ? suggestions : undefined;
@@ -810,7 +1074,7 @@ function actionPrefixSuggestions(
       candidates.push(clean);
     }
   };
-  for (const definition of listMedicationInstructionActions()) {
+  for (const definition of DEFAULT_SUGGESTION_ACTIONS) {
     push(locale === "th" ? definition.i18n?.th : definition.display.toLowerCase());
     for (const alias of definition.aliases ?? []) push(alias);
   }
@@ -843,9 +1107,30 @@ function semanticFastPath(
   );
   if (!hasMethod && !richAdministration) return undefined;
   const normalized = normalizeSpacing(input);
+  const locale = suggestionLocale(input, options);
+
+  if (hasMethod && clause.dose?.value !== undefined && !clause.dose.unit) {
+    const inferredUnit =
+      (clause.route?.code ? DEFAULT_UNIT_BY_ROUTE[clause.route.code] : undefined) ??
+      inferUnitFromContext(options?.context ?? undefined);
+    if (inferredUnit) {
+      const unitSurface = locale === "th"
+        ? localeLexemeByCanonical("th", inferredUnit) ?? inferredUnit
+        : inferredUnit;
+      const completed = `${normalized} ${unitSurface}`;
+      if (parserAcceptsSuggestion(completed, options)) {
+        const suggestions = [completed];
+        if (!clause.schedule && suggestions.length < limit) {
+          suggestions.push(`${completed} ${locale === "th" ? "วันละครั้ง" : "once daily"}`);
+        }
+        return suggestions.slice(0, limit);
+      }
+    }
+  }
+
   const suggestions = [normalized];
   if (hasMethod && !clause.schedule && suggestions.length < limit) {
-    suggestions.push(`${normalized} ${suggestionLocale(input, options) === "th" ? "วันละครั้ง" : "once daily"}`);
+    suggestions.push(`${normalized} ${locale === "th" ? "วันละครั้ง" : "once daily"}`);
   }
   return suggestions.slice(0, limit);
 }
@@ -899,6 +1184,14 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   if (directRoute?.length) {
     return directRoute;
   }
+  const directThaiRelation = directThaiRelationSuggestions(input, options, limit);
+  if (directThaiRelation?.length) {
+    return directThaiRelation;
+  }
+  const directEnglishRelation = directEnglishRelationSuggestions(input, options, limit);
+  if (directEnglishRelation?.length) {
+    return directEnglishRelation;
+  }
   const directTiming = directTimingSuggestions(input, options, limit);
   if (directTiming?.length) {
     return directTiming;
@@ -907,6 +1200,10 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   const semantic = semanticFastPath(input, options, limit);
   if (semantic?.length) {
     return semantic;
+  }
+  const localeTail = localeLexemeTailSuggestions(input, options, limit);
+  if (localeTail?.length) {
+    return localeTail;
   }
   const actions = actionPrefixSuggestions(input, options, limit);
   if (actions?.length) {

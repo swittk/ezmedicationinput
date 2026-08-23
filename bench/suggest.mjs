@@ -17,6 +17,14 @@ const cases = [
   { input: "at 14:3", options: { limit: 20 } },
   { input: "ทา", options: { limit: 20, locale: "th" } },
   { input: "รับประทาน 1 เม็ด เมื่อมีอาการปว", options: { limit: 20, locale: "th" } },
+  { input: "รับประทาน 1 เม", options: { limit: 20, locale: "th" } },
+  { input: "รับประทาน 1 เม็ด ว", options: { limit: 20, locale: "th" } },
+  { input: "รับประทาน 1 เม็ด ก่อนอ", options: { limit: 20, locale: "th" } },
+  { input: "ทาบริเวณผ", options: { limit: 20, locale: "th" } },
+  { input: "apply to right e", options: { limit: 20 } },
+  { input: "1 drop to o", options: { limit: 20 } },
+  { input: "1 tab po b", options: { limit: 20 } },
+  { input: "take 1 tab bef", options: { limit: 20 } },
   { input: "zzzz", options: { limit: 20 } }
 ];
 

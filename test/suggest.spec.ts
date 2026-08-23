@@ -143,6 +143,49 @@ describe("suggestSig", () => {
     expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
   });
 
+  it("completes Thai dose-unit tails from the parser locale lexicon", () => {
+    expect(suggestSig("รับประทาน 1 เม", { locale: "th", limit: 5 }))
+      .toContain("รับประทาน 1 เม็ด");
+  });
+
+  it("prefers complete Thai schedule surfaces over parser-only abbreviated aliases", () => {
+    const suggestions = suggestSig("รับประทาน 1 เม็ด ว", { locale: "th", limit: 10 });
+    expect(suggestions[0]).toBe("รับประทาน 1 เม็ด วันละครั้ง");
+    expect(suggestions).toContain("รับประทาน 1 เม็ด วันเสาร์");
+    expect(suggestions).not.toContain("รับประทาน 1 เม็ด วันส");
+  });
+
+  it("uses multiword body-site prefixes and ocular abbreviations", () => {
+    expect(suggestSig("apply to right e", { limit: 10 })).toContain("apply to right eye");
+    const ocular = suggestSig("1 drop to o", { limit: 10 });
+    expect(ocular).toEqual(expect.arrayContaining(["1 drop to od", "1 drop to os", "1 drop to ou"]));
+  });
+
+  it("completes natural before/after event tails through parser grammar vocabularies", () => {
+    expect(suggestSig("รับประทาน 1 เม็ด ก่อนอ", { locale: "th", limit: 8 }))
+      .toContain("รับประทาน 1 เม็ด ก่อนอาหาร");
+    expect(suggestSig("รับประทาน 1 เม็ด หลังอ", { locale: "th", limit: 8 }))
+      .toContain("รับประทาน 1 เม็ด หลังอาหาร");
+
+    const before = suggestSig("take 1 tab bef", { limit: 8 });
+    expect(before).toContain("take 1 tab before breakfast");
+    const after = suggestSig("take 1 tab after b", { limit: 8 });
+    expect(after).toContain("take 1 tab after breakfast");
+    expect(after.some((value) => value.includes(" bid"))).toBe(false);
+  });
+
+  it("completes Thai body-site aliases from the canonical site terminology", () => {
+    expect(suggestSig("ทาบริเวณผ", { locale: "th", limit: 8 }))
+      .toContain("ทาบริเวณผิวหนัง");
+  });
+
+  it("does not suggest a second route when the parsed prefix already has one", () => {
+    const suggestions = suggestSig("1 tab po b", { limit: 10 });
+    expect(suggestions[0]).toBe("1 tab po bid");
+    expect(suggestions).not.toContain("1 tab po by mouth");
+    expect(suggestSig("wash ex", { limit: 10 })).toEqual([]);
+  });
+
   it("uses the parser-owned Thai locale lexicon for partial grammar words", () => {
     const suggestions = suggestSig("คว", { locale: "th", limit: 5 });
     expect(suggestions).toContain("ควร");
@@ -157,7 +200,17 @@ describe("suggestSig", () => {
       { prefix: "1 tab po prn a", options: {} },
       { prefix: "at 14:3", options: {} },
       { prefix: "ทา", options: { locale: "th" } },
-      { prefix: "รับประทาน 1 เม็ด เมื่อมีอาการปว", options: { locale: "th" } }
+      { prefix: "รับประทาน 1 เม็ด เมื่อมีอาการปว", options: { locale: "th" } },
+      { prefix: "รับประทาน 1 เม", options: { locale: "th" } },
+      { prefix: "รับประทาน 1 เม็ด ว", options: { locale: "th" } },
+      { prefix: "apply to right e", options: {} },
+      { prefix: "1 drop to o", options: {} },
+      { prefix: "1 tab po b", options: {} },
+      { prefix: "รับประทาน 1 เม็ด ก่อนอ", options: { locale: "th" } },
+      { prefix: "รับประทาน 1 เม็ด หลังอ", options: { locale: "th" } },
+      { prefix: "take 1 tab bef", options: {} },
+      { prefix: "take 1 tab after b", options: {} },
+      { prefix: "ทาบริเวณผ", options: { locale: "th" } }
     ] as const;
     for (const { prefix, options } of cases) {
       const suggestions = suggestSig(prefix, { ...options, limit: 5 });
