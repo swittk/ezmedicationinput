@@ -997,10 +997,13 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     return `ทุก ${stripTrailingZero(period)} วัน`;
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
+    if (
+      period === 1 && (!periodMax || periodMax === 1) &&
+      frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency
+    ) {
+      return `สัปดาห์ละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
+    }
     if (schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `สัปดาห์ละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-      }
       return frequency !== undefined
         ? `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`
         : undefined;

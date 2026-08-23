@@ -177,6 +177,23 @@ describe("Thai formatter human-review follow-up", () => {
       .toBe("รับประทานครั้งละ 1 เม็ด สัปดาห์ละ 1 ถึง 2 ครั้ง ในวันอังคาร.");
   });
 
+  it("preserves weekly frequency ranges without weekday anchors", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      route: { coding: [{ system: SNOMED, code: "26643006", display: "Oral route" }] },
+      timing: {
+        repeat: {
+          frequency: 1,
+          frequencyMax: 2,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Week
+        }
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "th" }))
+      .toBe("รับประทานครั้งละ 1 เม็ด สัปดาห์ละ 1 ถึง 2 ครั้ง.");
+  });
+
   it("preserves Thai PRN source wording even when an exact coding is present", () => {
     const dosage: FhirDosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],

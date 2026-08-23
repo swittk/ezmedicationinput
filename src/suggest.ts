@@ -543,7 +543,8 @@ function localeLexemeByCanonical(locale: string, canonical: string, preferred?: 
   const lexemes = locale.toLowerCase().startsWith("th")
     ? THAI_SUGGESTION_LEXEMES
     : listMedicationLocaleLexemes(locale);
-  const matches = lexemes.filter((lexeme) => lexeme.canonical === canonical);
+  const canonicalKey = normalizeKey(canonical);
+  const matches = lexemes.filter((lexeme) => normalizeKey(lexeme.canonical) === canonicalKey);
   if (preferred) {
     const exact = matches.find((lexeme) => lexeme.surface === preferred);
     if (exact) return exact.surface;
@@ -651,7 +652,7 @@ function directBodySiteSuggestions(
   limit: number,
 ): string[] | undefined {
   const normalized = normalizeSpacing(input);
-  const match = normalized.match(/^(.*?(?:\bto|\bat|\bon|\bin|\binto|ที่|บริเวณ))\s*(.*)$/iu);
+  const match = normalized.match(/^(.*?(?:\binto\b|\bto\b|\bat\b|\bon\b|\bin\b|ที่|บริเวณ))\s*(.*)$/iu);
   if (!match) return undefined;
   const lead = normalizeSpacing(match[1]);
   const partial = normalizeSpacing(match[2] ?? "").toLowerCase();

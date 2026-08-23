@@ -137,6 +137,16 @@ describe("suggestSig", () => {
     expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
   });
 
+  it("matches mixed-case unit canonicals against Thai locale lexemes", () => {
+    const suggestions = suggestSig("", {
+      locale: "th",
+      limit: 3,
+      context: { dosageForm: "oral solution" }
+    });
+    expect(suggestions[0]).toBe("รับประทาน 1 มล วันละครั้ง");
+    expect(suggestions.some((value) => value.includes("mL"))).toBe(false);
+  });
+
   it("completes Thai PRN symptom tails from parser PRN terminology", () => {
     const suggestions = suggestSig("รับประทาน 1 เม็ด เมื่อมีอาการปว", { locale: "th", limit: 5 });
     expect(suggestions).toContain("รับประทาน 1 เม็ด เมื่อมีอาการปวด");
@@ -159,6 +169,12 @@ describe("suggestSig", () => {
     expect(suggestSig("apply to right e", { limit: 10 })).toContain("apply to right eye");
     const ocular = suggestSig("1 drop to o", { limit: 10 });
     expect(ocular).toEqual(expect.arrayContaining(["1 drop to od", "1 drop to os", "1 drop to ou"]));
+  });
+
+  it("keeps into intact as a body-site preposition", () => {
+    const suggestions = suggestSig("instill into r", { limit: 10 });
+    expect(suggestions).toContain("instill into rectum");
+    expect(suggestions.some((value) => value.startsWith("instill in to"))).toBe(false);
   });
 
   it("completes natural before/after event tails through parser grammar vocabularies", () => {
@@ -214,6 +230,7 @@ describe("suggestSig", () => {
     ] as const;
     for (const { prefix, options } of cases) {
       const suggestions = suggestSig(prefix, { ...options, limit: 5 });
+      expect(suggestions.length).toBeGreaterThan(0);
       for (const suggestion of suggestions) {
         expect(parseSig(suggestion, options).meta.leftoverText).toBeUndefined();
       }
