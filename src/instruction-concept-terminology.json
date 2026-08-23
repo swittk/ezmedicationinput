@@ -270,6 +270,34 @@
         "fresh patch",
         "แผ่นใหม่"
       ]
+    },
+    {
+      "code": "clean-result",
+      "role": "result",
+      "display": "clean",
+      "i18n": {
+        "th": "สะอาด"
+      },
+      "aliases": [
+        "clean",
+        "thoroughly clean",
+        "สะอาด"
+      ]
+    },
+    {
+      "code": "after-first-administration",
+      "role": "time",
+      "display": "after the first administration",
+      "i18n": {
+        "th": "หลังครั้งแรก"
+      },
+      "aliases": [
+        "after first administration",
+        "after the first administration",
+        "after first dose",
+        "after the first dose",
+        "หลังครั้งแรก"
+      ]
     }
   ]
 }

@@ -1160,10 +1160,26 @@ function timingRangeIsProcedureLocalDuration(
 ): boolean {
   for (const frame of getProceduralFrames(context)) {
     const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-    if (!definition?.procedural) continue;
-    for (const arg of frame.args) {
-      if (arg.role !== AdviceArgumentRole.Duration || !arg.span) continue;
-      if (arg.span.start <= start && end <= arg.span.end) return true;
+    if (definition?.procedural) {
+      for (const arg of frame.args) {
+        if (arg.role !== AdviceArgumentRole.Duration || !arg.span) continue;
+        if (arg.span.start <= start && end <= arg.span.end) return true;
+      }
+      continue;
+    }
+    if (
+      definition?.administrationMethod?.code &&
+      frame.span.start <= start && end <= frame.span.end
+    ) {
+      const earlierAdministration = context.tokens.some((candidate) => {
+        if (candidate.sourceEnd > frame.span.start) return false;
+        return Boolean(
+          resolveMedicationInstructionAction(
+            normalizeTokenLower(candidate), context.options
+          )?.administrationMethod?.code
+        );
+      });
+      if (earlierAdministration) return true;
     }
   }
   return false;

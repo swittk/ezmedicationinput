@@ -4,6 +4,7 @@ export interface TimingSummaryOptions {
   realizationMode?: "normalized" | "roundtrip";
   groupMealTimingsByRelation?: boolean;
   includeTimesPerDaySummary?: boolean;
+  sitePlacement?: "natural" | "trailing";
 }
 
 export type MealRelation = "before" | "after" | "with";

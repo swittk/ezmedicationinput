@@ -1349,6 +1349,8 @@ export function formatCanonicalClause(
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
+      sitePlacement: options?.sitePlacement ??
+        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault
     };
     return localization.formatShort(context);
@@ -1362,6 +1364,8 @@ export function formatCanonicalClause(
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
+      sitePlacement: options?.sitePlacement ??
+        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault
     };
     return localization.formatLong(context);

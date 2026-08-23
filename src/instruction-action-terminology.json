@@ -905,6 +905,9 @@
         "i18n": {
           "th": "ให้ยา"
         }
+      },
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
       }
     },
     {
@@ -981,7 +984,8 @@
       "aliases": [
         "take",
         "รับประทาน",
-        "กิน"
+        "กิน",
+        "ทาน"
       ],
       "procedural": false,
       "acceptsAmount": true,
@@ -998,7 +1002,10 @@
         "code": "738990001",
         "display": "Administer"
       },
-      "verbRouteHint": "26643006"
+      "verbRouteHint": "26643006",
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
+      }
     },
     {
       "code": "drink",
@@ -1022,7 +1029,10 @@
           "th": "รับประทาน"
         }
       },
-      "verbRouteHint": "26643006"
+      "verbRouteHint": "26643006",
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
+      }
     },
     {
       "code": "instill",
@@ -1462,7 +1472,9 @@
         "หลับ",
         "หลับตา"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
     },
     {
       "code": "press",

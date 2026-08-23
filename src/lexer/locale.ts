@@ -197,6 +197,15 @@ function registerKnownThaiTerms(values: Iterable<string>): void {
   }
 }
 
+for (const daySurface of Object.keys(DAY_OF_WEEK_TOKENS)) {
+  if (/[\u0E00-\u0E7F]/u.test(daySurface) && !daySurface.startsWith("วัน")) {
+    const prefixed = `วัน${daySurface}`;
+    if (DECLARATIVE_THAI_CANONICAL[prefixed] === undefined) {
+      DECLARATIVE_THAI_CANONICAL[prefixed] = daySurface;
+    }
+  }
+}
+
 registerKnownThaiTerms(Object.keys(DEFAULT_BODY_SITE_SNOMED));
 registerKnownThaiTerms(Object.keys(DEFAULT_PRN_REASON_DEFINITIONS));
 registerKnownThaiTerms(Object.keys(DEFAULT_ROUTE_SYNONYMS));
@@ -247,6 +256,7 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ทุก", "เดือน"], canonical: "monthly" },
   { parts: ["ทุก", "วัน"], canonical: "daily" },
   { parts: ["จาก", "นั้น"], canonical: "then" },
+  { parts: ["หลัง", "จาก", "นั้น"], canonical: "then" },
   { parts: ["สวน", "ล้าง"], canonical: "douche" },
   { parts: ["ชั่วโมง", "ละ"], canonical: "hourly" },
   { parts: ["สัปดาห์", "ละ"], canonical: "weekly" },

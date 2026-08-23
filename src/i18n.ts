@@ -2,6 +2,7 @@ import { findAdditionalInstructionDefinitionByCoding } from "./advice";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
+import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import {
   collectLocalizedWhenPhrases,
   combineLocalizedFrequencyAndEvents,
@@ -47,6 +48,7 @@ export interface SigFormatContext {
   readonly groupMealTimingsByRelation: boolean;
   readonly includeTimesPerDaySummary: boolean;
   readonly realizationMode: "normalized" | "roundtrip";
+  readonly sitePlacement: "natural" | "trailing";
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -162,12 +164,14 @@ function createThaiLocalization(): SigLocalization {
       clause,
       groupMealTimingsByRelation,
       includeTimesPerDaySummary,
-      realizationMode
+      realizationMode,
+      sitePlacement
     }) =>
       formatLongThai(clause, {
         groupMealTimingsByRelation,
         includeTimesPerDaySummary,
-        realizationMode
+        realizationMode,
+        sitePlacement
       })
   };
 }
@@ -640,6 +644,12 @@ const THAI_SITE_FIRST_VERBS = new Set([
   "พ่น"
 ]);
 
+const THAI_EARLY_SITE_ROUTES = new Set<RouteCode>([
+  RouteCode["Ophthalmic route"],
+  RouteCode["Otic route"],
+  RouteCode["Intravitreal route (qualifier value)"]
+]);
+
 function resolveThaiMethodVerb(
   clause: CanonicalSigClause,
   grammar: ThaiRouteGrammar
@@ -691,6 +701,9 @@ function shouldUseGenericMedicationObjectThai(
     return false;
   }
   if (THAI_IMPLIED_OBJECT_VERBS.has(verb)) {
+    return false;
+  }
+  if (resolveMedicationInstructionAction(verb)?.realizerConfig?.thaiImplicitMedicationObject) {
     return false;
   }
   const primaryStart = clause.instructionGraph?.primaryAdministrationSpan?.start;
@@ -983,10 +996,14 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
     if (schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1)) {
-      return undefined;
+      return frequency !== undefined
+        ? `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`
+        : undefined;
     }
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "สัปดาห์ละครั้ง";
+      return frequency !== undefined && frequency !== 1
+        ? `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`
+        : "สัปดาห์ละครั้ง";
     }
     if (periodMax && periodMax !== period) {
       return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
@@ -1667,19 +1684,28 @@ function formatLongThai(
   const durationPart = describeDurationThai(schedule);
 
   const segments: string[] = [];
+  const routePrefersEarlySite = Boolean(
+    clause.route?.code && THAI_EARLY_SITE_ROUTES.has(clause.route.code) &&
+    baseVerb === "หยอด"
+  );
+  const siteFirst = Boolean(sitePart) && options?.sitePlacement !== "trailing" && (
+    routePrefersEarlySite || (
+      THAI_SITE_FIRST_VERBS.has(baseVerb) &&
+      explicitDosePart === undefined &&
+      routePart === undefined
+    )
+  );
+  const placedSitePart = siteFirst && routePrefersEarlySite
+    ? sitePart?.replace(/^ที่/u, "")
+    : sitePart;
+  if (siteFirst && placedSitePart) {
+    segments.push(placedSitePart);
+  }
   if (dosePart) {
     segments.push(dosePart);
   }
   if (routePart) {
     segments.push(routePart);
-  }
-  const siteFirst =
-    Boolean(sitePart) &&
-    THAI_SITE_FIRST_VERBS.has(baseVerb) &&
-    explicitDosePart === undefined &&
-    routePart === undefined;
-  if (siteFirst && sitePart) {
-    segments.push(sitePart);
   }
   if (timing.frequency) {
     segments.push(timing.frequency);
@@ -1765,9 +1791,35 @@ function formatLongThai(
     ...clause,
     additionalInstructions: directAdditional
   });
-  const leadingInstructionText = formatPatientInstructionSentence(preGraphInstruction);
+  const primarySpan = clause.instructionGraph?.primaryAdministrationSpan;
+  const graphActions = clause.instructionGraph?.actions ?? [];
+  const lastPreAction = primarySpan
+    ? graphActions.filter((action) => action.span.end <= primarySpan.start)
+        .sort((a, b) => b.span.end - a.span.end)[0]
+    : undefined;
+  const firstPostAction = primarySpan
+    ? graphActions.filter((action) => action.span.start >= primarySpan.end)
+        .sort((a, b) => a.span.start - b.span.start)[0]
+    : undefined;
+  const noStrongBoundary = (start: number, end: number): boolean =>
+    !/[.!?;]/u.test(clause.rawText.slice(start - clause.raw.start, end - clause.raw.start));
+  const preFlowsIntoAdministration = Boolean(
+    !roundTrip && preGraphInstruction && primarySpan && lastPreAction &&
+    lastPreAction.polarity !== "negate" &&
+    noStrongBoundary(lastPreAction.span.end, primarySpan.start)
+  );
+  const postFlowsFromAdministration = Boolean(
+    !roundTrip && postGraphInstruction && primarySpan && firstPostAction &&
+    firstPostAction.polarity !== "negate" &&
+    noStrongBoundary(primarySpan.end, firstPostAction.span.start)
+  );
+  const leadingInstructionText = preFlowsIntoAdministration
+    ? undefined
+    : formatPatientInstructionSentence(preGraphInstruction);
   const graphInstruction = postGraphInstruction ?? wholeGraphInstruction;
-  const graphInstructionText = formatPatientInstructionSentence(graphInstruction);
+  const graphInstructionText = postFlowsFromAdministration
+    ? undefined
+    : formatPatientInstructionSentence(graphInstruction);
   const patientSourceRepresented = Boolean(
     clause.patientInstruction &&
     clause.instructionGraph &&
@@ -1815,7 +1867,16 @@ function formatLongThai(
       .filter(Boolean).join(" ").trim();
   }
 
-  const baseSentence = `${joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix))}.`;
+  let administrationText = joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
+  if (preFlowsIntoAdministration && preGraphInstruction) {
+    administrationText = `${preGraphInstruction} จากนั้น${administrationText}`;
+  }
+  if (postFlowsFromAdministration && postGraphInstruction) {
+    administrationText = `${administrationText} จากนั้น${postGraphInstruction}`;
+  }
+  const baseSentence = /[.!?]$/u.test(administrationText)
+    ? administrationText
+    : `${administrationText}.`;
   const rendered = [leadingInstructionText, baseSentence, trailingInstructionText]
     .filter(Boolean).join(" ").trim();
   return roundTrip ? makeThaiRoundTripSurface(rendered) : rendered;

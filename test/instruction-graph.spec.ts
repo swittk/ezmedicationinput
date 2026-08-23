@@ -473,7 +473,7 @@ describe("procedural instruction graph", () => {
     ]));
     expect(clause?.schedule?.when).toEqual(["IMD"]);
     expect(parsed.meta.leftoverText).toBeUndefined();
-    expect(parsed.longText).toBe("ผสมยา 1 ซองกับน้ำ 120 มิลลิลิตร. ดื่มทันที.");
+    expect(parsed.longText).toBe("ผสมยา 1 ซองกับน้ำ 120 มิลลิลิตร จากนั้นดื่มทันที.");
   });
 
   it("fails open to preserved opaque text when an async semantic resolver throws", async () => {

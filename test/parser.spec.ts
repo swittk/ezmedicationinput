@@ -4080,14 +4080,14 @@ describe("internationalization", () => {
 
     it("translates eye site names in Thai", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
-      expect(result.longText).toBe("หยอดครั้งละ 1 หยด ที่ตาขวา.");
-      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด ที่ตาขวา.");
+      expect(result.longText).toBe("หยอดตาขวา ครั้งละ 1 หยด.");
+      expect(result.fhir.text).toBe("หยอดตาขวา ครั้งละ 1 หยด.");
     });
 
     it("formats once-daily bedtime ocular dosing in Thai without splitting the timing", () => {
       const result = parseSig("1 drop ou qd hs", { locale: "th" });
-      expect(result.longText).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
-      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
+      expect(result.longText).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด วันละครั้ง ก่อนนอน.");
+      expect(result.fhir.text).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด วันละครั้ง ก่อนนอน.");
     });
 
     it("uses inhaler phrasing in Thai without สูดดม", () => {
@@ -4104,8 +4104,8 @@ describe("internationalization", () => {
 
     it("translates ear site names in Thai", () => {
       const result = parseSig("1 drop right ear once daily", { locale: "th" });
-      expect(result.longText).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
-      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+      expect(result.longText).toBe("หยอดหูขวา ครั้งละ 1 หยด วันละครั้ง.");
+      expect(result.fhir.text).toBe("หยอดหูขวา ครั้งละ 1 หยด วันละครั้ง.");
     });
 
     it("translates head site names in Thai", () => {
@@ -4185,7 +4185,7 @@ describe("internationalization", () => {
 
       for (const { sig, expectedSite } of cases) {
         const result = parseSig(sig, { locale: "th" });
-        expect(result.longText).toContain(`ที่${expectedSite}`);
+        expect(result.longText).toContain(expectedSite);
         expect(result.longText).not.toMatch(/otic/i);
         expect(result.fhir.text).toBe(result.longText);
       }
@@ -4214,8 +4214,8 @@ describe("internationalization", () => {
     it("includes minute interval wording together with count information in Thai", () => {
       const result = parseSig("1 drop ou q15min x 8 doses", { locale: "th" });
       expect(result.shortText).toBe("1 หยด OPH ทุก 15 นาที x8");
-      expect(result.longText).toBe("หยอดครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
-      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
+      expect(result.longText).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง.");
+      expect(result.fhir.text).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง.");
     });
 
     it("describes day-of-week schedules in Thai", () => {

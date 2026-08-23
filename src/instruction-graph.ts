@@ -66,6 +66,17 @@ interface ActionMatch {
   separableParticleIndex?: number;
 }
 
+function resultativeLeadAt(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): boolean {
+  if (key(parts[index]) !== "do") return false;
+  const next = parts[index + 1];
+  if (!next) return false;
+  return resolveMedicationInstructionConcept(key(next), options)?.role === AdviceArgumentRole.Result;
+}
+
 function actionAtIsGovernedByDirective(parts: Lexeme[], index: number): boolean {
   return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
     const start = index - prefix.parts.length;
@@ -120,7 +131,12 @@ function actionMatchAt(
           const nextDefinition = next
             ? resolveMedicationInstructionAction(key(next), options)
             : undefined;
-          if (nextDefinition) continue;
+          const nextConcept = next
+            ? resolveMedicationInstructionConcept(key(next), options)
+            : undefined;
+          if (nextDefinition || (definition.code === "give" && nextConcept?.role === AdviceArgumentRole.Result)) {
+            continue;
+          }
         }
         return { definition, length };
       }
@@ -504,7 +520,17 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const args = parsedArgs(argumentFromParts(
     parts, argumentStart, objectEnd, input, undefined, options
   ));
-  if (relation === AdviceRelation.For && duration) pushArgument(args, duration);
+  let typedLocalTime: AdviceArgument | undefined;
+  for (let index = argumentStart; index < objectEnd; index += 1) {
+    const candidate = internalArgument(key(parts[index]), parts[index].sourceText ?? parts[index].original, options);
+    if (candidate?.role === AdviceArgumentRole.Time) {
+      typedLocalTime = candidate;
+      pushArgument(args, candidate);
+      break;
+    }
+  }
+  if (typedLocalTime && duration) pushArgument(args, duration);
+  else if (relation === AdviceRelation.For && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
     const time = (relation === AdviceRelation.In || relation === AdviceRelation.On ||
       relation === AdviceRelation.Before || relation === AdviceRelation.After ||
@@ -720,19 +746,37 @@ const SITE_ARGUMENT_PARSER: ActionArgumentParser = (c) => ({
     c.parts, c.argumentStart, c.segmentEnd, c.input, AdviceArgumentRole.Site, c.options
   ))
 });
+function resultativeTail(
+  parts: Lexeme[], start: number, end: number, input: string, options?: ParseOptions
+): { lead: number; argument: AdviceArgument } | undefined {
+  for (let index = start; index + 1 < end; index += 1) {
+    if (key(parts[index]) !== "do") continue;
+    const argument = argumentFromParts(
+      parts, index + 1, end, input, AdviceArgumentRole.Result, options
+    );
+    if (argument?.role === AdviceArgumentRole.Result && argument.conceptId) {
+      return { lead: index, argument };
+    }
+  }
+  return undefined;
+}
+
 const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, options, relIndex, relation } = c;
   const args: AdviceArgument[] = [];
-  if (relIndex > argumentStart) {
+  const resultTail = resultativeTail(parts, argumentStart, segmentEnd, input, options);
+  const semanticEnd = resultTail?.lead ?? segmentEnd;
+  if (relIndex > argumentStart && relIndex < semanticEnd) {
     const localTarget = argumentFromParts(
       parts, argumentStart, relIndex, input, AdviceArgumentRole.Site, options);
     if (localTarget?.coding?.code || localTarget?.conceptId) pushArgument(args, localTarget);
     else pushArgument(args, argumentFromParts(parts, argumentStart, relIndex, input, undefined, options));
   }
-  if (relIndex >= 0) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, segmentEnd, input, preferredRinseRole(relation), options));
+  if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
+    parts, relIndex + 1, semanticEnd, input, preferredRinseRole(relation), options));
   else pushArgument(args, argumentFromParts(
-    parts, argumentStart, segmentEnd, input, preferredRinseRole(relation), options));
+    parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));
+  pushArgument(args, resultTail?.argument);
   return { args };
 };
 const DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
@@ -1062,7 +1106,11 @@ export function parseInstructionActions(
         end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ? index - 1 : index;
         break;
       }
-      if (ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) && !prefixedActionAt(parts, index, options)) {
+      if (
+        ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) &&
+        !prefixedActionAt(parts, index, options) &&
+        !resultativeLeadAt(parts, index, options)
+      ) {
         end = index;
         break;
       }
@@ -1994,12 +2042,15 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
       ? `${c.label}${target}${relationText}${relationTarget}`
       : `${c.label}${target} ${relationText} ${relationTarget}`;
   }
+  const resultSuffix = c.result
+    ? (c.thai ? `ให้${c.result}` : ` until ${c.result}`)
+    : "";
   if (c.site) return c.thai
-    ? `${c.label}${c.site}${c.substance ? `ด้วย${c.substance}` : ""}`
-    : `${c.label} ${c.site}${c.substance ? ` with ${c.substance}` : ""}`;
+    ? `${c.label}${c.site}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
+    : `${c.label} ${c.site}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
   return c.thai
-    ? `${c.label}${c.substance ? `ด้วย${c.substance}` : ""}`
-    : `${c.label}${c.substance ? ` with ${c.substance}` : ""}`;
+    ? `${c.label}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
+    : `${c.label}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
 };
 const OBJECT_AMOUNT_MATERIAL_REALIZER: ActionRealizer = (c) => {
   const object = c.theme ?? c.container;
@@ -2460,7 +2511,14 @@ export function realizeInstructionGraph(
   const targetLanguage = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const sourceLanguage = (graph.sourceLocale ?? "en").toLowerCase().startsWith("th") ? "th" : "en";
   for (const frame of frames) {
-    const sourceFaithful = options?.preferSourceText &&
+    const definition = getMedicationInstructionAction(frame.predicate.lemma);
+    const secondaryAdministration = Boolean(
+      definition?.administrationMethod?.code &&
+      graph.primaryAdministrationSpan &&
+      (frame.span.end <= graph.primaryAdministrationSpan.start ||
+       frame.span.start >= graph.primaryAdministrationSpan.end)
+    );
+    const sourceFaithful = (options?.preferSourceText || secondaryAdministration) &&
       targetLanguage === sourceLanguage &&
       sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)

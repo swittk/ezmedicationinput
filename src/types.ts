@@ -443,6 +443,8 @@ export interface FormatOptions {
    * schedule (for example, "three times daily" or "วันละ 3 ครั้ง").
    */
   includeTimesPerDaySummary?: boolean;
+  /** Thai long-text site placement. `natural` uses route-sensitive Thai word order; `trailing` preserves the legacy trailing site phrase. */
+  sitePlacement?: "natural" | "trailing";
 }
 
 export interface FormatBatchOptions extends FormatOptions {
@@ -859,6 +861,8 @@ export interface MedicationInstructionActionDefinition {
   realizerConfig?: {
     thaiFallbackObject?: string;
     thaiSuppressActivityConcepts?: string[];
+    /** Thai can omit an otherwise generic medication object for this action (e.g. รับประทานหลังอาหาร). */
+    thaiImplicitMedicationObject?: boolean;
   };
   continuationLicenses?: Array<{
     candidateAction: string;
