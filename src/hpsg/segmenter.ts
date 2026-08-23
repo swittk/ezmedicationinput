@@ -254,19 +254,29 @@ function doseBearingAdministrationContinuation(
   if (!ACTION_SEQUENCE_MARKERS.has(connectorLower) && !ACTION_COORDINATION_CONNECTORS.has(connectorLower)) {
     return false;
   }
+  const probeEnd = nextContinuationProbeEnd(input, tokens, connectorIndex + 1);
+  const continuationText = input.slice(first.sourceStart, probeEnd).trim();
+  if (!continuationText) return false;
+
+  // Cheap lexical rejection before invoking the full parser. Most sequence/
+  // coordination markers belong to procedural prose, not a heterogeneous
+  // administration continuation. Requiring an explicit unit here avoids
+  // reparsing the prefix for every ordinary `and` / `then`.
+  let hasExplicitDoseUnit = false;
+  for (let index = connectorIndex + 1; index < tokens.length; index += 1) {
+    const item = tokens[index];
+    if (!item || item.sourceStart >= probeEnd) break;
+    if (normalizeUnit(item.canonical ?? item.lower, options)) {
+      hasExplicitDoseUnit = true;
+      break;
+    }
+  }
+  if (!hasExplicitDoseUnit) return false;
+
   const prefixText = input.slice(segmentStart, connector.sourceStart).replace(/[,;]\s*$/u, "").trim();
   if (!prefixText) return false;
   const prefix = parseClauseState(prefixText, options);
   if (!prefix.primaryClause.dose) return false;
-
-  const probeEnd = nextContinuationProbeEnd(input, tokens, connectorIndex + 1);
-  const continuationText = input.slice(first.sourceStart, probeEnd).trim();
-  if (!continuationText) return false;
-  const hasExplicitDoseUnit = tokens.some((item, index) =>
-    index > connectorIndex && item.sourceStart < probeEnd &&
-    Boolean(normalizeUnit(item.canonical ?? item.lower, options))
-  );
-  if (!hasExplicitDoseUnit) return false;
   const continuationActions = parseInstructionActions(continuationText, 0, options);
   if (continuationActions.some((action) => action.args.some((arg) =>
     arg.conceptId === "after-first-administration"
