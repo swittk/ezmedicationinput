@@ -1334,11 +1334,12 @@ function translateSpatialSiteThai(
   site: string | undefined,
   relation?: BodySiteSpatialRelation
 ): string | undefined {
-  const spatialRelation = relation ?? (site ? resolveBodySitePhrase(site)?.spatialRelation : undefined);
+  const siteSpatialRelation = site ? resolveBodySitePhrase(site)?.spatialRelation : undefined;
+  const spatialRelation = relation ?? siteSpatialRelation;
   if (!spatialRelation?.relationText) {
     return undefined;
   }
-  if (site) {
+  if (site && (!relation?.relationText || siteSpatialRelation?.relationText)) {
     const curated = THAI_SITE_TRANSLATIONS[normalizeBodySiteKey(site)];
     if (curated) {
       return curated;

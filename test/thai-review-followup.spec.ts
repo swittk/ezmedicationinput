@@ -148,6 +148,19 @@ describe("Thai formatter human-review follow-up", () => {
     expect(formatted).not.toContain("Entire external genitalia");
   });
 
+  it("applies explicit spatial relations to curated base-site translations", () => {
+    const parsed = parseSig("apply to right side of abdomen bid");
+    const dosage: FhirDosage = {
+      ...parsed.fhir,
+      site: {
+        ...parsed.fhir.site,
+        text: "abdomen"
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "th" }))
+      .toBe("ทาบริเวณท้องด้านขวา วันละ 2 ครั้ง.");
+  });
+
   it("prefers coded Thai body-site translations over name fallbacks", () => {
     const dosage: FhirDosage = {
       route: { coding: [{ system: SNOMED, code: "6064005", display: "Topical route" }] },
