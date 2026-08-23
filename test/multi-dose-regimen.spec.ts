@@ -52,6 +52,34 @@ describe("heterogeneous multi-dose regimens", () => {
     ]);
   });
 
+  it("supports multiple timing anchors inside each heterogeneous dose group", () => {
+    const result = parseSig(
+      "Take 1 tab at wake and lunch, 2 tabs at dinner and 22:00",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+  });
+
+  it("supports the corresponding Thai multi-dose multi-timing surface", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด หลังตื่นนอนและอาหารกลางวัน, 2 เม็ด พร้อมอาหารเย็นและเวลา 22:00",
+      { locale: "th", context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+  });
+
   it("propagates a semicolon-delimited trailing low-BP safety condition across the regimen", () => {
     const result = parseSig(
       "take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep; do not take if low blood pressure",
