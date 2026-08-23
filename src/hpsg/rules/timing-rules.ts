@@ -33,6 +33,7 @@ import {
   DAY_RANGE_CONNECTORS,
   DURATION_LEAD_TOKENS,
   EVENT_ARTICLE_TOKENS,
+  EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
   EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES,
   EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES,
@@ -972,8 +973,10 @@ function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undef
           ? value / 60
           : undefined;
   if (minutes === undefined || !Number.isFinite(minutes) || minutes < 0) return undefined;
-  const rounded = Math.round(minutes);
-  return Math.abs(minutes - rounded) < 1e-9 ? rounded : undefined;
+  const seconds = minutes * 60;
+  const roundedSeconds = Math.round(seconds);
+  if (Math.abs(seconds - roundedSeconds) > 1e-9) return undefined;
+  return roundedSeconds / 60;
 }
 
 /**
@@ -1011,7 +1014,7 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     let unitIndex = cursor + 1;
     const possibleArticle = context.tokens[unitIndex];
-    if (possibleArticle && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(possibleArticle))) {
+    if (possibleArticle && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(possibleArticle))) {
       unitIndex += 1;
     }
     const unitToken = context.tokens[unitIndex];

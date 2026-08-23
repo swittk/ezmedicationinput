@@ -215,7 +215,9 @@
     "per"
   ],
   "nonSiteAnchoredPhrases": [
-    "empty stomach"
+    "empty stomach",
+    "least",
+    "most"
   ],
   "externalSiteLocativePrefixes": [
     "around",
@@ -917,6 +919,7 @@
     "half": 0.5,
     "ครึ่ง": 0.5
   },
+  "eventOffsetArticles": ["a", "an"],
   "instructionLeadingSeparators": [
     ",",
     ";",

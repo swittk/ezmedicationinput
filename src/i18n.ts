@@ -1133,13 +1133,27 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
+function formatEventOffsetQuantityThai(minutes: number): string {
+  const seconds = Number((minutes * 60).toFixed(9));
+  if (minutes < 1 && Number.isInteger(seconds)) {
+    return `${stripTrailingZero(seconds)} วินาที`;
+  }
+  if (minutes >= 24 * 60 && minutes % (24 * 60) === 0) {
+    return `${stripTrailingZero(minutes / (24 * 60))} วัน`;
+  }
+  if (minutes >= 60 && minutes % 60 === 0) {
+    return `${stripTrailingZero(minutes / 60)} ชั่วโมง`;
+  }
+  return `${stripTrailingZero(minutes)} นาที`;
+}
+
 function formatEventOffsetThai(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
-  const quantity = `${stripTrailingZero(value)} นาที`;
+  const quantity = formatEventOffsetQuantityThai(value);
   if (schedule.offsetMin !== undefined) return `${eventText}อย่างน้อย ${quantity}`;
   if (schedule.offsetMax !== undefined) return `${eventText}ไม่เกิน ${quantity}`;
   return `${eventText} ${quantity}`;

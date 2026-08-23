@@ -593,13 +593,29 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
+function formatEventOffsetQuantityEnglish(minutes: number): string {
+  const seconds = Number((minutes * 60).toFixed(9));
+  if (minutes < 1 && Number.isInteger(seconds)) {
+    return `${stripTrailingZero(seconds)} second${seconds === 1 ? "" : "s"}`;
+  }
+  if (minutes >= 24 * 60 && minutes % (24 * 60) === 0) {
+    const days = minutes / (24 * 60);
+    return `${stripTrailingZero(days)} day${days === 1 ? "" : "s"}`;
+  }
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${stripTrailingZero(hours)} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${stripTrailingZero(minutes)} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function formatEventOffsetEnglish(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
-  const quantity = `${stripTrailingZero(value)} minute${value === 1 ? "" : "s"}`;
+  const quantity = formatEventOffsetQuantityEnglish(value);
   if (schedule.offsetMin !== undefined) return `at least ${quantity} ${eventText}`;
   if (schedule.offsetMax !== undefined) return `at most ${quantity} ${eventText}`;
   return `${quantity} ${eventText}`;

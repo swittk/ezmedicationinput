@@ -23,6 +23,7 @@ import { arrayIncludes } from "./utils/array";
 import { convertValue, getBaseUnitFactor, getUnitCategory } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
 import { getDoseUnitSemantics } from "./unit-lexicon";
+import { getExactTimingOffsetMinutes } from "./fhir";
 
 /**
  * Default institution times used when a dosage only specifies frequency without
@@ -515,20 +516,26 @@ function estimateIngredientQuantity(
  */
 function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   const [hour, minute, second] = clock.split(":").map((part) => Number(part));
-  let totalMinutes = hour * SECONDS_PER_MINUTE + minute + offsetMinutes;
+  const secondsPerHour = SECONDS_PER_MINUTE * SECONDS_PER_MINUTE;
+  const secondsPerDay = MINUTES_PER_DAY * SECONDS_PER_MINUTE;
+  let totalSeconds =
+    hour * secondsPerHour + minute * SECONDS_PER_MINUTE + second +
+    Math.round(offsetMinutes * SECONDS_PER_MINUTE);
   let dayShift = 0;
-  while (totalMinutes < 0) {
-    totalMinutes += MINUTES_PER_DAY;
+  while (totalSeconds < 0) {
+    totalSeconds += secondsPerDay;
     dayShift -= 1;
   }
-  while (totalMinutes >= MINUTES_PER_DAY) {
-    totalMinutes -= MINUTES_PER_DAY;
+  while (totalSeconds >= secondsPerDay) {
+    totalSeconds -= secondsPerDay;
     dayShift += 1;
   }
-  const adjustedHour = Math.floor(totalMinutes / SECONDS_PER_MINUTE);
-  const adjustedMinute = totalMinutes % SECONDS_PER_MINUTE;
+  const adjustedHour = Math.floor(totalSeconds / secondsPerHour);
+  const remainder = totalSeconds % secondsPerHour;
+  const adjustedMinute = Math.floor(remainder / SECONDS_PER_MINUTE);
+  const adjustedSecond = remainder % SECONDS_PER_MINUTE;
   return {
-    time: `${pad(adjustedHour)}:${pad(adjustedMinute)}:${pad(second)}`,
+    time: `${pad(adjustedHour)}:${pad(adjustedMinute)}:${pad(adjustedSecond)}`,
     dayShift
   };
 }
@@ -741,6 +748,7 @@ function expandTiming(
 ): ExpandedTime[] {
   const mealOffsets: MealOffsetMap = config.mealOffsets ?? {};
   const eventClock = config.eventClock ?? {};
+  const exactOffset = getExactTimingOffsetMinutes(repeat);
   const normalized: ExpandedTime[] = [];
   const clockValue = eventClock[code];
   if (clockValue) {
@@ -753,7 +761,7 @@ function expandTiming(
       }
       normalized.push(applyOffset(
         normalizeClock(base),
-        repeat.offset !== undefined ? 0 : mealOffsets[code] ?? 0
+        exactOffset !== undefined ? 0 : mealOffsets[code] ?? 0
       ));
     }
   } else if (code === EventTiming["After Meal"]) {
@@ -764,7 +772,7 @@ function expandTiming(
       }
       normalized.push(applyOffset(
         normalizeClock(base),
-        repeat.offset !== undefined ? 0 : mealOffsets[code] ?? 0
+        exactOffset !== undefined ? 0 : mealOffsets[code] ?? 0
       ));
     }
   } else if (code === EventTiming.Meal) {
@@ -780,7 +788,7 @@ function expandTiming(
     const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
-      const offset = repeat.offset !== undefined
+      const offset = exactOffset !== undefined
         ? 0
         : mealOffsets[code] ?? mealOffsets[EventTiming["Before Meal"]] ?? 0;
       normalized.push(offset ? applyOffset(baseClock, offset) : { time: baseClock, dayShift: 0 });
@@ -790,16 +798,16 @@ function expandTiming(
     const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
-      const offset = repeat.offset !== undefined
+      const offset = exactOffset !== undefined
         ? 0
         : mealOffsets[code] ?? mealOffsets[EventTiming["After Meal"]] ?? 0;
       normalized.push(offset ? applyOffset(baseClock, offset) : { time: baseClock, dayShift: 0 });
     }
   }
 
-  if (repeat.offset !== undefined && normalized.length) {
+  if (exactOffset !== undefined && normalized.length) {
     return normalized.map((entry) => {
-      const adjusted = applyOffset(entry.time, signedEventOffset(code, repeat.offset ?? 0));
+      const adjusted = applyOffset(entry.time, signedEventOffset(code, exactOffset ?? 0));
       return {
         time: adjusted.time,
         dayShift: entry.dayShift + adjusted.dayShift
@@ -875,11 +883,12 @@ function inferWhenFallbackEntries(
 ): ExpandedTime[] {
   const entries: ExpandedTime[] = [];
   const seen = new Set<string>();
+  const exactOffset = getExactTimingOffsetMinutes(repeat);
 
   const addClock = (clock: string, code: string) => {
     const normalized = normalizeClock(clock);
-    const adjusted = repeat.offset !== undefined
-      ? applyOffset(normalized, signedEventOffset(code, repeat.offset ?? 0))
+    const adjusted = exactOffset !== undefined
+      ? applyOffset(normalized, signedEventOffset(code, exactOffset ?? 0))
       : { time: normalized, dayShift: 0 };
     const key = `${adjusted.dayShift}|${adjusted.time}`;
     if (seen.has(key)) {
@@ -894,7 +903,7 @@ function inferWhenFallbackEntries(
       continue;
     }
     let fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
-    if (repeat.offset !== undefined) {
+    if (exactOffset !== undefined) {
       if (code === EventTiming["Before Meal"] || code === EventTiming["After Meal"]) {
         fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[EventTiming.Meal];
       } else if (code in SPECIFIC_BEFORE_MEALS) {

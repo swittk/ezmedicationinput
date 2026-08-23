@@ -274,6 +274,7 @@ export const EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES =
 export const EVENT_OFFSET_FRACTIONS = new Map<string, number>(
   numberEntries(source.eventOffsetFractions ?? {})
 );
+export const EVENT_OFFSET_ARTICLES = setOf(source.eventOffsetArticles ?? []);
 
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
 export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);
