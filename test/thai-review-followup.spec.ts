@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatSig, parseSig } from "../src/index";
+import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
 const SNOMED = "http://snomed.info/sct";
 const LOCAL_ACTION = "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action";
@@ -145,6 +146,94 @@ describe("Thai formatter human-review follow-up", () => {
     const formatted = formatSig(codeOnlySite, "long", { locale: "th" });
     expect(formatted).toContain("บริเวณอวัยวะเพศภายนอก");
     expect(formatted).not.toContain("Entire external genitalia");
+  });
+
+  it("prefers coded Thai body-site translations over name fallbacks", () => {
+    const dosage: FhirDosage = {
+      route: { coding: [{ system: SNOMED, code: "6064005", display: "Topical route" }] },
+      site: {
+        text: "rectum",
+        coding: [{ system: SNOMED, code: "34402009", display: "Rectum" }]
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "th" })).toBe("ทาบริเวณทวารหนัก.");
+  });
+
+  it("preserves weekly frequency ranges when weekday anchors are present", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      route: { coding: [{ system: SNOMED, code: "26643006", display: "Oral route" }] },
+      timing: {
+        repeat: {
+          frequency: 1,
+          frequencyMax: 2,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: [FhirDayOfWeek.Tuesday]
+        }
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "th" }))
+      .toBe("รับประทานครั้งละ 1 เม็ด สัปดาห์ละ 1 ถึง 2 ครั้ง ในวันอังคาร.");
+  });
+
+  it("preserves Thai PRN source wording even when an exact coding is present", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      route: { coding: [{ system: SNOMED, code: "26643006", display: "Oral route" }] },
+      asNeededBoolean: true,
+      asNeededFor: [{
+        text: "ไข้สูง",
+        coding: [{ system: SNOMED, code: "386661006", display: "Fever" }]
+      }]
+    };
+    expect(formatSig(dosage, "long", { locale: "th" }))
+      .toBe("รับประทานครั้งละ 1 เม็ด ใช้เมื่อไข้สูง.");
+  });
+
+  it("places intravitreal eye sites early like the other early-site routes", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 0.05, unit: "mL" } }],
+      route: {
+        coding: [{
+          system: SNOMED,
+          code: "418401004",
+          display: "Intravitreal route (qualifier value)"
+        }]
+      },
+      site: {
+        text: "right eye",
+        coding: [{ system: SNOMED, code: "1290032005", display: "Structure of right eye proper" }]
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "th" }))
+      .toBe("ฉีดตาขวา ครั้งละ 0.05 มิลลิลิตร.");
+  });
+
+  it("does not let a standalone instruction graph hide administration timing or duration", () => {
+    const warning = parseSig("do not take with food").fhir;
+    const withTimingCode: FhirDosage = {
+      ...warning,
+      timing: { code: { coding: [{ code: "BID" }], text: "BID" } }
+    };
+    expect(formatSig(withTimingCode, "long", { locale: "th" }))
+      .toBe("ใช้ยา วันละ 2 ครั้ง. ห้ามรับประทานพร้อมอาหาร.");
+
+    const withDuration: FhirDosage = {
+      ...warning,
+      timing: {
+        repeat: {
+          boundsDuration: {
+            value: 5,
+            unit: "days",
+            system: "http://unitsofmeasure.org",
+            code: "d"
+          }
+        }
+      }
+    };
+    expect(formatSig(withDuration, "long", { locale: "th" }))
+      .toBe("ใช้ยา เป็นเวลา 5 วัน. ห้ามรับประทานพร้อมอาหาร.");
   });
 
   it("maps Implant to exact SNOMED method and subcutaneous route codes", () => {

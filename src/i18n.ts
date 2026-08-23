@@ -998,6 +998,9 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
     if (schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1)) {
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `สัปดาห์ละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
+      }
       return frequency !== undefined
         ? `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`
         : undefined;
@@ -1332,6 +1335,12 @@ function translateSpatialSiteThai(
   if (!spatialRelation?.relationText) {
     return undefined;
   }
+  if (site) {
+    const curated = THAI_SITE_TRANSLATIONS[normalizeBodySiteKey(site)];
+    if (curated) {
+      return curated;
+    }
+  }
   const prefix = THAI_SPATIAL_RELATION_PREFIXES[spatialRelation.relationText];
   if (!prefix) {
     return undefined;
@@ -1369,10 +1378,6 @@ function translateSiteThai(
   if (!normalized) {
     return site;
   }
-  const direct = THAI_SITE_TRANSLATIONS[normalized];
-  if (direct) {
-    return direct;
-  }
   const spatial = translateSpatialSiteThai(site, spatialRelation);
   if (spatial) {
     return spatial;
@@ -1382,6 +1387,10 @@ function translateSiteThai(
     if (translatedByCode) {
       return translatedByCode;
     }
+  }
+  const direct = THAI_SITE_TRANSLATIONS[normalized];
+  if (direct) {
+    return direct;
   }
   return site;
 }
@@ -1471,7 +1480,24 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
       coding.system ?? "http://snomed.info/sct",
       coding.code
     );
-    text = definition?.conditionI18n?.th ?? (sourceIsThai ? text : definition?.i18n?.th ?? text);
+    if (sourceIsThai) {
+      const normalizeSurface = (value: string | undefined) =>
+        value?.trim().toLowerCase().replace(/\s+/g, " ");
+      const normalizedSource = normalizeSurface(sourceText);
+      const terminologySurfaces = [
+        definition?.i18n?.th,
+        definition?.conditionI18n?.th,
+        ...(definition?.aliases ?? [])
+      ].map(normalizeSurface).filter((value): value is string => Boolean(value));
+      const sourceIsRegisteredSurface = Boolean(
+        normalizedSource && terminologySurfaces.indexOf(normalizedSource) !== -1
+      );
+      if (sourceIsRegisteredSurface) {
+        text = definition?.conditionI18n?.th ?? text;
+      }
+    } else {
+      text = definition?.conditionI18n?.th ?? definition?.i18n?.th ?? text;
+    }
   }
   const spatial = translateSpatialSiteThai(undefined, reason.spatialRelation);
   if (text && spatial) {
@@ -1687,7 +1713,10 @@ function formatLongThai(
   const segments: string[] = [];
   const routePrefersEarlySite = Boolean(
     clause.route?.code && THAI_EARLY_SITE_ROUTES.has(clause.route.code) &&
-    baseVerb === "หยอด"
+    (
+      baseVerb === "หยอด" ||
+      clause.route.code === RouteCode["Intravitreal route (qualifier value)"]
+    )
   );
   const siteFirst = Boolean(sitePart) && options?.sitePlacement !== "trailing" && (
     routePrefersEarlySite || (
@@ -1864,7 +1893,9 @@ function formatLongThai(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
-    schedule.count !== undefined
+    schedule.count !== undefined || schedule.timingCode ||
+    schedule.duration !== undefined || schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined
   );
   const graphCanStandAlone = Boolean(
     !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&
