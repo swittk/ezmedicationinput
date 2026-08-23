@@ -41,7 +41,29 @@ function getThaiWordSegmenter(): IntlWordSegmenter | undefined {
   }
 }
 
-function pushTextRun(tokens: SurfaceToken[], original: string, start: number): void {
+function splitThaiLatinRuns(value: string): Array<{ text: string; offset: number }> {
+  const runs: Array<{ text: string; offset: number }> = [];
+  let runStart = 0;
+  const script = (char: string): "thai" | "latin" | undefined =>
+    THAI_SCRIPT.test(char) ? "thai" : /[A-Za-z]/.test(char) ? "latin" : undefined;
+
+  for (let index = 1; index < value.length; index += 1) {
+    const previous = script(value[index - 1]);
+    const current = script(value[index]);
+    if (previous && current && previous !== current) {
+      runs.push({ text: value.slice(runStart, index), offset: runStart });
+      runStart = index;
+    }
+  }
+  runs.push({ text: value.slice(runStart), offset: runStart });
+  return runs;
+}
+
+function pushSingleScriptRun(
+  tokens: SurfaceToken[],
+  original: string,
+  start: number
+): void {
   const segmenter = THAI_SCRIPT.test(original) ? getThaiWordSegmenter() : undefined;
   if (!segmenter) {
     tokens.push({
@@ -71,6 +93,14 @@ function pushTextRun(tokens: SurfaceToken[], original: string, start: number): v
       start: partStart,
       end: partStart + part.segment.length
     });
+  }
+}
+
+function pushTextRun(tokens: SurfaceToken[], original: string, start: number): void {
+  for (const run of splitThaiLatinRuns(original)) {
+    if (run.text) {
+      pushSingleScriptRun(tokens, run.text, start + run.offset);
+    }
   }
 }
 

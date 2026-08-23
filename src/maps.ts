@@ -3316,11 +3316,11 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
     }
   },
   {
-    names: ["dizziness", "giddiness"],
+    names: ["dizziness", "dizzy", "giddiness"],
     definition: {
       coding: { system: SNOMED_SYSTEM, code: "404640003", display: "Dizziness" },
       text: "Dizziness",
-      aliases: ["เวียนหัว", "เวียนศีรษะ"],
+      aliases: ["เวียนหัว", "เวียนศีรษะ", "มึนหัว", "มึนงง"],
       i18n: { th: "เวียนศีรษะ" }
     }
   },

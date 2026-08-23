@@ -1843,6 +1843,19 @@ describe("parseSig core scenarios", () => {
     }
   });
 
+  it("codes common Thai and English dizziness variants consistently", () => {
+    const variants = ["เวียนหัว", "มึนหัว", "มึนงง", "dizzy", "dizziness"] as const;
+    for (const variant of variants) {
+      const result = parseSig(`กินวันละครั้งก่อนนอนเมื่อมีอาการ${variant}`, { locale: "th" });
+      expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toMatchObject({
+        system: "http://snomed.info/sct",
+        code: "404640003",
+        display: "Dizziness"
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
   it("accepts Thai aliases for expanded ambulatory PRN reasons", () => {
     const cases = [
       ["1 tab po prn ปวดหัว", "25064002", "ปวดหัว"],
