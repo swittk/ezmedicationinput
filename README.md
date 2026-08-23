@@ -108,11 +108,15 @@ result.fhir.additionalInstruction;
 // → [{ text: "Do not exceed 6 tablets daily" }]
 ```
 
-Customize the dictionaries and lookups through `ParseOptions`:
+Default symptom vocabulary is vendored declaratively in `symptom-terminology.json`.
+It currently contains 100 exact coded symptom concepts with Thai/English surfaces;
+HPSG PRN/condition recognition, coding, localization, and `suggestSig` consume the
+same derived terminology index. Applications can add shared symptom vocabulary at
+runtime through `symptomMap`:
 
 ```ts
 parseSig(input, {
-  prnReasonMap: {
+  symptomMap: {
     migraine: {
       text: "Migraine",
       coding: {
@@ -126,6 +130,12 @@ parseSig(input, {
   prnReasonSuggestionResolvers: async (request) => terminologyService.suggest(request),
 });
 ```
+
+`prnReasonMap` remains supported as a backward-compatible PRN-only override and
+takes precedence over `symptomMap` for the same surface. Public helpers
+`listSymptomDefinitions`, `resolveSymptomDefinition`, and
+`findSymptomDefinitionByCoding` expose the default terminology without coupling
+callers to PRN internals.
 
 Use `{reason}` in the sig string (e.g. `prn {migraine}`) to force a lookup even
 when a direct match exists. Additional instructions are sourced from a built-in

@@ -1,12 +1,12 @@
 import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_BODY_SITE_SNOMED,
-  DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_SYNONYMS,
   EVENT_TIMING_TOKENS,
   TIMING_ABBREVIATIONS
 } from "../maps";
+import { DEFAULT_SYMPTOM_DEFINITIONS } from "../symptom-terminology";
 import unitTerminologySource from "../unit-terminology.json";
 import instructionActionSource from "../instruction-action-terminology.json";
 import instructionConceptSource from "../instruction-concept-terminology.json";
@@ -207,7 +207,7 @@ for (const daySurface of Object.keys(DAY_OF_WEEK_TOKENS)) {
 }
 
 registerKnownThaiTerms(Object.keys(DEFAULT_BODY_SITE_SNOMED));
-registerKnownThaiTerms(Object.keys(DEFAULT_PRN_REASON_DEFINITIONS));
+registerKnownThaiTerms(Object.keys(DEFAULT_SYMPTOM_DEFINITIONS));
 registerKnownThaiTerms(Object.keys(DEFAULT_ROUTE_SYNONYMS));
 registerKnownThaiTerms(Object.keys(DEFAULT_UNIT_SYNONYMS));
 registerKnownThaiTerms(Object.keys(DAY_OF_WEEK_TOKENS));

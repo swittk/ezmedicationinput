@@ -15,6 +15,10 @@ function runNode(args: string[], code: string): {
   buildMedicationInstructionActionCodeSystemType?: string;
   listMedicationInstructionConceptsType?: string;
   buildMedicationInstructionConceptCodeSystemType?: string;
+  listSymptomDefinitionsType?: string;
+  resolveSymptomDefinitionType?: string;
+  findSymptomDefinitionByCodingType?: string;
+  symptomCount?: number;
   timingFrequencyMinExtensionUrl?: string;
   roundTripText?: string;
   roundTripSiteCode?: string;
@@ -86,6 +90,10 @@ describe("published package entrypoints", () => {
           buildMedicationInstructionActionCodeSystemType: typeof mod.buildMedicationInstructionActionCodeSystem,
           listMedicationInstructionConceptsType: typeof mod.listMedicationInstructionConcepts,
           buildMedicationInstructionConceptCodeSystemType: typeof mod.buildMedicationInstructionConceptCodeSystem,
+          listSymptomDefinitionsType: typeof mod.listSymptomDefinitions,
+          resolveSymptomDefinitionType: typeof mod.resolveSymptomDefinition,
+          findSymptomDefinitionByCodingType: typeof mod.findSymptomDefinitionByCoding,
+          symptomCount: mod.listSymptomDefinitions().length,
           timingFrequencyMinExtensionUrl: mod.TIMING_FREQUENCY_MIN_EXTENSION_URL,
           longText: actions.map((action) => action.predicate.lemma).join(",")
         }));
@@ -101,6 +109,10 @@ describe("published package entrypoints", () => {
       buildMedicationInstructionActionCodeSystemType: "function",
       listMedicationInstructionConceptsType: "function",
       buildMedicationInstructionConceptCodeSystemType: "function",
+      listSymptomDefinitionsType: "function",
+      resolveSymptomDefinitionType: "function",
+      findSymptomDefinitionByCodingType: "function",
+      symptomCount: 100,
       timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
       longText: "shake,rinse"
     });

@@ -1,12 +1,14 @@
 import {
-  DEFAULT_PRN_REASON_DEFINITIONS,
   EVENT_TIMING_TOKENS,
   TIMING_ABBREVIATIONS,
   WORD_FREQUENCIES,
-  normalizeBodySiteKey,
-  normalizePrnReasonKey
+  normalizeBodySiteKey
 } from "../../maps";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
+import {
+  normalizeSymptomKey,
+  resolveSymptomDefinition
+} from "../../symptom-terminology";
 import { LexKind } from "../../lexer/token-types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
@@ -98,26 +100,36 @@ interface PrnReasonParseOptions {
   predicative?: boolean;
 }
 
-function isKnownPrnReasonText(text: string): boolean {
-  const canonical = normalizePrnReasonKey(text);
-  return Boolean(canonical && DEFAULT_PRN_REASON_DEFINITIONS[canonical]);
+function isKnownPrnReasonText(context: HpsgClauseContext, text: string): boolean {
+  return Boolean(resolveSymptomDefinition(
+    text,
+    context.options?.prnReasonMap,
+    context.options?.symptomMap
+  ));
 }
 
 function normalizeLocatedReasonHead(text: string): string | undefined {
-  const canonical = normalizePrnReasonKey(text);
+  const canonical = normalizeSymptomKey(text);
   if (!canonical) {
     return undefined;
   }
   return PRN_GENERIC_LOCATED_HEADS.get(canonical) ?? canonical;
 }
 
-function isLocatedReasonHead(text: string): boolean {
+function isLocatedReasonHead(context: HpsgClauseContext, text: string): boolean {
   const canonical = normalizeLocatedReasonHead(text);
-  return Boolean(canonical && (DEFAULT_PRN_REASON_DEFINITIONS[canonical] || PRN_GENERIC_LOCATED_HEADS.has(canonical)));
+  return Boolean(canonical && (
+    resolveSymptomDefinition(
+      canonical,
+      context.options?.prnReasonMap,
+      context.options?.symptomMap
+    ) ||
+    PRN_GENERIC_LOCATED_HEADS.has(canonical)
+  ));
 }
 
 function normalizePredicativeReasonText(text: string): string {
-  return PRN_PREDICATE_REASON_NORMALIZATIONS.get(normalizePrnReasonKey(text) ?? "") ?? text;
+  return PRN_PREDICATE_REASON_NORMALIZATIONS.get(normalizeSymptomKey(text) ?? "") ?? text;
 }
 
 function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boolean {
@@ -141,7 +153,7 @@ function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boole
       break;
     }
     parts.push(token);
-    if (isKnownPrnReasonText(joinTokenText(parts)) || isLocatedReasonHead(joinTokenText(parts))) {
+    if (isKnownPrnReasonText(context, joinTokenText(parts)) || isLocatedReasonHead(context, joinTokenText(parts))) {
       return true;
     }
   }
@@ -256,7 +268,7 @@ function createPrnReasonRequest(
     })
     : undefined;
   const spatialTargetCoding = site?.spatialRelation?.targetCoding;
-  const canonical = normalizePrnReasonKey(text);
+  const canonical = normalizeSymptomKey(text);
   const headCanonical = headText ? normalizeLocatedReasonHead(headText) : undefined;
   return {
     text,
@@ -307,8 +319,8 @@ function parseLocatedPrnAtom(
     ? normalizePredicativeReasonText(cleanDirectText)
     : cleanDirectText;
   if (
-    isKnownPrnReasonText(cleanDirectText) ||
-    (predicativeText !== cleanDirectText && isKnownPrnReasonText(predicativeText))
+    isKnownPrnReasonText(context, cleanDirectText) ||
+    (predicativeText !== cleanDirectText && isKnownPrnReasonText(context, predicativeText))
   ) {
     return createPrnReasonRequest(context, predicativeText, tokens);
   }
@@ -330,7 +342,7 @@ function parseLocatedPrnAtom(
     const normalizedHead = normalizePredicativeReasonText(headText);
     const siteText = joinTokenText(tokens.slice(index));
     if (
-      isLocatedReasonHead(normalizedHead) &&
+      isLocatedReasonHead(context, normalizedHead) &&
       resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
@@ -344,7 +356,7 @@ function parseLocatedPrnAtom(
     const headText = joinTokenText(tokens.slice(index));
     const normalizedHead = normalizePredicativeReasonText(headText);
     if (
-      isLocatedReasonHead(normalizedHead) &&
+      isLocatedReasonHead(context, normalizedHead) &&
       resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
@@ -375,11 +387,11 @@ function parsePrnReasonAtoms(
   if (reasonTokens.length === 1) {
     const token = reasonTokens[0];
     const text = token.original.trim();
-    if (hasLexicalSeparator(text, PRN_COMPACT_REASON_SEPARATORS) && !isKnownPrnReasonText(text)) {
+    if (hasLexicalSeparator(text, PRN_COMPACT_REASON_SEPARATORS) && !isKnownPrnReasonText(context, text)) {
       const parts = splitByLexicalSeparators(text, PRN_COMPACT_REASON_SEPARATORS)
         .map((part) => part.trim())
         .filter(Boolean);
-      if (parts.length > 1 && parts.every((part) => isKnownPrnReasonText(part) || isLocatedReasonHead(part))) {
+      if (parts.length > 1 && parts.every((part) => isKnownPrnReasonText(context, part) || isLocatedReasonHead(context, part))) {
         return parts.map((part) => createPrnReasonRequest(context, part, [token]));
       }
     }
@@ -463,7 +475,7 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
         prnReasonBoundary(lower, context) ||
         startsDoseComplement(context, cursor) ||
         isScheduleLead(context, cursor)
-      ) && !isKnownPrnReasonText(lower)) {
+      ) && !isKnownPrnReasonText(context, lower)) {
         break;
       }
       body.push(item);
@@ -473,7 +485,7 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
     let reasonTokens: Token[] | undefined;
     for (let index = 1; index < body.length; index += 1) {
       const candidate = body.slice(index);
-      if (isKnownPrnReasonText(joinTokenText(candidate))) {
+      if (isKnownPrnReasonText(context, joinTokenText(candidate))) {
         reasonTokens = candidate;
         break;
       }
@@ -481,7 +493,7 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
     if (!reasonTokens) {
       for (let index = 1; index < body.length; index += 1) {
         const candidate = [body[index]];
-        if (isKnownPrnReasonText(joinTokenText(candidate))) {
+        if (isKnownPrnReasonText(context, joinTokenText(candidate))) {
           reasonTokens = candidate;
           break;
         }
@@ -494,7 +506,7 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
     if (!range) return [];
     const text = context.state.input.slice(range.start, range.end).trim();
     const reasonText = joinTokenText(reasonTokens);
-    const canonical = normalizePrnReasonKey(reasonText);
+    const canonical = normalizeSymptomKey(reasonText);
 
     return [
       lexicalSign({
@@ -636,7 +648,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           startsDoseComplement(context, cursor) ||
           (reasonTokens.length > 0 && isScheduleLead(context, cursor))
         ) &&
-        !isKnownPrnReasonText(lower)
+        !isKnownPrnReasonText(context, lower)
       ) {
         break;
       }
@@ -662,7 +674,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       predicative: isStandaloneConditionalLead
     });
     const primaryRequest = reasonAtoms[0]?.request;
-    const canonical = normalizePrnReasonKey(reasonText);
+    const canonical = normalizeSymptomKey(reasonText);
     return [
       lexicalSign({
         type: "prn-sign",

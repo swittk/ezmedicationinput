@@ -16,7 +16,6 @@ import { findUnparsedTokenGroups, parseClauseState } from "./parser";
 import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_BODY_SITE_SNOMED,
-  DEFAULT_PRN_REASON_DEFINITIONS,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
   DEFAULT_UNIT_SYNONYMS,
@@ -25,6 +24,7 @@ import {
   ROUTE_TEXT,
   TIMING_ABBREVIATIONS,
 } from "./maps";
+import { DEFAULT_SYMPTOM_DEFINITIONS } from "./symptom-terminology";
 import { ParseOptions, RouteCode } from "./types";
 
 export interface SuggestSigOptions extends ParseOptions {
@@ -349,8 +349,8 @@ function buildPrnReasons(options?: SuggestSigOptions): string[] {
   // Explicit caller vocabulary ranks first.
   for (const reason of options?.prnReasons ?? []) add(reason);
 
-  const custom = options?.prnReasonMap;
-  if (custom) {
+  for (const custom of [options?.prnReasonMap, options?.symptomMap]) {
+    if (!custom) continue;
     for (const surface in custom) {
       if (!Object.prototype.hasOwnProperty.call(custom, surface)) continue;
       const definition = custom[surface];
@@ -361,13 +361,13 @@ function buildPrnReasons(options?: SuggestSigOptions): string[] {
   }
 
   // Canonical parser-terminology labels rank ahead of their many aliases.
-  for (const surface in DEFAULT_PRN_REASON_DEFINITIONS) {
-    if (!Object.prototype.hasOwnProperty.call(DEFAULT_PRN_REASON_DEFINITIONS, surface)) continue;
-    const definition = DEFAULT_PRN_REASON_DEFINITIONS[surface];
+  for (const surface in DEFAULT_SYMPTOM_DEFINITIONS) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_SYMPTOM_DEFINITIONS, surface)) continue;
+    const definition = DEFAULT_SYMPTOM_DEFINITIONS[surface];
     add(thai ? definition.conditionI18n?.th ?? definition.i18n?.th : definition.text ?? surface);
   }
-  for (const surface in DEFAULT_PRN_REASON_DEFINITIONS) {
-    if (!Object.prototype.hasOwnProperty.call(DEFAULT_PRN_REASON_DEFINITIONS, surface)) continue;
+  for (const surface in DEFAULT_SYMPTOM_DEFINITIONS) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_SYMPTOM_DEFINITIONS, surface)) continue;
     add(surface);
   }
 

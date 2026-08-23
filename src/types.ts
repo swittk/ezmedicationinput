@@ -494,10 +494,13 @@ export interface CodeableConceptDefinition {
   i18n?: Record<string, string>;
 }
 
-export interface PrnReasonDefinition extends CodeableConceptDefinition {
+export interface SymptomDefinition extends CodeableConceptDefinition {
   /** Locale-specific surface proposition used after a conditional such as Thai `เมื่อ`. */
   conditionI18n?: Record<string, string>;
 }
+
+/** Backward-compatible PRN view of the shared symptom terminology. */
+export interface PrnReasonDefinition extends SymptomDefinition {}
 
 export interface AdditionalInstructionDefinition
   extends CodeableConceptDefinition {
@@ -1080,7 +1083,13 @@ export interface ParseOptions extends FormatOptions {
    */
   siteCodeSuggestionResolvers?: SiteCodeSuggestionResolver | SiteCodeSuggestionResolver[];
   /**
-   * Optional dictionary for translating PRN reason phrases into coded concepts.
+   * Optional application/institution symptom vocabulary shared by conditions,
+   * PRN indications, HPSG symptom recognition, and suggestion surfaces.
+   */
+  symptomMap?: Record<string, SymptomDefinition>;
+  /**
+   * Backward-compatible PRN-specific symptom overrides. When both maps define
+   * the same surface, this narrower PRN map takes precedence.
    */
   prnReasonMap?: Record<string, PrnReasonDefinition>;
   /**

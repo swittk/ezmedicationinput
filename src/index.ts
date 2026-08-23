@@ -59,6 +59,13 @@ export {
 } from "./instruction-concept-terminology";
 export type { MedicationInstructionConceptCodeSystem } from "./instruction-concept-terminology";
 export {
+  findSymptomDefinitionByCoding,
+  listSymptomDefinitions,
+  normalizeSymptomKey,
+  resolveSymptomDefinition
+} from "./symptom-terminology";
+export type { SymptomDictionaryEntry } from "./symptom-terminology";
+export {
   MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
   buildInstructionGraphExtension,
   parseInstructionGraphExtension
