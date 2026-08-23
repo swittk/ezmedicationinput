@@ -582,7 +582,10 @@ export interface AdviceFrame {
     i18n?: Record<string, string>;
     /** Persisted realization profile so caller-owned actions remain deterministic after parse/FHIR round-trip. */
     realizer?: MedicationInstructionActionRealizer;
-    realizerConfig?: { thaiFallbackObject?: string };
+    realizerConfig?: {
+      thaiFallbackObject?: string;
+      thaiSuppressActivityConcepts?: string[];
+    };
     /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
   };
@@ -844,6 +847,7 @@ export interface MedicationInstructionActionDefinition {
   };
   realizerConfig?: {
     thaiFallbackObject?: string;
+    thaiSuppressActivityConcepts?: string[];
   };
   continuationLicenses?: Array<{
     candidateAction: string;

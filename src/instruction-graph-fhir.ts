@@ -116,6 +116,9 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   }
   add(nested, valueCode("predicateRealizer", frame.predicate.realizer));
   add(nested, valueString("predicateRealizerThaiFallbackObject", frame.predicate.realizerConfig?.thaiFallbackObject));
+  for (const conceptId of frame.predicate.realizerConfig?.thaiSuppressActivityConcepts ?? []) {
+    add(nested, valueString("predicateRealizerThaiSuppressActivityConcept", conceptId));
+  }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: { ...coding } });
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
@@ -221,6 +224,10 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const argument = parseArgumentExtension(argumentExtension);
     if (argument) args.push(argument);
   }
+  const thaiSuppressActivityConcepts = children(
+    extension,
+    "predicateRealizerThaiSuppressActivityConcept"
+  ).map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
   const predicateI18n: Record<string, string> = {};
   for (const translation of children(extension, "predicateTranslation")) {
     const locale = child(translation, "locale")?.valueCode;
@@ -240,8 +247,14 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
       i18n: Object.keys(predicateI18n).length ? predicateI18n : undefined,
       semanticClass: child(extension, "semanticClass")?.valueString,
       realizer: child(extension, "predicateRealizer")?.valueCode as AdviceFrame["predicate"]["realizer"] | undefined,
-      realizerConfig: child(extension, "predicateRealizerThaiFallbackObject")?.valueString
-        ? { thaiFallbackObject: child(extension, "predicateRealizerThaiFallbackObject")?.valueString }
+      realizerConfig: child(extension, "predicateRealizerThaiFallbackObject")?.valueString ||
+        thaiSuppressActivityConcepts.length
+        ? {
+            thaiFallbackObject: child(extension, "predicateRealizerThaiFallbackObject")?.valueString,
+            thaiSuppressActivityConcepts: thaiSuppressActivityConcepts.length
+              ? thaiSuppressActivityConcepts
+              : undefined
+          }
         : undefined,
       codings: children(extension, "predicateCoding")
         .map((entry) => entry.valueCoding)

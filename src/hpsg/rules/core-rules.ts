@@ -20,6 +20,7 @@ import { resolveMedicationInstructionAction } from "../../instruction-action-ter
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { FREQUENCY_TIMES_WORDS, parseNumericRange } from "../timing-lexicon";
 import {
+  ACTION_COORDINATION_CONNECTORS,
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
@@ -84,7 +85,9 @@ function looksLikeCoordinatedNoun(context: HpsgClauseContext, start: number, ver
   if (METHOD_NOUN_LEFT_CONTEXT.get(verb)?.has(previousLower)) {
     return true;
   }
-  return previous?.original === "," && (next?.original === "," || nextLower === "or" || nextLower === "and");
+  return previous?.original === "," && (
+    next?.original === "," || ACTION_COORDINATION_CONNECTORS.has(nextLower)
+  );
 }
 
 function methodTokenBelongsToNegatedDirective(

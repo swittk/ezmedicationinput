@@ -16,6 +16,7 @@ import {
 } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
+  ACTION_SEQUENCE_MARKERS,
   EVENT_ARTICLE_TOKENS,
   EVENT_PREPOSITIONS,
   FREE_TEXT_DIRECTIVE_STARTS,
@@ -411,7 +412,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (
       consumed.length > 0 &&
       sequenceLead &&
-      normalizeTokenLower(sequenceLead) === "then"
+      ACTION_SEQUENCE_MARKERS.has(normalizeTokenLower(sequenceLead))
     ) {
       const next = context.tokens[cursor + 1];
       const nextLower = next ? normalizeTokenLower(next) : "";

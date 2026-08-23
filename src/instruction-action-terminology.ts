@@ -83,6 +83,17 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     : undefined;
 }
 
+function cloneRealizerConfig(
+  config: MedicationInstructionActionDefinition["realizerConfig"]
+): MedicationInstructionActionDefinition["realizerConfig"] {
+  return config ? {
+    ...config,
+    thaiSuppressActivityConcepts: config.thaiSuppressActivityConcepts
+      ? [...config.thaiSuppressActivityConcepts]
+      : undefined
+  } : undefined;
+}
+
 function cloneContextualCodings(
   rules: MedicationInstructionActionDefinition["contextualCodings"]
 ): MedicationInstructionActionDefinition["contextualCodings"] {
@@ -121,7 +132,7 @@ function cloneDefinition(
       primaryConcepts: definition.argumentParserConfig.primaryConcepts ? [...definition.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: definition.realizerConfig ? { ...definition.realizerConfig } : undefined,
+    realizerConfig: cloneRealizerConfig(definition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
@@ -150,7 +161,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
       primaryConcepts: sourceDefinition.argumentParserConfig.primaryConcepts ? [...sourceDefinition.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: sourceDefinition.argumentParserConfig.secondaryConcepts ? [...sourceDefinition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: sourceDefinition.realizerConfig ? { ...sourceDefinition.realizerConfig } : undefined,
+    realizerConfig: cloneRealizerConfig(sourceDefinition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
@@ -183,7 +194,7 @@ function normalizeCustomDefinition(
       primaryConcepts: input.argumentParserConfig.primaryConcepts ? [...input.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: input.argumentParserConfig.secondaryConcepts ? [...input.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: input.realizerConfig ? { ...input.realizerConfig } : undefined,
+    realizerConfig: cloneRealizerConfig(input.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),

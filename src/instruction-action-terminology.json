@@ -431,6 +431,11 @@
       "argumentParserConfig": {
         "implicitMatchedConcept": "use",
         "implicitMatchedRole": "activity"
+      },
+      "realizerConfig": {
+        "thaiSuppressActivityConcepts": [
+          "use"
+        ]
       }
     },
     {

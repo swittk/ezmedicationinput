@@ -11,7 +11,7 @@ import { LexKind } from "../../lexer/token-types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { Token } from "../../parser-state";
-import { PrnReasonLookupRequest } from "../../types";
+import { AdvicePolarity, PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -19,6 +19,7 @@ import {
   mapIntervalUnit
 } from "../timing-lexicon";
 import {
+  ACTION_DIRECTIVE_PREFIXES,
   AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_START_WORDS,
@@ -34,7 +35,9 @@ import {
   PRN_REASON_MULTIWORD_LEAD_INS,
   PRN_REASON_SITE_CONNECTORS,
   PRN_STANDALONE_REASON_LEADS,
-  SITE_DISPLAY_FILLERS
+  SITE_DISPLAY_FILLERS,
+  SYMPTOM_ADJUSTMENT_LEADS,
+  SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS
 } from "../lexical-classes";
 import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
 import {
@@ -418,15 +421,16 @@ function conditionalLeadBelongsToSafetyActionBefore(
   if (!METHOD_ACTION_BY_VERB[actionLower] && !resolveMedicationInstructionAction(actionLower, context.options)) {
     return false;
   }
-  const prefix = context.tokens[start - 2];
-  const prefixLower = prefix ? normalizeTokenLower(prefix) : "";
-  if (["avoid", "should-not", "don't", "dont"].indexOf(prefixLower) >= 0) return true;
-  if (prefixLower === "not") {
-    const modal = context.tokens[start - 3];
-    const modalLower = modal ? normalizeTokenLower(modal) : "";
-    return modalLower === "do" || modalLower === "should" || modalLower === "must";
-  }
-  return false;
+  const actionIndex = start - 1;
+  return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
+    if (prefix.polarity !== AdvicePolarity.Negate) return false;
+    const prefixStart = actionIndex - prefix.parts.length;
+    if (prefixStart < 0) return false;
+    return prefix.parts.every((part, offset) => {
+      const token = context.tokens[prefixStart + offset];
+      return Boolean(token && normalizeTokenLower(token) === part);
+    });
+  });
 }
 
 function hasProceduralInstructionActionAfter(
@@ -441,8 +445,6 @@ function hasProceduralInstructionActionAfter(
   }
   return false;
 }
-
-const SYMPTOM_ADJUSTMENT_LEADS = new Set(["adjust", "depending", "according", "during"]);
 
 export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.symptomAdjustment", (context, start) => {
@@ -498,13 +500,30 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
               reasons: atoms.map((atom) => ({ text: atom.text, lookupRequest: atom.request })),
               lookupRequests: atoms.map((atom) => atom.request)
             },
-            patientInstruction: normalizeTokenLower(lead) === "adjust" ? { text } : undefined
+            patientInstruction: SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS.has(normalizeTokenLower(lead))
+              ? { text }
+              : undefined
           },
           cont: { clauseKind: "administration" }
         },
         score: 24 + body.length + (canonical ? 4 : 0)
       })
     ];
+  });
+}
+
+function previousTokensEndNegatedDirectivePrefix(
+  context: HpsgClauseContext,
+  endExclusive: number
+): boolean {
+  return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
+    if (prefix.polarity !== AdvicePolarity.Negate || prefix.parts.length < 2) return false;
+    const prefixStart = endExclusive - prefix.parts.length;
+    if (prefixStart < 0) return false;
+    return prefix.parts.every((part, offset) => {
+      const token = context.tokens[prefixStart + offset];
+      return Boolean(token && normalizeTokenLower(token) === part);
+    });
   });
 }
 
@@ -525,9 +544,8 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       tokens.push(nextLead);
       cursor = start + 2;
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {
-      const previousLower = context.tokens[start - 1] ? normalizeTokenLower(context.tokens[start - 1]) : "";
       if (
-        previousLower === "not" ||
+        previousTokensEndNegatedDirectivePrefix(context, start) ||
         hasSafetyConditionalActionAfter(context, start) ||
         conditionalLeadBelongsToSafetyActionBefore(context, start) ||
         (start === 0 && hasProceduralInstructionActionAfter(context, start))

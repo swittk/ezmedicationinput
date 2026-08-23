@@ -1143,5 +1143,96 @@
       ],
       "modality": "must"
     }
+  ],
+  "actionRelationTokens": {
+    "before": "before",
+    "after": "after",
+    "for": "for",
+    "with": "with",
+    "into": "into",
+    "in": "in",
+    "on": "on",
+    "at": "on",
+    "to": "to",
+    "if": "if",
+    "unless": "unless",
+    "when": "when",
+    "while": "while",
+    "during": "during",
+    "until": "until"
+  },
+  "instructionDurationUnits": {
+    "second": "s",
+    "seconds": "s",
+    "sec": "s",
+    "secs": "s",
+    "minute": "min",
+    "minutes": "min",
+    "min": "min",
+    "mins": "min",
+    "hour": "h",
+    "hours": "h",
+    "hr": "h",
+    "hrs": "h",
+    "day": "d",
+    "days": "d"
+  },
+  "instructionDurationApproximationLeads": [
+    "about",
+    "approximately",
+    "approx",
+    "around"
+  ],
+  "instructionQuantityUnitLabels": {
+    "mL": {
+      "th": "มิลลิลิตร",
+      "enOne": "mL",
+      "enOther": "mL"
+    },
+    "min": {
+      "th": "นาที",
+      "enOne": "minute",
+      "enOther": "minutes"
+    },
+    "s": {
+      "th": "วินาที",
+      "enOne": "second",
+      "enOther": "seconds"
+    },
+    "h": {
+      "th": "ชั่วโมง",
+      "enOne": "hour",
+      "enOther": "hours"
+    },
+    "d": {
+      "th": "วัน",
+      "enOne": "day",
+      "enOther": "days"
+    },
+    "spray": {
+      "th": "พ่น",
+      "enOne": "spray",
+      "enOther": "sprays"
+    }
+  },
+  "actionSequenceMarkers": [
+    "then"
+  ],
+  "actionCoordinationConnectors": [
+    "and",
+    "or"
+  ],
+  "actionSequenceRelationTokens": [
+    "then",
+    "and"
+  ],
+  "symptomAdjustmentLeads": [
+    "adjust",
+    "depending",
+    "according",
+    "during"
+  ],
+  "symptomAdjustmentPatientInstructionLeads": [
+    "adjust"
   ]
 }

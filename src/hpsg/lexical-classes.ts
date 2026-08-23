@@ -1,4 +1,4 @@
-import { AdviceModality, AdvicePolarity, EventTiming, FhirCoding, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirCoding, RouteCode } from "../types";
 import source from "./lexical-classes.json";
 
 type MealRelation = "before" | "after" | "with";
@@ -82,6 +82,24 @@ function stringEntries(record: Record<string, string>): Array<[string, string]> 
 
 function numberRecord(record: Record<string, number>): Record<string, number> {
   return { ...record };
+}
+
+type InstructionQuantityUnitLabel = {
+  th: string;
+  enOne: string;
+  enOther: string;
+};
+
+function instructionQuantityUnitLabelMap(
+  record: Record<string, InstructionQuantityUnitLabel>
+): Map<string, InstructionQuantityUnitLabel> {
+  const result = new Map<string, InstructionQuantityUnitLabel>();
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      result.set(key, { ...record[key] });
+    }
+  }
+  return result;
 }
 
 function stringSetMap(record: Record<string, string[]>): Map<string, Set<string>> {
@@ -247,6 +265,23 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   polarity: prefix.polarity as AdvicePolarity | undefined,
   modality: prefix.modality as AdviceModality | undefined
 }));
+export const ACTION_RELATION_BY_TOKEN = new Map<string, AdviceRelation>(
+  stringEntries(source.actionRelationTokens).map(([token, relation]) =>
+    [token, relation as AdviceRelation]
+  )
+);
+export const ACTION_SEQUENCE_MARKERS = setOf(source.actionSequenceMarkers);
+export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
+export const ACTION_SEQUENCE_RELATION_TOKENS = setOf(source.actionSequenceRelationTokens);
+export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
+  stringEntries(source.instructionDurationUnits)
+);
+export const INSTRUCTION_DURATION_APPROXIMATION_LEADS = setOf(
+  source.instructionDurationApproximationLeads
+);
+export const INSTRUCTION_QUANTITY_UNIT_LABELS = instructionQuantityUnitLabelMap(
+  source.instructionQuantityUnitLabels as Record<string, InstructionQuantityUnitLabel>
+);
 export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
 export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
@@ -254,6 +289,10 @@ export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationL
 export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelationLeads);
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
+export const SYMPTOM_ADJUSTMENT_LEADS = setOf(source.symptomAdjustmentLeads);
+export const SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS = setOf(
+  source.symptomAdjustmentPatientInstructionLeads
+);
 
 export const EYE_SITE_ABBREVIATIONS = setOf(source.eyeSiteAbbreviations);
 export const NON_OCULAR_DOSE_UNITS = setOf(source.nonOcularDoseUnits);

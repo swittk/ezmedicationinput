@@ -4,10 +4,16 @@ import type { AdviceFrame, ParseOptions } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
 
-type PartMap = Readonly<Record<string, string>>;
+function permutations<T>(values: readonly T[]): T[][] {
+  if (values.length < 2) return [Array.from(values)];
+  return values.flatMap((value, index) =>
+    permutations([...values.slice(0, index), ...values.slice(index + 1)])
+      .map((tail) => [value, ...tail])
+  );
+}
 
-function surface(parts: PartMap, order: readonly string[], commaAfter?: string): string {
-  return order.map((name) => `${parts[name]}${name === commaAfter ? "," : ""}`).join(" ");
+function permutationSurfaces(parts: readonly string[]): string[] {
+  return permutations(parts).map((parts) => parts.join(" "));
 }
 
 function codeable(concept: any): string | undefined {
@@ -101,49 +107,36 @@ function expectCanonicalInvariant(results: readonly Result[]): void {
 }
 
 describe("HPSG permutation invariance", () => {
-  it("keeps site and schedule adjuncts invariant around an Apply head", () => {
-    const parts = { head: "apply", schedule: "twice daily", site: "to lesion" };
-    const variants = [
-      surface(parts, ["head", "schedule", "site"]),
-      surface(parts, ["head", "site", "schedule"]),
-      surface(parts, ["schedule", "head", "site"])
-    ];
+  it("keeps every site/schedule ordering invariant around an Apply head", () => {
+    const variants = permutationSurfaces(["apply", "to lesion", "twice daily"]);
+    expect(variants).toHaveLength(6);
     expectCanonicalInvariant(parseAll(variants));
   });
 
-  it("keeps event timing and site invariant around an Instill head", () => {
-    const variants = [
-      "instill right eye at bedtime",
-      "at bedtime instill right eye",
-      "instill at bedtime in right eye"
-    ];
+  it("keeps every event-timing/site ordering invariant around an Instill head", () => {
+    const variants = permutationSurfaces(["instill", "right eye", "at bedtime"]);
+    expect(variants).toHaveLength(6);
     expectCanonicalInvariant(parseAll(variants));
   });
 
-  it("keeps trailing, fronted, and infixed PRN adjuncts invariant", () => {
-    const parts = { head: "take", dose: "1 tab", schedule: "every 6 hours", prn: "as needed for pain" };
-    const variants = [
-      surface(parts, ["head", "dose", "schedule", "prn"]),
-      surface(parts, ["prn", "head", "dose", "schedule"], "prn"),
-      surface(parts, ["head", "prn", "dose", "schedule"])
-    ];
+  it("keeps all 24 head/dose/schedule/PRN orders invariant", () => {
+    const variants = permutationSurfaces([
+      "take", "1 tab", "every 6 hours", "as needed for pain"
+    ]);
+    expect(variants).toHaveLength(24);
     expectCanonicalInvariant(parseAll(variants, { context: { dosageForm: "tablet" } }));
   });
 
-  it("keeps code-switched site, dose, and qHS adjuncts invariant", () => {
-    const variants = [
-      "หยอด OU 1 drop qhs",
-      "qhs หยอด OU 1 drop",
-      "หยอด 1 drop OU qhs"
-    ];
+  it("keeps all 24 code-switched ocular head/site/dose/qHS orders invariant", () => {
+    const variants = permutationSurfaces(["หยอด", "OU", "1 drop", "qhs"]);
+    expect(variants).toHaveLength(24);
     expectCanonicalInvariant(parseAll(variants, { locale: "th" }));
   });
 
-  it("keeps a plain Thai prohibition invariant when BEFORE moves", () => {
-    const variants = parseAll([
-      "ห้ามรับประทานก่อนว่ายน้ำ",
-      "ก่อนว่ายน้ำห้ามรับประทาน"
-    ], { locale: "th" });
+  it("keeps every plain Thai prohibition/BEFORE order invariant", () => {
+    const surfaces = permutationSurfaces(["ห้ามรับประทาน", "ก่อนว่ายน้ำ"]);
+    expect(surfaces).toHaveLength(2);
+    const variants = parseAll(surfaces, { locale: "th" });
     expect(warningFingerprint(variants[1])).toEqual(warningFingerprint(variants[0]));
     expect(warningFingerprint(variants[0])).toMatchObject({
       predicate: "take",
@@ -155,11 +148,10 @@ describe("HPSG permutation invariance", () => {
     });
   });
 
-  it("keeps procedure-local AFTER-use scope invariant when the adjunct moves", () => {
-    const variants = parseAll([
-      "wash hands after use",
-      "after use wash hands"
-    ]);
+  it("keeps every procedure-local WASH/AFTER-use order invariant", () => {
+    const surfaces = permutationSurfaces(["wash hands", "after use"]);
+    expect(surfaces).toHaveLength(2);
+    const variants = parseAll(surfaces);
     expect(procedureFingerprint(variants[1])).toEqual(procedureFingerprint(variants[0]));
     expect(procedureFingerprint(variants[0])).toMatchObject({
       globalMethod: undefined,
@@ -170,19 +162,23 @@ describe("HPSG permutation invariance", () => {
     });
   });
 
-  it("keeps the clinician Thai dose/schedule/PRN semantics invariant across licensed orders", () => {
-    const variants = parseAll([
-      "ควรกินก่อนอาหารเย็นเมื่อมีอาการ วันละ 1 เม็ด",
-      "วันละ 1 เม็ด ควรกินก่อนอาหารเย็นเมื่อมีอาการ",
-      "เมื่อมีอาการ ควรกินก่อนอาหารเย็น วันละ 1 เม็ด",
-      "ควรกินวันละ 1 เม็ด ก่อนอาหารเย็นเมื่อมีอาการ"
-    ], { locale: "th" });
+  it("keeps all 24 clinician Thai modal/timing/PRN/dose orders invariant", () => {
+    const surfaces = permutationSurfaces([
+      "ควรกิน", "ก่อนอาหารเย็น", "เมื่อมีอาการ", "วันละ 1 เม็ด"
+    ]);
+    expect(surfaces).toHaveLength(24);
+    const variants = parseAll(surfaces, { locale: "th" });
     expectCanonicalInvariant(variants);
     for (const result of variants) {
       const take = action(result, "take");
-      expect(take).toMatchObject({ modality: "should", relation: "before" });
+      expect(take).toMatchObject({ modality: "should" });
+      expect(result.fhir.timing?.repeat?.when).toEqual(expect.arrayContaining(["AC", "EVE"]));
       expect(result.meta.canonical.clauses[0]?.instructionGraph?.coverage?.complete).toBe(true);
     }
+    expect(action(parseSig(
+      "ควรกินก่อนอาหารเย็นเมื่อมีอาการ วันละ 1 เม็ด",
+      { locale: "th" }
+    ), "take")).toMatchObject({ modality: "should", relation: "before" });
   });
 
   it("does not collapse genuinely sequence-changing permutations", () => {
