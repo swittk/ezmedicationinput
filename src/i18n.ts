@@ -495,17 +495,18 @@ const THAI_SITE_CODE_TRANSLATIONS: Record<string, string> = (() => {
       continue;
     }
 
-    let translated: string | undefined;
-    for (const name of names) {
-      const candidate = THAI_SITE_TRANSLATIONS[normalizeBodySiteKey(name)];
-      if (candidate) {
-        translated = candidate;
-        break;
-      }
+    const definitionTranslation = definition.i18n?.th?.trim();
+    if (definitionTranslation) {
+      translations[code] = definitionTranslation;
+      continue;
     }
 
-    if (translated) {
-      translations[code] = translated;
+    for (const name of names) {
+      const translated = THAI_SITE_TRANSLATIONS[normalizeBodySiteKey(name)];
+      if (translated) {
+        translations[code] = translated;
+        break;
+      }
     }
   }
 

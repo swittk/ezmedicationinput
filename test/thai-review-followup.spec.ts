@@ -134,6 +134,19 @@ describe("Thai formatter human-review follow-up", () => {
       .toBe("Wash the external genitalia. Do not wash into the vagina.");
   });
 
+  it("formats a code-only external genitalia site in Thai from the site definition", () => {
+    const parsed = parseSig("ใช้ล้างภายนอกบริเวณอวัยวะเพศ", { locale: "th" });
+    const codeOnlySite = {
+      ...parsed.fhir,
+      site: {
+        coding: [{ system: SNOMED, code: "362207005", display: "Entire external genitalia" }]
+      }
+    };
+    const formatted = formatSig(codeOnlySite, "long", { locale: "th" });
+    expect(formatted).toContain("บริเวณอวัยวะเพศภายนอก");
+    expect(formatted).not.toContain("Entire external genitalia");
+  });
+
   it("maps Implant to exact SNOMED method and subcutaneous route codes", () => {
     const parsed = parseSig("ฝัง 1 implant ใต้ผิวหนัง", { locale: "th" });
     expect(parsed.fhir.method?.coding?.[0]).toMatchObject({ system: SNOMED, code: "827107003", display: "Implant" });
