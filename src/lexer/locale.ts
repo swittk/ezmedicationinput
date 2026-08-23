@@ -236,6 +236,7 @@ function isKnownThaiDomainTerm(value: string): boolean {
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
+  { parts: ["เข้าไป", "ภายใน"], canonical: "into" },
   { parts: ["หลัง", "ตื่น", "นอน"], canonical: "wake" },
   { parts: ["ตื่น", "นอน"], canonical: "wake" },
   { parts: ["เป็น", "เวลา"], canonical: "for" },

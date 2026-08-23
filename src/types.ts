@@ -863,6 +863,8 @@ export interface MedicationInstructionActionDefinition {
     thaiSuppressActivityConcepts?: string[];
     /** Thai can omit an otherwise generic medication object for this action (e.g. รับประทานหลังอาหาร). */
     thaiImplicitMedicationObject?: boolean;
+    /** English realizes the anatomical site as the verb's direct object instead of `to/at <site>`. */
+    englishDirectSiteObject?: boolean;
   };
   continuationLicenses?: Array<{
     candidateAction: string;
@@ -885,6 +887,8 @@ export interface MedicationInstructionActionDefinition {
   contextualCodings?: MedicationInstructionActionContextualCodingRule[];
   /** A method-capable procedural action that may serve as the primary administration head. */
   primaryAdministrationHead?: boolean;
+  /** Semantically light verb that yields to an immediately following stronger administration head. */
+  supportVerb?: boolean;
   /** Positive action whose condition belongs to safety/instruction scope, not PRN administration scope. */
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;

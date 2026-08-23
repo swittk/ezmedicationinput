@@ -2226,6 +2226,23 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     const object = site ?? theme ?? substance ?? material;
     const relationTarget = activity ?? time;
     const prefix = negatedActionPrefix(frame, thai);
+    if (object && (
+      frame.relation === AdviceRelation.Into ||
+      frame.relation === AdviceRelation.In ||
+      frame.relation === AdviceRelation.On ||
+      frame.relation === AdviceRelation.To
+    )) {
+      const relationText = frame.relation === AdviceRelation.Into
+        ? (thai ? "เข้าไปใน" : "into")
+        : frame.relation === AdviceRelation.In
+          ? (thai ? "ใน" : "in")
+          : frame.relation === AdviceRelation.On
+            ? (thai ? "บน" : "on")
+            : (thai ? "ไปยัง" : "to");
+      return thai
+        ? `${prefix}${label}${relationText}${object}`
+        : `${prefix}${label.toLowerCase()} ${relationText} ${object}`;
+    }
     if (relationTarget && (
       frame.relation === AdviceRelation.Before ||
       frame.relation === AdviceRelation.After ||
@@ -2517,6 +2534,19 @@ export function realizeInstructionGraph(
     )) return false;
     if (options?.omitCanonicalAdministration &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
+      return false;
+    }
+    const definition = getMedicationInstructionAction(frame.predicate.lemma);
+    if (
+      options?.omitCanonicalAdministration &&
+      definition?.supportVerb &&
+      frame.polarity !== AdvicePolarity.Negate &&
+      frame.modality === undefined &&
+      frame.args.length === 0 &&
+      primary &&
+      frame.span.end <= primary.start &&
+      primary.start - frame.span.end <= 1
+    ) {
       return false;
     }
     const warning = frame.polarity === AdvicePolarity.Negate;

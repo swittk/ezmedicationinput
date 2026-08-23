@@ -279,6 +279,9 @@
       ],
       "argumentParser": "site-relation",
       "realizer": "site-relation",
+      "realizerConfig": {
+        "englishDirectSiteObject": true
+      },
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "785900008",
@@ -962,6 +965,7 @@
         "ใช้"
       ],
       "procedural": false,
+      "supportVerb": true,
       "acceptsAmount": true,
       "definesDose": true,
       "continuationAfterRelations": [

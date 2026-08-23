@@ -105,6 +105,35 @@ describe("Thai formatter human-review follow-up", () => {
     expect(parsed.fhir.additionalInstruction).toEqual([{ text: "ห้ามตัดแผ่นแปะ" }]);
   });
 
+  it("parses external genital wash with an internal-vaginal prohibition as typed site semantics", () => {
+    const parsed = parseSig(
+      "ใช้ล้างภายนอกบริเวณอวัยวะเพศ ห้ามล้างเข้าไปภายในบริเวณช่องคลอด",
+      { locale: "th" }
+    );
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    const warning = graph?.actions.find((action) => action.polarity === "negate");
+    expect(parsed.fhir.route?.coding?.[0]).toMatchObject({ system: SNOMED, code: "6064005", display: "Topical route" });
+    expect(parsed.fhir.site?.coding?.[0]).toMatchObject({ system: SNOMED, code: "362207005", display: "Entire external genitalia" });
+    expect(parsed.fhir.method?.coding?.[0]).toMatchObject({ system: SNOMED, code: "785900008", display: "Rinse or wash" });
+    expect(warning).toMatchObject({
+      predicate: { lemma: "wash" },
+      polarity: "negate",
+      relation: "into"
+    });
+    expect(warning?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "site",
+        conceptId: "vagina",
+        coding: expect.objectContaining({ system: SNOMED, code: "76784001", display: "Vagina" })
+      })
+    ]));
+    expect(graph?.coverage).toMatchObject({ complete: true, ratio: 1, opaqueCharacters: 0 });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.longText).toBe("ล้างบริเวณอวัยวะเพศภายนอก. ห้ามล้างเข้าไปภายในบริเวณช่องคลอด.");
+    expect(formatSig(parsed.fhir, "long", { locale: "en" }))
+      .toBe("Wash the external genitalia. Do not wash into the vagina.");
+  });
+
   it("maps Implant to exact SNOMED method and subcutaneous route codes", () => {
     const parsed = parseSig("ฝัง 1 implant ใต้ผิวหนัง", { locale: "th" });
     expect(parsed.fhir.method?.coding?.[0]).toMatchObject({ system: SNOMED, code: "827107003", display: "Implant" });

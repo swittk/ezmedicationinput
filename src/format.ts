@@ -7,6 +7,7 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
@@ -738,7 +739,11 @@ function renderSpatialSiteEnglish(
   }
 }
 
-function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string | undefined {
+function formatSite(
+  clause: CanonicalSigClause,
+  grammar: RouteGrammar,
+  directObject = false
+): string | undefined {
   let text = clause.site?.text?.trim();
   if (!text) {
     const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
@@ -778,6 +783,8 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (resolvedSite?.features.kind === "locative") {
     return resolvedSite.englishObjectText;
   }
+  const noun = resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
+  if (directObject) return noun;
   const preferredPreposition = resolvedSite?.preferredPreposition;
   let preposition = grammar.sitePreposition;
   if (!preposition || (preposition === "to" && preferredPreposition && preferredPreposition !== "to")) {
@@ -786,7 +793,6 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (!preposition) {
     preposition = "at";
   }
-  const noun = resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   return `${preposition} ${noun}`.trim();
 }
 
@@ -974,10 +980,14 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const baseVerb = resolveMethodVerb(clause, grammar);
   const verb = applyEnglishAdministrationModality(baseVerb, clause);
   const explicitDosePart = formatDoseLong(clause.dose);
-  const dosePart = explicitDosePart ?? (
-    shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
+  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
+  const directSiteObject = Boolean(
+    !explicitDosePart && methodDefinition?.realizerConfig?.englishDirectSiteObject
   );
-  const sitePart = formatSite(clause, grammar);
+  const dosePart = explicitDosePart ?? (
+    !directSiteObject && shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
+  );
+  const sitePart = formatSite(clause, grammar, directSiteObject);
   const roundTrip = options?.realizationMode === "roundtrip";
   let routePart = shouldSuppressRoutePhrase(clause, grammar, baseVerb)
     ? undefined

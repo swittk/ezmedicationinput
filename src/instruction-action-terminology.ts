@@ -46,6 +46,7 @@ interface ActionSource {
   suppressMethodRouteHint?: boolean;
   applicationVerb?: boolean;
   primaryAdministrationHead?: boolean;
+  supportVerb?: boolean;
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
   definesDose?: boolean;
@@ -149,6 +150,7 @@ function cloneDefinition(
     suppressMethodRouteHint: definition.suppressMethodRouteHint,
     applicationVerb: definition.applicationVerb,
     primaryAdministrationHead: definition.primaryAdministrationHead,
+    supportVerb: definition.supportVerb,
     safetyScopeTarget: definition.safetyScopeTarget,
     acceptsAmount: definition.acceptsAmount,
     definesDose: definition.definesDose,
@@ -184,6 +186,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     suppressMethodRouteHint: sourceDefinition.suppressMethodRouteHint,
     applicationVerb: sourceDefinition.applicationVerb,
     primaryAdministrationHead: sourceDefinition.primaryAdministrationHead,
+    supportVerb: sourceDefinition.supportVerb,
     safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
@@ -223,6 +226,7 @@ function normalizeCustomDefinition(
     suppressMethodRouteHint: input.suppressMethodRouteHint,
     applicationVerb: input.applicationVerb,
     primaryAdministrationHead: input.primaryAdministrationHead,
+    supportVerb: input.supportVerb,
     safetyScopeTarget: input.safetyScopeTarget,
     acceptsAmount: input.acceptsAmount,
     definesDose: input.definesDose,

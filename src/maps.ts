@@ -1358,7 +1358,22 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "181367001", display: "Entire vein" }, routeHint: RouteCode["Intravenous route"] }
     },
     {
-      names: ["vagina", "vaginal", "ช่องคลอด"],
+      names: [
+        "external genitalia",
+        "external genital area",
+        "อวัยวะเพศภายนอก",
+        "บริเวณอวัยวะเพศภายนอก",
+        "ภายนอกบริเวณอวัยวะเพศ"
+      ],
+      definition: {
+        coding: { code: "362207005", display: "Entire external genitalia" },
+        text: "external genitalia",
+        i18n: { th: "บริเวณอวัยวะเพศภายนอก" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["vagina", "vaginal", "ช่องคลอด", "บริเวณช่องคลอด"],
       definition: { coding: { code: "76784001", display: "Vagina" }, text: "vagina", routeHint: RouteCode["Per vagina"] }
     },
     {
