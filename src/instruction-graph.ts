@@ -2,7 +2,7 @@ import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS } from "./maps";
-import { MEAL_TIMING_BY_RELATION } from "./hpsg/lexical-classes";
+import { ACTION_DIRECTIVE_PREFIXES, MEAL_TIMING_BY_RELATION, THAI_METHOD_AUXILIARY_VERBS } from "./hpsg/lexical-classes";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -28,7 +28,10 @@ import {
   CanonicalSigClause,
   CanonicalSourceSpan,
   EventTiming,
+  FhirCoding,
+  MedicationInstructionActionArgumentParser,
   MedicationInstructionActionDefinition,
+  MedicationInstructionActionRealizer,
   ParseOptions,
   TextRange
 } from "./types";
@@ -96,7 +99,7 @@ function actionMatchAt(
       const definition = resolveMedicationInstructionAction(candidate, options);
       if (definition) {
         const first = parts[index];
-        if (definition.code === "give" && first && /[\u0E00-\u0E7F]/.test(first.original)) {
+        if (THAI_METHOD_AUXILIARY_VERBS.has(definition.code) && first && /[\u0E00-\u0E7F]/.test(first.original)) {
           const next = parts[index + length];
           const nextDefinition = next
             ? resolveMedicationInstructionAction(key(next), options)
@@ -448,6 +451,220 @@ function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumen
     : AdviceArgumentRole.Substance;
 }
 
+interface ActionArgumentParseContext {
+  definition: ActionDefinition;
+  parts: Lexeme[];
+  actionIndex: number;
+  argumentStart: number;
+  segmentEnd: number;
+  input: string;
+  offset: number;
+  options?: ParseOptions;
+  relation?: AdviceRelation;
+  relIndex: number;
+  relationTargetEnd: number;
+  conditionalTail: boolean;
+  amount?: AdviceArgument;
+  duration?: AdviceArgument;
+}
+interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; }
+type ActionArgumentParser = (context: ActionArgumentParseContext) => ParsedActionArguments;
+function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgument[] {
+  const args: AdviceArgument[] = [];
+  for (const value of values) pushArgument(args, value);
+  return args;
+}
+const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, options, relation, relIndex,
+    relationTargetEnd, conditionalTail, duration } = c;
+  const args = parsedArgs(argumentFromParts(
+    parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, undefined, options
+  ));
+  if (relation === AdviceRelation.For && duration) pushArgument(args, duration);
+  else if (relIndex >= 0 && !conditionalTail) {
+    const time = (relation === AdviceRelation.In || relation === AdviceRelation.On ||
+      relation === AdviceRelation.Before || relation === AdviceRelation.After)
+      ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+    const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
+      ? AdviceArgumentRole.Activity : undefined;
+    pushArgument(args, time ?? argumentFromParts(
+      parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
+    ));
+  }
+  return { args };
+};
+const CONTAINER_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, options, relIndex } = c;
+  const args = parsedArgs(argumentFromParts(parts, argumentStart,
+    relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Container, options));
+  let semanticEnd: number | undefined;
+  if (relIndex >= 0) {
+    let activityEnd = segmentEnd;
+    for (let index = relIndex + 1; index < segmentEnd; index += 1) {
+      const current = key(parts[index]);
+      if ((current === "and" || current === "or") && index > relIndex + 1) {
+        activityEnd = index; semanticEnd = index; break;
+      }
+    }
+    pushArgument(args, argumentFromParts(
+      parts, relIndex + 1, activityEnd, input, AdviceArgumentRole.Activity, options));
+  }
+  return { args, semanticEnd };
+};
+const THEME_DESTINATION_AMOUNT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, amount } = c;
+  const args = parsedArgs(argumentFromParts(parts, argumentStart,
+    relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Theme, options));
+  const amountIndex = amount?.span ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset) : undefined;
+  if (relIndex >= 0) pushArgument(args, argumentFromParts(parts, relIndex + 1,
+    amountIndex !== undefined && amountIndex > relIndex ? amountIndex : segmentEnd,
+    input, AdviceArgumentRole.Destination, options));
+  pushArgument(args, amount);
+  return { args };
+};
+const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, relation, amount } = c;
+  const args = parsedArgs(amount);
+  const amountIndex = amount?.span ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset) : undefined;
+  if (argumentStart < segmentEnd) {
+    let objectEnd = amountIndex !== undefined ? amountIndex : segmentEnd;
+    if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
+    if (objectEnd > argumentStart) pushArgument(args,
+      argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
+  }
+  const tailStart = amountIndex !== undefined ? Math.min(segmentEnd, amountIndex + 2)
+    : relIndex >= 0 ? relIndex + 1 : segmentEnd;
+  if (tailStart < segmentEnd) {
+    const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
+    if (relation === AdviceRelation.With || tail?.conceptId) pushArgument(args, tail);
+  }
+  return { args };
+};
+const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => ({
+  args: parsedArgs(c.amount, c.duration)
+});
+const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, duration } = c;
+  const durationIndex = duration?.span ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset) : undefined;
+  let objectEnd = durationIndex !== undefined ? durationIndex : segmentEnd;
+  if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
+  return { args: parsedArgs(
+    objectEnd > argumentStart
+      ? argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options)
+      : undefined,
+    duration
+  ) };
+};
+function configuredConceptIndex(parts: Lexeme[], start: number, end: number,
+  concepts: readonly string[] | undefined): number {
+  if (!concepts?.length) return -1;
+  for (let index = start; index < end; index += 1) {
+    if (concepts.indexOf(key(parts[index])) >= 0) return index;
+  }
+  return -1;
+}
+const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { definition, parts, argumentStart, segmentEnd, input, options } = c;
+  const absolutePrimary = configuredConceptIndex(
+    parts, argumentStart, segmentEnd, definition.argumentParserConfig?.primaryConcepts);
+  if (absolutePrimary < 0) return {
+    args: parsedArgs(argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options))
+  };
+  const args = parsedArgs(argumentFromParts(
+    parts, absolutePrimary, absolutePrimary + 1, input, AdviceArgumentRole.Substance, options));
+  const secondaryIndex = configuredConceptIndex(parts, absolutePrimary + 1, segmentEnd,
+    definition.argumentParserConfig?.secondaryConcepts);
+  if (secondaryIndex >= 0) {
+    const part = parts[secondaryIndex];
+    pushArgument(args, internalArgument(key(part), part.sourceText ?? part.original, options));
+  }
+  return { args };
+};
+const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { definition, parts, argumentStart, segmentEnd, input, options } = c;
+  const resultIndex = configuredConceptIndex(
+    parts, argumentStart, segmentEnd, definition.argumentParserConfig?.primaryConcepts);
+  if (resultIndex < 0) return {
+    args: parsedArgs(argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options))
+  };
+  const part = parts[resultIndex];
+  return { args: parsedArgs(internalArgument(key(part), part.sourceText ?? part.original, options)) };
+};
+const SITE_ARGUMENT_PARSER: ActionArgumentParser = (c) => ({
+  args: parsedArgs(argumentFromParts(
+    c.parts, c.argumentStart, c.segmentEnd, c.input, AdviceArgumentRole.Site, c.options
+  ))
+});
+const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, options, relIndex, relation } = c;
+  const args: AdviceArgument[] = [];
+  if (relIndex > argumentStart) {
+    const localTarget = argumentFromParts(
+      parts, argumentStart, relIndex, input, AdviceArgumentRole.Site, options);
+    if (localTarget?.coding?.code || localTarget?.conceptId) pushArgument(args, localTarget);
+    else pushArgument(args, argumentFromParts(parts, argumentStart, relIndex, input, undefined, options));
+  }
+  if (relIndex >= 0) pushArgument(args, argumentFromParts(
+    parts, relIndex + 1, segmentEnd, input, preferredRinseRole(relation), options));
+  else pushArgument(args, argumentFromParts(
+    parts, argumentStart, segmentEnd, input, preferredRinseRole(relation), options));
+  return { args };
+};
+const DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const parsed = parseDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
+  return { args: parsedArgs(parsed, parsed ? undefined : argumentFromParts(
+    c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
+  )) };
+};
+const BARE_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const parsed = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
+  return { args: parsedArgs(parsed, parsed ? undefined : argumentFromParts(
+    c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
+  )) };
+};
+const ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const configured = c.definition.argumentParserConfig;
+  const matchedSurface = sourceFor(c.parts, c.actionIndex, c.argumentStart, c.input);
+  const implicitConcept = configured?.implicitMatchedConcept;
+  const implicitRole = configured?.implicitMatchedRole ?? AdviceArgumentRole.Activity;
+  const implicit = implicitConcept && normalizeActionSurface(matchedSurface).indexOf(implicitConcept) >= 0
+    ? internalArgument(implicitConcept, matchedSurface, c.options) : undefined;
+  if (implicit) implicit.role = implicitRole;
+  return { args: parsedArgs(implicit ?? argumentFromParts(
+    c.parts, c.argumentStart, c.segmentEnd, c.input, AdviceArgumentRole.Activity, c.options
+  )) };
+};
+const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser, ActionArgumentParser> = {
+  default: DEFAULT_ACTION_ARGUMENT_PARSER,
+  "container-activity": CONTAINER_ACTIVITY_ARGUMENT_PARSER,
+  "theme-destination-amount": THEME_DESTINATION_AMOUNT_ARGUMENT_PARSER,
+  "object-amount-material": OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER,
+  "amount-duration": AMOUNT_DURATION_ARGUMENT_PARSER,
+  "object-duration": OBJECT_DURATION_ARGUMENT_PARSER,
+  "mix-substance": MIX_SUBSTANCE_ARGUMENT_PARSER,
+  result: RESULT_ARGUMENT_PARSER,
+  site: SITE_ARGUMENT_PARSER,
+  "site-relation": SITE_RELATION_ARGUMENT_PARSER,
+  duration: DURATION_ARGUMENT_PARSER,
+  "bare-duration": BARE_DURATION_ARGUMENT_PARSER,
+  activity: ACTIVITY_ARGUMENT_PARSER
+};
+function contextualActionCodings(definition: ActionDefinition, args: readonly AdviceArgument[]): FhirCoding[] {
+  const codings: FhirCoding[] = [];
+  for (const rule of definition.contextualCodings ?? []) {
+    const expected = rule.whenArgument;
+    const matched = args.some((arg) =>
+      (expected.role === undefined || arg.role === expected.role) &&
+      (expected.conceptId === undefined || arg.conceptId === expected.conceptId) &&
+      (expected.codingCode === undefined || arg.coding?.code === expected.codingCode) &&
+      (expected.normalized === undefined || arg.normalized === expected.normalized));
+    if (!matched || codings.some((coding) =>
+      coding.code === rule.coding.code && coding.system === rule.coding.system)) continue;
+    codings.push({ ...rule.coding });
+  }
+  return codings;
+}
+
 function buildActionFrame(
   parts: Lexeme[],
   segmentStart: number,
@@ -465,7 +682,6 @@ function buildActionFrame(
   const actionMatch = prefixed?.match ?? actionMatchAt(parts, actionIndex, options);
   if (!actionMatch) return undefined;
   const definition = actionMatch.definition;
-  const args: AdviceArgument[] = [];
   const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
   const rawRelation = relIndex >= 0 ? RELATIONS[key(parts.slice(relIndex, relIndex + 1)[0])] : undefined;
@@ -481,204 +697,20 @@ function buildActionFrame(
   const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
   let semanticEnd = conditionalTail && relIndex >= 0 ? relIndex : segmentEnd;
 
-  switch (definition.code) {
-    case "shake": {
-      pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Container, options));
-      if (relIndex >= 0) {
-        let activityEnd = segmentEnd;
-        for (let index = relIndex + 1; index < segmentEnd; index += 1) {
-          const current = key(parts[index]);
-          if ((current === "and" || current === "or") && index > relIndex + 1) {
-            activityEnd = index;
-            semanticEnd = index;
-            break;
-          }
-        }
-        pushArgument(args, argumentFromParts(parts, relIndex + 1, activityEnd, input, AdviceArgumentRole.Activity, options));
-      }
-      break;
-    }
-    case "pour": {
-      pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, AdviceArgumentRole.Theme, options));
-      const amountIndex = amount?.span
-        ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset)
-        : undefined;
-      if (relIndex >= 0) {
-        pushArgument(args, argumentFromParts(
-          parts,
-          relIndex + 1,
-          amountIndex !== undefined && amountIndex > relIndex ? amountIndex : segmentEnd,
-          input,
-          AdviceArgumentRole.Destination,
-          options
-        ));
-      }
-      pushArgument(args, amount);
-      break;
-    }
-    case "measure":
-    case "draw_up":
-    case "prime": {
-      pushArgument(args, amount);
-      const amountIndex = amount?.span
-        ? partIndexForAbsoluteSourceStart(parts, amount.span.start, offset)
-        : undefined;
-      if (argumentStart < segmentEnd) {
-        let objectEnd = amountIndex !== undefined ? amountIndex : segmentEnd;
-        if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
-        if (objectEnd > argumentStart) {
-          pushArgument(args, argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
-        }
-      }
-      const tailStart = amountIndex !== undefined
-        ? Math.min(segmentEnd, amountIndex + 2)
-        : relIndex >= 0 ? relIndex + 1 : segmentEnd;
-      if (tailStart < segmentEnd) {
-        const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
-        if (relation === AdviceRelation.With || tail?.conceptId) pushArgument(args, tail);
-      }
-      break;
-    }
-    case "swish":
-    case "gargle": {
-      pushArgument(args, amount);
-      pushArgument(args, duration);
-      break;
-    }
-    case "hold":
-    case "keep": {
-      const durationIndex = duration?.span
-        ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset)
-        : undefined;
-      let objectEnd = durationIndex !== undefined ? durationIndex : segmentEnd;
-      if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
-      if (objectEnd > argumentStart) {
-        pushArgument(args, argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
-      }
-      pushArgument(args, duration);
-      break;
-    }
-    case "mix": {
-      const waterIndex = parts.slice(argumentStart, segmentEnd).findIndex((part) => {
-        const currentKey = key(part);
-        return currentKey === "water" || currentKey === "clean-water";
-      });
-      if (waterIndex >= 0) {
-        const absoluteWater = argumentStart + waterIndex;
-        pushArgument(args, argumentFromParts(parts, absoluteWater, absoluteWater + 1, input, AdviceArgumentRole.Substance, options));
-        const afterWater = parts.slice(absoluteWater + 1, segmentEnd).find((part) => {
-          const currentKey = key(part);
-          return currentKey === "small" || currentKey === "small_amount";
-        });
-        if (afterWater) pushArgument(args, internalArgument("small", afterWater.sourceText ?? afterWater.original, options));
-      } else pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
-      break;
-    }
-    case "rub": {
-      const resultPart = parts.slice(argumentStart, segmentEnd).find((part) => {
-        const currentKey = key(part);
-        return currentKey === "foam" || currentKey === "foam-result";
-      });
-      if (resultPart) pushArgument(args, internalArgument("foam-result", resultPart.sourceText ?? resultPart.original, options));
-      else pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
-      break;
-    }
-    case "clean":
-      pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Site, options));
-      break;
-    case "rinse":
-    case "wash": {
-      if (relIndex > argumentStart) {
-        const localTarget = argumentFromParts(
-          parts,
-          argumentStart,
-          relIndex,
-          input,
-          AdviceArgumentRole.Site,
-          options
-        );
-        if (localTarget?.coding?.code || localTarget?.conceptId) pushArgument(args, localTarget);
-        else pushArgument(args, argumentFromParts(parts, argumentStart, relIndex, input, undefined, options));
-      }
-      if (relIndex >= 0) {
-        pushArgument(args, argumentFromParts(
-          parts,
-          relIndex + 1,
-          segmentEnd,
-          input,
-          preferredRinseRole(relation),
-          options
-        ));
-      } else {
-        pushArgument(args, argumentFromParts(
-          parts, argumentStart, segmentEnd, input, preferredRinseRole(relation), options
-        ));
-      }
-      break;
-    }
-    case "leave": {
-      const leaveDuration = parseDurationArgument(parts, argumentStart, segmentEnd, input, offset) ?? duration;
-      pushArgument(args, leaveDuration);
-      if (!leaveDuration) {
-        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
-      }
-      break;
-    }
-    case "wait": {
-      const waitDuration = parseBareDurationArgument(parts, argumentStart, segmentEnd, input, offset) ?? duration;
-      pushArgument(args, waitDuration);
-      if (!waitDuration) {
-        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options));
-      }
-      break;
-    }
-    case "stop": {
-      const matchedSurface = sourceFor(parts, actionIndex, argumentStart, input);
-      if (/\buse\b/i.test(matchedSurface) || /ใช้/u.test(matchedSurface)) {
-        pushArgument(args, internalArgument("use", matchedSurface, options));
-      } else {
-        pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Activity, options));
-      }
-      break;
-    }
-    case "douche":
-      pushArgument(args, argumentFromParts(parts, argumentStart, segmentEnd, input, AdviceArgumentRole.Site, options));
-      break;
-    default:
-      pushArgument(args, argumentFromParts(parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, undefined, options));
-      if (relation === AdviceRelation.For && duration) {
-        pushArgument(args, duration);
-      } else if (relIndex >= 0 && !conditionalTail) {
-        const time = (
-          relation === AdviceRelation.In ||
-          relation === AdviceRelation.On ||
-          relation === AdviceRelation.Before ||
-          relation === AdviceRelation.After
-        ) ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
-        const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
-          ? AdviceArgumentRole.Activity
-          : undefined;
-        pushArgument(
-          args,
-          time ?? argumentFromParts(
-            parts,
-            relIndex + 1,
-            relationTargetEnd,
-            input,
-            fallbackRole,
-            options
-          )
-        );
-      }
-      break;
-  }
-
+  const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
+    DEFAULT_ACTION_ARGUMENT_PARSER;
+  const parsed = argumentParser({
+    definition, parts, actionIndex, argumentStart, segmentEnd, input, offset, options,
+    relation, relIndex, relationTargetEnd, conditionalTail, amount, duration
+  });
+  const args = parsed.args;
+  if (parsed.semanticEnd !== undefined) semanticEnd = parsed.semanticEnd;
   pushArgument(args, amount);
 
-  const codings = medicationInstructionActionCodings(definition);
-  if (definition.code === "douche" && args.some((arg) => arg.coding?.code === "76784001" || arg.normalized === "vagina")) {
-    codings.push({ system: SNOMED_SYSTEM, code: "21397001", display: "Douche of vagina" });
-  }
+  const codings = [
+    ...medicationInstructionActionCodings(definition),
+    ...contextualActionCodings(definition, args)
+  ];
   const span = trimActionRange(input, rangeFor(parts, segmentStart, semanticEnd, offset), offset);
   return {
     force: polarity === AdvicePolarity.Negate
@@ -693,6 +725,8 @@ function buildActionFrame(
       semanticClass: definition.semanticClass,
       display: definition.display,
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
+      realizer: definition.realizer,
+      realizerConfig: definition.realizerConfig ? { ...definition.realizerConfig } : undefined,
       codings
     },
     relation,
@@ -710,25 +744,7 @@ interface PrefixedActionMatch {
   modality?: AdviceModality;
 }
 
-interface ActionDirectivePrefix {
-  parts: readonly string[];
-  polarity?: AdvicePolarity;
-  modality?: AdviceModality;
-}
-
-const ACTION_DIRECTIVE_PREFIXES: readonly ActionDirectivePrefix[] = [
-  { parts: ["do", "not"], polarity: AdvicePolarity.Negate },
-  { parts: ["should", "not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Should },
-  { parts: ["must", "not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Must },
-  { parts: ["should-not"], polarity: AdvicePolarity.Negate, modality: AdviceModality.Should },
-  { parts: ["don't"], polarity: AdvicePolarity.Negate },
-  { parts: ["dont"], polarity: AdvicePolarity.Negate },
-  { parts: ["avoid"], polarity: AdvicePolarity.Negate },
-  { parts: ["should"], modality: AdviceModality.Should },
-  { parts: ["must"], modality: AdviceModality.Must }
-];
-
-function directivePrefixMatches(parts: Lexeme[], index: number, prefix: ActionDirectivePrefix): boolean {
+function directivePrefixMatches(parts: Lexeme[], index: number, prefix: (typeof ACTION_DIRECTIVE_PREFIXES)[number]): boolean {
   return prefix.parts.every((part, offset) => key(parts[index + offset]) === part);
 }
 
@@ -777,27 +793,31 @@ function actionCandidateIsDoseUnit(
 function actionCandidateBelongsToCurrentFrame(
   parts: Lexeme[],
   index: number,
-  current: ActionDefinition | undefined
+  current: ActionDefinition | undefined,
+  options?: ParseOptions
 ): boolean {
   if (!current) return false;
-  const candidate = key(parts[index]);
-  if (candidate === "spray") {
-    if (current.code === "aim") return true;
-    if (current.code === "prime") {
-      const previous = key(parts[index - 1]);
-      const previousPart = parts[index - 1];
-      return previous === "nasal" || previous === "inhaler" || previous === "device" ||
-        previousPart?.kind === "NUMBER" || previousPart?.kind === "NUMBER_RANGE";
-    }
+  const candidateSurface = key(parts[index]);
+  const candidateDefinition = resolveMedicationInstructionAction(candidateSurface, options);
+  const candidateCode = candidateDefinition?.code ?? candidateSurface;
+  const previous = key(parts[index - 1]);
+  const previousKind = parts[index - 1]?.kind;
+  const next = key(parts[index + 1]);
+
+  for (const license of current.continuationLicenses ?? []) {
+    if (license.candidateAction !== candidateCode) continue;
+    const previousLicensed = !license.previousConcepts?.length && !license.previousKinds?.length ||
+      Boolean(license.previousConcepts?.indexOf(previous) !== -1) ||
+      Boolean(previousKind && license.previousKinds?.indexOf(previousKind as "NUMBER" | "NUMBER_RANGE") !== -1);
+    const nextLicensed = !license.nextConcepts?.length || license.nextConcepts.indexOf(next) !== -1;
+    if (previousLicensed && nextLicensed) return true;
   }
-  if (candidate === "use") {
+
+  const relationLicenses = candidateDefinition?.continuationAfterRelations;
+  if (relationLicenses?.length) {
     for (let cursor = Math.max(0, index - 3); cursor < index; cursor += 1) {
-      const relation = key(parts[cursor]);
-      if (relation === "before" || relation === "after") return true;
+      if (relationLicenses.indexOf(key(parts[cursor])) !== -1) return true;
     }
-  }
-  if (candidate === "rinse" && current.code === "swallow" && key(parts[index + 1]) === "water") {
-    return true;
   }
   return false;
 }
@@ -920,7 +940,7 @@ export function parseInstructionActions(
       if (
         nextActionMatch &&
         !actionCandidateIsDoseUnit(parts, index, options) &&
-        !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition)
+        !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition, options)
       ) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
         end = previousKey === "and" || previousKey === "or" ? index - 1 : index;
@@ -1733,6 +1753,128 @@ function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false):
     frame.predicate.lemma;
 }
 
+interface ActionRealizationContext {
+  frame: AdviceFrame;
+  locale: string;
+  thai: boolean;
+  label: string;
+  amount?: string;
+  theme?: string;
+  container?: string;
+  destination?: string;
+  site?: string;
+  substance?: string;
+  result?: string;
+  activity?: string;
+  time?: string;
+  duration?: string;
+  material?: string;
+  realizerConfig?: { thaiFallbackObject?: string };
+}
+type ActionRealizer = (context: ActionRealizationContext) => string;
+const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.site ?? c.substance;
+  return c.thai
+    ? `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` ${c.duration}` : ""}`
+    : `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+};
+const SOURCE_FAITHFUL_REALIZER: ActionRealizer = (c) => {
+  const sourceIsThai = /[\u0E00-\u0E7F]/.test(c.frame.sourceText);
+  if (c.thai === sourceIsThai) {
+    const text = c.frame.sourceText.trim();
+    return c.thai ? text : (text ? text.charAt(0).toUpperCase() + text.slice(1) : c.label);
+  }
+  return c.thai ? "ปรับการใช้ตามอาการ" : "Adjust use according to symptoms";
+};
+const CONTAINER_ACTIVITY_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.container ?? ""}${c.activity ? `ก่อน${c.activity}` : ""}`
+  : `${c.label}${c.container ? ` ${c.container}` : ""}${c.activity ? ` before ${c.activity}` : ""}`;
+const THEME_DESTINATION_AMOUNT_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`
+  : `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
+const MIX_SUBSTANCE_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.substance ?? c.theme ?? ""}${c.amount ?? ""}`
+  : `${c.label}${c.substance ? ` with ${c.amount ? `${c.amount} of ` : ""}${c.substance}` : c.theme ? ` ${c.theme}` : ""}`;
+const RESULT_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.result ? `ให้เกิด${c.result}` : ""}`
+  : `${c.label}${c.result ? ` to form ${c.result}` : ""}`;
+const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
+  const relationTarget = c.time ?? c.activity;
+  if (relationTarget) {
+    const target = c.site ? (c.thai ? c.site : ` ${c.site}`) : "";
+    const relationText = c.frame.relation === AdviceRelation.Before ? (c.thai ? "ก่อน" : "before")
+      : c.frame.relation === AdviceRelation.After ? (c.thai ? "หลัง" : "after")
+      : c.frame.relation === AdviceRelation.On ? (c.thai ? "เมื่อ" : "on")
+      : (c.thai ? "ใน" : "in");
+    return c.thai
+      ? `${c.label}${target}${relationText}${relationTarget}`
+      : `${c.label}${target} ${relationText} ${relationTarget}`;
+  }
+  if (c.site) return c.thai
+    ? `${c.label}${c.site}${c.substance ? `ด้วย${c.substance}` : ""}`
+    : `${c.label} ${c.site}${c.substance ? ` with ${c.substance}` : ""}`;
+  return c.thai
+    ? `${c.label}${c.substance ? `ด้วย${c.substance}` : ""}`
+    : `${c.label}${c.substance ? ` with ${c.substance}` : ""}`;
+};
+const OBJECT_AMOUNT_MATERIAL_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.container;
+  return c.thai
+    ? `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `ด้วย${c.material}` : ""}`
+    : `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` with ${c.material}` : ""}`;
+};
+const PRIME_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.container;
+  const fallback = c.realizerConfig?.thaiFallbackObject ?? "";
+  return c.thai
+    ? `${c.label}${object ?? fallback}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` ${c.material}` : ""}`
+    : `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` with ${c.amount}` : ""}${c.material ? ` ${c.material}` : ""}`;
+};
+const AMOUNT_DURATION_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` นาน ${c.duration}` : ""}`
+  : `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+const OBJECT_DURATION_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.site;
+  return c.thai
+    ? `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}`
+    : `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+};
+const RELATION_DURATION_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.site;
+  if (c.duration && c.frame.relation === AdviceRelation.After) return c.thai
+    ? `${c.label}${object ?? ""}หลัง ${c.duration}`
+    : `${c.label}${object ? ` ${object}` : ""} after ${c.duration}`;
+  if (c.duration && c.frame.relation === AdviceRelation.Before) return c.thai
+    ? `${c.label}${object ?? ""}ก่อน ${c.duration}`
+    : `${c.label}${object ? ` ${object}` : ""} before ${c.duration}`;
+  return c.thai ? `${c.label}${object ?? ""}` : `${c.label}${object ? ` ${object}` : ""}`;
+};
+const LEAVE_DURATION_REALIZER: ActionRealizer = (c) => c.thai
+  ? `${c.label}${c.duration ? ` ${c.duration}` : ""}`
+  : `${c.label} on${c.duration ? ` for ${c.duration}` : ""}`;
+const DURATION_REALIZER: ActionRealizer = (c) => `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
+const ACTIVITY_REALIZER: ActionRealizer = (c) => {
+  if (c.thai) return c.activity === "ใช้" || !c.activity ? c.label : `${c.label}${c.activity}`;
+  return `${c.label}${c.activity ? ` ${c.activity}` : ""}`;
+};
+const ACTION_REALIZERS: Record<MedicationInstructionActionRealizer, ActionRealizer> = {
+  default: DEFAULT_ACTION_REALIZER,
+  "source-faithful": SOURCE_FAITHFUL_REALIZER,
+  "container-activity": CONTAINER_ACTIVITY_REALIZER,
+  "theme-destination-amount": THEME_DESTINATION_AMOUNT_REALIZER,
+  "mix-substance": MIX_SUBSTANCE_REALIZER,
+  result: RESULT_REALIZER,
+  "site-relation": SITE_RELATION_REALIZER,
+  "object-amount-material": OBJECT_AMOUNT_MATERIAL_REALIZER,
+  prime: PRIME_REALIZER,
+  "amount-duration": AMOUNT_DURATION_REALIZER,
+  "object-duration": OBJECT_DURATION_REALIZER,
+  "relation-duration": RELATION_DURATION_REALIZER,
+  "leave-duration": LEAVE_DURATION_REALIZER,
+  duration: DURATION_REALIZER,
+  activity: ACTIVITY_REALIZER
+};
+
 function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
   const thai = locale.toLowerCase().startsWith("th");
   const first = (role: AdviceArgumentRole): string | undefined => {
@@ -1769,118 +1911,14 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
       : `Do not ${label.toLowerCase()}${fallbackObject ? ` ${fallbackObject}` : ""}`;
   }
 
-  switch (frame.predicate.lemma) {
-    case "adjust": {
-      const sourceIsThai = /[\u0E00-\u0E7F]/.test(frame.sourceText);
-      if (thai && sourceIsThai) return frame.sourceText;
-      if (!thai && !sourceIsThai) {
-        const text = frame.sourceText.trim();
-        return text ? text.charAt(0).toUpperCase() + text.slice(1) : label;
-      }
-      return thai ? "ปรับการใช้ตามอาการ" : "Adjust use according to symptoms";
-    }
-    case "shake":
-      return thai
-        ? `${label}${container ?? ""}${activity ? `ก่อน${activity}` : ""}`
-        : `${label}${container ? ` ${container}` : ""}${activity ? ` before ${activity}` : ""}`;
-    case "pour":
-      return thai
-        ? `${label}${theme ?? ""}${destination ? `ลง${destination}` : ""}${amount ? ` ${amount}` : ""}`
-        : `${label}${theme ? ` ${theme}` : ""}${amount ? ` ${amount}` : ""}${destination ? ` into ${destination}` : ""}`;
-    case "mix": {
-      const mixAmount = first(AdviceArgumentRole.Amount);
-      return thai
-        ? `${label}${substance ?? theme ?? ""}${mixAmount ?? ""}`
-        : `${label}${substance ? ` with ${mixAmount ? `${mixAmount} of ` : ""}${substance}` : theme ? ` ${theme}` : ""}`;
-    }
-    case "rub":
-      return thai ? `${label}${result ? `ให้เกิด${result}` : ""}` : `${label}${result ? ` to form ${result}` : ""}`;
-    case "clean":
-      return thai ? `${label}${site ?? theme ?? ""}` : `${label}${site ? ` ${site}` : theme ? ` ${theme}` : ""}`;
-    case "rinse":
-    case "wash": {
-      const relationTarget = time ?? activity;
-      if (relationTarget) {
-        const target = site ? (thai ? `${site}` : ` ${site}`) : "";
-        const relationText = frame.relation === AdviceRelation.Before ? (thai ? "ก่อน" : "before")
-          : frame.relation === AdviceRelation.After ? (thai ? "หลัง" : "after")
-          : frame.relation === AdviceRelation.On ? (thai ? "เมื่อ" : "on")
-          : (thai ? "ใน" : "in");
-        return thai
-          ? `${label}${target}${relationText}${relationTarget}`
-          : `${label}${target} ${relationText} ${relationTarget}`;
-      }
-      if (site) {
-        if (thai) return `${label}${site}${substance ? `ด้วย${substance}` : ""}`;
-        return `${label} ${site}${substance ? ` with ${substance}` : ""}`;
-      }
-      return thai ? `${label}${substance ? `ด้วย${substance}` : ""}` : `${label}${substance ? ` with ${substance}` : ""}`;
-    }
-    case "measure":
-    case "draw_up": {
-      const object = theme ?? first(AdviceArgumentRole.Object) ?? container;
-      if (thai) {
-        return `${label}${object ?? ""}${amount ? ` ${amount}` : ""}${material ? `ด้วย${material}` : ""}`;
-      }
-      return `${label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${material ? ` with ${material}` : ""}`;
-    }
-    case "prime": {
-      const object = theme ?? first(AdviceArgumentRole.Object) ?? container;
-      if (thai) {
-        return `${label}${object ?? "อุปกรณ์พ่น"}${amount ? ` ${amount}` : ""}${material ? ` ${material}` : ""}`;
-      }
-      return `${label}${object ? ` ${object}` : ""}${amount ? ` with ${amount}` : ""}${material ? ` ${material}` : ""}`;
-    }
-    case "swish":
-    case "gargle":
-      return thai
-        ? `${label}${amount ? ` ${amount}` : ""}${duration ? ` นาน ${duration}` : ""}`
-        : `${label}${amount ? ` ${amount}` : ""}${duration ? ` for ${duration}` : ""}`;
-    case "hold":
-    case "keep":
-    case "press": {
-      const object = theme ?? site ?? first(AdviceArgumentRole.Object);
-      return thai
-        ? `${label}${object ?? ""}${duration ? ` ${duration}` : ""}`
-        : `${label}${object ? ` ${object}` : ""}${duration ? ` for ${duration}` : ""}`;
-    }
-    case "discard":
-    case "remove": {
-      const object = theme ?? site ?? first(AdviceArgumentRole.Object);
-      if (duration && frame.relation === AdviceRelation.After) {
-        return thai
-          ? `${label}${object ?? ""}หลัง ${duration}`
-          : `${label}${object ? ` ${object}` : ""} after ${duration}`;
-      }
-      if (duration && frame.relation === AdviceRelation.Before) {
-        return thai
-          ? `${label}${object ?? ""}ก่อน ${duration}`
-          : `${label}${object ? ` ${object}` : ""} before ${duration}`;
-      }
-      return thai ? `${label}${object ?? ""}` : `${label}${object ? ` ${object}` : ""}`;
-    }
-    case "leave": {
-      const duration = first(AdviceArgumentRole.Duration);
-      if (thai) return `${label}${duration ? ` ${duration}` : ""}`;
-      return `${label} on${duration ? ` for ${duration}` : ""}`;
-    }
-    case "wait": {
-      const duration = first(AdviceArgumentRole.Duration);
-      return `${label}${duration ? ` ${duration}` : ""}`;
-    }
-    case "stop": {
-      const activity = first(AdviceArgumentRole.Activity);
-      if (thai) return activity === "ใช้" || !activity ? label : `${label}${activity}`;
-      return `${label}${activity ? ` ${activity}` : ""}`;
-    }
-    default: {
-      const object = theme ?? site ?? substance ?? first(AdviceArgumentRole.Object);
-      if (thai) {
-        return `${label}${object ?? ""}${amount ? ` ${amount}` : ""}${duration ? ` ${duration}` : ""}`;
-      }
-      return `${label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${duration ? ` for ${duration}` : ""}`;
-    }
-  }
+  const definition = getMedicationInstructionAction(frame.predicate.lemma);
+  const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
+  const realizer = ACTION_REALIZERS[realizerKey] ?? DEFAULT_ACTION_REALIZER;
+  return realizer({
+    frame, locale, thai, label, amount, theme, container, destination, site,
+    substance, result, activity, time, duration, material,
+    realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig
+  });
 }
 
 function normalizedInstructionSurface(value: string): string {

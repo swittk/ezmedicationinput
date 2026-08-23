@@ -13,7 +13,9 @@
         "shake well",
         "เขย่า"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "container-activity",
+      "realizer": "container-activity"
     },
     {
       "code": "pour",
@@ -28,7 +30,9 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "argumentParser": "theme-destination-amount",
+      "realizer": "theme-destination-amount"
     },
     {
       "code": "mix",
@@ -49,7 +53,19 @@
           "code": "421826007",
           "display": "Mix"
         }
-      ]
+      ],
+      "argumentParser": "mix-substance",
+      "realizer": "mix-substance",
+      "argumentParserConfig": {
+        "primaryConcepts": [
+          "water",
+          "clean-water"
+        ],
+        "secondaryConcepts": [
+          "small",
+          "small_amount"
+        ]
+      }
     },
     {
       "code": "rub",
@@ -62,7 +78,15 @@
         "rub",
         "ถู"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "result",
+      "realizer": "result",
+      "argumentParserConfig": {
+        "primaryConcepts": [
+          "foam",
+          "foam-result"
+        ]
+      }
     },
     {
       "code": "massage",
@@ -134,7 +158,8 @@
         "cleanse",
         "ทำความสะอาด"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "site"
     },
     {
       "code": "rinse",
@@ -161,7 +186,9 @@
       ],
       "roundtripI18n": {
         "th": "ล้างออก"
-      }
+      },
+      "argumentParser": "site-relation",
+      "realizer": "site-relation"
     },
     {
       "code": "wash",
@@ -187,7 +214,9 @@
           "code": "785900008",
           "display": "Rinse or wash"
         }
-      ]
+      ],
+      "argumentParser": "site-relation",
+      "realizer": "site-relation"
     },
     {
       "code": "douche",
@@ -200,7 +229,30 @@
         "douche",
         "สวนล้าง"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "site",
+      "contextualCodings": [
+        {
+          "whenArgument": {
+            "codingCode": "76784001"
+          },
+          "coding": {
+            "system": "http://snomed.info/sct",
+            "code": "21397001",
+            "display": "Douche of vagina"
+          }
+        },
+        {
+          "whenArgument": {
+            "normalized": "vagina"
+          },
+          "coding": {
+            "system": "http://snomed.info/sct",
+            "code": "21397001",
+            "display": "Douche of vagina"
+          }
+        }
+      ]
     },
     {
       "code": "dissolve",
@@ -284,7 +336,9 @@
         "leave on",
         "ทิ้งไว้"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "duration",
+      "realizer": "leave-duration"
     },
     {
       "code": "wipe",
@@ -323,7 +377,8 @@
         "take off",
         "เอาออก"
       ],
-      "procedural": true
+      "procedural": true,
+      "realizer": "relation-duration"
     },
     {
       "code": "discard",
@@ -337,7 +392,8 @@
         "throw away",
         "ทิ้ง"
       ],
-      "procedural": true
+      "procedural": true,
+      "realizer": "relation-duration"
     },
     {
       "code": "wait",
@@ -350,7 +406,9 @@
         "wait",
         "รอ"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
     },
     {
       "code": "stop",
@@ -367,7 +425,13 @@
         "หยุดใช้"
       ],
       "procedural": true,
-      "safetyScopeTarget": true
+      "safetyScopeTarget": true,
+      "argumentParser": "activity",
+      "realizer": "activity",
+      "argumentParserConfig": {
+        "implicitMatchedConcept": "use",
+        "implicitMatchedRole": "activity"
+      }
     },
     {
       "code": "measure",
@@ -382,7 +446,9 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
     },
     {
       "code": "crush",
@@ -454,7 +520,15 @@
           "display": "Swallow - dosing instruction imperative"
         }
       ],
-      "primaryAdministrationHead": true
+      "primaryAdministrationHead": true,
+      "continuationLicenses": [
+        {
+          "candidateAction": "rinse",
+          "nextConcepts": [
+            "water"
+          ]
+        }
+      ]
     },
     {
       "code": "gargle",
@@ -477,7 +551,9 @@
           "display": "Gargle"
         }
       ],
-      "primaryAdministrationHead": true
+      "primaryAdministrationHead": true,
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration"
     },
     {
       "code": "swish",
@@ -499,7 +575,9 @@
           "code": "421805007",
           "display": "Swish - dosing instruction imperative"
         }
-      ]
+      ],
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration"
     },
     {
       "code": "spit",
@@ -530,7 +608,26 @@
       "acceptsAmount": true,
       "i18n": {
         "th": "เตรียม"
-      }
+      },
+      "argumentParser": "object-amount-material",
+      "realizer": "prime",
+      "realizerConfig": {
+        "thaiFallbackObject": "อุปกรณ์พ่น"
+      },
+      "continuationLicenses": [
+        {
+          "candidateAction": "spray",
+          "previousConcepts": [
+            "nasal",
+            "inhaler",
+            "device"
+          ],
+          "previousKinds": [
+            "NUMBER",
+            "NUMBER_RANGE"
+          ]
+        }
+      ]
     },
     {
       "code": "draw_up",
@@ -541,7 +638,9 @@
       ],
       "procedural": true,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
     },
     {
       "code": "attach",
@@ -689,7 +788,11 @@
       ],
       "procedural": false,
       "acceptsAmount": true,
-      "definesDose": true
+      "definesDose": true,
+      "continuationAfterRelations": [
+        "before",
+        "after"
+      ]
     },
     {
       "code": "take",
@@ -940,7 +1043,9 @@
         "กลั้น",
         "กลั้นหายใจ"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
     },
     {
       "code": "close",
@@ -968,7 +1073,8 @@
         "press",
         "กด"
       ],
-      "procedural": true
+      "procedural": true,
+      "realizer": "object-duration"
     },
     {
       "code": "warm",
@@ -995,7 +1101,9 @@
         "คง",
         "ค้างไว้"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
     },
     {
       "code": "pump",
@@ -1047,7 +1155,12 @@
         "aim",
         "เล็ง"
       ],
-      "procedural": true
+      "procedural": true,
+      "continuationLicenses": [
+        {
+          "candidateAction": "spray"
+        }
+      ]
     },
     {
       "code": "touch",
@@ -1133,7 +1246,8 @@
         "ปรับ",
         "ปรับการใช้"
       ],
-      "procedural": true
+      "procedural": true,
+      "realizer": "source-faithful"
     },
     {
       "code": "apply_patch",

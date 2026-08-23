@@ -401,6 +401,33 @@ describe("procedural instruction graph", () => {
     });
   });
 
+  it("lets caller-owned actions select declarative argument and realization families", () => {
+    const parsed = parseSig("twirl bottle before use", {
+      instructionActionMap: {
+        twirl: {
+          code: "twirl-device",
+          semanticClass: "prepare_device",
+          display: "Twirl",
+          procedural: true,
+          argumentParser: "container-activity",
+          realizer: "container-activity"
+        }
+      }
+    });
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions[0]).toMatchObject({
+      predicate: { lemma: "twirl-device" },
+      args: [
+        expect.objectContaining({ role: "container", conceptId: "bottle" }),
+        expect.objectContaining({ role: "activity", conceptId: "use" })
+      ]
+    });
+    expect(realizeInstructionGraph(graph!, "en")).toBe("Twirl bottle before use");
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.actions[0]?.predicate.realizer).toBe("container-activity");
+    expect(realizeInstructionGraph(restored!, "en")).toBe("Twirl bottle before use");
+  });
+
   it("fails open to preserved opaque text when an async semantic resolver throws", async () => {
     const parsed = await parseSigAsync("sing a song", {
       instructionSemanticResolvers: async () => {

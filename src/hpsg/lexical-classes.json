@@ -1081,5 +1081,67 @@
     "before",
     "after",
     "with"
+  ],
+  "actionDirectivePrefixes": [
+    {
+      "parts": [
+        "do",
+        "not"
+      ],
+      "polarity": "negate"
+    },
+    {
+      "parts": [
+        "should",
+        "not"
+      ],
+      "polarity": "negate",
+      "modality": "should"
+    },
+    {
+      "parts": [
+        "must",
+        "not"
+      ],
+      "polarity": "negate",
+      "modality": "must"
+    },
+    {
+      "parts": [
+        "should-not"
+      ],
+      "polarity": "negate",
+      "modality": "should"
+    },
+    {
+      "parts": [
+        "don't"
+      ],
+      "polarity": "negate"
+    },
+    {
+      "parts": [
+        "dont"
+      ],
+      "polarity": "negate"
+    },
+    {
+      "parts": [
+        "avoid"
+      ],
+      "polarity": "negate"
+    },
+    {
+      "parts": [
+        "should"
+      ],
+      "modality": "should"
+    },
+    {
+      "parts": [
+        "must"
+      ],
+      "modality": "must"
+    }
   ]
 }

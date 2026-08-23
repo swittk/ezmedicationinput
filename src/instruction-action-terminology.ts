@@ -32,6 +32,13 @@ interface ActionSource {
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
   procedural?: boolean;
+  argumentParser?: MedicationInstructionActionDefinition["argumentParser"];
+  realizer?: MedicationInstructionActionDefinition["realizer"];
+  argumentParserConfig?: MedicationInstructionActionDefinition["argumentParserConfig"];
+  realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
+  continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
+  continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
+  contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
   primaryAdministrationHead?: boolean;
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
@@ -76,6 +83,26 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     : undefined;
 }
 
+function cloneContextualCodings(
+  rules: MedicationInstructionActionDefinition["contextualCodings"]
+): MedicationInstructionActionDefinition["contextualCodings"] {
+  return rules?.map((rule) => ({
+    whenArgument: { ...rule.whenArgument },
+    coding: cloneCoding(rule.coding)!
+  }));
+}
+
+function cloneContinuationLicenses(
+  rules: MedicationInstructionActionDefinition["continuationLicenses"]
+): MedicationInstructionActionDefinition["continuationLicenses"] {
+  return rules?.map((rule) => ({
+    ...rule,
+    previousConcepts: rule.previousConcepts ? [...rule.previousConcepts] : undefined,
+    previousKinds: rule.previousKinds ? [...rule.previousKinds] : undefined,
+    nextConcepts: rule.nextConcepts ? [...rule.nextConcepts] : undefined
+  }));
+}
+
 function cloneDefinition(
   definition: MedicationInstructionActionDefinition
 ): MedicationInstructionActionDefinition {
@@ -87,6 +114,17 @@ function cloneDefinition(
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     procedural: definition.procedural,
+    argumentParser: definition.argumentParser,
+    realizer: definition.realizer,
+    argumentParserConfig: definition.argumentParserConfig ? {
+      ...definition.argumentParserConfig,
+      primaryConcepts: definition.argumentParserConfig.primaryConcepts ? [...definition.argumentParserConfig.primaryConcepts] : undefined,
+      secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
+    } : undefined,
+    realizerConfig: definition.realizerConfig ? { ...definition.realizerConfig } : undefined,
+    continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
+    continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
+    contextualCodings: cloneContextualCodings(definition.contextualCodings),
     primaryAdministrationHead: definition.primaryAdministrationHead,
     safetyScopeTarget: definition.safetyScopeTarget,
     acceptsAmount: definition.acceptsAmount,
@@ -105,6 +143,17 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     procedural: sourceDefinition.procedural,
+    argumentParser: sourceDefinition.argumentParser,
+    realizer: sourceDefinition.realizer,
+    argumentParserConfig: sourceDefinition.argumentParserConfig ? {
+      ...sourceDefinition.argumentParserConfig,
+      primaryConcepts: sourceDefinition.argumentParserConfig.primaryConcepts ? [...sourceDefinition.argumentParserConfig.primaryConcepts] : undefined,
+      secondaryConcepts: sourceDefinition.argumentParserConfig.secondaryConcepts ? [...sourceDefinition.argumentParserConfig.secondaryConcepts] : undefined
+    } : undefined,
+    realizerConfig: sourceDefinition.realizerConfig ? { ...sourceDefinition.realizerConfig } : undefined,
+    continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
+    continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
+    contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
     primaryAdministrationHead: sourceDefinition.primaryAdministrationHead,
     safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
@@ -127,6 +176,17 @@ function normalizeCustomDefinition(
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     procedural: input.procedural ?? true,
+    argumentParser: input.argumentParser,
+    realizer: input.realizer,
+    argumentParserConfig: input.argumentParserConfig ? {
+      ...input.argumentParserConfig,
+      primaryConcepts: input.argumentParserConfig.primaryConcepts ? [...input.argumentParserConfig.primaryConcepts] : undefined,
+      secondaryConcepts: input.argumentParserConfig.secondaryConcepts ? [...input.argumentParserConfig.secondaryConcepts] : undefined
+    } : undefined,
+    realizerConfig: input.realizerConfig ? { ...input.realizerConfig } : undefined,
+    continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
+    continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
+    contextualCodings: cloneContextualCodings(input.contextualCodings),
     primaryAdministrationHead: input.primaryAdministrationHead,
     safetyScopeTarget: input.safetyScopeTarget,
     acceptsAmount: input.acceptsAmount,

@@ -1,4 +1,4 @@
-import { EventTiming, FhirCoding, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, EventTiming, FhirCoding, RouteCode } from "../types";
 import source from "./lexical-classes.json";
 
 type MealRelation = "before" | "after" | "with";
@@ -242,6 +242,11 @@ export const DURATION_LEAD_TOKENS = setOf(source.durationLeadTokens);
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
 export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);
 export const POSITIVE_DIRECTIVE_MARKERS = setOf(source.positiveDirectiveMarkers);
+export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((prefix) => ({
+  parts: prefix.parts as readonly string[],
+  polarity: prefix.polarity as AdvicePolarity | undefined,
+  modality: prefix.modality as AdviceModality | undefined
+}));
 export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
 export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);

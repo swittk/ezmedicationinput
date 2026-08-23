@@ -580,6 +580,9 @@ export interface AdviceFrame {
     semanticClass?: string;
     display?: string;
     i18n?: Record<string, string>;
+    /** Persisted realization profile so caller-owned actions remain deterministic after parse/FHIR round-trip. */
+    realizer?: MedicationInstructionActionRealizer;
+    realizerConfig?: { thaiFallbackObject?: string };
     /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
   };
@@ -774,6 +777,48 @@ export interface SmartMealExpansionScope {
   excludeDosageForms?: string[];
 }
 
+export type MedicationInstructionActionArgumentParser =
+  | "default"
+  | "container-activity"
+  | "theme-destination-amount"
+  | "object-amount-material"
+  | "amount-duration"
+  | "object-duration"
+  | "mix-substance"
+  | "result"
+  | "site"
+  | "site-relation"
+  | "duration"
+  | "bare-duration"
+  | "activity";
+
+export type MedicationInstructionActionRealizer =
+  | "default"
+  | "source-faithful"
+  | "container-activity"
+  | "theme-destination-amount"
+  | "mix-substance"
+  | "result"
+  | "site-relation"
+  | "object-amount-material"
+  | "prime"
+  | "amount-duration"
+  | "object-duration"
+  | "relation-duration"
+  | "leave-duration"
+  | "duration"
+  | "activity";
+
+export interface MedicationInstructionActionContextualCodingRule {
+  whenArgument: {
+    role?: AdviceArgumentRole;
+    conceptId?: string;
+    codingCode?: string;
+    normalized?: string;
+  };
+  coding: FhirCoding;
+}
+
 export interface MedicationInstructionActionDefinition {
   /** Stable semantic action code. */
   code: string;
@@ -787,6 +832,28 @@ export interface MedicationInstructionActionDefinition {
   aliases?: string[];
   /** Whether this is a procedural action rather than ordinary administration advice. */
   procedural?: boolean;
+  /** Declarative argument grammar family used by the instruction graph. */
+  argumentParser?: MedicationInstructionActionArgumentParser;
+  /** Declarative realization family used by English/Thai graph generation. */
+  realizer?: MedicationInstructionActionRealizer;
+  argumentParserConfig?: {
+    primaryConcepts?: string[];
+    secondaryConcepts?: string[];
+    implicitMatchedConcept?: string;
+    implicitMatchedRole?: AdviceArgumentRole;
+  };
+  realizerConfig?: {
+    thaiFallbackObject?: string;
+  };
+  continuationLicenses?: Array<{
+    candidateAction: string;
+    previousConcepts?: string[];
+    previousKinds?: Array<"NUMBER" | "NUMBER_RANGE">;
+    nextConcepts?: string[];
+  }>;
+  continuationAfterRelations?: string[];
+  /** Extra exact codings licensed by a typed semantic argument. */
+  contextualCodings?: MedicationInstructionActionContextualCodingRule[];
   /** A method-capable procedural action that may serve as the primary administration head. */
   primaryAdministrationHead?: boolean;
   /** Positive action whose condition belongs to safety/instruction scope, not PRN administration scope. */
