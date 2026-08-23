@@ -7,6 +7,7 @@ import {
   RouteSynonym,
   TIMING_ABBREVIATIONS
 } from "../maps";
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { arrayIncludes } from "../utils/array";
 import { EventTiming, FhirDayOfWeek, RouteCode } from "../types";
 import { LexToken } from "./token-types";
@@ -96,58 +97,6 @@ const WORKFLOW_INSTRUCTION_WORDS = new Set([
   "off",
   "then"
 ]);
-
-const APPLICATION_ROUTE_VERBS = new Set([
-  "apply",
-  "rub",
-  "massage",
-  "spread",
-  "stick",
-  "dab",
-  "lather"
-]);
-
-const ADMINISTRATION_METHOD_WORDS = new Set([
-  "administer",
-  "give",
-  "apply",
-  "apply_patch",
-  "rub",
-  "massage",
-  "spread",
-  "stick",
-  "dab",
-  "lather",
-  "spray",
-  "take",
-  "drink",
-  "inhale",
-  "swallow",
-  "use",
-  "inject",
-  "insert",
-  "instill",
-  "reapply",
-  "rinse",
-  "wash",
-  "shampoo"
-]);
-
-const ADMINISTRATION_ROUTE_HINTS: Record<string, RouteCode> = {
-  apply: RouteCode["Topical route"],
-  rub: RouteCode["Topical route"],
-  massage: RouteCode["Topical route"],
-  spread: RouteCode["Topical route"],
-  stick: RouteCode["Topical route"],
-  dab: RouteCode["Topical route"],
-  lather: RouteCode["Topical route"],
-  reapply: RouteCode["Topical route"],
-  wash: RouteCode["Topical route"],
-  shampoo: RouteCode["Topical route"],
-  take: RouteCode["Oral route"],
-  drink: RouteCode["Oral route"],
-  swallow: RouteCode["Oral route"]
-};
 
 const COUNT_KEYWORDS = new Set([
   "time",
@@ -457,8 +406,9 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
     );
   }
 
-  const administrationRoute = ADMINISTRATION_ROUTE_HINTS[normalized];
-  if (ADMINISTRATION_METHOD_WORDS.has(normalized)) {
+  const administrationAction = resolveMedicationInstructionAction(normalized);
+  const administrationRoute = administrationAction?.verbRouteHint;
+  if (administrationAction?.administrationMethod?.code) {
     annotations = annotations || {};
     annotations.wordClasses = pushEnum(
       annotations.wordClasses,
@@ -545,7 +495,7 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
     );
   }
 
-  if (APPLICATION_ROUTE_VERBS.has(normalized)) {
+  if (administrationAction?.applicationVerb) {
     annotations = annotations || {};
     annotations.wordClasses = pushEnum(
       annotations.wordClasses,
@@ -737,11 +687,11 @@ export function isWorkflowInstructionWord(word: string): boolean {
 }
 
 export function isApplicationVerbWord(word: string): boolean {
-  return APPLICATION_ROUTE_VERBS.has(normalizeMeaningKey(word));
+  return resolveMedicationInstructionAction(normalizeMeaningKey(word))?.applicationVerb === true;
 }
 
 export function isAdministrationVerbWord(word: string): boolean {
-  return ADMINISTRATION_METHOD_WORDS.has(normalizeMeaningKey(word));
+  return Boolean(resolveMedicationInstructionAction(normalizeMeaningKey(word))?.administrationMethod?.code);
 }
 
 export function isCountKeywordWord(word: string): boolean {

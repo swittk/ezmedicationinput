@@ -631,7 +631,8 @@ export function canonicalToFhir(
             system: clause.method.coding.system ?? SNOMED_SYSTEM,
             code: clause.method.coding.code,
             display: clause.method.coding.display,
-            _display: clonePrimitiveElement(clause.method.coding._display)
+            _display: clonePrimitiveElement(clause.method.coding._display) ??
+              buildTranslationPrimitiveElement(clause.method.coding.i18n)
           }
         ]
         : undefined
@@ -788,7 +789,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
           code: methodCoding.code,
           display: methodCoding.display,
           system: methodCoding.system,
-          _display: clonePrimitiveElement(methodCoding._display)
+          _display: clonePrimitiveElement(methodCoding._display),
+          i18n: getPrimitiveTranslations(methodCoding._display)
         }
         : undefined
     };
@@ -1019,7 +1021,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
       code: methodCoding.code,
       display: methodCoding.display,
       system: methodCoding.system,
-      _display: clonePrimitiveElement(methodCoding._display)
+      _display: clonePrimitiveElement(methodCoding._display),
+      i18n: getPrimitiveTranslations(methodCoding._display)
     };
   }
 

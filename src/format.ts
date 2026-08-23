@@ -11,6 +11,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRepresentsText,
+  instructionGraphSingleActionRepresentsText,
   realizeInstructionGraph
 } from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
@@ -1080,9 +1081,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   ) ?? [];
   const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
     !instruction.coding?.code &&
-    !instruction.frames?.length &&
     Boolean(instruction.text && clause.instructionGraph &&
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text))
+      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) &&
+      (!instruction.frames?.length ||
+        !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)))
   );
   const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
     graphOwnedAdditional.indexOf(instruction) === -1
@@ -1188,12 +1190,6 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   );
   if (patientInstruction) instructionPhrases.push(patientInstruction);
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  if (!canonicalClauseHasAdministrationSemantics(clause) && trailingInstructionText) {
-    return trailingInstructionText;
-  }
-  const leadingInstructionText = preGraphInstruction
-    ? formatPatientInstructionSentence(preGraphInstruction)
-    : undefined;
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
   const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
     !clause.instructionGraph.sourceLocale.toLowerCase().startsWith("th");
@@ -1203,6 +1199,12 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
+  if (!canonicalClauseHasAdministrationSemantics(clause) && trailingInstructionText) {
+    return trailingInstructionText;
+  }
+  const leadingInstructionText = preGraphInstruction
+    ? formatPatientInstructionSentence(preGraphInstruction)
+    : undefined;
   const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
     action.args.some((arg) =>
       arg.role === AdviceArgumentRole.Amount &&

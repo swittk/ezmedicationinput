@@ -39,7 +39,7 @@ import {
   SYMPTOM_ADJUSTMENT_LEADS,
   SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS
 } from "../lexical-classes";
-import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
+import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
   hasLexicalSeparator,
@@ -70,7 +70,7 @@ function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {
     DURATION_LEAD_TOKENS.has(lower) ||
     (isPunctuation(lower) && !PRN_REASON_COORDINATORS.has(lower)) ||
     Boolean(
-      METHOD_ACTION_BY_VERB[lower] ||
+      isMedicationAdministrationMethod(lower, context.options) ||
       INSTRUCTION_START_WORDS.has(lower) ||
       productRouteHint(lower) ||
       normalizeUnit(lower, context.options) ||
@@ -418,7 +418,8 @@ function conditionalLeadBelongsToSafetyActionBefore(
   const action = context.tokens[start - 1];
   if (!action) return false;
   const actionLower = normalizeTokenLower(action);
-  if (!METHOD_ACTION_BY_VERB[actionLower] && !resolveMedicationInstructionAction(actionLower, context.options)) {
+  if (!isMedicationAdministrationMethod(actionLower, context.options) &&
+      !resolveMedicationInstructionAction(actionLower, context.options)) {
     return false;
   }
   const actionIndex = start - 1;
@@ -437,13 +438,13 @@ function hasProceduralInstructionActionAfter(
   context: HpsgClauseContext,
   start: number
 ): boolean {
-  for (let index = start + 1; index < context.limit; index += 1) {
-    const token = context.tokens[index];
-    if (!token || context.state.consumed.has(token.index)) continue;
-    const definition = resolveMedicationInstructionAction(normalizeTokenLower(token), context.options);
-    if (definition?.procedural) return true;
-  }
-  return false;
+  const lead = context.tokens[start];
+  if (!lead) return false;
+  return getProceduralFrames(context).some((frame) => {
+    if (frame.span.start < lead.sourceEnd) return false;
+    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    return definition?.procedural === true;
+  });
 }
 
 export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -527,6 +528,21 @@ function previousTokensEndNegatedDirectivePrefix(
   });
 }
 
+function previousTokensEndDirectivePrefix(
+  context: HpsgClauseContext,
+  endExclusive: number
+): boolean {
+  return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
+    const prefixStart = endExclusive - prefix.parts.length;
+    if (prefixStart < 0) return false;
+    return prefix.parts.every((part, offset) => {
+      const token = context.tokens[prefixStart + offset];
+      return Boolean(token && normalizeTokenLower(token) === part);
+    });
+  });
+}
+
+
 export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
@@ -541,6 +557,10 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? normalizeTokenLower(nextLead)
       : undefined;
     if (nextLeadLower && AS_NEEDED_LEAD_PHRASES.has(`${leadLower} ${nextLeadLower}`)) {
+      // Surface "use if/when ..." is a PRN construction only when `use` is
+      // not itself governed by a preceding negative/modal safety directive.
+      // `should not use if ...` must remain a scoped safety action.
+      if (previousTokensEndDirectivePrefix(context, start)) return [];
       tokens.push(nextLead);
       cursor = start + 2;
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {

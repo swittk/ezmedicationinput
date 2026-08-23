@@ -32,11 +32,7 @@ import {
   WORKFLOW_NOUNS,
   WORKFLOW_START_WORDS
 } from "../lexical-classes";
-import {
-  METHOD_ACTION_BY_VERB,
-  METHOD_CODING_BY_ACTION,
-  cloneMethodCoding
-} from "../method-lexicon";
+import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
   joinTokenText,
@@ -84,7 +80,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
     return false;
   }
   return Boolean(
-    METHOD_ACTION_BY_VERB[normalizeTokenLower(token)] &&
+    isMedicationAdministrationMethod(normalizeTokenLower(token), context.options) &&
     isScheduleLead(context, index + 1)
   );
 }
@@ -247,7 +243,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         bodyTokens.length &&
         actionDefinition &&
         !actionDefinition.procedural &&
-        METHOD_ACTION_BY_VERB[lower] &&
+        isMedicationAdministrationMethod(lower, context.options) &&
         !WORKFLOW_ACTION_RELATION_LEADS.has(previousLower)
       ) {
         break;
@@ -339,7 +335,7 @@ function instructionStartIsLicensed(
   if (INSTRUCTION_START_WORDS.has(lower)) {
     return true;
   }
-  return Boolean(previous && METHOD_ACTION_BY_VERB[previousLower]);
+  return Boolean(previous && isMedicationAdministrationMethod(previousLower, context.options));
 }
 
 function parseInstructionCandidates(
@@ -421,7 +417,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         return [];
       }
       if (
-        (nextAction && !nextAction.procedural && METHOD_ACTION_BY_VERB[nextLower]) ||
+        (nextAction && !nextAction.procedural && isMedicationAdministrationMethod(nextLower, context.options)) ||
         FREE_TEXT_DIRECTIVE_STARTS.has(nextLower)
       ) {
         cursor += 1;
@@ -439,15 +435,15 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       !consumed.length &&
       firstBodyAction &&
       !firstBodyAction.procedural &&
-      METHOD_ACTION_BY_VERB[firstBodyLower] &&
+      isMedicationAdministrationMethod(firstBodyLower, context.options) &&
       isScheduleLead(context, cursor + 1)
     ) {
       return [];
     }
-    if (consumed.length && firstBodyAction && !firstBodyAction.procedural && METHOD_ACTION_BY_VERB[firstBodyLower]) {
+    if (consumed.length && firstBodyAction && !firstBodyAction.procedural && isMedicationAdministrationMethod(firstBodyLower, context.options)) {
       const priorPrimaryMethod = context.tokens.slice(0, cursor).some((candidate) => {
         const priorLower = normalizeTokenLower(candidate);
-        const method = METHOD_ACTION_BY_VERB[priorLower];
+        const method = isMedicationAdministrationMethod(priorLower, context.options);
         const definition = resolveMedicationInstructionAction(priorLower, context.options);
         return Boolean(method && definition && !definition.procedural);
       });

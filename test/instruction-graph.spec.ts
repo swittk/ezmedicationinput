@@ -262,7 +262,7 @@ describe("procedural instruction graph", () => {
       })
     ]);
     expect(graph?.coverage).toMatchObject({
-      understoodCharacters: 8,
+      understoodCharacters: 28,
       opaqueCharacters: 0,
       complete: true
     });
@@ -426,6 +426,54 @@ describe("procedural instruction graph", () => {
     const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
     expect(restored?.actions[0]?.predicate.realizer).toBe("container-activity");
     expect(realizeInstructionGraph(restored!, "en")).toBe("Twirl bottle before use");
+  });
+
+  it("models Thai separable patch replacement as a scoped procedural program rather than PRN", () => {
+    const parsed = parseSig(
+      "หากฝันชัดเจนให้เอาแผ่นแปะออกก่อนนอนแล้วแปะแผ่นใหม่ตอนเช้า",
+      { locale: "th" }
+    );
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause?.instructionGraph;
+    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["remove", "apply_patch"]);
+    expect(graph?.actions[0]).toMatchObject({
+      relation: "before",
+      args: [
+        expect.objectContaining({ conceptId: "patch" }),
+        expect.objectContaining({ role: "time", normalized: "HS" })
+      ]
+    });
+    expect(graph?.actions[1]?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ conceptId: "new_patch" }),
+      expect.objectContaining({ role: "time", conceptId: "morning" })
+    ]));
+    expect(graph?.relations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "then", fromActionIndex: 0, toActionIndex: 1 }),
+      expect.objectContaining({ kind: "if", toActionIndex: 0, text: "หากฝันชัดเจน" })
+    ]));
+    expect(graph?.coverage).toMatchObject({ opaqueCharacters: 0, complete: true, ratio: 1 });
+    expect(parsed.longText).toBe(
+      "หากฝันชัดเจนให้เอาแผ่นแปะออกก่อนนอน จากนั้นแปะแผ่นใหม่ตอนเช้า."
+    );
+  });
+
+  it("keeps reconstitution quantities local to MIX instead of promoting them to the swallowed dose", () => {
+    const parsed = parseSig("ผสมยา 1 ซองกับน้ำ 120 มิลลิลิตร แล้วดื่มทันที", { locale: "th" });
+    const clause = parsed.meta.canonical.clauses[0];
+    const mix = clause?.instructionGraph?.actions.find((action) => action.predicate.lemma === "mix");
+    expect(clause?.dose).toBeUndefined();
+    expect(mix?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "theme", conceptId: "product", quantity: { value: 1, unit: "sachet" }
+      }),
+      expect.objectContaining({
+        role: "substance", conceptId: "water", quantity: { value: 120, unit: "mL" }
+      })
+    ]));
+    expect(clause?.schedule?.when).toEqual(["IMD"]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.longText).toBe("ผสมยา 1 ซองกับน้ำ 120 มิลลิลิตร. ดื่มทันที.");
   });
 
   it("fails open to preserved opaque text when an async semantic resolver throws", async () => {

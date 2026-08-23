@@ -344,7 +344,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           valence: {
             site: {
               text: displayText,
-              i18n: resolved?.definition?.i18n,
+              i18n: !resolved?.coding && resolved?.definition?.text === "affected area" &&
+                /[\u0E00-\u0E7F]/u.test(sourceText)
+                ? { ...(resolved?.definition?.i18n ?? {}), th: sourceText }
+                : resolved?.definition?.i18n,
               source: "text",
               coding: resolved?.coding,
               spatialRelation: resolved?.spatialRelation,
@@ -428,7 +431,10 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             valence: {
               site: {
                 text: displayText,
-                i18n: resolved.definition?.i18n,
+                i18n: !resolved.coding && resolved.definition?.text === "affected area" &&
+                  /[\u0E00-\u0E7F]/u.test(sourceText)
+                  ? { ...(resolved.definition?.i18n ?? {}), th: sourceText }
+                  : resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,
                 spatialRelation: resolved.spatialRelation,

@@ -105,6 +105,9 @@ export function projectHpsgSignToState(
     if (site.text !== undefined) {
       state.siteText = site.text;
     }
+    if (site.i18n !== undefined) {
+      state.siteI18n = site.i18n;
+    }
     if (site.source !== undefined) {
       state.siteSource = site.source;
     }

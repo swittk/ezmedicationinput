@@ -311,7 +311,7 @@ describe("additional instruction rule inventory", () => {
     expect(drowsy.longText).toContain("อาจทำให้ง่วงซึม");
 
     const sparingly = parseSig("apply sparingly", { locale: "th" });
-    expect(sparingly.longText).toContain("ใช้เพียงเล็กน้อย");
+    expect(sparingly.longText).toContain("ทาเพียงเล็กน้อย");
 
     const thinly = parseSig("apply thinly", { locale: "th" });
     expect(thinly.longText).toContain("ทาบางๆ");
@@ -321,5 +321,20 @@ describe("additional instruction rule inventory", () => {
 
     const thickly = parseSig("apply thickly", { locale: "th" });
     expect(thickly.longText).toContain("ทาหนาๆ");
-  });
+  })
+
+  it("parses terminology-declared Thai administration style suffixes as integrated modifiers", () => {
+    const cases = [
+      ["ทาบางๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาบางๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาเบาๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาเบาๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาหนาๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาหนาๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาเพียงเล็กน้อยบริเวณรอยโรค วันละ 2 ครั้ง", "ทาเพียงเล็กน้อย บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาอย่างทั่วถึงบริเวณรอยโรค วันละ 2 ครั้ง", "ทาอย่างทั่วถึง บริเวณรอยโรค วันละ 2 ครั้ง."]
+    ] as const;
+    for (const [source, expected] of cases) {
+      const parsed = parseSig(source, { locale: "th" });
+      expect(parsed.longText).toBe(expected);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    }
+  });;
 });

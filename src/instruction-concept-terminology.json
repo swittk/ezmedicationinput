@@ -29,6 +29,31 @@
       ]
     },
     {
+      "code": "patch",
+      "role": "object",
+      "display": "patch",
+      "i18n": {
+        "th": "แผ่นแปะ"
+      },
+      "aliases": [
+        "patch",
+        "transdermal patch",
+        "แผ่นแปะ"
+      ]
+    },
+    {
+      "code": "breath",
+      "role": "object",
+      "display": "breath",
+      "i18n": {
+        "th": "หายใจ"
+      },
+      "aliases": [
+        "breath",
+        "หายใจ"
+      ]
+    },
+    {
       "code": "water",
       "role": "substance",
       "display": "water",
@@ -230,6 +255,20 @@
         "occlusive dressing",
         "an occlusive dressing",
         "แผ่นปิดแบบทึบ"
+      ]
+    },
+    {
+      "code": "new_patch",
+      "role": "object",
+      "display": "new patch",
+      "i18n": {
+        "th": "แผ่นใหม่"
+      },
+      "aliases": [
+        "new patch",
+        "replacement patch",
+        "fresh patch",
+        "แผ่นใหม่"
       ]
     }
   ]

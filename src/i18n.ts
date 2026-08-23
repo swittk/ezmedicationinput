@@ -17,6 +17,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRepresentsText,
+  instructionGraphSingleActionRepresentsText,
   realizeInstructionGraph
 } from "./instruction-graph";
 import {
@@ -591,10 +592,10 @@ const THAI_METHOD_TEXT_VERBS: Record<string, string> = {
   "Reapply sunscreen": "ทากันแดดซ้ำ",
   Rub: "ถู",
   Spray: "พ่น",
-  Shampoo: "สระ",
+  Shampoo: "สระผม",
   Swallow: "รับประทาน",
   Take: "รับประทาน",
-  "Use shampoo": "สระ",
+  "Use shampoo": "สระผม",
   Wash: "ล้าง"
 };
 
@@ -608,7 +609,8 @@ const THAI_IMPLIED_OBJECT_VERBS = new Set([
   "หยอด",
   "สอด",
   "ล้าง",
-  "สระ"
+  "สระ",
+  "สระผม"
 ]);
 
 const THAI_SUPPRESSIBLE_ROUTE_VERBS = new Set([
@@ -620,7 +622,8 @@ const THAI_SUPPRESSIBLE_ROUTE_VERBS = new Set([
   "ถู",
   "นวด",
   "ล้าง",
-  "สระ"
+  "สระ",
+  "สระผม"
 ]);
 
 const THAI_SITE_FIRST_VERBS = new Set([
@@ -633,6 +636,7 @@ const THAI_SITE_FIRST_VERBS = new Set([
   "นวด",
   "ล้าง",
   "สระ",
+  "สระผม",
   "พ่น"
 ]);
 
@@ -653,10 +657,9 @@ function resolveThaiMethodVerb(
     }
   }
 
-  const translatedDisplay = getPrimitiveTranslation(
-    clause.method?.coding?._display,
-    "th"
-  );
+  const translatedDisplay =
+    clause.method?.coding?.i18n?.th ??
+    getPrimitiveTranslation(clause.method?.coding?._display, "th");
   if (translatedDisplay) {
     return translatedDisplay;
   }
@@ -664,34 +667,20 @@ function resolveThaiMethodVerb(
   return grammar.verb;
 }
 
-function joinThaiVerbAndBody(verb: string, body: string): string {
+function joinThaiVerbAndBody(
+  verb: string,
+  body: string,
+  separatePhrase = false
+): string {
   const trimmedBody = body.trim();
-  if (!trimmedBody) {
-    return verb;
-  }
-  switch (verb) {
-    case "พ่น":
-      if (trimmedBody.startsWith("เข้า")) {
-        return `${verb}${trimmedBody}`;
-      }
-      break;
-    case "ทาซ้ำ":
-    case "ทากันแดดซ้ำ":
-    case "สระ":
-      if (
-        trimmedBody.startsWith("ทุก") ||
-        trimmedBody.startsWith("วัน") ||
-        trimmedBody.startsWith("ก่อน") ||
-        trimmedBody.startsWith("หลัง")
-      ) {
-        return `${verb}${trimmedBody}`;
-      }
-      break;
-    default:
-      break;
-  }
-  return `${verb} ${trimmedBody}`;
+  if (!trimmedBody) return verb;
+  // Thai normally joins a verbal head to a Thai complement, but an Arabic/Latin
+  // token needs a visible boundary. A declared verbal qualifier (e.g. บางๆ)
+  // also closes its phrase before the following site/dose phrase.
+  const separator = separatePhrase || /^[0-9A-Za-z]/u.test(trimmedBody) ? " " : "";
+  return `${verb}${separator}${trimmedBody}`;
 }
+
 
 function shouldUseGenericMedicationObjectThai(
   clause: CanonicalSigClause,
@@ -702,6 +691,14 @@ function shouldUseGenericMedicationObjectThai(
     return false;
   }
   if (THAI_IMPLIED_OBJECT_VERBS.has(verb)) {
+    return false;
+  }
+  const primaryStart = clause.instructionGraph?.primaryAdministrationSpan?.start;
+  if (primaryStart !== undefined && clause.instructionGraph?.actions.some((action) =>
+    action.span.end <= primaryStart && action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Theme && arg.conceptId === "product"
+    )
+  )) {
     return false;
   }
   switch (clause.route?.code) {
@@ -915,6 +912,8 @@ function formatUnitThai(unit: string, _value: number, style: "short" | "long"): 
     patch: { short: "แผ่น", long: "แผ่นแปะ" },
     patches: { short: "แผ่น", long: "แผ่นแปะ" },
     ring: { short: "วง", long: "วง" },
+    implant: { short: "ชิ้น", long: "ชิ้น" },
+    dose: { short: "ครั้ง", long: "ครั้ง" },
     applicatorful: { short: "แอปพลิเคเตอร์", long: "แอปพลิเคเตอร์" },
     capful: { short: "ฝา", long: "ฝา" },
     scoop: { short: "ช้อนตวง", long: "ช้อนตวง" },
@@ -1068,7 +1067,7 @@ function describeStandaloneOccurrenceCountThai(
   ) {
     return undefined;
   }
-  return `${stripTrailingZero(count)} ครั้ง`;
+  return `จำนวน ${stripTrailingZero(count)} ครั้ง`;
 }
 
 function joinMealNamesThai(parts: string[]): string {
@@ -1440,14 +1439,20 @@ function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
 }
 
 function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefined {
-  let text = reason.text ?? reason.coding?.display;
+  // A Thai source reason is already a surface proposition (e.g. "มีไข้",
+  // "ปวด", "มีอาการปวด"). Preserve it instead of replacing it with a
+  // nominal terminology label such as "ไข้". Coded terminology is used when
+  // we actually need to translate a non-Thai/no-source reason into Thai.
+  const sourceText = reason.text?.trim();
+  const sourceIsThai = Boolean(sourceText && /[\u0E00-\u0E7F]/u.test(sourceText));
+  let text = sourceIsThai ? sourceText : reason.coding?.display ?? sourceText;
   const coding = reason.coding;
   if (coding?.code) {
     const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
       coding.system ?? "http://snomed.info/sct",
       coding.code
     );
-    text = definition?.i18n?.th ?? text;
+    text = definition?.conditionI18n?.th ?? (sourceIsThai ? text : definition?.i18n?.th ?? text);
   }
   const spatial = translateSpatialSiteThai(undefined, reason.spatialRelation);
   if (text && spatial) {
@@ -1456,30 +1461,30 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
   return text;
 }
 
-function formatAsNeededThai(clause: CanonicalSigClause): string | undefined {
+function joinPrnReasonsThai(reasons: readonly CanonicalPrnReasonExpr[]): string | undefined {
+  const phrases = reasons
+    .map((reason) => translatePrnReasonThai(reason)?.trim())
+    .filter((reason): reason is string => Boolean(reason));
+  return phrases.length ? phrases.join("หรือ") : undefined;
+}
+
+function formatAsNeededThai(
+  clause: CanonicalSigClause,
+  embeddedAfterVerb = false
+): string | undefined {
   if (!clause.prn?.enabled) {
     return undefined;
   }
-  if (clause.prn.reasons?.length) {
-    const translatedReasons: typeof clause.prn.reasons = [];
-    for (const reason of clause.prn.reasons) {
-      const text = translatePrnReasonThai(reason);
-      translatedReasons.push({ text, coding: reason.coding });
-    }
-    const joined = getPreferredCanonicalPrnReasonText(undefined, translatedReasons, "หรือ");
-    if (joined) {
-      return `ใช้เมื่อจำเป็นสำหรับ ${joined}`;
-    }
-  }
-  const coding = clause.prn.reason?.coding;
-  const reason =
-    translatePrnReasonThai(clause.prn.reason ?? {}) ??
-    getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons, "หรือ") ??
-    coding?.display;
-  if (reason) {
-    return `ใช้เมื่อจำเป็นสำหรับ ${reason}`;
-  }
-  return "ใช้เมื่อจำเป็น";
+  const joined = clause.prn.reasons?.length
+    ? joinPrnReasonsThai(clause.prn.reasons)
+    : undefined;
+  const reason = joined ?? translatePrnReasonThai(clause.prn.reason ?? {});
+  // Thai condition morphology has two realization contexts. With preceding
+  // administration material, make the PRN clause explicit ("... ใช้เมื่อปวด").
+  // If the administration verb itself is immediately followed by the condition,
+  // omit the redundant ใช้ ("ทาเมื่อคัน", "ใช้เมื่อปวด").
+  const lead = embeddedAfterVerb ? "เมื่อ" : "ใช้เมื่อ";
+  return reason ? `${lead}${reason}` : `${lead}จำเป็น`;
 }
 
 function formatShortThai(clause: CanonicalSigClause): string {
@@ -1546,7 +1551,7 @@ function formatShortThai(clause: CanonicalSigClause): string {
 
 function makeThaiRoundTripSurface(text: string): string {
   return text
-    .replace(/ครั้งละ\s*/gu, "")
+    .replace(/ครั้งละ\s*/gu, " ")
     .replace(/ตอนเช้า/gu, "เช้า")
     .replace(/ตอนเที่ยง/gu, "เที่ยง")
     .replace(/ตอนกลางวัน/gu, "กลางวัน")
@@ -1574,6 +1579,19 @@ function applyThaiAdministrationModality(verb: string, clause: CanonicalSigClaus
   return prefix ? `${prefix}${verb}` : verb;
 }
 
+function thaiIntegratedAdministrationQualifier(
+  instruction: NonNullable<CanonicalSigClause["additionalInstructions"]>[number]
+): string | undefined {
+  const coding = instruction.coding;
+  if (!coding?.code) return undefined;
+  const definition = findAdditionalInstructionDefinitionByCoding(
+    coding.system ?? "http://snomed.info/sct",
+    coding.code
+  );
+  return definition?.verbSuffixI18n?.th?.trim() || undefined;
+}
+
+
 function formatLongThai(
   clause: CanonicalSigClause,
   options?: TimingSummaryOptions
@@ -1588,16 +1606,27 @@ function formatLongThai(
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
   const baseVerb = resolveThaiMethodVerb(clause, grammar);
-  const verb = applyThaiAdministrationModality(baseVerb, clause);
+  const integratedQualifiers = new Map<
+    NonNullable<CanonicalSigClause["additionalInstructions"]>[number],
+    string
+  >();
+  if (options?.realizationMode !== "roundtrip") {
+    for (const instruction of clause.additionalInstructions ?? []) {
+      const qualifier = thaiIntegratedAdministrationQualifier(instruction);
+      if (qualifier) integratedQualifiers.set(instruction, qualifier);
+    }
+  }
+  const modalVerb = applyThaiAdministrationModality(baseVerb, clause);
+  const qualifierSuffix = Array.from(integratedQualifiers.values()).join("");
+  const verb = `${modalVerb}${qualifierSuffix}`;
   const explicitDosePart = formatDoseThaiLong(clause.dose);
   const sitePart = formatSiteThai(clause, grammar);
-  const dosePart = shouldUseGenericMedicationObjectThai(
+  const usesGenericMedicationObject = shouldUseGenericMedicationObjectThai(
     clause,
     baseVerb,
     explicitDosePart
-  )
-    ? explicitDosePart ?? "ยา"
-    : explicitDosePart;
+  );
+  const dosePart = usesGenericMedicationObject ? explicitDosePart ?? "ยา" : explicitDosePart;
   const routePart = shouldSuppressRoutePhraseThai(
     clause,
     baseVerb,
@@ -1636,7 +1665,6 @@ function formatLongThai(
       ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
       : undefined;
   const durationPart = describeDurationThai(schedule);
-  const asNeeded = formatAsNeededThai(clause);
 
   const segments: string[] = [];
   if (dosePart) {
@@ -1668,79 +1696,129 @@ function formatLongThai(
   if (durationPart) {
     segments.push(durationPart);
   }
+  const prnCanAttachToVerb = segments.length === 0;
+  const prnCanAttachToGenericObject = Boolean(
+    usesGenericMedicationObject && !explicitDosePart &&
+    segments.length === 1 && segments[0] === dosePart
+  );
+  const asNeeded = formatAsNeededThai(
+    clause,
+    prnCanAttachToVerb || prnCanAttachToGenericObject
+  );
   if (asNeeded) {
-    segments.push(asNeeded);
+    if (prnCanAttachToGenericObject) segments[0] = `${segments[0]}${asNeeded}`;
+    else segments.push(asNeeded);
   }
   if (!siteFirst && sitePart) {
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const instructionPhrases: string[] = [];
-  const roundTripCrossLanguage = Boolean(
-    options?.realizationMode === "roundtrip" &&
-    clause.instructionGraph &&
-    !clause.instructionGraph.sourceLocale?.toLowerCase().startsWith("th")
-  );
+  const roundTrip = options?.realizationMode === "roundtrip";
   const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
     !instruction.coding?.code &&
-    !instruction.frames?.length &&
     Boolean(instruction.text && clause.instructionGraph &&
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text))
+      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) &&
+      (!instruction.frames?.length ||
+        !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)))
   );
   const directAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
-    graphOwnedAdditional.indexOf(instruction) === -1
+    graphOwnedAdditional.indexOf(instruction) === -1 &&
+    !integratedQualifiers.has(instruction)
   );
-  const hasCodedAdditionalInstruction = Boolean(
-    directAdditional.some((instruction) => instruction.coding?.code)
-  );
-  const graphWarning = clause.instructionGraph && (roundTripCrossLanguage || !hasCodedAdditionalInstruction)
+  const additionalSemanticSourceTexts = directAdditional
+    .map((instruction) => instruction.text?.trim())
+    .filter((text): text is string => Boolean(text));
+  for (const instruction of directAdditional) {
+    for (const frame of instruction.frames ?? []) {
+      const source = frame.sourceText?.trim();
+      if (source && additionalSemanticSourceTexts.indexOf(source) === -1) {
+        additionalSemanticSourceTexts.push(source);
+      }
+    }
+  }
+
+  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
+  const graphRealizationOptions = {
+    includeWarnings: true,
+    omitCanonicalAdministration: clause,
+    preferSourceText: roundTrip,
+    roundtripSafe: roundTrip,
+    omitSourceTexts: additionalSemanticSourceTexts
+  } as const;
+  const preGraphInstruction = positionedGraph && clause.instructionGraph
     ? realizeInstructionGraph(clause.instructionGraph, "th", {
-        onlyWarnings: true,
-        omitCanonicalAdministration: clause,
-        roundtripSafe: options?.realizationMode === "roundtrip"
+        ...graphRealizationOptions,
+        position: "pre"
       })
     : undefined;
+  const postGraphInstruction = positionedGraph && clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "th", {
+        ...graphRealizationOptions,
+        position: "post"
+      })
+    : undefined;
+  const wholeGraphInstruction = !positionedGraph && clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "th", graphRealizationOptions)
+    : undefined;
+
   const directInstruction = formatAdditionalInstructionsThai({
     ...clause,
     additionalInstructions: directAdditional
   });
-  const warningInstruction = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
-  const instructionText = [directInstruction, warningInstruction].filter(Boolean).join(" ").trim() || undefined;
-  if (instructionText) {
-    instructionPhrases.push(instructionText);
-  }
-  const representedInstructionTexts = directAdditional
-    .map((instruction) => instruction.text)
-    .filter((text): text is string => Boolean(text));
-  const graphInstruction = clause.instructionGraph &&
-    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
-    ? realizeInstructionGraph(clause.instructionGraph, "th", {
-        includeWarnings: false,
-        omitCanonicalAdministration: clause,
-        roundtripSafe: options?.realizationMode === "roundtrip"
-      })
-    : undefined;
+  const leadingInstructionText = formatPatientInstructionSentence(preGraphInstruction);
+  const graphInstruction = postGraphInstruction ?? wholeGraphInstruction;
+  const graphInstructionText = formatPatientInstructionSentence(graphInstruction);
   const patientSourceRepresented = Boolean(
     clause.patientInstruction &&
     clause.instructionGraph &&
-    instructionGraphRepresentsText(clause.instructionGraph, clause.patientInstruction) &&
-    (graphInstruction || graphWarning)
+    (preGraphInstruction || graphInstruction) &&
+    (
+      instructionGraphRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
+      clause.instructionGraph.coverage?.complete === true
+    )
   );
-  const patientInstruction = formatPatientInstructionSentence(
-    graphInstruction ?? (patientSourceRepresented ? undefined : clause.patientInstruction)
+  const fallbackPatientInstruction = formatPatientInstructionSentence(
+    patientSourceRepresented ? undefined : clause.patientInstruction
   );
-  if (patientInstruction) {
-    instructionPhrases.push(patientInstruction);
+  const trailingInstructionText = [
+    directInstruction,
+    graphInstructionText,
+    fallbackPatientInstruction
+  ].filter(Boolean).join(" ").trim() || undefined;
+
+  if (!canonicalClauseHasAdministrationSemantics(clause)) {
+    return [leadingInstructionText, trailingInstructionText].filter(Boolean).join(" ").trim() || `${verb}.`;
   }
-  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  if (!canonicalClauseHasAdministrationSemantics(clause) && trailingInstructionText) {
-    return trailingInstructionText;
+
+  const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
+  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+    action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === clause.dose?.value &&
+      arg.quantity?.range?.low === clause.dose?.range?.low &&
+      arg.quantity?.range?.high === clause.dose?.range?.high &&
+      arg.quantity?.unit === clause.dose?.unit
+    )
+  ));
+  const hasAdministrationTiming = Boolean(
+    schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined || schedule.periodMax !== undefined ||
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.count !== undefined
+  );
+  const graphCanStandAlone = Boolean(
+    !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&
+    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
+  );
+  if (graphCanStandAlone) {
+    return [directInstruction, graphInstructionText, fallbackPatientInstruction]
+      .filter(Boolean).join(" ").trim();
   }
-  const baseSentence = `${joinThaiVerbAndBody(verb, body)}.`;
-  const rendered = trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
-  return options?.realizationMode === "roundtrip"
-    ? makeThaiRoundTripSurface(rendered)
-    : rendered;
+
+  const baseSentence = `${joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix))}.`;
+  const rendered = [leadingInstructionText, baseSentence, trailingInstructionText]
+    .filter(Boolean).join(" ").trim();
+  return roundTrip ? makeThaiRoundTripSurface(rendered) : rendered;
 }
 
 function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | undefined {

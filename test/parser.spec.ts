@@ -1845,12 +1845,12 @@ describe("parseSig core scenarios", () => {
 
   it("accepts Thai aliases for expanded ambulatory PRN reasons", () => {
     const cases = [
-      ["1 tab po prn ปวดหัว", "25064002", "ปวดศีรษะ"],
+      ["1 tab po prn ปวดหัว", "25064002", "ปวดหัว"],
       ["1 tab po prn คัดจมูก", "68235000", "คัดจมูก"],
       ["1 drop ou prn ตาแดง", "703630003", "ตาแดง"],
-      ["1 tab po prn แสบขัด", "49650001", "แสบขัดเวลาปัสสาวะ"],
-      ["apply prn สิว", "88616000", "สิว"],
-      ["1 tab po prn เมารถ", "37031009", "เมารถหรือเมาเรือ"]
+      ["1 tab po prn แสบขัด", "49650001", "แสบขัด"],
+      ["apply prn สิว", "88616000", "เป็นสิว"],
+      ["1 tab po prn เมารถ", "37031009", "เมารถ"]
     ] as const;
 
     for (const [sig, code, localizedReason] of cases) {
@@ -1867,7 +1867,7 @@ describe("parseSig core scenarios", () => {
     });
 
     expect(result.longText).toBe(
-      "รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ คิดฟุ้งซ่าน หรือ ทำงานไม่ได้."
+      "รับประทานครั้งละ 1 เม็ด ใช้เมื่อคิดฟุ้งซ่านหรือทำงานไม่ได้."
     );
     expect(result.fhir.asNeededFor).toEqual([
       { text: "คิดฟุ้งซ่าน" },
@@ -1885,7 +1885,7 @@ describe("parseSig core scenarios", () => {
       locale: "th"
     });
 
-    expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด หรือ ไข้.");
+    expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด ใช้เมื่อปวดหรือมีไข้.");
     expect(result.fhir.asNeededFor).toMatchObject([
       {
         text: "pain",
@@ -2889,11 +2889,11 @@ describe("parseSig core scenarios", () => {
 
   it("localizes Thai body-site aliases through canonical site text", () => {
     const cases = [
-      ["apply to ตาขวา", "ทา ที่ตาขวา."],
-      ["apply to หูสองข้าง", "ทา ที่หูทั้งสองข้าง."],
-      ["apply to นิ้วโป้งเท้า", "ทา บริเวณนิ้วโป้งเท้า."],
-      ["apply to นิ้วก้อยเท้าซ้าย", "ทา บริเวณนิ้วก้อยเท้าซ้าย."],
-      ["apply to อัณฑะ", "ทา บริเวณอัณฑะ."]
+      ["apply to ตาขวา", "ทาที่ตาขวา."],
+      ["apply to หูสองข้าง", "ทาที่หูทั้งสองข้าง."],
+      ["apply to นิ้วโป้งเท้า", "ทาบริเวณนิ้วโป้งเท้า."],
+      ["apply to นิ้วก้อยเท้าซ้าย", "ทาบริเวณนิ้วก้อยเท้าซ้าย."],
+      ["apply to อัณฑะ", "ทาบริเวณอัณฑะ."]
     ] as const;
 
     for (const [sig, text] of cases) {
@@ -3677,7 +3677,7 @@ describe("parseSig core scenarios", () => {
     expect(result.shortText).toBe("10 mL PO PRN pain");
     expect(result.longText).toBe("Drink 10 mL as needed for pain.");
     expect(result.fhir.method?.text).toBe("Drink");
-    expectPrimitiveTranslation(result.fhir.method?._text, "th", "รับประทาน");
+    expectPrimitiveTranslation(result.fhir.method?._text, "th", "ดื่ม");
     expect(result.fhir.method?.coding).toEqual([
       {
         system: "http://snomed.info/sct",
@@ -3877,7 +3877,7 @@ describe("parseSig core scenarios", () => {
       {
         sig: "swallow 1 tab po daily",
         text: "Swallow",
-        thaiText: "รับประทาน",
+        thaiText: "กลืน",
         code: "738995006",
         display: "Swallow",
         thaiDisplay: "รับประทาน"
@@ -3988,15 +3988,15 @@ describe("internationalization", () => {
     it("produces Thai text for parseSig", () => {
       const result = parseSig("1 tab po bid", { context: TAB_CONTEXT, locale: "th" });
       expect(result.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
-      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
+      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
+      expect(result.fhir.text).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
     });
 
     it("formats Thai text from FHIR dosage", () => {
       const parsed = parseSig("1 tab po bid", { context: TAB_CONTEXT });
       const fromFhir = fromFhirDosage(parsed.fhir, { locale: "th" });
       expect(fromFhir.shortText).toBe("1 เม็ด PO วันละ 2 ครั้ง");
-      expect(fromFhir.longText).toBe("รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
+      expect(fromFhir.longText).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง.");
     });
 
     it("formats Thai site text from SNOMED coding when FHIR site.text is absent", () => {
@@ -4011,7 +4011,7 @@ describe("internationalization", () => {
         { locale: "th" }
       );
 
-      expect(fromFhir.longText).toBe("ทา บริเวณขมับขวา วันละ 2 ครั้ง.");
+      expect(fromFhir.longText).toBe("ทาบริเวณขมับขวา วันละ 2 ครั้ง.");
     });
 
     it("suppresses duplicate Thai rectal and vaginal site phrases when coding already implies the route", () => {
@@ -4028,7 +4028,7 @@ describe("internationalization", () => {
         },
         { locale: "th" }
       );
-      expect(rectal.longText).toBe("สอด ทางทวารหนัก.");
+      expect(rectal.longText).toBe("สอดทางทวารหนัก.");
       expect(rectal.longText).not.toContain("ไส้ตรง");
 
       const vaginal = fromFhirDosage(
@@ -4044,7 +4044,7 @@ describe("internationalization", () => {
         },
         { locale: "th" }
       );
-      expect(vaginal.longText).toBe("สอด ทางช่องคลอด.");
+      expect(vaginal.longText).toBe("สอดทางช่องคลอด.");
     });
 
     it("suppresses duplicate Thai rectal and vaginal site phrases for text-only routes", () => {
@@ -4060,7 +4060,7 @@ describe("internationalization", () => {
         },
         { locale: "th" }
       );
-      expect(rectal.longText).toBe("สอด ทางทวารหนัก.");
+      expect(rectal.longText).toBe("สอดทางทวารหนัก.");
       expect(rectal.longText).not.toContain("ไส้ตรง");
 
       const vaginal = fromFhirDosage(
@@ -4075,81 +4075,81 @@ describe("internationalization", () => {
         },
         { locale: "th" }
       );
-      expect(vaginal.longText).toBe("สอด ทางช่องคลอด.");
+      expect(vaginal.longText).toBe("สอดทางช่องคลอด.");
     });
 
     it("translates eye site names in Thai", () => {
       const result = parseSig("1 drop OD", { locale: "th" });
-      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
-      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ที่ตาขวา.");
+      expect(result.longText).toBe("หยอดครั้งละ 1 หยด ที่ตาขวา.");
+      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด ที่ตาขวา.");
     });
 
     it("formats once-daily bedtime ocular dosing in Thai without splitting the timing", () => {
       const result = parseSig("1 drop ou qd hs", { locale: "th" });
-      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
-      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
+      expect(result.longText).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
+      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ก่อนนอน ที่ตาทั้งสองข้าง.");
     });
 
     it("uses inhaler phrasing in Thai without สูดดม", () => {
       const result = parseSig("2 puff inhalation hs", { locale: "th" });
-      expect(result.longText).toBe("สูด ครั้งละ 2 พัฟ ก่อนนอน.");
-      expect(result.fhir.text).toBe("สูด ครั้งละ 2 พัฟ ก่อนนอน.");
+      expect(result.longText).toBe("สูดครั้งละ 2 พัฟ ก่อนนอน.");
+      expect(result.fhir.text).toBe("สูดครั้งละ 2 พัฟ ก่อนนอน.");
     });
 
     it("uses inhaler phrasing in Thai for puff-only sigs", () => {
       const result = parseSig("1 puff od", { locale: "th" });
-      expect(result.longText).toBe("สูด ครั้งละ 1 พัฟ วันละครั้ง.");
-      expect(result.fhir.text).toBe("สูด ครั้งละ 1 พัฟ วันละครั้ง.");
+      expect(result.longText).toBe("สูดครั้งละ 1 พัฟ วันละครั้ง.");
+      expect(result.fhir.text).toBe("สูดครั้งละ 1 พัฟ วันละครั้ง.");
     });
 
     it("translates ear site names in Thai", () => {
       const result = parseSig("1 drop right ear once daily", { locale: "th" });
-      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
-      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+      expect(result.longText).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
+      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด วันละครั้ง ที่หูขวา.");
     });
 
     it("translates head site names in Thai", () => {
       const result = parseSig("apply to head bid", { locale: "th" });
-      expect(result.longText).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
-      expect(result.fhir.text).toBe("ทา บริเวณศีรษะ วันละ 2 ครั้ง.");
+      expect(result.longText).toBe("ทาบริเวณศีรษะ วันละ 2 ครั้ง.");
+      expect(result.fhir.text).toBe("ทาบริเวณศีรษะ วันละ 2 ครั้ง.");
 
       const thaiHead = parseSig("apply to หัว", { locale: "th" });
-      expect(thaiHead.longText).toBe("ทา บริเวณศีรษะ.");
+      expect(thaiHead.longText).toBe("ทาบริเวณศีรษะ.");
 
       const thaiScalp = parseSig("apply ที่หนังศีรษะ", { locale: "th" });
-      expect(thaiScalp.longText).toBe("ทา บริเวณหนังศีรษะ.");
+      expect(thaiScalp.longText).toBe("ทาบริเวณหนังศีรษะ.");
     });
 
     it("translates spatial body-site relations in Thai", () => {
       const belowEar = parseSig("apply below ear bid", { locale: "th" });
-      expect(belowEar.longText).toBe("ทา บริเวณใต้หู วันละ 2 ครั้ง.");
+      expect(belowEar.longText).toBe("ทาบริเวณใต้หู วันละ 2 ครั้ง.");
 
       const topOfHand = parseSig("apply to top of hand bid", { locale: "th" });
-      expect(topOfHand.longText).toBe("ทา บริเวณด้านบนของมือ วันละ 2 ครั้ง.");
+      expect(topOfHand.longText).toBe("ทาบริเวณด้านบนของมือ วันละ 2 ครั้ง.");
 
       const rightAbdomen = parseSig("apply to right side of abdomen bid", { locale: "th" });
-      expect(rightAbdomen.longText).toBe("ทา บริเวณท้องด้านขวา วันละ 2 ครั้ง.");
+      expect(rightAbdomen.longText).toBe("ทาบริเวณท้องด้านขวา วันละ 2 ครั้ง.");
 
       const betweenFingers = parseSig("apply to area between fingers", { locale: "th" });
-      expect(betweenFingers.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+      expect(betweenFingers.longText).toBe("ทาบริเวณระหว่างนิ้วมือ.");
 
       const thaiBetweenFingers = parseSig("apply ระหว่างนิ้วมือ", { locale: "th" });
-      expect(thaiBetweenFingers.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+      expect(thaiBetweenFingers.longText).toBe("ทาบริเวณระหว่างนิ้วมือ.");
 
       const thaiBetweenDigits = parseSig("apply ระหว่างนิ้ว", { locale: "th" });
-      expect(thaiBetweenDigits.longText).toBe("ทา บริเวณระหว่างนิ้วมือ.");
+      expect(thaiBetweenDigits.longText).toBe("ทาบริเวณระหว่างนิ้วมือ.");
 
       const thaiBetweenToes = parseSig("apply ระหว่างนิ้วเท้า", { locale: "th" });
-      expect(thaiBetweenToes.longText).toBe("ทา บริเวณระหว่างนิ้วเท้า.");
+      expect(thaiBetweenToes.longText).toBe("ทาบริเวณระหว่างนิ้วเท้า.");
 
       const contextualThaiBetweenToes = parseSig("apply ระหว่างนิ้ว", {
         locale: "th",
         context: { bodySiteContext: "feet" }
       });
-      expect(contextualThaiBetweenToes.longText).toBe("ทา บริเวณระหว่างนิ้วเท้า.");
+      expect(contextualThaiBetweenToes.longText).toBe("ทาบริเวณระหว่างนิ้วเท้า.");
 
       const rightFlank = parseSig("apply to right flank", { locale: "th" });
-      expect(rightFlank.longText).toBe("ทา บริเวณสีข้างขวา.");
+      expect(rightFlank.longText).toBe("ทาบริเวณสีข้างขวา.");
 
       const fromExtensionOnly = fromFhirDosage(
         {
@@ -4158,12 +4158,12 @@ describe("internationalization", () => {
         },
         { locale: "th" }
       );
-      expect(fromExtensionOnly.longText).toBe("ทา บริเวณใต้หู วันละ 2 ครั้ง.");
+      expect(fromExtensionOnly.longText).toBe("ทาบริเวณใต้หู วันละ 2 ครั้ง.");
     });
 
     it("translates spatial PRN reason sites in Thai", () => {
       const result = parseSig("apply prn itch below ear", { locale: "th" });
-      expect(result.longText).toBe("ทา ใช้เมื่อจำเป็นสำหรับ คันใต้หู.");
+      expect(result.longText).toBe("ทาเมื่อคันใต้หู.");
       expect(result.fhir.asNeededFor?.[0]?.extension?.[0]?.url).toBe(
         BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
       );
@@ -4171,10 +4171,10 @@ describe("internationalization", () => {
 
     it("translates SNOMED-coded site variants in Thai without alias-specific text keys", () => {
       const temple = parseSig("apply to temple region bid", { locale: "th" });
-      expect(temple.longText).toBe("ทา บริเวณขมับ วันละ 2 ครั้ง.");
+      expect(temple.longText).toBe("ทาบริเวณขมับ วันละ 2 ครั้ง.");
 
       const leftHead = parseSig("apply to left side of head bid", { locale: "th" });
-      expect(leftHead.longText).toBe("ทา บริเวณศีรษะซ้าย วันละ 2 ครั้ง.");
+      expect(leftHead.longText).toBe("ทาบริเวณศีรษะซ้าย วันละ 2 ครั้ง.");
     });
 
     it("translates ear site variants without leaving English route text", () => {
@@ -4194,10 +4194,10 @@ describe("internationalization", () => {
     it("combines frequency, event timing, and as-needed phrasing in Thai", () => {
       const result = parseSig("1 tab po bid ac prn pain", { locale: "th" });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด."
+        "รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อปวด."
       );
       expect(result.shortText).toBe(
-        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อจำเป็นสำหรับ ปวด"
+        "1 เม็ด PO วันละ 2 ครั้ง ก่อนอาหาร ใช้เมื่อปวด"
       );
     });
 
@@ -4207,20 +4207,20 @@ describe("internationalization", () => {
         locale: "th"
       });
       expect(result.shortText).toBe("1 เม็ด PO ทุก 1 ชั่วโมง x10");
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
-      expect(result.fhir.text).toBe("รับประทาน ครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
+      expect(result.fhir.text).toBe("รับประทานครั้งละ 1 เม็ด ทุก 1 ชั่วโมง จำนวน 10 ครั้ง.");
     });
 
     it("includes minute interval wording together with count information in Thai", () => {
       const result = parseSig("1 drop ou q15min x 8 doses", { locale: "th" });
       expect(result.shortText).toBe("1 หยด OPH ทุก 15 นาที x8");
-      expect(result.longText).toBe("หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
-      expect(result.fhir.text).toBe("หยอด ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
+      expect(result.longText).toBe("หยอดครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
+      expect(result.fhir.text).toBe("หยอดครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง ที่ตาทั้งสองข้าง.");
     });
 
     it("describes day-of-week schedules in Thai", () => {
       const result = parseSig("1 tab po every monday", { locale: "th" });
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด ในวันจันทร์.");
+      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด ในวันจันทร์.");
     });
 
     it("groups Thai meal timings by relation without forcing a daily count", () => {
@@ -4228,7 +4228,7 @@ describe("internationalization", () => {
         locale: "th",
         groupMealTimingsByRelation: true
       });
-      expect(result.longText).toBe("รับประทาน ครั้งละ 1 เม็ด หลังอาหารเช้า กลางวัน และเย็น.");
+      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด หลังอาหารเช้า กลางวัน และเย็น.");
     });
 
     it("adds a Thai daily count summary independently from meal grouping", () => {
@@ -4237,7 +4237,7 @@ describe("internationalization", () => {
         includeTimesPerDaySummary: true
       });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า, หลังอาหารกลางวัน และ หลังอาหารเย็น."
+        "รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า, หลังอาหารกลางวัน และ หลังอาหารเย็น."
       );
     });
 
@@ -4248,7 +4248,7 @@ describe("internationalization", () => {
         includeTimesPerDaySummary: true
       });
       expect(result.longText).toBe(
-        "รับประทาน ครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
+        "รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
       );
     });
   });
@@ -5403,15 +5403,15 @@ describe("time-based schedules", () => {
     const cases = [
       {
         input: "1 tab with breakfast, with lunch, and at 9 am, 5 pm",
-        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
+        expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
       },
       {
         input: "1 tab with meals and @ 10:00",
-        expected: "ใช้ ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
+        expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
       },
       {
         input: "1 tab ac and @ 8:00",
-        expected: "ใช้ ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
+        expected: "ใช้ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
       }
     ];
 
@@ -5456,9 +5456,9 @@ describe("issue regression tests", () => {
 
   it("translates common PRN reasons to Thai", () => {
     const cases = [
-      { input: "1 tab prn pain", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ปวด." },
-      { input: "1 tab prn fever", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ ไข้." },
-      { input: "1 tab prn sleep", expected: "ใช้ ครั้งละ 1 เม็ด ใช้เมื่อจำเป็นสำหรับ นอนหลับ." }
+      { input: "1 tab prn pain", expected: "ใช้ครั้งละ 1 เม็ด ใช้เมื่อปวด." },
+      { input: "1 tab prn fever", expected: "ใช้ครั้งละ 1 เม็ด ใช้เมื่อมีไข้." },
+      { input: "1 tab prn sleep", expected: "ใช้ครั้งละ 1 เม็ด ใช้เมื่อนอนไม่หลับ." }
     ];
     for (const { input, expected } of cases) {
       const result = parseSig(input, { locale: "th" });

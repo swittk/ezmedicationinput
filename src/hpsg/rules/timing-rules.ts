@@ -54,7 +54,7 @@ import {
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
-import { getProceduralFrames } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
@@ -708,7 +708,16 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const lower = normalizeTokenLower(token);
     const abbreviationKey = lower.replace(/\./g, "");
     const descriptor = TIMING_ABBREVIATIONS[abbreviationKey];
-    if (descriptor) {
+    const followingCount = context.tokens[start + 1];
+    const followingTimes = context.tokens[start + 2];
+    const beginsCadenceFirstFrequency = Boolean(
+      mapFrequencyAdverb(lower) &&
+      followingCount?.kind === LexKind.Number &&
+      followingCount.value !== undefined &&
+      followingTimes &&
+      FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(followingTimes))
+    );
+    if (descriptor && !beginsCadenceFirstFrequency) {
       return [
         lexicalSign({
           type: "schedule-sign",
@@ -738,15 +747,6 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const wordFrequency = WORD_FREQUENCIES[lower];
     if (wordFrequency) {
-      const followingCount = context.tokens[start + 1];
-      const followingTimes = context.tokens[start + 2];
-      const beginsCadenceFirstFrequency = Boolean(
-        mapFrequencyAdverb(lower) &&
-        followingCount?.kind === LexKind.Number &&
-        followingCount.value !== undefined &&
-        followingTimes &&
-        FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(followingTimes))
-      );
       if (beginsCadenceFirstFrequency) {
         return [];
       }
@@ -772,6 +772,9 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
+      if (sourceRangeAttachmentClass(context, token.sourceStart, token.sourceEnd) === "procedure") {
+        return [];
+      }
       return [
         lexicalSign({
           type: "schedule-sign",
@@ -830,6 +833,61 @@ function eventExpressionPartsAt(
     parts.push(normalizeTokenLower(member));
   }
   return { parts, members };
+}
+
+function coordinatedRelatedEventSign(
+  context: HpsgClauseContext,
+  start: number,
+  relation: "before" | "after" | "with"
+): HpsgSign | undefined {
+  const relationToken = context.tokens[start];
+  if (!relationToken || context.state.consumed.has(relationToken.index)) return undefined;
+  const firstExpression = eventExpressionPartsAt(context, start + 1);
+  const firstResolved = resolveEventTimingExpression(firstExpression.parts);
+  if (!firstResolved || firstResolved.length < 2) return undefined;
+  const sharedHead = firstExpression.parts.slice(0, firstResolved.length - 1);
+  if (!sharedHead.length) return undefined;
+  const firstTiming = mealTimingForRelation(relation, firstResolved.timing);
+  if (!firstTiming) return undefined;
+
+  const timings: EventTiming[] = [firstTiming];
+  const members: Token[] = [
+    relationToken,
+    ...firstExpression.members.slice(0, firstResolved.length)
+  ];
+  let cursor = start + 1 + firstResolved.length;
+  while (cursor + 1 < context.tokens.length) {
+    const separator = context.tokens[cursor];
+    const tail = context.tokens[cursor + 1];
+    if (
+      !separator || !tail ||
+      context.state.consumed.has(separator.index) ||
+      context.state.consumed.has(tail.index) ||
+      !LIST_SEPARATORS.has(normalizeTokenLower(separator))
+    ) break;
+    const synthetic = [...sharedHead, normalizeTokenLower(tail)];
+    const resolvedTail = resolveEventTimingExpression(synthetic);
+    if (!resolvedTail || resolvedTail.length !== synthetic.length) break;
+    const relatedTail = mealTimingForRelation(relation, resolvedTail.timing);
+    if (!relatedTail) break;
+    members.push(separator, tail);
+    timings.push(relatedTail);
+    cursor += 2;
+  }
+  if (timings.length < 2) return undefined;
+  return lexicalSign({
+    type: "schedule-sign",
+    rule: "hpsg.lex.schedule.eventPhrase.coordinatedHeadEllipsis",
+    tokens: members,
+    synsem: {
+      head: { schedule: { when: timings } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    // Coordinated head ellipsis is a single, more specific construction than
+    // independently attaching the first meal phrase and a bare daypart.
+    score: 28 + members.length
+  });
 }
 
 export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -893,6 +951,10 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
 
     const relation = mealRelationFromToken(firstLower);
+    if (relation) {
+      const coordinated = coordinatedRelatedEventSign(context, start, relation);
+      if (coordinated) signs.push(coordinated);
+    }
     let combinedMealTiming: EventTiming | undefined;
     if (relation && secondLower) {
       const relatedExpression = eventExpressionPartsAt(context, start + 1);
@@ -968,7 +1030,14 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
       );
     }
 
-    return signs;
+    return signs.filter((sign) => {
+      if (!sign.tokens.length) return true;
+      const firstToken = sign.tokens[0];
+      const lastToken = sign.tokens[sign.tokens.length - 1];
+      return sourceRangeAttachmentClass(
+        context, firstToken.sourceStart, lastToken.sourceEnd
+      ) !== "procedure";
+    });
   });
 }
 
@@ -1030,7 +1099,7 @@ export function dayRangeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               valence: {},
               cont: { clauseKind: "administration" }
             },
-            score: 20
+            score: 13
           })
         ];
       }
@@ -1108,6 +1177,34 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
+    if (token.kind === LexKind.Number && token.value !== undefined) {
+      const unitToken = context.tokens[start + 1];
+      const previousToken = context.tokens[start - 1];
+      const unit = unitToken && !context.state.consumed.has(unitToken.index)
+        ? mapIntervalUnit(normalizeTokenLower(unitToken))
+        : undefined;
+      const governedByIntervalLead = Boolean(
+        previousToken && EVERY_INTERVAL_TOKENS.has(normalizeTokenLower(previousToken))
+      );
+      const governedByRangeConnector = Boolean(
+        previousToken && RANGE_CONNECTORS.has(normalizeTokenLower(previousToken))
+      );
+      if (unit && !governedByIntervalLead && !governedByRangeConnector &&
+        !timingRangeIsProcedureLocalDuration(context, token.sourceStart, unitToken.sourceEnd)) {
+        const schedule = buildDurationScheduleFeature(token.value, unit);
+        if (schedule) {
+          signs.push(
+            lexicalSign({
+              type: "schedule-sign",
+              rule: "hpsg.lex.schedule.duration.bare",
+              tokens: [token, unitToken],
+              synsem: { head: { schedule }, valence: {}, cont: { clauseKind: "administration" } },
+              score: 7
+            })
+          );
+        }
+      }
+    }
     const compactDuration = lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)(min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|wk|w|week|weeks|mo|month|months)$/);
     if (compactDuration) {
       if (timingRangeIsProcedureLocalDuration(context, token.sourceStart, token.sourceEnd)) return signs;
@@ -1170,7 +1267,15 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         const unit = unitToken && !context.state.consumed.has(unitToken.index)
           ? mapIntervalUnit(normalizeTokenLower(unitToken))
           : undefined;
-        const tokens = unit ? [token, valueToken, unitToken] : [token, valueToken];
+        const occurrenceToken = !unit && unitToken && !context.state.consumed.has(unitToken.index) &&
+          FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(unitToken))
+          ? unitToken
+          : undefined;
+        const tokens = unit
+          ? [token, valueToken, unitToken]
+          : occurrenceToken
+            ? [token, valueToken, occurrenceToken]
+            : [token, valueToken];
         if (unit && timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken?.sourceEnd ?? valueToken.sourceEnd)) {
           return signs;
         }

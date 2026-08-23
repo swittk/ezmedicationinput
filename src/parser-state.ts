@@ -391,6 +391,14 @@ export class ParserState {
     this.ensureSite().text = value;
   }
 
+  get siteI18n(): Record<string, string> | undefined {
+    return this.clause.site?.i18n;
+  }
+
+  set siteI18n(value: Record<string, string> | undefined) {
+    this.ensureSite().i18n = cloneI18nRecord(value);
+  }
+
   get siteSource(): "abbreviation" | "text" | "selection" | "resolver" | undefined {
     return this.clause.site?.source;
   }

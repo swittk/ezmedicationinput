@@ -10,6 +10,7 @@ import {
 import unitTerminologySource from "../unit-terminology.json";
 import instructionActionSource from "../instruction-action-terminology.json";
 import instructionConceptSource from "../instruction-concept-terminology.json";
+import adviceRulesSource from "../advice-rules.json";
 import { LexKind, LexToken } from "./token-types";
 
 /**
@@ -51,15 +52,19 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "และ": "and",
   "หรือ": "or",
   "ที่": "at",
+  "เวลา": "at",
   "ใน": "in",
   "บน": "on",
   "ลง": "into",
   "เข้า": "into",
   "ด้วย": "with",
+  "กับ": "with",
   "ภายนอก": "external",
   "บางๆ": "thinly",
   "ห้าม": "avoid",
   "ควร": "should",
+  "ต้อง": "must",
+  "ให้": "do",
   "ปรึกษา": "consult",
   "แพทย์": "doctor",
   "ประมาณ": "about",
@@ -78,6 +83,7 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
 
   // cadence / event timing
   "ครั้ง": "times",
+  "จำนวน": "total",
   "เช้า": "morning",
   "เที่ยง": "noon",
   "กลางวัน": "noon",
@@ -88,6 +94,9 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "อาหาร": "meal",
   "น้ำ": "water",
   "ฟอง": "foam",
+  "วินาที": "second",
+  "คืน": "night",
+  "ทันที": "immediate",
   "นาที": "minute",
   "ชั่วโมง": "hour",
   "วัน": "day",
@@ -132,6 +141,27 @@ function registerDeclarativeThaiAliases(
 }
 registerDeclarativeThaiAliases((instructionActionSource as DeclarativeTerminologySource).actions);
 registerDeclarativeThaiAliases((instructionConceptSource as DeclarativeTerminologySource).concepts);
+
+interface AdviceStyleLexiconSource {
+  rules?: Array<{
+    definition?: { thaiVerbSuffix?: string };
+    matcher?: { normalizedTexts?: string[] };
+  }>;
+}
+
+function registerDeclarativeAdviceStyleAliases(): void {
+  const rules = (adviceRulesSource as AdviceStyleLexiconSource).rules ?? [];
+  for (const rule of rules) {
+    const suffix = rule.definition?.thaiVerbSuffix?.trim().toLowerCase();
+    if (!suffix) continue;
+    const canonical = rule.matcher?.normalizedTexts?.find((candidate) =>
+      /^[a-z][a-z-]*$/i.test(candidate.trim())
+    )?.trim().toLowerCase();
+    if (!canonical) continue;
+    DECLARATIVE_THAI_CANONICAL[suffix] = canonical;
+  }
+}
+registerDeclarativeAdviceStyleAliases();
 
 function canonicalThaiLexeme(value: string): string | undefined {
   return THAI_LEXEME_ALIASES[value] ?? DECLARATIVE_THAI_CANONICAL[value];
@@ -197,6 +227,11 @@ function isKnownThaiDomainTerm(value: string): boolean {
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
+  { parts: ["เป็น", "เวลา"], canonical: "for" },
+  { parts: ["ยา", "พ่น"], canonical: "inhaler" },
+  { parts: ["ยา", "เหน็บ"], canonical: "suppository" },
+  { parts: ["แผ่น", "แปะ"], canonical: "patch" },
+  { parts: ["ครั้ง", "ละ"], canonical: "per-dose" },
   { parts: ["ไม่", "ควร"], canonical: "should-not" },
   { parts: ["กลาง", "วัน"], canonical: "noon" },
   { parts: ["ให้", "แห้ง"], canonical: "dry" },

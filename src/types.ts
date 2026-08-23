@@ -492,10 +492,16 @@ export interface CodeableConceptDefinition {
   i18n?: Record<string, string>;
 }
 
-export interface PrnReasonDefinition extends CodeableConceptDefinition { }
+export interface PrnReasonDefinition extends CodeableConceptDefinition {
+  /** Locale-specific surface proposition used after a conditional such as Thai `เมื่อ`. */
+  conditionI18n?: Record<string, string>;
+}
 
 export interface AdditionalInstructionDefinition
-  extends CodeableConceptDefinition { }
+  extends CodeableConceptDefinition {
+  /** Locale-specific suffix appended directly to the administration verb. */
+  verbSuffixI18n?: Record<string, string>;
+}
 
 export enum AdvicePolarity {
   Affirm = "affirm",
@@ -787,6 +793,7 @@ export type MedicationInstructionActionArgumentParser =
   | "object-amount-material"
   | "amount-duration"
   | "object-duration"
+  | "object-time"
   | "mix-substance"
   | "result"
   | "site"
@@ -807,6 +814,8 @@ export type MedicationInstructionActionRealizer =
   | "prime"
   | "amount-duration"
   | "object-duration"
+  | "object-time"
+  | "separable-object-relation"
   | "relation-duration"
   | "leave-duration"
   | "duration"
@@ -833,6 +842,8 @@ export interface MedicationInstructionActionDefinition {
   roundtripI18n?: Record<string, string>;
   /** Surface forms that should resolve to this action. */
   aliases?: string[];
+  /** Discontinuous surface forms such as Thai `เอา X ออก` (remove X). */
+  separableAliases?: Array<{ lead: string; particle: string }>;
   /** Whether this is a procedural action rather than ordinary administration advice. */
   procedural?: boolean;
   /** Declarative argument grammar family used by the instruction graph. */
@@ -856,6 +867,16 @@ export interface MedicationInstructionActionDefinition {
     nextConcepts?: string[];
   }>;
   continuationAfterRelations?: string[];
+  /** Exact coding for FHIR Dosage.method when this action can head administration. */
+  administrationMethod?: FhirCoding;
+  /** Route candidate licensed by the action surface itself (e.g. take -> oral). */
+  verbRouteHint?: RouteCode;
+  /** Exact route that overrides the ordinary verb route candidate for the method head. */
+  methodRouteOverride?: RouteCode;
+  /** Do not project the action's verb route hint from the method head. */
+  suppressMethodRouteHint?: boolean;
+  /** Marks surfaces that establish topical/application context for site grammar. */
+  applicationVerb?: boolean;
   /** Extra exact codings licensed by a typed semantic argument. */
   contextualCodings?: MedicationInstructionActionContextualCodingRule[];
   /** A method-capable procedural action that may serve as the primary administration head. */

@@ -128,7 +128,7 @@ describe("published package entrypoints", () => {
         }));
       `
     );
-    expect(result.roundTripText).toBe("หยอด วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.roundTripText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);
   });

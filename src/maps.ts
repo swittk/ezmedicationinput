@@ -166,6 +166,8 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
   registerVariants("subq", RouteCode["Subcutaneous route"]);
   registerVariants("subcut", RouteCode["Subcutaneous route"]);
   registerVariants("subcutaneous", RouteCode["Subcutaneous route"]);
+  registerVariants("ใต้ผิวหนัง", RouteCode["Subcutaneous route"]);
+  registerVariants("เข้าใต้ผิวหนัง", RouteCode["Subcutaneous route"]);
   registerVariants("in", RouteCode["Nasal route"]);
   registerVariants("intranasal", RouteCode["Nasal route"]);
   registerVariants("nasal", RouteCode["Nasal route"]);
@@ -180,8 +182,10 @@ export const DEFAULT_ROUTE_SYNONYMS: Record<string, RouteSynonym> = (() => {
   registerVariants("suppo", RouteCode["Per rectum"]);
   registerVariants("suppository", RouteCode["Per rectum"]);
   registerVariants("suppositories", RouteCode["Per rectum"]);
+  registerVariants("ทางทวารหนัก", RouteCode["Per rectum"]);
   registerVariants("pv", RouteCode["Per vagina"]);
   registerVariants("vaginal", RouteCode["Per vagina"]);
+  registerVariants("ทางช่องคลอด", RouteCode["Per vagina"]);
   registerVariants("oph", RouteCode["Ophthalmic route"]);
   registerVariants("ophth", RouteCode["Ophthalmic route"]);
   registerVariants("ophthalmic", RouteCode["Ophthalmic route"]);
@@ -393,7 +397,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["left eye", "ตาซ้าย"],
+      names: ["left eye", "ตาซ้าย", "ตาข้างซ้าย"],
       definition: {
         coding: { code: "1290031003", display: "Structure of left eye proper" },
         text: "left eye",
@@ -402,7 +406,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["right eye", "ตาขวา"],
+      names: ["right eye", "ตาขวา", "ตาข้างขวา"],
       definition: {
         coding: { code: "1290032005", display: "Structure of right eye proper" },
         text: "right eye",
@@ -475,7 +479,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["left ear", "หูซ้าย"],
+      names: ["left ear", "หูซ้าย", "หูข้างซ้าย"],
       definition: {
         coding: { code: "89644007", display: "Left ear" },
         text: "left ear",
@@ -483,7 +487,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["right ear", "หูขวา"],
+      names: ["right ear", "หูขวา", "หูข้างขวา"],
       definition: {
         coding: { code: "25577004", display: "Right ear" },
         text: "right ear",
@@ -536,7 +540,9 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
         "each nostril",
         "nares",
         "anterior nares",
-        "รูจมูกทั้งสองข้าง"
+        "รูจมูกทั้งสองข้าง",
+        "จมูกข้างละ",
+        "รูจมูกข้างละ"
       ],
       definition: {
         coding: { code: "244506005", display: "Anterior nares" },
@@ -547,8 +553,12 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["nose"],
-      definition: { coding: { code: "181195007", display: "Entire nose" }, routeHint: RouteCode["Nasal route"] }
+      names: ["nose", "จมูก"],
+      definition: {
+        coding: { code: "181195007", display: "Entire nose" },
+        i18n: { th: "จมูก" },
+        routeHint: RouteCode["Nasal route"]
+      }
     },
     {
       names: ["mouth"],
@@ -1384,8 +1394,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["rectum", "rectal"],
-      definition: { coding: { code: "34402009", display: "Rectum" }, text: "rectum", routeHint: RouteCode["Per rectum"] }
+      names: ["rectum", "rectal", "ทวารหนัก"],
+      definition: {
+        coding: { code: "34402009", display: "Rectum" },
+        text: "rectum",
+        i18n: { th: "ทวารหนัก" },
+        routeHint: RouteCode["Per rectum"]
+      }
     },
     {
       names: ["anus"],
@@ -1871,7 +1886,8 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   sleep: EventTiming["Before Sleep"],
   wake: EventTiming.Wake,
   waking: EventTiming.Wake,
-  stat: EventTiming.Immediate
+  stat: EventTiming.Immediate,
+  immediate: EventTiming.Immediate
 };
 
 const MEAL_KEYWORD_ENTRIES: Array<
@@ -2559,7 +2575,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "37796009", display: "Migraine" },
       text: "Migraine",
       aliases: ["ไมเกรน", "ปวดหัวไมเกรน"],
-      i18n: { th: "ไมเกรน" }
+      i18n: { th: "ไมเกรน" },
+      conditionI18n: { th: "มีอาการไมเกรน" }
     }
   },
   {
@@ -2653,7 +2670,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "55300003", display: "Cramp" },
       text: "Cramp",
       aliases: ["ตะคริว"],
-      i18n: { th: "ตะคริว" }
+      i18n: { th: "ตะคริว" },
+      conditionI18n: { th: "เป็นตะคริว" }
     }
   },
   {
@@ -2662,7 +2680,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "45352006", display: "Spasm" },
       text: "Spasm",
       aliases: ["เกร็ง", "กล้ามเนื้อเกร็ง"],
-      i18n: { th: "ตะคริวหรือเกร็ง" }
+      i18n: { th: "ตะคริวหรือเกร็ง" },
+      conditionI18n: { th: "มีอาการเกร็ง" }
     }
   },
   {
@@ -2831,7 +2850,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "386661006", display: "Fever" },
       text: "Fever",
       aliases: ["ไข้", "มีไข้", "เป็นไข้", "ตัวร้อน"],
-      i18n: { th: "ไข้" }
+      i18n: { th: "ไข้" },
+      conditionI18n: { th: "มีไข้" }
     }
   },
   {
@@ -2901,7 +2921,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Allergic rhinitis",
       aliases: ["ภูมิแพ้จมูก", "ภูมิแพ้"],
-      i18n: { th: "ภูมิแพ้จมูก" }
+      i18n: { th: "ภูมิแพ้จมูก" },
+      conditionI18n: { th: "มีอาการภูมิแพ้จมูก" }
     }
   },
   {
@@ -2923,7 +2944,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Acne",
       aliases: ["สิว"],
-      i18n: { th: "สิว" }
+      i18n: { th: "สิว" },
+      conditionI18n: { th: "เป็นสิว" }
     }
   },
   {
@@ -2932,7 +2954,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "43116000", display: "Eczema" },
       text: "Eczema",
       aliases: ["เอ็กซีมา", "ผื่นแพ้"],
-      i18n: { th: "ผื่นแพ้" }
+      i18n: { th: "ผื่นแพ้" },
+      conditionI18n: { th: "มีผื่นแพ้" }
     }
   },
   {
@@ -2945,7 +2968,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Atopic dermatitis",
       aliases: ["ผื่นภูมิแพ้", "ภูมิแพ้ผิวหนัง", "แพ้ผิว", "ผิวแพ้"],
-      i18n: { th: "ผื่นภูมิแพ้" }
+      i18n: { th: "ผื่นภูมิแพ้" },
+      conditionI18n: { th: "มีผื่นภูมิแพ้" }
     }
   },
   {
@@ -2954,7 +2978,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "9014002", display: "Psoriasis" },
       text: "Psoriasis",
       aliases: ["สะเก็ดเงิน"],
-      i18n: { th: "สะเก็ดเงิน" }
+      i18n: { th: "สะเก็ดเงิน" },
+      conditionI18n: { th: "มีผื่นสะเก็ดเงิน" }
     }
   },
   {
@@ -2963,7 +2988,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "126485001", display: "Urticaria" },
       text: "Hives",
       aliases: ["ลมพิษ", "ลมพิด"],
-      i18n: { th: "ลมพิษ" }
+      i18n: { th: "ลมพิษ" },
+      conditionI18n: { th: "เป็นลมพิษ" }
     }
   },
   {
@@ -2976,7 +3002,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Rash",
       aliases: ["ผื่น"],
-      i18n: { th: "ผื่น" }
+      i18n: { th: "ผื่น" },
+      conditionI18n: { th: "มีผื่น" }
     }
   },
   {
@@ -3048,7 +3075,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Cold sores",
       aliases: ["เริมที่ปาก", "แผลเริมที่ปาก"],
-      i18n: { th: "เริมที่ปาก" }
+      i18n: { th: "เริมที่ปาก" },
+      conditionI18n: { th: "เป็นเริมที่ปาก" }
     }
   },
   {
@@ -3072,7 +3100,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Mouth ulcer",
       aliases: ["แผลในปาก", "ร้อนใน"],
-      i18n: { th: "แผลในปาก" }
+      i18n: { th: "แผลในปาก" },
+      conditionI18n: { th: "มีแผลในปาก" }
     }
   },
   {
@@ -3094,7 +3123,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Dandruff",
       aliases: ["รังแค"],
-      i18n: { th: "รังแค" }
+      i18n: { th: "รังแค" },
+      conditionI18n: { th: "มีรังแค" }
     }
   },
   {
@@ -3151,7 +3181,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "70153002", display: "Hemorrhoids" },
       text: "Hemorrhoids",
       aliases: ["ริดสีดวง", "ริดสีดวงทวาร"],
-      i18n: { th: "ริดสีดวง" }
+      i18n: { th: "ริดสีดวง" },
+      conditionI18n: { th: "มีอาการริดสีดวง" }
     }
   },
   {
@@ -3221,7 +3252,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "225624000", display: "Panic attack" },
       text: "Panic attack",
       aliases: ["อาการแพนิค", "แพนิค", "ตื่นตระหนก"],
-      i18n: { th: "อาการแพนิค" }
+      i18n: { th: "อาการแพนิค" },
+      conditionI18n: { th: "มีอาการแพนิค" }
     }
   },
   {
@@ -3247,7 +3279,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Sleep",
       aliases: ["นอนหลับ", "นอนไม่หลับ"],
-      i18n: { th: "นอนหลับ" }
+      i18n: { th: "นอนหลับ" },
+      conditionI18n: { th: "นอนไม่หลับ" }
     }
   },
   {
@@ -3296,7 +3329,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       coding: { system: SNOMED_SYSTEM, code: "231494001", display: "Mania" },
       text: "Mania",
       aliases: ["แมเนีย", "อารมณ์คึกผิดปกติ"],
-      i18n: { th: "แมเนีย" }
+      i18n: { th: "แมเนีย" },
+      conditionI18n: { th: "มีอาการแมเนีย" }
     }
   },
   {
@@ -3309,7 +3343,8 @@ const DEFAULT_PRN_REASON_SOURCE: Array<{
       },
       text: "Depressed mood",
       aliases: ["อารมณ์ซึมเศร้า", "ซึมเศร้า"],
-      i18n: { th: "อารมณ์ซึมเศร้า" }
+      i18n: { th: "อารมณ์ซึมเศร้า" },
+      conditionI18n: { th: "รู้สึกซึมเศร้า" }
     }
   },
   {

@@ -9,6 +9,7 @@ import {
   ACTION_RELATION_BY_TOKEN,
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_TOKENS,
+  AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_DURATION_UNITS,
@@ -25,7 +26,8 @@ import {
   getMedicationInstructionAction,
   medicationInstructionActionCodings,
   normalizeActionSurface,
-  resolveMedicationInstructionAction
+  resolveMedicationInstructionAction,
+  resolveMedicationInstructionSeparableAction
 } from "./instruction-action-terminology";
 import {
   AdviceArgument,
@@ -61,6 +63,15 @@ function key(part: Lexeme | undefined): string {
 interface ActionMatch {
   definition: ActionDefinition;
   length: number;
+  separableParticleIndex?: number;
+}
+
+function actionAtIsGovernedByDirective(parts: Lexeme[], index: number): boolean {
+  return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
+    const start = index - prefix.parts.length;
+    if (start < 0) return false;
+    return prefix.parts.every((part, offset) => key(parts[start + offset]) === part);
+  });
 }
 
 function actionPhraseCandidates(parts: Lexeme[], index: number, length: number): string[] {
@@ -87,6 +98,15 @@ function actionMatchAt(
   index: number,
   options?: ParseOptions
 ): ActionMatch | undefined {
+  const current = parts[index];
+  const next = parts[index + 1];
+  if (
+    current && next &&
+    AS_NEEDED_LEAD_PHRASES.has(`${key(current)} ${key(next)}`) &&
+    !actionAtIsGovernedByDirective(parts, index)
+  ) {
+    return undefined;
+  }
   const previous = parts.slice(index - 1, index)[0];
   if (previous && ACTION_RELATION_BY_TOKEN.has(key(previous))) return undefined;
   const maxSpan = Math.min(4, parts.length - index);
@@ -105,6 +125,13 @@ function actionMatchAt(
         return { definition, length };
       }
     }
+  }
+  const lead = key(current);
+  for (let particleIndex = index + 1; particleIndex < Math.min(parts.length, index + 9); particleIndex += 1) {
+    const particle = parts[particleIndex];
+    if (!particle || ACTION_SEQUENCE_MARKERS.has(key(particle))) break;
+    const definition = resolveMedicationInstructionSeparableAction(lead, key(particle), options);
+    if (definition) return { definition, length: 1, separableParticleIndex: particleIndex };
   }
   return undefined;
 }
@@ -459,6 +486,7 @@ interface ActionArgumentParseContext {
   conditionalTail: boolean;
   amount?: AdviceArgument;
   duration?: AdviceArgument;
+  separableParticleIndex?: number;
 }
 interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; }
 type ActionArgumentParser = (context: ActionArgumentParseContext) => ParsedActionArguments;
@@ -469,14 +497,18 @@ function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgumen
 }
 const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, options, relation, relIndex,
-    relationTargetEnd, conditionalTail, duration } = c;
+    relationTargetEnd, conditionalTail, duration, separableParticleIndex } = c;
+  const objectEnd = separableParticleIndex !== undefined
+    ? separableParticleIndex
+    : relIndex >= 0 ? relIndex : segmentEnd;
   const args = parsedArgs(argumentFromParts(
-    parts, argumentStart, relIndex >= 0 ? relIndex : segmentEnd, input, undefined, options
+    parts, argumentStart, objectEnd, input, undefined, options
   ));
   if (relation === AdviceRelation.For && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
     const time = (relation === AdviceRelation.In || relation === AdviceRelation.On ||
-      relation === AdviceRelation.Before || relation === AdviceRelation.After)
+      relation === AdviceRelation.Before || relation === AdviceRelation.After ||
+      relation === AdviceRelation.With)
       ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
     const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
       ? AdviceArgumentRole.Activity : undefined;
@@ -556,17 +588,117 @@ function configuredConceptIndex(parts: Lexeme[], start: number, end: number,
   }
   return -1;
 }
+function quantifiedEntityArgument(
+  parts: Lexeme[],
+  start: number,
+  end: number,
+  input: string,
+  offset: number,
+  role: AdviceArgumentRole,
+  options?: ParseOptions
+): AdviceArgument | undefined {
+  if (end <= start) return undefined;
+  const quantity = parseQuantityArgument(parts, start, end, input, offset, options);
+  let entity: AdviceArgument | undefined;
+  if (quantity?.span) {
+    const quantityStart = partIndexForAbsoluteSourceStart(parts, quantity.span.start, offset);
+    const quantityEnd = quantityStart !== undefined ? quantityStart + 2 : undefined;
+    if (quantityStart !== undefined && quantityStart > start) {
+      entity = argumentFromParts(parts, start, quantityStart, input, role, options);
+    }
+    if (!entity && quantityEnd !== undefined && quantityEnd < end) {
+      entity = argumentFromParts(parts, quantityEnd, end, input, role, options);
+    }
+  } else {
+    entity = argumentFromParts(parts, start, end, input, role, options);
+  }
+  const text = trimSemanticText(sourceFor(parts, start, end, input));
+  if (!entity && !quantity) return undefined;
+  const sourceEntityText = entity?.text;
+  const result: AdviceArgument = entity ? { ...entity } : {
+    role,
+    text,
+    normalized: quantity?.quantity?.unit ?? text.toLowerCase()
+  };
+  if (sourceEntityText && /[\u0E00-\u0E7F]/u.test(sourceEntityText)) {
+    result.i18n = { ...(result.i18n ?? {}), th: sourceEntityText };
+  }
+  result.role = role;
+  result.text = text;
+  if (quantity?.quantity) result.quantity = quantity.quantity;
+  const first = parts[start];
+  const last = parts[end - 1];
+  if (first && last) result.span = { start: offset + first.sourceStart, end: offset + last.sourceEnd };
+  return result;
+}
+
+function trailingTimeArgument(
+  parts: Lexeme[],
+  start: number,
+  end: number,
+  input: string,
+  options?: ParseOptions
+): { start: number; argument: AdviceArgument } | undefined {
+  for (let index = start; index < end; index += 1) {
+    const canonical = parts.slice(index, end).map((part) => key(part));
+    const event = resolveEventTimingExpression(canonical, 0);
+    if (!event || event.length !== canonical.length) continue;
+    const resolved = argumentFromParts(parts, index, end, input, AdviceArgumentRole.Time, options);
+    if (resolved?.conceptId) return { start: index, argument: resolved };
+    return {
+      start: index,
+      argument: {
+        role: AdviceArgumentRole.Time,
+        text: trimSemanticText(sourceFor(parts, index, end, input)),
+        normalized: event.timing
+      }
+    };
+  }
+  return undefined;
+}
+
+const OBJECT_TIME_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const time = trailingTimeArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.options);
+  const objectEnd = time?.start ?? c.segmentEnd;
+  return { args: parsedArgs(
+    objectEnd > c.argumentStart
+      ? argumentFromParts(c.parts, c.argumentStart, objectEnd, c.input, AdviceArgumentRole.Object, c.options)
+      : undefined,
+    time?.argument
+  ) };
+};
+
 const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const { definition, parts, argumentStart, segmentEnd, input, options } = c;
+  const { definition, parts, argumentStart, segmentEnd, input, offset, options, relIndex } = c;
   const absolutePrimary = configuredConceptIndex(
     parts, argumentStart, segmentEnd, definition.argumentParserConfig?.primaryConcepts);
   if (absolutePrimary < 0) return {
     args: parsedArgs(argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options))
   };
-  const args = parsedArgs(argumentFromParts(
-    parts, absolutePrimary, absolutePrimary + 1, input, AdviceArgumentRole.Substance, options));
-  const secondaryIndex = configuredConceptIndex(parts, absolutePrimary + 1, segmentEnd,
-    definition.argumentParserConfig?.secondaryConcepts);
+
+  const args: AdviceArgument[] = [];
+  const split = relIndex >= argumentStart && relIndex < absolutePrimary ? relIndex : absolutePrimary;
+  if (split > argumentStart) {
+    pushArgument(args, quantifiedEntityArgument(
+      parts, argumentStart, split, input, offset, AdviceArgumentRole.Theme, options));
+  }
+
+  const substanceStart = relIndex >= 0 && relIndex < absolutePrimary ? relIndex + 1 : absolutePrimary;
+  const substance = quantifiedEntityArgument(
+    parts, substanceStart, segmentEnd, input, offset, AdviceArgumentRole.Substance, options);
+  if (substance?.conceptId === undefined) {
+    const primary = argumentFromParts(
+      parts, absolutePrimary, absolutePrimary + 1, input, AdviceArgumentRole.Substance, options);
+    if (primary) {
+      primary.text = substance?.text ?? primary.text;
+      primary.quantity = substance?.quantity;
+      primary.span = substance?.span ?? primary.span;
+      pushArgument(args, primary);
+    } else pushArgument(args, substance);
+  } else pushArgument(args, substance);
+
+  const secondaryIndex = configuredConceptIndex(
+    parts, argumentStart, segmentEnd, definition.argumentParserConfig?.secondaryConcepts);
   if (secondaryIndex >= 0) {
     const part = parts[secondaryIndex];
     pushArgument(args, internalArgument(key(part), part.sourceText ?? part.original, options));
@@ -634,6 +766,7 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   "object-amount-material": OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER,
   "amount-duration": AMOUNT_DURATION_ARGUMENT_PARSER,
   "object-duration": OBJECT_DURATION_ARGUMENT_PARSER,
+  "object-time": OBJECT_TIME_ARGUMENT_PARSER,
   "mix-substance": MIX_SUBSTANCE_ARGUMENT_PARSER,
   result: RESULT_ARGUMENT_PARSER,
   site: SITE_ARGUMENT_PARSER,
@@ -696,7 +829,8 @@ function buildActionFrame(
     DEFAULT_ACTION_ARGUMENT_PARSER;
   const parsed = argumentParser({
     definition, parts, actionIndex, argumentStart, segmentEnd, input, offset, options,
-    relation, relIndex, relationTargetEnd, conditionalTail, amount, duration
+    relation, relIndex, relationTargetEnd, conditionalTail, amount, duration,
+    separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
   if (parsed.semanticEnd !== undefined) semanticEnd = parsed.semanticEnd;
@@ -1220,6 +1354,13 @@ function buildInstructionRelations(
     const explicitRelation = relationFromSourceText(source);
     const onlyStructuralGap = !trimmed || /^[,;:.()\-]+$/.test(trimmed);
     if (!explicitRelation && !onlyStructuralGap) continue;
+    // Whitespace/punctuation can license an implicit procedural sequence, but it
+    // must not turn a following safety statement into a temporal "then".
+    // Warnings/cautions need an explicit sequence marker to acquire that edge.
+    if (
+      !explicitRelation &&
+      (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution)
+    ) continue;
     if (explicitRelation && CONDITION_RELATIONS.has(explicitRelation)) {
       const conditionTargetsCurrent = /^[,;:.()\-]/.test(trimmed);
       relations.push({
@@ -1297,15 +1438,21 @@ function mergedSpanLength(spans: TextRange[]): number {
 
 function buildInstructionCoverage(
   actions: AdviceFrame[],
+  relations: CanonicalInstructionRelation[],
   opaqueSpans: CanonicalSourceSpan[]
 ): CanonicalInstructionCoverage {
-  const understoodCharacters = mergedSpanLength(actions.map((action) => action.span));
+  const relationSpans: TextRange[] = [];
+  for (const relation of relations) {
+    if (relation.span) relationSpans.push(relation.span);
+  }
+  const allUnderstoodSpans = [...actions.map((action) => action.span), ...relationSpans];
+  const effectiveUnderstoodCharacters = mergedSpanLength(allUnderstoodSpans);
   const opaqueCharacters = mergedSpanLength(opaqueSpans.map((span) => ({ start: span.start, end: span.end })));
-  const total = understoodCharacters + opaqueCharacters;
+  const total = effectiveUnderstoodCharacters + opaqueCharacters;
   return {
-    understoodCharacters,
+    understoodCharacters: effectiveUnderstoodCharacters,
     opaqueCharacters,
-    ratio: total > 0 ? Math.round((understoodCharacters / total) * 10000) / 10000 : 0,
+    ratio: total > 0 ? Math.round((effectiveUnderstoodCharacters / total) * 10000) / 10000 : 0,
     complete: opaqueCharacters === 0
   };
 }
@@ -1564,7 +1711,12 @@ export function refreshInstructionGraphDerivedState(
     })) relations.push(relation);
   }
   graph.relations = relations.length ? relations : undefined;
-  graph.coverage = buildInstructionCoverage(graph.actions, opaqueSpans);
+  const relationOwnedOpaque = (span: CanonicalSourceSpan): boolean => relations.some((relation) =>
+    Boolean(relation.span && relation.span.start <= span.start && span.end <= relation.span.end)
+  );
+  const remainingOpaqueSpans = opaqueSpans.filter((span) => !relationOwnedOpaque(span));
+  graph.opaqueSpans = remainingOpaqueSpans.length ? remainingOpaqueSpans : undefined;
+  graph.coverage = buildInstructionCoverage(graph.actions, relations, remainingOpaqueSpans);
 }
 
 function promoteDoseFromDefiningAction(
@@ -1716,21 +1868,30 @@ export function buildInstructionGraph(
   return graph;
 }
 
+function translatedQuantity(
+  quantity: NonNullable<AdviceArgument["quantity"]>,
+  locale: string
+): string {
+  const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
+  const singular = quantity.value === 1 && !quantity.range;
+  const labels = quantity.unit ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(quantity.unit) : undefined;
+  const unit = labels
+    ? (language === "th" ? labels.th : singular ? labels.enOne : labels.enOther)
+    : (quantity.unit ?? "");
+  if (quantity.range) {
+    return `${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
+  }
+  return `${quantity.value ?? ""} ${unit}`.trim();
+}
+
 function translatedArgument(arg: AdviceArgument, locale: string): string {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
-  if (arg.quantity) {
-    const singular = arg.quantity.value === 1 && !arg.quantity.range;
-    const labels = arg.quantity.unit
-      ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(arg.quantity.unit)
-      : undefined;
-    const unit = labels
-      ? (language === "th" ? labels.th : singular ? labels.enOne : labels.enOther)
-      : (arg.quantity.unit ?? "");
-    if (arg.quantity.range) {
-      return `${arg.quantity.range.low ?? ""}-${arg.quantity.range.high ?? ""} ${unit}`.trim();
-    }
-    return `${arg.quantity.value ?? ""} ${unit}`.trim();
-  }
+  if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  return arg.i18n?.[language] ?? arg.normalized ?? arg.text;
+}
+
+function translatedArgumentConcept(arg: AdviceArgument, locale: string): string {
+  const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   return arg.i18n?.[language] ?? arg.normalized ?? arg.text;
 }
 
@@ -1763,6 +1924,7 @@ interface ActionRealizationContext {
   duration?: string;
   material?: string;
   realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
+  definition?: ActionDefinition;
 }
 type ActionRealizer = (context: ActionRealizationContext) => string;
 const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
@@ -1779,15 +1941,44 @@ const SOURCE_FAITHFUL_REALIZER: ActionRealizer = (c) => {
   }
   return c.thai ? "ปรับการใช้ตามอาการ" : "Adjust use according to symptoms";
 };
-const CONTAINER_ACTIVITY_REALIZER: ActionRealizer = (c) => c.thai
-  ? `${c.label}${c.container ?? ""}${c.activity ? `ก่อน${c.activity}` : ""}`
-  : `${c.label}${c.container ? ` ${c.container}` : ""}${c.activity ? ` before ${c.activity}` : ""}`;
+const CONTAINER_ACTIVITY_REALIZER: ActionRealizer = (c) => {
+  const container = c.container ?? c.theme;
+  return c.thai
+    ? `${c.label}${container ?? ""}${c.activity ? `ก่อน${c.activity}` : ""}`
+    : `${c.label}${container ? ` ${container}` : ""}${c.activity ? ` before ${c.activity}` : ""}`;
+};
 const THEME_DESTINATION_AMOUNT_REALIZER: ActionRealizer = (c) => c.thai
   ? `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`
   : `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
-const MIX_SUBSTANCE_REALIZER: ActionRealizer = (c) => c.thai
-  ? `${c.label}${c.substance ?? c.theme ?? ""}${c.amount ?? ""}`
-  : `${c.label}${c.substance ? ` with ${c.amount ? `${c.amount} of ` : ""}${c.substance}` : c.theme ? ` ${c.theme}` : ""}`;
+const MIX_SUBSTANCE_REALIZER: ActionRealizer = (c) => {
+  const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme);
+  const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance);
+  const theme = themeArg ? translatedArgumentConcept(themeArg, c.locale) : undefined;
+  const substance = substanceArg ? translatedArgumentConcept(substanceArg, c.locale) : c.substance;
+  const themeAmount = themeArg?.quantity ? translatedQuantity(themeArg.quantity, c.locale) : undefined;
+  const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
+  const substanceAmount = substanceArg?.quantity
+    ? translatedQuantity(substanceArg.quantity, c.locale)
+    : c.amount;
+  if (c.thai) {
+    const themeText = theme ? `${theme}${themeAmount ? ` ${themeAmount}` : ""}` : "";
+    const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";
+    const substanceText = substance
+      ? `${themeText ? "กับ" : ""}${substance}${substanceAmount ? `${amountSeparator}${substanceAmount}` : ""}`
+      : "";
+    return `${c.label}${themeText}${substanceText}`;
+  }
+  const themeText = theme
+    ? ` ${themeAmount ? `${themeAmount} of ` : ""}${theme}`
+    : "";
+  const substanceAmountText = substanceAmount
+    ? `${substanceAmount}${amountArg?.conceptId && !substanceArg?.quantity ? " of " : " "}`
+    : "";
+  const substanceText = substance
+    ? ` with ${substanceAmountText}${substance}`
+    : "";
+  return `${c.label}${themeText}${substanceText}`;
+};
 const RESULT_REALIZER: ActionRealizer = (c) => c.thai
   ? `${c.label}${c.result ? `ให้เกิด${c.result}` : ""}`
   : `${c.label}${c.result ? ` to form ${c.result}` : ""}`;
@@ -1832,14 +2023,36 @@ const OBJECT_DURATION_REALIZER: ActionRealizer = (c) => {
     ? `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}`
     : `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
 };
+const OBJECT_TIME_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.site;
+  if (c.thai) return `${c.label}${object ?? ""}${c.time ?? ""}`;
+  return `${c.label}${object ? ` ${object}` : ""}${c.time ? ` in ${c.time}` : ""}`;
+};
+const SEPARABLE_OBJECT_RELATION_REALIZER: ActionRealizer = (c) => {
+  const object = c.theme ?? c.site;
+  const alias = c.definition?.separableAliases?.find((candidate) =>
+    c.thai ? /[\u0E00-\u0E7F]/u.test(candidate.lead + candidate.particle) : !/[\u0E00-\u0E7F]/u.test(candidate.lead + candidate.particle)
+  );
+  if (!alias) return RELATION_DURATION_REALIZER(c);
+  const target = c.duration ?? c.time ?? c.activity;
+  const relationText = c.frame.relation === AdviceRelation.Before
+    ? (c.thai ? "ก่อน" : " before ")
+    : c.frame.relation === AdviceRelation.After
+      ? (c.thai ? "หลัง" : " after ")
+      : "";
+  return c.thai
+    ? `${alias.lead}${object ?? ""}${alias.particle}${target ? `${relationText}${target}` : ""}`
+    : `${alias.lead}${object ? ` ${object}` : ""} ${alias.particle}${target ? `${relationText}${target}` : ""}`;
+};
 const RELATION_DURATION_REALIZER: ActionRealizer = (c) => {
   const object = c.theme ?? c.site;
-  if (c.duration && c.frame.relation === AdviceRelation.After) return c.thai
-    ? `${c.label}${object ?? ""}หลัง ${c.duration}`
-    : `${c.label}${object ? ` ${object}` : ""} after ${c.duration}`;
-  if (c.duration && c.frame.relation === AdviceRelation.Before) return c.thai
-    ? `${c.label}${object ?? ""}ก่อน ${c.duration}`
-    : `${c.label}${object ? ` ${object}` : ""} before ${c.duration}`;
+  const target = c.duration ?? c.time ?? c.activity;
+  if (target && c.frame.relation === AdviceRelation.After) return c.thai
+    ? `${c.label}${object ?? ""}หลัง${target}`
+    : `${c.label}${object ? ` ${object}` : ""} after ${target}`;
+  if (target && c.frame.relation === AdviceRelation.Before) return c.thai
+    ? `${c.label}${object ?? ""}ก่อน${target}`
+    : `${c.label}${object ? ` ${object}` : ""} before ${target}`;
   return c.thai ? `${c.label}${object ?? ""}` : `${c.label}${object ? ` ${object}` : ""}`;
 };
 const LEAVE_DURATION_REALIZER: ActionRealizer = (c) => c.thai
@@ -1855,6 +2068,48 @@ const ACTIVITY_REALIZER: ActionRealizer = (c) => {
   if (c.thai) return suppressThaiActivity || !c.activity ? c.label : `${c.label}${c.activity}`;
   return `${c.label}${c.activity ? ` ${c.activity}` : ""}`;
 };
+const THAI_NEGATED_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.Should]: "ไม่ควร",
+  [AdviceModality.Must]: "ห้าม"
+};
+const ENGLISH_NEGATED_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.Should]: "Should not ",
+  [AdviceModality.Must]: "Must not "
+};
+
+function negatedActionPrefix(frame: AdviceFrame, thai: boolean): string {
+  if (thai) return (frame.modality && THAI_NEGATED_MODALITY_PREFIX[frame.modality]) ?? "ห้าม";
+  return (frame.modality && ENGLISH_NEGATED_MODALITY_PREFIX[frame.modality]) ?? "Do not ";
+}
+
+const THAI_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "อาจ",
+  [AdviceModality.Can]: "สามารถ",
+  [AdviceModality.Might]: "อาจ",
+  [AdviceModality.Could]: "อาจ",
+  [AdviceModality.Should]: "ควร",
+  [AdviceModality.Must]: "ต้อง"
+};
+const ENGLISH_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "May ",
+  [AdviceModality.Can]: "Can ",
+  [AdviceModality.Might]: "Might ",
+  [AdviceModality.Could]: "Could ",
+  [AdviceModality.Should]: "Should ",
+  [AdviceModality.Must]: "Must "
+};
+
+function applyPositiveActionModality(text: string, frame: AdviceFrame, thai: boolean): string {
+  if (!frame.modality) return text;
+  const prefix = thai
+    ? THAI_POSITIVE_MODALITY_PREFIX[frame.modality]
+    : ENGLISH_POSITIVE_MODALITY_PREFIX[frame.modality];
+  if (!prefix) return text;
+  const normalizedPrefix = prefix.trim().toLowerCase();
+  if (text.trim().toLowerCase().startsWith(normalizedPrefix)) return text;
+  return `${prefix}${thai ? text : text.charAt(0).toLowerCase() + text.slice(1)}`;
+}
+
 const ACTION_REALIZERS: Record<MedicationInstructionActionRealizer, ActionRealizer> = {
   default: DEFAULT_ACTION_REALIZER,
   "source-faithful": SOURCE_FAITHFUL_REALIZER,
@@ -1867,6 +2122,8 @@ const ACTION_REALIZERS: Record<MedicationInstructionActionRealizer, ActionRealiz
   prime: PRIME_REALIZER,
   "amount-duration": AMOUNT_DURATION_REALIZER,
   "object-duration": OBJECT_DURATION_REALIZER,
+  "object-time": OBJECT_TIME_REALIZER,
+  "separable-object-relation": SEPARABLE_OBJECT_RELATION_REALIZER,
   "relation-duration": RELATION_DURATION_REALIZER,
   "leave-duration": LEAVE_DURATION_REALIZER,
   duration: DURATION_REALIZER,
@@ -1888,35 +2145,41 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const substance = first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
-  const time = first(AdviceArgumentRole.Time);
+  const timeArg = frame.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  const time = timeArg
+    ? (thai && /[\u0E00-\u0E7F]/u.test(timeArg.text) ? timeArg.text : translatedArgument(timeArg, locale))
+    : undefined;
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
 
   if (frame.polarity === AdvicePolarity.Negate) {
     const object = site ?? theme ?? substance ?? material;
     const relationTarget = activity ?? time;
+    const prefix = negatedActionPrefix(frame, thai);
     if (relationTarget && (frame.relation === AdviceRelation.Before || frame.relation === AdviceRelation.After)) {
       const relationText = frame.relation === AdviceRelation.Before
         ? (thai ? "ก่อน" : "before")
         : (thai ? "หลัง" : "after");
       return thai
-        ? `ห้าม${label}${object ?? ""}${relationText}${relationTarget}`
-        : `Do not ${label.toLowerCase()}${object ? ` ${object}` : ""} ${relationText} ${relationTarget}`;
+        ? `${prefix}${label}${object ?? ""}${relationText}${relationTarget}`
+        : `${prefix}${label.toLowerCase()}${object ? ` ${object}` : ""} ${relationText} ${relationTarget}`;
     }
     const fallbackObject = object ?? relationTarget;
     return thai
-      ? `ห้าม${label}${fallbackObject ?? ""}`
-      : `Do not ${label.toLowerCase()}${fallbackObject ? ` ${fallbackObject}` : ""}`;
+      ? `${prefix}${label}${fallbackObject ?? ""}`
+      : `${prefix}${label.toLowerCase()}${fallbackObject ? ` ${fallbackObject}` : ""}`;
   }
 
   const definition = getMedicationInstructionAction(frame.predicate.lemma);
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const realizer = ACTION_REALIZERS[realizerKey] ?? DEFAULT_ACTION_REALIZER;
-  return realizer({
+  const realized = realizer({
     frame, locale, thai, label, amount, theme, container, destination, site,
     substance, result, activity, time, duration, material,
-    realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig
+    realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
+    definition
   });
+  return applyPositiveActionModality(realized, frame, thai);
 }
 
 function normalizedInstructionSurface(value: string): string {
@@ -1929,13 +2192,47 @@ export function instructionGraphRepresentsText(
 ): boolean {
   const normalized = normalizedInstructionSurface(text);
   if (!normalized) return false;
+  const compact = (value: string): string => value.replace(/\s+/gu, "");
+  const pieces: Array<{ start: number; end: number; text: string }> = [];
+  for (const action of graph.actions) {
+    if (action.sourceText?.trim()) {
+      pieces.push({ start: action.span.start, end: action.span.end, text: action.sourceText });
+    }
+  }
+  for (const relation of graph.relations ?? []) {
+    if (relation.text?.trim() && relation.span) {
+      pieces.push({ start: relation.span.start, end: relation.span.end, text: relation.text });
+    }
+  }
+  for (const opaque of graph.opaqueSpans ?? []) {
+    if (opaque.text?.trim()) {
+      pieces.push({ start: opaque.start, end: opaque.end, text: opaque.text });
+    }
+  }
+  pieces.sort((left, right) => left.start - right.start || left.end - right.end);
+  const represented = normalizedInstructionSurface(pieces.map((piece) => piece.text).join(" "));
+  if (represented && compact(represented).includes(compact(normalized))) {
+    return true;
+  }
   return graph.actions.some((action) => {
     const candidate = normalizedInstructionSurface(action.sourceText);
-    return Boolean(candidate && (
-      candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)
-    ));
+    return Boolean(candidate && (candidate === normalized || candidate.includes(normalized)));
   });
 }
+
+export function instructionGraphSingleActionRepresentsText(
+  graph: CanonicalInstructionGraph,
+  text: string
+): boolean {
+  const normalized = normalizedInstructionSurface(text);
+  if (!normalized) return false;
+  const compact = (value: string): string => value.replace(/\s+/gu, "");
+  return graph.actions.some((action) => {
+    const candidate = normalizedInstructionSurface(action.sourceText);
+    return Boolean(candidate && compact(candidate) === compact(normalized));
+  });
+}
+
 
 function codingEquivalent(
   left: { system?: string; code?: string } | undefined,
@@ -2157,6 +2454,8 @@ export function realizeInstructionGraph(
     text: string;
     understood: boolean;
     actionIndex?: number;
+    conditionTargetActionIndex?: number;
+    warning?: boolean;
   }> = [];
   const targetLanguage = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const sourceLanguage = (graph.sourceLocale ?? "en").toLowerCase().startsWith("th") ? "th" : "en";
@@ -2173,7 +2472,9 @@ export function realizeInstructionGraph(
         end: frame.span.end,
         text,
         understood: true,
-        actionIndex: frame.sequenceIndex
+        actionIndex: frame.sequenceIndex,
+        warning: frame.force === AdviceForce.Warning || frame.force === AdviceForce.Caution ||
+          frame.polarity === AdvicePolarity.Negate
       });
     }
   }
@@ -2199,7 +2500,8 @@ export function realizeInstructionGraph(
         start: relation.span.start,
         end: relation.span.end,
         text: relationText,
-        understood: false
+        understood: false,
+        conditionTargetActionIndex: relation.toActionIndex
       });
     }
   }
@@ -2230,11 +2532,24 @@ export function realizeInstructionGraph(
       : undefined;
     if (conditional) {
       if (thai) {
-        output += node.text;
+        const target = frames.find((frame) => frame.sequenceIndex === node.actionIndex);
+        const imperativeLink = target && !target.modality && target.polarity !== AdvicePolarity.Negate
+          ? "ให้"
+          : "";
+        output += `${imperativeLink}${node.text}`;
       } else {
         const lowered = node.text.charAt(0).toLowerCase() + node.text.slice(1);
         output += `, ${lowered}`;
       }
+      continue;
+    }
+    const postposedConditional = Boolean(
+      previous?.understood &&
+      !node.understood &&
+      node.conditionTargetActionIndex === previous.actionIndex
+    );
+    if (postposedConditional) {
+      output += thai ? node.text : ` ${node.text}`;
       continue;
     }
     const explicitRelation = previous?.understood && node.understood
@@ -2243,6 +2558,10 @@ export function realizeInstructionGraph(
           relation.toActionIndex === node.actionIndex
         )
       : undefined;
+    if (previous?.understood && node.understood && node.warning && !explicitRelation) {
+      output += `. ${node.text}`;
+      continue;
+    }
     output += previous?.understood && node.understood && explicitRelation?.kind === AdviceRelation.Then
       ? (thai ? " จากนั้น" : "; then ")
       : "; ";

@@ -11,6 +11,7 @@ import {
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
 import { buildInstructionGraph } from "./instruction-graph";
+import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
   applyPrnReasonCodingAsync
@@ -66,39 +67,6 @@ const ROUTE_REFINEMENTS = new Map<RouteCode, ReadonlySet<RouteCode>>([
     ])
   ]
 ]);
-
-const METHOD_TEXT_BY_VERB: Record<string, string> = {
-  administer: "Administer",
-  apply: "Apply",
-  apply_patch: "Apply patch",
-  bathe: "Bathe",
-  chew: "Chew",
-  drink: "Drink",
-  gargle: "Gargle",
-  inhale: "Inhale",
-  inject: "Inject",
-  insert: "Insert",
-  instill: "Instill",
-  rinse: "Rinse",
-  spray: "Spray",
-  swallow: "Swallow",
-  take: "Take",
-  use: "Use"
-};
-
-const METHOD_THAI_BY_VERB: Record<string, string> = {
-  apply: "ทา",
-  apply_patch: "แปะ",
-  drink: "รับประทาน",
-  inhale: "สูด",
-  inject: "ฉีด",
-  insert: "สอด",
-  instill: "หยอด",
-  spray: "พ่น",
-  swallow: "รับประทาน",
-  take: "รับประทาน",
-  wash: "ล้าง"
-};
 
 export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
@@ -173,14 +141,11 @@ function setRoute(state: ParserState, code: RouteCode, text?: string): void {
 
 function refreshMethodSurface(state: ParserState): void {
   const verb = state.methodVerb;
-  if (!verb) {
-    return;
-  }
-  state.methodText = METHOD_TEXT_BY_VERB[verb] ?? verb.charAt(0).toUpperCase() + verb.slice(1);
-  const thai = METHOD_THAI_BY_VERB[verb];
-  state.methodTextElement = thai
-    ? buildTranslationPrimitiveElement({ th: thai })
-    : undefined;
+  if (!verb) return;
+  const definition = resolveMedicationAdministrationMethod(verb);
+  state.methodText = definition?.display ?? verb.charAt(0).toUpperCase() + verb.slice(1);
+  const thai = definition?.i18n?.th;
+  state.methodTextElement = thai ? buildTranslationPrimitiveElement({ th: thai }) : undefined;
 }
 
 function recordEvidence(

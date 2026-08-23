@@ -193,6 +193,7 @@
   },
   "connectors": [
     "per",
+    "per-dose",
     "to",
     "in",
     "into",
@@ -207,7 +208,8 @@
     "every",
     "then",
     ",",
-    "via"
+    "via",
+    "do"
   ],
   "routeSitePrepositions": [
     "per"
@@ -695,7 +697,8 @@
   ],
   "countMarkerTokens": [
     "x",
-    "*"
+    "*",
+    "total"
   ],
   "countConnectorWords": [
     "a",
@@ -817,7 +820,8 @@
   "medicationObjectFillers": [
     "medication",
     "medicine",
-    "drug"
+    "drug",
+    "product"
   ],
   "clockLeadTokens": [
     "@",
@@ -957,7 +961,9 @@
     "sun exposure"
   ],
   "asNeededLeadPhrases": [
-    "as needed"
+    "as needed",
+    "use when",
+    "use if"
   ],
   "prnBreakingCoordinators": [
     ",",
@@ -1145,6 +1151,11 @@
         "must"
       ],
       "modality": "must"
+    },
+    {
+      "parts": [
+        "do"
+      ]
     }
   ],
   "actionRelationTokens": {
@@ -1216,6 +1227,21 @@
       "th": "พ่น",
       "enOne": "spray",
       "enOther": "sprays"
+    },
+    "sachet": {
+      "th": "ซอง",
+      "enOne": "sachet",
+      "enOther": "sachets"
+    },
+    "dose": {
+      "th": "ครั้ง",
+      "enOne": "dose",
+      "enOther": "doses"
+    },
+    "implant": {
+      "th": "ชิ้น",
+      "enOne": "implant",
+      "enOther": "implants"
     }
   },
   "actionSequenceMarkers": [

@@ -4,12 +4,7 @@ import {
   normalizeBodySiteKey,
   ROUTE_TEXT
 } from "../../maps";
-import {
-  getRouteMeaning,
-  hasTokenWordClass,
-  isAdministrationVerbWord,
-  TokenWordClass
-} from "../../lexer/meaning";
+import { getRouteMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
@@ -50,10 +45,8 @@ import {
 } from "../lexical-classes";
 import {
   cloneMethodCoding,
-  METHOD_ACTION_BY_VERB,
-  METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE,
-  METHOD_CODING_BY_ACTION,
-  METHOD_ROUTE_OVERRIDE_BY_VERB
+  isMedicationAdministrationMethod,
+  resolveMedicationAdministrationMethod
 } from "../method-lexicon";
 import {
   HpsgClauseContext,
@@ -110,7 +103,7 @@ export function directiveMarkerLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     if (!target || context.state.consumed.has(target.index)) return [];
     const targetLower = normalizeTokenLower(target);
     const definition = resolveMedicationInstructionAction(targetLower, context.options);
-    if (!definition || definition.procedural || !METHOD_ACTION_BY_VERB[targetLower]) return [];
+    if (!definition || definition.procedural || !definition.administrationMethod?.code) return [];
     return [lexicalSign({
       type: "connector-sign",
       rule: "hpsg.lex.directiveMarker",
@@ -133,23 +126,18 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (looksLikeThaiGiveAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
       return [];
     }
-    if (
-      !METHOD_ACTION_BY_VERB[verb] ||
-      (
-        !hasTokenWordClass(token, TokenWordClass.AdministrationVerb) &&
-        !isAdministrationVerbWord(verb)
-      )
-    ) {
-      return [];
-    }
-    const action = METHOD_ACTION_BY_VERB[verb];
+    const methodDefinition = resolveMedicationAdministrationMethod(verb, context.options);
+    if (!methodDefinition) return [];
     const headClass = sourceRangeAttachmentClass(context, token.sourceStart, token.sourceEnd);
-    const routeOverride = METHOD_ROUTE_OVERRIDE_BY_VERB[verb];
+    const routeOverride = methodDefinition.methodRouteOverride;
+    const verbRouteHint = methodDefinition.verbRouteHint;
     const route = routeOverride
       ? { code: routeOverride, text: ROUTE_TEXT[routeOverride] }
-      : METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE.has(action)
+      : methodDefinition.suppressMethodRouteHint
         ? undefined
-        : getRouteMeaning(token);
+        : verbRouteHint
+          ? { code: verbRouteHint, text: ROUTE_TEXT[verbRouteHint] }
+          : getRouteMeaning(token);
     return [
       lexicalSign({
         type: "method-sign",
@@ -160,7 +148,7 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             method: {
               verb,
               headClass,
-              coding: cloneMethodCoding(METHOD_CODING_BY_ACTION[action])
+              coding: cloneMethodCoding(methodDefinition.administrationMethod)
             },
             route: route ? { code: route.code, text: route.text } : undefined
           },
@@ -189,7 +177,7 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!phrase) {
         continue;
       }
-      if (span === 1 && METHOD_ACTION_BY_VERB[phrase]) continue;
+      if (span === 1 && isMedicationAdministrationMethod(phrase, context.options)) continue;
       if (routeTokenIsPartitiveSiteHead(context, start, span)) {
         continue;
       }
@@ -346,9 +334,9 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const previous = context.tokens[start - 1];
-      const previousVerb = previous && METHOD_ACTION_BY_VERB[normalizeTokenLower(previous)]
-        ? normalizeTokenLower(previous)
-        : undefined;
+      const previousVerb = previous && isMedicationAdministrationMethod(
+        normalizeTokenLower(previous), context.options
+      ) ? normalizeTokenLower(previous) : undefined;
       const methodText = previousVerb ? PRODUCT_METHOD_TEXT[previousVerb]?.[productPhrase] : undefined;
       signs.push(
         lexicalSign({

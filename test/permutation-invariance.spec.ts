@@ -183,7 +183,7 @@ describe("HPSG permutation invariance", () => {
     expect(take).toMatchObject({ modality: "should", relation: "before" });
     expect(take?.args.find((arg) => arg.role === "time")?.normalized).toBe("CV");
     expect(original.longText).toBe(
-      "ควรรับประทาน ครั้งละ 1 เม็ด วันละครั้ง ก่อนอาหารเย็น ใช้เมื่อจำเป็นสำหรับ มีอาการ."
+      "ควรรับประทานครั้งละ 1 เม็ด วันละครั้ง ก่อนอาหารเย็น ใช้เมื่อมีอาการ."
     );
   });
 

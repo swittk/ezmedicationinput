@@ -851,10 +851,23 @@ function buildParseResult(
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
 
+  const graphUnderstoodSpans: TextRange[] = [];
+  for (const candidate of canonicalClauses) {
+    const graph = candidate.instructionGraph;
+    if (!graph) continue;
+    for (const action of graph.actions) graphUnderstoodSpans.push(action.span);
+    for (const relation of graph.relations ?? []) {
+      if (relation.span) graphUnderstoodSpans.push(relation.span);
+    }
+  }
+  const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
+    graphUnderstoodSpans.some((span) =>
+      span.start <= value.sourceStart && value.sourceEnd <= span.end
+    );
   const consumedTokens: string[] = [];
   const leftoverParts: string[] = [];
   for (const token of state.tokens) {
-    if (state.consumed.has(token.index)) {
+    if (state.consumed.has(token.index) || tokenUnderstoodByGraph(token)) {
       consumedTokens.push(token.original);
     } else {
       leftoverParts.push(token.original);

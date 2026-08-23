@@ -31,6 +31,7 @@ interface ActionSource {
   i18n?: Record<string, string>;
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
+  separableAliases?: Array<{ lead: string; particle: string }>;
   procedural?: boolean;
   argumentParser?: MedicationInstructionActionDefinition["argumentParser"];
   realizer?: MedicationInstructionActionDefinition["realizer"];
@@ -39,6 +40,11 @@ interface ActionSource {
   continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
   continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
   contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
+  administrationMethod?: FhirCoding;
+  verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
+  methodRouteOverride?: MedicationInstructionActionDefinition["methodRouteOverride"];
+  suppressMethodRouteHint?: boolean;
+  applicationVerb?: boolean;
   primaryAdministrationHead?: boolean;
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
@@ -124,6 +130,7 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: definition.procedural,
     argumentParser: definition.argumentParser,
     realizer: definition.realizer,
@@ -136,6 +143,11 @@ function cloneDefinition(
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
+    administrationMethod: cloneCoding(definition.administrationMethod),
+    verbRouteHint: definition.verbRouteHint,
+    methodRouteOverride: definition.methodRouteOverride,
+    suppressMethodRouteHint: definition.suppressMethodRouteHint,
+    applicationVerb: definition.applicationVerb,
     primaryAdministrationHead: definition.primaryAdministrationHead,
     safetyScopeTarget: definition.safetyScopeTarget,
     acceptsAmount: definition.acceptsAmount,
@@ -153,6 +165,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: sourceDefinition.procedural,
     argumentParser: sourceDefinition.argumentParser,
     realizer: sourceDefinition.realizer,
@@ -165,6 +178,11 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
+    administrationMethod: cloneCoding(sourceDefinition.administrationMethod),
+    verbRouteHint: sourceDefinition.verbRouteHint,
+    methodRouteOverride: sourceDefinition.methodRouteOverride,
+    suppressMethodRouteHint: sourceDefinition.suppressMethodRouteHint,
+    applicationVerb: sourceDefinition.applicationVerb,
     primaryAdministrationHead: sourceDefinition.primaryAdministrationHead,
     safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
@@ -186,6 +204,7 @@ function normalizeCustomDefinition(
     i18n: input.i18n ? { ...input.i18n } : undefined,
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
     procedural: input.procedural ?? true,
     argumentParser: input.argumentParser,
     realizer: input.realizer,
@@ -198,6 +217,11 @@ function normalizeCustomDefinition(
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),
+    administrationMethod: cloneCoding(input.administrationMethod),
+    verbRouteHint: input.verbRouteHint,
+    methodRouteOverride: input.methodRouteOverride,
+    suppressMethodRouteHint: input.suppressMethodRouteHint,
+    applicationVerb: input.applicationVerb,
     primaryAdministrationHead: input.primaryAdministrationHead,
     safetyScopeTarget: input.safetyScopeTarget,
     acceptsAmount: input.acceptsAmount,
@@ -220,6 +244,32 @@ function customDefinitionForSurface(
     if (candidates.some((candidate) => normalizeActionSurface(candidate) === target)) {
       return normalizeCustomDefinition(configuredSurface, input);
     }
+  }
+  return undefined;
+}
+
+export function resolveMedicationInstructionSeparableAction(
+  lead: string,
+  particle: string,
+  options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  const normalizedLead = normalizeActionSurface(lead);
+  const normalizedParticle = normalizeActionSurface(particle);
+  const map = options?.instructionActionMap;
+  if (map) {
+    for (const surface of Object.keys(map)) {
+      const definition = normalizeCustomDefinition(surface, map[surface]);
+      if (definition.separableAliases?.some((alias) =>
+        normalizeActionSurface(alias.lead) === normalizedLead &&
+        normalizeActionSurface(alias.particle) === normalizedParticle
+      )) return definition;
+    }
+  }
+  for (const definition of DEFAULT_ACTIONS) {
+    if (definition.separableAliases?.some((alias) =>
+      normalizeActionSurface(alias.lead) === normalizedLead &&
+      normalizeActionSurface(alias.particle) === normalizedParticle
+    )) return cloneDefinition(definition);
   }
   return undefined;
 }

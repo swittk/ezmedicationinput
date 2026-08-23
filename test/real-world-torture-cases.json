@@ -226,7 +226,7 @@
     "route": "inhalation",
     "actions": [
       "shake",
-      "rinse",
+      "rinse_mouth",
       "spit"
     ]
   },
@@ -258,7 +258,7 @@
     "name": "rinse mouth do not swallow",
     "input": "rinse mouth after inhalation; do not swallow rinse water",
     "actions": [
-      "rinse",
+      "rinse_mouth",
       "swallow"
     ]
   },

@@ -81,6 +81,7 @@ interface AdviceDefinitionSource {
   display: string;
   text: string;
   thai: string;
+  thaiVerbSuffix?: string;
 }
 
 interface AdviceFrameTemplateArgumentSource {
@@ -412,7 +413,8 @@ function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalI
       display: source.display
     },
     text: source.text,
-    i18n: { th: source.thai }
+    i18n: { th: source.thai },
+    verbSuffixI18n: source.thaiVerbSuffix ? { th: source.thaiVerbSuffix } : undefined
   };
 }
 
@@ -535,11 +537,17 @@ function buildAdviceCodingRule(source: AdviceCodingRuleSource): AdviceCodingRule
   for (const frame of source.frames) {
     frames.push(buildAdviceFrameTemplate(frame));
   }
+  let matcher = buildAdviceMatcher(source.matcher);
+  const thaiVerbSuffix = source.definition.thaiVerbSuffix?.trim();
+  if (thaiVerbSuffix) {
+    const normalized = normalizeAdditionalInstructionKey(thaiVerbSuffix);
+    if (normalized) matcher = { anyOf: [matcher, { normalizedTexts: [normalized] }] };
+  }
   return {
     id: source.id,
     definition: createDefinitionFromSource(source.definition),
     frames,
-    matcher: buildAdviceMatcher(source.matcher)
+    matcher
   };
 }
 
