@@ -5,8 +5,11 @@ import { findUnparsedTokenGroups, parseClauseState } from "../parser";
 import { parseAdditionalInstructions } from "../advice";
 import { parseInstructionActions } from "../instruction-graph";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { normalizeUnit } from "../unit-lexicon";
 import { AdviceForce, AdviceFrame, ParseOptions } from "../types";
 import {
+  ACTION_COORDINATION_CONNECTORS,
+  ACTION_SEQUENCE_MARKERS,
   CLAUSE_LEAD_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS,
   LATERAL_MODIFIER_WORDS,
@@ -207,6 +210,73 @@ function isCommaClauseBoundary(
   return true;
 }
 
+function nextContinuationProbeEnd(
+  input: string,
+  tokens: Token[],
+  startIndex: number
+): number {
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const current = tokens[index];
+    if (!current) continue;
+    const lower = normalizeSegmentLexeme(current);
+    if (
+      current.original === "," || current.original === ";" ||
+      current.original === "." || current.original === "!" || current.original === "?" ||
+      isBoundaryToken(current) || isSlashClauseBoundary(tokens, index) ||
+      (index > startIndex && (ACTION_SEQUENCE_MARKERS.has(lower) || ACTION_COORDINATION_CONNECTORS.has(lower)))
+    ) return current.sourceStart;
+  }
+  return input.length;
+}
+
+function normalizeSegmentLexeme(item: Token): string {
+  return (item.canonical ?? item.lower).replace(/^[.,;:]+|[.,;:]+$/g, "");
+}
+
+/**
+ * Split omitted-head administration continuations such as
+ * `take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep`.
+ * The continuation must contain a typed dose and either structured timing or
+ * its own explicit administration head, so ordinary `wash and rinse` prose is
+ * not segmented here.
+ */
+function doseBearingAdministrationContinuation(
+  input: string,
+  tokens: Token[],
+  connectorIndex: number,
+  segmentStart: number,
+  options?: ParseOptions
+): boolean {
+  const connector = tokens[connectorIndex];
+  const first = tokens[connectorIndex + 1];
+  if (!connector || !first) return false;
+  const connectorLower = normalizeSegmentLexeme(connector);
+  if (!ACTION_SEQUENCE_MARKERS.has(connectorLower) && !ACTION_COORDINATION_CONNECTORS.has(connectorLower)) {
+    return false;
+  }
+  const prefixText = input.slice(segmentStart, connector.sourceStart).replace(/[,;]\s*$/u, "").trim();
+  if (!prefixText) return false;
+  const prefix = parseClauseState(prefixText, options);
+  if (!prefix.primaryClause.dose) return false;
+
+  const probeEnd = nextContinuationProbeEnd(input, tokens, connectorIndex + 1);
+  const continuationText = input.slice(first.sourceStart, probeEnd).trim();
+  if (!continuationText) return false;
+  const hasExplicitDoseUnit = tokens.some((item, index) =>
+    index > connectorIndex && item.sourceStart < probeEnd &&
+    Boolean(normalizeUnit(item.canonical ?? item.lower, options))
+  );
+  if (!hasExplicitDoseUnit) return false;
+  const continuationActions = parseInstructionActions(continuationText, 0, options);
+  if (continuationActions.some((action) => action.args.some((arg) =>
+    arg.conceptId === "after-first-administration"
+  ))) return false;
+  const continuation = parseClauseState(continuationText, options);
+  const clause = continuation.primaryClause;
+  if (!clause.dose) return false;
+  return hasMeaningfulSchedule(continuation) || Boolean(clause.method?.text || clause.method?.coding?.code);
+}
+
 function isSlashClauseBoundary(tokens: Token[], index: number): boolean {
   const token = tokens[index];
   if (!token || token.original !== "/") {
@@ -285,6 +355,24 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       scannedOffset = token.sourceEnd;
       continue;
     }
+    const nextToken = tokens[index + 1];
+    if (
+      token.original === "," && nextToken &&
+      doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)
+    ) {
+      pushSegment(segments, input, start, token.sourceStart);
+      start = nextToken.sourceEnd;
+      index += 1;
+      scannedOffset = nextToken.sourceEnd;
+      continue;
+    }
+    if (doseBearingAdministrationContinuation(input, tokens, index, start, options)) {
+      pushSegment(segments, input, start, token.sourceStart);
+      start = token.sourceEnd;
+      scannedOffset = token.sourceEnd;
+      continue;
+    }
+
     const isBoundary =
       isBoundaryToken(token) ||
       isCommaClauseBoundary(input, tokens, index, proceduralActions, options, start) ||

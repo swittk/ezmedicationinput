@@ -511,6 +511,82 @@ function appendParseResult(
   items.push(next);
 }
 
+function normalizedSafetyText(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+function sameDosageConcept(
+  left: { coding?: Array<{ system?: string; code?: string }>; text?: string } | undefined,
+  right: { coding?: Array<{ system?: string; code?: string }>; text?: string } | undefined
+): boolean {
+  const leftCoding = left?.coding?.[0];
+  const rightCoding = right?.coding?.[0];
+  if (leftCoding?.code && rightCoding?.code) {
+    return leftCoding.code === rightCoding.code && (leftCoding.system ?? "") === (rightCoding.system ?? "");
+  }
+  return normalizedSafetyText(left?.text) === normalizedSafetyText(right?.text);
+}
+
+/**
+ * A semicolon-delimited trailing negated instruction after a heterogeneous
+ * dose regimen is regimen-level safety text. FHIR Dosage has no batch-level
+ * additionalInstruction slot, so copy that safety instruction onto each
+ * compatible Dosage item rather than silently attaching it only to the final
+ * dose clause.
+ */
+function propagateTrailingSharedSafety(results: ParseResult[], options?: ParseOptions): void {
+  if (results.length < 2) return;
+  const last = results[results.length - 1];
+  const clause = last.meta.canonical.clauses[0];
+  const raw = clause?.raw.text ?? "";
+  const separator = raw.lastIndexOf(";");
+  if (separator < 0) return;
+  const trailing = normalizedSafetyText(raw.slice(separator + 1));
+  if (!trailing) return;
+
+  const sharedCanonical = (clause?.additionalInstructions ?? []).filter((instruction) => {
+    const text = normalizedSafetyText(instruction.text);
+    return Boolean(
+      text && trailing.includes(text) &&
+      instruction.frames?.some((frame) => frame.polarity === "negate")
+    );
+  });
+  if (!sharedCanonical.length) return;
+  const sharedTexts = sharedCanonical.map((instruction) => normalizedSafetyText(instruction.text));
+  const sharedFhir = (last.fhir.additionalInstruction ?? []).filter((instruction) => {
+    const text = normalizedSafetyText(instruction.text);
+    return Boolean(text && sharedTexts.some((candidate) => text === candidate || text.includes(candidate) || candidate.includes(text)));
+  });
+  if (!sharedFhir.length) return;
+
+  for (let index = 0; index < results.length - 1; index += 1) {
+    const item = results[index];
+    if (!sameDosageConcept(item.fhir.route, last.fhir.route)) continue;
+    if (item.fhir.method && last.fhir.method && !sameDosageConcept(item.fhir.method, last.fhir.method)) {
+      continue;
+    }
+    const existing = item.fhir.additionalInstruction ?? [];
+    const additions = sharedFhir.filter((candidate) => {
+      const key = normalizedSafetyText(candidate.text);
+      return !existing.some((value) => normalizedSafetyText(value.text) === key);
+    });
+    if (!additions.length) continue;
+    item.fhir.additionalInstruction = [...existing, ...additions.map((value) => ({ ...value }))];
+    const canonical = item.meta.canonical.clauses[0];
+    if (canonical) {
+      canonical.additionalInstructions = [
+        ...(canonical.additionalInstructions ?? []),
+        ...sharedCanonical.filter((candidate) => !canonical.additionalInstructions?.some(
+          (value) => normalizedSafetyText(value.text) === normalizedSafetyText(candidate.text)
+        ))
+      ];
+    }
+    item.longText = formatSig(item.fhir, "long", options);
+    item.shortText = formatSig(item.fhir, "short", options);
+    item.fhir.text = item.longText;
+  }
+}
+
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
   const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
   for (const result of results) {
@@ -536,6 +612,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
   return {

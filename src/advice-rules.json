@@ -26,20 +26,31 @@
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": [
-            "after"
-          ],
-          "argConcepts": [
-            {
-              "conceptIds": [
-                "food",
-                "meal"
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "after"
               ],
-              "role": "meal_state"
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
             }
-          ]
-        }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -68,21 +79,32 @@
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": [
-            "with",
-            "after"
-          ],
-          "argConcepts": [
-            {
-              "conceptIds": [
-                "food",
-                "meal"
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "with",
+                "after"
               ],
-              "role": "meal_state"
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
             }
-          ]
-        }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -111,20 +133,31 @@
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": [
-            "before"
-          ],
-          "argConcepts": [
-            {
-              "conceptIds": [
-                "food",
-                "meal"
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "before"
               ],
-              "role": "meal_state"
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
             }
-          ]
-        }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -153,8 +186,19 @@
         }
       ],
       "matcher": {
-        "normalizedTexts": [
-          "half to one hour before food"
+        "allOf": [
+          {
+            "normalizedTexts": [
+              "half to one hour before food"
+            ]
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
         ]
       }
     },
@@ -184,9 +228,20 @@
         }
       ],
       "matcher": {
-        "normalizedTexts": [
-          "an hour before food or on an empty stomach",
-          "one hour before food or on an empty stomach"
+        "allOf": [
+          {
+            "normalizedTexts": [
+              "an hour before food or on an empty stomach",
+              "one hour before food or on an empty stomach"
+            ]
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
         ]
       }
     },

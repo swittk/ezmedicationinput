@@ -1932,9 +1932,28 @@ function translatedQuantity(
   return `${quantity.value ?? ""} ${unit}`.trim();
 }
 
+const GRAPH_TIME_ARGUMENT_I18N: Partial<Record<EventTiming, { en: string; th: string }>> = {
+  [EventTiming.Meal]: { en: "food", th: "อาหาร" },
+  [EventTiming.Breakfast]: { en: "breakfast", th: "อาหารเช้า" },
+  [EventTiming.Lunch]: { en: "lunch", th: "อาหารกลางวัน" },
+  [EventTiming.Dinner]: { en: "dinner", th: "อาหารเย็น" },
+  [EventTiming["Before Sleep"]]: { en: "sleep", th: "นอน" },
+  [EventTiming.Wake]: { en: "waking", th: "ตื่นนอน" },
+  [EventTiming.Morning]: { en: "the morning", th: "ตอนเช้า" },
+  [EventTiming.Noon]: { en: "noon", th: "ตอนเที่ยง" },
+  [EventTiming.Afternoon]: { en: "the afternoon", th: "ตอนบ่าย" },
+  [EventTiming.Evening]: { en: "the evening", th: "ตอนเย็น" },
+  [EventTiming.Night]: { en: "night", th: "ตอนกลางคืน" },
+  [EventTiming.Immediate]: { en: "immediately", th: "ทันที" }
+};
+
 function translatedArgument(arg: AdviceArgument, locale: string): string {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
+    const localized = GRAPH_TIME_ARGUMENT_I18N[arg.normalized as EventTiming];
+    if (localized) return localized[language];
+  }
   return arg.i18n?.[language] ?? arg.normalized ?? arg.text;
 }
 
@@ -2207,10 +2226,16 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     const object = site ?? theme ?? substance ?? material;
     const relationTarget = activity ?? time;
     const prefix = negatedActionPrefix(frame, thai);
-    if (relationTarget && (frame.relation === AdviceRelation.Before || frame.relation === AdviceRelation.After)) {
+    if (relationTarget && (
+      frame.relation === AdviceRelation.Before ||
+      frame.relation === AdviceRelation.After ||
+      frame.relation === AdviceRelation.With
+    )) {
       const relationText = frame.relation === AdviceRelation.Before
         ? (thai ? "ก่อน" : "before")
-        : (thai ? "หลัง" : "after");
+        : frame.relation === AdviceRelation.After
+          ? (thai ? "หลัง" : "after")
+          : (thai ? "พร้อม" : "with");
       return thai
         ? `${prefix}${label}${object ?? ""}${relationText}${relationTarget}`
         : `${prefix}${label.toLowerCase()}${object ? ` ${object}` : ""} ${relationText} ${relationTarget}`;
@@ -2518,9 +2543,10 @@ export function realizeInstructionGraph(
       (frame.span.end <= graph.primaryAdministrationSpan.start ||
        frame.span.start >= graph.primaryAdministrationSpan.end)
     );
-    const sourceFaithful = (options?.preferSourceText || secondaryAdministration) &&
-      targetLanguage === sourceLanguage &&
-      sourceTextCoversFrameMeaning(frame)
+    const sourceFaithful = (
+      options?.preferSourceText || secondaryAdministration ||
+      frame.polarity === AdvicePolarity.Negate
+    ) && targetLanguage === sourceLanguage && sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)
       : undefined;
     const text = sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);

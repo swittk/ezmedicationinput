@@ -1079,13 +1079,18 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
     action.polarity === AdvicePolarity.Negate
   ) ?? [];
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
-    !instruction.coding?.code &&
-    Boolean(instruction.text && clause.instructionGraph &&
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) &&
-      (!instruction.frames?.length ||
-        !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)))
-  );
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
+    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+    const normalized = normalizeInstruction(instruction.text);
+    const representedByWarning = graphWarnings.some((action) => {
+      const source = normalizeInstruction(action.sourceText);
+      return source === normalized || source.includes(normalized) || normalized.includes(source);
+    });
+    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+      representedByWarning || !instruction.frames?.length ||
+      !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)
+    );
+  });
   const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
     graphOwnedAdditional.indexOf(instruction) === -1
   );
@@ -1295,7 +1300,10 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
   if (!phrases.length) {
     return undefined;
   }
-  return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
+  return phrases.map((phrase) => {
+    const sentence = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+    return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+  }).join(" ").trim();
 }
 
 function firstCanonicalClause(internal: ParserState): CanonicalSigClause {

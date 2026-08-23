@@ -24,6 +24,7 @@ import {
 import {
   AdviceArgumentRole,
   AdviceModality,
+  AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
   CanonicalDoseExpr,
@@ -1740,13 +1741,20 @@ function formatLongThai(
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const roundTrip = options?.realizationMode === "roundtrip";
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
-    !instruction.coding?.code &&
-    Boolean(instruction.text && clause.instructionGraph &&
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) &&
-      (!instruction.frames?.length ||
-        !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)))
-  );
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
+    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+    const normalized = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+    const representedByWarning = clause.instructionGraph.actions
+      .filter((action) => action.polarity === AdvicePolarity.Negate)
+      .some((action) => {
+        const source = action.sourceText.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+        return source === normalized || source.includes(normalized) || normalized.includes(source);
+      });
+    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+      representedByWarning || !instruction.frames?.length ||
+      !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)
+    );
+  });
   const directAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
     graphOwnedAdditional.indexOf(instruction) === -1 &&
     !integratedQualifiers.has(instruction)
