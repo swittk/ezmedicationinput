@@ -36,6 +36,7 @@ import {
   PRN_REASON_SITE_CONNECTORS,
   PRN_STANDALONE_REASON_LEADS,
   SITE_DISPLAY_FILLERS,
+  SYMPTOM_ADJUSTMENT_CONNECTORS,
   SYMPTOM_ADJUSTMENT_LEADS,
   SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS
 } from "../lexical-classes";
@@ -454,9 +455,18 @@ export function symptomAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContex
 
     const body: Token[] = [];
     for (let cursor = start; cursor < context.limit; cursor += 1) {
-      const token = context.tokens[cursor];
-      if (!token || context.state.consumed.has(token.index)) break;
-      body.push(token);
+      const item = context.tokens[cursor];
+      if (!item || context.state.consumed.has(item.index)) break;
+      const lower = normalizeTokenLower(item);
+      const adjustmentConnector = body.length <= 2 && SYMPTOM_ADJUSTMENT_CONNECTORS.has(lower);
+      if (cursor > start && !adjustmentConnector && (
+        prnReasonBoundary(lower, context) ||
+        startsDoseComplement(context, cursor) ||
+        isScheduleLead(context, cursor)
+      ) && !isKnownPrnReasonText(lower)) {
+        break;
+      }
+      body.push(item);
     }
     if (body.length < 2) return [];
 

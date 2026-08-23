@@ -704,6 +704,7 @@ export async function parseSigAsync(
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
   return {

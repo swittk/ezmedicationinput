@@ -192,7 +192,7 @@ export function parseNumericRange(
   }
   const low = parseFloat(rangeMatch[1]);
   const high = parseFloat(rangeMatch[2]);
-  if (!Number.isFinite(low) || !Number.isFinite(high)) {
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high < low) {
     return undefined;
   }
   return { low, high };

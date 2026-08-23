@@ -264,6 +264,10 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.prn?.evidence);
 
     if (clause.instructionGraph) {
+      if (clause.instructionGraph.primaryAdministrationSpan) {
+        clause.instructionGraph.primaryAdministrationSpan.start += offset;
+        clause.instructionGraph.primaryAdministrationSpan.end += offset;
+      }
       for (const action of clause.instructionGraph.actions) {
         action.span.start += offset;
         action.span.end += offset;

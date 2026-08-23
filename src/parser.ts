@@ -139,10 +139,10 @@ function setRoute(state: ParserState, code: RouteCode, text?: string): void {
   state.routeText = text ?? ROUTE_TEXT[code];
 }
 
-function refreshMethodSurface(state: ParserState): void {
+function refreshMethodSurface(state: ParserState, options?: ParseOptions): void {
   const verb = state.methodVerb;
   if (!verb) return;
-  const definition = resolveMedicationAdministrationMethod(verb);
+  const definition = resolveMedicationAdministrationMethod(verb, options);
   state.methodText = definition?.display ?? verb.charAt(0).toUpperCase() + verb.slice(1);
   const thai = definition?.i18n?.th;
   state.methodTextElement = thai ? buildTranslationPrimitiveElement({ th: thai }) : undefined;
@@ -279,14 +279,22 @@ function normalizedSafetyText(value: string): string {
   return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
 }
 
-function promoteGraphWarningsToAdditionalInstructions(clause: CanonicalSigClause): void {
-  const warnings = clause.instructionGraph?.actions.filter((frame) =>
-    frame.polarity === AdvicePolarity.Negate && Boolean(frame.sourceText.trim())
-  ) ?? [];
-  if (!warnings.length) return;
+function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClause): void {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  const directives = graph?.actions.filter((frame) => {
+    if (!frame.sourceText.trim()) return false;
+    if (frame.polarity === AdvicePolarity.Negate) return true;
+    if (!frame.modality || !primary) return false;
+    return frame.span.end <= primary.start || frame.span.start >= primary.end;
+  }) ?? [];
+  if (!directives.length) return;
   const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
-  for (const warning of warnings) {
-    const text = warning.sourceText.trim();
+  for (const warning of directives) {
+    const sourceText = warning.sourceText.trim();
+    const text = sourceText
+      ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+      : sourceText;
     const normalized = normalizedSafetyText(text);
     if (!normalized) continue;
     const alreadyRepresentedByFrame = instructions.some((instruction) =>
@@ -303,9 +311,21 @@ function promoteGraphWarningsToAdditionalInstructions(clause: CanonicalSigClause
     });
     if (overlapIndex >= 0) {
       const existing = instructions[overlapIndex];
-      if (normalizedSafetyText(existing.text ?? "").length < normalized.length) {
-        instructions[overlapIndex] = { ...existing, text };
+      const frames = [...(existing.frames ?? [])];
+      if (!frames.some((frame) =>
+        frame.predicate.lemma === warning.predicate.lemma &&
+        frame.polarity === warning.polarity &&
+        frame.span.start < warning.span.end && warning.span.start < frame.span.end
+      )) {
+        frames.push(warning);
       }
+      const shouldUseWarningText = !existing.coding?.code &&
+        normalizedSafetyText(existing.text ?? "").length < normalized.length;
+      instructions[overlapIndex] = {
+        ...existing,
+        ...(shouldUseWarningText ? { text } : {}),
+        frames
+      };
       continue;
     }
     instructions.push({ text, frames: [warning] });
@@ -323,7 +343,7 @@ function finalizeClause(state: ParserState, options?: ParseOptions): void {
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
   clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
-  promoteGraphWarningsToAdditionalInstructions(clause);
+  promoteGraphDirectivesToAdditionalInstructions(clause);
 }
 
 export function findUnparsedTokenGroups(
@@ -402,7 +422,7 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
       markToken,
       normalizeSiteText: normalizeBodySiteKey,
       recordEvidence,
-      refreshMethodSurface,
+      refreshMethodSurface: (target) => refreshMethodSurface(target, options),
       setRoute
     },
     project: true

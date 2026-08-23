@@ -358,6 +358,13 @@ function applyResolutionIfValid(
   return true;
 }
 
+class AsyncInstructionSemanticResolverError extends Error {
+  constructor() {
+    super("Instruction semantic resolver returned a Promise; use parseSigAsync for asynchronous semantic resolution.");
+    this.name = "AsyncInstructionSemanticResolverError";
+  }
+}
+
 export function applyInstructionSemanticResolvers(
   internal: ParserState,
   options?: ParseOptions
@@ -372,16 +379,12 @@ export function applyInstructionSemanticResolvers(
       try {
         const result = resolver(requestForOpaque(internal, graph, opaque, options));
         if (isPromise(result)) {
-          throw new Error(
-            "Instruction semantic resolver returned a Promise; use parseSigAsync for asynchronous semantic resolution."
-          );
+          void Promise.resolve(result).catch(() => undefined);
+          throw new AsyncInstructionSemanticResolverError();
         }
         if (applyResolutionIfValid(internal, graph, opaque, result, options)) break;
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message.includes("use parseSigAsync")
-        ) {
+        if (error instanceof AsyncInstructionSemanticResolverError) {
           throw error;
         }
         addResolverWarning(internal);

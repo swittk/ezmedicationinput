@@ -40,16 +40,8 @@ function prefixProgram(
     const next = frames[index];
     const gap = context.state.input.slice(previous.span.end, next.span.start);
     if (hasStrongBoundary(gap)) break;
-    const definition = resolveMedicationInstructionAction(next.predicate.lemma, context.options);
     const linked = explicitlySequences(gap);
     if (!linked) break;
-    if (!definition?.procedural && next.polarity !== AdvicePolarity.Negate) {
-      // Positive administration may belong to the conditional program, but only
-      // when the source explicitly coordinates it with the preceding action.
-      result.push(next);
-      previous = next;
-      continue;
-    }
     result.push(next);
     previous = next;
   }

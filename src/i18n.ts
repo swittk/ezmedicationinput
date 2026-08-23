@@ -1577,8 +1577,7 @@ function makeThaiRoundTripSurface(text: string): string {
     .replace(/ตอนเย็น/gu, "เย็น")
     .replace(/ตอนกลางคืน/gu, "กลางคืน")
     .replace(/([0-9]+(?:\.[0-9]+)?)\s+ถึง\s+([0-9]+(?:\.[0-9]+)?)/gu, "$1-$2")
-    .replace(/ใช้เมื่อจำเป็นสำหรับ\s+/gu, "เมื่อมี")
-    .replace(/\s+/gu, " ")
+        .replace(/\s+/gu, " ")
     .trim();
 }
 
@@ -1813,12 +1812,12 @@ function formatLongThai(
     !/[.!?;]/u.test(clause.rawText.slice(start - clause.raw.start, end - clause.raw.start));
   const preFlowsIntoAdministration = Boolean(
     !roundTrip && preGraphInstruction && primarySpan && lastPreAction &&
-    lastPreAction.polarity !== "negate" &&
+    lastPreAction.polarity !== AdvicePolarity.Negate &&
     noStrongBoundary(lastPreAction.span.end, primarySpan.start)
   );
   const postFlowsFromAdministration = Boolean(
     !roundTrip && postGraphInstruction && primarySpan && firstPostAction &&
-    firstPostAction.polarity !== "negate" &&
+    firstPostAction.polarity !== AdvicePolarity.Negate &&
     noStrongBoundary(primarySpan.end, firstPostAction.span.start)
   );
   const leadingInstructionText = preFlowsIntoAdministration

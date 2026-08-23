@@ -1,5 +1,5 @@
 import { parseInstructionActions } from "../instruction-graph";
-import { AdviceArgumentRole, AdviceRelation, type AdviceFrame } from "../types";
+import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, type AdviceFrame } from "../types";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import type { HpsgClauseContext } from "./rule-context";
 
@@ -32,14 +32,15 @@ export function sourceRangeAttachmentClass(
       (left.span.end - left.span.start) - (right.span.end - right.span.start)
     )[0];
   if (!enclosing) return "administration";
-  if (enclosing.polarity === "negate") return "procedure";
+  if (enclosing.polarity === AdvicePolarity.Negate) return "procedure";
   const definition = resolveMedicationInstructionAction(enclosing.predicate.lemma, context.options);
+  if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural) return "administration";
 
   const relationCanAttachLocally =
     enclosing.relation === AdviceRelation.Before || enclosing.relation === AdviceRelation.After;
   const priorAdministrationCandidate = relationCanAttachLocally && getProceduralFrames(context).some((frame) => {
-    if (frame === enclosing || frame.span.start >= enclosing.span.start || frame.polarity === "negate") {
+    if (frame === enclosing || frame.span.start >= enclosing.span.start || frame.polarity === AdvicePolarity.Negate) {
       return false;
     }
     const priorDefinition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);

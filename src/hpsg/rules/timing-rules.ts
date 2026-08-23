@@ -393,18 +393,13 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
-/**
- * Parses languages and clinical shorthand that place the cadence adverb before
- * the count, e.g. `daily 2 times`. Thai `วันละ 2 ครั้ง` is normalized by the
- * locale lexer to exactly this feature sequence, without pretending Thai has
- * English word order.
- */
 export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.separatedFrequencyRange", (context, start) => {
-    const lowToken = tokensAvailable(context, start, 1)?.[0];
-    const connector = context.tokens[start + 1];
-    const highToken = context.tokens[start + 2];
-    const timesToken = context.tokens[start + 3];
+    const rangeTokens = tokensAvailable(context, start, 4);
+    const lowToken = rangeTokens?.[0];
+    const connector = rangeTokens?.[1];
+    const highToken = rangeTokens?.[2];
+    const timesToken = rangeTokens?.[3];
     if (
       !lowToken || lowToken.kind !== LexKind.Number || lowToken.value === undefined || lowToken.value < 0 ||
       !connector || !RANGE_CONNECTORS.has(normalizeTokenLower(connector)) ||
@@ -460,6 +455,12 @@ export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext
   });
 }
 
+/**
+ * Parses languages and clinical shorthand that place the cadence adverb before
+ * the count, e.g. `daily 2 times`. Thai `วันละ 2 ครั้ง` is normalized by the
+ * locale lexer to exactly this feature sequence, without pretending Thai has
+ * English word order.
+ */
 export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.cadenceFirstFrequency", (context, start) => {
     const cadence = tokensAvailable(context, start, 1)?.[0];
@@ -856,7 +857,7 @@ function coordinatedRelatedEventSign(
     ...firstExpression.members.slice(0, firstResolved.length)
   ];
   let cursor = start + 1 + firstResolved.length;
-  while (cursor + 1 < context.tokens.length) {
+  while (cursor + 1 < context.limit) {
     const separator = context.tokens[cursor];
     const tail = context.tokens[cursor + 1];
     if (
@@ -1440,7 +1441,7 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
   const lower = normalizeTokenLower(token);
   if (
     /^\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower) ||
-    /^\d+(?:\.\d+)?[-–—]\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower)
+    /^\d+(?:\.\d+)?-\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower)
   ) {
     return true;
   }

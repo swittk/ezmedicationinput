@@ -158,9 +158,9 @@ describe("Thai clinician free-text parsing", () => {
       "จากนั้นล้างด้วยน้ำสะอาด. ห้ามสวนล้างช่องคลอด"
     );
     expect(realizeInstructionGraph(graph, "en")).toBe(
-      "Shake bottle before use; then Pour product 1-2 mL into the palm; " +
-      "then Mix with a small amount of water; then Rub to form foam; " +
-      "then Clean external intimate area; then Rinse with clean water. " +
+      "Shake bottle before use; then pour product 1-2 mL into the palm; " +
+      "then mix with a small amount of water; then rub to form foam; " +
+      "then clean external intimate area; then rinse with clean water. " +
       "Do not douche the vagina"
     );
   });
@@ -183,7 +183,7 @@ describe("Thai clinician free-text parsing", () => {
       "เทผลิตภัณฑ์ลงฝ่ามือ 1-2 มิลลิลิตร"
     );
     expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain(
-      "Pour product 1-2 mL into the palm"
+      "pour product 1-2 mL into the palm"
     );
     expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain(
       "Do not douche the vagina"

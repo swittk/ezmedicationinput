@@ -1528,11 +1528,11 @@
       "semanticClass": "manipulate",
       "display": "Pump",
       "i18n": {
-        "th": "กด"
+        "th": "กดหัวปั๊ม"
       },
       "aliases": [
         "pump",
-        "กด"
+        "กดหัวปั๊ม"
       ],
       "procedural": true
     },

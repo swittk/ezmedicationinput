@@ -593,6 +593,9 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (isClockDoseContext(context, start, lower)) {
       return [];
     }
+    if (numericTokenIsProcedureLocalQuantity(context, token)) {
+      return [];
+    }
     const percentBodyAreaDose = percentBodyAreaDoseAfter(context, start, lower);
     if (percentBodyAreaDose) {
       return percentBodyAreaDose;
@@ -763,9 +766,6 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           score: 9
         })
       ];
-    }
-    if (token.kind === LexKind.Number && token.value !== undefined && numericTokenIsProcedureLocalQuantity(context, token)) {
-      return [];
     }
     if (token.kind !== LexKind.Number || token.value === undefined) {
       const timesMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)[x*]$/);

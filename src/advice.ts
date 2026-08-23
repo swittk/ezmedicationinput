@@ -1467,6 +1467,9 @@ const DEFAULT_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainder
 };
 
 const LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
+  if (!remainderWords.length) {
+    return DEFAULT_ADVICE_VERB_ARGUMENT_PARSER(remainderWords);
+  }
   if (isRelationWord(remainderWords[0]) !== AdviceRelation.On) {
     return DEFAULT_ADVICE_VERB_ARGUMENT_PARSER(remainderWords);
   }
@@ -1764,6 +1767,23 @@ export function parseAdditionalInstructions(
   };
   const instructions: ParsedAdditionalInstruction[] = [];
   const segments = splitInstructionSegments(sourceText, span);
+  // Compound qualifier codes must be matched as a complete instruction. Mapping
+  // each sentence independently would over-code partial source text, while the
+  // normal per-segment path cannot see an exact multi-sentence matcher.
+  if (segments.length > 1) {
+    const cleanedSource = cleanFreeText(sourceText);
+    const normalizedSource = normalizeAdditionalInstructionKey(cleanedSource);
+    const compoundRule = normalizedSource
+      ? matchAdviceCodingRule([], normalizedSource)
+      : undefined;
+    if (compoundRule) {
+      return [{
+        text: compoundRule.definition.text ?? cleanedSource,
+        coding: cloneDefinitionCoding(compoundRule.definition.coding, compoundRule.definition.i18n),
+        frames: []
+      }];
+    }
+  }
   for (const segment of segments) {
     const cleanedText = cleanFreeText(segment.text);
     if (!cleanedText) {

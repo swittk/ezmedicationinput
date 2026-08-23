@@ -2679,7 +2679,10 @@ export function realizeInstructionGraph(
     output += previous?.understood && node.understood && explicitRelation?.kind === AdviceRelation.Then
       ? (thai ? " จากนั้น" : "; then ")
       : "; ";
-    output += node.text;
+    const continuationText = !thai && node.understood
+      ? node.text.charAt(0).toLowerCase() + node.text.slice(1)
+      : node.text;
+    output += continuationText;
   }
   return output;
 }

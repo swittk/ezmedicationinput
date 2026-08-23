@@ -571,6 +571,7 @@ export class ParserState {
       site.text === undefined &&
       site.coding === undefined &&
       site.spatialRelation === undefined &&
+      site.i18n === undefined &&
       site.administrationTargetCount === undefined &&
       site.source === undefined &&
       site.inferred === undefined &&

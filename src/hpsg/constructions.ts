@@ -185,49 +185,125 @@ function schemaMatches(
   schema: ConstructionSchema,
   leftTraits: Set<SignTrait>,
   rightTraits: Set<SignTrait>
-): { swapped: boolean } | undefined {
+): { direct: boolean; swapped: boolean } | undefined {
   const directAllowed = !forbidden(leftTraits, schema.forbidLeft) && !forbidden(rightTraits, schema.forbidRight);
-  if (directAllowed && hasAll(leftTraits, schema.left) && hasAll(rightTraits, schema.right)) return { swapped: false };
+  const direct = directAllowed && hasAll(leftTraits, schema.left) && hasAll(rightTraits, schema.right);
   const swappedAllowed = !forbidden(leftTraits, schema.forbidRight) && !forbidden(rightTraits, schema.forbidLeft);
-  if (schema.symmetric && swappedAllowed && hasAll(leftTraits, schema.right) && hasAll(rightTraits, schema.left)) return { swapped: true };
-  return undefined;
+  const swapped = Boolean(
+    schema.symmetric && swappedAllowed && hasAll(leftTraits, schema.right) && hasAll(rightTraits, schema.left)
+  );
+  return direct || swapped ? { direct, swapped } : undefined;
 }
 
-function resolveHeadSide(
+function rawTraitHeadSide(
   source: HeadSource | undefined,
   leftTraits: Set<SignTrait>,
   rightTraits: Set<SignTrait>
 ): "left" | "right" | undefined {
   if (!source || source === "none") return undefined;
   if (source === "left" || source === "right") return source;
-  if (source === "non-marker") return leftTraits.has("marker") ? "right" : "left";
+  if (source === "non-marker") {
+    if (leftTraits.has("marker") !== rightTraits.has("marker")) {
+      return leftTraits.has("marker") ? "right" : "left";
+    }
+    return undefined;
+  }
+  const trait: SignTrait | undefined = source === "administration-head"
+    ? "administration-head"
+    : source === "method-specialization"
+      ? "method-specialization"
+      : source === "scope-target"
+        ? "scope-target"
+        : undefined;
+  if (!trait) return undefined;
+  const left = leftTraits.has(trait) && (source !== "scope-target" || !leftTraits.has("condition"));
+  const right = rightTraits.has(trait) && (source !== "scope-target" || !rightTraits.has("condition"));
+  return left === right ? undefined : left ? "left" : "right";
+}
+
+function headedMatchIsAmbiguous(
+  source: HeadSource | undefined,
+  match: { direct: boolean; swapped: boolean },
+  leftTraits: Set<SignTrait>,
+  rightTraits: Set<SignTrait>
+): boolean {
+  if (!source || source === "none") return false;
+  if ((source === "left" || source === "right") && match.direct && match.swapped) return true;
   if (source === "administration-head") {
-    if (leftTraits.has("administration-head") && !rightTraits.has("administration-head")) return "left";
-    if (rightTraits.has("administration-head") && !leftTraits.has("administration-head")) return "right";
+    return leftTraits.has("administration-head") && rightTraits.has("administration-head");
   }
   if (source === "method-specialization") {
-    if (leftTraits.has("method-specialization") && !rightTraits.has("method-specialization")) return "left";
-    if (rightTraits.has("method-specialization") && !leftTraits.has("method-specialization")) return "right";
+    return leftTraits.has("method-specialization") && rightTraits.has("method-specialization");
   }
   if (source === "scope-target") {
-    if (leftTraits.has("scope-target") && !leftTraits.has("condition")) return "left";
-    if (rightTraits.has("scope-target") && !rightTraits.has("condition")) return "right";
+    const left = leftTraits.has("scope-target") && !leftTraits.has("condition");
+    const right = rightTraits.has("scope-target") && !rightTraits.has("condition");
+    return left && right;
   }
-  return undefined;
+  if (source === "non-marker") {
+    return leftTraits.has("marker") && rightTraits.has("marker");
+  }
+  return false;
+}
+
+function schemaTraitHeadSide(
+  schema: ConstructionSchema,
+  match: { direct: boolean; swapped: boolean },
+  source: HeadSource | undefined,
+  leftTraits: Set<SignTrait>,
+  rightTraits: Set<SignTrait>
+): "left" | "right" | undefined {
+  if (!source || source === "none") return undefined;
+  if (match.direct !== match.swapped) {
+    const physicalSide = (schemaSide: "left" | "right"): "left" | "right" =>
+      match.direct ? schemaSide : schemaSide === "left" ? "right" : "left";
+    if (source === "left" || source === "right") return physicalSide(source);
+    const trait: SignTrait | undefined = source === "administration-head"
+      ? "administration-head"
+      : source === "method-specialization"
+        ? "method-specialization"
+        : source === "scope-target"
+          ? "scope-target"
+          : source === "non-marker"
+            ? "marker"
+            : undefined;
+    if (trait) {
+      const leftRequires = schema.left.indexOf(trait) >= 0;
+      const rightRequires = schema.right.indexOf(trait) >= 0;
+      if (leftRequires !== rightRequires) {
+        if (source === "non-marker") return physicalSide(leftRequires ? "right" : "left");
+        return physicalSide(leftRequires ? "left" : "right");
+      }
+    }
+  }
+  return rawTraitHeadSide(source, leftTraits, rightTraits);
 }
 
 export function selectHpsgConstruction(left: HpsgSign, right: HpsgSign): HpsgConstructionSelection | undefined {
   const leftTraits = signTraits(left);
   const rightTraits = signTraits(right);
+  let ambiguousHeadedMatch = false;
   for (const schema of CONSTRUCTION_SCHEMAS) {
-    if (!schemaMatches(schema, leftTraits, rightTraits)) continue;
+    const match = schemaMatches(schema, leftTraits, rightTraits);
+    if (!match) continue;
     if (schema.operation === "scope" && !scopeRequirementSatisfied(left, right)) continue;
+
+    const headed = Boolean(schema.headFrom && schema.headFrom !== "none");
+    const headSide = schemaTraitHeadSide(schema, match, schema.headFrom, leftTraits, rightTraits);
+    if (headed && !headSide) {
+      if (headedMatchIsAmbiguous(schema.headFrom, match, leftTraits, rightTraits)) {
+        ambiguousHeadedMatch = true;
+      }
+      continue;
+    }
+    if (schema.kind === "generic" && ambiguousHeadedMatch) return undefined;
+
     return {
       motherType: schema.motherType,
       construction: {
         kind: schema.kind,
         operation: schema.operation ?? "unify",
-        headSide: resolveHeadSide(schema.headFrom, leftTraits, rightTraits),
+        headSide,
         leftType: left.type,
         rightType: right.type
       }

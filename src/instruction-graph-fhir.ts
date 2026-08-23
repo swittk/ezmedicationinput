@@ -50,7 +50,8 @@ function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension 
       code: value.code,
       display: value.display,
       extension: value.extension,
-      _display: value._display
+      _display: value._display,
+      i18n: value.i18n
     }
   };
 }
@@ -327,7 +328,6 @@ export function parseInstructionGraphExtension(
     });
   }
   if (!actions.length && !opaqueSpans.length) return undefined;
-  actions.sort((left, right) => (left.sequenceIndex ?? 0) - (right.sequenceIndex ?? 0));
   const primaryAdministrationStart = child(extension, "primaryAdministrationStart")?.valueInteger;
   const primaryAdministrationEnd = child(extension, "primaryAdministrationEnd")?.valueInteger;
   return {

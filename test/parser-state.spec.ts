@@ -66,6 +66,12 @@ describe("ParserState setters", () => {
     expect(state.primaryClause.prn).toEqual({ enabled: true });
   });
 
+  it("preserves site state that contains only translations", () => {
+    const state = new ParserState("", []);
+    state.siteI18n = { th: "บริเวณตา" };
+    expect(state.primaryClause.site).toEqual({ i18n: { th: "บริเวณตา" } });
+  });
+
   it("preserves localized site coding metadata without creating empty site state", () => {
     const state = new ParserState("", []);
 

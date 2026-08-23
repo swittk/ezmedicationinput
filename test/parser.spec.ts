@@ -5466,6 +5466,45 @@ describe("issue regression tests", () => {
     }
   });
 
+  it("keeps symptom-adjustment reasons from consuming following dose and schedule", () => {
+    const result = parseSig("adjust according to headache 2 tabs bid", { context: TAB_CONTEXT });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
+    expect(result.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("25064002");
+    expect(result.meta.canonical.clauses[0]?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule: "hpsg.lex.symptomAdjustment" }),
+      expect.objectContaining({ rule: "hpsg.lex.dose.numeric" }),
+      expect.objectContaining({ rule: "hpsg.lex.schedule.timingAbbreviation" })
+    ]));
+  });
+
+  it("uses custom action terminology when projecting method display and translation", () => {
+    const result = parseSig("frobnicate 1 tab", {
+      context: TAB_CONTEXT,
+      instructionActionMap: {
+        frobnicate: {
+          code: "frobnicate",
+          semanticClass: "administration",
+          display: "Frobnicate",
+          i18n: { th: "ฟรอบ" },
+          procedural: false,
+          acceptsAmount: true,
+          definesDose: true,
+          administrationMethod: { system: "https://example.test/method", code: "frob", display: "Frobnicate" },
+          verbRouteHint: SNOMEDCTRouteCodes["Oral route"]
+        }
+      }
+    });
+    expect(result.fhir.method?.text).toBe("Frobnicate");
+    expect(result.fhir.method?.coding?.[0]).toMatchObject({
+      system: "https://example.test/method", code: "frob", display: "Frobnicate"
+    });
+    expect(result.fhir.method?._text?.extension?.[0]?.extension).toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: "content", valueString: "ฟรอบ" })
+    ]));
+    expect(result.longText).toBe("Frobnicate 1 tablet orally.");
+  });
+
   it("consumes optional 'for' after 'prn' to avoid duplication", () => {
     const result = parseSig("1 tab po prn for pain");
     expect(result.meta.normalized.prnReason?.text).toBe("pain");

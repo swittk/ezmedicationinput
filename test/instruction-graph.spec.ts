@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import {
   buildMedicationInstructionActionCodeSystem,
   buildMedicationInstructionConceptCodeSystem,
@@ -14,6 +15,36 @@ import {
 } from "../src/index";
 
 describe("procedural instruction graph", () => {
+  it("preserves graph action order, relation indices, and coding translations through FHIR", () => {
+    const parsed = parseSig("wash hands then wait 5 minutes");
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions).toHaveLength(2);
+    expect(graph?.relations?.[0]).toMatchObject({ fromActionIndex: 0, toActionIndex: 1 });
+    graph!.actions[0].sequenceIndex = 9;
+    graph!.actions[1].sequenceIndex = 1;
+    graph!.actions[0].args[0].coding = {
+      system: "https://example.test/site",
+      code: "hands",
+      display: "Hands",
+      i18n: { th: "มือ" }
+    };
+
+    const extension = buildInstructionGraphExtension(graph)!;
+    const restored = parseInstructionGraphExtension([extension])!;
+    expect(restored.actions.map((action) => action.predicate.lemma)).toEqual(["wash", "wait"]);
+    expect(restored.relations?.[0]).toMatchObject({ fromActionIndex: 0, toActionIndex: 1 });
+    expect(restored.actions[0].args[0].coding?.i18n).toEqual({ th: "มือ" });
+  });
+
+  it("rebases primary administration spans with the rest of a later batch segment", () => {
+    const input = "1 tab po daily | wash hands before instill 1 drop od";
+    const parsed = parseSig(input);
+    const graph = parsed.items[1]?.meta.canonical.clauses[0]?.instructionGraph;
+    const start = input.indexOf("instill");
+    expect(graph?.primaryAdministrationSpan).toEqual({ start, end: start + "instill".length });
+    expect(graph?.actions.every((action) => action.span.start >= parsed.meta.segments[1].range.start)).toBe(true);
+  });
+
   it("preserves opaque text next to understood actions through FHIR", () => {
     const parsed = parseSig("shake bottle before use and sing a song");
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
@@ -27,6 +58,17 @@ describe("procedural instruction graph", () => {
     expect(restored?.opaqueSpans?.map((span) => span.text)).toEqual(["sing a song"]);
   });
 
+  it("keeps Thai press and pump surfaces semantically distinct", () => {
+    const press = parseSig("กด 10 วินาที", { locale: "th" });
+    expect(press.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma).toBe("press");
+
+    const pump = parseSig("กดหัวปั๊ม 1 ครั้ง", { locale: "th" });
+    expect(pump.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma).toBe("pump");
+    expect(pump.meta.canonical.clauses[0]?.instructionGraph?.coverage).toMatchObject({
+      complete: true, opaqueCharacters: 0, ratio: 1
+    });
+  });
+
   it("models workflow duration and time arguments without contaminating medication timing", () => {
     const leave = parseSig("leave on for 10 minutes then rinse");
     const leaveGraph = leave.meta.canonical.clauses[0]?.instructionGraph;
@@ -35,7 +77,7 @@ describe("procedural instruction graph", () => {
       role: "duration",
       quantity: { value: 10, unit: "min" }
     });
-    expect(realizeInstructionGraph(leaveGraph!, "en")).toBe("Leave on for 10 minutes; then Rinse");
+    expect(realizeInstructionGraph(leaveGraph!, "en")).toBe("Leave on for 10 minutes; then rinse");
 
     const rinse = parseSig("rinse in the morning");
     const rinseAction = rinse.meta.canonical.clauses[0]?.instructionGraph?.actions[0];
@@ -88,7 +130,7 @@ describe("procedural instruction graph", () => {
     });
     expect(graph?.opaqueSpans).toBeUndefined();
     expect(realizeInstructionGraph(graph!, "en")).toBe(
-      "Wipe the lesion; then Wait 5 minutes; then Rinse"
+      "Wipe the lesion; then wait 5 minutes; then rinse"
     );
   });
 
@@ -181,7 +223,7 @@ describe("procedural instruction graph", () => {
       "เช็ดรอยโรค จากนั้นรอ 5 นาที จากนั้นล้างด้วยน้ำ"
     );
     expect(realizeInstructionGraph(graph!, "en")).toBe(
-      "Wipe the lesion; then Wait 5 minutes; then Rinse with water"
+      "Wipe the lesion; then wait 5 minutes; then rinse with water"
     );
   });
 
@@ -290,6 +332,8 @@ describe("procedural instruction graph", () => {
 
   it("accepts only terminology-valid semantic resolver proposals for opaque spans", () => {
     const requests: string[] = [];
+    let observedRange: { start: number; end: number } | undefined;
+    let observedOpaque: string | undefined;
     const parsed = parseSig("shake bottle before use and croon a song", {
       instructionActionMap: {
         sing: {
@@ -310,8 +354,8 @@ describe("procedural instruction graph", () => {
       },
       instructionSemanticResolvers: (request) => {
         requests.push(request.sourceText);
-        expect(request.range).toEqual({ start: 28, end: 40 });
-        expect(request.existingGraph.opaqueSpans?.[0]?.text).toBe("croon a song");
+        observedRange = { ...request.range };
+        observedOpaque = request.existingGraph.opaqueSpans?.[0]?.text;
         return {
           actions: [
             {
@@ -332,6 +376,8 @@ describe("procedural instruction graph", () => {
     });
 
     expect(requests).toEqual(["croon a song"]);
+    expect(observedRange).toEqual({ start: 28, end: 40 });
+    expect(observedOpaque).toBe("croon a song");
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
     expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["shake", "sing"]);
     expect(graph?.opaqueSpans).toBeUndefined();
@@ -399,6 +445,18 @@ describe("procedural instruction graph", () => {
       complete: true,
       ratio: 1
     });
+  });
+
+  it("does not mistake resolver-thrown message text for the local async-resolver sentinel", () => {
+    const parsed = parseSig("murmur quietly", {
+      instructionSemanticResolvers: () => {
+        throw new Error("resolver says use parseSigAsync for a different reason");
+      }
+    });
+    expect(parsed.warnings).toContain(
+      "Instruction semantic resolver failed; opaque clinician text was preserved."
+    );
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans?.[0]?.text).toBe("murmur quietly");
   });
 
   it("lets caller-owned actions select declarative argument and realization families", () => {

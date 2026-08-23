@@ -1034,13 +1034,7 @@
     "dry",
     "clean",
     "hairless",
-    "affected",
-    "broken",
     "intact",
-    "painful",
-    "external",
-    "irritated",
-    "inflamed",
     "wet",
     "moist"
   ],
@@ -1260,6 +1254,11 @@
     "depending",
     "according",
     "during"
+  ],
+  "symptomAdjustmentConnectors": [
+    "according",
+    "on",
+    "to"
   ],
   "symptomAdjustmentPatientInstructionLeads": [
     "adjust"

@@ -193,6 +193,8 @@ describe("HPSG permutation invariance", () => {
     const order = (result: Result) => result.meta.canonical.clauses
       .flatMap((clause) => clause.instructionGraph?.actions ?? [])
       .map((frame) => frame.predicate.lemma);
+    expect(order(forward)).toEqual(["wash", "wait"]);
+    expect(order(reverse)).toEqual(["wait", "wash"]);
     expect(order(forward)).not.toEqual(order(reverse));
   });
 });

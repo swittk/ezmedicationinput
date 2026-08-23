@@ -9,6 +9,9 @@ import {
   validateFeatureStructure
 } from "../src/hpsg/type-system";
 import { combineSignFeatureStructures, signFeatureStructure } from "../src/hpsg/feature-structure";
+import { selectHpsgConstruction } from "../src/hpsg/constructions";
+import { lexicalSign } from "../src/hpsg/signature";
+import { tokenize } from "../src/parser";
 
 describe("formal HPSG typed feature structures", () => {
   it("uses a real subtype hierarchy for signs", () => {
@@ -83,6 +86,25 @@ describe("formal HPSG typed feature structures", () => {
     expect(HPSG_TYPE_SYSTEM.isSubtype("head-adjunct-phrase", "phrase-sign")).toBe(true);
     expect(HPSG_TYPE_SYSTEM.isSubtype("administration-clause", "clause-sign")).toBe(true);
     expect(HPSG_TYPE_SYSTEM.isSubtype("administration-clause", "headed-phrase")).toBe(true);
+  });
+
+  it("rejects ambiguous headed schemas instead of returning a headed phrase without daughter identity", () => {
+    const tokens = tokenize("take apply");
+    const makeAmbiguous = (index: number) => lexicalSign({
+      type: "method-sign",
+      rule: "test.ambiguous-head",
+      tokens: [tokens[index]],
+      synsem: {
+        head: {
+          method: { verb: index === 0 ? "take" : "apply", text: index === 0 ? "Take" : "Apply" },
+          dose: { value: 1, unit: "tab" }
+        },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      }
+    });
+    const selected = selectHpsgConstruction(makeAmbiguous(0), makeAmbiguous(1));
+    expect(selected).toBeUndefined();
   });
 
   it("stores formal head and non-head daughter identity on headed phrase AVMs", () => {

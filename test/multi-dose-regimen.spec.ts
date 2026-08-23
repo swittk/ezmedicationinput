@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig, parseSig, parseSigAsync } from "../src/index";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
 
@@ -95,6 +95,18 @@ describe("heterogeneous multi-dose regimens", () => {
     }
   });
 
+  it("keeps trailing shared safety consistent in async parsing", async () => {
+    const input = "take 1 tab at 12:00, 2 tabs at 16:00; do not take with food";
+    const sync = parseSig(input, { context: TABLET_CONTEXT });
+    const asyncResult = await parseSigAsync(input, { context: TABLET_CONTEXT });
+    expect(asyncResult.items.map((item) => item.fhir.additionalInstruction)).toEqual(
+      sync.items.map((item) => item.fhir.additionalInstruction)
+    );
+    expect(asyncResult.items.every((item) =>
+      item.fhir.additionalInstruction?.some((instruction) => instruction.text === "Do not take with food")
+    )).toBe(true);
+  });
+
   it("keeps negated food safety negative and shared without a positive with-food coding", () => {
     const result = parseSig(
       "take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep; do not take with food",
@@ -117,6 +129,8 @@ describe("heterogeneous multi-dose regimens", () => {
     const thai = parseSig("ห้ามรับประทานพร้อมอาหาร", { locale: "th" });
     expect(english.longText).toContain("Do not take with food.");
     expect(thai.longText).toContain("ห้ามรับประทานพร้อมอาหาร.");
+    expect(formatSig(english.fhir, "long", { locale: "th" })).toBe("ห้ามรับประทานพร้อมอาหาร.");
+    expect(formatSig(thai.fhir, "long", { locale: "en" })).toBe("Do not take with food.");
   });
 
 
@@ -133,13 +147,6 @@ describe("heterogeneous multi-dose regimens", () => {
       ]);
       expect(item.meta.leftoverText).toBeUndefined();
     }
-  });
-
-  it("realizes negated food relation cleanly across English and Thai", () => {
-    const english = parseSig("do not take with food", { locale: "en" });
-    const thai = parseSig("ห้ามรับประทานพร้อมอาหาร", { locale: "th" });
-    expect(formatSig(english.fhir, "long", { locale: "th" })).toBe("ห้ามรับประทานพร้อมอาหาร.");
-    expect(formatSig(thai.fhir, "long", { locale: "en" })).toBe("Do not take with food.");
   });
 
   it("does not split ordinary coordination that lacks a new typed dose", () => {

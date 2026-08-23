@@ -5,6 +5,7 @@ import {
   formatSig,
   fromFhirDosage,
   parseSig,
+  AdviceArgumentRole,
   type AdviceFrame,
   type ParseBatchResult
 } from "../src/index";
@@ -74,7 +75,7 @@ function prnText(result: ParseBatchResult): string {
 function hasDurationRange(result: ParseBatchResult, low: number, high: number): boolean {
   return graphActions(result).some((action) =>
     action.args.some((arg) =>
-      arg.role === "duration" &&
+      arg.role === AdviceArgumentRole.Duration &&
       arg.quantity?.range?.low === low &&
       arg.quantity?.range?.high === high
     )

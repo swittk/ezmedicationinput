@@ -290,6 +290,7 @@ export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelatio
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
 export const SYMPTOM_ADJUSTMENT_LEADS = setOf(source.symptomAdjustmentLeads);
+export const SYMPTOM_ADJUSTMENT_CONNECTORS = setOf(source.symptomAdjustmentConnectors);
 export const SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS = setOf(
   source.symptomAdjustmentPatientInstructionLeads
 );

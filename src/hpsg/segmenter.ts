@@ -366,17 +366,15 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       continue;
     }
     const nextToken = tokens[index + 1];
-    if (
-      token.original === "," && nextToken &&
-      doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)
-    ) {
-      pushSegment(segments, input, start, token.sourceStart);
-      start = nextToken.sourceEnd;
-      index += 1;
-      scannedOffset = nextToken.sourceEnd;
-      continue;
-    }
-    if (doseBearingAdministrationContinuation(input, tokens, index, start, options)) {
+    if (token.original === "," && nextToken) {
+      if (doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)) {
+        pushSegment(segments, input, start, token.sourceStart);
+        start = nextToken.sourceEnd;
+        index += 1;
+        scannedOffset = nextToken.sourceEnd;
+        continue;
+      }
+    } else if (doseBearingAdministrationContinuation(input, tokens, index, start, options)) {
       pushSegment(segments, input, start, token.sourceStart);
       start = token.sourceEnd;
       scannedOffset = token.sourceEnd;
