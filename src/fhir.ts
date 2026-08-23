@@ -52,6 +52,8 @@ import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
 export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
@@ -520,6 +522,24 @@ export function canonicalToFhir(
     repeat.periodMax = schedule.periodMax;
     hasRepeat = true;
   }
+  if (schedule?.offset !== undefined) {
+    repeat.offset = schedule.offset;
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMin !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_OFFSET_MIN_EXTENSION_URL, valueInteger: schedule.offsetMin }
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMax !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_OFFSET_MAX_EXTENSION_URL, valueInteger: schedule.offsetMax }
+    ];
+    hasRepeat = true;
+  }
   if (schedule?.dayOfWeek?.length) {
     repeat.dayOfWeek = [...schedule.dayOfWeek];
     hasRepeat = true;
@@ -800,6 +820,12 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
+  const offsetMinExtension = repeat?.extension?.find(
+    (extension) => extension.url === TIMING_OFFSET_MIN_EXTENSION_URL
+  )?.valueInteger;
+  const offsetMaxExtension = repeat?.extension?.find(
+    (extension) => extension.url === TIMING_OFFSET_MAX_EXTENSION_URL
+  )?.valueInteger;
   const timingBounds = extractCanonicalTimingBounds(repeat);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
@@ -812,6 +838,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.period !== undefined ||
     repeat?.periodMax !== undefined ||
     repeat?.periodUnit ||
+    repeat?.offset !== undefined ||
+    offsetMinExtension !== undefined ||
+    offsetMaxExtension !== undefined ||
     repeat?.dayOfWeek?.length ||
     repeat?.when?.length ||
     repeat?.timeOfDay?.length
@@ -827,6 +856,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       period: repeat?.period,
       periodMax: repeat?.periodMax,
       periodUnit: repeat?.periodUnit,
+      offset: repeat?.offset,
+      offsetMin: offsetMinExtension,
+      offsetMax: offsetMaxExtension,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined

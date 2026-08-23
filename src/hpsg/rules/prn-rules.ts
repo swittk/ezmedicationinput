@@ -27,6 +27,7 @@ import {
   INSTRUCTION_START_WORDS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
+  PRN_CONTEXTUAL_REASON_LEADS,
   PRN_CONDITIONAL_SITE_BOUNDARY_ANCHORS,
   PRN_DEFAULT_SITE_CONNECTOR,
   PRN_GENERIC_LOCATED_HEADS,
@@ -565,20 +566,71 @@ function previousTokensEndDirectivePrefix(
 }
 
 
+export function matchContextualPrnReasonLead(
+  context: HpsgClauseContext,
+  start: number
+): { tokens: Token[]; canonical: string; next: number } | undefined {
+  for (const lead of PRN_CONTEXTUAL_REASON_LEADS) {
+    const tokens: Token[] = [];
+    let matched = true;
+    for (let offset = 0; offset < lead.parts.length; offset += 1) {
+      const token = context.tokens[start + offset];
+      if (
+        !token ||
+        context.state.consumed.has(token.index) ||
+        token.original.trim().toLowerCase() !== lead.parts[offset].toLowerCase()
+      ) {
+        matched = false;
+        break;
+      }
+      tokens.push(token);
+    }
+    if (!matched) continue;
+    const next = start + lead.parts.length;
+    if (lead.requiresKnownReason && !canStartPrnReasonAtom(context, next)) continue;
+    return { tokens, canonical: lead.canonical, next };
+  }
+  return undefined;
+}
+
+export function tokenBelongsToContextualPrnReasonLead(
+  context: HpsgClauseContext,
+  tokenIndex: number
+): boolean {
+  const maxLength = PRN_CONTEXTUAL_REASON_LEADS.reduce(
+    (maximum, lead) => Math.max(maximum, lead.parts.length),
+    0
+  );
+  for (let start = Math.max(0, tokenIndex - maxLength + 1); start <= tokenIndex; start += 1) {
+    const match = matchContextualPrnReasonLead(context, start);
+    if (match?.tokens.some((token) => token.index === tokenIndex)) return true;
+  }
+  return false;
+}
+
 export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
     if (!lead) {
       return [];
     }
-    const leadLower = normalizeTokenLower(lead);
-    let cursor = start + 1;
-    const tokens = [lead];
+    const contextualLead = matchContextualPrnReasonLead(context, start);
+    const leadLower = contextualLead?.canonical ?? normalizeTokenLower(lead);
+    let cursor = contextualLead?.next ?? start + 1;
+    const tokens = contextualLead ? [...contextualLead.tokens] : [lead];
     const nextLead = context.tokens[start + 1];
     const nextLeadLower = nextLead && !context.state.consumed.has(nextLead.index)
       ? normalizeTokenLower(nextLead)
       : undefined;
-    if (nextLeadLower && AS_NEEDED_LEAD_PHRASES.has(`${leadLower} ${nextLeadLower}`)) {
+    if (contextualLead) {
+      if (
+        previousTokensEndNegatedDirectivePrefix(context, start) ||
+        hasSafetyConditionalActionAfter(context, start) ||
+        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+      ) {
+        return [];
+      }
+    } else if (nextLeadLower && AS_NEEDED_LEAD_PHRASES.has(`${leadLower} ${nextLeadLower}`)) {
       // Surface "use if/when ..." is a PRN construction only when `use` is
       // not itself governed by a preceding negative/modal safety directive.
       // `should not use if ...` must remain a scoped safety action.
@@ -605,7 +657,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     } else if (!PRN_LEADS.has(leadLower)) {
       return [];
     }
-    const isStandaloneConditionalLead = PRN_STANDALONE_REASON_LEADS.has(leadLower);
+    const isStandaloneConditionalLead = Boolean(contextualLead) || PRN_STANDALONE_REASON_LEADS.has(leadLower);
     while (cursor < context.limit) {
       const leadIn = context.tokens[cursor];
       if (!leadIn || context.state.consumed.has(leadIn.index)) {

@@ -54,6 +54,7 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
+import { tokenBelongsToContextualPrnReasonLead } from "./prn-rules";
 
 const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
 
@@ -183,6 +184,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    if (tokenBelongsToContextualPrnReasonLead(context, start)) {
+      return signs;
+    }
     const siteCandidate = getPrimarySiteMeaningCandidate(token);
     const previous = context.tokens[start - 1];
     const previousRoutePhrase = previous && !context.state.consumed.has(previous.index)
@@ -223,6 +227,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       firstAfterAnchorLower &&
       (
         isClockLikeLower(firstAfterAnchorLower) ||
+        (
+          SITE_ANCHORS.has(firstAfterAnchorLower) &&
+          Boolean(secondAfterAnchorLower && isClockLikeLower(secondAfterAnchorLower))
+        ) ||
         (
           /^[0-9]{1,2}$/.test(firstAfterAnchorLower) &&
           Boolean(secondAfterAnchorLower && isAmPmLower(secondAfterAnchorLower))

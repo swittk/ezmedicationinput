@@ -148,6 +148,9 @@ export interface HpsgScheduleFeature {
   period?: number;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
+  offset?: number;
+  offsetMin?: number;
+  offsetMax?: number;
   when?: EventTiming[];
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];

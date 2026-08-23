@@ -253,6 +253,9 @@ function cleanupClause(state: ParserState): void {
       schedule.period === undefined &&
       schedule.periodMax === undefined &&
       schedule.periodUnit === undefined &&
+      schedule.offset === undefined &&
+      schedule.offsetMin === undefined &&
+      schedule.offsetMax === undefined &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&

@@ -46,6 +46,15 @@ function applySchedule(
   if (schedule.periodUnit !== undefined) {
     state.periodUnit = schedule.periodUnit;
   }
+  if (schedule.offset !== undefined) {
+    state.offset = schedule.offset;
+  }
+  if (schedule.offsetMin !== undefined) {
+    state.offsetMin = schedule.offsetMin;
+  }
+  if (schedule.offsetMax !== undefined) {
+    state.offsetMax = schedule.offsetMax;
+  }
   if (schedule.when) {
     for (const whenCode of schedule.when) {
       deps.addWhen(state.when, whenCode);

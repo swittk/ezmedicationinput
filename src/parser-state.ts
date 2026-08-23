@@ -249,6 +249,30 @@ export class ParserState {
     this.ensureSchedule().periodUnit = value;
   }
 
+  get offset(): number | undefined {
+    return this.clause.schedule?.offset;
+  }
+
+  set offset(value: number | undefined) {
+    this.ensureSchedule().offset = value;
+  }
+
+  get offsetMin(): number | undefined {
+    return this.clause.schedule?.offsetMin;
+  }
+
+  set offsetMin(value: number | undefined) {
+    this.ensureSchedule().offsetMin = value;
+  }
+
+  get offsetMax(): number | undefined {
+    return this.clause.schedule?.offsetMax;
+  }
+
+  set offsetMax(value: number | undefined) {
+    this.ensureSchedule().offsetMax = value;
+  }
+
   get dayOfWeek(): FhirDayOfWeek[] {
     const schedule = this.ensureSchedule();
     if (!schedule.dayOfWeek) {

@@ -33,6 +33,9 @@ import {
   DAY_RANGE_CONNECTORS,
   DURATION_LEAD_TOKENS,
   EVENT_ARTICLE_TOKENS,
+  EVENT_OFFSET_FRACTIONS,
+  EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES,
+  EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES,
   EVENT_PREPOSITIONS,
   FOOD_EVENT_ALIASES,
   LIST_SEPARATORS,
@@ -56,6 +59,7 @@ import {
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
   switch (value) {
@@ -451,6 +455,49 @@ export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext
         cont: { clauseKind: "administration" }
       },
       score: 18
+    })];
+  });
+}
+
+const DISTRIBUTIVE_SINGLE_DOSE_KINDS = new Set([
+  "counted_presentation",
+  "device_actuation",
+  "product_specific_amount"
+]);
+
+/**
+ * A distributive cadence followed directly by a discrete unit licenses an
+ * elided cardinal one: Thai `วันละเม็ด` => one tablet daily. This is narrower
+ * than globally treating every bare unit as one dose.
+ */
+export function cadenceFirstImplicitSingleDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.cadenceFirstImplicitSingleDose", (context, start) => {
+    const cadence = tokensAvailable(context, start, 1)?.[0];
+    if (!cadence) return [];
+    const periodUnit = mapFrequencyAdverb(normalizeTokenLower(cadence));
+    if (!periodUnit) return [];
+    const unitToken = context.tokens[start + 1];
+    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
+    const unit = normalizeUnit(normalizeTokenLower(unitToken), context.options);
+    if (!unit || !DISTRIBUTIVE_SINGLE_DOSE_KINDS.has(getDoseUnitKind(unit) ?? "")) return [];
+    const normalizedPeriod = normalizePeriodValue(1, periodUnit);
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.cadenceFirstImplicitSingleDose",
+      tokens: [cadence, unitToken],
+      synsem: {
+        head: {
+          dose: { value: 1, unit },
+          schedule: {
+            frequency: 1,
+            period: normalizedPeriod.value,
+            periodUnit: normalizedPeriod.unit
+          }
+        },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 20
     })];
   });
 }
@@ -888,6 +935,117 @@ function coordinatedRelatedEventSign(
     // Coordinated head ellipsis is a single, more specific construction than
     // independently attaching the first meal phrase and a bare daypart.
     score: 28 + members.length
+  });
+}
+
+function eventOffsetLeadLength(
+  context: HpsgClauseContext,
+  start: number,
+  sequences: readonly (readonly string[])[]
+): number {
+  for (const sequence of sequences) {
+    let matches = true;
+    for (let offset = 0; offset < sequence.length; offset += 1) {
+      const token = context.tokens[start + offset];
+      if (
+        !token ||
+        context.state.consumed.has(token.index) ||
+        normalizeTokenLower(token) !== sequence[offset]
+      ) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return sequence.length;
+  }
+  return 0;
+}
+
+function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undefined {
+  const minutes = unit === FhirPeriodUnit.Minute
+    ? value
+    : unit === FhirPeriodUnit.Hour
+      ? value * 60
+      : unit === FhirPeriodUnit.Day
+        ? value * 24 * 60
+        : unit === FhirPeriodUnit.Second
+          ? value / 60
+          : undefined;
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes < 0) return undefined;
+  const rounded = Math.round(minutes);
+  return Math.abs(minutes - rounded) < 1e-9 ? rounded : undefined;
+}
+
+/**
+ * Relative event offsets are timing semantics, not treatment duration.
+ * `ก่อนอาหารอย่างน้อยครึ่งชั่วโมง` becomes Before Meal + offsetMin 30 min.
+ */
+export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.eventOffset", (context, start) => {
+    const relationToken = tokensAvailable(context, start, 1)?.[0];
+    if (!relationToken) return [];
+    const relation = mealRelationFromToken(normalizeTokenLower(relationToken));
+    if (relation !== "before" && relation !== "after") return [];
+
+    const relatedExpression = eventExpressionPartsAt(context, start + 1);
+    const resolvedEvent = resolveEventTimingExpression(relatedExpression.parts);
+    if (!resolvedEvent) return [];
+    const timing = mealTimingForRelation(relation, resolvedEvent.timing);
+    if (!timing) return [];
+    const eventTokens = relatedExpression.members.slice(0, resolvedEvent.length);
+    let cursor = start + 1 + resolvedEvent.length;
+
+    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
+    const maximumLead = minimumLead
+      ? 0
+      : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
+    const qualifierLength = minimumLead || maximumLead;
+    cursor += qualifierLength;
+
+    const valueToken = context.tokens[cursor];
+    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
+    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
+      ? valueToken.value
+      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
+    if (value === undefined) return [];
+
+    let unitIndex = cursor + 1;
+    const possibleArticle = context.tokens[unitIndex];
+    if (possibleArticle && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(possibleArticle))) {
+      unitIndex += 1;
+    }
+    const unitToken = context.tokens[unitIndex];
+    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
+    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
+    if (!unit) return [];
+    const minutes = eventOffsetMinutes(value, unit);
+    if (minutes === undefined) return [];
+
+    const tokens = [
+      relationToken,
+      ...eventTokens,
+      ...context.tokens.slice(start + 1 + resolvedEvent.length, cursor),
+      valueToken,
+      ...(unitIndex > cursor + 1 ? [possibleArticle] : []),
+      unitToken
+    ].filter((token): token is Token => Boolean(token));
+    const schedule = minimumLead
+      ? { when: [timing], offsetMin: minutes }
+      : maximumLead
+        ? { when: [timing], offsetMax: minutes }
+        : { when: [timing], offset: minutes };
+
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.eventOffset",
+      tokens,
+      synsem: {
+        head: { schedule },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 28 + tokens.length
+    })];
   });
 }
 

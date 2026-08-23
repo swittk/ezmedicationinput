@@ -4,6 +4,11 @@ import source from "./lexical-classes.json";
 type MealRelation = "before" | "after" | "with";
 type MealTimingByRelation = Map<MealRelation, Map<EventTiming, EventTiming>>;
 type BodySiteFeatureKind = "nominal" | "partitive" | "locative";
+type ContextualPrnReasonLead = {
+  parts: string[];
+  canonical: string;
+  requiresKnownReason?: boolean;
+};
 type CompoundDoseUnit = {
   head: string;
   tails: string[];
@@ -190,6 +195,12 @@ export const ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS = setOf(
 export const PRN_LEADS = setOf(source.prnLeads);
 export const PRN_REASON_LEAD_INS = setOf(source.prnReasonLeadIns);
 export const PRN_STANDALONE_REASON_LEADS = setOf(source.prnStandaloneReasonLeads);
+export const PRN_CONTEXTUAL_REASON_LEADS: ContextualPrnReasonLead[] =
+  (source.prnContextualReasonLeads ?? []).map((lead) => ({
+    parts: [...lead.parts],
+    canonical: lead.canonical,
+    requiresKnownReason: lead.requiresKnownReason
+  }));
 export const PRN_REASON_MULTIWORD_LEAD_INS = setOf(source.prnReasonMultiwordLeadIns);
 export const PRN_REASON_SITE_CONNECTORS = setOf(source.prnReasonSiteConnectors);
 export const PRN_REASON_COORDINATORS = setOf(source.prnReasonCoordinators);
@@ -256,6 +267,13 @@ export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
 export const DAY_RANGE_CONNECTORS = setOf(source.dayRangeConnectors);
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = setOf(source.durationLeadTokens);
+export const EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES =
+  (source.eventOffsetMinimumLeadSequences ?? []).map((parts) => [...parts]);
+export const EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES =
+  (source.eventOffsetMaximumLeadSequences ?? []).map((parts) => [...parts]);
+export const EVENT_OFFSET_FRACTIONS = new Map<string, number>(
+  numberEntries(source.eventOffsetFractions ?? {})
+);
 
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
 export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);

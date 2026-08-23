@@ -244,6 +244,13 @@
     "when",
     "whenever"
   ],
+  "prnContextualReasonLeads": [
+    {
+      "parts": ["เวลา", "ที่"],
+      "canonical": "when",
+      "requiresKnownReason": true
+    }
+  ],
   "prnReasonMultiwordLeadIns": [
     "due to"
   ],
@@ -898,6 +905,18 @@
   "durationLeadTokens": [
     "for"
   ],
+  "eventOffsetMinimumLeadSequences": [
+    ["at", "least"],
+    ["อย่าง", "น้อย"]
+  ],
+  "eventOffsetMaximumLeadSequences": [
+    ["at", "most"],
+    ["ไม่", "เกิน"]
+  ],
+  "eventOffsetFractions": {
+    "half": 0.5,
+    "ครึ่ง": 0.5
+  },
   "instructionLeadingSeparators": [
     ",",
     ";",

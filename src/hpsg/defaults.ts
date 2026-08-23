@@ -178,6 +178,9 @@ function hasStructuredTiming(state: ParserState): boolean {
     state.duration !== undefined ||
     state.durationMax !== undefined ||
     state.durationUnit !== undefined ||
+    state.offset !== undefined ||
+    state.offsetMin !== undefined ||
+    state.offsetMax !== undefined ||
     state.frequency !== undefined ||
     state.frequencyMax !== undefined ||
     state.period !== undefined ||

@@ -494,6 +494,9 @@ function describeStandaloneOccurrenceCount(
     schedule?.duration !== undefined ||
     schedule?.durationMax !== undefined ||
     schedule?.durationUnit !== undefined ||
+    schedule?.offset !== undefined ||
+    schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined ||
     schedule?.timingCode
   ) {
     return undefined;
@@ -590,10 +593,23 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
+function formatEventOffsetEnglish(
+  eventText: string,
+  schedule: CanonicalScheduleExpr
+): string {
+  const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
+  if (value === undefined) return eventText;
+  const quantity = `${stripTrailingZero(value)} minute${value === 1 ? "" : "s"}`;
+  if (schedule.offsetMin !== undefined) return `at least ${quantity} ${eventText}`;
+  if (schedule.offsetMax !== undefined) return `at most ${quantity} ${eventText}`;
+  return `${quantity} ${eventText}`;
+}
+
 const EN_TIMING_GRAMMAR: LocalizedTimingGrammar = {
   whenText: WHEN_TEXT,
   joinList: joinWithAnd,
   summarizeMealTimingGroup,
+  formatEventOffset: formatEventOffsetEnglish,
   bedtimeJoinStyle: (dailyCount) => {
     if (dailyCount === 1) {
       return "adjacent";
@@ -1232,7 +1248,11 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length || schedule.count !== undefined
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.count !== undefined || schedule.timingCode ||
+    schedule.duration !== undefined || schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
   );
   const graphCanStandAlone = Boolean(
     !hasExplicitMethod && trailingInstructionText && clause.instructionGraph?.actions.length &&

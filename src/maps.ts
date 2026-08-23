@@ -1457,7 +1457,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["skin", "ผิวหนัง"],
+      names: ["skin", "ผิวหนัง", "ผิว"],
       definition: {
         coding: { code: "181469002", display: "Entire skin" },
         i18n: { th: "ผิวหนัง" },

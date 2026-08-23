@@ -200,6 +200,9 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.duration !== undefined ||
     schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined ||
+    schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined ||
+    schedule.offsetMax !== undefined ||
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||

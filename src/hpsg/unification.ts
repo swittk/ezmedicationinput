@@ -351,7 +351,10 @@ function mergeSchedule(
     !sameOptionalScalar(left.frequencyMax, right.frequencyMax) ||
     !sameOptionalScalar(left.period, right.period) ||
     !sameOptionalScalar(left.periodMax, right.periodMax) ||
-    !sameOptionalScalar(left.periodUnit, right.periodUnit)
+    !sameOptionalScalar(left.periodUnit, right.periodUnit) ||
+    !sameOptionalScalar(left.offset, right.offset) ||
+    !sameOptionalScalar(left.offsetMin, right.offsetMin) ||
+    !sameOptionalScalar(left.offsetMax, right.offsetMax)
   ) {
     return undefined;
   }
@@ -367,6 +370,9 @@ function mergeSchedule(
     period: mergeOptionalScalar(left.period, right.period),
     periodMax: mergeOptionalScalar(left.periodMax, right.periodMax),
     periodUnit: mergeOptionalScalar(left.periodUnit, right.periodUnit),
+    offset: mergeOptionalScalar(left.offset, right.offset),
+    offsetMin: mergeOptionalScalar(left.offsetMin, right.offsetMin),
+    offsetMax: mergeOptionalScalar(left.offsetMax, right.offsetMax),
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay)

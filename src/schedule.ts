@@ -720,6 +720,17 @@ const SPECIFIC_AFTER_MEALS: Record<string, string> = {
   [EventTiming["After Dinner"]]: EventTiming.Dinner
 };
 
+function signedEventOffset(code: string, offset: number): number {
+  if (
+    code === EventTiming["Before Meal"] ||
+    code in SPECIFIC_BEFORE_MEALS ||
+    code === EventTiming["Before Sleep"]
+  ) {
+    return -offset;
+  }
+  return offset;
+}
+
 /**
  * Expands a single EventTiming code into concrete wall-clock entries.
  */
@@ -740,7 +751,10 @@ function expandTiming(
       if (!base) {
         continue;
       }
-      normalized.push(applyOffset(normalizeClock(base), mealOffsets[code] ?? 0));
+      normalized.push(applyOffset(
+        normalizeClock(base),
+        repeat.offset !== undefined ? 0 : mealOffsets[code] ?? 0
+      ));
     }
   } else if (code === EventTiming["After Meal"]) {
     for (const meal of getDefaultMealPairs(config)) {
@@ -748,7 +762,10 @@ function expandTiming(
       if (!base) {
         continue;
       }
-      normalized.push(applyOffset(normalizeClock(base), mealOffsets[code] ?? 0));
+      normalized.push(applyOffset(
+        normalizeClock(base),
+        repeat.offset !== undefined ? 0 : mealOffsets[code] ?? 0
+      ));
     }
   } else if (code === EventTiming.Meal) {
     for (const meal of getDefaultMealPairs(config)) {
@@ -763,8 +780,9 @@ function expandTiming(
     const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
-      const offset =
-        mealOffsets[code] ?? mealOffsets[EventTiming["Before Meal"]] ?? 0;
+      const offset = repeat.offset !== undefined
+        ? 0
+        : mealOffsets[code] ?? mealOffsets[EventTiming["Before Meal"]] ?? 0;
       normalized.push(offset ? applyOffset(baseClock, offset) : { time: baseClock, dayShift: 0 });
     }
   } else if (code in SPECIFIC_AFTER_MEALS) {
@@ -772,15 +790,16 @@ function expandTiming(
     const base = eventClock[mealCode];
     if (base) {
       const baseClock = normalizeClock(base);
-      const offset =
-        mealOffsets[code] ?? mealOffsets[EventTiming["After Meal"]] ?? 0;
+      const offset = repeat.offset !== undefined
+        ? 0
+        : mealOffsets[code] ?? mealOffsets[EventTiming["After Meal"]] ?? 0;
       normalized.push(offset ? applyOffset(baseClock, offset) : { time: baseClock, dayShift: 0 });
     }
   }
 
-  if (repeat.offset && normalized.length) {
+  if (repeat.offset !== undefined && normalized.length) {
     return normalized.map((entry) => {
-      const adjusted = applyOffset(entry.time, repeat.offset ?? 0);
+      const adjusted = applyOffset(entry.time, signedEventOffset(code, repeat.offset ?? 0));
       return {
         time: adjusted.time,
         dayShift: entry.dayShift + adjusted.dayShift
@@ -857,10 +876,10 @@ function inferWhenFallbackEntries(
   const entries: ExpandedTime[] = [];
   const seen = new Set<string>();
 
-  const addClock = (clock: string) => {
+  const addClock = (clock: string, code: string) => {
     const normalized = normalizeClock(clock);
-    const adjusted = repeat.offset
-      ? applyOffset(normalized, repeat.offset ?? 0)
+    const adjusted = repeat.offset !== undefined
+      ? applyOffset(normalized, signedEventOffset(code, repeat.offset ?? 0))
       : { time: normalized, dayShift: 0 };
     const key = `${adjusted.dayShift}|${adjusted.time}`;
     if (seen.has(key)) {
@@ -874,12 +893,21 @@ function inferWhenFallbackEntries(
     if (code === EventTiming.Immediate) {
       continue;
     }
-    const fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
+    let fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
+    if (repeat.offset !== undefined) {
+      if (code === EventTiming["Before Meal"] || code === EventTiming["After Meal"]) {
+        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[EventTiming.Meal];
+      } else if (code in SPECIFIC_BEFORE_MEALS) {
+        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_BEFORE_MEALS[code]];
+      } else if (code in SPECIFIC_AFTER_MEALS) {
+        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_AFTER_MEALS[code]];
+      }
+    }
     if (!fallbackClocks) {
       continue;
     }
     for (const clock of fallbackClocks) {
-      addClock(clock);
+      addClock(clock, code);
     }
   }
 

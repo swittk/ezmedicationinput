@@ -173,8 +173,14 @@ interface LocalePhrase {
 }
 
 interface UnitTerminologySource {
-  terms?: Array<{ unit?: string; aliases?: string[] }>;
+  terms?: Array<{ unit?: string; aliases?: string[]; parseAsDose?: boolean }>;
 }
+
+const DOSE_UNIT_CANONICALS = new Set(
+  ((unitTerminologySource as UnitTerminologySource).terms ?? [])
+    .filter((term) => term.parseAsDose !== false && term.unit)
+    .map((term) => term.unit!.toLowerCase())
+);
 
 const LEGACY_THAI_GROUP_TERMS = [
   "วันธรรมดา",
@@ -302,6 +308,42 @@ function mergeSourceSpan(
   };
 }
 
+function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[] {
+  const result: LexToken[] = [];
+  for (const token of tokens) {
+    if (token.kind !== LexKind.Word || !token.lower.startsWith("ละ") || token.lower.length <= 2) {
+      result.push({ ...token });
+      continue;
+    }
+    const unitSurface = token.lower.slice(2);
+    const canonicalUnit = canonicalThaiLexeme(unitSurface);
+    if (!canonicalUnit || !DOSE_UNIT_CANONICALS.has(canonicalUnit.toLowerCase())) {
+      result.push({ ...token });
+      continue;
+    }
+    const splitAt = token.sourceStart + 2;
+    result.push({
+      ...token,
+      original: token.original.slice(0, 2),
+      lower: "ละ",
+      canonical: undefined,
+      sourceEnd: splitAt,
+      sourceText: token.original.slice(0, 2),
+      derived: true
+    });
+    result.push({
+      ...token,
+      original: token.original.slice(2),
+      lower: unitSurface,
+      canonical: canonicalUnit,
+      sourceStart: splitAt,
+      sourceText: token.original.slice(2),
+      derived: true
+    });
+  }
+  return result;
+}
+
 function knownDomainCompoundAt(
   tokens: readonly LexToken[],
   start: number,
@@ -405,11 +447,12 @@ export function listMedicationLocaleLexemes(locale: string): MedicationLocaleLex
 }
 
 export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
+  const prepared = splitThaiDistributiveUnitTokens(tokens);
   const normalized: LexToken[] = [];
   let cursor = 0;
 
-  while (cursor < tokens.length) {
-    const knownCompound = knownDomainCompoundAt(tokens, cursor, input);
+  while (cursor < prepared.length) {
+    const knownCompound = knownDomainCompoundAt(prepared, cursor, input);
     if (knownCompound) {
       normalized.push(knownCompound.token);
       cursor += knownCompound.length;
@@ -418,18 +461,18 @@ export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): 
 
     let matchedPhrase: LocalePhrase | undefined;
     for (const phrase of THAI_PHRASES) {
-      if (phraseMatches(tokens, cursor, phrase)) {
+      if (phraseMatches(prepared, cursor, phrase)) {
         matchedPhrase = phrase;
         break;
       }
     }
     if (matchedPhrase) {
-      normalized.push(mergePhrase(tokens, cursor, matchedPhrase, input));
+      normalized.push(mergePhrase(prepared, cursor, matchedPhrase, input));
       cursor += matchedPhrase.parts.length;
       continue;
     }
 
-    const token = tokens[cursor];
+    const token = prepared[cursor];
     const canonical = canonicalThaiLexeme(token.lower);
     normalized.push(canonical ? { ...token, canonical } : { ...token });
     cursor += 1;

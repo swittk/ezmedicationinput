@@ -36,7 +36,11 @@ import {
   CanonicalSigClause,
   TextRange
 } from "./types";
-export { TIMING_FREQUENCY_MIN_EXTENSION_URL } from "./fhir";
+export {
+  TIMING_FREQUENCY_MIN_EXTENSION_URL,
+  TIMING_OFFSET_MIN_EXTENSION_URL,
+  TIMING_OFFSET_MAX_EXTENSION_URL
+} from "./fhir";
 export { suggestSig } from "./suggest";
 export {
   parseInstructionActions,

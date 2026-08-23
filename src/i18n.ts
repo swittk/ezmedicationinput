@@ -1088,6 +1088,9 @@ function describeStandaloneOccurrenceCountThai(
     schedule?.duration !== undefined ||
     schedule?.durationMax !== undefined ||
     schedule?.durationUnit !== undefined ||
+    schedule?.offset !== undefined ||
+    schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined ||
     schedule?.timingCode
   ) {
     return undefined;
@@ -1130,10 +1133,23 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
+function formatEventOffsetThai(
+  eventText: string,
+  schedule: CanonicalScheduleExpr
+): string {
+  const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
+  if (value === undefined) return eventText;
+  const quantity = `${stripTrailingZero(value)} นาที`;
+  if (schedule.offsetMin !== undefined) return `${eventText}อย่างน้อย ${quantity}`;
+  if (schedule.offsetMax !== undefined) return `${eventText}ไม่เกิน ${quantity}`;
+  return `${eventText} ${quantity}`;
+}
+
 const TH_TIMING_GRAMMAR: LocalizedTimingGrammar = {
   whenText: WHEN_TEXT_THAI,
   joinList: joinWithAndThai,
   summarizeMealTimingGroup: summarizeMealTimingGroupThai,
+  formatEventOffset: formatEventOffsetThai,
   bedtimeJoinStyle: (dailyCount) => {
     if (dailyCount === 1) {
       return "adjacent";
@@ -1899,7 +1915,8 @@ function formatLongThai(
     schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined
+    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
   );
   const graphCanStandAlone = Boolean(
     !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&

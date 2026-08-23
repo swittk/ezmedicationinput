@@ -351,6 +351,7 @@ export interface FhirTimingRepeat extends FhirElement {
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];
   when?: EventTiming[];
+  /** Exact event offset in minutes. */
   offset?: number;
 }
 
@@ -1157,6 +1158,12 @@ export interface CanonicalScheduleExpr {
   period?: number;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
+  /** Exact event offset in minutes, matching FHIR Timing.repeat.offset. */
+  offset?: number;
+  /** Minimum event offset in minutes when the source says “at least”. */
+  offsetMin?: number;
+  /** Maximum event offset in minutes when the source says “at most”. */
+  offsetMax?: number;
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];

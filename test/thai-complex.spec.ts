@@ -99,6 +99,70 @@ describe("Thai clinician free-text parsing", () => {
     expect(three.fhir.timing?.repeat?.when).toEqual(["MORN", "NOON", "EVE"]);
   });
 
+  it("parses natural Thai distributive doses and symptom conditions compositionally", () => {
+    const oral = parseSig("กินวันละเม็ดเวลาที่ง่วง", { locale: "th" });
+    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(oral.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(oral.fhir.asNeededFor?.[0]?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "79519003",
+      display: "Drowsiness"
+    });
+    expect(oral.meta.leftoverText).toBeUndefined();
+
+    const topical = parseSig("ทาผิวเวลาที่คัน", { locale: "th" });
+    expect(topical.fhir.site?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "181469002",
+      display: "Entire skin"
+    });
+    expect(topical.fhir.asNeededFor?.[0]?.coding?.[0]?.code)
+      .toBe("418363000:363698007=181469002");
+    expect(topical.meta.leftoverText).toBeUndefined();
+  });
+
+  it("parses quantified meal offsets without confusing them with treatment duration", () => {
+    const minimum = parseSig("กินก่อนอาหารอย่างน้อยครึ่งชั่วโมง", { locale: "th" });
+    expect(minimum.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      when: ["AC"],
+      offsetMin: 30
+    });
+    expect(minimum.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+    expect(minimum.fhir.timing?.repeat?.offset).toBeUndefined();
+    expect(minimum.fhir.timing?.repeat?.extension).toContainEqual({
+      url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min",
+      valueInteger: 30
+    });
+    expect(minimum.longText).toBe("รับประทานก่อนอาหารอย่างน้อย 30 นาที.");
+    expect(minimum.meta.leftoverText).toBeUndefined();
+    expect(formatSig(minimum.fhir, "long", { locale: "th" }))
+      .toBe("รับประทานก่อนอาหารอย่างน้อย 30 นาที.");
+    expect(formatSig(minimum.fhir, "long", { locale: "en" }))
+      .toBe("Take the medication orally at least 30 minutes before meals.");
+    expect(fromFhirDosage(minimum.fhir, { locale: "th" }).longText)
+      .toBe("รับประทานก่อนอาหารอย่างน้อย 30 นาที.");
+
+    const exact = parseSig("กินก่อนอาหารครึ่งชั่วโมง", { locale: "th" });
+    expect(exact.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      when: ["AC"],
+      offset: 30
+    });
+    expect(exact.fhir.timing?.repeat).toMatchObject({ when: ["AC"], offset: 30 });
+    expect(exact.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+  });
+
+  it("uses the distributive-dose construction across discrete units", () => {
+    const drops = parseSig("หยอดวันละหยด", { locale: "th" });
+    expect(drops.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(drops.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(drops.meta.leftoverText).toBeUndefined();
+
+    const capsules = parseSig("กินวันละแคปซูลเวลาที่เวียนหัว", { locale: "th" });
+    expect(capsules.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "cap" });
+    expect(capsules.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("404640003");
+    expect(capsules.meta.leftoverText).toBeUndefined();
+  });
+
   it("recognizes common Thai administration verbs and units through the same grammar", () => {
     const oral = parseSig("รับประทาน 1 เม็ด วันละ 2 ครั้ง เช้าเย็น", { locale: "th" });
     expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1 });
