@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { suggestSig } from "../src";
+import { parseSig, suggestSig } from "../src";
+import { RouteCode } from "../src/types";
 
 const TAB_CONTEXT = { context: { dosageForm: "tablet" } } as const;
 
@@ -128,6 +129,112 @@ describe("suggestSig", () => {
     expect(suggestions.some((value) => value.includes("teaspoon") || value.includes("tsp"))).toBe(
       false,
     );
+  });
+
+  it("uses Thai defaults when the requested locale is Thai", () => {
+    const suggestions = suggestSig("", { locale: "th", limit: 5 });
+    expect(suggestions[0]).toBe("รับประทาน 1 เม็ด วันละครั้ง");
+    expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
+  });
+
+  it("completes Thai PRN symptom tails from parser PRN terminology", () => {
+    const suggestions = suggestSig("รับประทาน 1 เม็ด เมื่อมีอาการปว", { locale: "th", limit: 5 });
+    expect(suggestions).toContain("รับประทาน 1 เม็ด เมื่อมีอาการปวด");
+    expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
+  });
+
+  it("uses the parser-owned Thai locale lexicon for partial grammar words", () => {
+    const suggestions = suggestSig("คว", { locale: "th", limit: 5 });
+    expect(suggestions).toContain("ควร");
+    expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
+  });
+
+  it("keeps representative suggestions inside the parser language", () => {
+    const cases = [
+      { prefix: "", options: {} },
+      { prefix: "1x", options: {} },
+      { prefix: "1 tab po q", options: {} },
+      { prefix: "1 tab po prn a", options: {} },
+      { prefix: "at 14:3", options: {} },
+      { prefix: "ทา", options: { locale: "th" } },
+      { prefix: "รับประทาน 1 เม็ด เมื่อมีอาการปว", options: { locale: "th" } }
+    ] as const;
+    for (const { prefix, options } of cases) {
+      const suggestions = suggestSig(prefix, { ...options, limit: 5 });
+      for (const suggestion of suggestions) {
+        expect(parseSig(suggestion, options).meta.leftoverText).toBeUndefined();
+      }
+    }
+  });
+
+  it("returns cheaply bounded no-match results instead of default noise", () => {
+    expect(suggestSig("zzzz", { limit: 20 })).toEqual([]);
+  });
+
+  it("suggests from Thai action terminology instead of falling back to English defaults", () => {
+    const suggestions = suggestSig("ทา", { locale: "th", limit: 5 });
+    expect(suggestions[0]).toBe("ทา");
+    expect(suggestions).toContain("ทา วันละครั้ง");
+    expect(suggestions.some((value) => value.includes("tab po"))).toBe(false);
+  });
+
+  it("suggests complete administration actions understood by the HPSG parser", () => {
+    expect(suggestSig("wash", { limit: 5 })).toContain("wash");
+    expect(suggestSig("apply", { limit: 5 })).toContain("apply");
+  });
+
+  it("surfaces PRN reasons from the parser terminology rather than a suggester-only shortlist", () => {
+    expect(suggestSig("1 tab po prn mig", { limit: 10 })).toContain("1 tab po prn migraine");
+  });
+
+  it("surfaces runtime PRN terminology", () => {
+    expect(suggestSig("1 tab po prn restp", {
+      limit: 10,
+      prnReasonMap: { restpainz: { text: "Rest pain Z" } }
+    })).toContain("1 tab po prn restpainz");
+  });
+
+  it("surfaces runtime route aliases from ParseOptions", () => {
+    expect(suggestSig("1 tab cust", {
+      limit: 10,
+      routeMap: { customoral: RouteCode["Oral route"] }
+    })).toContain("1 tab customoral");
+  });
+
+  it("surfaces runtime body-site vocabulary", () => {
+    expect(suggestSig("apply to spec", {
+      limit: 10,
+      siteCodeMap: {
+        "special spot": { text: "special spot" }
+      }
+    })).toContain("apply to special spot");
+  });
+
+  it("surfaces runtime unit aliases without adding a suggester branch", () => {
+    expect(suggestSig("5 sco", {
+      limit: 10,
+      unitMap: { scoop: "tab" }
+    })).toContain("5 scoop po qd");
+  });
+
+  it("surfaces runtime custom action terminology without hard-coded suggester branches", () => {
+    const suggestions = suggestSig("pai", {
+      limit: 5,
+      instructionActionMap: {
+        paint: {
+          code: "paint",
+          display: "Paint",
+          aliases: ["paint", "painting"]
+        }
+      }
+    });
+    expect(suggestions).toContain("paint");
+    expect(suggestions).toContain("painting");
+  });
+
+  it("short-circuits already complete semantic directions", () => {
+    const source = "500 mg po q4-6h prn pain";
+    expect(suggestSig(source, { limit: 20 })[0]).toBe(source);
   });
 
   it("supports time-based suggestions", () => {

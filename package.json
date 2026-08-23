@@ -20,7 +20,8 @@
     "test": "vitest run --dir test",
     "bench:torture": "npm run build && node bench/real-world-torture.mjs",
     "bench:adversarial": "npm run build && node bench/adversarial.mjs",
-    "bench:roundtrip": "npm run build && node bench/roundtrip.mjs"
+    "bench:roundtrip": "npm run build && node bench/roundtrip.mjs",
+    "bench:suggest": "npm run build && node --expose-gc bench/suggest.mjs"
   },
   "files": [
     "dist"

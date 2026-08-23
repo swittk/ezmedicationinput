@@ -372,6 +372,38 @@ function mergePhrase(
   );
 }
 
+export interface MedicationLocaleLexeme {
+  surface: string;
+  canonical: string;
+}
+
+/** Parser-owned locale lexemes for bounded autocomplete/discovery surfaces. */
+export function listMedicationLocaleLexemes(locale: string): MedicationLocaleLexeme[] {
+  if (!locale.toLowerCase().startsWith("th")) return [];
+  const result: MedicationLocaleLexeme[] = [];
+  const seen = new Set<string>();
+  const add = (surface: string, canonical: string | undefined) => {
+    const clean = surface.trim();
+    if (!clean || !canonical || seen.has(clean)) return;
+    seen.add(clean);
+    result.push({ surface: clean, canonical });
+  };
+  for (const surface in THAI_LEXEME_ALIASES) {
+    if (Object.prototype.hasOwnProperty.call(THAI_LEXEME_ALIASES, surface)) {
+      add(surface, THAI_LEXEME_ALIASES[surface]);
+    }
+  }
+  for (const surface in DECLARATIVE_THAI_CANONICAL) {
+    if (Object.prototype.hasOwnProperty.call(DECLARATIVE_THAI_CANONICAL, surface)) {
+      add(surface, DECLARATIVE_THAI_CANONICAL[surface]);
+    }
+  }
+  for (const phrase of THAI_PHRASES) {
+    add(phrase.parts.join(""), phrase.canonical);
+  }
+  return result;
+}
+
 export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
   const normalized: LexToken[] = [];
   let cursor = 0;

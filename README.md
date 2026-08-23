@@ -191,38 +191,39 @@ Notes:
 
 ### Sig (directions) suggestions
 
-Use `suggestSig` to drive autocomplete experiences while the clinician is
-typing shorthand medication directions (sig = directions). It returns an array
-of canonical direction strings and accepts the same `ParseOptions` context plus
-a `limit` and custom PRN reasons.
+Use `suggestSig` to drive autocomplete while the clinician is typing medication
+directions. Completion is bounded and shares the parser's terminology and locale
+lexicons instead of generating a Cartesian product of canned sig strings. It
+accepts the same `ParseOptions` context plus a `limit` and optional custom PRN
+reasons.
 
 ```ts
 import { suggestSig } from "ezmedicationinput";
 
-const suggestions = suggestSig("1 drop to od q2h", {
-  limit: 5,
-  context: { dosageForm: "ophthalmic solution" },
-});
+suggestSig("1 tab po q", { limit: 5 });
+// → ["1 tab po qd", "1 tab po qid", "1 tab po q1h", ...]
 
-// → ["1 drop oph q2h", "1 drop oph q2h prn pain", ...]
+suggestSig("ทา", { locale: "th", limit: 5 });
+// → ["ทา", "ทา วันละครั้ง"]
 ```
 
 Highlights:
 
-- Recognizes plural units and their singular counterparts (`tab`/`tabs`,
-  `puff`/`puffs`, `mL`/`millilitres`, etc.) and normalizes spelled-out metric,
-  SI-prefixed masses/volumes (`micrograms`, `microliters`, `nanograms`,
-  `liters`, `kilograms`, etc.) alongside household measures like `teaspoon`
-  and `tablespoons` (set `allowHouseholdVolumeUnits: false` to omit them).
-- Keeps matching even when intermediary words such as `to`, `in`, or ocular
-  site shorthand (`od`, `os`, `ou`) appear in the prefix.
-- Emits dynamic interval suggestions, including arbitrary `q<number>h` cadences
-  and common range patterns like `q4-6h`.
-- Supports multiple timing tokens in sequence (e.g. `1 tab po morn hs`).
-- Surfaces PRN reasons from built-ins or custom `prnReasons` entries while
-  preserving numeric doses pulled from the typed prefix.
-- When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
-  (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
+- Complete semantic prefixes are recognized through the live parser/HPSG path
+  and short-circuit instead of searching an unrelated suggestion universe.
+- Action, route, unit, body-site, PRN, frequency, and timing extensions supplied
+  through `ParseOptions` participate in autocomplete where applicable; parser
+  terminology remains the source of truth.
+- Thai suggestions use the parser-owned Thai lexicon, including Thai defaults,
+  action prefixes, grammar words, and PRN symptom tails rather than falling back
+  to English shorthand.
+- Unit, route, timing, clock, PRN, and meal-dash partials use bounded specialized
+  completion paths; unknown prefixes cheaply return no suggestions.
+- Suggested representative EN/TH completions are regression-tested by reparsing
+  them through the real parser with no leftover text.
+- `npm run bench:suggest` reports latency, throughput, and retained/peak memory
+  without imposing timing-sensitive test thresholds.
+
 
 ## Formal HPSG substrate
 
