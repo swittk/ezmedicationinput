@@ -22,6 +22,8 @@ interface AdviceLexemeEntry {
   lemma: string;
   partOfSpeech: string;
   semanticClass?: string;
+  parserProfile?: string;
+  realizerProfile?: string;
 }
 
 interface AdviceConceptEntry {
@@ -32,9 +34,28 @@ interface AdviceConceptEntry {
   implicitRelation?: string;
 }
 
+interface AdviceGrammarSource {
+  leadingNoiseWords: string[];
+  administrationPredicates: string[];
+  verbConnectorWords: string[];
+  simpleTimeWords: string[];
+  durationUnitWords: string[];
+  negationPrefixes: Array<{ parts: string[]; modality?: string }>;
+  warningPredicateSemanticClasses: string[];
+  warningModalities: string[];
+  cautionModalities: string[];
+  semanticClassRoles: Record<string, string>;
+  sequenceMarkers: string[];
+  negativeNominalLeads: string[];
+  ellipticalEffectSemanticClasses: string[];
+  styleSemanticClasses: string[];
+  embeddedAvoidanceTriggerConceptIds: string[];
+}
+
 interface AdviceTerminologySource {
   lexemes: AdviceLexemeEntry[];
   concepts: AdviceConceptEntry[];
+  grammar: AdviceGrammarSource;
 }
 
 interface AdviceFrameTemplateArgument {
@@ -221,27 +242,26 @@ const DEFAULT_INSTRUCTION_CONTEXT: AdviceParseContext = {
   allowFreeTextFallback: false
 };
 
-const LEADING_NOISE_WORDS = new Set(["and", "please"]);
-const ADMINISTRATION_PREDICATES = new Set(["apply", "take", "use"]);
-const NEGATOR_WORDS = new Set(["not", "no", "dont", "don't", "mustnt", "mustn't"]);
-const VERB_CONNECTOR_WORDS = new Set(["and", "or"]);
-const SIMPLE_TIME_WORDS = new Set(["morning", "evening", "night", "bedtime"]);
-const DURATION_UNIT_WORDS = new Set([
-  "second",
-  "seconds",
-  "sec",
-  "secs",
-  "minute",
-  "minutes",
-  "min",
-  "mins",
-  "hour",
-  "hours",
-  "hr",
-  "hrs",
-  "day",
-  "days"
-]);
+const LEADING_NOISE_WORDS = new Set(ADVICE_TERMINOLOGY.grammar.leadingNoiseWords);
+const ADMINISTRATION_PREDICATES = new Set(ADVICE_TERMINOLOGY.grammar.administrationPredicates);
+const VERB_CONNECTOR_WORDS = new Set(ADVICE_TERMINOLOGY.grammar.verbConnectorWords);
+const SIMPLE_TIME_WORDS = new Set(ADVICE_TERMINOLOGY.grammar.simpleTimeWords);
+const DURATION_UNIT_WORDS = new Set(ADVICE_TERMINOLOGY.grammar.durationUnitWords);
+const WARNING_PREDICATE_SEMANTIC_CLASSES = new Set(
+  ADVICE_TERMINOLOGY.grammar.warningPredicateSemanticClasses
+);
+const WARNING_MODALITIES = new Set(ADVICE_TERMINOLOGY.grammar.warningModalities);
+const CAUTION_MODALITIES = new Set(ADVICE_TERMINOLOGY.grammar.cautionModalities);
+const SEMANTIC_CLASS_ROLES = ADVICE_TERMINOLOGY.grammar.semanticClassRoles;
+const SEQUENCE_MARKERS = new Set(ADVICE_TERMINOLOGY.grammar.sequenceMarkers);
+const NEGATIVE_NOMINAL_LEADS = new Set(ADVICE_TERMINOLOGY.grammar.negativeNominalLeads);
+const ELLIPTICAL_EFFECT_SEMANTIC_CLASSES = new Set(
+  ADVICE_TERMINOLOGY.grammar.ellipticalEffectSemanticClasses
+);
+const STYLE_SEMANTIC_CLASSES = new Set(ADVICE_TERMINOLOGY.grammar.styleSemanticClasses);
+const EMBEDDED_AVOIDANCE_TRIGGER_CONCEPT_IDS = new Set(
+  ADVICE_TERMINOLOGY.grammar.embeddedAvoidanceTriggerConceptIds
+);
 
 const LEXEMES_BY_SURFACE: Record<string, AdviceLexemeEntry[]> = Object.create(null);
 const CONCEPTS_BY_SURFACE: Record<string, AdviceConceptEntry[]> = Object.create(null);
@@ -368,6 +388,21 @@ function cleanFreeText(value: string): string {
   return collapseWhitespace(value.slice(start, end));
 }
 
+function enumValue<T>(record: object, value: string | undefined): T | undefined {
+  if (!value) return undefined;
+  const values = record as Record<string, unknown>;
+  for (const key of Object.keys(values)) {
+    if (values[key] === value) return values[key] as T;
+  }
+  return undefined;
+}
+
+function requiredEnumValue<T>(record: object, value: string, label: string): T {
+  const parsed = enumValue<T>(record, value);
+  if (parsed !== undefined) return parsed;
+  throw new Error(`Unsupported ${label}: ${value}`);
+}
+
 function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalInstructionDefinition {
   const system = source.system?.trim() || SNOMED_SYSTEM;
   return {
@@ -382,91 +417,21 @@ function createDefinitionFromSource(source: AdviceDefinitionSource): AdditionalI
 }
 
 function mapAdviceForce(value: string): AdviceForce {
-  switch (value) {
-    case AdviceForce.Instruction:
-      return AdviceForce.Instruction;
-    case AdviceForce.Warning:
-      return AdviceForce.Warning;
-    case AdviceForce.Caution:
-      return AdviceForce.Caution;
-    case AdviceForce.Sequence:
-      return AdviceForce.Sequence;
-    default:
-      throw new Error(`Unsupported advice force: ${value}`);
-  }
+  return requiredEnumValue<AdviceForce>(AdviceForce, value, "advice force");
 }
 
 function mapAdvicePolarity(value: string | undefined): AdvicePolarity | undefined {
-  if (!value) {
-    return undefined;
-  }
-  switch (value) {
-    case AdvicePolarity.Affirm:
-      return AdvicePolarity.Affirm;
-    case AdvicePolarity.Negate:
-      return AdvicePolarity.Negate;
-    default:
-      throw new Error(`Unsupported advice polarity: ${value}`);
-  }
+  if (!value) return undefined;
+  return requiredEnumValue<AdvicePolarity>(AdvicePolarity, value, "advice polarity");
 }
 
 function mapAdviceRelation(value: string | undefined): AdviceRelation | undefined {
-  if (!value) {
-    return undefined;
-  }
-  switch (value) {
-    case AdviceRelation.With:
-      return AdviceRelation.With;
-    case AdviceRelation.Without:
-      return AdviceRelation.Without;
-    case AdviceRelation.Before:
-      return AdviceRelation.Before;
-    case AdviceRelation.After:
-      return AdviceRelation.After;
-    case AdviceRelation.During:
-      return AdviceRelation.During;
-    case AdviceRelation.Then:
-      return AdviceRelation.Then;
-    case AdviceRelation.Until:
-      return AdviceRelation.Until;
-    case AdviceRelation.For:
-      return AdviceRelation.For;
-    case AdviceRelation.In:
-      return AdviceRelation.In;
-    case AdviceRelation.On:
-      return AdviceRelation.On;
-    default:
-      throw new Error(`Unsupported advice relation: ${value}`);
-  }
+  if (!value) return undefined;
+  return requiredEnumValue<AdviceRelation>(AdviceRelation, value, "advice relation");
 }
 
 function mapAdviceArgumentRole(value: string): AdviceArgumentRole {
-  switch (value) {
-    case AdviceArgumentRole.Theme:
-      return AdviceArgumentRole.Theme;
-    case AdviceArgumentRole.Object:
-      return AdviceArgumentRole.Object;
-    case AdviceArgumentRole.Substance:
-      return AdviceArgumentRole.Substance;
-    case AdviceArgumentRole.MealState:
-      return AdviceArgumentRole.MealState;
-    case AdviceArgumentRole.Activity:
-      return AdviceArgumentRole.Activity;
-    case AdviceArgumentRole.Material:
-      return AdviceArgumentRole.Material;
-    case AdviceArgumentRole.Site:
-      return AdviceArgumentRole.Site;
-    case AdviceArgumentRole.Amount:
-      return AdviceArgumentRole.Amount;
-    case AdviceArgumentRole.Duration:
-      return AdviceArgumentRole.Duration;
-    case AdviceArgumentRole.Time:
-      return AdviceArgumentRole.Time;
-    case AdviceArgumentRole.Free:
-      return AdviceArgumentRole.Free;
-    default:
-      throw new Error(`Unsupported advice argument role: ${value}`);
-  }
+  return requiredEnumValue<AdviceArgumentRole>(AdviceArgumentRole, value, "advice argument role");
 }
 
 function buildAdviceFrameTemplateArgument(
@@ -854,22 +819,7 @@ function findModalLexeme(word: string): AdviceLexemeEntry | undefined {
 }
 
 function mapModalLemmaToModality(lemma: string | undefined): AdviceModality | undefined {
-  switch (lemma) {
-    case AdviceModality.May:
-      return AdviceModality.May;
-    case AdviceModality.Can:
-      return AdviceModality.Can;
-    case AdviceModality.Might:
-      return AdviceModality.Might;
-    case AdviceModality.Could:
-      return AdviceModality.Could;
-    case AdviceModality.Should:
-      return AdviceModality.Should;
-    case AdviceModality.Must:
-      return AdviceModality.Must;
-    default:
-      return undefined;
-  }
+  return enumValue<AdviceModality>(AdviceModality, lemma);
 }
 
 function containsConceptId(normalized: string, conceptId: string): boolean {
@@ -906,31 +856,28 @@ function containsVerbSequence(words: string[], leadLemma: string, targetLemma: s
   return false;
 }
 
-function consumeNegationPrefix(words: string[], start: number): number | undefined {
-  if (start >= words.length) {
-    return undefined;
+interface AdviceNegationPrefixMatch {
+  end: number;
+  modality?: AdviceModality;
+}
+
+function consumeNegationPrefix(words: string[], start: number): AdviceNegationPrefixMatch | undefined {
+  if (start >= words.length) return undefined;
+  for (const prefix of ADVICE_TERMINOLOGY.grammar.negationPrefixes) {
+    if (start + prefix.parts.length > words.length) continue;
+    const matched = prefix.parts.every((part, offset) => words[start + offset] === part);
+    if (!matched) continue;
+    return {
+      end: start + prefix.parts.length,
+      modality: mapModalLemmaToModality(prefix.modality)
+    };
   }
-  const first = words[start];
-  const second = start + 1 < words.length ? words[start + 1] : undefined;
-  switch (first) {
-    case "do":
-      return second === "not" ? start + 2 : undefined;
-    case "don":
-      return second === "t" ? start + 2 : undefined;
-    case "must":
-      return second === "not" ? start + 2 : undefined;
-    case "mustn":
-      return second === "t" ? start + 2 : undefined;
-    default:
-      return NEGATOR_WORDS.has(first) ? start + 1 : undefined;
-  }
+  return undefined;
 }
 
 function parseLeadingClauseFeatures(words: string[]): AdviceClausePrefix | undefined {
   let cursor = skipLeadingNoise(words);
-  if (cursor >= words.length) {
-    return undefined;
-  }
+  if (cursor >= words.length) return undefined;
 
   let modality: AdviceModality | undefined;
   const modalLexeme = findModalLexeme(words[cursor]);
@@ -938,30 +885,13 @@ function parseLeadingClauseFeatures(words: string[]): AdviceClausePrefix | undef
     modality = mapModalLemmaToModality(modalLexeme.lemma);
     cursor += 1;
   }
+  if (cursor >= words.length) return { cursor, modality };
 
-  if (cursor >= words.length) {
-    return { cursor, modality };
-  }
-
-  const negationEnd = consumeNegationPrefix(words, cursor);
-  if (negationEnd === undefined) {
-    return {
-      cursor,
-      modality
-    };
-  }
-
-  switch (words[cursor]) {
-    case "mustn":
-      modality = AdviceModality.Must;
-      break;
-    default:
-      break;
-  }
-
+  const negation = consumeNegationPrefix(words, cursor);
+  if (!negation) return { cursor, modality };
   return {
-    cursor: negationEnd,
-    modality,
+    cursor: negation.end,
+    modality: negation.modality ?? modality,
     polarity: AdvicePolarity.Negate
   };
 }
@@ -969,50 +899,25 @@ function parseLeadingClauseFeatures(words: string[]): AdviceClausePrefix | undef
 function deriveClauseForce(
   sequenceCount: number,
   context: AdviceParseContext,
-  predicateLemma: string,
+  _predicateLemma: string,
   predicateSemanticClass: string | undefined,
   polarity: AdvicePolarity | undefined,
   modality: AdviceModality | undefined
 ): AdviceForce {
-  if (sequenceCount > 1) {
-    return AdviceForce.Sequence;
+  if (sequenceCount > 1) return AdviceForce.Sequence;
+  if (predicateSemanticClass && WARNING_PREDICATE_SEMANTIC_CLASSES.has(predicateSemanticClass)) {
+    return AdviceForce.Warning;
   }
-  switch (predicateSemanticClass) {
-    case "effect":
-      return AdviceForce.Warning;
-    default:
-      break;
-  }
-  switch (modality) {
-    case AdviceModality.May:
-    case AdviceModality.Can:
-    case AdviceModality.Might:
-    case AdviceModality.Could:
-      return AdviceForce.Warning;
-    case AdviceModality.Should:
-      return AdviceForce.Caution;
-    default:
-      break;
-  }
-  switch (predicateLemma) {
-    case "avoid":
-      return AdviceForce.Warning;
-    default:
-      break;
-  }
-  switch (polarity) {
-    case AdvicePolarity.Negate:
-      return AdviceForce.Warning;
-    default:
-      break;
-  }
+  if (modality && WARNING_MODALITIES.has(modality)) return AdviceForce.Warning;
+  if (modality && CAUTION_MODALITIES.has(modality)) return AdviceForce.Caution;
+  if (polarity === AdvicePolarity.Negate) return AdviceForce.Warning;
   return context.defaultForce ?? AdviceForce.Instruction;
 }
 
 function containsNegatedVerb(words: string[], lemma: string): boolean {
   for (let index = 0; index < words.length; index += 1) {
-    const nextIndex = consumeNegationPrefix(words, index);
-    if (nextIndex !== undefined && nextIndex < words.length && findVerbLemma(words[nextIndex]) === lemma) {
+    const negation = consumeNegationPrefix(words, index);
+    if (negation && negation.end < words.length && findVerbLemma(words[negation.end]) === lemma) {
       return true;
     }
   }
@@ -1020,28 +925,8 @@ function containsNegatedVerb(words: string[], lemma: string): boolean {
 }
 
 function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgumentRole {
-  switch (semanticClass) {
-    case "meal_state":
-      return AdviceArgumentRole.MealState;
-    case "activity":
-      return AdviceArgumentRole.Activity;
-    case "material":
-      return AdviceArgumentRole.Material;
-    case "site":
-      return AdviceArgumentRole.Site;
-    case "amount_style":
-      return AdviceArgumentRole.Amount;
-    case "manner_style":
-      return AdviceArgumentRole.Free;
-    case "duration":
-      return AdviceArgumentRole.Duration;
-    case "time":
-      return AdviceArgumentRole.Time;
-    case "substance":
-      return AdviceArgumentRole.Substance;
-    default:
-      return AdviceArgumentRole.Object;
-  }
+  const configured = semanticClass ? SEMANTIC_CLASS_ROLES[semanticClass] : undefined;
+  return enumValue<AdviceArgumentRole>(AdviceArgumentRole, configured) ?? AdviceArgumentRole.Object;
 }
 
 function classifyArgument(text: string): AdviceArgument {
@@ -1166,7 +1051,7 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
   const segments: AdviceSegment[] = [];
   let segmentStart = 0;
   for (const token of tokens) {
-    if (normalizeAdditionalInstructionKey(token.original) !== "then") {
+    if (!SEQUENCE_MARKERS.has(normalizeAdditionalInstructionKey(token.original))) {
       continue;
     }
     const trimmed = trimSegment(sourceText, segmentStart, token.sourceStart);
@@ -1213,60 +1098,11 @@ function isAdministrationWord(word: string): boolean {
 
 function isRelationWord(word: string): AdviceRelation | undefined {
   const entry = findNormalizedLexeme(word, "relation");
-  if (!entry) {
-    return undefined;
-  }
-  switch (entry.lemma) {
-    case "with":
-      return AdviceRelation.With;
-    case "without":
-      return AdviceRelation.Without;
-    case "before":
-      return AdviceRelation.Before;
-    case "after":
-      return AdviceRelation.After;
-    case "during":
-      return AdviceRelation.During;
-    case "then":
-      return AdviceRelation.Then;
-    case "until":
-      return AdviceRelation.Until;
-    case "for":
-      return AdviceRelation.For;
-    case "in":
-      return AdviceRelation.In;
-    case "on":
-      return AdviceRelation.On;
-    default:
-      return undefined;
-  }
+  return entry ? enumValue<AdviceRelation>(AdviceRelation, entry.lemma) : undefined;
 }
 
 function parseAdviceRelation(value: string | undefined): AdviceRelation | undefined {
-  switch (value) {
-    case AdviceRelation.With:
-      return AdviceRelation.With;
-    case AdviceRelation.Without:
-      return AdviceRelation.Without;
-    case AdviceRelation.Before:
-      return AdviceRelation.Before;
-    case AdviceRelation.After:
-      return AdviceRelation.After;
-    case AdviceRelation.During:
-      return AdviceRelation.During;
-    case AdviceRelation.Then:
-      return AdviceRelation.Then;
-    case AdviceRelation.Until:
-      return AdviceRelation.Until;
-    case AdviceRelation.For:
-      return AdviceRelation.For;
-    case AdviceRelation.In:
-      return AdviceRelation.In;
-    case AdviceRelation.On:
-      return AdviceRelation.On;
-    default:
-      return undefined;
-  }
+  return enumValue<AdviceRelation>(AdviceRelation, value);
 }
 
 function normalizeWords(text: string): string[] {
@@ -1414,7 +1250,7 @@ function parseEmbeddedAvoidanceFrames(
     (
       containsVerbLemma(words, "avoid") ||
       containsNegatedVerb(words, "drink") ||
-      (words.length >= 2 && words[0] === "no")
+      (words.length >= 2 && NEGATIVE_NOMINAL_LEADS.has(words[0]))
     )
   ) {
     frames.push(
@@ -1460,7 +1296,7 @@ function tryParseNoObjectInstruction(
     return undefined;
   }
   const cursor = skipLeadingNoise(words);
-  if (cursor >= words.length || words[cursor] !== "no") {
+  if (cursor >= words.length || !NEGATIVE_NOMINAL_LEADS.has(words[cursor])) {
     return undefined;
   }
   const objectText = words.slice(cursor + 1).join(" ");
@@ -1519,14 +1355,8 @@ function tryParseEllipticalEffectInstruction(
     return undefined;
   }
 
-  switch (prefix.modality) {
-    case AdviceModality.May:
-    case AdviceModality.Can:
-    case AdviceModality.Might:
-    case AdviceModality.Could:
-      break;
-    default:
-      return undefined;
+  if (!prefix.modality || !WARNING_MODALITIES.has(prefix.modality)) {
+    return undefined;
   }
 
   if (isKnownVerb(words[prefix.cursor]) || isRelationWord(words[prefix.cursor])) {
@@ -1538,7 +1368,7 @@ function tryParseEllipticalEffectInstruction(
     return undefined;
   }
   const concept = findExactConcept(objectText);
-  if (!concept || concept.semanticClass !== "effect") {
+  if (!concept || !ELLIPTICAL_EFFECT_SEMANTIC_CLASSES.has(concept.semanticClass)) {
     return undefined;
   }
 
@@ -1590,7 +1420,7 @@ function tryParseStyleInstruction(
   const lexeme = findNormalizedLexeme(styleText);
   if (
     !lexeme ||
-    (lexeme.semanticClass !== "amount_style" && lexeme.semanticClass !== "manner_style")
+    !STYLE_SEMANTIC_CLASSES.has(lexeme.semanticClass ?? "")
   ) {
     return undefined;
   }
@@ -1614,6 +1444,44 @@ function tryParseStyleInstruction(
     )
   ];
 }
+
+interface AdviceVerbArgumentParse {
+  relation?: AdviceRelation;
+  args: AdviceArgument[];
+}
+
+type AdviceVerbArgumentParser = (words: string[]) => AdviceVerbArgumentParse;
+
+const DEFAULT_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
+  const relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
+  const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
+  return { relation, args: objectText ? [classifyArgument(objectText)] : [] };
+};
+
+const LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
+  if (isRelationWord(remainderWords[0]) !== AdviceRelation.On) {
+    return DEFAULT_ADVICE_VERB_ARGUMENT_PARSER(remainderWords);
+  }
+  const args = [createArgument(AdviceArgumentRole.Theme, AdviceRelation.On, AdviceRelation.On)];
+  let relation: AdviceRelation | undefined;
+  if (remainderWords.length > 1) {
+    const nextRelation = isRelationWord(remainderWords[1]);
+    if (nextRelation) {
+      relation = nextRelation;
+      const tail = remainderWords.slice(2).join(" ");
+      if (tail) args.push(classifyArgument(tail));
+    } else {
+      const tail = remainderWords.slice(1).join(" ");
+      if (tail) args.push(classifyArgument(tail));
+    }
+  }
+  return { relation, args };
+};
+
+const ADVICE_VERB_ARGUMENT_PARSERS: Record<string, AdviceVerbArgumentParser> = {
+  default: DEFAULT_ADVICE_VERB_ARGUMENT_PARSER,
+  "leave-on": LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER
+};
 
 function tryParseClauseInstruction(
   sourceText: string,
@@ -1656,50 +1524,13 @@ function tryParseClauseInstruction(
     return undefined;
   }
 
-  let relation: AdviceRelation | undefined;
-  const args: AdviceArgument[] = [];
   const remainderWords = words.slice(remainderStart);
   const primaryVerb = verbEntries[0];
-
-  switch (primaryVerb.lemma) {
-    case "leave":
-      if (remainderWords[0] === "on") {
-        args.push(createArgument(AdviceArgumentRole.Theme, "on", "on"));
-        if (remainderWords.length > 1) {
-          const nextRelation = isRelationWord(remainderWords[1]);
-          if (nextRelation) {
-            relation = nextRelation;
-            const afterRelation = remainderWords.slice(2).join(" ");
-            if (afterRelation) {
-              args.push(classifyArgument(afterRelation));
-            }
-          } else {
-            const tail = remainderWords.slice(1).join(" ");
-            if (tail) {
-              args.push(classifyArgument(tail));
-            }
-          }
-        }
-        break;
-      }
-      relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
-      {
-        const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
-        if (objectText) {
-          args.push(classifyArgument(objectText));
-        }
-      }
-      break;
-    default:
-      relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
-      {
-        const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
-        if (objectText) {
-          args.push(classifyArgument(objectText));
-        }
-      }
-      break;
-  }
+  const argumentParser = ADVICE_VERB_ARGUMENT_PARSERS[primaryVerb.parserProfile ?? "default"] ??
+    DEFAULT_ADVICE_VERB_ARGUMENT_PARSER;
+  const parsedArguments = argumentParser(remainderWords);
+  const relation = parsedArguments.relation;
+  const args = parsedArguments.args;
 
   if (
     !args.length &&
@@ -1736,9 +1567,9 @@ function tryParseClauseInstruction(
 
   if (
     frames.length === 1 &&
-    frames[0].predicate.lemma === "cause" &&
     frames[0].args.length === 1 &&
-    frames[0].args[0].conceptId === "drowsiness"
+    Boolean(frames[0].args[0].conceptId &&
+      EMBEDDED_AVOIDANCE_TRIGGER_CONCEPT_IDS.has(frames[0].args[0].conceptId as string))
   ) {
     const embedded = parseEmbeddedAvoidanceFrames(
       words,
@@ -1832,22 +1663,7 @@ function capitalizeSentence(value: string): string {
 }
 
 function realizeAdviceModality(modality: AdviceModality | undefined): string | undefined {
-  switch (modality) {
-    case AdviceModality.May:
-      return "May";
-    case AdviceModality.Can:
-      return "Can";
-    case AdviceModality.Might:
-      return "Might";
-    case AdviceModality.Could:
-      return "Could";
-    case AdviceModality.Should:
-      return "Should";
-    case AdviceModality.Must:
-      return "Must";
-    default:
-      return undefined;
-  }
+  return modality ? capitalizeSentence(modality) : undefined;
 }
 
 function joinAdviceArgumentTexts(args: AdviceArgument[]): string | undefined {
@@ -1867,46 +1683,56 @@ function joinAdviceArgumentTexts(args: AdviceArgument[]): string | undefined {
   return text || undefined;
 }
 
+interface AdviceRealizationContext {
+  frame: AdviceFrame;
+  argText?: string;
+  modalityText?: string;
+}
+
+type AdvicePredicateRealizer = (context: AdviceRealizationContext) => string;
+
+const DEFAULT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
+  let text = modalityText
+    ? `${modalityText} ${frame.predicate.lemma}`
+    : capitalizeSentence(frame.predicate.lemma);
+  if (frame.relation) text += ` ${frame.relation}`;
+  if (argText) text += ` ${argText}`;
+  return text;
+};
+
+const AVOIDANCE_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
+  const predicate = modalityText
+    ? `${modalityText} ${frame.predicate.lemma}`
+    : capitalizeSentence(frame.predicate.lemma);
+  return argText ? `${predicate} ${argText}` : predicate;
+};
+
+const EFFECT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
+  const effectiveModality = modalityText ?? capitalizeSentence(AdviceModality.May);
+  const predicate = `${effectiveModality} ${frame.predicate.lemma}`;
+  return argText ? `${predicate} ${argText}` : predicate;
+};
+
+const ADVICE_PREDICATE_REALIZERS: Record<string, AdvicePredicateRealizer> = {
+  default: DEFAULT_ADVICE_PREDICATE_REALIZER,
+  avoidance: AVOIDANCE_ADVICE_PREDICATE_REALIZER,
+  effect: EFFECT_ADVICE_PREDICATE_REALIZER
+};
+
 function realizeSingleAdviceFrame(frame: AdviceFrame): string | undefined {
   const argText = joinAdviceArgumentTexts(frame.args);
   const modalityText = realizeAdviceModality(frame.modality);
-  switch (frame.polarity) {
-    case AdvicePolarity.Negate: {
-      let text = `${modalityText === "Must" ? "Must not" : "Do not"} ${frame.predicate.lemma}`;
-      if (frame.relation) {
-        text += ` ${frame.relation}`;
-      }
-      if (argText) {
-        text += ` ${argText}`;
-      }
-      return text;
-    }
-    default:
-      break;
+  if (frame.polarity === AdvicePolarity.Negate) {
+    let text = `${frame.modality === AdviceModality.Must ? "Must not" : "Do not"} ${frame.predicate.lemma}`;
+    if (frame.relation) text += ` ${frame.relation}`;
+    if (argText) text += ` ${argText}`;
+    return text;
   }
 
-  switch (frame.predicate.lemma) {
-    case "avoid":
-      if (!modalityText) {
-        return argText ? `Avoid ${argText}` : "Avoid";
-      }
-      return argText ? `${modalityText} avoid ${argText}` : `${modalityText} avoid`;
-    case "cause":
-      if (!modalityText) {
-        return argText ? "May cause " + argText : "May cause";
-      }
-      return argText ? `${modalityText} cause ${argText}` : `${modalityText} cause`;
-    default: {
-      let text = modalityText ? `${modalityText} ${frame.predicate.lemma}` : capitalizeSentence(frame.predicate.lemma);
-      if (frame.relation) {
-        text += ` ${frame.relation}`;
-      }
-      if (argText) {
-        text += ` ${argText}`;
-      }
-      return text;
-    }
-  }
+  const lexeme = findVerbLexeme(frame.predicate.lemma);
+  const realizer = ADVICE_PREDICATE_REALIZERS[lexeme?.realizerProfile ?? "default"] ??
+    DEFAULT_ADVICE_PREDICATE_REALIZER;
+  return realizer({ frame, argText, modalityText });
 }
 
 function realizeAdviceFramesText(frames: AdviceFrame[]): string | undefined {
