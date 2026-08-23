@@ -172,13 +172,19 @@ describe("HPSG permutation invariance", () => {
     for (const result of variants) {
       const take = action(result, "take");
       expect(take).toMatchObject({ modality: "should" });
-      expect(result.fhir.timing?.repeat?.when).toEqual(expect.arrayContaining(["AC", "EVE"]));
+      expect(result.fhir.timing?.repeat?.when).toEqual(["ACV"]);
       expect(result.meta.canonical.clauses[0]?.instructionGraph?.coverage?.complete).toBe(true);
     }
-    expect(action(parseSig(
+    const original = parseSig(
       "ควรกินก่อนอาหารเย็นเมื่อมีอาการ วันละ 1 เม็ด",
       { locale: "th" }
-    ), "take")).toMatchObject({ modality: "should", relation: "before" });
+    );
+    const take = action(original, "take");
+    expect(take).toMatchObject({ modality: "should", relation: "before" });
+    expect(take?.args.find((arg) => arg.role === "time")?.normalized).toBe("CV");
+    expect(original.longText).toBe(
+      "ควรรับประทาน ครั้งละ 1 เม็ด วันละครั้ง ก่อนอาหารเย็น ใช้เมื่อจำเป็นสำหรับ มีอาการ."
+    );
   });
 
   it("does not collapse genuinely sequence-changing permutations", () => {

@@ -2288,6 +2288,24 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.when).toEqual(["ACV"]);
   });
 
+  it.each([
+    ["รับประทานก่อนอาหารเช้า", EventTiming["Before Breakfast"]],
+    ["รับประทานก่อนอาหารกลางวัน", EventTiming["Before Lunch"]],
+    ["รับประทานก่อนอาหารเย็น", EventTiming["Before Dinner"]],
+    ["รับประทานหลังอาหารเย็น", EventTiming["After Dinner"]]
+  ])("composes Thai meal-period timing %s", (sig, expected) => {
+    const result = parseSig(sig, { locale: "th" });
+    expect(result.fhir.timing?.repeat?.when).toEqual([expected]);
+  });
+
+  it("does not collapse explicitly coordinated before-meal and evening timings", () => {
+    const result = parseSig("รับประทานก่อนอาหาร และ ตอนเย็น", { locale: "th" });
+    expect(result.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["Before Meal"],
+      EventTiming.Evening
+    ]);
+  });
+
   it("maps pc suppertime", () => {
     const result = parseSig("pc suppertime");
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["After Dinner"]]);

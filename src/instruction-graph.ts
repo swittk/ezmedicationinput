@@ -2,6 +2,7 @@ import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS } from "./maps";
+import { resolveEventTimingExpression } from "./event-timing-expression";
 import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_DIRECTIVE_PREFIXES,
@@ -200,11 +201,12 @@ function timeArgumentFromParts(
   endExclusive: number,
   input: string
 ): AdviceArgument | undefined {
-  let event: string | undefined;
-  for (let index = start; index < endExclusive; index += 1) {
-    const candidate = EVENT_TIMING_TOKENS[key(parts[index])];
+  const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
+  let event: EventTiming | undefined;
+  for (let index = 0; index < canonicalParts.length; index += 1) {
+    const candidate = resolveEventTimingExpression(canonicalParts, index);
     if (candidate) {
-      event = candidate;
+      event = candidate.timing;
       break;
     }
   }

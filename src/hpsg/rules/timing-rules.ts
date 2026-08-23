@@ -9,6 +9,10 @@ import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "../../types";
 import {
+  MAX_EVENT_TIMING_EXPRESSION_PARTS,
+  resolveEventTimingExpression
+} from "../../event-timing-expression";
+import {
   EVERY_INTERVAL_TOKENS,
   COUNT_MARKER_TOKENS,
   FREQUENCY_CONNECTOR_WORDS,
@@ -30,7 +34,6 @@ import {
   DURATION_LEAD_TOKENS,
   EVENT_ARTICLE_TOKENS,
   EVENT_PREPOSITIONS,
-  FIXED_EVENT_PHRASES,
   FOOD_EVENT_ALIASES,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
@@ -814,6 +817,21 @@ function mealRelationFromToken(lower: string): "before" | "after" | "with" | und
   return MEAL_RELATION_BY_TOKEN.get(lower);
 }
 
+function eventExpressionPartsAt(
+  context: HpsgClauseContext,
+  start: number
+): { parts: string[]; members: Token[] } {
+  const parts: string[] = [];
+  const members: Token[] = [];
+  for (let offset = 0; offset < MAX_EVENT_TIMING_EXPRESSION_PARTS; offset += 1) {
+    const member = context.tokens[start + offset];
+    if (!member || context.state.consumed.has(member.index)) break;
+    members.push(member);
+    parts.push(normalizeTokenLower(member));
+  }
+  return { parts, members };
+}
+
 export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.eventPhrase", (context, start) => {
     const first = tokensAvailable(context, start, 1)?.[0];
@@ -828,19 +846,20 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? normalizeTokenLower(second)
       : undefined;
 
-    const fixedPhrase = secondLower ? FIXED_EVENT_PHRASES.get(`${firstLower} ${secondLower}`) : undefined;
-    if (fixedPhrase) {
+    const eventExpression = eventExpressionPartsAt(context, start);
+    const fixedPhrase = resolveEventTimingExpression(eventExpression.parts);
+    if (fixedPhrase && fixedPhrase.length > 1) {
       signs.push(
         lexicalSign({
           type: "schedule-sign",
           rule: "hpsg.lex.schedule.eventPhrase.fixed",
-          tokens: [first, second],
+          tokens: eventExpression.members.slice(0, fixedPhrase.length),
           synsem: {
-            head: { schedule: { when: [fixedPhrase] } },
+            head: { schedule: { when: [fixedPhrase.timing] } },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: 15
+          score: 13 + fixedPhrase.length
         })
       );
     }
@@ -874,21 +893,25 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
 
     const relation = mealRelationFromToken(firstLower);
+    let combinedMealTiming: EventTiming | undefined;
     if (relation && secondLower) {
-      const meal = EVENT_TIMING_TOKENS[secondLower];
-      const combined = meal ? mealTimingForRelation(relation, meal) : undefined;
-      if (combined) {
+      const relatedExpression = eventExpressionPartsAt(context, start + 1);
+      const resolvedEvent = resolveEventTimingExpression(relatedExpression.parts);
+      combinedMealTiming = resolvedEvent
+        ? mealTimingForRelation(relation, resolvedEvent.timing)
+        : undefined;
+      if (combinedMealTiming && resolvedEvent) {
         signs.push(
           lexicalSign({
             type: "schedule-sign",
             rule: "hpsg.lex.schedule.eventPhrase.mealRelation",
-            tokens: [first, second],
+            tokens: [first, ...relatedExpression.members.slice(0, resolvedEvent.length)],
             synsem: {
-              head: { schedule: { when: [combined] } },
+              head: { schedule: { when: [combinedMealTiming] } },
               valence: {},
               cont: { clauseKind: "administration" }
             },
-            score: 16
+            score: 15 + resolvedEvent.length
           })
         );
       }
@@ -924,7 +947,7 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
     }
 
-    if (relation && secondLower && FOOD_EVENT_ALIASES.has(secondLower)) {
+    if (!combinedMealTiming && relation && secondLower && FOOD_EVENT_ALIASES.has(secondLower)) {
       const combined = relation === MEAL_RELATION_BY_TOKEN.get("before")
         ? EventTiming["Before Meal"]
         : relation === MEAL_RELATION_BY_TOKEN.get("after")

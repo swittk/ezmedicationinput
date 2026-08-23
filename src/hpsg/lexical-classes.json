@@ -833,7 +833,10 @@
     "the"
   ],
   "fixedEventPhrases": {
-    "early morning": "Early Morning"
+    "early morning": "Early Morning",
+    "meal morning": "Breakfast",
+    "meal noon": "Lunch",
+    "meal evening": "Dinner"
   },
   "mealRelationTokens": {
     "ac": "before",
