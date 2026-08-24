@@ -488,7 +488,10 @@
       ],
       "procedural": true,
       "argumentParser": "duration-activity",
-      "realizer": "duration-activity"
+      "realizer": "duration-activity",
+      "preferredRelationSemanticClasses": [
+        "interval"
+      ]
     },
     {
       "code": "stop",

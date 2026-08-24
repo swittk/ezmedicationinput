@@ -10,6 +10,7 @@ import { DEFAULT_SYMPTOM_DEFINITIONS } from "../symptom-terminology";
 import {
   getRelationLocaleLexemeAliases,
   getRelationLocalePhrases,
+  getRelationLocaleSuggestionLexemes,
   getRelationSplitPrefixes
 } from "../relation-terminology";
 import unitTerminologySource from "../unit-terminology.json";
@@ -110,7 +111,7 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
 
 const THAI_LEXEME_ALIASES: Record<string, string> = { ...NON_RELATION_THAI_LEXEME_ALIASES };
 for (const [surface, canonical] of getRelationLocaleLexemeAliases("th")) {
-  THAI_LEXEME_ALIASES[surface] = canonical;
+  if (!/\s/u.test(surface)) THAI_LEXEME_ALIASES[surface] = canonical;
 }
 
 interface DeclarativeTerminologySource {
@@ -477,6 +478,9 @@ export function listMedicationLocaleLexemes(locale: string): MedicationLocaleLex
     if (Object.prototype.hasOwnProperty.call(THAI_LEXEME_ALIASES, surface)) {
       add(surface, THAI_LEXEME_ALIASES[surface]);
     }
+  }
+  for (const lexeme of getRelationLocaleSuggestionLexemes("th")) {
+    if (!/\s/u.test(lexeme.surface)) add(lexeme.surface, lexeme.canonical);
   }
   for (const surface in DECLARATIVE_THAI_CANONICAL) {
     if (Object.prototype.hasOwnProperty.call(DECLARATIVE_THAI_CANONICAL, surface)) {

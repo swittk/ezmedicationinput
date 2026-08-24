@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import adviceTerminologySource from "../src/advice-terminology.json";
 import lexicalClassesSource from "../src/hpsg/lexical-classes.json";
+import { formatSig, parseSig } from "../src/index";
+import { listMedicationLocaleLexemes } from "../src/lexer/locale";
+import { SITE_ANCHORS, SITE_SELF_DISPLAY_ANCHORS } from "../src/hpsg/lexical-classes";
 import { AdviceRelation } from "../src/types";
 import {
   ACTION_SEQUENCE_MARKERS,
@@ -86,6 +89,10 @@ describe("declarative relation terminology", () => {
     expect(aliases.get("ก่อน")).toBe("before");
     expect(aliases.get("ที่")).toBe("at");
     expect(aliases.get("ภายนอก")).toBe("external");
+    // ระหว่าง is intentionally ambiguous: HPSG context decides during vs between.
+    expect(aliases.get("ระหว่าง")).toBeUndefined();
+    expect(resolveActionRelationSurface("ระหว่าง")).toBe(AdviceRelation.During);
+    expect(resolveActionRelationSurface("ระหว่าง", ["interval"])).toBe(AdviceRelation.Between);
 
     expect(getRelationLocalePhrases("th")).toContainEqual({
       parts: ["เข้าไป", "ภายใน"],
@@ -94,6 +101,44 @@ describe("declarative relation terminology", () => {
     expect(getRelationSplitPrefixes("th")).toEqual(expect.arrayContaining([
       "ระหว่าง", "ก่อน", "หลัง", "เมื่อ", "ขณะ"
     ]));
+  });
+
+  it("keeps multi-token Thai relation phrases out of the single-token locale lexicon", () => {
+    const lexemes = listMedicationLocaleLexemes("th");
+    expect(lexemes.some((lexeme) => /\s/u.test(lexeme.surface) && [
+      "แล้ว จึง",
+      "จาก นั้น",
+      "หลัง จาก นั้น",
+      "เป็น เวลา",
+      "เข้าไป ภายใน",
+      "เข้าไป ใน"
+    ].includes(lexeme.surface))).toBe(false);
+    expect(lexemes).toContainEqual(expect.objectContaining({ surface: "เข้าไปภายใน", canonical: "into" }));
+    expect(lexemes).toContainEqual(expect.objectContaining({ surface: "ระหว่าง", canonical: "during" }));
+  });
+
+  it("round-trips ambiguous Thai ระหว่าง as during while preserving interval between", () => {
+    const source = parseSig("during exercise wash affected area");
+    const thai = formatSig(source.fhir, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(thai).toContain("ระหว่าง");
+
+    const reparsed = parseSig(thai, { locale: "th" });
+    const duringAction = reparsed.meta.canonical.clauses[0]?.instructionGraph?.actions.find((action) =>
+      action.args.some((arg) => arg.conceptId === "exercise")
+    );
+    expect(duringAction?.relation).toBe(AdviceRelation.During);
+
+    const between = parseSig("รอ 5 นาที ระหว่างยาหยอดตา", { locale: "th" });
+    expect(between.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.relation)
+      .toBe(AdviceRelation.Between);
+  });
+
+  it("retains declarative external site anchors across relation-derived sets", () => {
+    expect(SITE_ANCHORS.has("external")).toBe(true);
+    expect(SITE_SELF_DISPLAY_ANCHORS.has("external")).toBe(true);
+    const parsed = parseSig("apply external vulva");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.site?.text).toBe("external vulva");
   });
 
   it("normalizes body-site relation aliases and owns their realization strategy", () => {
@@ -151,8 +196,12 @@ describe("declarative relation terminology", () => {
     ]) {
       expect(lexical).not.toHaveProperty(legacyKey);
     }
-    expect(lexical.workflowStartWords).not.toEqual(expect.arrayContaining(["before", "after", "with"]));
-    expect(lexical.instructionStartWords).not.toEqual(expect.arrayContaining(["on", "with", "without"]));
+    for (const token of ["before", "after", "with"]) {
+      expect(lexical.workflowStartWords).not.toContain(token);
+    }
+    for (const token of ["on", "with", "without"]) {
+      expect(lexical.instructionStartWords).not.toContain(token);
+    }
     expect(lexical.freeTextDirectiveStarts).not.toEqual(expect.arrayContaining(["without"]));
 
     expect((adviceTerminologySource as { grammar?: Record<string, unknown> }).grammar)

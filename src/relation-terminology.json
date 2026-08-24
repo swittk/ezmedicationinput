@@ -150,6 +150,16 @@
         "preposedAction": true,
         "detectInActionGap": true,
         "roundtripRichRelation": true
+      },
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ระหว่าง",
+            "canonical": "during",
+            "splitPrefix": true,
+            "defaultForAmbiguousSurface": true
+          }
+        ]
       }
     },
     {

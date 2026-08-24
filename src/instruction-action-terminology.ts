@@ -39,6 +39,7 @@ interface ActionSource {
   realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
   continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
   continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
+  preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
   contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
   administrationMethod?: FhirCoding;
   verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
@@ -146,6 +147,7 @@ function cloneDefinition(
     realizerConfig: cloneRealizerConfig(definition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
+    preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
     administrationMethod: cloneCoding(definition.administrationMethod),
     verbRouteHint: definition.verbRouteHint,
@@ -182,6 +184,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     realizerConfig: cloneRealizerConfig(sourceDefinition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
+    preferredRelationSemanticClasses: sourceDefinition.preferredRelationSemanticClasses ? [...sourceDefinition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
     administrationMethod: cloneCoding(sourceDefinition.administrationMethod),
     verbRouteHint: sourceDefinition.verbRouteHint,
@@ -222,6 +225,7 @@ function normalizeCustomDefinition(
     realizerConfig: cloneRealizerConfig(input.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
+    preferredRelationSemanticClasses: input.preferredRelationSemanticClasses ? [...input.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),
     administrationMethod: cloneCoding(input.administrationMethod),
     verbRouteHint: input.verbRouteHint,

@@ -891,6 +891,8 @@ export interface MedicationInstructionActionDefinition {
     nextConcepts?: string[];
   }>;
   continuationAfterRelations?: string[];
+  /** Preferred relation semantic classes used to resolve lexically ambiguous relation surfaces. */
+  preferredRelationSemanticClasses?: string[];
   /** Exact coding for FHIR Dosage.method when this action can head administration. */
   administrationMethod?: FhirCoding;
   /** Route candidate licensed by the action surface itself (e.g. take -> oral). */

@@ -155,8 +155,15 @@ function bodySiteFeatureScoreBonus(
   return map;
 }
 
-export const SITE_ANCHORS = new Set([...source.siteAnchors, ...BODY_SITE_LOCATIVE_LEAD_TOKENS]);
-export const SITE_SELF_DISPLAY_ANCHORS = new Set(BODY_SITE_LOCATIVE_LEAD_TOKENS);
+export const SITE_ANCHORS = new Set([
+  ...source.siteAnchors,
+  ...BODY_SITE_LOCATIVE_LEAD_TOKENS,
+  ...BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES
+]);
+export const SITE_SELF_DISPLAY_ANCHORS = new Set([
+  ...BODY_SITE_LOCATIVE_LEAD_TOKENS,
+  ...BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES
+]);
 export const SITE_FILLERS = setOf(source.siteFillers);
 export const BODY_SITE_PARTITIVE_HEADS = setOf(source.bodySitePartitiveHeads);
 export const BODY_SITE_PARTITIVE_MODIFIERS = setOf(source.bodySitePartitiveModifiers);

@@ -606,7 +606,7 @@ function uniqueText(results: BodySiteLookupResult[]): string[] {
   return texts;
 }
 
-function sortedSetValues(values: Set<string>): string[] {
+function sortedSetValues(values: ReadonlySet<string>): string[] {
   return Array.from(values).sort((left, right) => left.localeCompare(right));
 }
 

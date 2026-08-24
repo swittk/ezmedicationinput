@@ -12,7 +12,8 @@ import {
   localizeAdviceRelation,
   relationHasGrammarFeature,
   relationHasSemanticClass,
-  resolveActionRelationSurface
+  resolveActionRelationSurface,
+  resolveActionRelationSurfaceByGrammarFeature
 } from "./relation-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
@@ -983,11 +984,17 @@ function buildActionFrame(
   const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
   const rawRelation = relIndex >= 0
-    ? resolveActionRelationSurface(key(parts.slice(relIndex, relIndex + 1)[0]))
+    ? resolveActionRelationSurface(
+        key(parts.slice(relIndex, relIndex + 1)[0]),
+        definition.preferredRelationSemanticClasses
+      )
     : undefined;
   const nextRelationIndex = relIndex >= 0 ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
   const nextRelation = nextRelationIndex >= 0
-    ? resolveActionRelationSurface(key(parts[nextRelationIndex]))
+    ? resolveActionRelationSurface(
+        key(parts[nextRelationIndex]),
+        definition.preferredRelationSemanticClasses
+      )
     : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
   const conditionalTail = relationHasGrammarFeature(rawRelation, "conditionalTail");
@@ -1163,8 +1170,11 @@ function preposedActionRelation(
   actionStart: number
 ): PreposedActionRelation | undefined {
   if (cursor >= actionStart) return undefined;
-  const relation = resolveActionRelationSurface(key(parts[cursor]));
-  if (!relation || !relationHasGrammarFeature(relation, "preposedAction")) return undefined;
+  const relation = resolveActionRelationSurfaceByGrammarFeature(
+    key(parts[cursor]),
+    "preposedAction"
+  );
+  if (!relation) return undefined;
   const targetStart = cursor + 1;
   if (targetStart >= actionStart) return undefined;
   return { relation, relationIndex: cursor, targetStart, targetEnd: actionStart };
@@ -1546,10 +1556,8 @@ function attachDoseToNearestAction(
 function relationFromSourceText(text: string): AdviceRelation | undefined {
   const keys = lexInput(text).map((token) => key(token)).filter(Boolean);
   for (const candidate of keys) {
-    const relation = resolveActionRelationSurface(candidate);
-    if (relationHasGrammarFeature(relation, "detectInActionGap")) {
-      return relation;
-    }
+    const relation = resolveActionRelationSurfaceByGrammarFeature(candidate, "detectInActionGap");
+    if (relation) return relation;
     if (ACTION_SEQUENCE_RELATION_TOKENS.has(candidate)) {
       return getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
     }

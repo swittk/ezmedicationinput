@@ -37,6 +37,19 @@ describe("surface tokenization", () => {
 });
 
 describe("lex normalization", () => {
+  it("preserves ambiguous Thai relation surfaces for grammar-level disambiguation", () => {
+    const standalone = lexInput("ระหว่าง");
+    expect(standalone).toHaveLength(1);
+    expect(standalone[0]?.original).toBe("ระหว่าง");
+    expect(standalone[0]?.canonical).toBeUndefined();
+
+    const compact = lexInput("ระหว่างออกกำลังกาย");
+    expect(compact.map((token) => ({ original: token.original, canonical: token.canonical }))).toEqual([
+      { original: "ระหว่าง", canonical: undefined },
+      { original: "ออกกำลังกาย", canonical: "exercise" }
+    ]);
+  });
+
   it("splits compact forms while retaining source provenance", () => {
     const input = "500mg poac @8:00";
     const tokens = lexInput(input);

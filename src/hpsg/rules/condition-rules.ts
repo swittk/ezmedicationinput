@@ -70,7 +70,7 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
   if (!first) return 0;
   let end = context.state.input.length;
   for (let index = start + 1; index < context.limit; index += 1) {
-    const current = context.tokens.slice(index, index + 1)[0];
+    const current = context.tokens[index];
     if (!current) break;
     if (/^[.;!?]$/u.test(current.original.trim()) || startsMaximumCountLead(context, index)) {
       end = current.sourceStart;
