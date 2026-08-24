@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSig } from "../src";
+import { formatSig, parseSig } from "../src";
 
 const SNOMED = "http://snomed.info/sct";
 const EXTERNAL_GENITALIA = "362207005";
@@ -22,6 +22,7 @@ describe("body-site preposition grammar", () => {
       display: "Entire external genitalia"
     });
     expect(parsed.meta.canonical.clauses[0]?.site?.spatialRelation).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.route?.code).toBe("6064005");
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
 
@@ -81,6 +82,40 @@ describe("body-site preposition grammar", () => {
     expect(next.meta.leftoverText).toBeUndefined();
     expect(surrounding.meta.leftoverText).toBeUndefined();
     expect(along.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each([
+    ["wash at external genital area", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash at the external genital area", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash on external genitals", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash over genital area", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash in genital region", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash external genitalia", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash genitals", "ล้างบริเวณอวัยวะเพศภายนอก."],
+    ["wash around external genital area", "ล้างรอบบริเวณอวัยวะเพศภายนอก."],
+    ["wash outside external genitalia", "ล้างด้านนอกบริเวณอวัยวะเพศภายนอก."],
+    ["wash inside external genitalia", "ล้างในบริเวณอวัยวะเพศภายนอก."],
+    ["wash within external genitalia", "ล้างในบริเวณอวัยวะเพศภายนอก."],
+    ["wash underneath external genitalia", "ล้างใต้บริเวณอวัยวะเพศภายนอก."],
+    ["wash next to external genital area", "ล้างใกล้บริเวณอวัยวะเพศภายนอก."],
+    ["wash adjacent to external genital area", "ล้างใกล้บริเวณอวัยวะเพศภายนอก."],
+    ["wash surrounding external genital area", "ล้างรอบบริเวณอวัยวะเพศภายนอก."],
+    ["wash adjacent to vulva", "ล้างใกล้อวัยวะเพศหญิงภายนอก."],
+    ["wash vulva", "ล้างบริเวณอวัยวะเพศหญิงภายนอก."],
+    ["wash vulvar area", "ล้างบริเวณอวัยวะเพศหญิงภายนอก."],
+    ["apply next to lesion", "ทาใกล้รอยโรค."],
+    ["apply adjacent to lesion", "ทาใกล้รอยโรค."],
+    ["apply surrounding lesion", "ทาบริเวณรอบรอยโรค."],
+    ["apply to area adjacent to lesion", "ทาใกล้รอยโรค."],
+    ["apply to area surrounding lesion", "ทาบริเวณรอบรอยโรค."],
+    ["apply along lesion", "ทาตามแนวรอยโรค."],
+    ["do not wash into vagina", "ห้ามล้างเข้าไปในช่องคลอด."]
+  ] as const)("preserves pure Thai realization for %s", (source, expectedThai) => {
+    const parsed = parseSig(source);
+    const thai = formatSig(parsed.fhir, "long", { locale: "th" });
+    expect(thai).toBe(expectedThai);
+    expect(thai).not.toMatch(/[A-Za-z]/u);
+    expect(parsed.meta.leftoverText).toBeUndefined();
   });
 
   it("does not collapse directional into into a generic inside site relation", () => {

@@ -1396,7 +1396,12 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     },
     {
       names: ["vagina", "vaginal", "ช่องคลอด", "บริเวณช่องคลอด"],
-      definition: { coding: { code: "76784001", display: "Vagina" }, text: "vagina", routeHint: RouteCode["Per vagina"] }
+      definition: {
+        coding: { code: "76784001", display: "Vagina" },
+        text: "vagina",
+        i18n: { th: "ช่องคลอด" },
+        routeHint: RouteCode["Per vagina"]
+      }
     },
     {
       names: ["penis", "penile"],

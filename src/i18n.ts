@@ -1308,6 +1308,20 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   if (clause.route?.code === RouteCode["Nasal route"]) {
     return `เข้า${translated}`;
   }
+  const spatialRelation = clause.site?.spatialRelation;
+  const spatialRelationText = spatialRelation?.relationText;
+  const spatialTargetThai = spatialRelation
+    ? translateSpatialTargetThai(spatialRelation)
+    : undefined;
+  if (
+    spatialRelationText &&
+    (
+      THAI_SELF_PREPOSITIONAL_SPATIAL_RELATIONS.has(spatialRelationText) ||
+      spatialTargetThai?.startsWith("บริเวณ")
+    )
+  ) {
+    return translated;
+  }
   const preposition = grammar.sitePreposition ?? "ที่";
   if (translated.startsWith(preposition)) {
     return translated;
@@ -1329,6 +1343,7 @@ const THAI_SPATIAL_RELATION_PREFIXES: Record<string, string> = {
   front: "ด้านหน้า",
   inside: "ใน",
   between: "ระหว่าง",
+  along: "ตามแนว",
   "left side": "ด้านซ้ายของ",
   lower: "ส่วนล่างของ",
   middle: "กลาง",
@@ -1342,6 +1357,11 @@ const THAI_SPATIAL_RELATION_PREFIXES: Record<string, string> = {
   under: "ใต้",
   upper: "ส่วนบนของ"
 };
+
+const THAI_SELF_PREPOSITIONAL_SPATIAL_RELATIONS = new Set([
+  "near",
+  "along"
+]);
 
 const THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES: Record<string, string> = {
   abdomen: "ท้อง",

@@ -41,6 +41,7 @@ import {
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
   ROUTE_SITE_PREPOSITIONS,
   SITE_ANCHORS,
+  SITE_FILLERS,
   THAI_METHOD_AUXILIARY_VERBS
 } from "../lexical-classes";
 import {
@@ -161,6 +162,34 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function routeTokenIsSitePrepositionBeforeResolvableSite(
+  context: HpsgClauseContext,
+  start: number,
+  span: number
+): boolean {
+  if (span !== 1) return false;
+  const token = context.tokens[start];
+  if (!token || !SITE_ANCHORS.has(normalizeTokenLower(token))) return false;
+  const maxEnd = Math.min(context.limit, start + 7);
+  for (let end = start + 2; end <= maxEnd; end += 1) {
+    const following = context.tokens.slice(start + 1, end);
+    if (!following.length || following.some((candidate) => context.state.consumed.has(candidate.index))) {
+      continue;
+    }
+    const siteText = following
+      .filter((candidate) => !SITE_FILLERS.has(normalizeTokenLower(candidate)))
+      .map((candidate) => candidate.original)
+      .join(" ")
+      .trim();
+    if (!siteText) continue;
+    const resolved = resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
+    if (resolved?.coding || resolved?.definition) return true;
+  }
+  return false;
+}
+
 export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.route", (context, start) => {
     const signs: HpsgSign[] = [];
@@ -178,7 +207,10 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       if (span === 1 && isMedicationAdministrationMethod(phrase, context.options)) continue;
-      if (routeTokenIsPartitiveSiteHead(context, start, span)) {
+      if (
+        routeTokenIsPartitiveSiteHead(context, start, span) ||
+        routeTokenIsSitePrepositionBeforeResolvableSite(context, start, span)
+      ) {
         continue;
       }
       const routeCandidates = routePhraseCandidates(phrase);
