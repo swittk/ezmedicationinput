@@ -1367,7 +1367,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     {
       names: [
         "external genitalia",
+        "external genitals",
         "external genital area",
+        "external genital region",
+        "genitals",
+        "genitalia",
+        "genital area",
+        "genital region",
         "อวัยวะเพศภายนอก",
         "บริเวณอวัยวะเพศภายนอก",
         "ภายนอกบริเวณอวัยวะเพศ"
@@ -1376,6 +1382,15 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
         coding: { code: "362207005", display: "Entire external genitalia" },
         text: "external genitalia",
         i18n: { th: "บริเวณอวัยวะเพศภายนอก" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["vulva", "vulval", "vulvar", "vulval area", "vulvar area", "vulval region", "vulvar region"],
+      definition: {
+        coding: { code: "45292006", display: "Vulval structure" },
+        text: "vulva",
+        i18n: { th: "อวัยวะเพศหญิงภายนอก" },
         routeHint: RouteCode["Topical route"]
       }
     },

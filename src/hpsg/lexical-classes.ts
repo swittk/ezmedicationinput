@@ -161,6 +161,12 @@ export const SITE_ANCHORS = setOf(source.siteAnchors);
 export const SITE_SELF_DISPLAY_ANCHORS = setOf(source.siteSelfDisplayAnchors);
 export const SITE_FILLERS = setOf(source.siteFillers);
 export const BODY_SITE_LOCATIVE_RELATIONS = setOf(source.bodySiteLocativeRelations);
+export const BODY_SITE_LOCATIVE_RELATION_ALIASES = new Map<string, string>(
+  stringEntries(source.bodySiteLocativeRelationAliases ?? {})
+);
+export const BODY_SITE_LOCATIVE_RELATION_PHRASES = new Map<string, string>(
+  stringEntries(source.bodySiteLocativeRelationPhrases ?? {})
+);
 export const BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS = new Map<string, string>(
   stringEntries(source.bodySiteLocativeRenderPrepositions)
 );

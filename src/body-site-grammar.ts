@@ -7,6 +7,8 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
   BODY_SITE_DISPLAY_PENALTY_WORDS,
+  BODY_SITE_LOCATIVE_RELATION_ALIASES,
+  BODY_SITE_LOCATIVE_RELATION_PHRASES,
   BODY_SITE_LOCATIVE_RELATIONS,
   BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS,
   BODY_SITE_PARTITIVE_CONNECTORS,
@@ -53,7 +55,8 @@ export type BodySiteLocativeRelation =
   | "near"
   | "outside"
   | "inside"
-  | "between";
+  | "between"
+  | "along";
 
 export interface BodySiteNominalFeatures {
   kind: "nominal";
@@ -445,6 +448,33 @@ function buildNominalFeatures(
   };
 }
 
+function canonicalBodySiteLocativeRelation(
+  value: string | undefined
+): BodySiteLocativeRelation | undefined {
+  if (!value) return undefined;
+  const canonical = BODY_SITE_LOCATIVE_RELATION_ALIASES.get(value) ?? value;
+  return BODY_SITE_LOCATIVE_RELATIONS.has(canonical)
+    ? canonical as BodySiteLocativeRelation
+    : undefined;
+}
+
+function matchBodySiteLocativeRelation(
+  words: readonly string[],
+  start = 0
+): { relation: BodySiteLocativeRelation; length: number } | undefined {
+  let best: { relation: BodySiteLocativeRelation; length: number } | undefined;
+  for (const [phrase, canonical] of BODY_SITE_LOCATIVE_RELATION_PHRASES) {
+    const parts = phrase.split(/\s+/u);
+    if (parts.length <= (best?.length ?? 0) || start + parts.length > words.length) continue;
+    if (!parts.every((part, offset) => words[start + offset] === part)) continue;
+    const relation = canonicalBodySiteLocativeRelation(canonical);
+    if (relation) best = { relation, length: parts.length };
+  }
+  if (best) return best;
+  const relation = canonicalBodySiteLocativeRelation(words[start]);
+  return relation ? { relation, length: 1 } : undefined;
+}
+
 function parseBodySiteFeatures(
   text: string,
   coding?: FhirCoding,
@@ -460,32 +490,30 @@ function parseBodySiteFeatures(
   }
 
   const firstWord = words[0];
-  if (firstWord && BODY_SITE_LOCATIVE_RELATIONS.has(firstWord) && words.length > 1) {
-    const targetText = words.slice(1).join(" ");
+  const firstRelation = matchBodySiteLocativeRelation(words);
+  if (firstRelation && words.length > firstRelation.length) {
+    const targetText = words.slice(firstRelation.length).join(" ");
     const targetFeatures = parseBodySiteFeatures(targetText, undefined, customSiteMap);
     // Nested locatives are flattened to a nominal target to avoid recursive
     // relation stacks such as "inside below ear"; we preserve the outer relation.
     return {
       kind: "locative",
-      relation: firstWord as BodySiteLocativeRelation,
+      relation: firstRelation.relation,
       target: targetFeatures.kind === "locative"
         ? buildNominalFeatures(targetText, normalizeBodySiteKey(targetText), undefined, customSiteMap)
         : targetFeatures
     };
   }
 
-  if (
-    firstWord &&
-    (firstWord === "area" || firstWord === "region") &&
-    words[1] !== undefined &&
-    BODY_SITE_LOCATIVE_RELATIONS.has(words[1]) &&
-    words.length > 2
-  ) {
-    const targetText = words.slice(2).join(" ");
+  const areaRelation = firstWord && (firstWord === "area" || firstWord === "region")
+    ? matchBodySiteLocativeRelation(words, 1)
+    : undefined;
+  if (areaRelation && words.length > 1 + areaRelation.length) {
+    const targetText = words.slice(1 + areaRelation.length).join(" ");
     const targetFeatures = parseBodySiteFeatures(targetText, undefined, customSiteMap);
     return {
       kind: "locative",
-      relation: words[1] as BodySiteLocativeRelation,
+      relation: areaRelation.relation,
       target: targetFeatures.kind === "locative"
         ? buildNominalFeatures(targetText, normalizeBodySiteKey(targetText), undefined, customSiteMap)
         : targetFeatures

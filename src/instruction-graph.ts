@@ -10,6 +10,7 @@ import {
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_TOKENS,
   AS_NEEDED_LEAD_PHRASES,
+  BODY_SITE_LOCATIVE_RELATION_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_DURATION_UNITS,
@@ -312,9 +313,33 @@ function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefin
   )) args.push(argument);
 }
 
+function tokenBelongsToBodySiteRelationPhrase(
+  parts: Lexeme[],
+  index: number,
+  start: number,
+  endExclusive: number
+): boolean {
+  const tokenKey = key(parts.slice(index, index + 1)[0]);
+  for (const phrase of BODY_SITE_LOCATIVE_RELATION_PHRASES.keys()) {
+    const phraseParts = phrase.split(/\s+/u);
+    for (let position = 0; position < phraseParts.length; position += 1) {
+      if (phraseParts[position] !== tokenKey) continue;
+      const phraseStart = index - position;
+      if (phraseStart < start || phraseStart + phraseParts.length > endExclusive) continue;
+      if (phraseParts.every((part, offset) =>
+        key(parts.slice(phraseStart + offset, phraseStart + offset + 1)[0]) === part
+      )) return true;
+    }
+  }
+  return false;
+}
+
 function relationIndex(parts: Lexeme[], start: number, endExclusive: number): number {
   for (let index = start; index < endExclusive; index += 1) {
-    if (ACTION_RELATION_BY_TOKEN.has(key(parts.slice(index, index + 1)[0]))) return index;
+    if (
+      ACTION_RELATION_BY_TOKEN.has(key(parts.slice(index, index + 1)[0])) &&
+      !tokenBelongsToBodySiteRelationPhrase(parts, index, start, endExclusive)
+    ) return index;
   }
   return -1;
 }

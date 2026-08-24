@@ -11,6 +11,11 @@
     "บริเวณ",
     "inside",
     "within",
+    "underneath",
+    "next",
+    "adjacent",
+    "surrounding",
+    "along",
     "around",
     "behind",
     "near",
@@ -24,6 +29,12 @@
   ],
   "siteSelfDisplayAnchors": [
     "inside",
+    "within",
+    "underneath",
+    "next",
+    "adjacent",
+    "surrounding",
+    "along",
     "around",
     "behind",
     "near",
@@ -45,6 +56,15 @@
     "their",
     "my"
   ],
+  "bodySiteLocativeRelationAliases": {
+    "within": "inside",
+    "underneath": "under",
+    "surrounding": "around"
+  },
+  "bodySiteLocativeRelationPhrases": {
+    "next to": "near",
+    "adjacent to": "near"
+  },
   "bodySiteLocativeRelations": [
     "behind",
     "around",
@@ -55,7 +75,8 @@
     "near",
     "outside",
     "inside",
-    "between"
+    "between",
+    "along"
   ],
   "bodySiteLocativeRenderPrepositions": {
     "inside": "in"
