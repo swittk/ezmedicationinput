@@ -1134,19 +1134,27 @@ export function nextDueDoses(
   const occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
   if (occurrenceCap) {
     const requestedLimit = Math.floor(limit);
-    const candidateLimit = Math.min(10000, Math.max(requestedLimit, requestedLimit * 512));
-    const uncapped = nextDueDoses(withoutOccurrenceCap(dosage), {
-      ...options,
-      limit: candidateLimit,
-      priorDoseTimes: undefined
-    });
-    return applyOccurrenceCap(
-      uncapped,
-      occurrenceCap,
-      options.priorDoseTimes,
-      timeZone,
-      requestedLimit
-    );
+    let candidateLimit = Math.min(10000, Math.max(16, requestedLimit * 4));
+    while (true) {
+      const uncapped = nextDueDoses(withoutOccurrenceCap(dosage), {
+        ...options,
+        limit: candidateLimit,
+        priorDoseTimes: undefined
+      });
+      const capped = applyOccurrenceCap(
+        uncapped,
+        occurrenceCap,
+        options.priorDoseTimes,
+        timeZone,
+        requestedLimit
+      );
+      if (
+        capped.length >= requestedLimit ||
+        uncapped.length < candidateLimit ||
+        candidateLimit >= 10000
+      ) return capped;
+      candidateLimit = Math.min(10000, candidateLimit * 2);
+    }
   }
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),

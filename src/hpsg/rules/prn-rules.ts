@@ -72,7 +72,7 @@ function startsDoseComplement(context: HpsgClauseContext, start: number): boolea
   return Boolean(normalizeUnit(normalizeTokenLower(unit), context.options));
 }
 
-function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
+export function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
   return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
     const tokens = tokensAvailable(context, start, parts.length);
     return Boolean(tokens && tokens.every(
@@ -647,6 +647,10 @@ function knownSymptomSpan(
   return undefined;
 }
 
+const SYMPTOM_ONSET_FIRST_TOKENS = new Set(
+  SYMPTOM_ONSET_PREFIX_PATTERNS.map((parts) => parts[0]).filter(Boolean)
+);
+
 function symptomOnsetMatch(
   context: HpsgClauseContext,
   start: number
@@ -654,7 +658,7 @@ function symptomOnsetMatch(
   const first = context.tokens[start];
   if (!first || context.state.consumed.has(first.index)) return undefined;
   const firstKey = first.canonical ?? first.lower;
-  if (firstKey !== "at" && firstKey !== "when") return undefined;
+  if (!SYMPTOM_ONSET_FIRST_TOKENS.has(firstKey)) return undefined;
   for (const prefix of SYMPTOM_ONSET_PREFIX_PATTERNS) {
     const lead = onsetPatternMatches(context, start, prefix);
     if (!lead) continue;

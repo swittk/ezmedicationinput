@@ -11,6 +11,7 @@ import {
 } from "./symptom-terminology";
 import { ParserState } from "./parser-state";
 import {
+  CanonicalPrnReasonExpr,
   FhirCoding,
   ParseOptions,
   PrnReasonDefinition,
@@ -597,6 +598,23 @@ async function collectSuggestionsForRequestAsync(
   }
 }
 
+function normalizeReasonIdentity(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function matchingExistingReason(
+  reasons: CanonicalPrnReasonExpr[],
+  request: PrnReasonLookupRequest
+): CanonicalPrnReasonExpr | undefined {
+  const identities = [request.text, request.originalText, request.canonical]
+    .map(normalizeReasonIdentity)
+    .filter(Boolean);
+  return reasons.find((reason) => {
+    const identity = normalizeReasonIdentity(reason.text);
+    return Boolean(identity && identities.indexOf(identity) >= 0);
+  });
+}
+
 function runMultiplePrnReasonResolutionSync(
   internal: ParserState,
   requests: PrnReasonLookupRequest[],
@@ -609,11 +627,11 @@ function runMultiplePrnReasonResolutionSync(
   const reasons = [];
   for (const request of requests) {
     const definition = resolvePrnReasonDefinitionSyncForRequest(internal, request, options);
-    const index: number = reasons.length;
+    const existingReason = matchingExistingReason(existingReasons, request);
     reasons.push({
       text: request.text,
       spatialRelation: request.locativeSiteSpatialRelation,
-      triggerPhase: existingReasons[index]?.triggerPhase ?? (requests.length === 1 ? primaryTrigger : undefined),
+      triggerPhase: existingReason?.triggerPhase ?? primaryTrigger,
       coding: codingFromPrnDefinition(definition)
     });
     collectSuggestionsForRequestSync(internal, request, definition, options);
@@ -640,11 +658,11 @@ async function runMultiplePrnReasonResolutionAsync(
   const reasons = [];
   for (const request of requests) {
     const definition = await resolvePrnReasonDefinitionAsyncForRequest(internal, request, options);
-    const index: number = reasons.length;
+    const existingReason = matchingExistingReason(existingReasons, request);
     reasons.push({
       text: request.text,
       spatialRelation: request.locativeSiteSpatialRelation,
-      triggerPhase: existingReasons[index]?.triggerPhase ?? (requests.length === 1 ? primaryTrigger : undefined),
+      triggerPhase: existingReason?.triggerPhase ?? primaryTrigger,
       coding: codingFromPrnDefinition(definition)
     });
     await collectSuggestionsForRequestAsync(internal, request, definition, options);

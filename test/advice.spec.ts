@@ -4,7 +4,8 @@ import {
   buildAdditionalInstructionFramesFromCoding,
   __test__ as adviceTest,
   findAdditionalInstructionDefinitionByCoding,
-  parseAdditionalInstructions
+  parseAdditionalInstructions,
+  realizeAdviceFramesText
 } from "../src/advice";
 import {
   AdviceArgumentRole,
@@ -381,4 +382,24 @@ describe("additional instruction rule inventory", () => {
       expect(parsed.meta.leftoverText).toBeUndefined();
     }
   });;
+
+  it("uses locale-specific conjunctions when realizing multiple advice arguments", () => {
+    const frame = {
+      force: AdviceForce.Warning,
+      predicate: { lemma: "avoid" },
+      args: [
+        { role: AdviceArgumentRole.Object, text: "eyes", i18n: { th: "ตา" } },
+        { role: AdviceArgumentRole.Object, text: "mouth", i18n: { th: "ปาก" } }
+      ],
+      span: { start: 0, end: 1 },
+      sourceText: "x",
+      sequenceIndex: 0
+    };
+    expect(realizeAdviceFramesText([frame], "en")).toBe("Avoid eyes and mouth");
+    expect(realizeAdviceFramesText([frame], "th")).toBe("หลีกเลี่ยงตา และ ปาก");
+
+    frame.args.push({ role: AdviceArgumentRole.Object, text: "skin", i18n: { th: "ผิวหนัง" } });
+    expect(realizeAdviceFramesText([frame], "th")).toBe("หลีกเลี่ยงตา, ปาก และ ผิวหนัง");
+  });
+
 });

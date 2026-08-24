@@ -562,9 +562,14 @@ function localeLexemeByCanonical(locale: string, canonical: string, preferred?: 
   return matches.sort((left, right) => left.surface.length - right.surface.length)[0]?.surface;
 }
 
-function parserAcceptsSuggestion(candidate: string, options?: SuggestSigOptions): boolean {
+function parserAcceptsSuggestion(
+  candidate: string,
+  options?: SuggestSigOptions
+): ReturnType<typeof parseClauseState> | undefined {
   const state = parseClauseState(candidate, options);
-  return !state.primaryClause.leftovers?.length && findUnparsedTokenGroups(state).length === 0;
+  return !state.primaryClause.leftovers?.length && findUnparsedTokenGroups(state).length === 0
+    ? state
+    : undefined;
 }
 
 function directPrnReasonSuggestions(
@@ -1086,6 +1091,7 @@ function actionPrefixSuggestions(
     }
   };
   for (const definition of DEFAULT_SUGGESTION_ACTIONS) {
+    if (definition.argumentParser === "preposed-duration") continue;
     push(locale === "th" ? definition.i18n?.th : definition.display.toLowerCase());
     for (const alias of definition.aliases ?? []) push(alias);
   }
@@ -1094,6 +1100,7 @@ function actionPrefixSuggestions(
     for (const surface in customActions) {
       if (!Object.prototype.hasOwnProperty.call(customActions, surface)) continue;
       const definition = customActions[surface];
+      if (definition.argumentParser === "preposed-duration") continue;
       push(surface);
       push(locale === "th" ? definition.i18n?.th : definition.display);
       for (const alias of definition.aliases ?? []) push(alias);
@@ -1201,6 +1208,27 @@ function representativePrnReason(
   return reasons[0];
 }
 
+function hasCustomTrajectoryVocabulary(options: SuggestSigOptions | undefined): boolean {
+  return Boolean(options && (
+    options.context || options.unitMap || options.routeMap || options.siteCodeMap ||
+    options.freqMap || options.whenMap || options.prnReasonMap || options.symptomMap ||
+    options.instructionActionMap || options.instructionConceptMap || options.prnReasons?.length
+  ));
+}
+
+function mergeSuggestionLists(primary: string[], extra: string[], limit: number): string[] {
+  const result = primary.slice(0, limit);
+  const seen = new Set(result.map((value) => normalizeSpacing(value).toLowerCase()));
+  for (const candidate of extra) {
+    if (result.length >= limit) break;
+    const key = normalizeSpacing(candidate).toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(candidate);
+  }
+  return result;
+}
+
 function semanticTrajectorySuggestions(
   input: string,
   options: SuggestSigOptions | undefined,
@@ -1230,10 +1258,10 @@ function semanticTrajectorySuggestions(
     if (!clean) return;
     const key = clean.toLowerCase();
     if (seen.has(key)) return;
-    // Trajectory fragments are assembled only from parser-owned action traits,
-    // unit/route maps, grammar lexemes and symptom terminology. Keep runtime
-    // autocomplete cheap; the regression suite proves representative emitted
-    // trajectories remain inside the parser language.
+    // Default trajectories are assembled from parser-owned grammar/vocabulary and
+    // stay on the cheap path. Caller-supplied vocabulary can change what is legal,
+    // so validate those assembled candidates against the same configured parser.
+    if (hasCustomTrajectoryVocabulary(options) && !parserAcceptsSuggestion(clean, options)) return;
     seen.add(key);
     suggestions.push(clean);
   };
@@ -1307,7 +1335,9 @@ function continueExactSemanticSuggestion(
     return direct.slice(0, limit);
   }
   const trajectories = semanticTrajectorySuggestions(normalized, options, limit, state);
-  return trajectories.length > 1 ? trajectories : direct.slice(0, limit);
+  return trajectories.length > 1
+    ? mergeSuggestionLists(direct, trajectories, limit)
+    : direct.slice(0, limit);
 }
 
 function enrichDirectSuggestions(
@@ -1355,8 +1385,9 @@ function semanticFastPath(
         ? localeLexemeByCanonical("th", inferredUnit) ?? inferredUnit
         : inferredUnit;
       const completed = `${normalized} ${unitSurface}`;
-      if (parserAcceptsSuggestion(completed, options)) {
-        const trajectories = semanticTrajectorySuggestions(completed, options, limit);
+      const completedState = parserAcceptsSuggestion(completed, options);
+      if (completedState) {
+        const trajectories = semanticTrajectorySuggestions(completed, options, limit, completedState);
         return trajectories.length ? trajectories : [completed];
       }
     }

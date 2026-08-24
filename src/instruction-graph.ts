@@ -339,6 +339,11 @@ function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefin
   )) args.push(argument);
 }
 
+const BODY_SITE_LOCATIVE_RELATION_TOKEN_PARTS = Array.from(
+  BODY_SITE_LOCATIVE_RELATION_PHRASES.keys(),
+  (phrase) => phrase.split(/\s+/u).filter(Boolean)
+);
+
 function tokenBelongsToBodySiteRelationPhrase(
   parts: Lexeme[],
   index: number,
@@ -346,8 +351,7 @@ function tokenBelongsToBodySiteRelationPhrase(
   endExclusive: number
 ): boolean {
   const tokenKey = key(parts.slice(index, index + 1)[0]);
-  for (const phrase of BODY_SITE_LOCATIVE_RELATION_PHRASES.keys()) {
-    const phraseParts = phrase.split(/\s+/u);
+  for (const phraseParts of BODY_SITE_LOCATIVE_RELATION_TOKEN_PARTS) {
     for (let position = 0; position < phraseParts.length; position += 1) {
       if (phraseParts[position] !== tokenKey) continue;
       const phraseStart = index - position;
@@ -1214,9 +1218,19 @@ function attachPreposedActionRelation(
   frame.sourceText = sourceText.slice(first.sourceStart, frame.span.end - baseOffset);
 }
 
+const ACTION_TAIL_PHRASE_TOKEN_CACHE = new WeakMap<object, string[][]>();
+
+function actionTailPhraseTokens(phrases: ReadonlySet<string>): string[][] {
+  const key = phrases as unknown as object;
+  const cached = ACTION_TAIL_PHRASE_TOKEN_CACHE.get(key);
+  if (cached) return cached;
+  const tokens = Array.from(phrases, (phrase) => phrase.split(/\s+/).filter(Boolean));
+  ACTION_TAIL_PHRASE_TOKEN_CACHE.set(key, tokens);
+  return tokens;
+}
+
 function actionTailStartsPhrase(parts: Lexeme[], index: number, phrases: ReadonlySet<string>): boolean {
-  for (const phrase of phrases) {
-    const words = phrase.split(/\s+/).filter(Boolean);
+  for (const words of actionTailPhraseTokens(phrases)) {
     if (!words.length || index + words.length > parts.length) continue;
     if (words.every((word, offset) => key(parts[index + offset]) === word)) return true;
   }

@@ -168,4 +168,13 @@ describe("semantic annotations", () => {
       "fri"
     ]);
   });
+
+  it("gives derived Thai split tokens independent surface-index arrays", () => {
+    const tokens = lexInput("ละเม็ด");
+    expect(tokens.map((token) => token.original)).toEqual(["ละ", "เม็ด"]);
+    expect(tokens[0].surfaceIndices).not.toBe(tokens[1].surfaceIndices);
+    tokens[0].surfaceIndices.push(999);
+    expect(tokens[1].surfaceIndices).not.toContain(999);
+  });
+
 });

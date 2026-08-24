@@ -1,3 +1,4 @@
+import { stableStructureKey } from "../stable-structure";
 import { ParserState, Token } from "../parser-state";
 import { EventTiming, FhirDayOfWeek, RouteCode } from "../types";
 import { HpsgScheduleFeature, HpsgSign } from "./signature";
@@ -64,8 +65,8 @@ function applySchedule(
   if (schedule.activityTiming?.length) {
     const existing = state.activityTiming ? state.activityTiming.slice() : [];
     for (const item of schedule.activityTiming) {
-      const key = JSON.stringify(item);
-      if (!existing.some((candidate) => JSON.stringify(candidate) === key)) {
+      const key = stableStructureKey(item);
+      if (!existing.some((candidate) => stableStructureKey(candidate) === key)) {
         existing.push(item);
       }
     }

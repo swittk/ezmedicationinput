@@ -1963,6 +1963,24 @@
       ],
       "procedural": true,
       "safetyScopeTarget": true
+    },
+    {
+      "code": "complete-course",
+      "semanticClass": "course-completion",
+      "display": "Complete the course",
+      "i18n": {
+        "th": "ใช้ยาให้ครบ"
+      },
+      "aliases": [
+        "finish the course",
+        "complete the course",
+        "finish course",
+        "complete course",
+        "ใช้ยาให้ครบ",
+        "รับประทานยาให้ครบ",
+        "กินยาให้ครบ"
+      ],
+      "procedural": true
     }
   ]
 }

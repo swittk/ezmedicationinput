@@ -109,7 +109,7 @@
     { "unit": "dose", "kind": "counted_presentation", "aliases": ["doses"] },
     { "unit": "tab", "kind": "counted_presentation", "aliases": ["tablet", "เม็ด"] },
     { "unit": "cap", "kind": "counted_presentation", "aliases": ["capsule", "แคปซูล"] },
-    { "unit": "patch", "kind": "counted_presentation", "aliases": ["patches", "system", "systems", "transdermal system", "transdermal systems", "patch", "แผ่น", "แผ่นแปะ"] },
+    { "unit": "patch", "kind": "counted_presentation", "aliases": ["patches", "system", "systems", "transdermal system", "transdermal systems", "แผ่น", "แผ่นแปะ"] },
     { "unit": "ring", "kind": "counted_presentation", "aliases": ["rings"] },
     { "unit": "suppository", "kind": "counted_presentation", "aliases": ["suppositories"] },
     { "unit": "pessary", "kind": "counted_presentation", "aliases": ["pessaries"] },

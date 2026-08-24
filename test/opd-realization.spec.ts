@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatSig, fromFhirDosage, nextDueDoses, parseSig,
+  formatSig, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig,
   TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL
 } from "../src";
 
@@ -33,6 +33,15 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
       expect.objectContaining({ url: TIMING_ACTIVITY_WINDOW_EXTENSION_URL })
     ]));
+    const activityExtension = parsed.fhir.timing?.repeat?.extension
+      ?.find((extension) => extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL)
+      ?.extension?.find((extension) => extension.url === "activity")?.valueCodeableConcept;
+    expect(activityExtension?._text).toBeUndefined();
+    const translated = parseSig(source, { locale: "th" });
+    const translatedActivity = translated.fhir.timing?.repeat?.extension
+      ?.find((extension) => extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL)
+      ?.extension?.find((extension) => extension.url === "activity")?.valueCodeableConcept;
+    expect(translatedActivity?._text?.extension?.length).toBeGreaterThan(0);
     expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule?.activityTiming?.[0]?.offset)
       .toBe(offset);
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ก่อนออกกำลังกาย");
@@ -71,6 +80,18 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     const total = parseSig("take 1 tab q5min prn chest pain max 3 doses");
     expect(total.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3, period: 5, periodUnit: "min" });
     expect(total.meta.canonical.clauses[0]?.schedule?.occurrenceCap).toBeUndefined();
+  });
+
+  it("round-trips second-based occurrence caps", () => {
+    expect(getTimingOccurrenceCap({
+      extension: [{
+        url: TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+        extension: [
+          { url: "max", valueInteger: 2 },
+          { url: "period", valueQuantity: { value: 30, code: "s", unit: "s" } }
+        ]
+      }]
+    })).toEqual({ max: 2, period: 30, periodUnit: "s" });
   });
 
   it("composes Thai PRN and a per-day cap without swallowing either", () => {
@@ -148,12 +169,15 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       .toContain("หลีกเลี่ยงบริเวณตา");
   });
 
-  it("recognizes common complete-course shorthand through the existing coded instruction", () => {
+  it("keeps short course-completion shorthand typed without over-coding it", () => {
     const parsed = parseSig("take 1 cap bid x7d finish the course");
     expect(parsed.meta.leftoverText).toBeUndefined();
-    expect(parsed.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418577003");
-    expect(parsed.longText).toContain("Complete the prescribed course");
-    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ใช้ยาให้ครบตามที่สั่ง");
+    expect(parsed.fhir.additionalInstruction).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions)
+      .toContainEqual(expect.objectContaining({ predicate: expect.objectContaining({ lemma: "complete-course" }) }));
+    expect(parsed.longText).toContain("complete the course");
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ใช้ยาให้ครบ");
+
   });
 
   it("preserves negated procedural durations across languages", () => {
@@ -206,6 +230,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
   it.each([
     "take 1 tab at onset of migraine",
     "take 1 tab at migraine onset",
+    "take 1 tab upon onset of migraine",
     "take 1 tab when migraine starts",
     "รับประทาน 1 เม็ดเมื่อเริ่มมีอาการไมเกรน",
     "รับประทาน 1 เม็ดเมื่อเริ่มปวดไมเกรน"

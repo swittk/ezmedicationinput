@@ -1,3 +1,4 @@
+import { stableStructureKey } from "../stable-structure";
 import {
   HpsgDoseFeature,
   HpsgMethodFeature,
@@ -184,6 +185,7 @@ function mergePrn(
   const reasons = mergePrnReasons(left.reasons, right.reasons);
   const lookupRequests = mergePrnLookupRequests(left.lookupRequests, right.lookupRequests);
   const mergedReasonText = mergeCoordinatedText(left.reasonText, right.reasonText);
+  if (!sameOptionalScalar(left.triggerPhase, right.triggerPhase)) return undefined;
   if (!reasons?.length && !sameOptionalScalar(left.reasonText, right.reasonText)) {
     return undefined;
   }
@@ -338,7 +340,7 @@ function appendUniqueStructured<T>(left: T[] | undefined, right: T[] | undefined
   const result: T[] = [];
   const seen = new Set<string>();
   for (const item of [...(left ?? []), ...(right ?? [])]) {
-    const key = JSON.stringify(item);
+    const key = stableStructureKey(item);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(item);

@@ -1,8 +1,7 @@
 import { AdvicePolarity, AdviceRelation } from "../../types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
-import { MAXIMUM_COUNT_LEAD_SEQUENCES } from "../lexical-classes";
-import { hasSymptomOnsetPrnAt } from "./prn-rules";
+import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { HpsgConditionFeature, HpsgLexicalRule, lexicalSign } from "../signature";
 
@@ -60,14 +59,6 @@ function conditionTokens(
   );
 }
 
-function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
-  return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
-    const available = context.tokens.slice(start, start + parts.length);
-    return available.length === parts.length && available.every(
-      (token, offset) => !context.state.consumed.has(token.index) && normalizeTokenLower(token) === parts[offset]
-    );
-  });
-}
 
 function postfixConditionEnd(context: HpsgClauseContext, start: number): number {
   const first = context.tokens[start];

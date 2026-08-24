@@ -343,6 +343,7 @@ function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
     const splitAt = token.sourceStart + prefix.length;
     result.push({
       ...token,
+      surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(0, prefix.length),
       lower: prefix,
       canonical: canonicalThaiLexeme(prefix),
@@ -352,6 +353,7 @@ function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
     });
     result.push({
       ...token,
+      surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(prefix.length),
       lower: remainder,
       canonical: remainderCanonical,
@@ -379,6 +381,7 @@ function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[
     const splitAt = token.sourceStart + 2;
     result.push({
       ...token,
+      surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(0, 2),
       lower: "ละ",
       canonical: undefined,
@@ -388,6 +391,7 @@ function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[
     });
     result.push({
       ...token,
+      surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(2),
       lower: unitSurface,
       canonical: canonicalUnit,

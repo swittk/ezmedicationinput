@@ -262,9 +262,10 @@ describe("suggestSig", () => {
       "take 1 tab as needed for pain",
     ]));
 
-    expect(suggestSig("take before meals", { limit: 10 })).toContain("take before meals 1 tab");
-    expect(suggestSig("apply to affected area", { limit: 10 }))
-      .toContain("apply to affected area 1 g");
+    const takeBeforeMeals = suggestSig("take before meals", { limit: 10 });
+    expect(takeBeforeMeals).toContain("take before meals 1 tab");
+    const applyAffectedArea = suggestSig("apply to affected area", { limit: 10 });
+    expect(applyAffectedArea).toContain("apply to affected area 1 g");
 
     const compact = suggestSig("1 tab po", { limit: 10 });
     expect(compact).toEqual(expect.arrayContaining([
@@ -273,7 +274,7 @@ describe("suggestSig", () => {
       "1 tab po at bedtime",
       "1 tab po as needed for pain",
     ]));
-    for (const candidate of [...naturalDose, ...compact]) {
+    for (const candidate of [...naturalDose, ...compact, ...takeBeforeMeals, ...applyAffectedArea]) {
       expect(parseSig(candidate).meta.leftoverText).toBeUndefined();
     }
   });
@@ -413,4 +414,25 @@ describe("suggestSig", () => {
     const suggestions = suggestSig("at 14:3");
     expect(suggestions.some(s => s.includes("at 14:30"))).toBe(true);
   });
+
+  it("validates semantic trajectories against caller vocabulary", () => {
+    const options = {
+      limit: 10,
+      context: { dosageForm: "tablet" },
+      unitMap: { scoop: "tab" },
+      prnReasonMap: { restpainz: { text: "Rest pain Z" } }
+    };
+    const suggestions = suggestSig("take", options);
+    expect(suggestions.length).toBeGreaterThan(1);
+    for (const candidate of suggestions) {
+      expect(parseSig(candidate, options).meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("does not offer preposed-duration markers as standalone actions", () => {
+    expect(suggestSig("of", { limit: 10 })).not.toContain("off");
+    expect(suggestSig("pau", { limit: 10 })).not.toContain("pause use");
+    expect(parseSig("take 1 tab daily x21d then 7 days off").meta.leftoverText).toBeUndefined();
+  });
+
 });

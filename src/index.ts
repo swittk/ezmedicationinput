@@ -1045,7 +1045,7 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
     internal.unit = carry.unit;
   }
 
-  if (!internal.siteText && !internal.siteCoding && carry.siteText) {
+  if (!internal.siteText && !internal.siteCoding && (carry.siteText || carry.siteCoding)) {
     internal.siteText = carry.siteText;
     internal.siteI18n = carry.siteI18n;
     internal.siteSource = carry.siteSource;

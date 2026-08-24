@@ -34,7 +34,9 @@ describe("relative event-offset grammar", () => {
     ["take 1 cap at least half an hour before breakfast", "offsetMin", 30]
   ] as const)("parses quantity-first event offsets in %s", (source, field, value) => {
     const parsed = parseSig(source);
-    const schedule = parsed.meta.canonical.clauses[0]?.schedule;
+    const clause = parsed.meta.canonical.clauses[0];
+    const schedule = clause?.schedule;
+    expect(clause?.dose).toEqual({ value: 1, unit: "cap" });
     expect(schedule?.[field]).toBe(value);
     expect(schedule?.when).toEqual(["ACM"]);
     expect(schedule?.duration).toBeUndefined();

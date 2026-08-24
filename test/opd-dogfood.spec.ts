@@ -73,7 +73,8 @@ describe("OPD clinician dogfood grammar", () => {
     const spit = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions?.find(
       (action) => action.predicate.lemma === "spit"
     );
-    expect(spit?.args ?? []).toEqual([]);
+    expect(spit).toBeDefined();
+    expect(spit?.args).toEqual([]);
   });
 
   it.each([
@@ -148,7 +149,8 @@ describe("OPD clinician dogfood grammar", () => {
     const spit = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions?.find(
       (action) => action.predicate.lemma === "spit"
     );
-    expect(spit?.args ?? []).toEqual([]);
+    expect(spit).toBeDefined();
+    expect(spit?.args).toEqual([]);
   });
 
   it("recognizes now as immediate event timing", () => {

@@ -368,6 +368,11 @@ export class ParserState {
   }
 
   set asNeededReasonTriggerPhase(value: "onset" | undefined) {
+    if (value === undefined) {
+      if (this.clause.prn?.reason) delete this.clause.prn.reason.triggerPhase;
+      this.cleanupPrn();
+      return;
+    }
     const prn = this.clause.prn ?? (this.clause.prn = { enabled: true });
     if (!prn.reason) prn.reason = {};
     prn.reason.triggerPhase = value;

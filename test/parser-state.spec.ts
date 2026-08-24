@@ -3,6 +3,7 @@ import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 import { applySiteCoding } from "../src/site-coding";
+import { applyPrnReasonCoding } from "../src/prn-reason-coding";
 
 const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
@@ -506,4 +507,49 @@ describe("FHIR parser-state import", () => {
       durationUnit: "d"
     });
   });
+
+  it("clears an undefined PRN trigger phase without creating PRN state", () => {
+    const empty = new ParserState("", []);
+    empty.asNeededReasonTriggerPhase = undefined;
+    expect(empty.primaryClause.prn).toBeUndefined();
+
+    const state = new ParserState("", []);
+    state.asNeededReason = "pain";
+    state.asNeededReasonTriggerPhase = "onset";
+    state.asNeededReasonTriggerPhase = undefined;
+    expect(state.primaryClause.prn?.reason?.text).toBe("pain");
+    expect(state.primaryClause.prn?.reason?.triggerPhase).toBeUndefined();
+  });
+
+  it("preserves PRN trigger phases by reason identity rather than request order", () => {
+    const state = new ParserState("", []);
+    state.asNeeded = true;
+    state.asNeededReasons = [
+      { text: "migraine", triggerPhase: "onset" },
+      { text: "headache" }
+    ];
+    state.prnReasonLookupRequests = [
+      { originalText: "headache", text: "headache", normalized: "headache", canonical: "headache", isProbe: false, inputText: "" },
+      { originalText: "migraine", text: "migraine", normalized: "migraine", canonical: "migraine", isProbe: false, inputText: "" }
+    ];
+    applyPrnReasonCoding(state);
+    expect(state.asNeededReasons?.map((reason) => [reason.text, reason.triggerPhase])).toEqual([
+      ["headache", undefined],
+      ["migraine", "onset"]
+    ]);
+  });
+
+  it("applies an aggregate PRN trigger phase across multiple lookup requests", () => {
+    const state = new ParserState("", []);
+    state.asNeeded = true;
+    state.asNeededReasonTriggerPhase = "onset";
+    state.prnReasonLookupRequests = [
+      { originalText: "headache", text: "headache", normalized: "headache", canonical: "headache", isProbe: false, inputText: "" },
+      { originalText: "migraine", text: "migraine", normalized: "migraine", canonical: "migraine", isProbe: false, inputText: "" }
+    ];
+    applyPrnReasonCoding(state);
+    expect(state.asNeededReasons?.map((reason) => reason.triggerPhase)).toEqual(["onset", "onset"]);
+    expect(state.asNeededReasonTriggerPhase).toBe("onset");
+  });
+
 });

@@ -1433,14 +1433,7 @@
       "matcher": {
         "normalizedTexts": [
           "Take at regular intervals. Complete the prescribed course unless otherwise directed",
-          "รับประทานตามช่วงเวลาสม่ำเสมอ และใช้ยาให้ครบตามที่สั่ง เว้นแต่ได้รับคำสั่งเป็นอย่างอื่น",
-          "finish the course",
-          "complete the course",
-          "finish course",
-          "complete course",
-          "ใช้ยาให้ครบ",
-          "รับประทานยาให้ครบ",
-          "กินยาให้ครบ"
+          "รับประทานตามช่วงเวลาสม่ำเสมอ และใช้ยาให้ครบตามที่สั่ง เว้นแต่ได้รับคำสั่งเป็นอย่างอื่น"
         ]
       }
     },

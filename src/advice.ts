@@ -1701,20 +1701,22 @@ function localizedAdviceArgumentText(arg: AdviceArgument, locale: string): strin
 }
 
 function joinAdviceArgumentTexts(args: AdviceArgument[], locale = "en"): string | undefined {
-  let text = "";
-  let added = 0;
-  for (const arg of args) {
-    const trimmed = localizedAdviceArgumentText(arg, locale);
-    if (!trimmed) {
-      continue;
-    }
-    if (added > 0) {
-      text += added === 1 ? " and " : ", ";
-    }
-    text += trimmed;
-    added += 1;
+  const texts = args
+    .map((arg) => localizedAdviceArgumentText(arg, locale))
+    .filter((text): text is string => Boolean(text));
+  if (!texts.length) return undefined;
+  if (locale.toLowerCase().startsWith("th")) {
+    if (texts.length === 1) return texts[0];
+    if (texts.length === 2) return `${texts[0]} และ ${texts[1]}`;
+    return `${texts.slice(0, -1).join(", ")} และ ${texts[texts.length - 1]}`;
   }
-  return text || undefined;
+
+  let text = "";
+  for (let index = 0; index < texts.length; index += 1) {
+    if (index > 0) text += index === 1 ? " and " : ", ";
+    text += texts[index];
+  }
+  return text;
 }
 
 interface AdviceRealizationContext {

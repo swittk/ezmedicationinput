@@ -112,7 +112,10 @@ function activityTimingOffsetChild(url: string, value: number | undefined) {
   };
 }
 
-function buildActivityTimingExtension(item: CanonicalActivityTimingExpr) {
+function buildActivityTimingExtension(
+  item: CanonicalActivityTimingExpr,
+  options?: FhirProjectionOptions
+) {
   const children = [
     { url: "relation", valueCode: item.relation },
     {
@@ -120,7 +123,9 @@ function buildActivityTimingExtension(item: CanonicalActivityTimingExpr) {
       valueCodeableConcept: {
         text: item.activity.text,
         coding: item.activity.coding?.code ? [{ ...item.activity.coding }] : undefined,
-        _text: buildTranslationPrimitiveElement(item.activity.i18n)
+        _text: options?.includeTranslationExtensions
+          ? buildTranslationPrimitiveElement(item.activity.i18n)
+          : undefined
       }
     },
     activityTimingOffsetChild("offset", item.offset),
@@ -175,7 +180,7 @@ export function getTimingOccurrenceCap(
     !periodUnit
   ) return undefined;
   const mappedUnit = periodUnit as FhirPeriodUnit;
-  if (["min", "h", "d", "wk", "mo", "a"].indexOf(mappedUnit) < 0) return undefined;
+  if (["s", "min", "h", "d", "wk", "mo", "a"].indexOf(mappedUnit) < 0) return undefined;
   return { max, period, periodUnit: mappedUnit };
 }
 
@@ -714,7 +719,7 @@ export function canonicalToFhir(
   if (schedule?.activityTiming?.length) {
     repeat.extension = [
       ...(repeat.extension ?? []),
-      ...schedule.activityTiming.map(buildActivityTimingExtension)
+      ...schedule.activityTiming.map((item) => buildActivityTimingExtension(item, options))
     ];
     hasRepeat = true;
   }
@@ -1010,12 +1015,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const offsetMinExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   const timingBounds = extractCanonicalTimingBounds(repeat);
+  const activityTiming = parseActivityTimingExtensions(repeat);
+  const occurrenceCap = getTimingOccurrenceCap(repeat);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
-    parseActivityTimingExtensions(repeat)?.length ||
-    getTimingOccurrenceCap(repeat) !== undefined ||
+    activityTiming?.length ||
+    occurrenceCap !== undefined ||
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
@@ -1047,8 +1054,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offset: repeat?.offset ?? offsetExactExtension,
       offsetMin: offsetMinExtension,
       offsetMax: offsetMaxExtension,
-      activityTiming: parseActivityTimingExtensions(repeat),
-      occurrenceCap: getTimingOccurrenceCap(repeat),
+      activityTiming,
+      occurrenceCap,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
