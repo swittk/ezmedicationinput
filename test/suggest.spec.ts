@@ -202,6 +202,89 @@ describe("suggestSig", () => {
     expect(suggestSig("wash ex", { limit: 10 })).toEqual([]);
   });
 
+  it("exposes distinct semantic trajectories from action-only prefixes", () => {
+    const thaiTake = suggestSig("กิน", { locale: "th", limit: 10 });
+    expect(thaiTake).toEqual(expect.arrayContaining([
+      "กิน 1 เม็ด",
+      "กิน 1 เม็ด วันละครั้ง",
+      "กิน วันละ 2 ครั้ง",
+      "กิน ก่อนอาหาร",
+      "กิน หลังอาหาร",
+      "กิน ก่อนนอน",
+      "กินเมื่อมีอาการปวด",
+    ]));
+
+    const thaiApply = suggestSig("ทา", { locale: "th", limit: 10 });
+    expect(thaiApply).toEqual(expect.arrayContaining([
+      "ทาบริเวณที่มีอาการ",
+      "ทา วันละ 2 ครั้ง",
+      "ทา ก่อนนอน",
+      "ทาเมื่อมีอาการคัน",
+    ]));
+    expect(thaiApply.some((value) => value.includes("ก่อนอาหาร") || value.includes("หลังอาหาร"))).toBe(false);
+
+    const englishTake = suggestSig("take", { limit: 10 });
+    expect(englishTake).toEqual(expect.arrayContaining([
+      "take 1 tab",
+      "take 1 tab once daily",
+      "take twice daily",
+      "take before meals",
+      "take after meals",
+      "take at bedtime",
+      "take as needed for pain",
+    ]));
+
+    const englishApply = suggestSig("apply", { limit: 10 });
+    expect(englishApply).toEqual(expect.arrayContaining([
+      "apply to affected area",
+      "apply twice daily",
+      "apply at bedtime",
+      "apply as needed for itching",
+    ]));
+    expect(englishApply.some((value) => value.includes("before meals") || value.includes("after meals"))).toBe(false);
+
+    for (const [candidate, locale] of [
+      ...thaiTake.map((candidate) => [candidate, "th"] as const),
+      ...thaiApply.map((candidate) => [candidate, "th"] as const),
+      ...englishTake.map((candidate) => [candidate, "en"] as const),
+      ...englishApply.map((candidate) => [candidate, "en"] as const),
+    ]) {
+      expect(parseSig(candidate, { locale }).meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("continues complete dose and classic sig states along semantic trajectories", () => {
+    const naturalDose = suggestSig("take 1 tab", { limit: 10 });
+    expect(naturalDose).toEqual(expect.arrayContaining([
+      "take 1 tab twice daily",
+      "take 1 tab before meals",
+      "take 1 tab at bedtime",
+      "take 1 tab as needed for pain",
+    ]));
+
+    expect(suggestSig("take before meals", { limit: 10 })).toContain("take before meals 1 tab");
+    expect(suggestSig("apply to affected area", { limit: 10 }))
+      .toContain("apply to affected area 1 g");
+
+    const compact = suggestSig("1 tab po", { limit: 10 });
+    expect(compact).toEqual(expect.arrayContaining([
+      "1 tab po twice daily",
+      "1 tab po before meals",
+      "1 tab po at bedtime",
+      "1 tab po as needed for pain",
+    ]));
+    for (const candidate of [...naturalDose, ...compact]) {
+      expect(parseSig(candidate).meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("continues lexical completions into the next semantic slot", () => {
+    const suggestions = suggestSig("กิน ครั้งล", { locale: "th", limit: 10 });
+    expect(suggestions[0]).toBe("กิน ครั้งละ");
+    expect(suggestions).toContain("กิน ครั้งละ 1 เม็ด");
+    expect(suggestions).toContain("กิน ครั้งละ 1 เม็ด วันละครั้ง");
+  });
+
   it("uses the parser-owned Thai locale lexicon for partial grammar words", () => {
     const suggestions = suggestSig("คว", { locale: "th", limit: 5 });
     expect(suggestions).toContain("ควร");

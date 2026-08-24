@@ -58,6 +58,16 @@ const DEFAULT_LIMIT = 10;
 
 const THAI_SUGGESTION_LEXEMES = listMedicationLocaleLexemes("th");
 const DEFAULT_SUGGESTION_ACTIONS = listMedicationInstructionActions();
+const DEFAULT_SUGGESTION_ACTION_SURFACES: Array<{
+  surface: string;
+  definition: (typeof DEFAULT_SUGGESTION_ACTIONS)[number];
+}> = [];
+for (const definition of DEFAULT_SUGGESTION_ACTIONS) {
+  for (const surface of [definition.display, definition.i18n?.th, ...(definition.aliases ?? [])]) {
+    if (surface) DEFAULT_SUGGESTION_ACTION_SURFACES.push({ surface, definition });
+  }
+}
+DEFAULT_SUGGESTION_ACTION_SURFACES.sort((left, right) => right.surface.length - left.surface.length);
 let defaultSupportedBodySiteTextCache: string[] | undefined;
 function defaultSupportedBodySiteText(): string[] {
   if (!defaultSupportedBodySiteTextCache) {
@@ -1094,6 +1104,230 @@ function actionPrefixSuggestions(
   return matches.length ? matches.slice(0, limit) : undefined;
 }
 
+function actionSurfaceMatchesInput(surface: string, normalizedInput: string): boolean {
+  const candidate = normalizeSpacing(surface).toLowerCase();
+  if (!candidate) return false;
+  return normalizedInput === candidate || normalizedInput.startsWith(`${candidate} `) ||
+    (THAI_SCRIPT.test(candidate) && normalizedInput.startsWith(candidate));
+}
+
+function suggestionActionDefinitionForClause(
+  input: string,
+  clause: ReturnType<typeof parseClauseState>["primaryClause"],
+  options?: SuggestSigOptions,
+) {
+  const normalized = normalizeSpacing(input).toLowerCase();
+
+  // Surface identity is stronger than Dosage.method coding: several distinct
+  // actions can legitimately project the same administration method code.
+  const customActions = options?.instructionActionMap;
+  if (customActions) {
+    for (const surface in customActions) {
+      if (!Object.prototype.hasOwnProperty.call(customActions, surface)) continue;
+      const definition = customActions[surface];
+      const surfaces = [surface, definition.display, definition.i18n?.th, ...(definition.aliases ?? [])]
+        .filter((value): value is string => Boolean(value))
+        .sort((left, right) => right.length - left.length);
+      if (surfaces.some((candidate) => actionSurfaceMatchesInput(candidate, normalized))) return definition;
+    }
+  }
+
+  const defaultBySurface = DEFAULT_SUGGESTION_ACTION_SURFACES.find(({ surface }) =>
+    actionSurfaceMatchesInput(surface, normalized)
+  )?.definition;
+  if (defaultBySurface) return defaultBySurface;
+
+  const methodCode = clause.method?.coding?.code;
+  if (!methodCode) return undefined;
+  return DEFAULT_SUGGESTION_ACTIONS.find(
+    (definition) => definition.administrationMethod?.code === methodCode,
+  );
+}
+
+function trajectoryUnitForRoute(
+  routeCode: RouteCode | undefined,
+  options: SuggestSigOptions | undefined,
+): string | undefined {
+  const contextUnit = inferUnitFromContext(options?.context ?? undefined);
+  const pairs = buildUnitRoutePairs(contextUnit, options);
+  if (routeCode) {
+    const matched = pairs.find((pair) =>
+      (options?.routeMap?.[pair.route] ?? DEFAULT_ROUTE_SYNONYMS[pair.route]?.code) === routeCode
+    );
+    if (matched) return matched.unit;
+  }
+  return contextUnit ?? pairs[0]?.unit;
+}
+
+function trajectoryScheduleSuffixes(locale: "th" | "en", routeCode?: RouteCode): string[] {
+  if (locale === "th") {
+    const onceDaily = localeLexemeByCanonical("th", "daily", "วันละครั้ง") ?? "วันละครั้ง";
+    const daily = localeLexemeByCanonical("th", "daily", "วันละ") ?? "วันละ";
+    const times = localeLexemeByCanonical("th", "times", "ครั้ง") ?? "ครั้ง";
+    const before = localeLexemeByCanonical("th", "before", "ก่อน") ?? "ก่อน";
+    const after = localeLexemeByCanonical("th", "after", "หลัง") ?? "หลัง";
+    const meal = localeLexemeByCanonical("th", "meal", "อาหาร") ?? "อาหาร";
+    const sleep = localeLexemeByCanonical("th", "sleep", "นอน") ?? "นอน";
+    const all = [
+      onceDaily,
+      `${daily} 2 ${times}`,
+      `${before}${meal}`,
+      `${after}${meal}`,
+      `${before}${sleep}`,
+    ];
+    return routeCode && routeCode !== RouteCode["Oral route"]
+      ? [all[0], all[1], all[4]]
+      : all;
+  }
+  const all = ["once daily", "twice daily", "before meals", "after meals", "at bedtime"];
+  return routeCode && routeCode !== RouteCode["Oral route"]
+    ? [all[0], all[1], all[4]]
+    : all;
+}
+
+function representativePrnReason(
+  options: SuggestSigOptions | undefined,
+  locale: "th" | "en",
+  topical: boolean,
+): string | undefined {
+  const reasons = buildPrnReasons({ ...options, locale });
+  const preferred = topical
+    ? (locale === "th" ? ["คัน"] : ["itching", "itch"])
+    : (locale === "th" ? ["ปวด"] : ["pain"]);
+  for (const wanted of preferred) {
+    const match = reasons.find((reason) => normalizeKey(reason) === normalizeKey(wanted));
+    if (match) return match;
+  }
+  return reasons[0];
+}
+
+function semanticTrajectorySuggestions(
+  input: string,
+  options: SuggestSigOptions | undefined,
+  limit: number,
+  parsedState?: ReturnType<typeof parseClauseState>,
+): string[] {
+  const normalized = normalizeSpacing(input);
+  const state = parsedState ?? parseClauseState(normalized, options);
+  const clause = state.primaryClause;
+  if (clause.leftovers?.length || findUnparsedTokenGroups(state).length) return [];
+  const hasMethod = Boolean(clause.method?.text || clause.method?.coding?.code);
+  const hasAdministrationAnchor = hasMethod || Boolean(clause.dose && clause.route?.code);
+  if (!hasAdministrationAnchor) return [];
+
+  const locale: "th" | "en" = suggestionLocale(input, options) === "th" ? "th" : "en";
+  const routeCode = clause.route?.code;
+  const topical = routeCode === RouteCode["Topical route"];
+  const actionDefinition = suggestionActionDefinitionForClause(normalized, clause, options);
+  const supportsDose = actionDefinition?.definesDose === true || actionDefinition?.acceptsAmount === true;
+  const actionOnly = (clause.evidence ?? []).length > 0 &&
+    (clause.evidence ?? []).every((evidence) => evidence.rule === "hpsg.lex.method");
+
+  const suggestions: string[] = [];
+  const seen = new Set<string>();
+  const push = (candidate: string | undefined) => {
+    const clean = normalizeSpacing(candidate ?? "");
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) return;
+    // Trajectory fragments are assembled only from parser-owned action traits,
+    // unit/route maps, grammar lexemes and symptom terminology. Keep runtime
+    // autocomplete cheap; the regression suite proves representative emitted
+    // trajectories remain inside the parser language.
+    seen.add(key);
+    suggestions.push(clean);
+  };
+
+  push(normalized);
+
+  if (topical && !clause.site) {
+    const directSite = actionDefinition?.realizerConfig?.englishDirectSiteObject === true;
+    push(locale === "th"
+      ? `${normalized}บริเวณที่มีอาการ`
+      : `${normalized}${directSite ? "" : " to"} affected area`);
+  }
+
+  let doseCandidate: string | undefined;
+  if (supportsDose && !clause.dose) {
+    const unit = trajectoryUnitForRoute(routeCode, options);
+    if (unit) {
+      const unitSurface = locale === "th"
+        ? localeLexemeByCanonical("th", unit) ?? unit
+        : unit;
+      doseCandidate = `${normalized} 1 ${unitSurface}`;
+      push(doseCandidate);
+      if (!clause.schedule) {
+        push(`${doseCandidate} ${trajectoryScheduleSuffixes(locale, routeCode)[0]}`);
+      }
+    }
+  }
+
+  // Once the clinician has started a nontrivial dose construction (for example
+  // Thai ครั้งละ), finish that slot before offering unrelated timing branches.
+  if (supportsDose && !clause.dose && !actionOnly) {
+    return suggestions.slice(0, limit);
+  }
+
+  if (!clause.schedule) {
+    for (const suffix of trajectoryScheduleSuffixes(locale, routeCode)) {
+      push(`${normalized} ${suffix}`);
+      if (suggestions.length >= limit) break;
+    }
+  }
+
+  if (!clause.prn?.enabled && suggestions.length < limit) {
+    const reason = representativePrnReason(options, locale, topical);
+    if (reason) {
+      if (locale === "th") {
+        const symptom = reason.startsWith("มีอาการ") ? reason : `มีอาการ${reason}`;
+        push(`${normalized}เมื่อ${symptom}`);
+      } else {
+        push(`${normalized} as needed for ${reason}`);
+      }
+    }
+  }
+
+  return suggestions.slice(0, limit);
+}
+
+function continueExactSemanticSuggestion(
+  direct: string[],
+  input: string,
+  options: SuggestSigOptions | undefined,
+  limit: number,
+): string[] {
+  const normalized = normalizeSpacing(input);
+  if (!direct.some((candidate) => normalizeSpacing(candidate).toLowerCase() === normalized.toLowerCase())) {
+    return direct.slice(0, limit);
+  }
+  const state = parseClauseState(normalized, options);
+  if (state.primaryClause.leftovers?.length || findUnparsedTokenGroups(state).length) {
+    return direct.slice(0, limit);
+  }
+  const trajectories = semanticTrajectorySuggestions(normalized, options, limit, state);
+  return trajectories.length > 1 ? trajectories : direct.slice(0, limit);
+}
+
+function enrichDirectSuggestions(
+  direct: string[],
+  options: SuggestSigOptions | undefined,
+  limit: number,
+): string[] {
+  if (direct.length >= limit || direct.length > 3) return direct.slice(0, limit);
+  const suggestions = [...direct];
+  const seen = new Set(direct.map((value) => normalizeSpacing(value).toLowerCase()));
+  for (const base of direct.slice(0, 2)) {
+    for (const candidate of semanticTrajectorySuggestions(base, options, limit)) {
+      const key = normalizeSpacing(candidate).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      suggestions.push(candidate);
+      if (suggestions.length >= limit) return suggestions;
+    }
+  }
+  return suggestions;
+}
+
 function semanticFastPath(
   input: string,
   options: SuggestSigOptions | undefined,
@@ -1120,20 +1354,14 @@ function semanticFastPath(
         : inferredUnit;
       const completed = `${normalized} ${unitSurface}`;
       if (parserAcceptsSuggestion(completed, options)) {
-        const suggestions = [completed];
-        if (!clause.schedule && suggestions.length < limit) {
-          suggestions.push(`${completed} ${locale === "th" ? "วันละครั้ง" : "once daily"}`);
-        }
-        return suggestions.slice(0, limit);
+        const trajectories = semanticTrajectorySuggestions(completed, options, limit);
+        return trajectories.length ? trajectories : [completed];
       }
     }
   }
 
-  const suggestions = [normalized];
-  if (hasMethod && !clause.schedule && suggestions.length < limit) {
-    suggestions.push(`${normalized} ${locale === "th" ? "วันละครั้ง" : "once daily"}`);
-  }
-  return suggestions.slice(0, limit);
+  const trajectories = semanticTrajectorySuggestions(normalized, options, limit, state);
+  return trajectories.length ? trajectories : undefined;
 }
 
 export function suggestSig(input: string, options?: SuggestSigOptions): string[] {
@@ -1148,19 +1376,28 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
 
   const directThaiPrn = directThaiPrnReasonSuggestions(input, options, limit);
   if (directThaiPrn?.length) {
-    return directThaiPrn;
+    return continueExactSemanticSuggestion(directThaiPrn, input, options, limit);
   }
   const directPrn = directPrnReasonSuggestions(input, options, limit);
   if (directPrn?.length) {
-    return directPrn;
+    return continueExactSemanticSuggestion(directPrn, input, options, limit);
   }
   const directTime = directTimeSuggestions(input, limit);
   if (directTime?.length) {
-    return directTime;
+    return continueExactSemanticSuggestion(directTime, input, options, limit);
+  }
+  const inputTokens = normalizeSpacing(input).split(" ");
+  const lastToken = inputTokens[inputTokens.length - 1];
+  if (lastToken && normalizeUnit(lastToken, options)) {
+    const state = parseClauseState(input, options);
+    if (!state.primaryClause.leftovers?.length && findUnparsedTokenGroups(state).length === 0) {
+      const trajectories = semanticTrajectorySuggestions(input, options, limit, state);
+      if (trajectories.length > 1) return trajectories;
+    }
   }
   const directUnit = directUnitSuggestions(input, options, limit);
   if (directUnit?.length) {
-    return directUnit;
+    return enrichDirectSuggestions(directUnit, options, limit);
   }
   const directMultiplicative = directMultiplicativeSuggestions(input, limit);
   if (directMultiplicative?.length) {
@@ -1179,23 +1416,23 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
 
   const directSite = directBodySiteSuggestions(input, options, limit);
   if (directSite?.length) {
-    return directSite;
+    return continueExactSemanticSuggestion(directSite, input, options, limit);
   }
   const directRoute = directRouteSuggestions(input, options, limit);
   if (directRoute?.length) {
-    return directRoute;
+    return continueExactSemanticSuggestion(directRoute, input, options, limit);
   }
   const directThaiRelation = directThaiRelationSuggestions(input, options, limit);
   if (directThaiRelation?.length) {
-    return directThaiRelation;
+    return continueExactSemanticSuggestion(directThaiRelation, input, options, limit);
   }
   const directEnglishRelation = directEnglishRelationSuggestions(input, options, limit);
   if (directEnglishRelation?.length) {
-    return directEnglishRelation;
+    return continueExactSemanticSuggestion(directEnglishRelation, input, options, limit);
   }
   const directTiming = directTimingSuggestions(input, options, limit);
   if (directTiming?.length) {
-    return directTiming;
+    return continueExactSemanticSuggestion(directTiming, input, options, limit);
   }
 
   const semantic = semanticFastPath(input, options, limit);
@@ -1204,15 +1441,15 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   }
   const localeTail = localeLexemeTailSuggestions(input, options, limit);
   if (localeTail?.length) {
-    return localeTail;
+    return enrichDirectSuggestions(localeTail, options, limit);
   }
   const actions = actionPrefixSuggestions(input, options, limit);
   if (actions?.length) {
-    return actions;
+    return enrichDirectSuggestions(actions, options, limit);
   }
   const localeLexemes = localeLexemePrefixSuggestions(input, options, limit);
   if (localeLexemes?.length) {
-    return localeLexemes;
+    return enrichDirectSuggestions(localeLexemes, options, limit);
   }
 
   return [];

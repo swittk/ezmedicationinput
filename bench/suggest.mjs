@@ -15,6 +15,8 @@ const cases = [
   { input: "500 mg po q4-6h prn pain", options: { limit: 20 } },
   { input: "500 millig", options: { limit: 20 } },
   { input: "at 14:3", options: { limit: 20 } },
+  { input: "กิน", options: { limit: 20, locale: "th" } },
+  { input: "กิน ครั้งล", options: { limit: 20, locale: "th" } },
   { input: "ทา", options: { limit: 20, locale: "th" } },
   { input: "รับประทาน 1 เม็ด เมื่อมีอาการปว", options: { limit: 20, locale: "th" } },
   { input: "รับประทาน 1 เม", options: { limit: 20, locale: "th" } },
@@ -24,6 +26,8 @@ const cases = [
   { input: "apply to right e", options: { limit: 20 } },
   { input: "1 drop to o", options: { limit: 20 } },
   { input: "1 tab po b", options: { limit: 20 } },
+  { input: "take", options: { limit: 20 } },
+  { input: "apply", options: { limit: 20 } },
   { input: "take 1 tab bef", options: { limit: 20 } },
   { input: "zzzz", options: { limit: 20 } }
 ];
