@@ -344,6 +344,7 @@ function mergeSchedule(
   if (
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
     !sameOptionalScalar(left.count, right.count) ||
+    !sameOptionalScalar(left.countMax, right.countMax) ||
     !sameOptionalScalar(left.duration, right.duration) ||
     !sameOptionalScalar(left.durationMax, right.durationMax) ||
     !sameOptionalScalar(left.durationUnit, right.durationUnit) ||
@@ -362,6 +363,7 @@ function mergeSchedule(
     attachmentClass: mergedClass,
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     count: mergeOptionalScalar(left.count, right.count),
+    countMax: mergeOptionalScalar(left.countMax, right.countMax),
     duration: mergeOptionalScalar(left.duration, right.duration),
     durationMax: mergeOptionalScalar(left.durationMax, right.durationMax),
     durationUnit: mergeOptionalScalar(left.durationUnit, right.durationUnit),

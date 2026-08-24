@@ -245,6 +245,8 @@ export const COMPACT_LIST_SEPARATORS = setOf(source.compactListSeparators);
 export const EVERY_INTERVAL_TOKENS_DATA = setOf(source.everyIntervalTokens);
 export const COUNT_MARKER_TOKENS_DATA = setOf(source.countMarkerTokens);
 export const COUNT_CONNECTOR_WORDS_DATA = setOf(source.countConnectorWords);
+export const MAXIMUM_COUNT_LEAD_TOKENS = setOf(source.maximumCountLeadTokens ?? []);
+export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
 export const FREQUENCY_SIMPLE_WORDS_DATA = numberRecord(source.frequencySimpleWords);
 export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWords);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
@@ -309,6 +311,13 @@ export const INSTRUCTION_QUANTITY_UNIT_LABELS = instructionQuantityUnitLabelMap(
 );
 export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
 export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
+export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowInstructions ?? [])
+  .map((entry) => ({
+    parts: [...entry.parts],
+    text: entry.text,
+    i18n: entry.i18n ? { ...entry.i18n } : undefined
+  }))
+  .sort((left, right) => right.parts.length - left.parts.length);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
 export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationLicenses);
 export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelationLeads);

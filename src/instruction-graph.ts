@@ -1,8 +1,9 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
-import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS } from "./maps";
+import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
+import { resolveSymptomDefinition } from "./symptom-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_DIRECTIVE_PREFIXES,
@@ -12,10 +13,13 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   BODY_SITE_LOCATIVE_RELATION_PHRASES,
   DURATION_LEAD_TOKENS,
+  EVENT_OFFSET_ARTICLES,
+  EVENT_OFFSET_FRACTIONS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
+  PRN_LEADS,
   RANGE_CONNECTORS,
   THAI_METHOD_AUXILIARY_VERBS
 } from "./hpsg/lexical-classes";
@@ -425,27 +429,39 @@ function durationArgumentAt(
       span: { start: offset + parts[start].sourceStart, end: offset + rangeUnitToken.sourceEnd }
     };
   }
-  const unitToken = parts[cursor + 1];
-  if (!unitToken || cursor + 1 >= endExclusive) return undefined;
+  let unitIndex = cursor + 1;
+  const possibleArticle = parts[unitIndex];
+  if (possibleArticle && EVENT_OFFSET_ARTICLES.has(key(possibleArticle))) {
+    unitIndex += 1;
+  }
+  const unitToken = parts[unitIndex];
+  if (!unitToken || unitIndex >= endExclusive) return undefined;
   const unit = durationUnitFromKey(key(unitToken));
   if (!unit) return undefined;
 
   let quantity: AdviceArgument["quantity"] | undefined;
+  let normalizedValue: string | number | undefined;
   if (valueToken.kind === "NUMBER" && valueToken.value !== undefined) {
     quantity = { value: valueToken.value, unit };
+    normalizedValue = valueToken.value;
   } else if (valueToken.kind === "NUMBER_RANGE") {
     const range = valueToken.original.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
     if (range) {
       quantity = { range: { low: Number(range[1]), high: Number(range[2]) }, unit };
+      normalizedValue = valueToken.original;
+    }
+  } else {
+    const fraction = EVENT_OFFSET_FRACTIONS.get(key(valueToken));
+    if (fraction !== undefined) {
+      quantity = { value: fraction, unit };
+      normalizedValue = fraction;
     }
   }
-  if (!quantity) return undefined;
+  if (!quantity || normalizedValue === undefined) return undefined;
   return {
     role: AdviceArgumentRole.Duration,
-    text: sourceFor(parts, start, cursor + 2, input),
-    normalized: valueToken.kind === "NUMBER_RANGE"
-      ? `${valueToken.original} ${unit}`
-      : `${valueToken.value} ${unit}`,
+    text: sourceFor(parts, start, unitIndex + 1, input),
+    normalized: `${normalizedValue} ${unit}`,
     quantity,
     span: { start: offset + parts[start].sourceStart, end: offset + unitToken.sourceEnd }
   };
@@ -488,6 +504,18 @@ function parseBareDurationArgument(
   offset: number
 ): AdviceArgument | undefined {
   return durationArgumentAt(parts, start, endExclusive, input, offset);
+}
+
+function partIndexAfterAbsoluteSourceEnd(
+  parts: Lexeme[],
+  sourceEnd: number,
+  offset: number
+): number | undefined {
+  const relative = sourceEnd - offset;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index].sourceEnd === relative) return index + 1;
+  }
+  return undefined;
 }
 
 function partIndexForAbsoluteSourceStart(
@@ -537,7 +565,7 @@ function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgumen
   return args;
 }
 const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const { parts, argumentStart, segmentEnd, input, options, relation, relIndex,
+  const { parts, argumentStart, segmentEnd, input, offset, options, relation, relIndex,
     relationTargetEnd, conditionalTail, duration, separableParticleIndex } = c;
   const objectEnd = separableParticleIndex !== undefined
     ? separableParticleIndex
@@ -561,9 +589,12 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       relation === AdviceRelation.Before || relation === AdviceRelation.After ||
       relation === AdviceRelation.With)
       ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+    const relationDuration = relation === AdviceRelation.Before || relation === AdviceRelation.After
+      ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
+      : undefined;
     const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
       ? AdviceArgumentRole.Activity : undefined;
-    pushArgument(args, time ?? argumentFromParts(
+    pushArgument(args, time ?? relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
     ));
   }
@@ -816,6 +847,19 @@ const BARE_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
   )) };
 };
+const DURATION_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const duration = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
+  const durationTailStart = duration?.span
+    ? partIndexAfterAbsoluteSourceEnd(c.parts, duration.span.end, c.offset)
+    : undefined;
+  const activityStart = c.relIndex >= 0
+    ? c.relIndex + 1
+    : durationTailStart;
+  const activity = activityStart !== undefined && activityStart < c.segmentEnd
+    ? argumentFromParts(c.parts, activityStart, c.segmentEnd, c.input, AdviceArgumentRole.Activity, c.options)
+    : undefined;
+  return { args: parsedArgs(duration, activity) };
+};
 const ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const configured = c.definition.argumentParserConfig;
   const matchedSurface = sourceFor(c.parts, c.actionIndex, c.argumentStart, c.input);
@@ -842,6 +886,7 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   "site-relation": SITE_RELATION_ARGUMENT_PARSER,
   duration: DURATION_ARGUMENT_PARSER,
   "bare-duration": BARE_DURATION_ARGUMENT_PARSER,
+  "duration-activity": DURATION_ACTIVITY_ARGUMENT_PARSER,
   activity: ACTIVITY_ARGUMENT_PARSER
 };
 function contextualActionCodings(definition: ActionDefinition, args: readonly AdviceArgument[]): FhirCoding[] {
@@ -883,16 +928,28 @@ function buildActionFrame(
     ? ACTION_RELATION_BY_TOKEN.get(key(parts.slice(relIndex, relIndex + 1)[0]))
     : undefined;
   const nextRelationIndex = relIndex >= 0 ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
+  const nextRelation = nextRelationIndex >= 0
+    ? ACTION_RELATION_BY_TOKEN.get(key(parts[nextRelationIndex]))
+    : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
   const conditionalTail = rawRelation === AdviceRelation.If ||
     rawRelation === AdviceRelation.Unless ||
-    rawRelation === AdviceRelation.When;
+    rawRelation === AdviceRelation.When ||
+    rawRelation === AdviceRelation.While;
+  const secondaryConditionalTail = nextRelation === AdviceRelation.If ||
+    nextRelation === AdviceRelation.Unless ||
+    nextRelation === AdviceRelation.When ||
+    nextRelation === AdviceRelation.While;
   const relation = conditionalTail ? undefined : rawRelation;
   const amount = definition.acceptsAmount
     ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
     : undefined;
   const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
-  let semanticEnd = conditionalTail && relIndex >= 0 ? relIndex : segmentEnd;
+  let semanticEnd = conditionalTail && relIndex >= 0
+    ? relIndex
+    : secondaryConditionalTail && nextRelationIndex >= 0
+      ? nextRelationIndex
+      : segmentEnd;
 
   const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
     DEFAULT_ACTION_ARGUMENT_PARSER;
@@ -1093,6 +1150,39 @@ function attachPreposedActionRelation(
   frame.sourceText = sourceText.slice(first.sourceStart, frame.span.end - baseOffset);
 }
 
+function actionTailStartsPhrase(parts: Lexeme[], index: number, phrases: ReadonlySet<string>): boolean {
+  for (const phrase of phrases) {
+    const words = phrase.split(/\s+/).filter(Boolean);
+    if (!words.length || index + words.length > parts.length) continue;
+    if (words.every((word, offset) => key(parts[index + offset]) === word)) return true;
+  }
+  return false;
+}
+
+function actionHasLocalRelationBefore(parts: Lexeme[], actionStart: number, index: number): boolean {
+  for (let cursor = actionStart + 1; cursor < index; cursor += 1) {
+    if (ACTION_RELATION_BY_TOKEN.has(key(parts[cursor]))) return true;
+  }
+  return false;
+}
+
+function actionTailIsRegimenModifier(
+  parts: Lexeme[],
+  actionStart: number,
+  index: number,
+  definition: ActionDefinition | undefined
+): boolean {
+  const token = key(parts[index]);
+  if (!token) return false;
+  if (PRN_LEADS.has(token) || actionTailStartsPhrase(parts, index, AS_NEEDED_LEAD_PHRASES)) {
+    return true;
+  }
+  const timing = Boolean(TIMING_ABBREVIATIONS[token] || WORD_FREQUENCIES[token] || EVENT_TIMING_TOKENS[token]);
+  if (!timing) return false;
+  if (definition?.argumentParser === "object-time") return false;
+  return !actionHasLocalRelationBefore(parts, actionStart, index);
+}
+
 export function parseInstructionActions(
   sourceText: string,
   baseOffset = 0,
@@ -1126,6 +1216,10 @@ export function parseInstructionActions(
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
       const currentKey = key(parts.slice(index, index + 1)[0]);
+      if (actionTailIsRegimenModifier(parts, actionStart, index, startingMatch?.definition)) {
+        end = index;
+        break;
+      }
       if (ACTION_SEQUENCE_MARKERS.has(currentKey)) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
         end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ? index - 1 : index;
@@ -1975,11 +2069,26 @@ const GRAPH_TIME_ARGUMENT_I18N: Partial<Record<EventTiming, { en: string; th: st
 function translatedArgument(arg: AdviceArgument, locale: string): string {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  const looseQuantity = (arg.text ?? arg.normalized ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s+(.+)$/u);
+  if (looseQuantity) {
+    const unit = normalizeUnit(looseQuantity[2]);
+    if (unit) return translatedQuantity({ value: Number(looseQuantity[1]), unit }, locale);
+  }
   if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
     const localized = GRAPH_TIME_ARGUMENT_I18N[arg.normalized as EventTiming];
     if (localized) return localized[language];
   }
-  return arg.i18n?.[language] ?? arg.normalized ?? arg.text;
+  const localizedArgument = arg.i18n?.[language];
+  if (localizedArgument) return localizedArgument;
+  if (arg.role === AdviceArgumentRole.Activity && arg.normalized) {
+    const action = resolveMedicationInstructionAction(arg.normalized);
+    if (action) {
+      if (language === "th") return action.i18n?.th ?? arg.text;
+      if (!/[\u0E00-\u0E7F]/u.test(arg.text)) return arg.text;
+      return action.display.charAt(0).toLowerCase() + action.display.slice(1);
+    }
+  }
+  return arg.normalized ?? arg.text;
 }
 
 function translatedArgumentConcept(arg: AdviceArgument, locale: string): string {
@@ -2021,9 +2130,19 @@ interface ActionRealizationContext {
 type ActionRealizer = (context: ActionRealizationContext) => string;
 const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   const object = c.theme ?? c.site ?? c.substance;
+  const objectArg = c.frame.args.find((arg) =>
+    arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+    arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance
+  );
+  const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
+  const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
+  const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
+  const amount = objectSource && amountSource && objectSource.includes(amountSource)
+    ? undefined
+    : c.amount;
   return c.thai
-    ? `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` ${c.duration}` : ""}`
-    : `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+    ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${c.duration ? ` ${c.duration}` : ""}`
+    : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
 };
 const SOURCE_FAITHFUL_REALIZER: ActionRealizer = (c) => {
   const sourceIsThai = /[\u0E00-\u0E7F]/.test(c.frame.sourceText);
@@ -2140,20 +2259,31 @@ const SEPARABLE_OBJECT_RELATION_REALIZER: ActionRealizer = (c) => {
     : `${alias.lead}${object ? ` ${object}` : ""} ${alias.particle}${target ? `${relationText}${target}` : ""}`;
 };
 const RELATION_DURATION_REALIZER: ActionRealizer = (c) => {
-  const object = c.theme ?? c.site;
+  const object = c.amount ?? c.theme ?? c.site;
   const target = c.duration ?? c.time ?? c.activity;
+  const thaiObject = object ? (/^[0-9A-Za-z]/u.test(object) ? ` ${object}` : object) : "";
+  const thaiTarget = target && /^[0-9A-Za-z]/u.test(target) ? ` ${target}` : target;
   if (target && c.frame.relation === AdviceRelation.After) return c.thai
-    ? `${c.label}${object ?? ""}หลัง${target}`
+    ? `${c.label}${thaiObject}หลัง${thaiTarget}`
     : `${c.label}${object ? ` ${object}` : ""} after ${target}`;
   if (target && c.frame.relation === AdviceRelation.Before) return c.thai
-    ? `${c.label}${object ?? ""}ก่อน${target}`
+    ? `${c.label}${thaiObject}ก่อน${thaiTarget}`
     : `${c.label}${object ? ` ${object}` : ""} before ${target}`;
-  return c.thai ? `${c.label}${object ?? ""}` : `${c.label}${object ? ` ${object}` : ""}`;
+  return c.thai ? `${c.label}${thaiObject}` : `${c.label}${object ? ` ${object}` : ""}`;
 };
 const LEAVE_DURATION_REALIZER: ActionRealizer = (c) => c.thai
   ? `${c.label}${c.duration ? ` ${c.duration}` : ""}`
   : `${c.label} on${c.duration ? ` for ${c.duration}` : ""}`;
 const DURATION_REALIZER: ActionRealizer = (c) => `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
+const DURATION_ACTIVITY_REALIZER: ActionRealizer = (c) => {
+  if (!c.activity) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
+  if (c.frame.relation === AdviceRelation.Between) {
+    return c.thai
+      ? `${c.label}${c.duration ? ` ${c.duration}` : ""} ระหว่าง${c.activity}`
+      : `${c.label}${c.duration ? ` ${c.duration}` : ""} between ${c.activity}`;
+  }
+  return `${c.label}${c.duration ? ` ${c.duration}` : ""} ${c.activity}`;
+};
 const ACTIVITY_REALIZER: ActionRealizer = (c) => {
   const activityArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Activity);
   const suppressThaiActivity = Boolean(
@@ -2222,6 +2352,7 @@ const ACTION_REALIZERS: Record<MedicationInstructionActionRealizer, ActionRealiz
   "relation-duration": RELATION_DURATION_REALIZER,
   "leave-duration": LEAVE_DURATION_REALIZER,
   duration: DURATION_REALIZER,
+  "duration-activity": DURATION_ACTIVITY_REALIZER,
   activity: ACTIVITY_REALIZER
 };
 
@@ -2524,6 +2655,80 @@ function sourceTextCoversFrameMeaning(frame: AdviceFrame): boolean {
   });
 }
 
+function conditionRelationBody(text: string, kind: AdviceRelation): {
+  body: string;
+  persists: boolean;
+} | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  let body = trimmed;
+  switch (kind) {
+    case AdviceRelation.If:
+      body = body.replace(/^(?:if\s+|ถ้า|หาก)/iu, "").trim();
+      break;
+    case AdviceRelation.Unless:
+      body = body.replace(/^(?:unless\s+|เว้นแต่)/iu, "").trim();
+      break;
+    case AdviceRelation.When:
+      body = body.replace(/^(?:when\s+|เมื่อ)/iu, "").trim();
+      break;
+    case AdviceRelation.While:
+      body = body.replace(/^(?:while\s+|ขณะที่|ขณะ)/iu, "").trim();
+      break;
+    default:
+      return undefined;
+  }
+  if (!body) return undefined;
+  let persists = false;
+  const englishPersistence = body.match(/^(.+?)\s+(?:persists?|continues?|remains?)$/iu);
+  if (englishPersistence) {
+    body = englishPersistence[1].trim();
+    persists = true;
+  } else if (/^ยัง/u.test(body)) {
+    body = body.replace(/^ยัง/u, "").trim();
+    persists = true;
+  }
+  return body ? { body, persists } : undefined;
+}
+
+function localizeConditionRelationText(
+  relation: CanonicalInstructionRelation,
+  sourceLocale: string,
+  targetLocale: string
+): string | undefined {
+  const text = trimSemanticText(relation.text ?? "");
+  if (!text) return undefined;
+  const sourceLanguage = sourceLocale.toLowerCase().startsWith("th") ? "th" : "en";
+  const targetLanguage = targetLocale.toLowerCase().startsWith("th") ? "th" : "en";
+  if (sourceLanguage === targetLanguage) return text;
+  const parsed = conditionRelationBody(text, relation.kind);
+  if (!parsed) return text;
+  const definition = resolveSymptomDefinition(parsed.body);
+  if (!definition) return text;
+  const symptom = targetLanguage === "th"
+    ? definition.i18n?.th ?? definition.text ?? definition.coding?.display
+    : definition.text ?? definition.coding?.display;
+  if (!symptom) return text;
+  const normalizedSymptom = targetLanguage === "en"
+    ? symptom.charAt(0).toLowerCase() + symptom.slice(1)
+    : symptom;
+  const body = parsed.persists
+    ? targetLanguage === "th"
+      ? `ยัง${definition.conditionI18n?.th ?? normalizedSymptom}`
+      : `${normalizedSymptom} persists`
+    : targetLanguage === "th"
+      ? definition.conditionI18n?.th ?? normalizedSymptom
+      : normalizedSymptom;
+  const lead = targetLanguage === "th"
+    ? relation.kind === AdviceRelation.If ? "ถ้า"
+      : relation.kind === AdviceRelation.Unless ? "เว้นแต่"
+        : relation.kind === AdviceRelation.When ? "เมื่อ"
+          : relation.kind === AdviceRelation.While ? "ขณะที่"
+            : ""
+    : relation.kind;
+  return `${lead}${targetLanguage === "en" ? " " : ""}${body}`.trim();
+}
+
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
@@ -2633,7 +2838,11 @@ export function realizeInstructionGraph(
       );
     });
     if (representedByTarget) continue;
-    const relationText = trimSemanticText(relation.text);
+    const relationText = localizeConditionRelationText(
+      relation,
+      graph.sourceLocale ?? "en",
+      locale
+    );
     if (relationText) {
       nodes.push({
         start: relation.span.start,

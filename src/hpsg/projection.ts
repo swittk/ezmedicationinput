@@ -22,6 +22,9 @@ function applySchedule(
   if (schedule.count !== undefined) {
     state.count = schedule.count;
   }
+  if (schedule.countMax !== undefined) {
+    state.countMax = schedule.countMax;
+  }
   if (schedule.duration !== undefined) {
     state.duration = schedule.duration;
   }

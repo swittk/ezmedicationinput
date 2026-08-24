@@ -278,6 +278,18 @@ describe("suggestSig", () => {
     }
   });
 
+  it("does not invent oral-tablet trajectories for route-ambiguous specialty verbs", () => {
+    expect(suggestSig("inhale", { limit: 10 })).toEqual(expect.arrayContaining([
+      "inhale 1 puff",
+      "inhale once daily"
+    ]));
+    for (const action of ["instill", "spray", "inject", "insert"]) {
+      const suggestions = suggestSig(action, { limit: 10 });
+      expect(suggestions.some((value) => /\b(?:tab|tablet)\b/i.test(value))).toBe(false);
+      expect(suggestions.some((value) => value.includes("before meals") || value.includes("after meals"))).toBe(false);
+    }
+  });
+
   it("continues lexical completions into the next semantic slot", () => {
     const suggestions = suggestSig("กิน ครั้งล", { locale: "th", limit: 10 });
     expect(suggestions[0]).toBe("กิน ครั้งละ");

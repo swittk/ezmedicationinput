@@ -245,6 +245,7 @@ function cleanupClause(state: ParserState): void {
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
     if (
       schedule.count === undefined &&
+      schedule.countMax === undefined &&
       schedule.duration === undefined &&
       schedule.durationMax === undefined &&
       schedule.durationUnit === undefined &&

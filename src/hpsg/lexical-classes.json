@@ -746,6 +746,15 @@
     "additional",
     "extra"
   ],
+  "maximumCountLeadTokens": [
+    "max",
+    "maximum"
+  ],
+  "occurrenceCountWords": [
+    "dose",
+    "doses",
+    "ครั้ง"
+  ],
   "frequencySimpleWords": {
     "once": 1,
     "twice": 2,
@@ -1104,6 +1113,28 @@
     "when",
     "while"
   ],
+  "administrationWindowInstructions": [
+    {
+      "parts": ["while", "awake"],
+      "text": "while awake",
+      "i18n": { "th": "ขณะตื่น" }
+    },
+    {
+      "parts": ["while", "awake", "only"],
+      "text": "while awake only",
+      "i18n": { "th": "เฉพาะขณะตื่น" }
+    },
+    {
+      "parts": ["only", "while", "awake"],
+      "text": "while awake only",
+      "i18n": { "th": "เฉพาะขณะตื่น" }
+    },
+    {
+      "parts": ["before", "exercise"],
+      "text": "before exercise",
+      "i18n": { "th": "ก่อนออกกำลังกาย" }
+    }
+  ],
   "thaiMethodAuxiliaryVerbs": [
     "give"
   ],
@@ -1210,6 +1241,7 @@
     "when": "when",
     "while": "while",
     "during": "during",
+    "between": "between",
     "until": "until"
   },
   "instructionDurationUnits": {
@@ -1235,6 +1267,26 @@
     "around"
   ],
   "instructionQuantityUnitLabels": {
+    "tab": {
+      "th": "เม็ด",
+      "enOne": "tablet",
+      "enOther": "tablets"
+    },
+    "cap": {
+      "th": "แคปซูล",
+      "enOne": "capsule",
+      "enOther": "capsules"
+    },
+    "drop": {
+      "th": "หยด",
+      "enOne": "drop",
+      "enOther": "drops"
+    },
+    "puff": {
+      "th": "พัฟ",
+      "enOne": "puff",
+      "enOther": "puffs"
+    },
     "mL": {
       "th": "มิลลิลิตร",
       "enOne": "mL",

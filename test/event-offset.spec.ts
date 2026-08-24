@@ -28,6 +28,19 @@ describe("relative event-offset grammar", () => {
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
 
+  it.each([
+    ["take 1 cap 30 min before breakfast", "offset", 30],
+    ["take 1 cap half an hour before breakfast", "offset", 30],
+    ["take 1 cap at least half an hour before breakfast", "offsetMin", 30]
+  ] as const)("parses quantity-first event offsets in %s", (source, field, value) => {
+    const parsed = parseSig(source);
+    const schedule = parsed.meta.canonical.clauses[0]?.schedule;
+    expect(schedule?.[field]).toBe(value);
+    expect(schedule?.when).toEqual(["ACM"]);
+    expect(schedule?.duration).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
   it("preserves sub-minute exact offsets without writing an invalid FHIR offset", () => {
     const parsed = parseSig("take before meals half a minute");
     expect(parsed.longText).toBe("Take the medication orally 30 seconds before meals.");

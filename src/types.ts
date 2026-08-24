@@ -340,6 +340,7 @@ export interface FhirPeriod {
 
 export interface FhirTimingRepeat extends FhirElement {
   count?: number;
+  countMax?: number;
   boundsDuration?: FhirQuantity;
   boundsPeriod?: FhirPeriod;
   boundsRange?: FhirRange;
@@ -536,6 +537,7 @@ export enum AdviceRelation {
   Before = "before",
   After = "after",
   During = "during",
+  Between = "between",
   Then = "then",
   Until = "until",
   For = "for",
@@ -806,6 +808,7 @@ export type MedicationInstructionActionArgumentParser =
   | "site-relation"
   | "duration"
   | "bare-duration"
+  | "duration-activity"
   | "activity";
 
 export type MedicationInstructionActionRealizer =
@@ -825,6 +828,7 @@ export type MedicationInstructionActionRealizer =
   | "relation-duration"
   | "leave-duration"
   | "duration"
+  | "duration-activity"
   | "activity";
 
 export interface MedicationInstructionActionContextualCodingRule {
@@ -1150,6 +1154,7 @@ export interface CanonicalMethodExpr {
 export interface CanonicalScheduleExpr {
   timingCode?: string;
   count?: number;
+  countMax?: number;
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
@@ -1186,6 +1191,7 @@ export interface CanonicalPrnExpr {
 
 export interface CanonicalAdditionalInstructionExpr {
   text?: string;
+  i18n?: Record<string, string>;
   coding?: FhirCoding;
   frames?: AdviceFrame[];
   evidence?: CanonicalEvidence[];

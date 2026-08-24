@@ -185,6 +185,14 @@ export class ParserState {
     this.ensureSchedule().count = value;
   }
 
+  get countMax(): number | undefined {
+    return this.clause.schedule?.countMax;
+  }
+
+  set countMax(value: number | undefined) {
+    this.ensureSchedule().countMax = value;
+  }
+
   get duration(): number | undefined {
     return this.clause.schedule?.duration;
   }

@@ -175,6 +175,7 @@ function applyRouteSiteDefault(state: ParserState): void {
 function hasStructuredTiming(state: ParserState): boolean {
   return Boolean(
     state.count !== undefined ||
+    state.countMax !== undefined ||
     state.duration !== undefined ||
     state.durationMax !== undefined ||
     state.durationUnit !== undefined ||

@@ -1084,6 +1084,22 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
+      names: ["affected ear", "affected ears", "หูข้างที่มีอาการ", "หูที่มีอาการ"],
+      definition: {
+        text: "affected ear",
+        routeHint: RouteCode["Otic route"],
+        i18n: { th: "หูข้างที่มีอาการ" }
+      }
+    },
+    {
+      names: ["affected eye", "affected eyes", "ตาข้างที่มีอาการ", "ตาที่มีอาการ"],
+      definition: {
+        text: "affected eye",
+        routeHint: RouteCode["Ophthalmic route"],
+        i18n: { th: "ตาข้างที่มีอาการ" }
+      }
+    },
+    {
       names: [
         "affected area", "affected areas", "affected site",
         "painful area", "painful spot", "painful site", "area that hurts", "area that is painful", "where it hurts",
@@ -1933,7 +1949,8 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   wake: EventTiming.Wake,
   waking: EventTiming.Wake,
   stat: EventTiming.Immediate,
-  immediate: EventTiming.Immediate
+  immediate: EventTiming.Immediate,
+  now: EventTiming.Immediate
 };
 
 const MEAL_KEYWORD_ENTRIES: Array<

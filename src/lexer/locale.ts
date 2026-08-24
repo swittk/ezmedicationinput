@@ -78,6 +78,11 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "เมื่อ": "when",
   "ขณะ": "while",
   "ขณะที่": "while",
+  "ตื่น": "awake",
+  "เฉพาะ": "only",
+  "ออกกำลังกาย": "exercise",
+  "การออกกำลังกาย": "exercise",
+  "ระหว่าง": "between",
   "จนกว่า": "until",
   "เว้นแต่": "unless",
 
@@ -212,6 +217,7 @@ for (const daySurface of Object.keys(DAY_OF_WEEK_TOKENS)) {
   }
 }
 
+registerKnownThaiTerms(Object.keys(THAI_LEXEME_ALIASES));
 registerKnownThaiTerms(Object.keys(DEFAULT_BODY_SITE_SNOMED));
 registerKnownThaiTerms(Object.keys(DEFAULT_SYMPTOM_DEFINITIONS));
 registerKnownThaiTerms(Object.keys(DEFAULT_ROUTE_SYNONYMS));
@@ -306,6 +312,51 @@ function mergeSourceSpan(
     sourceText,
     derived: true
   };
+}
+
+const THAI_GRAMMAR_PREFIXES = ["ระหว่าง", "ก่อน", "หลัง", "เมื่อ", "ขณะ"] as const;
+
+function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
+  const result: LexToken[] = [];
+  for (const token of tokens) {
+    if (token.kind !== LexKind.Word || isKnownThaiDomainTerm(token.lower)) {
+      result.push({ ...token });
+      continue;
+    }
+    const prefix = THAI_GRAMMAR_PREFIXES.find((candidate) =>
+      token.lower.startsWith(candidate) && token.lower.length > candidate.length
+    );
+    if (!prefix) {
+      result.push({ ...token });
+      continue;
+    }
+    const remainder = token.lower.slice(prefix.length);
+    const remainderCanonical = canonicalThaiLexeme(remainder);
+    if (!isKnownThaiDomainTerm(remainder) && !remainderCanonical) {
+      result.push({ ...token });
+      continue;
+    }
+    const splitAt = token.sourceStart + prefix.length;
+    result.push({
+      ...token,
+      original: token.original.slice(0, prefix.length),
+      lower: prefix,
+      canonical: canonicalThaiLexeme(prefix),
+      sourceEnd: splitAt,
+      sourceText: token.original.slice(0, prefix.length),
+      derived: true
+    });
+    result.push({
+      ...token,
+      original: token.original.slice(prefix.length),
+      lower: remainder,
+      canonical: remainderCanonical,
+      sourceStart: splitAt,
+      sourceText: token.original.slice(prefix.length),
+      derived: true
+    });
+  }
+  return result;
 }
 
 function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[] {
@@ -447,7 +498,7 @@ export function listMedicationLocaleLexemes(locale: string): MedicationLocaleLex
 }
 
 export function applyLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
-  const prepared = splitThaiDistributiveUnitTokens(tokens);
+  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(tokens));
   const normalized: LexToken[] = [];
   let cursor = 0;
 

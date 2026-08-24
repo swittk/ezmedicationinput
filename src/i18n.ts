@@ -14,6 +14,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { ADMINISTRATION_WINDOW_INSTRUCTIONS } from "./hpsg/lexical-classes";
 import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
@@ -72,6 +73,12 @@ export interface SigLocalizationConfig
   locale?: string;
   inherit?: string;
 }
+
+const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
+  ADMINISTRATION_WINDOW_INSTRUCTIONS
+    .filter((entry) => entry.i18n?.th)
+    .map((entry) => [entry.text.toLowerCase().trim(), entry.i18n!.th!] as const)
+);
 
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
 
@@ -485,6 +492,21 @@ export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   skin: "ผิวหนัง",
   hair: "เส้นผม"
 };
+
+const THAI_SITE_DEFINITION_TRANSLATIONS: Record<string, string> = (() => {
+  const translations: Record<string, string> = {};
+  for (const { names, definition } of DEFAULT_BODY_SITE_SNOMED_SOURCE) {
+    const translated = definition.i18n?.th?.trim();
+    if (!translated) continue;
+    for (const name of names) {
+      const normalized = normalizeBodySiteKey(name);
+      if (normalized && !translations[normalized]) translations[normalized] = translated;
+    }
+    const canonical = normalizeBodySiteKey(definition.text ?? "");
+    if (canonical && !translations[canonical]) translations[canonical] = translated;
+  }
+  return translations;
+})();
 
 const THAI_SITE_CODE_TRANSLATIONS: Record<string, string> = (() => {
   const translations: Record<string, string> = {};
@@ -1073,7 +1095,7 @@ function describeStandaloneOccurrenceCountThai(
   schedule: CanonicalScheduleExpr | undefined
 ): string | undefined {
   const count = schedule?.count;
-  if (!count || count <= 0) {
+  if (!count || count <= 0 || schedule?.countMax !== undefined) {
     return undefined;
   }
   if (
@@ -1442,6 +1464,10 @@ function translateSiteThai(
       return translatedByCode;
     }
   }
+  const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized];
+  if (definitionTranslation) {
+    return definitionTranslation;
+  }
   const direct = THAI_SITE_TRANSLATIONS[normalized];
   if (direct) {
     return direct;
@@ -1634,7 +1660,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
     }
     parts.push(days.join(","));
   }
-  if (schedule.count !== undefined) {
+  if (schedule.countMax !== undefined) {
+    parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
+  } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   const durationShort = formatDurationShortThai(schedule);
@@ -1758,8 +1786,9 @@ function formatLongThai(
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
-  const countPart =
-    schedule.count !== undefined && !standaloneOccurrenceCount
+  const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
+    ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
+    : schedule.count !== undefined && !standaloneOccurrenceCount
       ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
       : undefined;
   const durationPart = describeDurationThai(schedule);
@@ -1947,7 +1976,7 @@ function formatLongThai(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
-    schedule.count !== undefined || schedule.timingCode ||
+    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.offset !== undefined ||
     schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
@@ -2005,8 +2034,10 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
       phrases.push("ขณะท้องว่าง");
       continue;
     }
-    let text = instruction.text ?? instruction.coding?.display;
-    if (instruction.coding?.code) {
+    let text = instruction.i18n?.th ??
+      (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
+      instruction.text ?? instruction.coding?.display;
+    if (!instruction.i18n?.th && instruction.coding?.code) {
       const definition = findAdditionalInstructionDefinitionByCoding(
         instruction.coding.system ?? "http://snomed.info/sct",
         instruction.coding.code

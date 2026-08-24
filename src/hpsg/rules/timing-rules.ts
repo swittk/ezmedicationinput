@@ -42,6 +42,8 @@ import {
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
+  MAXIMUM_COUNT_LEAD_TOKENS,
+  OCCURRENCE_COUNT_WORDS,
   RANGE_CONNECTORS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
   SLEEP_EVENT_ALIASES,
@@ -962,6 +964,11 @@ function eventOffsetLeadLength(
   return 0;
 }
 
+const EVENT_OFFSET_BOUND_LEADS = new Set([
+  ...EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES.map((sequence) => sequence[0]),
+  ...EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES.map((sequence) => sequence[0])
+].filter((value): value is string => Boolean(value)));
+
 function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undefined {
   const minutes = unit === FhirPeriodUnit.Minute
     ? value
@@ -977,6 +984,89 @@ function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undef
   const roundedSeconds = Math.round(seconds);
   if (Math.abs(seconds - roundedSeconds) > 1e-9) return undefined;
   return roundedSeconds / 60;
+}
+
+/**
+ * Quantity-first event offsets are the ordinary English inverse of
+ * relation-first forms: `30 min before breakfast`, `half an hour after food`.
+ * They project to the same canonical event-offset feature as `before meals
+ * 30 minutes`, so ordering is grammar rather than a separate semantic model.
+ */
+export function quantityFirstEventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.eventOffset.quantityFirst", (context, start) => {
+    const first = context.tokens[start];
+    if (!first || context.state.consumed.has(first.index)) return [];
+    const firstLower = normalizeTokenLower(first);
+    const canStartWithValue =
+      (first.kind === LexKind.Number && first.value !== undefined) ||
+      EVENT_OFFSET_FRACTIONS.has(firstLower);
+    if (!canStartWithValue && !EVENT_OFFSET_BOUND_LEADS.has(firstLower)) return [];
+    let cursor = start;
+    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
+    const maximumLead = minimumLead
+      ? 0
+      : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
+    const qualifierLength = minimumLead || maximumLead;
+    cursor += qualifierLength;
+
+    const valueToken = context.tokens[cursor];
+    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
+    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
+      ? valueToken.value
+      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
+    if (value === undefined) return [];
+
+    let unitIndex = cursor + 1;
+    const possibleArticle = context.tokens[unitIndex];
+    if (possibleArticle && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(possibleArticle))) {
+      unitIndex += 1;
+    }
+    const unitToken = context.tokens[unitIndex];
+    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
+    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
+    if (!unit) return [];
+    const minutes = eventOffsetMinutes(value, unit);
+    if (minutes === undefined) return [];
+
+    const relationIndex = unitIndex + 1;
+    const relationToken = context.tokens[relationIndex];
+    if (!relationToken || context.state.consumed.has(relationToken.index)) return [];
+    const relation = mealRelationFromToken(normalizeTokenLower(relationToken));
+    if (relation !== "before" && relation !== "after") return [];
+
+    const relatedExpression = eventExpressionPartsAt(context, relationIndex + 1);
+    const resolvedEvent = resolveEventTimingExpression(relatedExpression.parts);
+    if (!resolvedEvent) return [];
+    const timing = mealTimingForRelation(relation, resolvedEvent.timing);
+    if (!timing) return [];
+    const eventTokens = relatedExpression.members.slice(0, resolvedEvent.length);
+
+    const tokens = [
+      ...context.tokens.slice(start, cursor),
+      valueToken,
+      ...(unitIndex > cursor + 1 ? [possibleArticle] : []),
+      unitToken,
+      relationToken,
+      ...eventTokens
+    ].filter((token): token is Token => Boolean(token));
+    const schedule = minimumLead
+      ? { when: [timing], offsetMin: minutes }
+      : maximumLead
+        ? { when: [timing], offsetMax: minutes }
+        : { when: [timing], offset: minutes };
+
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.eventOffset.quantityFirst",
+      tokens,
+      synsem: {
+        head: { schedule },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 29 + tokens.length
+    })];
+  });
 }
 
 /**
@@ -1355,6 +1445,30 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
+    if (MAXIMUM_COUNT_LEAD_TOKENS.has(lower)) {
+      const valueToken = context.tokens[start + 1];
+      const occurrenceToken = context.tokens[start + 2];
+      if (
+        valueToken && !context.state.consumed.has(valueToken.index) &&
+        valueToken.kind === LexKind.Number && valueToken.value !== undefined && valueToken.value >= 1 &&
+        Number.isInteger(valueToken.value) &&
+        occurrenceToken && !context.state.consumed.has(occurrenceToken.index) &&
+        OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(occurrenceToken))
+      ) {
+        signs.push(lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.count.maximum",
+          tokens: [token, valueToken, occurrenceToken],
+          synsem: {
+            head: { schedule: { count: 1, countMax: valueToken.value } },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 18
+        }));
+        return signs;
+      }
+    }
     if (token.kind === LexKind.Number && token.value !== undefined) {
       const unitToken = context.tokens[start + 1];
       const previousToken = context.tokens[start - 1];

@@ -479,7 +479,7 @@ function describeStandaloneOccurrenceCount(
   schedule: CanonicalScheduleExpr | undefined
 ): string | undefined {
   const count = schedule?.count;
-  if (!count || count <= 0) {
+  if (!count || count <= 0 || schedule?.countMax !== undefined) {
     return undefined;
   }
   if (
@@ -972,7 +972,9 @@ function formatShort(clause: CanonicalSigClause): string {
     }
     parts.push(times.join(","));
   }
-  if (schedule.count !== undefined) {
+  if (schedule.countMax !== undefined) {
+    parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
+  } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   const durationShort = formatDurationShort(schedule);
@@ -1053,8 +1055,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
-  const countPart =
-    schedule.count !== undefined && !standaloneOccurrenceCount
+  const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
+    ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
+    : schedule.count !== undefined && !standaloneOccurrenceCount
       ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
       : undefined;
   const durationPart = describeDuration(schedule);
@@ -1265,7 +1268,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
-    schedule.count !== undefined || schedule.timingCode ||
+    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.offset !== undefined ||
     schedule.offsetMin !== undefined || schedule.offsetMax !== undefined

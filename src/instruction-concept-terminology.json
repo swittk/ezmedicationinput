@@ -116,6 +116,22 @@
       ]
     },
     {
+      "code": "eye_drop_administration",
+      "role": "activity",
+      "display": "eye drops",
+      "i18n": {
+        "th": "การหยอดตา"
+      },
+      "aliases": [
+        "eye drop",
+        "eye drops",
+        "eyedrop",
+        "eyedrops",
+        "การหยอดตา",
+        "ยาหยอดตา"
+      ]
+    },
+    {
       "code": "use",
       "role": "activity",
       "display": "use",

@@ -487,8 +487,8 @@
         "รอ"
       ],
       "procedural": true,
-      "argumentParser": "bare-duration",
-      "realizer": "duration"
+      "argumentParser": "duration-activity",
+      "realizer": "duration-activity"
     },
     {
       "code": "stop",
@@ -580,6 +580,7 @@
         }
       ],
       "primaryAdministrationHead": true,
+      "realizer": "relation-duration",
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "738992009",
@@ -595,6 +596,7 @@
       },
       "aliases": [
         "swallow",
+        "swallowing",
         "กลืน"
       ],
       "procedural": true,
@@ -696,7 +698,11 @@
         "rinse your mouth",
         "บ้วนปาก"
       ],
-      "procedural": true
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration"
     },
     {
       "code": "spit",
@@ -1136,7 +1142,8 @@
         "i18n": {
           "th": "สูด"
         }
-      }
+      },
+      "verbRouteHint": "447694001"
     },
     {
       "code": "inject",
@@ -1508,6 +1515,24 @@
       "procedural": true
     },
     {
+      "code": "remain-upright",
+      "semanticClass": "position",
+      "display": "Remain upright",
+      "i18n": {
+        "th": "อยู่ในท่าตั้งตรง"
+      },
+      "aliases": [
+        "remain upright",
+        "stay upright",
+        "sit upright",
+        "อยู่ในท่าตั้งตรง",
+        "นั่งตัวตรง"
+      ],
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
+    },
+    {
       "code": "keep",
       "semanticClass": "retain",
       "display": "Keep",
@@ -1795,9 +1820,13 @@
       },
       "aliases": [
         "repeat",
-        "ทำซ้ำ"
+        "ทำซ้ำ",
+        "กินซ้ำ",
+        "รับประทานซ้ำ",
+        "ใช้ซ้ำ"
       ],
-      "procedural": true
+      "procedural": true,
+      "realizer": "relation-duration"
     }
   ]
 }

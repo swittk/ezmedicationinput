@@ -140,6 +140,7 @@ export interface HpsgScheduleFeature {
   attachmentClass?: "administration" | "procedure";
   timingCode?: string;
   count?: number;
+  countMax?: number;
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;

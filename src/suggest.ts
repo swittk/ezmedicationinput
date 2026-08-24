@@ -1175,12 +1175,12 @@ function trajectoryScheduleSuffixes(locale: "th" | "en", routeCode?: RouteCode):
       `${after}${meal}`,
       `${before}${sleep}`,
     ];
-    return routeCode && routeCode !== RouteCode["Oral route"]
+    return routeCode !== RouteCode["Oral route"]
       ? [all[0], all[1], all[4]]
       : all;
   }
   const all = ["once daily", "twice daily", "before meals", "after meals", "at bedtime"];
-  return routeCode && routeCode !== RouteCode["Oral route"]
+  return routeCode !== RouteCode["Oral route"]
     ? [all[0], all[1], all[4]]
     : all;
 }
@@ -1249,7 +1249,8 @@ function semanticTrajectorySuggestions(
 
   let doseCandidate: string | undefined;
   if (supportsDose && !clause.dose) {
-    const unit = trajectoryUnitForRoute(routeCode, options);
+    const contextUnit = inferUnitFromContext(options?.context ?? undefined);
+    const unit = routeCode || contextUnit ? trajectoryUnitForRoute(routeCode, options) : undefined;
     if (unit) {
       const unitSurface = locale === "th"
         ? localeLexemeByCanonical("th", unit) ?? unit
@@ -1275,7 +1276,8 @@ function semanticTrajectorySuggestions(
     }
   }
 
-  if (!clause.prn?.enabled && suggestions.length < limit) {
+  if (!clause.prn?.enabled && suggestions.length < limit &&
+    (routeCode === RouteCode["Oral route"] || topical)) {
     const reason = representativePrnReason(options, locale, topical);
     if (reason) {
       if (locale === "th") {

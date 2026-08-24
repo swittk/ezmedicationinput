@@ -25,6 +25,7 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_START_WORDS,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
   PRN_CONTEXTUAL_REASON_LEADS,
@@ -72,6 +73,7 @@ function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {
   return (
     /^x[0-9]+(?:\.[0-9]+)?$/.test(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
+    MAXIMUM_COUNT_LEAD_TOKENS.has(lower) ||
     (isPunctuation(lower) && !PRN_REASON_COORDINATORS.has(lower)) ||
     Boolean(
       isMedicationAdministrationMethod(lower, context.options) ||

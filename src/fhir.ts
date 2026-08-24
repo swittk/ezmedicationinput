@@ -522,6 +522,11 @@ export function canonicalToFhir(
     repeat.count = schedule.count;
     hasRepeat = true;
   }
+  if (schedule?.countMax !== undefined) {
+    repeat.count = repeat.count ?? 1;
+    repeat.countMax = schedule.countMax;
+    hasRepeat = true;
+  }
   if (schedule?.duration !== undefined && schedule.durationUnit) {
     if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
       repeat.boundsRange = buildFhirBoundsRange(
@@ -693,12 +698,13 @@ export function canonicalToFhir(
 
   const additionalInstructions: Array<{
     text: string;
+    i18n?: Record<string, string>;
     coding?: { system?: string; code?: string; display?: string };
   }> = [];
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
     if (!text) continue;
-    additionalInstructions.push({ text, coding: instruction.coding });
+    additionalInstructions.push({ text, i18n: instruction.i18n, coding: instruction.coding });
   }
   for (const action of clause.instructionGraph?.actions ?? []) {
     if (action.polarity !== AdvicePolarity.Negate) continue;
@@ -714,8 +720,12 @@ export function canonicalToFhir(
   if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
     for (const instruction of additionalInstructions) {
+      const textElement = options?.includeTranslationExtensions
+        ? buildTranslationPrimitiveElement(instruction.i18n)
+        : undefined;
       dosage.additionalInstruction.push({
         text: instruction.text,
+        ...(textElement ? { _text: textElement } : {}),
         coding: instruction.coding?.code
           ? [
             {
@@ -862,6 +872,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
+    repeat?.countMax !== undefined ||
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
@@ -881,6 +892,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     clause.schedule = {
       timingCode: dosage.timing?.code?.coding?.[0]?.code,
       count: repeat?.count,
+      countMax: repeat?.countMax,
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
@@ -960,6 +972,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       const coding = instruction.coding?.find((code) => Boolean(code.code));
       clause.additionalInstructions.push({
         text: instruction.text,
+        i18n: codeableConceptTranslationI18n(instruction, coding).text,
         coding: coding?.code
           ? {
             code: coding.code,
@@ -994,6 +1007,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     : [];
   state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
   state.count = dosage.timing?.repeat?.count;
+  state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;

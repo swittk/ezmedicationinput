@@ -661,9 +661,14 @@ function resolveDayFilteredSeriesRepeat(
   }
 }
 
+function repeatOccurrenceCap(repeat: FhirTimingRepeat): number | undefined {
+  const raw = repeat.countMax ?? repeat.count;
+  return raw === undefined ? undefined : Math.max(0, Math.floor(raw));
+}
+
 function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
   return (
-    repeat.count === 1 &&
+    repeatOccurrenceCap(repeat) === 1 &&
     repeat.frequency === undefined &&
     repeat.frequencyMax === undefined &&
     repeat.period === undefined &&
@@ -1076,7 +1081,7 @@ export function nextDueDoses(
     orderedAt &&
     timing &&
     repeat &&
-    repeat.count !== undefined
+    repeatOccurrenceCap(repeat) !== undefined
   ) {
     priorCount = derivePriorCountFromHistory(
       timing,
@@ -1095,9 +1100,7 @@ export function nextDueDoses(
     return [];
   }
 
-  const rawCount = repeat.count;
-  const normalizedCount =
-    rawCount === undefined ? undefined : Math.max(0, Math.floor(rawCount));
+  const normalizedCount = repeatOccurrenceCap(repeat);
   if (normalizedCount === 0) {
     return [];
   }
@@ -1327,9 +1330,7 @@ function derivePriorCountFromHistory(
     return 0;
   }
 
-  const normalizedCount = repeat.count === undefined
-    ? undefined
-    : Math.max(0, Math.floor(repeat.count));
+  const normalizedCount = repeatOccurrenceCap(repeat);
 
   if (normalizedCount === 0) {
     return 0;
@@ -1845,9 +1846,7 @@ function countScheduleEvents(
   const repeat = timing?.repeat;
   if (!timing || !repeat) return 0;
 
-  const normalizedCount = repeat.count === undefined
-    ? undefined
-    : Math.max(0, Math.floor(repeat.count));
+  const normalizedCount = repeatOccurrenceCap(repeat);
   if (normalizedCount === 0) {
     return 0;
   }

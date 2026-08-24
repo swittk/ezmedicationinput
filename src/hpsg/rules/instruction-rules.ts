@@ -17,6 +17,7 @@ import {
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
   ACTION_SEQUENCE_MARKERS,
+  ADMINISTRATION_WINDOW_INSTRUCTIONS,
   EVENT_ARTICLE_TOKENS,
   EVENT_PREPOSITIONS,
   FREE_TEXT_DIRECTIVE_STARTS,
@@ -45,6 +46,15 @@ import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
 
 const INSTRUCTION_PREDICATES = ["take", "apply", "use"] as const;
+const ADMINISTRATION_WINDOWS_BY_FIRST = new Map<string, typeof ADMINISTRATION_WINDOW_INSTRUCTIONS>();
+for (const definition of ADMINISTRATION_WINDOW_INSTRUCTIONS) {
+  const first = definition.parts[0];
+  if (!first) continue;
+  const existing = ADMINISTRATION_WINDOWS_BY_FIRST.get(first) ?? [];
+  existing.push(definition);
+  ADMINISTRATION_WINDOWS_BY_FIRST.set(first, existing);
+}
+
 
 function startsEventTimingPhrase(context: HpsgClauseContext, index: number): boolean {
   const lead = context.tokens[index];
@@ -387,12 +397,46 @@ function bodyParsesAsStyleInstruction(
 }
 
 
+function administrationWindowInstructionAt(
+  context: HpsgClauseContext,
+  start: number
+) {
+  const first = context.tokens[start];
+  if (!first || context.state.consumed.has(first.index)) return undefined;
+  const candidates = ADMINISTRATION_WINDOWS_BY_FIRST.get(normalizeTokenLower(first));
+  if (!candidates) return undefined;
+  for (const definition of candidates) {
+    const tokens = tokensAvailable(context, start, definition.parts.length);
+    if (!tokens) continue;
+    if (!tokens.every((token, index) => normalizeTokenLower(token) === definition.parts[index])) continue;
+    return lexicalSign({
+      type: "instruction-sign",
+      rule: "hpsg.lex.instruction.administrationWindow",
+      tokens,
+      synsem: {
+        head: {},
+        valence: {
+          instructions: [{
+            text: definition.text,
+            i18n: definition.i18n ? { ...definition.i18n } : undefined
+          }]
+        },
+        cont: { clauseKind: "administration" }
+      },
+      score: 24 + tokens.length
+    });
+  }
+  return undefined;
+}
+
 export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.instruction", (context, start) => {
     const first = context.tokens[start];
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
+    const administrationWindow = administrationWindowInstructionAt(context, start);
+    if (administrationWindow) return [administrationWindow];
 
     let cursor = start;
     const consumed: Token[] = [];
