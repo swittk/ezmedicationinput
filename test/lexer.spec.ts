@@ -7,6 +7,13 @@ import { LexKind, SurfaceTokenKind } from "../src/lexer/token-types";
 import { RouteCode } from "../src/types";
 
 describe("surface tokenization", () => {
+  it("splits adjacent Thai and Latin script runs without losing spans", () => {
+    const input = "มีอาการdizzy";
+    const tokens = scanSurfaceTokens(input);
+    expect(tokens.map((token) => token.original)).toEqual(["มี", "อาการ", "dizzy"]);
+    expect(tokens.map((token) => input.slice(token.start, token.end))).toEqual(["มี", "อาการ", "dizzy"]);
+  });
+
   it("preserves exact source spans and separators", () => {
     const input = "OD q2h; apply to scalp";
     const tokens = scanSurfaceTokens(input);

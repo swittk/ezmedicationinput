@@ -1,4 +1,4 @@
-import { buildCanonicalSigClauses } from "./ir";
+import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
   combineLocalizedFrequencyAndEvents,
@@ -7,9 +7,19 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import {
+  instructionGraphHasNovelNonWarningContent,
+  instructionGraphPrimaryAdministrationModality,
+  instructionGraphRepresentsText,
+  instructionGraphSingleActionRepresentsText,
+  realizeInstructionGraph
+} from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdviceArgumentRole,
+  AdviceModality,
+  AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
   CanonicalDoseExpr,
@@ -130,7 +140,7 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
   },
   [RouteCode["Transdermal route"]]: {
     verb: "Apply",
-    routePhrase: ({ hasSite }) => (hasSite ? undefined : "transdermally"),
+    routePhrase: "transdermally",
     sitePreposition: "to"
   },
   [RouteCode["Subcutaneous route"]]: {
@@ -164,6 +174,26 @@ const ROUTE_GRAMMAR: Partial<Record<RouteCode, RouteGrammar>> = {
     sitePreposition: "into"
   }
 };
+
+function explicitRoundTripRoutePhrase(route: RouteCode | undefined): string | undefined {
+  if (!route) return undefined;
+  switch (route) {
+    case RouteCode["Oral route"]: return "orally";
+    case RouteCode["Ophthalmic route"]: return "via ophthalmic route";
+    case RouteCode["Intravitreal route (qualifier value)"]: return "via intravitreal route";
+    case RouteCode["Otic route"]: return "via otic route";
+    case RouteCode["Nasal route"]: return "via nasal route";
+    case RouteCode["Respiratory tract route (qualifier value)"]: return "via inhalation";
+    case RouteCode["Topical route"]: return "topically";
+    case RouteCode["Transdermal route"]: return "transdermally";
+    case RouteCode["Subcutaneous route"]: return "subcutaneously";
+    case RouteCode["Intramuscular route"]: return "intramuscularly";
+    case RouteCode["Intravenous route"]: return "intravenously";
+    case RouteCode["Per rectum"]: return "rectally";
+    case RouteCode["Per vagina"]: return "vaginally";
+    default: return undefined;
+  }
+}
 
 function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
   return clause.schedule ?? {};
@@ -464,6 +494,9 @@ function describeStandaloneOccurrenceCount(
     schedule?.duration !== undefined ||
     schedule?.durationMax !== undefined ||
     schedule?.durationUnit !== undefined ||
+    schedule?.offset !== undefined ||
+    schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined ||
     schedule?.timingCode
   ) {
     return undefined;
@@ -560,10 +593,39 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
+function formatEventOffsetQuantityEnglish(minutes: number): string {
+  const seconds = Number((minutes * 60).toFixed(9));
+  if (minutes < 1 && Number.isInteger(seconds)) {
+    return `${stripTrailingZero(seconds)} second${seconds === 1 ? "" : "s"}`;
+  }
+  if (minutes >= 24 * 60 && minutes % (24 * 60) === 0) {
+    const days = minutes / (24 * 60);
+    return `${stripTrailingZero(days)} day${days === 1 ? "" : "s"}`;
+  }
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${stripTrailingZero(hours)} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${stripTrailingZero(minutes)} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function formatEventOffsetEnglish(
+  eventText: string,
+  schedule: CanonicalScheduleExpr
+): string {
+  const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
+  if (value === undefined) return eventText;
+  const quantity = formatEventOffsetQuantityEnglish(value);
+  if (schedule.offsetMin !== undefined) return `at least ${quantity} ${eventText}`;
+  if (schedule.offsetMax !== undefined) return `at most ${quantity} ${eventText}`;
+  return `${quantity} ${eventText}`;
+}
+
 const EN_TIMING_GRAMMAR: LocalizedTimingGrammar = {
   whenText: WHEN_TEXT,
   joinList: joinWithAnd,
   summarizeMealTimingGroup,
+  formatEventOffset: formatEventOffsetEnglish,
   bedtimeJoinStyle: (dailyCount) => {
     if (dailyCount === 1) {
       return "adjacent";
@@ -709,7 +771,11 @@ function renderSpatialSiteEnglish(
   }
 }
 
-function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string | undefined {
+function formatSite(
+  clause: CanonicalSigClause,
+  grammar: RouteGrammar,
+  directObject = false
+): string | undefined {
   let text = clause.site?.text?.trim();
   if (!text) {
     const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
@@ -749,6 +815,8 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (resolvedSite?.features.kind === "locative") {
     return resolvedSite.englishObjectText;
   }
+  const noun = resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
+  if (directObject) return noun;
   const preferredPreposition = resolvedSite?.preferredPreposition;
   let preposition = grammar.sitePreposition;
   if (!preposition || (preposition === "to" && preferredPreposition && preferredPreposition !== "to")) {
@@ -757,7 +825,6 @@ function formatSite(clause: CanonicalSigClause, grammar: RouteGrammar): string |
   if (!preposition) {
     preposition = "at";
   }
-  const noun = resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   return `${preposition} ${noun}`.trim();
 }
 
@@ -923,18 +990,43 @@ function formatShort(clause: CanonicalSigClause): string {
   return parts.filter(Boolean).join(" ");
 }
 
+const ENGLISH_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "May",
+  [AdviceModality.Can]: "Can",
+  [AdviceModality.Might]: "Might",
+  [AdviceModality.Could]: "Could",
+  [AdviceModality.Should]: "Should",
+  [AdviceModality.Must]: "Must"
+};
+
+function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigClause): string {
+  const modality = instructionGraphPrimaryAdministrationModality(clause);
+  const prefix = modality ? ENGLISH_MODALITY_PREFIX[modality] : undefined;
+  if (!prefix) return verb;
+  return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+}
+
 function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
-  const verb = resolveMethodVerb(clause, grammar);
+  const baseVerb = resolveMethodVerb(clause, grammar);
+  const verb = applyEnglishAdministrationModality(baseVerb, clause);
   const explicitDosePart = formatDoseLong(clause.dose);
-  const dosePart = explicitDosePart ?? (
-    shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
+  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
+  const directSiteObject = Boolean(
+    !explicitDosePart && methodDefinition?.realizerConfig?.englishDirectSiteObject
   );
-  const sitePart = formatSite(clause, grammar);
-  const routePart = shouldSuppressRoutePhrase(clause, grammar, verb)
+  const dosePart = explicitDosePart ?? (
+    !directSiteObject && shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
+  );
+  const sitePart = formatSite(clause, grammar, directSiteObject);
+  const roundTrip = options?.realizationMode === "roundtrip";
+  let routePart = shouldSuppressRoutePhrase(clause, grammar, baseVerb)
     ? undefined
     : buildRoutePhrase(clause, grammar, Boolean(sitePart));
+  if (roundTrip && clause.route?.code) {
+    routePart = explicitRoundTripRoutePhrase(clause.route.code) ?? routePart;
+  }
   const standaloneOccurrenceCount = describeStandaloneOccurrenceCount(schedule);
   const frequencyPart =
     describeFrequency(schedule) ??
@@ -991,33 +1083,226 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   if (durationPart) {
     segments.push(durationPart);
   }
+  if (roundTrip && sitePart && asNeededPart) {
+    segments.push(sitePart);
+  }
   if (asNeededPart) {
     segments.push(asNeededPart);
   }
-  if (sitePart) {
+  if (sitePart && !(roundTrip && asNeededPart)) {
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const primaryGraphAction = roundTrip && clause.instructionGraph?.primaryAdministrationSpan
+    ? clause.instructionGraph.actions.find((action) => {
+        const primary = clause.instructionGraph?.primaryAdministrationSpan;
+        if (!primary || action.span.end <= primary.start || action.span.start >= primary.end) return false;
+        const hasLocalRelation = [
+          AdviceRelation.Before, AdviceRelation.After, AdviceRelation.During, AdviceRelation.While,
+          AdviceRelation.Until, AdviceRelation.For
+        ].indexOf(action.relation as AdviceRelation) >= 0;
+        const hasRichArgument = action.args.some((arg) =>
+          [
+            AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
+            AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+            AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+          ].indexOf(arg.role) >= 0 ||
+          ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+            /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
+        );
+        return hasLocalRelation || hasRichArgument;
+      })
+    : undefined;
   const instructionPhrases: string[] = [];
-  const instructionText = formatAdditionalInstructions(clause);
-  if (instructionText) {
-    instructionPhrases.push(instructionText);
-  }
-  const patientInstruction = formatPatientInstructionSentence(
-    clause.patientInstruction
+  const hasCodedAdditionalInstruction = Boolean(
+    clause.additionalInstructions?.some((instruction) => instruction.coding?.code)
   );
-  if (patientInstruction) {
-    instructionPhrases.push(patientInstruction);
-  }
-  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  if (!body) {
-    if (!trailingInstructionText) {
-      return `${verb}.`;
+  const normalizeInstruction = (value: string) => value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+  const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
+    action.polarity === AdvicePolarity.Negate
+  ) ?? [];
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
+    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+    const normalized = normalizeInstruction(instruction.text);
+    const representedByWarning = graphWarnings.some((action) => {
+      const source = normalizeInstruction(action.sourceText);
+      return source === normalized || source.includes(normalized) || normalized.includes(source);
+    });
+    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+      representedByWarning || !instruction.frames?.length ||
+      !instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text)
+    );
+  });
+  const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
+    graphOwnedAdditional.indexOf(instruction) === -1
+  );
+  const additionalTexts = additionalForDirectRendering
+    .map((instruction) => instruction.text?.trim())
+    .filter((text): text is string => Boolean(text));
+  const additionalSemanticSourceTexts = additionalTexts.slice();
+  for (const instruction of additionalForDirectRendering) {
+    for (const frame of instruction.frames ?? []) {
+      const source = frame.sourceText?.trim();
+      if (source && additionalSemanticSourceTexts.indexOf(source) === -1) {
+        additionalSemanticSourceTexts.push(source);
+      }
     }
-    return `${verb}. ${trailingInstructionText}`.trim();
   }
-  const baseSentence = `${verb} ${body}.`;
-  return trailingInstructionText ? `${baseSentence} ${trailingInstructionText}` : baseSentence;
+  const allAdditionalRepresentedByGraphWarnings = Boolean(
+    graphWarnings.length &&
+    additionalTexts.every((text) => {
+      const normalized = normalizeInstruction(text);
+      return graphWarnings.some((action) => {
+        const source = normalizeInstruction(action.sourceText);
+        return source === normalized || source.includes(normalized) || normalized.includes(source);
+      });
+    })
+  );
+  const positionedRoundTrip = Boolean(roundTrip && clause.instructionGraph?.primaryAdministrationSpan);
+  const graphWholeInstruction = clause.instructionGraph &&
+    !positionedRoundTrip &&
+    !hasCodedAdditionalInstruction &&
+    allAdditionalRepresentedByGraphWarnings
+      ? realizeInstructionGraph(clause.instructionGraph, "en", {
+          includeWarnings: true,
+          omitCanonicalAdministration: clause,
+          preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
+          omitSourceTexts: additionalSemanticSourceTexts
+        })
+      : undefined;
+  if (!graphWholeInstruction) {
+    const directInstruction = formatAdditionalInstructions({
+      ...clause,
+      additionalInstructions: additionalForDirectRendering
+    });
+    if (directInstruction) instructionPhrases.push(directInstruction);
+    const graphWarning = clause.instructionGraph && !positionedRoundTrip
+      ? realizeInstructionGraph(clause.instructionGraph, "en", {
+          onlyWarnings: true,
+          omitCanonicalAdministration: clause,
+          preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
+          omitSourceTexts: additionalSemanticSourceTexts
+        })
+      : undefined;
+    const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
+    if (graphWarningText && !instructionPhrases.some((value) =>
+      normalizeInstruction(value).includes(normalizeInstruction(graphWarningText)) ||
+      normalizeInstruction(graphWarningText).includes(normalizeInstruction(value))
+    )) {
+      instructionPhrases.push(graphWarningText);
+    }
+  }
+  const representedInstructionTexts = additionalForDirectRendering
+    .map((instruction) => instruction.text)
+    .filter((text): text is string => Boolean(text));
+  const preGraphInstruction = positionedRoundTrip && clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "en", {
+        includeWarnings: true,
+        omitCanonicalAdministration: clause,
+        preferSourceText: true,
+        roundtripSafe: true,
+        omitSourceTexts: additionalSemanticSourceTexts,
+        position: "pre"
+      })
+    : undefined;
+  const postGraphOmissions = primaryGraphAction
+    ? [...additionalSemanticSourceTexts, primaryGraphAction.sourceText]
+    : additionalSemanticSourceTexts;
+  const postGraphInstruction = positionedRoundTrip && clause.instructionGraph
+    ? realizeInstructionGraph(clause.instructionGraph, "en", {
+        includeWarnings: true,
+        omitCanonicalAdministration: clause,
+        preferSourceText: true,
+        roundtripSafe: true,
+        omitSourceTexts: postGraphOmissions,
+        position: "post"
+      })
+    : undefined;
+  const graphInstruction = graphWholeInstruction ?? postGraphInstruction ?? (
+    !positionedRoundTrip && clause.instructionGraph &&
+    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
+      ? realizeInstructionGraph(clause.instructionGraph, "en", {
+          includeWarnings: false,
+          omitCanonicalAdministration: clause,
+          preferSourceText: roundTrip,
+          roundtripSafe: roundTrip,
+          omitSourceTexts: additionalSemanticSourceTexts
+        })
+      : undefined
+  );
+  const patientInstruction = formatPatientInstructionSentence(
+    graphInstruction ?? (positionedRoundTrip ? undefined : clause.patientInstruction)
+  );
+  if (patientInstruction) instructionPhrases.push(patientInstruction);
+  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
+  const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
+  const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
+    !clause.instructionGraph.sourceLocale.toLowerCase().startsWith("th");
+  if (
+    roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
+    clause.instructionGraph?.sourceText.trim()
+  ) {
+    return clause.instructionGraph.sourceText.trim();
+  }
+  if (!canonicalClauseHasAdministrationSemantics(clause) && trailingInstructionText) {
+    return trailingInstructionText;
+  }
+  const leadingInstructionText = preGraphInstruction
+    ? formatPatientInstructionSentence(preGraphInstruction)
+    : undefined;
+  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+    action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === clause.dose?.value &&
+      arg.quantity?.range?.low === clause.dose?.range?.low &&
+      arg.quantity?.range?.high === clause.dose?.range?.high &&
+      arg.quantity?.unit === clause.dose?.unit
+    )
+  ));
+  const hasAdministrationTiming = Boolean(
+    schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined || schedule.periodMax !== undefined ||
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.count !== undefined || schedule.timingCode ||
+    schedule.duration !== undefined || schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
+  );
+  const graphCanStandAlone = Boolean(
+    !hasExplicitMethod && trailingInstructionText && clause.instructionGraph?.actions.length &&
+    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
+  );
+  if (graphCanStandAlone) return trailingInstructionText as string;
+  const primarySourceSentence = primaryGraphAction
+    ? formatPatientInstructionSentence(primaryGraphAction.sourceText)
+    : undefined;
+  const primaryActionIndex = primaryGraphAction
+    ? clause.instructionGraph?.actions.indexOf(primaryGraphAction)
+    : undefined;
+  const entersPrimaryWithThen = primaryActionIndex !== undefined && primaryActionIndex >= 0
+    ? clause.instructionGraph?.relations?.some((relation) =>
+        relation.kind === AdviceRelation.Then && relation.toActionIndex === primaryActionIndex &&
+        relation.fromActionIndex !== undefined
+      )
+    : false;
+  const compose = (base: string): string => {
+    const effectiveBase = primarySourceSentence ?? base;
+    if (leadingInstructionText && effectiveBase && entersPrimaryWithThen) {
+      const leading = leadingInstructionText.replace(/[.!?]+$/, "");
+      return [
+        `${leading}; then ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`,
+        trailingInstructionText
+      ].filter(Boolean).join(" ").trim();
+    }
+    return [leadingInstructionText, effectiveBase, trailingInstructionText].filter(Boolean).join(" ").trim();
+  };
+  if (!body) {
+    if (!trailingInstructionText && !leadingInstructionText) return `${verb}.`;
+    return hasExplicitMethod ? compose(`${verb}.`) : compose("");
+  }
+  return compose(`${verb} ${body}.`);
 }
 
 function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
@@ -1061,7 +1346,10 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
   if (!phrases.length) {
     return undefined;
   }
-  return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
+  return phrases.map((phrase) => {
+    const sentence = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+    return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+  }).join(" ").trim();
 }
 
 function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
@@ -1114,6 +1402,9 @@ export function formatCanonicalClause(
       defaultText: formatDefault("short"),
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
+      realizationMode: options?.realizationMode ?? "normalized",
+      sitePlacement: options?.sitePlacement ??
+        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault
     };
     return localization.formatShort(context);
@@ -1126,6 +1417,9 @@ export function formatCanonicalClause(
       defaultText: formatDefault("long"),
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
+      realizationMode: options?.realizationMode ?? "normalized",
+      sitePlacement: options?.sitePlacement ??
+        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault
     };
     return localization.formatLong(context);

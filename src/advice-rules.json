@@ -11,16 +11,46 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "after",
-          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "food",
+              "conceptId": "food"
+            }
+          ]
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": ["after"],
-          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
-        }
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "after"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -34,16 +64,47 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "with",
-          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "food",
+              "conceptId": "food"
+            }
+          ]
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": ["with", "after"],
-          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
-        }
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "with",
+                "after"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -57,16 +118,46 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "before",
-          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "food",
+              "conceptId": "food"
+            }
+          ]
         }
       ],
       "matcher": {
-        "frame": {
-          "relations": ["before"],
-          "argConcepts": [{ "conceptIds": ["food", "meal"], "role": "meal_state" }]
-        }
+        "allOf": [
+          {
+            "frame": {
+              "relations": [
+                "before"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "food",
+                    "meal"
+                  ],
+                  "role": "meal_state"
+                }
+              ]
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -80,13 +171,35 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "before",
-          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "food",
+              "conceptId": "food"
+            }
+          ]
         }
       ],
       "matcher": {
-        "normalizedTexts": ["half to one hour before food"]
+        "allOf": [
+          {
+            "normalizedTexts": [
+              "half to one hour before food"
+            ]
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -100,15 +213,35 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "before",
-          "args": [{ "role": "meal_state", "text": "food", "conceptId": "food" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "food",
+              "conceptId": "food"
+            }
+          ]
         }
       ],
       "matcher": {
-        "normalizedTexts": [
-          "an hour before food or on an empty stomach",
-          "one hour before food or on an empty stomach"
+        "allOf": [
+          {
+            "normalizedTexts": [
+              "an hour before food or on an empty stomach",
+              "one hour before food or on an empty stomach"
+            ]
+          },
+          {
+            "not": {
+              "frame": {
+                "polarity": "negate"
+              }
+            }
+          }
         ]
       }
     },
@@ -123,13 +256,27 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "on",
-          "args": [{ "role": "meal_state", "text": "empty stomach", "conceptId": "empty_stomach" }]
+          "args": [
+            {
+              "role": "meal_state",
+              "text": "empty stomach",
+              "conceptId": "empty_stomach"
+            }
+          ]
         }
       ],
       "matcher": {
-        "argConcept": { "conceptIds": ["empty_stomach"], "role": "meal_state" }
+        "argConcept": {
+          "conceptIds": [
+            "empty_stomach"
+          ],
+          "role": "meal_state"
+        }
       }
     },
     {
@@ -143,23 +290,53 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
           "relation": "with",
-          "args": [{ "role": "substance", "text": "water", "conceptId": "water" }]
+          "args": [
+            {
+              "role": "substance",
+              "text": "water",
+              "conceptId": "water"
+            }
+          ]
         }
       ],
       "matcher": {
         "anyOf": [
           {
             "frame": {
-              "relations": ["with"],
-              "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+              "relations": [
+                "with"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "water"
+                  ],
+                  "role": "substance"
+                }
+              ],
+              "predicateLemmas": [
+                "take"
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": ["drink"],
-              "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+              "predicateLemmas": [
+                "drink"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "water"
+                  ],
+                  "role": "substance"
+                }
+              ]
             }
           }
         ]
@@ -176,15 +353,34 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "dissolve", "semanticClass": "prepare" },
+          "predicate": {
+            "lemma": "dissolve",
+            "semanticClass": "prepare"
+          },
           "relation": "with",
-          "args": [{ "role": "substance", "text": "water", "conceptId": "water" }]
+          "args": [
+            {
+              "role": "substance",
+              "text": "water",
+              "conceptId": "water"
+            }
+          ]
         }
       ],
       "matcher": {
         "frame": {
-          "predicateLemmas": ["dissolve", "mix"],
-          "argConcepts": [{ "conceptIds": ["water"], "role": "substance" }]
+          "predicateLemmas": [
+            "dissolve",
+            "mix"
+          ],
+          "argConcepts": [
+            {
+              "conceptIds": [
+                "water"
+              ],
+              "role": "substance"
+            }
+          ]
         }
       }
     },
@@ -199,24 +395,56 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
-          "args": [{ "role": "substance", "text": "alcohol", "conceptId": "alcohol" }]
+          "predicate": {
+            "lemma": "avoid",
+            "semanticClass": "avoidance"
+          },
+          "args": [
+            {
+              "role": "substance",
+              "text": "alcohol",
+              "conceptId": "alcohol"
+            }
+          ]
         }
       ],
       "matcher": {
         "anyOf": [
           {
             "frame": {
-              "predicateLemmas": ["avoid", "drink"],
-              "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
+              "predicateLemmas": [
+                "avoid",
+                "drink"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": ["take", "use", "administer"],
-              "relations": ["with"],
+              "predicateLemmas": [
+                "take",
+                "use",
+                "administer"
+              ],
+              "relations": [
+                "with"
+              ],
               "polarity": "negate",
-              "argConcepts": [{ "conceptIds": ["alcohol"], "role": "substance" }]
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ]
             }
           }
         ]
@@ -233,22 +461,41 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "cause", "semanticClass": "effect" },
-          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+          "predicate": {
+            "lemma": "cause",
+            "semanticClass": "effect"
+          },
+          "args": [
+            {
+              "role": "object",
+              "text": "drowsiness",
+              "conceptId": "drowsiness"
+            }
+          ]
         }
       ],
       "matcher": {
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["cause"],
-              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+              "predicateLemmas": [
+                "cause"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "drowsiness"
+                  ]
+                }
+              ]
             }
           },
           {
             "not": {
               "frame": {
-                "predicateLemmas": ["drive"],
+                "predicateLemmas": [
+                  "drive"
+                ],
                 "polarity": "negate"
               }
             }
@@ -256,7 +503,9 @@
           {
             "not": {
               "argConcept": {
-                "conceptIds": ["alcohol"],
+                "conceptIds": [
+                  "alcohol"
+                ],
                 "role": "substance"
               }
             }
@@ -275,13 +524,25 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "cause", "semanticClass": "effect" },
-          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+          "predicate": {
+            "lemma": "cause",
+            "semanticClass": "effect"
+          },
+          "args": [
+            {
+              "role": "object",
+              "text": "drowsiness",
+              "conceptId": "drowsiness"
+            }
+          ]
         },
         {
           "force": "warning",
           "polarity": "negate",
-          "predicate": { "lemma": "drive", "semanticClass": "activity" },
+          "predicate": {
+            "lemma": "drive",
+            "semanticClass": "activity"
+          },
           "args": []
         }
       ],
@@ -289,13 +550,23 @@
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["cause"],
-              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+              "predicateLemmas": [
+                "cause"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "drowsiness"
+                  ]
+                }
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": ["drive"],
+              "predicateLemmas": [
+                "drive"
+              ],
               "polarity": "negate"
             }
           }
@@ -313,38 +584,71 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "cause", "semanticClass": "effect" },
-          "args": [{ "role": "object", "text": "drowsiness", "conceptId": "drowsiness" }]
+          "predicate": {
+            "lemma": "cause",
+            "semanticClass": "effect"
+          },
+          "args": [
+            {
+              "role": "object",
+              "text": "drowsiness",
+              "conceptId": "drowsiness"
+            }
+          ]
         },
         {
           "force": "warning",
           "polarity": "negate",
-          "predicate": { "lemma": "drive", "semanticClass": "activity" },
+          "predicate": {
+            "lemma": "drive",
+            "semanticClass": "activity"
+          },
           "args": []
         },
         {
           "force": "warning",
-          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
-          "args": [{ "role": "substance", "text": "alcohol", "conceptId": "alcohol" }]
+          "predicate": {
+            "lemma": "avoid",
+            "semanticClass": "avoidance"
+          },
+          "args": [
+            {
+              "role": "substance",
+              "text": "alcohol",
+              "conceptId": "alcohol"
+            }
+          ]
         }
       ],
       "matcher": {
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["cause"],
-              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+              "predicateLemmas": [
+                "cause"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "drowsiness"
+                  ]
+                }
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": ["drive"],
+              "predicateLemmas": [
+                "drive"
+              ],
               "polarity": "negate"
             }
           },
           {
             "argConcept": {
-              "conceptIds": ["alcohol"],
+              "conceptIds": [
+                "alcohol"
+              ],
               "role": "substance"
             }
           }
@@ -362,10 +666,21 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "cause", "semanticClass": "effect" },
+          "predicate": {
+            "lemma": "cause",
+            "semanticClass": "effect"
+          },
           "args": [
-            { "role": "object", "text": "drowsiness", "conceptId": "drowsiness" },
-            { "role": "time", "text": "next day", "conceptId": "next_day" }
+            {
+              "role": "object",
+              "text": "drowsiness",
+              "conceptId": "drowsiness"
+            },
+            {
+              "role": "time",
+              "text": "next day",
+              "conceptId": "next_day"
+            }
           ]
         }
       ],
@@ -373,19 +688,31 @@
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["cause"],
-              "argConcepts": [{ "conceptIds": ["drowsiness"] }]
+              "predicateLemmas": [
+                "cause"
+              ],
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "drowsiness"
+                  ]
+                }
+              ]
             }
           },
           {
             "argConcept": {
-              "conceptIds": ["next_day"],
+              "conceptIds": [
+                "next_day"
+              ],
               "role": "time"
             }
           },
           {
             "argConcept": {
-              "conceptIds": ["alcohol"],
+              "conceptIds": [
+                "alcohol"
+              ],
               "role": "substance"
             }
           }
@@ -403,7 +730,10 @@
       "frames": [
         {
           "force": "caution",
-          "predicate": { "lemma": "use", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "use",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -425,7 +755,10 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "follow", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "follow",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -447,7 +780,10 @@
       "frames": [
         {
           "force": "caution",
-          "predicate": { "lemma": "keep", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "keep",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -470,14 +806,32 @@
       "frames": [
         {
           "force": "warning",
-          "predicate": { "lemma": "avoid", "semanticClass": "avoidance" },
-          "args": [{ "role": "object", "text": "sunlight", "conceptId": "sunlight" }]
+          "predicate": {
+            "lemma": "avoid",
+            "semanticClass": "avoidance"
+          },
+          "args": [
+            {
+              "role": "object",
+              "text": "sunlight",
+              "conceptId": "sunlight"
+            }
+          ]
         }
       ],
       "matcher": {
         "frame": {
-          "predicateLemmas": ["avoid"],
-          "argConcepts": [{ "conceptIds": ["sunlight", "sun_lamps"] }]
+          "predicateLemmas": [
+            "avoid"
+          ],
+          "argConcepts": [
+            {
+              "conceptIds": [
+                "sunlight",
+                "sun_lamps"
+              ]
+            }
+          ]
         }
       }
     },
@@ -493,13 +847,19 @@
         {
           "force": "instruction",
           "polarity": "negate",
-          "predicate": { "lemma": "crush", "semanticClass": "manipulate" },
+          "predicate": {
+            "lemma": "crush",
+            "semanticClass": "manipulate"
+          },
           "args": []
         },
         {
           "force": "instruction",
           "polarity": "negate",
-          "predicate": { "lemma": "chew", "semanticClass": "manipulate" },
+          "predicate": {
+            "lemma": "chew",
+            "semanticClass": "manipulate"
+          },
           "args": []
         }
       ],
@@ -507,13 +867,17 @@
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["crush"],
+              "predicateLemmas": [
+                "crush"
+              ],
               "polarity": "negate"
             }
           },
           {
             "frame": {
-              "predicateLemmas": ["chew"],
+              "predicateLemmas": [
+                "chew"
+              ],
               "polarity": "negate"
             }
           }
@@ -531,7 +895,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "chew", "semanticClass": "manipulate" },
+          "predicate": {
+            "lemma": "chew",
+            "semanticClass": "manipulate"
+          },
           "args": []
         }
       ],
@@ -539,13 +906,17 @@
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": ["chew"]
+              "predicateLemmas": [
+                "chew"
+              ]
             }
           },
           {
             "not": {
               "frame": {
-                "predicateLemmas": ["chew"],
+                "predicateLemmas": [
+                  "chew"
+                ],
                 "polarity": "negate"
               }
             }
@@ -559,13 +930,22 @@
         "code": "420883007",
         "display": "Sparingly - dosing instruction fragment",
         "text": "Apply sparingly",
-        "thai": "ใช้เพียงเล็กน้อย"
+        "thai": "ใช้เพียงเล็กน้อย",
+        "thaiVerbSuffix": "เพียงเล็กน้อย"
       },
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "apply", "semanticClass": "administration" },
-          "args": [{ "role": "amount", "text": "sparingly" }]
+          "predicate": {
+            "lemma": "apply",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "amount",
+              "text": "sparingly"
+            }
+          ]
         }
       ],
       "matcher": {
@@ -601,13 +981,22 @@
         "code": "419125005",
         "display": "Liberally",
         "text": "Apply liberally",
-        "thai": "ใช้อย่างทั่วถึง"
+        "thai": "ใช้อย่างทั่วถึง",
+        "thaiVerbSuffix": "อย่างทั่วถึง"
       },
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "apply", "semanticClass": "administration" },
-          "args": [{ "role": "amount", "text": "liberally" }]
+          "predicate": {
+            "lemma": "apply",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "amount",
+              "text": "liberally"
+            }
+          ]
         }
       ],
       "matcher": {
@@ -636,13 +1025,23 @@
         "code": "420162004",
         "display": "To be spread thinly",
         "text": "Apply thinly",
-        "thai": "ทาบางๆ"
+        "thai": "ทาบางๆ",
+        "thaiVerbSuffix": "บางๆ"
       },
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "apply", "semanticClass": "administration" },
-          "args": [{ "role": "amount", "text": "thin layer", "conceptId": "thin_layer" }]
+          "predicate": {
+            "lemma": "apply",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "amount",
+              "text": "thin layer",
+              "conceptId": "thin_layer"
+            }
+          ]
         }
       ],
       "matcher": {
@@ -677,13 +1076,23 @@
         "code": "418449005",
         "display": "Gently",
         "text": "Apply gently",
-        "thai": "ทาเบาๆ"
+        "thai": "ทาเบาๆ",
+        "thaiVerbSuffix": "เบาๆ"
       },
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "apply", "semanticClass": "administration" },
-          "args": [{ "role": "free", "text": "gently", "conceptId": "gently" }]
+          "predicate": {
+            "lemma": "apply",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "free",
+              "text": "gently",
+              "conceptId": "gently"
+            }
+          ]
         }
       ],
       "matcher": {
@@ -704,13 +1113,23 @@
         "code": "246703001",
         "display": "Thick",
         "text": "Apply thickly",
-        "thai": "ทาหนาๆ"
+        "thai": "ทาหนาๆ",
+        "thaiVerbSuffix": "หนาๆ"
       },
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "apply", "semanticClass": "administration" },
-          "args": [{ "role": "amount", "text": "thick layer", "conceptId": "thick_layer" }]
+          "predicate": {
+            "lemma": "apply",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "amount",
+              "text": "thick layer",
+              "conceptId": "thick_layer"
+            }
+          ]
         }
       ],
       "matcher": {
@@ -746,14 +1165,33 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "take", "semanticClass": "administration" },
-          "args": [{ "role": "free", "text": "slowly", "conceptId": "slowly" }]
+          "predicate": {
+            "lemma": "take",
+            "semanticClass": "administration"
+          },
+          "args": [
+            {
+              "role": "free",
+              "text": "slowly",
+              "conceptId": "slowly"
+            }
+          ]
         }
       ],
       "matcher": {
         "frame": {
-          "predicateSemanticClasses": ["administration", "ingest"],
-          "argConcepts": [{ "conceptIds": ["slowly"], "role": "free" }]
+          "predicateSemanticClasses": [
+            "administration",
+            "ingest"
+          ],
+          "argConcepts": [
+            {
+              "conceptIds": [
+                "slowly"
+              ],
+              "role": "free"
+            }
+          ]
         }
       }
     },
@@ -768,7 +1206,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "dissolve", "semanticClass": "prepare" },
+          "predicate": {
+            "lemma": "dissolve",
+            "semanticClass": "prepare"
+          },
           "args": []
         }
       ],
@@ -791,7 +1232,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "swish", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "swish",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -812,7 +1256,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "wash", "semanticClass": "cleanse" },
+          "predicate": {
+            "lemma": "wash",
+            "semanticClass": "cleanse"
+          },
           "args": []
         }
       ],
@@ -833,7 +1280,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "insert", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "insert",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -854,7 +1304,10 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "instill", "semanticClass": "administration" },
+          "predicate": {
+            "lemma": "instill",
+            "semanticClass": "administration"
+          },
           "args": []
         }
       ],
@@ -875,13 +1328,368 @@
       "frames": [
         {
           "force": "instruction",
-          "predicate": { "lemma": "shampoo", "semanticClass": "cleanse" },
+          "predicate": {
+            "lemma": "shampoo",
+            "semanticClass": "cleanse"
+          },
           "args": []
         }
       ],
       "matcher": {
         "normalizedTexts": [
           "shampoo"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-417929005",
+      "definition": {
+        "code": "417929005",
+        "display": "Times (qualifier value)",
+        "text": "Times",
+        "thai": "ครั้ง"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Times",
+          "ครั้ง"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-417980006",
+      "definition": {
+        "code": "417980006",
+        "display": "Contains aspirin (qualifier value)",
+        "text": "Contains aspirin",
+        "thai": "มีแอสไพรินเป็นส่วนประกอบ"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Contains aspirin",
+          "มีแอสไพรินเป็นส่วนประกอบ"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418194009",
+      "definition": {
+        "code": "418194009",
+        "display": "Contains an aspirin-like medicine (qualifier value)",
+        "text": "Contains an aspirin-like medicine",
+        "thai": "มียาที่ออกฤทธิ์คล้ายแอสไพรินเป็นส่วนประกอบ"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Contains an aspirin-like medicine",
+          "มียาที่ออกฤทธิ์คล้ายแอสไพรินเป็นส่วนประกอบ"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418281004",
+      "definition": {
+        "code": "418281004",
+        "display": "Do not take anything containing aspirin while taking this medicine (qualifier value)",
+        "text": "Do not take anything containing aspirin while taking this medicine",
+        "thai": "ห้ามรับประทานยาอื่นที่มีแอสไพรินร่วมกับยานี้"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take anything containing aspirin while taking this medicine",
+          "ห้ามรับประทานยาอื่นที่มีแอสไพรินร่วมกับยานี้"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418443006",
+      "definition": {
+        "code": "418443006",
+        "display": "Do not take more than . . . in 24 hours or . . . in any one week (qualifier value)",
+        "text": "Do not take more than ... in 24 hours or ... in any one week",
+        "thai": "ห้ามรับประทานเกิน ... ใน 24 ชั่วโมง หรือ ... ในหนึ่งสัปดาห์"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take more than ... in 24 hours or ... in any one week",
+          "ห้ามรับประทานเกิน ... ใน 24 ชั่วโมง หรือ ... ในหนึ่งสัปดาห์"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418577003",
+      "definition": {
+        "code": "418577003",
+        "display": "Take at regular intervals. Complete the prescribed course unless otherwise directed (qualifier value)",
+        "text": "Take at regular intervals. Complete the prescribed course unless otherwise directed",
+        "thai": "รับประทานตามช่วงเวลาสม่ำเสมอ และใช้ยาให้ครบตามที่สั่ง เว้นแต่ได้รับคำสั่งเป็นอย่างอื่น"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Take at regular intervals. Complete the prescribed course unless otherwise directed",
+          "รับประทานตามช่วงเวลาสม่ำเสมอ และใช้ยาให้ครบตามที่สั่ง เว้นแต่ได้รับคำสั่งเป็นอย่างอื่น"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418637003",
+      "definition": {
+        "code": "418637003",
+        "display": "Do not take with any other paracetamol products (qualifier value)",
+        "text": "Do not take with any other paracetamol products",
+        "thai": "ห้ามรับประทานร่วมกับยาอื่นที่มีพาราเซตามอล"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take with any other paracetamol products",
+          "ห้ามรับประทานร่วมกับยาอื่นที่มีพาราเซตามอล"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-418850000",
+      "definition": {
+        "code": "418850000",
+        "display": "Contains aspirin and paracetamol. Do not take with any other paracetamol products (qualifier value)",
+        "text": "Contains aspirin and paracetamol. Do not take with any other paracetamol products",
+        "thai": "มีแอสไพรินและพาราเซตามอลเป็นส่วนประกอบ ห้ามรับประทานร่วมกับยาอื่นที่มีพาราเซตามอล"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Contains aspirin and paracetamol. Do not take with any other paracetamol products",
+          "มีแอสไพรินและพาราเซตามอลเป็นส่วนประกอบ ห้ามรับประทานร่วมกับยาอื่นที่มีพาราเซตามอล"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419111009",
+      "definition": {
+        "code": "419111009",
+        "display": "Allow to dissolve under the tongue. Do not transfer from this container. Keep tightly closed. Discard eight weeks after opening (qualifier value)",
+        "text": "Allow to dissolve under the tongue. Do not transfer from this container. Keep tightly closed. Discard eight weeks after opening",
+        "thai": "อมใต้ลิ้นจนละลาย ห้ามย้ายยาออกจากภาชนะเดิม ปิดฝาให้สนิท และทิ้งเมื่อเปิดใช้แล้ว 8 สัปดาห์"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Allow to dissolve under the tongue. Do not transfer from this container. Keep tightly closed. Discard eight weeks after opening",
+          "อมใต้ลิ้นจนละลาย ห้ามย้ายยาออกจากภาชนะเดิม ปิดฝาให้สนิท และทิ้งเมื่อเปิดใช้แล้ว 8 สัปดาห์"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419115000",
+      "definition": {
+        "code": "419115000",
+        "display": "Do not take milk, indigestion remedies, or medicines containing iron or zinc at the same time of day as this medicine (qualifier value)",
+        "text": "Do not take milk, indigestion remedies, or medicines containing iron or zinc at the same time of day as this medicine",
+        "thai": "ห้ามรับประทานนม ยาแก้อาหารไม่ย่อย หรือยาที่มีธาตุเหล็กหรือสังกะสีในช่วงเวลาเดียวกันของวันกับยานี้"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take milk, indigestion remedies, or medicines containing iron or zinc at the same time of day as this medicine",
+          "ห้ามรับประทานนม ยาแก้อาหารไม่ย่อย หรือยาที่มีธาตุเหล็กหรือสังกะสีในช่วงเวลาเดียวกันของวันกับยานี้"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419437002",
+      "definition": {
+        "code": "419437002",
+        "display": "Do not take more than 2 at any one time. Do not take more than 8 in 24 hours (qualifier value)",
+        "text": "Do not take more than 2 at any one time. Do not take more than 8 in 24 hours",
+        "thai": "ห้ามรับประทานครั้งละเกิน 2 และห้ามเกิน 8 ใน 24 ชั่วโมง"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take more than 2 at any one time. Do not take more than 8 in 24 hours",
+          "ห้ามรับประทานครั้งละเกิน 2 และห้ามเกิน 8 ใน 24 ชั่วโมง"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419444006",
+      "definition": {
+        "code": "419444006",
+        "display": "Do not stop taking this medicine except on your doctor's advice (qualifier value)",
+        "text": "Do not stop taking this medicine except on your doctor's advice",
+        "thai": "ห้ามหยุดยา เว้นแต่แพทย์แนะนำ"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not stop taking this medicine except on your doctor's advice",
+          "ห้ามหยุดยา เว้นแต่แพทย์แนะนำ"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419473009",
+      "definition": {
+        "code": "419473009",
+        "display": "Each (qualifier value)",
+        "text": "Each",
+        "thai": "แต่ละ"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Each",
+          "แต่ละ"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-419974005",
+      "definition": {
+        "code": "419974005",
+        "display": "This medicine may color the urine",
+        "text": "This medicine may color the urine",
+        "thai": "ยานี้อาจทำให้ปัสสาวะเปลี่ยนสี"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "This medicine may color the urine",
+          "ยานี้อาจทำให้ปัสสาวะเปลี่ยนสี"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-420003005",
+      "definition": {
+        "code": "420003005",
+        "display": "Do not take more than . . . in 24 hours (qualifier value)",
+        "text": "Do not take more than ... in 24 hours",
+        "thai": "ห้ามรับประทานเกิน ... ใน 24 ชั่วโมง"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take more than ... in 24 hours",
+          "ห้ามรับประทานเกิน ... ใน 24 ชั่วโมง"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-420082003",
+      "definition": {
+        "code": "420082003",
+        "display": "Do not take indigestion remedies or medicines containing iron or zinc at the same time of day as this medicine (qualifier value)",
+        "text": "Do not take indigestion remedies or medicines containing iron or zinc at the same time of day as this medicine",
+        "thai": "ห้ามรับประทานยาแก้อาหารไม่ย่อยหรือยาที่มีธาตุเหล็กหรือสังกะสีในช่วงเวลาเดียวกันของวันกับยานี้"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take indigestion remedies or medicines containing iron or zinc at the same time of day as this medicine",
+          "ห้ามรับประทานยาแก้อาหารไม่ย่อยหรือยาที่มีธาตุเหล็กหรือสังกะสีในช่วงเวลาเดียวกันของวันกับยานี้"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-420110001",
+      "definition": {
+        "code": "420110001",
+        "display": "Do not take indigestion remedies at the same time of day as this medicine (qualifier value)",
+        "text": "Do not take indigestion remedies at the same time of day as this medicine",
+        "thai": "ห้ามรับประทานยาแก้อาหารไม่ย่อยในช่วงเวลาเดียวกันของวันกับยานี้"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Do not take indigestion remedies at the same time of day as this medicine",
+          "ห้ามรับประทานยาแก้อาหารไม่ย่อยในช่วงเวลาเดียวกันของวันกับยานี้"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-420652005",
+      "definition": {
+        "code": "420652005",
+        "display": "Until gone - dosing instruction fragment (qualifier value)",
+        "text": "Use until gone",
+        "thai": "ใช้จนหมด"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Use until gone",
+          "ใช้จนหมด"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-421484000",
+      "definition": {
+        "code": "421484000",
+        "display": "Then discontinue - dosing instruction fragment (qualifier value)",
+        "text": "Then discontinue",
+        "thai": "จากนั้นหยุดใช้"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Then discontinue",
+          "จากนั้นหยุดใช้"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-421769005",
+      "definition": {
+        "code": "421769005",
+        "display": "Follow directions (qualifier value)",
+        "text": "Follow directions",
+        "thai": "ใช้ตามคำแนะนำ"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Follow directions",
+          "ใช้ตามคำแนะนำ"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-421984009",
+      "definition": {
+        "code": "421984009",
+        "display": "Until finished - dosing instruction fragment (qualifier value)",
+        "text": "Use until finished",
+        "thai": "ใช้จนหมด"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Use until finished",
+          "ใช้จนหมด"
+        ]
+      }
+    },
+    {
+      "id": "fhir-additional-422327006",
+      "definition": {
+        "code": "422327006",
+        "display": "Then stop - dosing instruction fragment (qualifier value)",
+        "text": "Then stop",
+        "thai": "จากนั้นหยุด"
+      },
+      "frames": [],
+      "matcher": {
+        "normalizedTexts": [
+          "Then stop",
+          "จากนั้นหยุด"
         ]
       }
     }

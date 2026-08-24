@@ -23,6 +23,7 @@ import {
   mergeTranslationPrimitiveElement
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
 import { parseSnomedFindingSitePostcoordinationCode } from "./snomed-postcoordination";
@@ -33,6 +34,7 @@ import {
   findPrnReasonDefinitionByCoding
 } from "./maps";
 import {
+  AdvicePolarity,
   CanonicalDoseRange,
   CanonicalSigClause,
   BodySiteSpatialRelation,
@@ -49,8 +51,37 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
+export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
+
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
+
+function timingOffsetExtensionValue(
+  repeat: FhirTimingRepeat | undefined,
+  url: string
+): number | undefined {
+  const extension = repeat?.extension?.find((candidate) => candidate.url === url);
+  const value = extension?.valueInteger ?? extension?.valueDecimal;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function timingOffsetExtension(url: string, minutes: number) {
+  return Number.isInteger(minutes)
+    ? { url, valueInteger: minutes }
+    : { url, valueDecimal: minutes };
+}
+
+export function getExactTimingOffsetMinutes(
+  repeat: FhirTimingRepeat | undefined
+): number | undefined {
+  if (repeat?.offset !== undefined) return repeat.offset;
+  return timingOffsetExtensionValue(repeat, TIMING_OFFSET_EXACT_EXTENSION_URL);
+}
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
 export interface FhirProjectionOptions {
@@ -469,12 +500,22 @@ export function canonicalToFhir(
   options?: FhirProjectionOptions
 ): FhirDosage {
   const dosage: FhirDosage = {};
+  const instructionGraphExtension = buildInstructionGraphExtension(clause.instructionGraph);
+  if (instructionGraphExtension) {
+    dosage.extension = [instructionGraphExtension];
+  }
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
 
-  if (schedule?.frequency !== undefined) {
+  if (schedule?.frequency !== undefined && schedule.frequency > 0) {
     repeat.frequency = schedule.frequency;
+    hasRepeat = true;
+  } else if (schedule?.frequency === 0) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }
+    ];
     hasRepeat = true;
   }
   if (schedule?.count !== undefined) {
@@ -504,6 +545,31 @@ export function canonicalToFhir(
   }
   if (schedule?.periodMax !== undefined) {
     repeat.periodMax = schedule.periodMax;
+    hasRepeat = true;
+  }
+  if (schedule?.offset !== undefined) {
+    if (Number.isInteger(schedule.offset)) {
+      repeat.offset = schedule.offset;
+    } else {
+      repeat.extension = [
+        ...(repeat.extension ?? []),
+        timingOffsetExtension(TIMING_OFFSET_EXACT_EXTENSION_URL, schedule.offset)
+      ];
+    }
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMin !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      timingOffsetExtension(TIMING_OFFSET_MIN_EXTENSION_URL, schedule.offsetMin)
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMax !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      timingOffsetExtension(TIMING_OFFSET_MAX_EXTENSION_URL, schedule.offsetMax)
+    ];
     hasRepeat = true;
   }
   if (schedule?.dayOfWeek?.length) {
@@ -617,16 +683,37 @@ export function canonicalToFhir(
             system: clause.method.coding.system ?? SNOMED_SYSTEM,
             code: clause.method.coding.code,
             display: clause.method.coding.display,
-            _display: clonePrimitiveElement(clause.method.coding._display)
+            _display: clonePrimitiveElement(clause.method.coding._display) ??
+              buildTranslationPrimitiveElement(clause.method.coding.i18n)
           }
         ]
         : undefined
     };
   }
 
-  if (clause.additionalInstructions?.length) {
+  const additionalInstructions: Array<{
+    text: string;
+    coding?: { system?: string; code?: string; display?: string };
+  }> = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    const text = instruction.text?.trim();
+    if (!text) continue;
+    additionalInstructions.push({ text, coding: instruction.coding });
+  }
+  for (const action of clause.instructionGraph?.actions ?? []) {
+    if (action.polarity !== AdvicePolarity.Negate) continue;
+    const text = action.sourceText.trim();
+    if (!text) continue;
+    const normalized = text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+    const alreadyRepresented = additionalInstructions.some((instruction) => {
+      const candidate = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    });
+    if (!alreadyRepresented) additionalInstructions.push({ text, coding: undefined });
+  }
+  if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
-    for (const instruction of clause.additionalInstructions) {
+    for (const instruction of additionalInstructions) {
       dosage.additionalInstruction.push({
         text: instruction.text,
         coding: instruction.coding?.code
@@ -702,6 +789,7 @@ export function toFhir(state: ParserState): FhirDosage {
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
+  clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
   let routeCode: RouteCode | undefined;
 
   const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
@@ -753,13 +841,23 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
           code: methodCoding.code,
           display: methodCoding.display,
           system: methodCoding.system,
-          _display: clonePrimitiveElement(methodCoding._display)
+          _display: clonePrimitiveElement(methodCoding._display),
+          i18n: getPrimitiveTranslations(methodCoding._display)
         }
         : undefined
     };
   }
 
   const repeat = dosage.timing?.repeat;
+  const frequencyMinExtension = repeat?.extension?.find(
+    (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
+  )?.valueInteger;
+  const offsetExactExtension = timingOffsetExtensionValue(
+    repeat,
+    TIMING_OFFSET_EXACT_EXTENSION_URL
+  );
+  const offsetMinExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
+  const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   const timingBounds = extractCanonicalTimingBounds(repeat);
   if (
     dosage.timing?.code?.coding?.[0]?.code ||
@@ -767,10 +865,15 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
+    frequencyMinExtension !== undefined ||
     repeat?.frequencyMax !== undefined ||
     repeat?.period !== undefined ||
     repeat?.periodMax !== undefined ||
     repeat?.periodUnit ||
+    repeat?.offset !== undefined ||
+    offsetExactExtension !== undefined ||
+    offsetMinExtension !== undefined ||
+    offsetMaxExtension !== undefined ||
     repeat?.dayOfWeek?.length ||
     repeat?.when?.length ||
     repeat?.timeOfDay?.length
@@ -781,11 +884,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
-      frequency: repeat?.frequency,
+      frequency: repeat?.frequency ?? frequencyMinExtension,
       frequencyMax: repeat?.frequencyMax,
       period: repeat?.period,
       periodMax: repeat?.periodMax,
       periodUnit: repeat?.periodUnit,
+      offset: repeat?.offset ?? offsetExactExtension,
+      offsetMin: offsetMinExtension,
+      offsetMax: offsetMaxExtension,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
@@ -896,6 +1002,9 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.period = dosage.timing?.repeat?.period;
   state.periodMax = dosage.timing?.repeat?.periodMax;
   state.periodUnit = dosage.timing?.repeat?.periodUnit;
+  state.offset = getExactTimingOffsetMinutes(dosage.timing?.repeat);
+  state.offsetMin = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
+  state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   state.siteText = getFallbackSiteText(dosage.site);
@@ -980,7 +1089,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
       code: methodCoding.code,
       display: methodCoding.display,
       system: methodCoding.system,
-      _display: clonePrimitiveElement(methodCoding._display)
+      _display: clonePrimitiveElement(methodCoding._display),
+      i18n: getPrimitiveTranslations(methodCoding._display)
     };
   }
 

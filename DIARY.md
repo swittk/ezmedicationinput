@@ -2149,3 +2149,534 @@ Checked smoke cases:
 
 Verification:
 - `npm run build`
+
+## 2026-08-22 Thai free-text segmentation and complex instruction parsing
+
+A real-world Thai clinician instruction exposed a lexical-boundary gap rather
+than a weakness in the HPSG semantic model. Thai prose without inter-word
+spaces reached the grammar as opaque surface blobs, so dose units, cadence,
+event timing, and safety instructions could not participate in existing rules.
+
+What changed:
+- added locale-aware Thai word segmentation at the lexer boundary using
+  `Intl.Segmenter`, while retaining exact source offsets and falling back to the
+  previous opaque-token behavior when the runtime lacks a segmenter
+- added a canonical locale lexeme layer so stable Thai medication terms feed
+  the existing HPSG grammar without translating or discarding unknown prose
+- added maximal-munch recomposition of existing Thai clinical dictionary terms
+  after segmentation, preserving established aliases such as PRN reasons, body
+  sites, weekday groups, and natural dose units
+- added a cadence-first HPSG construction for forms such as `วันละ 2 ครั้ง`
+  (`daily 2 times`) so the value is a frequency, not a total-count constraint
+- made workflow spans stop before explicit structured doses and before a new
+  scheduled administration, preventing procedural prose from swallowing dose
+  or timing semantics
+- preserved workflow text from exact source ranges and allowed explicit
+  free-text warning/directive clauses to survive when no safe terminology code
+  exists
+
+Regression fixture:
+`เขย่าขวดก่อนใช้ เทผลิตภัณฑ์ลงฝ่ามือ 1-2 มิลลิลิตร ผสมน้ำเล็กน้อยถูให้เกิดฟอง ทำความสะอาดบริเวณภายนอกจุดซ่อนเร้น จากนั้นล้างด้วยน้ำสะอาด ใช้วันละ 2 ครั้ง เช้าเย็น (ห้ามสวนล้างช่องคลอด).`
+
+It now yields:
+- dose range 1-2 mL
+- frequency 2 per 1 day with BID code
+- event timings morning + evening
+- preserved free-text no-douching instruction
+- source-faithful preparation / cleansing patient instruction
+- no unparsed-token lint issues
+
+Verification:
+- `npm run build`
+- `npm test`
+- `npm run test:dist`
+
+## 2026-08-22 Procedural instruction semantic graph and bidirectional realization
+
+The Thai free-text pass proved that extracting dose/timing while leaving the
+rest as one patientInstruction string was safe but not sufficient. Complex
+preparation/application instructions now project into an ordered semantic
+graph that is richer than FHIR Dosage while remaining lossless.
+
+Architecture:
+- added a canonical `instructionGraph` made of ordered typed action frames
+- action frames carry predicate, semantic class, polarity, relation, typed
+  arguments, quantities, source spans, and multiple codings
+- added the stable package-owned CodeSystem URI
+  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-action`
+  and public terminology enumeration/lookup APIs plus a FHIR-shaped CodeSystem
+  resource generator
+- external terminology is additive: exact SNOMED mappings are attached where
+  appropriate; actions without an honest SNOMED equivalent retain the internal
+  action code rather than being coerced to a nearby concept
+- added a FHIR extension
+  `https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph`
+  so the semantic graph survives Dosage serialization/deserialization while
+  standard Dosage.text, patientInstruction and additionalInstruction remain
+  conventional interoperable fallbacks
+- added Thai and English realization from the same graph
+- added realization -> parse action-sequence invariance tests in both languages
+- preserved unparsed fragments as ordered opaque source spans; unknown text is
+  emitted verbatim instead of silently disappearing or receiving invented
+  semantics
+
+Local SNOMED validation used the owner-provided International RF2 snapshot
+`SnomedCT_InternationalRF2_PRODUCTION_20260401`. The archive remains local and
+is ignored by Git. Confirmed active concepts used by this pass include:
+- 731973001 Entire palm (region)
+- 76784001 Vagina
+- 21397001 Douche of vagina (procedure)
+- 782155003 Rinse (administration method)
+- 422152000 Wash - dosing instruction imperative (qualifier value)
+- 421826007 Mix (qualifier value)
+
+No honest generic SNOMED `pour` action was found in the supplied snapshot, so
+`pour` intentionally remains an internal action with its destination separately
+coded when possible.
+
+The original torture-test instruction now yields ordered actions:
+1. shake(container=bottle, before=use)
+2. pour(theme=product, destination=palm[SNOMED 731973001], amount=1-2 mL)
+3. mix(substance=water, amount=small)
+4. rub(result=foam)
+5. clean(site=external intimate area; deliberately not over-coded)
+6. rinse(substance=clean water)
+7. NOT douche(site=vagina[SNOMED 76784001]), with action mapping SNOMED 21397001
+
+The same stored graph realizes to understandable Thai and English. Existing
+workflow semantics were also strengthened for duration (`leave on for 10
+minutes then rinse`) and temporal workflow arguments (`rinse in the morning`).
+Generic medication advice such as warfarin/grapefruit cautions remains owned by
+the existing advice subsystem rather than being duplicated into the procedural
+graph.
+
+Verification:
+- `npm run build`
+- `npm test` -> 640 tests passing
+- `npm run test:dist` -> published ESM/CJS graph exports verified
+- `git diff --check`
+
+## 2026-08-22 Declarative procedural terminology and conservative leftover enrichment
+
+The procedural semantic graph checkpoint was generalized so expanding the
+language/domain vocabulary no longer requires editing imperative parser maps.
+
+What changed:
+- moved default procedural actions into `instruction-action-terminology.json`
+  and a typed runtime
+- default catalog now contains 50 TH/EN action concepts and aliases spanning
+  preparation, cleansing, device manipulation, oral/topical workflow, and
+  administration verbs
+- action matching is longest-first over canonical, spaced source, and contiguous
+  source forms, so aliases such as `shake well`, `pat dry`, `draw up`, and Thai
+  no-space forms can resolve without ad-hoc parser branches
+- added `ParseOptions.instructionActionMap` for caller-owned action concepts,
+  aliases, labels, procedural scope, amount capability, and arbitrary coding
+  systems
+- custom action display/i18n/codings are stored in the semantic graph and FHIR
+  extension, so they remain realizable after serialization without requiring
+  the original custom map again
+- HPSG leftovers are conservatively re-parsed only through explicitly licensed
+  procedural terminology; recognized portions become graph actions and all
+  remaining text stays opaque/lossless
+- existing coded additional-instruction semantics retain human-realization
+  precedence, avoiding degradation of mature advice such as “swallow whole; do
+  not crush or chew”
+
+Argument semantics were generalized in parallel:
+- added package-owned
+  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept`
+- moved common instruction concepts into declarative terminology: product,
+  bottle, water, clean water, small amount, foam, use, event times, and the
+  deliberately broad external-intimate-area concept
+- added `ParseOptions.instructionConceptMap` for institution/application-owned
+  argument vocabulary and arbitrary coding systems
+- arguments now retain plural codings while keeping a preferred coding for
+  compatibility
+- local RF2 2026-04-01 confirmed `11713004 |Water (substance)|`; water therefore
+  carries both the package semantic concept and exact SNOMED mapping
+- `clean water` is intentionally NOT coerced to potable/sterile/purified water
+  because those are stronger claims than the source text
+
+Language improvements:
+- Thai `แล้ว`, `แล้วจึง`, and `ต่อมา` normalize to sequence semantics
+- English `and then` is treated as sequence glue rather than contaminating the
+  prior argument
+- Thai `รอยโรค` was added as a body-site alias for the existing SNOMED skin
+  lesion concept, preserving natural no-space Thai parsing
+- example `เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ` now becomes:
+  wipe(site=lesion) -> wait(duration=5 min) -> rinse(substance=water), with no
+  opaque sequence glue, and realizes cleanly in Thai and English
+
+Custom terminology proof:
+- a caller-defined `zap` surface can map to semantic action `phototreat`, Thai
+  `ฉายแสง`, and `http://example.org/action|P1`
+- a caller-defined `magicgel` can map to a substance concept, Thai `เจลวิเศษ`,
+  and `http://example.org/concept|MG`
+- both survive FHIR graph-extension round-trip and remain bilingual-realizable
+
+Verification:
+- `npm run build`
+- `npm test` -> 646 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 Typed instruction relations, coverage, and conditional-vs-PRN disambiguation
+
+The declarative instruction graph was extended from an ordered action list into
+a more honest semantic graph with explicit relationships and measurable partial
+understanding.
+
+What changed:
+- added typed graph relations for THEN, BEFORE, AFTER, DURING/WHILE, UNTIL, IF,
+  UNLESS, and WHEN
+- relations are serialized through the package FHIR graph extension and their
+  source spans are rebased correctly in multi-segment parsing
+- added graph semantic coverage:
+  - understoodCharacters
+  - opaqueCharacters
+  - ratio
+  - complete
+- coverage survives FHIR round-trip; opaque conditional bodies are therefore
+  visibly partial rather than silently counted as understood
+- added common Thai conditional lexemes: ถ้า, หาก, เมื่อ, ขณะ/ขณะที่, จนกว่า,
+  เว้นแต่
+- added `stop / stop use / หยุด / หยุดใช้` as a procedural action and modeled
+  `use` as its activity argument when present
+
+HPSG ambiguity fixed:
+- clause-leading `if/หาก ...` was previously captured by the standalone PRN
+  construction even when it introduced a procedural instruction
+- the PRN lexical rule now yields when a clause-leading condition is followed
+  by an explicitly licensed procedural action
+- classic medication shorthand such as `1 tab po if pain` remains PRN
+
+Examples:
+- `if irritation occurs stop use` -> relation IF -> stop(activity=use), with the
+  condition body retained opaque and coverage ~0.2857 until its condition
+  semantics are further modeled
+- human realization is `if irritation occurs, stop use`
+- `หากระคายเคืองให้หยุดใช้` -> the same IF -> stop(use) structure and natural
+  source-language realization
+- `เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ` remains fully understood with
+  complete coverage and explicit THEN relations
+
+Safety hardening:
+- whole-clause enrichment no longer prefers a wider span merely because it
+  consumes more text; overlapping same-action candidates are selected by
+  structured semantic richness (quantity/coding/concept/typed argument)
+- canonical dosage method semantics dominate redundant graph actions when the
+  graph contributes no additional structured meaning, preventing duplicate
+  `swallow`, `shampoo`, or `reapply` text
+
+Verification:
+- `npm run build`
+- `npm test` -> 649 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 Validated opaque-span semantic resolver seam
+
+The instruction graph now has an optional hybrid semantic-enrichment seam for
+opaque text without granting learned/remote systems authority over canonical
+medication structure.
+
+Contract:
+- `ParseOptions.instructionSemanticResolvers` accepts sync or async proposal
+  providers
+- each provider receives exactly one deterministic `opaqueSpan` at a time,
+  including its absolute source range, locale/context, and a read-only clone of
+  the pre-enrichment graph
+- resolver action/argument ranges are relative to that opaque source text
+- proposals are locally revalidated before graph admission:
+  - action must resolve to registered/custom procedural action terminology
+  - argument concepts must resolve through instruction concept terminology or
+    the dedicated body-site grammar
+  - quantities must be finite and use accepted parser units
+  - argument ranges must remain inside the proposed action range
+  - action ranges must remain inside the supplied opaque span
+  - resolver actions cannot overlap deterministic graph actions or one another
+- unregistered, malformed, overlapping, or out-of-bounds proposals are ignored
+  and source text remains opaque
+- accepted actions are marked `origin: semantic-resolver` and may carry a
+  separately bounded 0..1 resolver confidence
+- origin/confidence survive the FHIR graph-extension round trip
+- semantic coverage is recomputed after enrichment; learned confidence is never
+  conflated with coverage
+
+Execution behavior:
+- synchronous resolvers may be explicitly used with `parseSig`
+- Promise-returning resolvers require `parseSigAsync`, matching the package's
+  existing sync/async resolver ergonomics
+- `parseSigAsync` awaits semantic resolvers after deterministic PRN/site coding
+  and before formatting/FHIR projection
+- resolver runtime failures fail open: opaque clinician text is preserved and a
+  warning is surfaced instead of emitting guessed structure
+- deterministic action aliases always win first, so registered literal text
+  does not need a model round trip; tests use real paraphrases such as
+  `croon a song -> sing` and `murmur quietly -> hum`
+
+This provides a safe neuro-symbolic integration point for local classifiers,
+LLMs, or remote clinical NLP without permitting them to overwrite deterministic
+dose, timing, route, PRN, or existing structured semantics.
+
+Verification:
+- `npm run build`
+- focused instruction-graph resolver tests pass
+- `npm test` -> 653 tests passing
+- `npm run test:dist` -> 3 published-entrypoint tests passing
+
+## 2026-08-22 More formal HPSG attachment, 50-case torture corpus, and performance
+
+A researched 50-case TH/EN medication/product instruction corpus exposed that the
+remaining serious errors were primarily scope and attachment errors rather than
+missing dictionary entries. Real-label patterns include inhaler priming/rinsing,
+mouth-rinse swish/spit warnings, topical clean/dry/apply workflows, vaginal
+applicators, eye-drop precautions, patch replacement/disposal, insulin site
+rotation, and Thai colloquial action sequences.
+
+HPSG/parser changes:
+- replaced repeated all-sign x all-sign chart rescans with an indexed agenda
+  keyed by span boundaries
+- packed chart identity by semantic state (type + span + SYNSEM), no longer by
+  derivational consumed-token bookkeeping; equivalent derivations retain the
+  best token coverage/score
+- cached immutable chart keys and shared one procedural analysis cache across
+  method/site/instruction HPSG rule families
+- changed clause projection from one winning constituent to a compatible
+  semantic cover, allowing non-overlapping method/dose/site/schedule signs to
+  unify across deliberately opaque gaps
+- introduced declarative procedural HPSG lexical constructions; they complement
+  proven workflow rules rather than replacing them
+- separated procedure-local site/route/method arguments from global medication
+  site/route/method attachment (e.g. wash hands no longer steals Dosage.site;
+  rub in gently no longer implies intranasal route)
+- segment boundaries now preserve comma-linked procedural regimens when an
+  action sequence continues across punctuation
+- broad workflow/advice constituents yield before a new positive administration
+  head so preparatory actions can compose with a later APPLY/INSTILL/etc.
+- added ordinary number-word dose construction (one drop/packet/applicatorful)
+  and canonical-token-aware method classification for Thai
+- added typed contextual disambiguation such as Thai ให้ as auxiliary vs GIVE
+- action terminology now distinguishes acceptsAmount from definesDose, allowing
+  measure/swish/gargle/dissolve/pour and administration actions to promote real
+  dose amounts while prime/re-prime counts stay procedure-local
+
+The permanent `real-world-torture.spec.ts` now contains 50 semantic contracts and
+passes 50/50. Together with the pre-existing suite this yields 703/703 tests.
+The corpus includes explicit forbidden interpretations to catch dangerous false
+structure, such as inhaler priming spray counts becoming medication dose or
+procedure-local `in` becoming intranasal route.
+
+Performance baseline on the same 50 cases before this pass (HP host, warm, 5000
+parses): mean 6.22 ms, p50 3.41 ms, p95 7.52 ms, p99 119.8 ms, ~160.7 parses/s.
+An intermediate packed-chart build already reached ~4.54 ms mean / 84 ms p99.
+The finalized checked-in benchmark (`npm run bench:torture`, 20 warmup rounds +
+100 measured rounds = 5000 parses) reached mean 3.93 ms, p50 3.37 ms, p95
+8.32 ms, p99 12.49 ms, and ~254 parses/s. The former pathological topical
+workflow dropped from ~99 ms average to ~12.8 ms. This is roughly 37% lower
+mean latency, 58% higher throughput, and ~90% lower p99 than the pre-pass
+baseline while the grammar became more expressive. The benchmark script is
+checked in so future grammar changes can be compared on the same workload
+without flaky CI timing assertions.
+
+## 2026-08-22 Formal typed-feature HPSG substrate
+
+Follow-up formalization after the 50-case HPSG/torture checkpoint:
+
+- introduced a real typed feature-structure runtime with:
+  - declared type hierarchy and multiple inheritance
+  - inherited feature appropriateness constraints
+  - required appropriate features
+  - general graph unification
+  - atom conflict detection
+  - reentrancy / token-identity preservation
+  - canonical serialization that emits references for shared structure
+- declared the sign hierarchy (`sign`, `word-sign`, `phrase-sign`,
+  `clause-sign`, lexical sign subtypes) plus typed SYNSEM / HEAD / VALENCE /
+  CONT and medication-domain feature types
+- every lexical HPSG sign now carries a validated typed feature graph
+- phrase combination unifies daughter SYNSEM feature structures into a typed
+  clause-sign mother; the existing domain-specific SYNSEM merge remains the
+  leaf-value compatibility layer during migration
+- chart type matching now follows formal subtype inheritance rather than flat
+  string equality / clause-sign special casing
+- added dedicated tests for subtype/multiple inheritance, appropriateness,
+  general unification conflicts, reentrancy preservation, and existing
+  medication sign materialization
+
+Performance:
+- naive typed AVM construction/unification initially cost too much: mean 5.76
+  ms, p99 31.44 ms, ~174 parses/s on the 50-case benchmark
+- structural SYNSEM/sign/mother AVMs are immutable and highly repetitive, so
+  memoizing equivalent typed shapes recovered nearly all cost
+- final formal-HPSG benchmark: mean 4.06 ms, p50 3.46 ms, p95 8.78 ms, p99
+  13.08 ms, ~246 parses/s over 5000 parses
+- this is ~3% slower than the immediately preceding non-formal checkpoint but
+  still ~35% lower mean latency and ~89% lower p99 than the original baseline
+
+Validation after memoization: 709/709 source tests passing, including all 50
+real-world torture contracts and 6 formal typed-feature tests.
+
+Boundary: this is now a genuine typed-feature HPSG substrate, but not yet a
+fully declarative DELPH-IN-style grammar. Route refinement, schedule merging,
+and several domain leaf constraints still live in specialized TypeScript
+unification functions, and the semantic pivot is the medication instruction
+graph rather than MRS. Those are the next formalization targets if further HPSG
+purity produces measurable product value.
+
+## 2026-08-22 Weird TH/EN safety scope and workflow-head HPSG
+
+A second adversarial pass started from five deliberately awkward Thai clinician
+instructions: four-times-daily eye drops with four event times, bedtime drops
+with conditional medical advice, 0-2/day symptom-adjusted eye drops, a
+wash/leave/rinse topical workflow with a wound warning, and patch application
+with a menstrual warning. The same semantic families were expanded into
+English, shorthand, Unicode-range, punctuation, separated-range, and TH/EN
+code-switched variants.
+
+The failures were mostly scope/attachment rather than missing vocabulary, so the
+fixes intentionally moved more structure into HPSG:
+
+- added typed `conditional-sign` and `adjustment-sign` lexical constructions
+- separated conditional safety advice from PRN: `if irritation -> consult` and
+  `should not use if wound` do not make the medication itself PRN
+- added symptom-adjusted administration for `adjust`, `depending`, `according`,
+  and safely-resolved `during <symptom> periods`
+- added compact, cadence-first, and separated frequency-range constructions,
+  including `0-2x/day`, `วันละ 0-2 ครั้ง`, `0 to 2 times per day`, and
+  `0 ถึง 2 ครั้ง/วัน`
+- prevented a number starting a separated frequency range from also becoming a
+  numeric dose lexical sign
+- added approximate, Unicode-dash, and separated procedural duration ranges
+  (`about 5-10 min`, `5–10 minutes`, `5 to 10 minutes`)
+- made the first positive method-capable workflow action the possible HPSG
+  workflow head; later wash/rinse actions remain dependent procedure actions
+- made generic Apply->topical a defeasible default rather than a lexical fact;
+  `apply patch`/Thai `แปะ` is a specific Apply variant with transdermal route
+- preserved `แปะ` as the human-facing Thai method while retaining SNOMED Apply
+- tightened body-site scope around `during`, `depending`, `not`, punctuation,
+  and conditional/directive boundaries
+- made workflow argument and action spans source-faithful around punctuation,
+  and reconciled opaque spans against richer understood action spans
+- stopped instruction-graph relations from inventing THEN across arbitrary
+  structured text such as medication schedule material
+
+FHIR `Timing.repeat.frequency` is positiveInt and cannot encode the explicit
+lower bound 0. The canonical graph therefore projects frequency=0 through the
+package-owned extension
+`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+while `frequencyMax`, period, and periodUnit remain standard FHIR fields. The
+extension round-trips through `fromFhirDosage()` and is exported publicly.
+Negated graph actions are also projected to standard
+`Dosage.additionalInstruction.text` when not already represented, so ordinary
+FHIR consumers retain critical warnings even without understanding the rich
+instruction-graph extension.
+
+A new 28-case `weird-clinician-cases.json` corpus plus two dedicated FHIR
+round-trip tests now contributes 30 tests. Combined with the pre-existing
+50-case real-world torture corpus there are 78 adversarial directions spanning
+TH/EN/code-switching. Full source validation is 739/739 tests and published
+ESM/CJS validation is 3/3.
+
+Performance remained bounded. The original pre-HPSG baseline on the old 50-case
+workload was ~6.22 ms mean with ~119.8 ms p99. The formal-HPSG checkpoint was
+~4.06 ms mean / 13.08 ms p99. This richer pass varies with host load around
+~4.47-4.93 ms mean and ~17.8-20.3 ms p99 on the same 50 cases. The new combined
+78-case benchmark measured 3.99 ms mean, 3.41 ms p50, 8.68 ms p95, 16.71 ms
+p99, and ~250 parses/s over 7800 measured parses. `bench:torture` preserves the
+50-case apples-to-apples workload; `bench:adversarial` runs all 78 cases.
+
+The architecture remains intentionally hybrid rather than claiming total
+DELPH-IN-style grammar purity: typed feature structures, subtype constraints,
+head/valence attachment, and these new constructions are formal HPSG machinery;
+some medication-specific leaf compatibility and semantic assembly remain
+specialized TypeScript constraints where that is currently clearer and safer.
+
+
+## 2026-08-23 Headed HPSG constructions and bidirectional realization
+
+This pass pushed the formal HPSG core and the realization side together instead
+of treating generation as a formatter afterthought.
+
+The phrase inventory is now explicit in the live chart rather than collapsing
+every successful combination to one generic clause type. Construction subtypes
+include headed complement/adjunct/marker structures, coordination,
+procedure-sequence/conditional structures, and administration clauses. Phrase
+AVMs carry the actual `LEFT_DTR`/`RIGHT_DTR` daughter graphs; headed phrase types
+add required `HEAD_DTR` and `NON_HEAD_DTR` features whose values are the real
+daughter objects, preserving reentrancy/identity. Appropriateness validates
+those features. Parser-time mother validation is incremental because daughters
+and SYNSEM have already been validated; the full recursive validator remains
+available and is exercised by the formal tests.
+
+Construction typing initially expanded equivalent chart derivations and caused
+a substantial latency regression. Chart packing now keys semantically equivalent
+phrase construction alternatives under their `phrase-sign` state while retaining
+the winning derivation's concrete construction subtype and daughter AVM. The
+immutable type system also memoizes subtype, appropriateness, and compatible-type
+queries. This keeps the formal structure without paying for every derivational
+variant independently.
+
+Conditional procedural programs gained proper scope. A leading condition whose
+first governed action is procedural is represented as a nested action program,
+so e.g. `if vivid dreams -> remove patch at bedtime -> apply new patch in the
+morning` does not leak Apply/transdermal/MORN into the standing global Dosage.
+Leading `if pain take...`/`if itchy apply...` still follows the established PRN
+administration grammar. Action-local event times survive in the graph.
+
+The instruction graph now records `primaryAdministrationSpan` and persists it in
+the package FHIR graph extension. Round-trip-safe realization uses that provenance
+to keep pre-administration actions before the canonical dosage and post-actions
+behind it. A rich primary event can replace a generic dosage sentence when it
+contains meaning FHIR cannot express, such as replacement-patch identity or
+`rinse AFTER inhalation`. `THEN` is generated only from an actual graph relation;
+warnings no longer become fictitious sequential actions.
+
+`FormatOptions.realizationMode` now has an explicit `roundtrip` contract and is
+forwarded through localization callbacks. Same-locale Thai graphs use their exact
+source-faithful clinician wording. Pure structured Thai dosage output uses
+parser-safe natural forms for event words, PRN wording, and numeric ranges.
+Cross-language realization uses the typed semantic graph. Declarative Thai
+terminology aliases are consumed directly by the locale lexer, but display/i18n
+translations are not parse aliases unless explicitly declared; this preserves
+richer compositional readings such as `ถู` + foam-result rather than collapsing
+them into a coarse translated Lather label.
+
+Generation is now a permanent semantic regression target:
+
+- 50 English label-style parse -> realize -> reparse cases
+- 25 Thai/code-switched same-language cases, including the five new clinician
+  torture examples and the original complex wash/mix/lather example
+- 12 TH<->EN cross-language cases whose equivalence normalizes only syntax that
+  is already represented by typed argument roles/canonical administration truth
+
+The combined generation suite is 87/87. The cross-language fingerprint remains
+strict on method/route/site/dose/timing/PRN, coded arguments and quantities,
+polarity/modality, real temporal/conditional relations, graph sequence relations,
+and opaque information loss. It only ignores language-specific prepositions and
+a redundant canonical primary graph action when FHIR already contains that
+whole administration fact.
+
+Additional hardening discovered by those corpora includes numeric action/unit
+ambiguity (`2 sprays` cannot start a second Spray action), Thai `เข้า` as a real
+`into` relation, `ล้างมือหลังใช้` retaining both local hand site and AFTER-use
+scope, `ล้างออก` as one Rinse alias, coded `บางๆ` as a real head-adjunct
+instruction, and bilingual declarative concepts for nasal spray/inhaler/device
+priming and occlusive dressings.
+
+Final validation for this checkpoint is 828/828 source tests across 18 files and
+4/4 published ESM/CJS tests. The checked-in performance workloads on the HP host
+measured:
+
+- 50-case parser: 4.3956 ms mean, 3.7133 p50, 9.1160 p95, 18.8618 p99,
+  ~227.5 parses/s
+- 78-case combined parser: 4.0728 ms mean, 3.4333 p50, 8.0788 p95,
+  18.8883 p99, ~245.5 parses/s
+- 87-case parse -> round-trip-safe realization -> reparse: 11.8255 ms mean,
+  6.7607 p50, 43.6639 p95, 53.3277 p99, ~84.6 complete round-trips/s
+
+This is materially more formal HPSG than the previous checkpoint: the parser has
+real typed headed constructions and daughter feature structures, not only typed
+SYNSEM leaves. It is still intentionally not advertised as a fully declarative
+DELPH-IN/ERG grammar because some medication-specific leaf compatibility,
+semantic assembly, and terminology defaults remain explicit TypeScript domain
+constraints where that is clearer and safer.

@@ -1,0 +1,158 @@
+import { describe, expect, it } from "vitest";
+import { formatSig, parseSig, parseSigAsync } from "../src/index";
+
+const TABLET_CONTEXT = { dosageForm: "tablet" };
+
+function dose(result: ReturnType<typeof parseSig>, index: number) {
+  return result.items[index]?.fhir.doseAndRate?.[0]?.doseQuantity;
+}
+
+function repeat(result: ReturnType<typeof parseSig>, index: number) {
+  return result.items[index]?.fhir.timing?.repeat;
+}
+
+describe("heterogeneous multi-dose regimens", () => {
+  it("splits omitted-head English then/and continuations into independent Dosage items", () => {
+    const result = parseSig(
+      "take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(3);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(dose(result, 2)).toEqual({ value: 1.5, unit: "tab" });
+    expect(repeat(result, 0)?.timeOfDay).toEqual(["12:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["16:00:00"]);
+    expect(repeat(result, 2)?.when).toEqual(["HS"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined, undefined]);
+    expect(result.items.map((item) => item.longText)).toEqual([
+      "Take 1 tablet orally at 12:00 pm.",
+      "Take 2 tablets orally at 4:00 pm.",
+      "Take 1.5 tablets orally at bedtime."
+    ]);
+  });
+
+  it("does the corresponding Thai multi-dose segmentation without a flag", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด เวลา 12:00 จากนั้น 2 เม็ด เวลา 16:00 และ 1.5 เม็ด ก่อนนอน",
+      { locale: "th", context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(3);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(dose(result, 2)).toEqual({ value: 1.5, unit: "tab" });
+    expect(repeat(result, 0)?.timeOfDay).toEqual(["12:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["16:00:00"]);
+    expect(repeat(result, 2)?.when).toEqual(["HS"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined, undefined]);
+    expect(result.items.map((item) => item.longText)).toEqual([
+      "รับประทานครั้งละ 1 เม็ด เวลา 12:00.",
+      "รับประทานครั้งละ 2 เม็ด เวลา 16:00.",
+      "รับประทานครั้งละ 1.5 เม็ด ก่อนนอน."
+    ]);
+  });
+
+  it("supports multiple timing anchors inside each heterogeneous dose group", () => {
+    const result = parseSig(
+      "Take 1 tab at wake and lunch, 2 tabs at dinner and 22:00",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+  });
+
+  it("supports the corresponding Thai multi-dose multi-timing surface", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด หลังตื่นนอนและอาหารกลางวัน, 2 เม็ด พร้อมอาหารเย็นและเวลา 22:00",
+      { locale: "th", context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
+    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+  });
+
+  it("propagates a semicolon-delimited trailing low-BP safety condition across the regimen", () => {
+    const result = parseSig(
+      "take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep; do not take if low blood pressure",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(3);
+    for (const item of result.items) {
+      expect(item.fhir.additionalInstruction).toEqual([
+        expect.objectContaining({ text: "do not take if low blood pressure" })
+      ]);
+      expect(item.longText).toContain("Do not take if low blood pressure.");
+      expect(item.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("keeps trailing shared safety consistent in async parsing", async () => {
+    const input = "take 1 tab at 12:00, 2 tabs at 16:00; do not take with food";
+    const sync = parseSig(input, { context: TABLET_CONTEXT });
+    const asyncResult = await parseSigAsync(input, { context: TABLET_CONTEXT });
+    expect(asyncResult.items.map((item) => item.fhir.additionalInstruction)).toEqual(
+      sync.items.map((item) => item.fhir.additionalInstruction)
+    );
+    expect(asyncResult.items.every((item) =>
+      item.fhir.additionalInstruction?.some((instruction) => instruction.text === "Do not take with food")
+    )).toBe(true);
+  });
+
+  it("keeps negated food safety negative and shared without a positive with-food coding", () => {
+    const result = parseSig(
+      "take 1 tab at 12:00, then 2 tabs at 16:00, and 1.5 tabs before sleep; do not take with food",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(3);
+    for (const item of result.items) {
+      expect(item.longText).toContain("Do not take with food.");
+      expect(item.fhir.additionalInstruction).toEqual([
+        expect.objectContaining({ text: "Do not take with food" })
+      ]);
+      expect(item.fhir.additionalInstruction?.some((instruction) =>
+        instruction.coding?.some((coding) => coding.code === "311504000")
+      )).toBe(false);
+    }
+  });
+
+  it("round-trips negated food relation across English and Thai surfaces", () => {
+    const english = parseSig("do not take with food", { locale: "en" });
+    const thai = parseSig("ห้ามรับประทานพร้อมอาหาร", { locale: "th" });
+    expect(english.longText).toContain("Do not take with food.");
+    expect(thai.longText).toContain("ห้ามรับประทานพร้อมอาหาร.");
+    expect(formatSig(english.fhir, "long", { locale: "th" })).toBe("ห้ามรับประทานพร้อมอาหาร.");
+    expect(formatSig(thai.fhir, "long", { locale: "en" })).toBe("Do not take with food.");
+  });
+
+
+  it("propagates the corresponding Thai low-BP safety condition across the regimen", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด เวลา 12:00 จากนั้น 2 เม็ด เวลา 16:00 และ 1.5 เม็ด ก่อนนอน; ห้ามรับประทานหากความดันโลหิตต่ำ",
+      { locale: "th", context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(3);
+    for (const item of result.items) {
+      expect(item.longText).toContain("ห้ามรับประทานหากความดันโลหิตต่ำ.");
+      expect(item.fhir.additionalInstruction).toEqual([
+        expect.objectContaining({ text: "ห้ามรับประทานหากความดันโลหิตต่ำ" })
+      ]);
+      expect(item.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("does not split ordinary coordination that lacks a new typed dose", () => {
+    const procedural = parseSig("wash scalp and rinse", { locale: "en" });
+    expect(procedural.count).toBe(1);
+    const timingList = parseSig("take 1 tab at 09:00 and 12:00", { context: TABLET_CONTEXT });
+    expect(timingList.count).toBe(1);
+  });
+});

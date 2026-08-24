@@ -212,6 +212,50 @@ describe("additional instruction rule inventory", () => {
     });
   });
 
+  it("matches compound FHIR additional-instruction text before sentence splitting", () => {
+    const compounds = [
+      [
+        "418577003",
+        "Take at regular intervals. Complete the prescribed course unless otherwise directed"
+      ],
+      [
+        "418850000",
+        "Contains aspirin and paracetamol. Do not take with any other paracetamol products"
+      ],
+      [
+        "419111009",
+        "Allow to dissolve under the tongue. Do not transfer from this container. Keep tightly closed. Discard eight weeks after opening"
+      ],
+      [
+        "419437002",
+        "Do not take more than 2 at any one time. Do not take more than 8 in 24 hours"
+      ]
+    ] as const;
+    for (const [code, text] of compounds) {
+      const compound = parseAdditionalInstructions(text, { start: 0, end: text.length });
+      expect(compound, code).toHaveLength(1);
+      expect(compound[0]?.coding?.code, code).toBe(code);
+      expect(compound[0]?.text, code).toBe(text);
+
+      const partial = text.split(".")[0];
+      const firstSentenceOnly = parseAdditionalInstructions(partial, { start: 0, end: partial.length });
+      expect(firstSentenceOnly[0]?.coding?.code, `partial ${code}`).not.toBe(code);
+    }
+  });
+
+  it("realizes leave-on duration without relation-word leakage", () => {
+    const parsed = parseSig("leave on for 20 minutes");
+    expect(parsed.longText).toContain("Leave on for 20 minutes.");
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
+      predicate: { lemma: "leave" },
+      relation: AdviceRelation.For,
+      args: [expect.objectContaining({
+        role: AdviceArgumentRole.Duration,
+        quantity: { value: 20, unit: "min" }
+      })]
+    });
+  });
+
   it("codes common clinic instructions for topical and oral products", () => {
     const sparingly = parseAdditionalInstructions("apply sparingly", { start: 0, end: 15 });
     expect(sparingly[0]?.coding?.code).toBe("420883007");
@@ -311,7 +355,7 @@ describe("additional instruction rule inventory", () => {
     expect(drowsy.longText).toContain("อาจทำให้ง่วงซึม");
 
     const sparingly = parseSig("apply sparingly", { locale: "th" });
-    expect(sparingly.longText).toContain("ใช้เพียงเล็กน้อย");
+    expect(sparingly.longText).toContain("ทาเพียงเล็กน้อย");
 
     const thinly = parseSig("apply thinly", { locale: "th" });
     expect(thinly.longText).toContain("ทาบางๆ");
@@ -321,5 +365,20 @@ describe("additional instruction rule inventory", () => {
 
     const thickly = parseSig("apply thickly", { locale: "th" });
     expect(thickly.longText).toContain("ทาหนาๆ");
-  });
+  })
+
+  it("parses terminology-declared Thai administration style suffixes as integrated modifiers", () => {
+    const cases = [
+      ["ทาบางๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาบางๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาเบาๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาเบาๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาหนาๆ บริเวณรอยโรค วันละ 2 ครั้ง", "ทาหนาๆ บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาเพียงเล็กน้อยบริเวณรอยโรค วันละ 2 ครั้ง", "ทาเพียงเล็กน้อย บริเวณรอยโรค วันละ 2 ครั้ง."],
+      ["ทาอย่างทั่วถึงบริเวณรอยโรค วันละ 2 ครั้ง", "ทาอย่างทั่วถึง บริเวณรอยโรค วันละ 2 ครั้ง."]
+    ] as const;
+    for (const [source, expected] of cases) {
+      const parsed = parseSig(source, { locale: "th" });
+      expect(parsed.longText).toBe(expected);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    }
+  });;
 });

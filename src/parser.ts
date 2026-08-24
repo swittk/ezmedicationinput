@@ -10,6 +10,8 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
+import { buildInstructionGraph } from "./instruction-graph";
+import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
   applyPrnReasonCodingAsync
@@ -19,6 +21,7 @@ export {
   applySiteCodingAsync
 } from "./site-coding";
 import {
+  AdvicePolarity,
   BodySiteDefinition,
   CanonicalSigClause,
   EventTiming,
@@ -64,37 +67,6 @@ const ROUTE_REFINEMENTS = new Map<RouteCode, ReadonlySet<RouteCode>>([
     ])
   ]
 ]);
-
-const METHOD_TEXT_BY_VERB: Record<string, string> = {
-  administer: "Administer",
-  apply: "Apply",
-  bathe: "Bathe",
-  chew: "Chew",
-  drink: "Drink",
-  gargle: "Gargle",
-  inhale: "Inhale",
-  inject: "Inject",
-  insert: "Insert",
-  instill: "Instill",
-  rinse: "Rinse",
-  spray: "Spray",
-  swallow: "Swallow",
-  take: "Take",
-  use: "Use"
-};
-
-const METHOD_THAI_BY_VERB: Record<string, string> = {
-  apply: "ทา",
-  drink: "รับประทาน",
-  inhale: "สูด",
-  inject: "ฉีด",
-  insert: "สอด",
-  instill: "หยอด",
-  spray: "พ่น",
-  swallow: "รับประทาน",
-  take: "รับประทาน",
-  wash: "ล้าง"
-};
 
 export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
@@ -167,16 +139,13 @@ function setRoute(state: ParserState, code: RouteCode, text?: string): void {
   state.routeText = text ?? ROUTE_TEXT[code];
 }
 
-function refreshMethodSurface(state: ParserState): void {
+function refreshMethodSurface(state: ParserState, options?: ParseOptions): void {
   const verb = state.methodVerb;
-  if (!verb) {
-    return;
-  }
-  state.methodText = METHOD_TEXT_BY_VERB[verb] ?? verb.charAt(0).toUpperCase() + verb.slice(1);
-  const thai = METHOD_THAI_BY_VERB[verb];
-  state.methodTextElement = thai
-    ? buildTranslationPrimitiveElement({ th: thai })
-    : undefined;
+  if (!verb) return;
+  const definition = resolveMedicationAdministrationMethod(verb, options);
+  state.methodText = definition?.display ?? verb.charAt(0).toUpperCase() + verb.slice(1);
+  const thai = definition?.i18n?.th;
+  state.methodTextElement = thai ? buildTranslationPrimitiveElement({ th: thai }) : undefined;
 }
 
 function recordEvidence(
@@ -284,6 +253,9 @@ function cleanupClause(state: ParserState): void {
       schedule.period === undefined &&
       schedule.periodMax === undefined &&
       schedule.periodUnit === undefined &&
+      schedule.offset === undefined &&
+      schedule.offsetMin === undefined &&
+      schedule.offsetMax === undefined &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&
@@ -306,7 +278,64 @@ function cleanupClause(state: ParserState): void {
   }
 }
 
-function finalizeClause(state: ParserState): void {
+function normalizedSafetyText(value: string): string {
+  return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClause): void {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  const directives = graph?.actions.filter((frame) => {
+    if (!frame.sourceText.trim()) return false;
+    if (frame.polarity === AdvicePolarity.Negate) return true;
+    if (!frame.modality || !primary) return false;
+    return frame.span.end <= primary.start || frame.span.start >= primary.end;
+  }) ?? [];
+  if (!directives.length) return;
+  const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
+  for (const warning of directives) {
+    const sourceText = warning.sourceText.trim();
+    const text = sourceText
+      ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+      : sourceText;
+    const normalized = normalizedSafetyText(text);
+    if (!normalized) continue;
+    const alreadyRepresentedByFrame = instructions.some((instruction) =>
+      instruction.frames?.some((frame) =>
+        frame.span.start === warning.span.start &&
+        frame.span.end === warning.span.end &&
+        frame.polarity === warning.polarity
+      )
+    );
+    if (alreadyRepresentedByFrame) continue;
+    const overlapIndex = instructions.findIndex((instruction) => {
+      const existing = normalizedSafetyText(instruction.text ?? "");
+      return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
+    });
+    if (overlapIndex >= 0) {
+      const existing = instructions[overlapIndex];
+      const frames = [...(existing.frames ?? [])];
+      if (!frames.some((frame) =>
+        frame.predicate.lemma === warning.predicate.lemma &&
+        frame.polarity === warning.polarity &&
+        frame.span.start < warning.span.end && warning.span.start < frame.span.end
+      )) {
+        frames.push(warning);
+      }
+      const shouldUseWarningText = !existing.coding?.code &&
+        normalizedSafetyText(existing.text ?? "").length < normalized.length;
+      instructions[overlapIndex] = {
+        ...existing,
+        ...(shouldUseWarningText ? { text } : {}),
+        frames
+      };
+      continue;
+    }
+    instructions.push({ text, frames: [warning] });
+  }
+}
+
+function finalizeClause(state: ParserState, options?: ParseOptions): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
   clause.rawText = state.input;
@@ -316,6 +345,8 @@ function finalizeClause(state: ParserState): void {
   clause.warnings = state.warnings.length ? state.warnings.slice() : undefined;
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
+  clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
+  promoteGraphDirectivesToAdditionalInstructions(clause);
 }
 
 export function findUnparsedTokenGroups(
@@ -394,7 +425,7 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
       markToken,
       normalizeSiteText: normalizeBodySiteKey,
       recordEvidence,
-      refreshMethodSurface,
+      refreshMethodSurface: (target) => refreshMethodSurface(target, options),
       setRoute
     },
     project: true
@@ -403,6 +434,6 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);
   seedKnownSiteCoding(state);
-  finalizeClause(state);
+  finalizeClause(state, options);
   return state;
 }

@@ -5,10 +5,10 @@ import {
   hasSnomedFindingSitePostcoordination
 } from "./snomed-postcoordination";
 import {
-  DEFAULT_PRN_REASON_DEFINITIONS,
-  DEFAULT_PRN_REASON_ENTRIES,
-  normalizePrnReasonKey
-} from "./maps";
+  DEFAULT_SYMPTOM_DEFINITIONS as DEFAULT_PRN_REASON_DEFINITIONS,
+  DEFAULT_SYMPTOM_ENTRIES as DEFAULT_PRN_REASON_ENTRIES,
+  normalizeSymptomKey as normalizePrnReasonKey
+} from "./symptom-terminology";
 import { ParserState } from "./parser-state";
 import {
   FhirCoding,
@@ -146,6 +146,14 @@ function lookupPrnReasonDefinition(
     }
   }
   return undefined;
+}
+
+function lookupConfiguredPrnReasonDefinition(
+  options: ParseOptions | undefined,
+  canonical: string | string[]
+): PrnReasonDefinition | undefined {
+  return lookupPrnReasonDefinition(options?.prnReasonMap, canonical) ??
+    lookupPrnReasonDefinition(options?.symptomMap, canonical);
 }
 
 function lookupDefaultPrnReasonDefinition(
@@ -311,18 +319,18 @@ function resolvePrnReasonDefinitionSyncForRequest(
     return selection;
   }
   const canonicals = collectPrnReasonLookupCanonicals(request);
-  const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const exactCustomDefinition = lookupConfiguredPrnReasonDefinition(options, request.canonical);
   const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
   const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const hasExactCombinedDefinition = Boolean(
     exactCustomDefinition ||
     exactDefaultDefinition ||
     (combinedCanonical && (
-      lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical) ||
+      lookupConfiguredPrnReasonDefinition(options, combinedCanonical) ||
       lookupDefaultPrnReasonDefinition(combinedCanonical)
     ))
   );
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
+  const customDefinition = lookupConfiguredPrnReasonDefinition(options, canonicals);
   if (customDefinition) {
     return buildPostcoordinatedPrnReasonDefinition(
       request,
@@ -362,18 +370,18 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
     return selection;
   }
   const canonicals = collectPrnReasonLookupCanonicals(request);
-  const exactCustomDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical);
+  const exactCustomDefinition = lookupConfiguredPrnReasonDefinition(options, request.canonical);
   const exactDefaultDefinition = lookupDefaultPrnReasonDefinition(request.canonical);
   const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const hasExactCombinedDefinition = Boolean(
     exactCustomDefinition ||
     exactDefaultDefinition ||
     (combinedCanonical && (
-      lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical) ||
+      lookupConfiguredPrnReasonDefinition(options, combinedCanonical) ||
       lookupDefaultPrnReasonDefinition(combinedCanonical)
     ))
   );
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
+  const customDefinition = lookupConfiguredPrnReasonDefinition(options, canonicals);
   if (customDefinition) {
     return buildPostcoordinatedPrnReasonDefinition(
       request,
@@ -760,9 +768,9 @@ function runPrnReasonResolutionSync(
   const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
   const exactCustomDefinition =
-    lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical) ??
-    lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical ?? "");
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
+    lookupConfiguredPrnReasonDefinition(options, request.canonical) ??
+    lookupConfiguredPrnReasonDefinition(options, combinedCanonical ?? "");
+  const customDefinition = lookupConfiguredPrnReasonDefinition(options, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 
@@ -870,9 +878,9 @@ async function runPrnReasonResolutionAsync(
   const combinedCanonical = buildCombinedPrnReasonCanonical(request);
   const selection = pickPrnReasonSelection(options?.prnReasonSelections, request);
   const exactCustomDefinition =
-    lookupPrnReasonDefinition(options?.prnReasonMap, request.canonical) ??
-    lookupPrnReasonDefinition(options?.prnReasonMap, combinedCanonical ?? "");
-  const customDefinition = lookupPrnReasonDefinition(options?.prnReasonMap, canonicals);
+    lookupConfiguredPrnReasonDefinition(options, request.canonical) ??
+    lookupConfiguredPrnReasonDefinition(options, combinedCanonical ?? "");
+  const customDefinition = lookupConfiguredPrnReasonDefinition(options, canonicals);
   const inferredDefinition = inferSiteSpecificPrnReasonDefinition(internal, request);
   let resolution = selection ?? customDefinition;
 

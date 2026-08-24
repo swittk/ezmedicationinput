@@ -1,105 +1,82 @@
-import { buildTranslationPrimitiveElement, clonePrimitiveElement } from "../fhir-translations";
-import { FhirCoding } from "../types";
+import {
+  listMedicationInstructionActions,
+  normalizeActionSurface,
+  resolveMedicationInstructionAction
+} from "../instruction-action-terminology";
+import {
+  FhirCoding,
+  MedicationInstructionActionDefinition,
+  ParseOptions,
+  RouteCode
+} from "../types";
+import { clonePrimitiveElement } from "../fhir-translations";
 
-const SNOMED_SYSTEM = "http://snomed.info/sct";
+export type MethodAction = string;
 
-export enum MethodAction {
-  Administer = "administer",
-  Apply = "apply",
-  Inhale = "inhale",
-  Inject = "inject",
-  Insert = "insert",
-  Instill = "instill",
-  Spray = "spray",
-  Swallow = "swallow",
-  Wash = "wash"
-}
-
-export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {
-  apply: MethodAction.Apply,
-  dab: MethodAction.Apply,
-  drink: MethodAction.Swallow,
-  inhale: MethodAction.Inhale,
-  inject: MethodAction.Inject,
-  insert: MethodAction.Insert,
-  instill: MethodAction.Instill,
-  lather: MethodAction.Wash,
-  massage: MethodAction.Apply,
-  reapply: MethodAction.Apply,
-  rub: MethodAction.Apply,
-  shampoo: MethodAction.Wash,
-  spray: MethodAction.Spray,
-  spread: MethodAction.Apply,
-  swallow: MethodAction.Swallow,
-  take: MethodAction.Administer,
-  use: MethodAction.Administer,
-  wash: MethodAction.Wash
-};
-
-export const METHOD_CODING_BY_ACTION: Record<MethodAction, FhirCoding> = {
-  [MethodAction.Administer]: {
-    system: SNOMED_SYSTEM,
-    code: "738990001",
-    display: "Administer"
-  },
-  [MethodAction.Apply]: {
-    system: SNOMED_SYSTEM,
-    code: "738991002",
-    display: "Apply",
-    _display: buildTranslationPrimitiveElement({ th: "ทา" })
-  },
-  [MethodAction.Inhale]: {
-    system: SNOMED_SYSTEM,
-    code: "740666001",
-    display: "Inhale",
-    _display: buildTranslationPrimitiveElement({ th: "สูด" })
-  },
-  [MethodAction.Inject]: {
-    system: SNOMED_SYSTEM,
-    code: "740685003",
-    display: "Inject",
-    _display: buildTranslationPrimitiveElement({ th: "ฉีด" })
-  },
-  [MethodAction.Insert]: {
-    system: SNOMED_SYSTEM,
-    code: "738993004",
-    display: "Insert",
-    _display: buildTranslationPrimitiveElement({ th: "สอด" })
-  },
-  [MethodAction.Instill]: {
-    system: SNOMED_SYSTEM,
-    code: "738994005",
-    display: "Instill",
-    _display: buildTranslationPrimitiveElement({ th: "หยอด" })
-  },
-  [MethodAction.Spray]: {
-    system: SNOMED_SYSTEM,
-    code: "738996007",
-    display: "Spray",
-    _display: buildTranslationPrimitiveElement({ th: "พ่น" })
-  },
-  [MethodAction.Swallow]: {
-    system: SNOMED_SYSTEM,
-    code: "738995006",
-    display: "Swallow",
-    _display: buildTranslationPrimitiveElement({ th: "รับประทาน" })
-  },
-  [MethodAction.Wash]: {
-    system: SNOMED_SYSTEM,
-    code: "785900008",
-    display: "Rinse or wash",
-    _display: buildTranslationPrimitiveElement({ th: "ล้าง" })
-  }
-};
-
-export function cloneMethodCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  if (!coding?.code) {
-    return undefined;
-  }
+function cloneMethodCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
+  if (!coding?.code) return undefined;
   return {
     system: coding.system,
     code: coding.code,
     display: coding.display,
-    _display: clonePrimitiveElement(coding._display)
+    extension: coding.extension?.map((extension) => ({ ...extension })),
+    _display: clonePrimitiveElement(coding._display),
+    i18n: coding.i18n ? { ...coding.i18n } : undefined
   };
 }
+
+function methodSurfaces(definition: MedicationInstructionActionDefinition): string[] {
+  const values = [definition.code, definition.display, ...(definition.aliases ?? [])];
+  for (const language of Object.keys(definition.i18n ?? {})) {
+    const value = definition.i18n?.[language];
+    if (value) values.push(value);
+  }
+  return Array.from(new Set(values.map(normalizeActionSurface).filter(Boolean)));
+}
+
+/**
+ * Compatibility indexes derived from the single declarative action terminology.
+ * New methods must be added to instruction-action-terminology, not here.
+ */
+export const METHOD_ACTION_BY_VERB: Record<string, MethodAction> = {};
+export const METHOD_CODING_BY_ACTION: Record<string, FhirCoding> = {};
+export const METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE = new Set<MethodAction>();
+export const METHOD_ROUTE_OVERRIDE_BY_VERB: Partial<Record<string, RouteCode>> = {};
+
+for (const definition of listMedicationInstructionActions()) {
+  if (!definition.administrationMethod?.code) continue;
+  METHOD_CODING_BY_ACTION[definition.code] = cloneMethodCoding(definition.administrationMethod)!;
+  if (definition.suppressMethodRouteHint) {
+    METHOD_ACTIONS_WITHOUT_IMPLICIT_ROUTE.add(definition.code);
+  }
+  for (const surface of methodSurfaces(definition)) {
+    METHOD_ACTION_BY_VERB[surface] = definition.code;
+    if (definition.methodRouteOverride) {
+      METHOD_ROUTE_OVERRIDE_BY_VERB[surface] = definition.methodRouteOverride;
+    }
+  }
+}
+
+export function resolveMedicationAdministrationMethod(
+  surface: string,
+  options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  const definition = resolveMedicationInstructionAction(surface, options);
+  return definition?.administrationMethod?.code ? definition : undefined;
+}
+
+export function isMedicationAdministrationMethod(
+  surface: string,
+  options?: ParseOptions
+): boolean {
+  return Boolean(resolveMedicationAdministrationMethod(surface, options));
+}
+
+export function medicationAdministrationMethodCoding(
+  surface: string,
+  options?: ParseOptions
+): FhirCoding | undefined {
+  return cloneMethodCoding(resolveMedicationAdministrationMethod(surface, options)?.administrationMethod);
+}
+
+export { cloneMethodCoding };

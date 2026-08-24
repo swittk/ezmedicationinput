@@ -4,6 +4,7 @@ import { objectEntries } from "./utils/object";
 import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
   BODY_SITE_ADJECTIVE_SUFFIXES,
+  BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
   BODY_SITE_DISPLAY_PENALTY_WORDS,
   BODY_SITE_LOCATIVE_RELATIONS,
@@ -95,6 +96,7 @@ export interface ResolvedBodySitePhrase {
 
 export interface BodySitePhraseContext {
   bodySiteContext?: string;
+  allowTerminalModifierInheritance?: boolean;
 }
 
 const AMBIGUOUS_DIGIT_SITE_KEYS = new Set(["ระหว่างนิ้ว", "between digits"]);
@@ -225,6 +227,27 @@ function lookupDefinitionForCanonical(
     lookupBodySiteDefinition(customSiteMap, canonical) ??
     DEFAULT_BODY_SITE_SNOMED[canonical]
   );
+}
+
+function terminalInheritanceIsLicensed(canonical: string): boolean {
+  const words = canonical.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  return words.slice(0, -1).every((word) =>
+    BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word) || BODY_SITE_BARE_NOMINAL_PREFIXES.has(word)
+  );
+}
+
+function longestTerminalBodySiteDefinition(
+  canonical: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): { canonical: string; definition: BodySiteDefinition } | undefined {
+  const words = canonical.split(/\s+/).filter(Boolean);
+  for (let start = 1; start < words.length; start += 1) {
+    const suffix = words.slice(start).join(" ");
+    const definition = lookupDefinitionForCanonical(suffix, customSiteMap);
+    if (definition?.coding?.code || definition?.routeHint) return { canonical: suffix, definition };
+  }
+  return undefined;
 }
 
 function isAdjectivalSitePhrase(phrase: string): boolean {
@@ -647,7 +670,7 @@ export function resolveBodySitePhrase(
   const displaySourceText = contextualCanonical ?? trimmed;
   const displayText = normalizeSiteDisplayText(displaySourceText, customSiteMap);
   const canonical = normalizeBodySiteKey(displayText);
-  const definition =
+  const directDefinition =
     lookupBodySiteDefinition(customSiteMap, lookupCanonical) ??
     (contextualCanonical
       ? lookupBodySiteDefinition(customSiteMap, contextualCanonical)
@@ -656,8 +679,16 @@ export function resolveBodySitePhrase(
     DEFAULT_BODY_SITE_SNOMED[lookupCanonical] ??
     lookupBodySiteDefinition(customSiteMap, canonical) ??
     DEFAULT_BODY_SITE_SNOMED[canonical];
+  const preliminaryFeatures = parseBodySiteFeatures(displayText, undefined, customSiteMap);
+  const terminal = directDefinition ||
+    !context?.allowTerminalModifierInheritance ||
+    preliminaryFeatures.kind !== "nominal" ||
+    !terminalInheritanceIsLicensed(canonical)
+    ? undefined
+    : longestTerminalBodySiteDefinition(canonical, customSiteMap);
+  const definition = directDefinition ?? terminal?.definition;
   const coding = buildBodySiteCoding(definition);
-  const finalDisplayText = definition?.text ?? displayText;
+  const finalDisplayText = directDefinition?.text ?? displayText;
   const features = parseBodySiteFeatures(finalDisplayText, coding, customSiteMap);
   const spatialRelation =
     definition?.spatialRelation ??
@@ -665,7 +696,7 @@ export function resolveBodySitePhrase(
 
   return {
     lookupCanonical,
-    resolutionCanonical: contextualCanonical ?? lookupCanonical,
+    resolutionCanonical: contextualCanonical ?? terminal?.canonical ?? lookupCanonical,
     canonical: normalizeBodySiteKey(finalDisplayText) || canonical,
     displayText: finalDisplayText,
     coding,

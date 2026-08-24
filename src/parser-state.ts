@@ -249,6 +249,30 @@ export class ParserState {
     this.ensureSchedule().periodUnit = value;
   }
 
+  get offset(): number | undefined {
+    return this.clause.schedule?.offset;
+  }
+
+  set offset(value: number | undefined) {
+    this.ensureSchedule().offset = value;
+  }
+
+  get offsetMin(): number | undefined {
+    return this.clause.schedule?.offsetMin;
+  }
+
+  set offsetMin(value: number | undefined) {
+    this.ensureSchedule().offsetMin = value;
+  }
+
+  get offsetMax(): number | undefined {
+    return this.clause.schedule?.offsetMax;
+  }
+
+  set offsetMax(value: number | undefined) {
+    this.ensureSchedule().offsetMax = value;
+  }
+
   get dayOfWeek(): FhirDayOfWeek[] {
     const schedule = this.ensureSchedule();
     if (!schedule.dayOfWeek) {
@@ -389,6 +413,14 @@ export class ParserState {
 
   set siteText(value: string | undefined) {
     this.ensureSite().text = value;
+  }
+
+  get siteI18n(): Record<string, string> | undefined {
+    return this.clause.site?.i18n;
+  }
+
+  set siteI18n(value: Record<string, string> | undefined) {
+    this.ensureSite().i18n = cloneI18nRecord(value);
   }
 
   get siteSource(): "abbreviation" | "text" | "selection" | "resolver" | undefined {
@@ -563,6 +595,7 @@ export class ParserState {
       site.text === undefined &&
       site.coding === undefined &&
       site.spatialRelation === undefined &&
+      site.i18n === undefined &&
       site.administrationTargetCount === undefined &&
       site.source === undefined &&
       site.inferred === undefined &&

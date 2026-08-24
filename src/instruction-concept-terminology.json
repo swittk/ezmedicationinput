@@ -1,0 +1,303 @@
+{
+  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+  "concepts": [
+    {
+      "code": "product",
+      "role": "theme",
+      "display": "product",
+      "i18n": {
+        "th": "ผลิตภัณฑ์"
+      },
+      "aliases": [
+        "product",
+        "medication",
+        "medicine",
+        "ผลิตภัณฑ์",
+        "ยา"
+      ]
+    },
+    {
+      "code": "bottle",
+      "role": "container",
+      "display": "bottle",
+      "i18n": {
+        "th": "ขวด"
+      },
+      "aliases": [
+        "bottle",
+        "ขวด"
+      ]
+    },
+    {
+      "code": "patch",
+      "role": "object",
+      "display": "patch",
+      "i18n": {
+        "th": "แผ่นแปะ"
+      },
+      "aliases": [
+        "patch",
+        "transdermal patch",
+        "แผ่นแปะ"
+      ]
+    },
+    {
+      "code": "breath",
+      "role": "object",
+      "display": "breath",
+      "i18n": {
+        "th": "หายใจ"
+      },
+      "aliases": [
+        "breath",
+        "หายใจ"
+      ]
+    },
+    {
+      "code": "water",
+      "role": "substance",
+      "display": "water",
+      "i18n": {
+        "th": "น้ำ"
+      },
+      "aliases": [
+        "water",
+        "น้ำ"
+      ],
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "11713004",
+          "display": "Water"
+        }
+      ]
+    },
+    {
+      "code": "clean_water",
+      "role": "substance",
+      "display": "clean water",
+      "i18n": {
+        "th": "น้ำสะอาด"
+      },
+      "aliases": [
+        "clean water",
+        "น้ำสะอาด",
+        "clean-water"
+      ]
+    },
+    {
+      "code": "small_amount",
+      "role": "amount",
+      "display": "a small amount",
+      "i18n": {
+        "th": "เล็กน้อย"
+      },
+      "aliases": [
+        "small",
+        "small amount",
+        "a small amount",
+        "a little",
+        "little",
+        "เล็กน้อย"
+      ]
+    },
+    {
+      "code": "foam",
+      "role": "result",
+      "display": "foam",
+      "i18n": {
+        "th": "ฟอง"
+      },
+      "aliases": [
+        "foam",
+        "lather",
+        "ฟอง",
+        "foam-result"
+      ]
+    },
+    {
+      "code": "use",
+      "role": "activity",
+      "display": "use",
+      "i18n": {
+        "th": "ใช้"
+      },
+      "aliases": [
+        "use",
+        "ใช้"
+      ]
+    },
+    {
+      "code": "morning",
+      "role": "time",
+      "display": "the morning",
+      "i18n": {
+        "th": "ตอนเช้า"
+      },
+      "aliases": [
+        "morning",
+        "the morning",
+        "เช้า",
+        "ตอนเช้า"
+      ]
+    },
+    {
+      "code": "noon",
+      "role": "time",
+      "display": "noon",
+      "i18n": {
+        "th": "ตอนเที่ยง"
+      },
+      "aliases": [
+        "noon",
+        "เที่ยง",
+        "ตอนเที่ยง"
+      ]
+    },
+    {
+      "code": "afternoon",
+      "role": "time",
+      "display": "the afternoon",
+      "i18n": {
+        "th": "ตอนบ่าย"
+      },
+      "aliases": [
+        "afternoon",
+        "the afternoon",
+        "บ่าย",
+        "ตอนบ่าย"
+      ]
+    },
+    {
+      "code": "evening",
+      "role": "time",
+      "display": "the evening",
+      "i18n": {
+        "th": "ตอนเย็น"
+      },
+      "aliases": [
+        "evening",
+        "the evening",
+        "เย็น",
+        "ตอนเย็น"
+      ]
+    },
+    {
+      "code": "night",
+      "role": "time",
+      "display": "night",
+      "i18n": {
+        "th": "กลางคืน"
+      },
+      "aliases": [
+        "night",
+        "at night",
+        "กลางคืน"
+      ]
+    },
+    {
+      "code": "external_intimate_area",
+      "role": "site",
+      "display": "external intimate area",
+      "i18n": {
+        "th": "บริเวณภายนอกจุดซ่อนเร้น"
+      },
+      "aliases": [
+        "external intimate area",
+        "บริเวณภายนอกจุดซ่อนเร้น",
+        "external-intimate-area"
+      ]
+    },
+    {
+      "code": "nasal_spray",
+      "role": "object",
+      "display": "nasal spray",
+      "i18n": {
+        "th": "ยาพ่นจมูก"
+      },
+      "aliases": [
+        "nasal spray",
+        "ยาพ่นจมูก"
+      ]
+    },
+    {
+      "code": "inhaler",
+      "role": "object",
+      "display": "inhaler",
+      "i18n": {
+        "th": "ยาสูดพ่น"
+      },
+      "aliases": [
+        "inhaler",
+        "ยาสูดพ่น"
+      ]
+    },
+    {
+      "code": "before_first_use",
+      "role": "material",
+      "display": "before first use",
+      "i18n": {
+        "th": "ก่อนใช้ครั้งแรก"
+      },
+      "aliases": [
+        "before first use",
+        "ก่อนใช้ครั้งแรก"
+      ]
+    },
+    {
+      "code": "occlusive_dressing",
+      "role": "material",
+      "display": "an occlusive dressing",
+      "i18n": {
+        "th": "แผ่นปิดแบบทึบ"
+      },
+      "aliases": [
+        "occlusive dressing",
+        "an occlusive dressing",
+        "แผ่นปิดแบบทึบ"
+      ]
+    },
+    {
+      "code": "new_patch",
+      "role": "object",
+      "display": "new patch",
+      "i18n": {
+        "th": "แผ่นใหม่"
+      },
+      "aliases": [
+        "new patch",
+        "replacement patch",
+        "fresh patch",
+        "แผ่นใหม่"
+      ]
+    },
+    {
+      "code": "clean-result",
+      "role": "result",
+      "display": "clean",
+      "i18n": {
+        "th": "สะอาด"
+      },
+      "aliases": [
+        "clean",
+        "thoroughly clean",
+        "สะอาด"
+      ]
+    },
+    {
+      "code": "after-first-administration",
+      "role": "time",
+      "display": "after the first administration",
+      "i18n": {
+        "th": "หลังครั้งแรก"
+      },
+      "aliases": [
+        "after first administration",
+        "after the first administration",
+        "after first dose",
+        "after the first dose",
+        "หลังครั้งแรก"
+      ]
+    }
+  ]
+}

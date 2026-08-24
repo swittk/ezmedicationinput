@@ -1,6 +1,7 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
+import { applyLocaleLexicon } from "./locale";
 
 const PER_SLASH_UNITS = new Set([
   "d",
@@ -40,7 +41,7 @@ function classifyLexKind(value: string): {
     return { kind: LexKind.Number, value: parseFloat(value) };
   }
 
-  const rangeMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)$/);
+  const rangeMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
   if (rangeMatch) {
     return {
       kind: LexKind.NumberRange,
@@ -60,7 +61,7 @@ function classifyLexKind(value: string): {
     return { kind: LexKind.TimeLike };
   }
 
-  if (lower === "," || lower === ";") {
+  if (lower === "," || lower === ";" || lower === "." || lower === "!" || lower === "?") {
     return { kind: LexKind.Separator };
   }
 
@@ -558,7 +559,7 @@ export function lexInput(input: string): LexToken[] {
     }
 
     if (current.kind === SurfaceTokenKind.Separator) {
-      if (current.original === "," || current.original === ";") {
+      if ([",", ";", ".", "!", "?"].indexOf(current.original) >= 0) {
         output.push(buildToken(current.original, [current], input));
       }
       index += 1;
@@ -583,9 +584,5 @@ export function lexInput(input: string): LexToken[] {
     index += 1;
   }
 
-  for (let tokenIndex = 0; tokenIndex < output.length; tokenIndex += 1) {
-    output[tokenIndex].index = tokenIndex;
-  }
-
-  return output;
+  return applyLocaleLexicon(output, input);
 }

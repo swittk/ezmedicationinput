@@ -12,6 +12,7 @@ export interface LocalizedTimingGrammar {
   readonly whenText: Partial<Record<EventTiming, string>>;
   joinList(parts: string[]): string;
   summarizeMealTimingGroup(group: MealTimingGroup): string;
+  formatEventOffset?(eventText: string, schedule: CanonicalScheduleExpr): string;
   bedtimeJoinStyle?(dailyCount: number | undefined): BedtimeJoinStyle;
 }
 
@@ -88,6 +89,21 @@ export function filterLocalizedWhenEvents(
   return filtered;
 }
 
+function applyLocalizedEventOffset(
+  phrases: string[],
+  schedule: CanonicalScheduleExpr | undefined,
+  grammar: LocalizedTimingGrammar
+): string[] {
+  if (
+    !schedule ||
+    (schedule.offset === undefined && schedule.offsetMin === undefined && schedule.offsetMax === undefined) ||
+    !grammar.formatEventOffset
+  ) {
+    return phrases;
+  }
+  return phrases.map((phrase) => grammar.formatEventOffset!(phrase, schedule));
+}
+
 export function collectLocalizedWhenPhrases(
   schedule: CanonicalScheduleExpr | undefined,
   grammar: LocalizedTimingGrammar,
@@ -107,7 +123,7 @@ export function collectLocalizedWhenPhrases(
         phrases.push(text);
       }
     }
-    return phrases;
+    return applyLocalizedEventOffset(phrases, schedule, grammar);
   }
 
   const groupedCodes = new Set<EventTiming>(mealGroup.codes);
@@ -126,7 +142,7 @@ export function collectLocalizedWhenPhrases(
       phrases.push(text);
     }
   }
-  return phrases;
+  return applyLocalizedEventOffset(phrases, schedule, grammar);
 }
 
 function inferExplicitDailyFrequency(schedule: CanonicalScheduleExpr | undefined): number | undefined {

@@ -338,7 +338,7 @@ export interface FhirPeriod {
   end?: string;
 }
 
-export interface FhirTimingRepeat {
+export interface FhirTimingRepeat extends FhirElement {
   count?: number;
   boundsDuration?: FhirQuantity;
   boundsPeriod?: FhirPeriod;
@@ -351,6 +351,7 @@ export interface FhirTimingRepeat {
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];
   when?: EventTiming[];
+  /** Exact event offset in minutes. */
   offset?: number;
 }
 
@@ -425,6 +426,12 @@ export interface MedicationContext {
 
 export interface FormatOptions {
   locale?: "en" | "th" | string;
+  /**
+   * `normalized` favors compact natural wording. `roundtrip` stays human-readable
+   * but emits explicit attachment/route cues so parse -> realize -> parse can
+   * preserve canonical semantics. Defaults to `normalized`.
+   */
+  realizationMode?: "normalized" | "roundtrip";
   i18n?: SigTranslationConfig;
   /**
    * Collapses repeated meal relation phrases into a grouped phrase when all
@@ -437,6 +444,8 @@ export interface FormatOptions {
    * schedule (for example, "three times daily" or "วันละ 3 ครั้ง").
    */
   includeTimesPerDaySummary?: boolean;
+  /** Thai long-text site placement. `natural` uses route-sensitive Thai word order; `trailing` preserves the legacy trailing site phrase. */
+  sitePlacement?: "natural" | "trailing";
 }
 
 export interface FormatBatchOptions extends FormatOptions {
@@ -486,10 +495,19 @@ export interface CodeableConceptDefinition {
   i18n?: Record<string, string>;
 }
 
-export interface PrnReasonDefinition extends CodeableConceptDefinition { }
+export interface SymptomDefinition extends CodeableConceptDefinition {
+  /** Locale-specific surface proposition used after a conditional such as Thai `เมื่อ`. */
+  conditionI18n?: Record<string, string>;
+}
+
+/** Backward-compatible PRN view of the shared symptom terminology. */
+export interface PrnReasonDefinition extends SymptomDefinition {}
 
 export interface AdditionalInstructionDefinition
-  extends CodeableConceptDefinition { }
+  extends CodeableConceptDefinition {
+  /** Locale-specific suffix appended directly to the administration verb. */
+  verbSuffixI18n?: Record<string, string>;
+}
 
 export enum AdvicePolarity {
   Affirm = "affirm",
@@ -522,7 +540,13 @@ export enum AdviceRelation {
   Until = "until",
   For = "for",
   In = "in",
-  On = "on"
+  Into = "into",
+  On = "on",
+  To = "to",
+  If = "if",
+  Unless = "unless",
+  When = "when",
+  While = "while"
 }
 
 export enum AdviceArgumentRole {
@@ -533,6 +557,10 @@ export enum AdviceArgumentRole {
   Activity = "activity",
   Material = "material",
   Site = "site",
+  Destination = "destination",
+  Result = "result",
+  Container = "container",
+  Manner = "manner",
   Amount = "amount",
   Duration = "duration",
   Time = "time",
@@ -544,6 +572,14 @@ export interface AdviceArgument {
   text: string;
   normalized?: string;
   conceptId?: string;
+  coding?: FhirCoding;
+  codings?: FhirCoding[];
+  i18n?: Record<string, string>;
+  quantity?: {
+    value?: number;
+    range?: CanonicalDoseRange;
+    unit?: string;
+  };
   span?: TextRange;
 }
 
@@ -554,12 +590,24 @@ export interface AdviceFrame {
   predicate: {
     lemma: string;
     semanticClass?: string;
+    display?: string;
+    i18n?: Record<string, string>;
+    /** Persisted realization profile so caller-owned actions remain deterministic after parse/FHIR round-trip. */
+    realizer?: MedicationInstructionActionRealizer;
+    realizerConfig?: {
+      thaiFallbackObject?: string;
+      thaiSuppressActivityConcepts?: string[];
+    };
+    /** Internal/custom action coding followed by any trustworthy external mappings. */
+    codings?: FhirCoding[];
   };
   relation?: AdviceRelation;
   args: AdviceArgument[];
   span: TextRange;
   sourceText: string;
   sequenceIndex?: number;
+  origin?: "grammar" | "semantic-resolver";
+  confidence?: number;
   coding?: FhirCoding;
 }
 
@@ -744,6 +792,188 @@ export interface SmartMealExpansionScope {
   excludeDosageForms?: string[];
 }
 
+export type MedicationInstructionActionArgumentParser =
+  | "default"
+  | "container-activity"
+  | "theme-destination-amount"
+  | "object-amount-material"
+  | "amount-duration"
+  | "object-duration"
+  | "object-time"
+  | "mix-substance"
+  | "result"
+  | "site"
+  | "site-relation"
+  | "duration"
+  | "bare-duration"
+  | "activity";
+
+export type MedicationInstructionActionRealizer =
+  | "default"
+  | "source-faithful"
+  | "container-activity"
+  | "theme-destination-amount"
+  | "mix-substance"
+  | "result"
+  | "site-relation"
+  | "object-amount-material"
+  | "prime"
+  | "amount-duration"
+  | "object-duration"
+  | "object-time"
+  | "separable-object-relation"
+  | "relation-duration"
+  | "leave-duration"
+  | "duration"
+  | "activity";
+
+export interface MedicationInstructionActionContextualCodingRule {
+  whenArgument: {
+    role?: AdviceArgumentRole;
+    conceptId?: string;
+    codingCode?: string;
+    normalized?: string;
+  };
+  coding: FhirCoding;
+}
+
+export interface MedicationInstructionActionDefinition {
+  /** Stable semantic action code. */
+  code: string;
+  semanticClass: string;
+  display: string;
+  /** Alternate human-readable labels keyed by BCP-47-ish language tag. */
+  i18n?: Record<string, string>;
+  /** Unambiguous parser-safe labels used only for semantic round-trip realization. */
+  roundtripI18n?: Record<string, string>;
+  /** Surface forms that should resolve to this action. */
+  aliases?: string[];
+  /** Discontinuous surface forms such as Thai `เอา X ออก` (remove X). */
+  separableAliases?: Array<{ lead: string; particle: string }>;
+  /** Whether this is a procedural action rather than ordinary administration advice. */
+  procedural?: boolean;
+  /** Declarative argument grammar family used by the instruction graph. */
+  argumentParser?: MedicationInstructionActionArgumentParser;
+  /** Declarative realization family used by English/Thai graph generation. */
+  realizer?: MedicationInstructionActionRealizer;
+  argumentParserConfig?: {
+    primaryConcepts?: string[];
+    secondaryConcepts?: string[];
+    implicitMatchedConcept?: string;
+    implicitMatchedRole?: AdviceArgumentRole;
+  };
+  realizerConfig?: {
+    thaiFallbackObject?: string;
+    thaiSuppressActivityConcepts?: string[];
+    /** Thai can omit an otherwise generic medication object for this action (e.g. รับประทานหลังอาหาร). */
+    thaiImplicitMedicationObject?: boolean;
+    /** English realizes the anatomical site as the verb's direct object instead of `to/at <site>`. */
+    englishDirectSiteObject?: boolean;
+  };
+  continuationLicenses?: Array<{
+    candidateAction: string;
+    previousConcepts?: string[];
+    previousKinds?: Array<"NUMBER" | "NUMBER_RANGE">;
+    nextConcepts?: string[];
+  }>;
+  continuationAfterRelations?: string[];
+  /** Exact coding for FHIR Dosage.method when this action can head administration. */
+  administrationMethod?: FhirCoding;
+  /** Route candidate licensed by the action surface itself (e.g. take -> oral). */
+  verbRouteHint?: RouteCode;
+  /** Exact route that overrides the ordinary verb route candidate for the method head. */
+  methodRouteOverride?: RouteCode;
+  /** Do not project the action's verb route hint from the method head. */
+  suppressMethodRouteHint?: boolean;
+  /** Marks surfaces that establish topical/application context for site grammar. */
+  applicationVerb?: boolean;
+  /** Extra exact codings licensed by a typed semantic argument. */
+  contextualCodings?: MedicationInstructionActionContextualCodingRule[];
+  /** A method-capable procedural action that may serve as the primary administration head. */
+  primaryAdministrationHead?: boolean;
+  /** Semantically light verb that yields to an immediately following stronger administration head. */
+  supportVerb?: boolean;
+  /** Positive action whose condition belongs to safety/instruction scope, not PRN administration scope. */
+  safetyScopeTarget?: boolean;
+  acceptsAmount?: boolean;
+  /** Whether an amount argument on this action defines the medication dose. */
+  definesDose?: boolean;
+  /** Optional primary coding when an institution owns the action terminology. */
+  coding?: FhirCoding;
+  /** Exact external terminology mappings; never fuzzy/approximate mappings. */
+  externalCodings?: FhirCoding[];
+}
+
+export interface MedicationInstructionActionInput
+  extends Partial<MedicationInstructionActionDefinition> {
+  semanticClass?: string;
+}
+
+export interface MedicationInstructionConceptDefinition {
+  code: string;
+  role: AdviceArgumentRole;
+  display: string;
+  i18n?: Record<string, string>;
+  aliases?: string[];
+  coding?: FhirCoding;
+  externalCodings?: FhirCoding[];
+}
+
+export interface MedicationInstructionConceptInput
+  extends Partial<MedicationInstructionConceptDefinition> {
+  role?: AdviceArgumentRole;
+}
+
+export interface InstructionSemanticArgumentProposal {
+  /** Typed argument role the resolver believes this phrase fills. */
+  role: AdviceArgumentRole;
+  /** Range relative to the opaque source span supplied in the resolver request. */
+  range: TextRange;
+  /** Registered instruction concept or body-site surface/code. */
+  concept?: string;
+  /** Explicit quantity, still validated against the parser's unit terminology. */
+  quantity?: {
+    value?: number;
+    low?: number;
+    high?: number;
+    unit?: string;
+  };
+}
+
+export interface InstructionSemanticActionProposal {
+  /** Registered instruction action surface/code. */
+  action: string;
+  /** Range relative to the opaque source span supplied in the resolver request. */
+  range: TextRange;
+  polarity?: AdvicePolarity;
+  /** Resolver confidence only; it never bypasses deterministic validation. */
+  confidence?: number;
+  args?: InstructionSemanticArgumentProposal[];
+}
+
+export interface InstructionSemanticResolution {
+  actions: InstructionSemanticActionProposal[];
+}
+
+export interface InstructionSemanticResolverRequest {
+  inputText: string;
+  sourceText: string;
+  /** Absolute range of sourceText within inputText. */
+  range: TextRange;
+  locale?: string;
+  context?: MedicationContext | null;
+  /** Read-only semantic context produced before learned enrichment. */
+  existingGraph: CanonicalInstructionGraph;
+}
+
+export type InstructionSemanticResolver = (
+  request: InstructionSemanticResolverRequest
+) =>
+  | InstructionSemanticResolution
+  | null
+  | undefined
+  | Promise<InstructionSemanticResolution | null | undefined>;
+
 export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
@@ -752,6 +982,24 @@ export interface ParseOptions extends FormatOptions {
   context?: MedicationContext | null;
   routeMap?: Record<string, RouteCode>;
   unitMap?: Record<string, string>;
+  /**
+   * Institution/application procedural vocabulary. Map keys are accepted
+   * surface forms; definitions may use any coding system and may add aliases.
+   * Unknown text still remains opaque rather than being guessed.
+   */
+  instructionActionMap?: Record<string, MedicationInstructionActionInput>;
+  /**
+   * Institution/application argument vocabulary for substances, containers,
+   * results, activities, etc. Body sites still use the richer siteCodeMap.
+   */
+  instructionConceptMap?: Record<string, MedicationInstructionConceptInput>;
+  /**
+   * Optional learned/remote semantic proposal providers. They are used only by
+   * parseSigAsync(), and only against spans the deterministic parser left opaque.
+   * Proposals are validated against registered action/concept/site/unit vocabularies
+   * before they can enter the canonical graph.
+   */
+  instructionSemanticResolvers?: InstructionSemanticResolver | InstructionSemanticResolver[];
   freqMap?: Record<
     string,
     {
@@ -836,7 +1084,13 @@ export interface ParseOptions extends FormatOptions {
    */
   siteCodeSuggestionResolvers?: SiteCodeSuggestionResolver | SiteCodeSuggestionResolver[];
   /**
-   * Optional dictionary for translating PRN reason phrases into coded concepts.
+   * Optional application/institution symptom vocabulary shared by conditions,
+   * PRN indications, HPSG symptom recognition, and suggestion surfaces.
+   */
+  symptomMap?: Record<string, SymptomDefinition>;
+  /**
+   * Backward-compatible PRN-specific symptom overrides. When both maps define
+   * the same surface, this narrower PRN map takes precedence.
    */
   prnReasonMap?: Record<string, PrnReasonDefinition>;
   /**
@@ -904,6 +1158,12 @@ export interface CanonicalScheduleExpr {
   period?: number;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
+  /** Exact event offset in minutes, matching FHIR Timing.repeat.offset. */
+  offset?: number;
+  /** Minimum event offset in minutes when the source says “at least”. */
+  offsetMin?: number;
+  /** Maximum event offset in minutes when the source says “at most”. */
+  offsetMax?: number;
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];
@@ -931,6 +1191,37 @@ export interface CanonicalAdditionalInstructionExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalInstructionRelation {
+  kind: AdviceRelation;
+  fromActionIndex?: number;
+  toActionIndex: number;
+  text?: string;
+  span?: TextRange;
+}
+
+export interface CanonicalInstructionCoverage {
+  understoodCharacters: number;
+  opaqueCharacters: number;
+  ratio: number;
+  complete: boolean;
+}
+
+export interface CanonicalInstructionGraph {
+  /** Ordered, language-neutral procedural/administration actions. */
+  actions: AdviceFrame[];
+  /** Explicit temporal/conditional relationships between actions or source clauses. */
+  relations?: CanonicalInstructionRelation[];
+  /** Source span of the canonical primary administration head, when known. */
+  primaryAdministrationSpan?: TextRange;
+  /** Source fragments the parser deliberately did not assign semantics to. */
+  opaqueSpans?: CanonicalSourceSpan[];
+  coverage?: CanonicalInstructionCoverage;
+  /** Exact original source represented by this graph. */
+  sourceText: string;
+  /** Source language when it can be determined without guessing. */
+  sourceLocale?: string;
+}
+
 export interface CanonicalSourceSpan extends TextRange {
   text: string;
   tokenIndices?: number[];
@@ -955,6 +1246,7 @@ export interface CanonicalSigClause {
   schedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
   patientInstruction?: string;
+  instructionGraph?: CanonicalInstructionGraph;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];
   leftovers: CanonicalSourceSpan[];
   evidence: CanonicalEvidence[];
@@ -993,6 +1285,7 @@ export interface ParseNormalizedMeta {
   site?: BodySiteDetail;
   method?: { text?: string; coding?: FhirCoding };
   patientInstruction?: string;
+  instructionGraph?: CanonicalInstructionGraph;
   prnReason?: ConceptSiteDetail;
   prnReasons?: ConceptSiteDetail[];
   additionalInstructions?: Array<{ text?: string; coding?: FhirCoding }>;

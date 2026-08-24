@@ -400,6 +400,32 @@ describe("nextDueDoses", () => {
     ]);
   });
 
+  it("applies explicit FHIR event offsets in the direction encoded by when", () => {
+    const beforeMeal = parseSig("กินก่อนอาหารครึ่งชั่วโมง", { locale: "th" });
+    expect(nextDueDoses(beforeMeal.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T06:00:00Z",
+      from: "2024-01-01T07:00:00Z",
+      limit: 3
+    })).toEqual([
+      "2024-01-01T07:30:00+00:00",
+      "2024-01-01T12:00:00+00:00",
+      "2024-01-01T18:00:00+00:00"
+    ]);
+
+    const afterMeal = parseSig("กินหลังอาหาร 1 ชั่วโมง", { locale: "th" });
+    expect(nextDueDoses(afterMeal.fhir, {
+      ...BASE_OPTIONS,
+      orderedAt: "2024-01-01T06:00:00Z",
+      from: "2024-01-01T07:00:00Z",
+      limit: 3
+    })).toEqual([
+      "2024-01-01T09:00:00+00:00",
+      "2024-01-01T13:30:00+00:00",
+      "2024-01-01T19:30:00+00:00"
+    ]);
+  });
+
   it("respects count limits for anchored event timings", () => {
     const dosage: FhirDosage = {
       timing: {

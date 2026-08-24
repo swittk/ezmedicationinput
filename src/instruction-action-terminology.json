@@ -1,0 +1,1803 @@
+{
+  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action",
+  "actions": [
+    {
+      "code": "shake",
+      "semanticClass": "prepare",
+      "display": "Shake",
+      "i18n": {
+        "th": "เขย่า"
+      },
+      "aliases": [
+        "shake",
+        "shake well",
+        "เขย่า"
+      ],
+      "procedural": true,
+      "argumentParser": "container-activity",
+      "realizer": "container-activity"
+    },
+    {
+      "code": "pour",
+      "semanticClass": "transfer",
+      "display": "Pour",
+      "i18n": {
+        "th": "เท"
+      },
+      "aliases": [
+        "pour",
+        "เท"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "argumentParser": "theme-destination-amount",
+      "realizer": "theme-destination-amount"
+    },
+    {
+      "code": "mix",
+      "semanticClass": "prepare",
+      "display": "Mix",
+      "i18n": {
+        "th": "ผสม"
+      },
+      "aliases": [
+        "mix",
+        "combine",
+        "ผสม"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421826007",
+          "display": "Mix"
+        }
+      ],
+      "argumentParser": "mix-substance",
+      "realizer": "mix-substance",
+      "argumentParserConfig": {
+        "primaryConcepts": [
+          "water",
+          "clean-water"
+        ],
+        "secondaryConcepts": [
+          "small",
+          "small_amount"
+        ]
+      }
+    },
+    {
+      "code": "rub",
+      "semanticClass": "apply",
+      "display": "Rub",
+      "i18n": {
+        "th": "ถู"
+      },
+      "aliases": [
+        "rub",
+        "ถู"
+      ],
+      "procedural": true,
+      "argumentParser": "result",
+      "realizer": "result",
+      "argumentParserConfig": {
+        "primaryConcepts": [
+          "foam",
+          "foam-result"
+        ]
+      },
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "massage",
+      "semanticClass": "apply",
+      "display": "Massage",
+      "i18n": {
+        "th": "นวด"
+      },
+      "aliases": [
+        "massage",
+        "นวด"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "360222005",
+          "display": "Massage - action"
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "spread",
+      "semanticClass": "apply",
+      "display": "Spread",
+      "i18n": {
+        "th": "เกลี่ย"
+      },
+      "aliases": [
+        "spread",
+        "เกลี่ย"
+      ],
+      "procedural": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "dab",
+      "semanticClass": "apply",
+      "display": "Dab",
+      "i18n": {
+        "th": "แตะ"
+      },
+      "aliases": [
+        "dab",
+        "แตะ"
+      ],
+      "procedural": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "lather",
+      "semanticClass": "prepare",
+      "display": "Lather",
+      "i18n": {
+        "th": "ถูให้เกิดฟอง"
+      },
+      "aliases": [
+        "lather"
+      ],
+      "procedural": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "785900008",
+        "display": "Rinse or wash",
+        "i18n": {
+          "th": "ล้าง"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "applicationVerb": true
+    },
+    {
+      "code": "clean",
+      "semanticClass": "cleanse",
+      "display": "Clean",
+      "i18n": {
+        "th": "ทำความสะอาด"
+      },
+      "aliases": [
+        "clean",
+        "cleanse",
+        "ทำความสะอาด"
+      ],
+      "procedural": true,
+      "argumentParser": "site"
+    },
+    {
+      "code": "rinse",
+      "semanticClass": "cleanse",
+      "display": "Rinse",
+      "i18n": {
+        "th": "ล้าง"
+      },
+      "aliases": [
+        "rinse",
+        "rinse off",
+        "wash off",
+        "rinsing",
+        "ล้างออก",
+        "ล้างด้วย"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "782155003",
+          "display": "Rinse"
+        }
+      ],
+      "roundtripI18n": {
+        "th": "ล้างออก"
+      },
+      "argumentParser": "site-relation",
+      "realizer": "site-relation",
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "782155003",
+        "display": "Rinse",
+        "i18n": {
+          "th": "ล้าง"
+        }
+      }
+    },
+    {
+      "code": "wash",
+      "semanticClass": "cleanse",
+      "display": "Wash",
+      "i18n": {
+        "th": "ล้าง"
+      },
+      "aliases": [
+        "wash",
+        "ล้าง"
+      ],
+      "procedural": true,
+      "primaryAdministrationHead": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "422152000",
+          "display": "Wash - dosing instruction imperative"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "785900008",
+          "display": "Rinse or wash"
+        }
+      ],
+      "argumentParser": "site-relation",
+      "realizer": "site-relation",
+      "realizerConfig": {
+        "englishDirectSiteObject": true
+      },
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "785900008",
+        "display": "Rinse or wash",
+        "i18n": {
+          "th": "ล้าง"
+        }
+      },
+      "verbRouteHint": "6064005"
+    },
+    {
+      "code": "douche",
+      "semanticClass": "cleanse",
+      "display": "Douche",
+      "i18n": {
+        "th": "สวนล้าง"
+      },
+      "aliases": [
+        "douche",
+        "สวนล้าง"
+      ],
+      "procedural": true,
+      "argumentParser": "site",
+      "contextualCodings": [
+        {
+          "whenArgument": {
+            "codingCode": "76784001"
+          },
+          "coding": {
+            "system": "http://snomed.info/sct",
+            "code": "21397001",
+            "display": "Douche of vagina"
+          }
+        },
+        {
+          "whenArgument": {
+            "normalized": "vagina"
+          },
+          "coding": {
+            "system": "http://snomed.info/sct",
+            "code": "21397001",
+            "display": "Douche of vagina"
+          }
+        }
+      ]
+    },
+    {
+      "code": "dissolve",
+      "semanticClass": "prepare",
+      "display": "Dissolve",
+      "i18n": {
+        "th": "ละลาย"
+      },
+      "aliases": [
+        "dissolve",
+        "ละลาย"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421682005",
+          "display": "Dissolve - dosing instruction imperative"
+        }
+      ]
+    },
+    {
+      "code": "dilute",
+      "semanticClass": "prepare",
+      "display": "Dilute",
+      "i18n": {
+        "th": "เจือจาง"
+      },
+      "aliases": [
+        "dilute",
+        "เจือจาง"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421399004",
+          "display": "Dilute - dosing instruction imperative"
+        }
+      ]
+    },
+    {
+      "code": "dry",
+      "semanticClass": "cleanse",
+      "display": "Dry",
+      "i18n": {
+        "th": "ทำให้แห้ง"
+      },
+      "aliases": [
+        "dry",
+        "pat dry",
+        "ทำให้แห้ง",
+        "ซับให้แห้ง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "cover",
+      "semanticClass": "cover",
+      "display": "Cover",
+      "i18n": {
+        "th": "ปิดคลุม"
+      },
+      "aliases": [
+        "cover",
+        "ปิดคลุม"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "leave",
+      "semanticClass": "retain",
+      "display": "Leave",
+      "i18n": {
+        "th": "ทิ้งไว้"
+      },
+      "aliases": [
+        "leave",
+        "leave on",
+        "ทิ้งไว้"
+      ],
+      "procedural": true,
+      "argumentParser": "duration",
+      "realizer": "leave-duration"
+    },
+    {
+      "code": "wipe",
+      "semanticClass": "cleanse",
+      "display": "Wipe",
+      "i18n": {
+        "th": "เช็ด"
+      },
+      "aliases": [
+        "wipe",
+        "เช็ด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "swab",
+      "semanticClass": "cleanse",
+      "display": "Swab",
+      "i18n": {
+        "th": "เช็ด"
+      },
+      "aliases": [
+        "swab"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "remove",
+      "semanticClass": "manipulate",
+      "display": "Remove",
+      "i18n": {
+        "th": "เอาออก"
+      },
+      "aliases": [
+        "remove",
+        "take off",
+        "เอาออก"
+      ],
+      "procedural": true,
+      "realizer": "separable-object-relation",
+      "separableAliases": [
+        {
+          "lead": "เอา",
+          "particle": "ออก"
+        }
+      ]
+    },
+    {
+      "code": "discard",
+      "semanticClass": "discard",
+      "display": "Discard",
+      "i18n": {
+        "th": "ทิ้ง"
+      },
+      "aliases": [
+        "discard",
+        "throw away",
+        "ทิ้ง"
+      ],
+      "procedural": true,
+      "realizer": "relation-duration"
+    },
+    {
+      "code": "wait",
+      "semanticClass": "wait",
+      "display": "Wait",
+      "i18n": {
+        "th": "รอ"
+      },
+      "aliases": [
+        "wait",
+        "รอ"
+      ],
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "stop",
+      "semanticClass": "stop",
+      "display": "Stop",
+      "i18n": {
+        "th": "หยุดใช้"
+      },
+      "aliases": [
+        "stop",
+        "stop use",
+        "stop using",
+        "หยุด",
+        "หยุดใช้"
+      ],
+      "procedural": true,
+      "safetyScopeTarget": true,
+      "argumentParser": "activity",
+      "realizer": "activity",
+      "argumentParserConfig": {
+        "implicitMatchedConcept": "use",
+        "implicitMatchedRole": "activity"
+      },
+      "realizerConfig": {
+        "thaiSuppressActivityConcepts": [
+          "use"
+        ]
+      }
+    },
+    {
+      "code": "measure",
+      "semanticClass": "measure",
+      "display": "Measure",
+      "i18n": {
+        "th": "ตวง"
+      },
+      "aliases": [
+        "measure",
+        "ตวง"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
+    },
+    {
+      "code": "crush",
+      "semanticClass": "manipulate",
+      "display": "Crush",
+      "i18n": {
+        "th": "บด"
+      },
+      "aliases": [
+        "crush",
+        "บด"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "129400007",
+          "display": "Crushing - action"
+        }
+      ]
+    },
+    {
+      "code": "chew",
+      "semanticClass": "manipulate",
+      "display": "Chew",
+      "i18n": {
+        "th": "เคี้ยว"
+      },
+      "aliases": [
+        "chew",
+        "เคี้ยว"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419747000",
+          "display": "Chew - dosing instruction imperative"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738992009",
+          "display": "Chew"
+        }
+      ],
+      "primaryAdministrationHead": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738992009",
+        "display": "Chew"
+      }
+    },
+    {
+      "code": "swallow",
+      "semanticClass": "ingest",
+      "display": "Swallow",
+      "i18n": {
+        "th": "กลืน"
+      },
+      "aliases": [
+        "swallow",
+        "กลืน"
+      ],
+      "procedural": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738995006",
+          "display": "Swallow"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421521009",
+          "display": "Swallow - dosing instruction imperative"
+        }
+      ],
+      "primaryAdministrationHead": true,
+      "continuationLicenses": [
+        {
+          "candidateAction": "rinse",
+          "nextConcepts": [
+            "water"
+          ]
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738995006",
+        "display": "Swallow",
+        "i18n": {
+          "th": "รับประทาน"
+        }
+      },
+      "verbRouteHint": "26643006"
+    },
+    {
+      "code": "gargle",
+      "semanticClass": "cleanse",
+      "display": "Gargle",
+      "i18n": {
+        "th": "กลั้วคอ"
+      },
+      "aliases": [
+        "gargle",
+        "กลั้วคอ"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "782168006",
+          "display": "Gargle"
+        }
+      ],
+      "primaryAdministrationHead": true,
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration",
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "782168006",
+        "display": "Gargle"
+      }
+    },
+    {
+      "code": "swish",
+      "semanticClass": "cleanse",
+      "display": "Swish",
+      "i18n": {
+        "th": "กลั้วปาก"
+      },
+      "aliases": [
+        "swish",
+        "กลั้ว",
+        "กลั้วปาก"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421805007",
+          "display": "Swish - dosing instruction imperative"
+        }
+      ],
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration"
+    },
+    {
+      "code": "rinse_mouth",
+      "semanticClass": "cleanse",
+      "display": "Rinse mouth",
+      "i18n": {
+        "th": "บ้วนปาก"
+      },
+      "aliases": [
+        "rinse mouth",
+        "rinse your mouth",
+        "บ้วนปาก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "spit",
+      "semanticClass": "expel",
+      "display": "Spit out",
+      "i18n": {
+        "th": "บ้วนทิ้ง"
+      },
+      "aliases": [
+        "spit",
+        "spit out",
+        "บ้วน",
+        "บ้วนทิ้ง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "prime",
+      "semanticClass": "prepare_device",
+      "display": "Prime",
+      "aliases": [
+        "prime",
+        "เตรียม",
+        "เตรียมหัวพ่น",
+        "เตรียมอุปกรณ์พ่น"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "i18n": {
+        "th": "เตรียม"
+      },
+      "argumentParser": "object-amount-material",
+      "realizer": "prime",
+      "realizerConfig": {
+        "thaiFallbackObject": "อุปกรณ์พ่น"
+      },
+      "continuationLicenses": [
+        {
+          "candidateAction": "spray",
+          "previousConcepts": [
+            "nasal",
+            "inhaler",
+            "device"
+          ],
+          "previousKinds": [
+            "NUMBER",
+            "NUMBER_RANGE"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "draw_up",
+      "semanticClass": "prepare_device",
+      "display": "Draw up",
+      "aliases": [
+        "draw up"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
+    },
+    {
+      "code": "attach",
+      "semanticClass": "device",
+      "display": "Attach",
+      "i18n": {
+        "th": "ต่อ"
+      },
+      "aliases": [
+        "attach",
+        "ต่อ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "detach",
+      "semanticClass": "device",
+      "display": "Detach",
+      "i18n": {
+        "th": "ถอด"
+      },
+      "aliases": [
+        "detach",
+        "ถอด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "replace",
+      "semanticClass": "manipulate",
+      "display": "Replace",
+      "i18n": {
+        "th": "เปลี่ยน"
+      },
+      "aliases": [
+        "replace",
+        "เปลี่ยน"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "rotate",
+      "semanticClass": "administration_pattern",
+      "display": "Rotate",
+      "aliases": [
+        "rotate"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "reapply",
+      "semanticClass": "administration",
+      "display": "Reapply",
+      "i18n": {
+        "th": "ทาซ้ำ"
+      },
+      "aliases": [
+        "reapply",
+        "apply again",
+        "ทาซ้ำ"
+      ],
+      "procedural": true,
+      "primaryAdministrationHead": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "shampoo",
+      "semanticClass": "cleanse",
+      "display": "Shampoo",
+      "i18n": {
+        "th": "สระผม"
+      },
+      "aliases": [
+        "shampoo",
+        "สระ",
+        "สระผม"
+      ],
+      "procedural": true,
+      "primaryAdministrationHead": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "785900008",
+        "display": "Rinse or wash",
+        "i18n": {
+          "th": "ล้าง"
+        }
+      },
+      "verbRouteHint": "6064005"
+    },
+    {
+      "code": "soak",
+      "semanticClass": "prepare",
+      "display": "Soak",
+      "i18n": {
+        "th": "แช่"
+      },
+      "aliases": [
+        "soak",
+        "แช่"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "moisten",
+      "semanticClass": "prepare",
+      "display": "Moisten",
+      "i18n": {
+        "th": "ทำให้ชื้น"
+      },
+      "aliases": [
+        "moisten",
+        "wet",
+        "ทำให้ชื้น"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "administer",
+      "semanticClass": "administration",
+      "display": "Administer",
+      "i18n": {
+        "th": "ให้ยา"
+      },
+      "aliases": [
+        "administer",
+        "administer medication",
+        "ให้ยา"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738990001",
+        "display": "Administer",
+        "i18n": {
+          "th": "ให้ยา"
+        }
+      },
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
+      }
+    },
+    {
+      "code": "apply",
+      "semanticClass": "administration",
+      "display": "Apply",
+      "i18n": {
+        "th": "ทา"
+      },
+      "aliases": [
+        "apply",
+        "ทา",
+        "stick",
+        "stick patch"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738991002",
+          "display": "Apply"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "417924000",
+          "display": "Apply - dosing instruction imperative"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "verbRouteHint": "6064005",
+      "suppressMethodRouteHint": true,
+      "applicationVerb": true
+    },
+    {
+      "code": "use",
+      "semanticClass": "administration",
+      "display": "Use",
+      "i18n": {
+        "th": "ใช้"
+      },
+      "aliases": [
+        "use",
+        "ใช้"
+      ],
+      "procedural": false,
+      "supportVerb": true,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "continuationAfterRelations": [
+        "before",
+        "after"
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738990001",
+        "display": "Administer"
+      }
+    },
+    {
+      "code": "take",
+      "semanticClass": "administration",
+      "display": "Take",
+      "i18n": {
+        "th": "รับประทาน"
+      },
+      "aliases": [
+        "take",
+        "รับประทาน",
+        "กิน",
+        "ทาน"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419652001",
+          "display": "Take - dosing instruction imperative"
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738990001",
+        "display": "Administer"
+      },
+      "verbRouteHint": "26643006",
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
+      }
+    },
+    {
+      "code": "drink",
+      "semanticClass": "ingest",
+      "display": "Drink",
+      "i18n": {
+        "th": "ดื่ม"
+      },
+      "aliases": [
+        "drink",
+        "ดื่ม"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738995006",
+        "display": "Swallow",
+        "i18n": {
+          "th": "รับประทาน"
+        }
+      },
+      "verbRouteHint": "26643006",
+      "realizerConfig": {
+        "thaiImplicitMedicationObject": true
+      }
+    },
+    {
+      "code": "instill",
+      "semanticClass": "administration",
+      "display": "Instill",
+      "i18n": {
+        "th": "หยอด"
+      },
+      "aliases": [
+        "instill",
+        "หยอด"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738994005",
+          "display": "Instill"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421538008",
+          "display": "Instill - dosing instruction imperative"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738994005",
+        "display": "Instill",
+        "i18n": {
+          "th": "หยอด"
+        }
+      }
+    },
+    {
+      "code": "spray",
+      "semanticClass": "administration",
+      "display": "Spray",
+      "i18n": {
+        "th": "พ่น"
+      },
+      "aliases": [
+        "spray",
+        "พ่น"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738996007",
+          "display": "Spray"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738996007",
+        "display": "Spray",
+        "i18n": {
+          "th": "พ่น"
+        }
+      }
+    },
+    {
+      "code": "inhale",
+      "semanticClass": "administration",
+      "display": "Inhale",
+      "i18n": {
+        "th": "สูด"
+      },
+      "aliases": [
+        "inhale",
+        "สูด"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "740666001",
+          "display": "Inhale"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421134003",
+          "display": "Inhale - dosing instruction imperative"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "740666001",
+        "display": "Inhale",
+        "i18n": {
+          "th": "สูด"
+        }
+      }
+    },
+    {
+      "code": "inject",
+      "semanticClass": "administration",
+      "display": "Inject",
+      "i18n": {
+        "th": "ฉีด"
+      },
+      "aliases": [
+        "inject",
+        "ฉีด"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "740685003",
+          "display": "Inject"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "422145002",
+          "display": "Inject - dosing instruction imperative"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "740685003",
+        "display": "Inject",
+        "i18n": {
+          "th": "ฉีด"
+        }
+      }
+    },
+    {
+      "code": "insert",
+      "semanticClass": "administration",
+      "display": "Insert",
+      "i18n": {
+        "th": "สอด"
+      },
+      "aliases": [
+        "insert",
+        "สอด"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738993004",
+          "display": "Insert"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "421257003",
+          "display": "Insert - dosing instruction imperative"
+        }
+      ],
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738993004",
+        "display": "Insert",
+        "i18n": {
+          "th": "สอด"
+        }
+      }
+    },
+    {
+      "code": "infuse",
+      "semanticClass": "administration",
+      "display": "Infuse",
+      "aliases": [
+        "infuse"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "764794000",
+          "display": "Infuse"
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "764794000",
+        "display": "Infuse"
+      }
+    },
+    {
+      "code": "give",
+      "semanticClass": "administration",
+      "display": "Give",
+      "i18n": {
+        "th": "ให้"
+      },
+      "aliases": [
+        "give",
+        "ให้"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "419582001",
+          "display": "Give - dosing instruction imperative"
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738990001",
+        "display": "Administer"
+      }
+    },
+    {
+      "code": "suck",
+      "semanticClass": "ingest",
+      "display": "Suck",
+      "i18n": {
+        "th": "อม"
+      },
+      "aliases": [
+        "suck",
+        "suck on",
+        "อม"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "764498003",
+        "display": "Suck",
+        "i18n": {
+          "th": "อม"
+        }
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "764498003",
+          "display": "Suck"
+        }
+      ]
+    },
+    {
+      "code": "orodisperse",
+      "semanticClass": "ingest",
+      "display": "Orodisperse",
+      "i18n": {
+        "th": "ปล่อยให้ละลายในปาก"
+      },
+      "aliases": [
+        "orodisperse",
+        "allow to dissolve in mouth",
+        "dissolve in mouth",
+        "ปล่อยให้ละลายในปาก"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "823034001",
+        "display": "Orodisperse",
+        "i18n": {
+          "th": "ปล่อยให้ละลายในปาก"
+        }
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "823034001",
+          "display": "Orodisperse"
+        }
+      ]
+    },
+    {
+      "code": "implant",
+      "semanticClass": "administration",
+      "display": "Implant",
+      "i18n": {
+        "th": "ฝัง"
+      },
+      "aliases": [
+        "implant",
+        "ฝัง"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "827107003",
+        "display": "Implant",
+        "i18n": {
+          "th": "ฝัง"
+        }
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "827107003",
+          "display": "Implant"
+        }
+      ]
+    },
+    {
+      "code": "insufflate",
+      "semanticClass": "administration",
+      "display": "Insufflate",
+      "aliases": [
+        "insufflate"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "1010690008",
+        "display": "Insufflate"
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "1010690008",
+          "display": "Insufflate"
+        }
+      ]
+    },
+    {
+      "code": "dialysis",
+      "semanticClass": "administration",
+      "display": "Dialysis",
+      "aliases": [
+        "dialysis"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "1231460007",
+        "display": "Dialysis"
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "1231460007",
+          "display": "Dialysis"
+        }
+      ]
+    },
+    {
+      "code": "bathe",
+      "semanticClass": "administration",
+      "display": "Bathe",
+      "aliases": [
+        "bathe"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "58841000052102",
+        "display": "Bathe"
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "58841000052102",
+          "display": "Bathe"
+        }
+      ]
+    },
+    {
+      "code": "part",
+      "semanticClass": "prepare_site",
+      "display": "Part",
+      "i18n": {
+        "th": "แหวก"
+      },
+      "aliases": [
+        "part",
+        "part hair",
+        "แหวก",
+        "แหวกผม"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "stir",
+      "semanticClass": "prepare",
+      "display": "Stir",
+      "i18n": {
+        "th": "คน"
+      },
+      "aliases": [
+        "stir",
+        "คน"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "hold",
+      "semanticClass": "retain",
+      "display": "Hold",
+      "i18n": {
+        "th": "กลั้น"
+      },
+      "aliases": [
+        "hold",
+        "กลั้น"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
+      "code": "close",
+      "semanticClass": "manipulate",
+      "display": "Close",
+      "i18n": {
+        "th": "หลับตา"
+      },
+      "aliases": [
+        "close",
+        "close eyes",
+        "หลับ",
+        "หลับตา"
+      ],
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "press",
+      "semanticClass": "apply_pressure",
+      "display": "Press",
+      "i18n": {
+        "th": "กด"
+      },
+      "aliases": [
+        "press",
+        "กด"
+      ],
+      "procedural": true,
+      "realizer": "object-duration"
+    },
+    {
+      "code": "warm",
+      "semanticClass": "prepare",
+      "display": "Warm",
+      "i18n": {
+        "th": "อุ่น"
+      },
+      "aliases": [
+        "warm",
+        "อุ่น"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "keep",
+      "semanticClass": "retain",
+      "display": "Keep",
+      "i18n": {
+        "th": "คง"
+      },
+      "aliases": [
+        "keep",
+        "คง",
+        "ค้างไว้"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
+      "code": "pump",
+      "semanticClass": "manipulate",
+      "display": "Pump",
+      "i18n": {
+        "th": "กดหัวปั๊ม"
+      },
+      "aliases": [
+        "pump",
+        "กดหัวปั๊ม"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "fold",
+      "semanticClass": "manipulate",
+      "display": "Fold",
+      "i18n": {
+        "th": "พับ"
+      },
+      "aliases": [
+        "fold",
+        "พับ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pinch",
+      "semanticClass": "manipulate",
+      "display": "Pinch",
+      "i18n": {
+        "th": "หยิบจับ"
+      },
+      "aliases": [
+        "pinch",
+        "หยิบจับ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "aim",
+      "semanticClass": "position",
+      "display": "Aim",
+      "i18n": {
+        "th": "เล็ง"
+      },
+      "aliases": [
+        "aim",
+        "เล็ง"
+      ],
+      "procedural": true,
+      "continuationLicenses": [
+        {
+          "candidateAction": "spray"
+        }
+      ]
+    },
+    {
+      "code": "touch",
+      "semanticClass": "contact",
+      "display": "Touch",
+      "i18n": {
+        "th": "สัมผัส"
+      },
+      "aliases": [
+        "touch",
+        "สัมผัส"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "change",
+      "semanticClass": "replace",
+      "display": "Change",
+      "i18n": {
+        "th": "เปลี่ยน"
+      },
+      "aliases": [
+        "change",
+        "เปลี่ยน"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "squeeze",
+      "semanticClass": "manipulate",
+      "display": "Squeeze",
+      "i18n": {
+        "th": "บีบ"
+      },
+      "aliases": [
+        "squeeze",
+        "บีบ"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pull",
+      "semanticClass": "manipulate",
+      "display": "Pull",
+      "i18n": {
+        "th": "ดึง"
+      },
+      "aliases": [
+        "pull",
+        "ดึง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "consult",
+      "semanticClass": "medical_advice",
+      "display": "Consult a doctor",
+      "i18n": {
+        "th": "ปรึกษาแพทย์"
+      },
+      "aliases": [
+        "consult",
+        "consult a doctor",
+        "consult doctor",
+        "seek medical advice",
+        "seek medical attention",
+        "ปรึกษาแพทย์"
+      ],
+      "procedural": true,
+      "safetyScopeTarget": true
+    },
+    {
+      "code": "adjust",
+      "semanticClass": "administration_pattern",
+      "display": "Adjust use",
+      "i18n": {
+        "th": "ปรับการใช้"
+      },
+      "aliases": [
+        "adjust",
+        "adjust use",
+        "adjust according to symptoms",
+        "ปรับ",
+        "ปรับการใช้"
+      ],
+      "procedural": true,
+      "realizer": "source-faithful"
+    },
+    {
+      "code": "apply_patch",
+      "semanticClass": "administration",
+      "display": "Apply patch",
+      "i18n": {
+        "th": "แปะ"
+      },
+      "aliases": [
+        "apply patch",
+        "apply_patch",
+        "แปะ"
+      ],
+      "procedural": false,
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738991002",
+          "display": "Apply"
+        },
+        {
+          "system": "http://snomed.info/sct",
+          "code": "417924000",
+          "display": "Apply - dosing instruction imperative"
+        }
+      ],
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738991002",
+        "display": "Apply",
+        "i18n": {
+          "th": "ทา"
+        }
+      },
+      "methodRouteOverride": "45890007",
+      "argumentParser": "object-time",
+      "realizer": "object-time"
+    },
+    {
+      "code": "cut",
+      "semanticClass": "manipulate",
+      "display": "Cut",
+      "i18n": {
+        "th": "ตัด"
+      },
+      "aliases": [
+        "cut",
+        "ตัด"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "wear",
+      "semanticClass": "retain",
+      "display": "Wear",
+      "i18n": {
+        "th": "ติดไว้"
+      },
+      "aliases": [
+        "wear",
+        "wearing",
+        "ติดไว้"
+      ],
+      "procedural": true,
+      "acceptsAmount": true,
+      "definesDose": false
+    },
+    {
+      "code": "exhale",
+      "semanticClass": "breathing",
+      "display": "Exhale",
+      "i18n": {
+        "th": "หายใจออก"
+      },
+      "aliases": [
+        "exhale",
+        "breathe out",
+        "หายใจออก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "blow",
+      "semanticClass": "prepare_site",
+      "display": "Blow",
+      "i18n": {
+        "th": "สั่งน้ำมูก"
+      },
+      "aliases": [
+        "blow",
+        "สั่งน้ำมูก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "tilt",
+      "semanticClass": "position",
+      "display": "Tilt",
+      "i18n": {
+        "th": "เอียง"
+      },
+      "aliases": [
+        "tilt",
+        "เอียง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "blink",
+      "semanticClass": "manipulate",
+      "display": "Blink",
+      "i18n": {
+        "th": "กะพริบตา"
+      },
+      "aliases": [
+        "blink",
+        "กะพริบตา"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "repeat",
+      "semanticClass": "repeat",
+      "display": "Repeat",
+      "i18n": {
+        "th": "ทำซ้ำ"
+      },
+      "aliases": [
+        "repeat",
+        "ทำซ้ำ"
+      ],
+      "procedural": true
+    }
+  ]
+}

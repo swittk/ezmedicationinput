@@ -11,6 +11,7 @@ import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { inferRouteFromContext } from "../../context";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -22,10 +23,12 @@ import {
   mapIntervalUnit
 } from "../timing-lexicon";
 import {
+  BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
+  INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
   OCULAR_ROUTE_CODES,
@@ -38,7 +41,6 @@ import {
   SITE_SELF_DISPLAY_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS
 } from "../lexical-classes";
-import { METHOD_ACTION_BY_VERB } from "../method-lexicon";
 import {
   HpsgClauseContext,
   isAmPmLower,
@@ -52,6 +54,25 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
+import { tokenBelongsToContextualPrnReasonLead } from "./prn-rules";
+
+const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
+
+function anchoredModifierLeadsToResolvableSite(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const maxEnd = Math.min(context.limit, start + 5);
+  for (let index = start + 1; index < maxEnd; index += 1) {
+    const candidate = context.tokens.slice(index, index + 1)[0];
+    if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
+    const resolved = resolveBodySitePhrase(candidate.original, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
+    if (resolved?.coding || resolved?.definition) return true;
+  }
+  return false;
+}
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
@@ -60,14 +81,17 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   }));
+  const actionLike = resolveMedicationInstructionAction(lower, context.options);
   return (
     isPunctuation(lower) ||
     PRN_LEADS.has(lower) ||
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
+    SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
+    INSTRUCTION_START_WORDS.has(lower) ||
     Boolean(
-      METHOD_ACTION_BY_VERB[lower] ||
+      actionLike ||
       (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||
       productRouteHint(lower) ||
       (normalizeUnit(lower, context.options) && !siteLike) ||
@@ -160,6 +184,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    if (tokenBelongsToContextualPrnReasonLead(context, start)) {
+      return signs;
+    }
     const siteCandidate = getPrimarySiteMeaningCandidate(token);
     const previous = context.tokens[start - 1];
     const previousRoutePhrase = previous && !context.state.consumed.has(previous.index)
@@ -201,6 +228,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       (
         isClockLikeLower(firstAfterAnchorLower) ||
         (
+          SITE_ANCHORS.has(firstAfterAnchorLower) &&
+          Boolean(secondAfterAnchorLower && isClockLikeLower(secondAfterAnchorLower))
+        ) ||
+        (
           /^[0-9]{1,2}$/.test(firstAfterAnchorLower) &&
           Boolean(secondAfterAnchorLower && isAmPmLower(secondAfterAnchorLower))
         )
@@ -222,7 +253,15 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (getDayOfWeekMeaning(candidate)) {
         break;
       }
-      if (siteBoundary(candidateLower, context)) {
+      const siteModifierCanBridgeBoundary = (
+        SITE_SELF_DISPLAY_ANCHORS.has(candidateLower) ||
+        EXTERNAL_SITE_LOCATIVE_PREFIXES.has(candidateLower) ||
+        BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(candidateLower)
+      ) && anchoredModifierLeadsToResolvableSite(context, cursor);
+      if (
+        siteBoundary(candidateLower, context) &&
+        (isPunctuation(candidateLower) || !siteModifierCanBridgeBoundary)
+      ) {
         const next = context.tokens[cursor + 1];
         const nextLower = next && !context.state.consumed.has(next.index)
           ? normalizeTokenLower(next)
@@ -230,12 +269,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         const continuedText = nextLower
           ? [...displayTokens, next].map((part) => part.original).join(" ")
           : "";
+        const continuedSite = continuedText
+          ? resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
+              bodySiteContext: context.options?.context?.bodySiteContext
+            })
+          : undefined;
         if (
           !isPunctuation(candidateLower) ||
           !nextLower ||
-          !resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
-            bodySiteContext: context.options?.context?.bodySiteContext
-          })
+          !continuedSite ||
+          (!continuedSite.coding && !continuedSite.definition)
         ) {
           break;
         }
@@ -256,14 +299,19 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!displayTokens.length) {
       return signs;
     }
-    const rawSourceText = displayTokens.map((part) => part.original).join(" ").replace(/\s+/g, " ").trim();
+    const rawSourceText = joinTokenText(displayTokens);
     const isProbe = rawSourceText.includes("{") || rawSourceText.includes("}");
-    const sourceText = rawSourceText.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
+    const sourceText = rawSourceText
+      .replace(/[{}]/g, "")
+      .replace(/[.,;:!?]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {
       return signs;
     }
     const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
-      bodySiteContext: context.options?.context?.bodySiteContext
+      bodySiteContext: context.options?.context?.bodySiteContext,
+      allowTerminalModifierInheritance: true
     });
     const abbreviationCandidate = displayTokens.length === 1
       ? getPrimarySiteMeaningCandidate(displayTokens[0])
@@ -304,7 +352,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           valence: {
             site: {
               text: displayText,
-              i18n: resolved?.definition?.i18n,
+              i18n: !resolved?.coding && resolved?.definition?.text === "affected area" &&
+                /[\u0E00-\u0E7F]/u.test(sourceText)
+                ? { ...(resolved?.definition?.i18n ?? {}), th: sourceText }
+                : resolved?.definition?.i18n,
               source: "text",
               coding: resolved?.coding,
               spatialRelation: resolved?.spatialRelation,
@@ -388,7 +439,10 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             valence: {
               site: {
                 text: displayText,
-                i18n: resolved.definition?.i18n,
+                i18n: !resolved.coding && resolved.definition?.text === "affected area" &&
+                  /[\u0E00-\u0E7F]/u.test(sourceText)
+                  ? { ...(resolved.definition?.i18n ?? {}), th: sourceText }
+                  : resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,
                 spatialRelation: resolved.spatialRelation,

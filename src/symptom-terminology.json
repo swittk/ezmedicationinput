@@ -1,0 +1,2378 @@
+{
+  "system": "http://snomed.info/sct",
+  "symptoms": [
+    {
+      "names": [
+        "pain",
+        "ache",
+        "aches",
+        "pains"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "22253000",
+          "display": "Pain"
+        },
+        "text": "Pain",
+        "aliases": [
+          "เจ็บ",
+          "ปวด"
+        ],
+        "i18n": {
+          "th": "ปวด"
+        }
+      }
+    },
+    {
+      "names": [
+        "headache",
+        "head pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "25064002",
+          "display": "Headache"
+        },
+        "text": "Headache",
+        "aliases": [
+          "ปวดหัว",
+          "ปวดศีรษะ"
+        ],
+        "i18n": {
+          "th": "ปวดศีรษะ"
+        }
+      }
+    },
+    {
+      "names": [
+        "migraine",
+        "migraine headache"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "37796009",
+          "display": "Migraine"
+        },
+        "text": "Migraine",
+        "aliases": [
+          "ไมเกรน",
+          "ปวดหัวไมเกรน"
+        ],
+        "i18n": {
+          "th": "ไมเกรน"
+        },
+        "conditionI18n": {
+          "th": "มีอาการไมเกรน"
+        }
+      }
+    },
+    {
+      "names": [
+        "back pain",
+        "backache",
+        "pain in back"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "161891005",
+          "display": "Backache"
+        },
+        "text": "Back pain",
+        "aliases": [
+          "ปวดหลัง"
+        ],
+        "i18n": {
+          "th": "ปวดหลัง"
+        }
+      }
+    },
+    {
+      "names": [
+        "low back pain",
+        "lower back pain",
+        "lumbar pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "279039007",
+          "display": "Low back pain"
+        },
+        "text": "Low back pain",
+        "aliases": [
+          "ปวดหลังส่วนล่าง",
+          "ปวดเอว"
+        ],
+        "i18n": {
+          "th": "ปวดหลังส่วนล่าง"
+        }
+      }
+    },
+    {
+      "names": [
+        "joint pain",
+        "arthralgia",
+        "painful joint"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "57676002",
+          "display": "Pain of joint"
+        },
+        "text": "Joint pain",
+        "aliases": [
+          "ปวดข้อ"
+        ],
+        "i18n": {
+          "th": "ปวดข้อ"
+        }
+      }
+    },
+    {
+      "names": [
+        "muscle pain",
+        "myalgia"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "68962001",
+          "display": "Muscle pain"
+        },
+        "text": "Muscle pain",
+        "aliases": [
+          "ปวดกล้ามเนื้อ",
+          "เมื่อยกล้ามเนื้อ"
+        ],
+        "i18n": {
+          "th": "ปวดกล้ามเนื้อ"
+        }
+      }
+    },
+    {
+      "names": [
+        "ear pain",
+        "earache",
+        "otalgia"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "301354004",
+          "display": "Pain of ear"
+        },
+        "text": "Ear pain",
+        "aliases": [
+          "ปวดหู"
+        ],
+        "i18n": {
+          "th": "ปวดหู"
+        }
+      }
+    },
+    {
+      "names": [
+        "sore throat",
+        "throat pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "267102003",
+          "display": "Sore throat"
+        },
+        "text": "Sore throat",
+        "aliases": [
+          "เจ็บคอ",
+          "คอเจ็บ"
+        ],
+        "i18n": {
+          "th": "เจ็บคอ"
+        }
+      }
+    },
+    {
+      "names": [
+        "chest pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "29857009",
+          "display": "Chest pain"
+        },
+        "text": "Chest pain",
+        "aliases": [
+          "เจ็บหน้าอก"
+        ],
+        "i18n": {
+          "th": "เจ็บหน้าอก"
+        }
+      }
+    },
+    {
+      "names": [
+        "pelvic pain",
+        "pelvic and perineal pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "274671002",
+          "display": "Pelvic and perineal pain"
+        },
+        "text": "Pelvic pain",
+        "aliases": [
+          "ปวดเชิงกราน",
+          "ปวดท้องน้อย"
+        ],
+        "i18n": {
+          "th": "ปวดเชิงกราน"
+        }
+      }
+    },
+    {
+      "names": [
+        "dysmenorrhea",
+        "menstrual cramps",
+        "period cramps",
+        "period pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "266599000",
+          "display": "Dysmenorrhea"
+        },
+        "text": "Menstrual cramps",
+        "aliases": [
+          "ปวดประจำเดือน",
+          "ปวดเมนส์"
+        ],
+        "i18n": {
+          "th": "ปวดประจำเดือน"
+        }
+      }
+    },
+    {
+      "names": [
+        "cramp",
+        "cramps",
+        "cramping"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "55300003",
+          "display": "Cramp"
+        },
+        "text": "Cramp",
+        "aliases": [
+          "ตะคริว"
+        ],
+        "i18n": {
+          "th": "ตะคริว"
+        },
+        "conditionI18n": {
+          "th": "เป็นตะคริว"
+        }
+      }
+    },
+    {
+      "names": [
+        "spasm",
+        "spasms",
+        "muscle spasm"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "45352006",
+          "display": "Spasm"
+        },
+        "text": "Spasm",
+        "aliases": [
+          "เกร็ง",
+          "กล้ามเนื้อเกร็ง"
+        ],
+        "i18n": {
+          "th": "ตะคริวหรือเกร็ง"
+        },
+        "conditionI18n": {
+          "th": "มีอาการเกร็ง"
+        }
+      }
+    },
+    {
+      "names": [
+        "nausea",
+        "queasiness",
+        "queasy"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "422587007",
+          "display": "Nausea"
+        },
+        "text": "Nausea",
+        "aliases": [
+          "คลื่นไส้"
+        ],
+        "i18n": {
+          "th": "คลื่นไส้"
+        }
+      }
+    },
+    {
+      "names": [
+        "vomiting",
+        "emesis",
+        "throw up",
+        "throwing up"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "422400008",
+          "display": "Vomiting"
+        },
+        "text": "Vomiting",
+        "aliases": [
+          "อาเจียน"
+        ],
+        "i18n": {
+          "th": "อาเจียน"
+        }
+      }
+    },
+    {
+      "names": [
+        "n/v",
+        "nausea and vomiting",
+        "vomiting and nausea"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "16932000",
+          "display": "Nausea and vomiting"
+        },
+        "text": "Nausea and vomiting",
+        "aliases": [
+          "คลื่นไส้อาเจียน",
+          "คลื่นไส้และอาเจียน"
+        ],
+        "i18n": {
+          "th": "คลื่นไส้และอาเจียน"
+        }
+      }
+    },
+    {
+      "names": [
+        "diarrhea",
+        "diarrhoea",
+        "loose stool",
+        "loose stools"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "62315008",
+          "display": "Diarrhea"
+        },
+        "text": "Diarrhea",
+        "aliases": [
+          "ท้องเสีย",
+          "ถ่ายเหลว"
+        ],
+        "i18n": {
+          "th": "ท้องเสีย"
+        }
+      }
+    },
+    {
+      "names": [
+        "constipation"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "14760008",
+          "display": "Constipation"
+        },
+        "text": "Constipation",
+        "aliases": [
+          "ท้องผูก",
+          "ถ่ายไม่ออก"
+        ],
+        "i18n": {
+          "th": "ท้องผูก"
+        }
+      }
+    },
+    {
+      "names": [
+        "heartburn"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "16331000",
+          "display": "Heartburn"
+        },
+        "text": "Heartburn",
+        "aliases": [
+          "แสบร้อนกลางอก"
+        ],
+        "i18n": {
+          "th": "แสบร้อนกลางอก"
+        }
+      }
+    },
+    {
+      "names": [
+        "abdominal pain",
+        "abdomen pain",
+        "abdomen ache",
+        "pain in abdomen",
+        "stomach pain",
+        "stomachache"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "21522001",
+          "display": "Abdominal pain"
+        },
+        "text": "Abdominal pain",
+        "aliases": [
+          "ปวดท้อง"
+        ],
+        "i18n": {
+          "th": "ปวดท้อง"
+        }
+      }
+    },
+    {
+      "names": [
+        "abdominal bloating",
+        "bloating",
+        "bloated"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "116289008",
+          "display": "Abdominal bloating"
+        },
+        "text": "Bloating",
+        "aliases": [
+          "ท้องอืด"
+        ],
+        "i18n": {
+          "th": "ท้องอืด"
+        }
+      }
+    },
+    {
+      "names": [
+        "flatulence",
+        "gas",
+        "gassy"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "249504006",
+          "display": "Flatulence"
+        },
+        "text": "Gas",
+        "aliases": [
+          "มีแก๊สในท้อง",
+          "ลมในท้อง"
+        ],
+        "i18n": {
+          "th": "มีแก๊สในท้อง"
+        }
+      }
+    },
+    {
+      "names": [
+        "eye itch",
+        "itchy eye",
+        "itchy eyes",
+        "eye itching",
+        "itching eye",
+        "itching eyes",
+        "itching of eye",
+        "itching of eyes"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "74776002",
+          "display": "Itching of eye"
+        },
+        "text": "Eye itching",
+        "aliases": [
+          "คันตา",
+          "ตาคัน"
+        ],
+        "i18n": {
+          "th": "คันตา"
+        }
+      }
+    },
+    {
+      "names": [
+        "lesion itch",
+        "itchy lesion",
+        "itching lesion",
+        "lesion itching",
+        "itching of lesion",
+        "itching of skin lesion",
+        "skin lesion itch"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "445329008",
+          "display": "Itching of lesion of skin"
+        },
+        "text": "Lesion itching",
+        "aliases": [
+          "คันรอยโรค",
+          "คันที่รอยโรค"
+        ],
+        "i18n": {
+          "th": "คันที่รอยโรค"
+        }
+      }
+    },
+    {
+      "names": [
+        "itch",
+        "itching",
+        "itchiness",
+        "itchy",
+        "wound itch",
+        "wound itchiness",
+        "itchy wound",
+        "wound itching",
+        "itching wound",
+        "itching of wound",
+        "itchiness of wound"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "418363000",
+          "display": "Itching of skin"
+        },
+        "text": "Itching",
+        "aliases": [
+          "คัน",
+          "คันแผล",
+          "แผลคัน"
+        ],
+        "i18n": {
+          "th": "คัน"
+        }
+      }
+    },
+    {
+      "names": [
+        "cough",
+        "coughing"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "49727002",
+          "display": "Cough"
+        },
+        "text": "Cough",
+        "aliases": [
+          "ไอ"
+        ],
+        "i18n": {
+          "th": "ไอ"
+        }
+      }
+    },
+    {
+      "names": [
+        "fever",
+        "temperature",
+        "pyrexia"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "386661006",
+          "display": "Fever"
+        },
+        "text": "Fever",
+        "aliases": [
+          "ไข้",
+          "มีไข้",
+          "เป็นไข้",
+          "ตัวร้อน"
+        ],
+        "i18n": {
+          "th": "ไข้"
+        },
+        "conditionI18n": {
+          "th": "มีไข้"
+        }
+      }
+    },
+    {
+      "names": [
+        "nasal congestion",
+        "congestion",
+        "stuffy nose",
+        "blocked nose"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "68235000",
+          "display": "Nasal congestion"
+        },
+        "text": "Nasal congestion",
+        "aliases": [
+          "คัดจมูก"
+        ],
+        "i18n": {
+          "th": "คัดจมูก"
+        }
+      }
+    },
+    {
+      "names": [
+        "nasal discharge",
+        "rhinorrhea",
+        "rhinorrhoea",
+        "runny nose",
+        "discharge from nose"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "64531003",
+          "display": "Nasal discharge"
+        },
+        "text": "Runny nose",
+        "aliases": [
+          "น้ำมูกไหล"
+        ],
+        "i18n": {
+          "th": "น้ำมูกไหล"
+        }
+      }
+    },
+    {
+      "names": [
+        "dyspnea",
+        "dyspnoea",
+        "shortness of breath",
+        "sob",
+        "breathlessness",
+        "breathless"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "267036007",
+          "display": "Dyspnea"
+        },
+        "text": "Shortness of breath",
+        "aliases": [
+          "เหนื่อย",
+          "หายใจลำบาก",
+          "หอบ"
+        ],
+        "i18n": {
+          "th": "เหนื่อยหรือหายใจลำบาก"
+        }
+      }
+    },
+    {
+      "names": [
+        "wheezing",
+        "wheeze",
+        "wheezy"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "56018004",
+          "display": "Wheezing"
+        },
+        "text": "Wheeze",
+        "aliases": [
+          "หายใจมีเสียงหวีด"
+        ],
+        "i18n": {
+          "th": "หายใจมีเสียงหวีด"
+        }
+      }
+    },
+    {
+      "names": [
+        "sneezing",
+        "sneeze",
+        "sneezes"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "76067001",
+          "display": "Sneezing"
+        },
+        "text": "Sneezing",
+        "aliases": [
+          "จาม"
+        ],
+        "i18n": {
+          "th": "จาม"
+        }
+      }
+    },
+    {
+      "names": [
+        "allergic rhinitis",
+        "allergy symptoms",
+        "hay fever",
+        "hayfever"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "61582004",
+          "display": "Allergic rhinitis"
+        },
+        "text": "Allergic rhinitis",
+        "aliases": [
+          "ภูมิแพ้จมูก",
+          "ภูมิแพ้"
+        ],
+        "i18n": {
+          "th": "ภูมิแพ้จมูก"
+        },
+        "conditionI18n": {
+          "th": "มีอาการภูมิแพ้จมูก"
+        }
+      }
+    },
+    {
+      "names": [
+        "acne",
+        "acne vulgaris",
+        "pimple",
+        "pimples",
+        "breakout",
+        "breakouts",
+        "acne breakout",
+        "acne breakouts"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "88616000",
+          "display": "Acne vulgaris"
+        },
+        "text": "Acne",
+        "aliases": [
+          "สิว"
+        ],
+        "i18n": {
+          "th": "สิว"
+        },
+        "conditionI18n": {
+          "th": "เป็นสิว"
+        }
+      }
+    },
+    {
+      "names": [
+        "eczema",
+        "eczema flare",
+        "eczematous rash"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "43116000",
+          "display": "Eczema"
+        },
+        "text": "Eczema",
+        "aliases": [
+          "เอ็กซีมา",
+          "ผื่นแพ้"
+        ],
+        "i18n": {
+          "th": "ผื่นแพ้"
+        },
+        "conditionI18n": {
+          "th": "มีผื่นแพ้"
+        }
+      }
+    },
+    {
+      "names": [
+        "atopic dermatitis",
+        "atopic eczema"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "24079001",
+          "display": "Atopic dermatitis"
+        },
+        "text": "Atopic dermatitis",
+        "aliases": [
+          "ผื่นภูมิแพ้",
+          "ภูมิแพ้ผิวหนัง",
+          "แพ้ผิว",
+          "ผิวแพ้"
+        ],
+        "i18n": {
+          "th": "ผื่นภูมิแพ้"
+        },
+        "conditionI18n": {
+          "th": "มีผื่นภูมิแพ้"
+        }
+      }
+    },
+    {
+      "names": [
+        "psoriasis",
+        "psoriatic rash"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "9014002",
+          "display": "Psoriasis"
+        },
+        "text": "Psoriasis",
+        "aliases": [
+          "สะเก็ดเงิน"
+        ],
+        "i18n": {
+          "th": "สะเก็ดเงิน"
+        },
+        "conditionI18n": {
+          "th": "มีผื่นสะเก็ดเงิน"
+        }
+      }
+    },
+    {
+      "names": [
+        "hives",
+        "urticaria"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "126485001",
+          "display": "Urticaria"
+        },
+        "text": "Hives",
+        "aliases": [
+          "ลมพิษ",
+          "ลมพิด"
+        ],
+        "i18n": {
+          "th": "ลมพิษ"
+        },
+        "conditionI18n": {
+          "th": "เป็นลมพิษ"
+        }
+      }
+    },
+    {
+      "names": [
+        "rash",
+        "skin rash",
+        "skin eruption",
+        "eruption of skin"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "271807003",
+          "display": "Eruption of skin"
+        },
+        "text": "Rash",
+        "aliases": [
+          "ผื่น"
+        ],
+        "i18n": {
+          "th": "ผื่น"
+        },
+        "conditionI18n": {
+          "th": "มีผื่น"
+        }
+      }
+    },
+    {
+      "names": [
+        "burning sensation",
+        "burning",
+        "burning pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "90673000",
+          "display": "Burning sensation"
+        },
+        "text": "Burning sensation",
+        "aliases": [
+          "แสบร้อน",
+          "แสบ"
+        ],
+        "i18n": {
+          "th": "แสบร้อน"
+        }
+      }
+    },
+    {
+      "names": [
+        "irritation",
+        "irritated"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "257553007",
+          "display": "Irritation"
+        },
+        "text": "Irritation",
+        "aliases": [
+          "ระคายเคือง"
+        ],
+        "i18n": {
+          "th": "ระคายเคือง"
+        }
+      }
+    },
+    {
+      "names": [
+        "dry eye",
+        "dry eyes"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "162290004",
+          "display": "Dry eyes"
+        },
+        "text": "Dry eyes",
+        "aliases": [
+          "ตาแห้ง"
+        ],
+        "i18n": {
+          "th": "ตาแห้ง"
+        }
+      }
+    },
+    {
+      "names": [
+        "red eye",
+        "red eyes"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "703630003",
+          "display": "Red eye"
+        },
+        "text": "Red eye",
+        "aliases": [
+          "ตาแดง"
+        ],
+        "i18n": {
+          "th": "ตาแดง"
+        }
+      }
+    },
+    {
+      "names": [
+        "eye pain",
+        "pain in eye",
+        "ocular pain"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "41652007",
+          "display": "Pain in eye"
+        },
+        "text": "Eye pain",
+        "aliases": [
+          "ปวดตา",
+          "เจ็บตา"
+        ],
+        "i18n": {
+          "th": "ปวดตา"
+        }
+      }
+    },
+    {
+      "names": [
+        "cold sore",
+        "cold sores",
+        "herpes labialis",
+        "fever blister",
+        "fever blisters"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "1475003",
+          "display": "Herpes labialis"
+        },
+        "text": "Cold sores",
+        "aliases": [
+          "เริมที่ปาก",
+          "แผลเริมที่ปาก"
+        ],
+        "i18n": {
+          "th": "เริมที่ปาก"
+        },
+        "conditionI18n": {
+          "th": "เป็นเริมที่ปาก"
+        }
+      }
+    },
+    {
+      "names": [
+        "mouth ulcer",
+        "mouth ulcers",
+        "oral ulcer",
+        "oral ulcers",
+        "mouth sore",
+        "mouth sores",
+        "canker sore",
+        "canker sores",
+        "aphthous ulcer",
+        "aphthous ulcers"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "26284000",
+          "display": "Ulcer of mouth"
+        },
+        "text": "Mouth ulcer",
+        "aliases": [
+          "แผลในปาก",
+          "ร้อนใน"
+        ],
+        "i18n": {
+          "th": "แผลในปาก"
+        },
+        "conditionI18n": {
+          "th": "มีแผลในปาก"
+        }
+      }
+    },
+    {
+      "names": [
+        "dry skin",
+        "xeroderma"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "52475004",
+          "display": "Xeroderma"
+        },
+        "text": "Dry skin",
+        "aliases": [
+          "ผิวแห้ง"
+        ],
+        "i18n": {
+          "th": "ผิวแห้ง"
+        }
+      }
+    },
+    {
+      "names": [
+        "dandruff",
+        "scalp dandruff"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "400201008",
+          "display": "Pityriasis capitis"
+        },
+        "text": "Dandruff",
+        "aliases": [
+          "รังแค"
+        ],
+        "i18n": {
+          "th": "รังแค"
+        },
+        "conditionI18n": {
+          "th": "มีรังแค"
+        }
+      }
+    },
+    {
+      "names": [
+        "scalp itch",
+        "scalp itchiness",
+        "scalp itching",
+        "itchiness of scalp",
+        "itching of scalp",
+        "itchy scalp"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "275921007",
+          "display": "Scalp itchy"
+        },
+        "text": "Scalp itching",
+        "aliases": [
+          "คันหนังศีรษะ"
+        ],
+        "i18n": {
+          "th": "คันหนังศีรษะ"
+        }
+      }
+    },
+    {
+      "names": [
+        "dysuria",
+        "burning urination",
+        "burning when urinating"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "49650001",
+          "display": "Dysuria"
+        },
+        "text": "Dysuria",
+        "aliases": [
+          "แสบขัด",
+          "ปัสสาวะแสบขัด",
+          "แสบเวลาปัสสาวะ"
+        ],
+        "i18n": {
+          "th": "แสบขัดเวลาปัสสาวะ"
+        }
+      }
+    },
+    {
+      "names": [
+        "frequency of urination",
+        "urinary frequency",
+        "frequent urination"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "364198000",
+          "display": "Frequency of urination"
+        },
+        "text": "Urinary frequency",
+        "aliases": [
+          "ปัสสาวะบ่อย"
+        ],
+        "i18n": {
+          "th": "ปัสสาวะบ่อย"
+        }
+      }
+    },
+    {
+      "names": [
+        "urgent desire to urinate",
+        "urinary urgency",
+        "urgency to urinate",
+        "urgency to pass urine",
+        "urgency of micturition"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "75088002",
+          "display": "Urgent desire to urinate"
+        },
+        "text": "Urinary urgency",
+        "aliases": [
+          "ปวดปัสสาวะรีบ",
+          "ปวดปัสสาวะกะทันหัน"
+        ],
+        "i18n": {
+          "th": "ปวดปัสสาวะรีบ"
+        }
+      }
+    },
+    {
+      "names": [
+        "hemorrhoids",
+        "haemorrhoids",
+        "hemorrhoid",
+        "haemorrhoid",
+        "piles"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "70153002",
+          "display": "Hemorrhoids"
+        },
+        "text": "Hemorrhoids",
+        "aliases": [
+          "ริดสีดวง",
+          "ริดสีดวงทวาร"
+        ],
+        "i18n": {
+          "th": "ริดสีดวง"
+        },
+        "conditionI18n": {
+          "th": "มีอาการริดสีดวง"
+        }
+      }
+    },
+    {
+      "names": [
+        "vaginal discharge",
+        "discharge from vagina"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "271939006",
+          "display": "Vaginal discharge"
+        },
+        "text": "Vaginal discharge",
+        "aliases": [
+          "ตกขาว"
+        ],
+        "i18n": {
+          "th": "ตกขาว"
+        }
+      }
+    },
+    {
+      "names": [
+        "vaginal irritation",
+        "irritation of vagina"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "161816004",
+          "display": "Vaginal irritation"
+        },
+        "text": "Vaginal irritation",
+        "aliases": [
+          "ระคายเคืองช่องคลอด"
+        ],
+        "i18n": {
+          "th": "ระคายเคืองช่องคลอด"
+        }
+      }
+    },
+    {
+      "names": [
+        "pruritus of vagina",
+        "itching of vagina",
+        "vaginal itching",
+        "vaginal itch"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "34363003",
+          "display": "Pruritus of vagina"
+        },
+        "text": "Vaginal itching",
+        "aliases": [
+          "คันช่องคลอด"
+        ],
+        "i18n": {
+          "th": "คันช่องคลอด"
+        }
+      }
+    },
+    {
+      "names": [
+        "vaginal dryness",
+        "dry vagina"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "31908003",
+          "display": "Vaginal dryness"
+        },
+        "text": "Vaginal dryness",
+        "aliases": [
+          "ช่องคลอดแห้ง"
+        ],
+        "i18n": {
+          "th": "ช่องคลอดแห้ง"
+        }
+      }
+    },
+    {
+      "names": [
+        "anxiety",
+        "nervousness",
+        "feeling anxious"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "48694002",
+          "display": "Anxiety"
+        },
+        "text": "Anxiety",
+        "aliases": [
+          "วิตกกังวล",
+          "กังวล"
+        ],
+        "i18n": {
+          "th": "วิตกกังวล"
+        }
+      }
+    },
+    {
+      "names": [
+        "panic attack",
+        "panic",
+        "panic episode"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "225624000",
+          "display": "Panic attack"
+        },
+        "text": "Panic attack",
+        "aliases": [
+          "อาการแพนิค",
+          "แพนิค",
+          "ตื่นตระหนก"
+        ],
+        "i18n": {
+          "th": "อาการแพนิค"
+        },
+        "conditionI18n": {
+          "th": "มีอาการแพนิค"
+        }
+      }
+    },
+    {
+      "names": [
+        "agitation",
+        "agitated",
+        "feeling agitated",
+        "unable to keep still"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "24199005",
+          "display": "Feeling agitated"
+        },
+        "text": "Agitation",
+        "aliases": [
+          "กระสับกระส่าย",
+          "อยู่ไม่นิ่ง"
+        ],
+        "i18n": {
+          "th": "กระสับกระส่าย"
+        }
+      }
+    },
+    {
+      "names": [
+        "sleep",
+        "sleeping",
+        "insomnia",
+        "sleep issues",
+        "unable to sleep"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "193462001",
+          "display": "Insomnia"
+        },
+        "text": "Sleep",
+        "aliases": [
+          "นอนหลับ",
+          "นอนไม่หลับ"
+        ],
+        "i18n": {
+          "th": "นอนหลับ"
+        },
+        "conditionI18n": {
+          "th": "นอนไม่หลับ"
+        }
+      }
+    },
+    {
+      "names": [
+        "sleepiness",
+        "sleepy",
+        "drowsiness",
+        "drowsy",
+        "somnolence"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "79519003",
+          "display": "Drowsiness"
+        },
+        "text": "Sleepiness",
+        "aliases": [
+          "ง่วงนอน",
+          "ง่วง"
+        ],
+        "i18n": {
+          "th": "ง่วงนอน"
+        }
+      }
+    },
+    {
+      "names": [
+        "dizziness",
+        "dizzy",
+        "giddiness"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "404640003",
+          "display": "Dizziness"
+        },
+        "text": "Dizziness",
+        "aliases": [
+          "เวียนหัว",
+          "เวียนศีรษะ",
+          "มึนหัว",
+          "มึนงง"
+        ],
+        "i18n": {
+          "th": "เวียนศีรษะ"
+        }
+      }
+    },
+    {
+      "names": [
+        "vertigo"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "399153001",
+          "display": "Vertigo"
+        },
+        "text": "Vertigo",
+        "aliases": [
+          "บ้านหมุน"
+        ],
+        "i18n": {
+          "th": "บ้านหมุน"
+        }
+      }
+    },
+    {
+      "names": [
+        "hallucinations",
+        "hallucination"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "7011001",
+          "display": "Hallucinations"
+        },
+        "text": "Hallucinations",
+        "aliases": [
+          "ประสาทหลอน",
+          "หูแว่ว",
+          "เห็นภาพหลอน"
+        ],
+        "i18n": {
+          "th": "ประสาทหลอน"
+        }
+      }
+    },
+    {
+      "names": [
+        "mania",
+        "manic"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "231494001",
+          "display": "Mania"
+        },
+        "text": "Mania",
+        "aliases": [
+          "แมเนีย",
+          "อารมณ์คึกผิดปกติ"
+        ],
+        "i18n": {
+          "th": "แมเนีย"
+        },
+        "conditionI18n": {
+          "th": "มีอาการแมเนีย"
+        }
+      }
+    },
+    {
+      "names": [
+        "depressed mood",
+        "feeling depressed",
+        "depressed"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "366979004",
+          "display": "Depressed mood"
+        },
+        "text": "Depressed mood",
+        "aliases": [
+          "อารมณ์ซึมเศร้า",
+          "ซึมเศร้า"
+        ],
+        "i18n": {
+          "th": "อารมณ์ซึมเศร้า"
+        },
+        "conditionI18n": {
+          "th": "รู้สึกซึมเศร้า"
+        }
+      }
+    },
+    {
+      "names": [
+        "poor concentration",
+        "difficulty concentrating",
+        "unable to concentrate",
+        "cannot concentrate",
+        "can't focus"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "26329005",
+          "display": "Poor concentration"
+        },
+        "text": "Poor concentration",
+        "aliases": [
+          "สมาธิไม่ดี",
+          "ขาดสมาธิ",
+          "ไม่มีสมาธิ"
+        ],
+        "i18n": {
+          "th": "สมาธิไม่ดี"
+        }
+      }
+    },
+    {
+      "names": [
+        "motion sickness",
+        "travel sickness",
+        "car sickness",
+        "sea sickness",
+        "seasickness"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "37031009",
+          "display": "Motion sickness"
+        },
+        "text": "Motion sickness",
+        "aliases": [
+          "เมารถ",
+          "เมาเรือ",
+          "เมาเครื่องบิน"
+        ],
+        "i18n": {
+          "th": "เมารถหรือเมาเรือ"
+        }
+      }
+    },
+    {
+      "names": [
+        "dry mouth",
+        "xerostomia"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "162014002",
+          "display": "Dry mouth"
+        },
+        "text": "Dry mouth",
+        "aliases": [
+          "ปากแห้ง"
+        ],
+        "i18n": {
+          "th": "ปากแห้ง"
+        }
+      }
+    },
+    {
+      "names": [
+        "palpitations",
+        "palpitation"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "80313002",
+          "display": "Palpitations"
+        },
+        "text": "Palpitations",
+        "aliases": [
+          "ใจสั่น"
+        ],
+        "i18n": {
+          "th": "ใจสั่น"
+        }
+      }
+    },
+    {
+      "names": [
+        "fatigue",
+        "tiredness",
+        "tired",
+        "weariness"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "84229001",
+          "display": "Fatigue"
+        },
+        "text": "Fatigue",
+        "aliases": [
+          "อ่อนเพลีย",
+          "เหนื่อยล้า"
+        ],
+        "i18n": {
+          "th": "อ่อนเพลีย"
+        },
+        "conditionI18n": {
+          "th": "อ่อนเพลีย"
+        }
+      }
+    },
+    {
+      "names": [
+        "syncope",
+        "fainting",
+        "faint",
+        "blackout"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "271594007",
+          "display": "Syncope"
+        },
+        "text": "Syncope",
+        "aliases": [
+          "เป็นลม",
+          "หมดสติชั่วคราว"
+        ],
+        "i18n": {
+          "th": "เป็นลม"
+        },
+        "conditionI18n": {
+          "th": "เป็นลม"
+        }
+      }
+    },
+    {
+      "names": [
+        "edema",
+        "oedema",
+        "swelling"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "267038008",
+          "display": "Edema"
+        },
+        "text": "Edema",
+        "aliases": [
+          "บวม",
+          "อาการบวม"
+        ],
+        "i18n": {
+          "th": "บวม"
+        },
+        "conditionI18n": {
+          "th": "มีอาการบวม"
+        }
+      }
+    },
+    {
+      "names": [
+        "chill",
+        "chills",
+        "shivering"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "43724002",
+          "display": "Chill"
+        },
+        "text": "Chill",
+        "aliases": [
+          "หนาวสั่น",
+          "สั่นหนาว"
+        ],
+        "i18n": {
+          "th": "หนาวสั่น"
+        },
+        "conditionI18n": {
+          "th": "หนาวสั่น"
+        }
+      }
+    },
+    {
+      "names": [
+        "loss of appetite",
+        "poor appetite",
+        "no appetite",
+        "anorexia",
+        "off food"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "79890006",
+          "display": "Loss of appetite"
+        },
+        "text": "Loss of appetite",
+        "aliases": [
+          "เบื่ออาหาร",
+          "ไม่อยากอาหาร"
+        ],
+        "i18n": {
+          "th": "เบื่ออาหาร"
+        },
+        "conditionI18n": {
+          "th": "เบื่ออาหาร"
+        }
+      }
+    },
+    {
+      "names": [
+        "weight loss",
+        "weight decreased",
+        "losing weight"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "262285001",
+          "display": "Weight decreased"
+        },
+        "text": "Weight decreased",
+        "aliases": [
+          "น้ำหนักลด"
+        ],
+        "i18n": {
+          "th": "น้ำหนักลด"
+        },
+        "conditionI18n": {
+          "th": "น้ำหนักลด"
+        }
+      }
+    },
+    {
+      "names": [
+        "confusion",
+        "confused",
+        "clouded consciousness",
+        "dazed"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "40917007",
+          "display": "Clouded consciousness"
+        },
+        "text": "Clouded consciousness",
+        "aliases": [
+          "สับสน"
+        ],
+        "i18n": {
+          "th": "สับสน"
+        },
+        "conditionI18n": {
+          "th": "มีอาการสับสน"
+        }
+      }
+    },
+    {
+      "names": [
+        "lethargy",
+        "lethargic",
+        "sluggish"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "214264003",
+          "display": "Lethargy"
+        },
+        "text": "Lethargy",
+        "aliases": [
+          "ซึม",
+          "ซึมลง"
+        ],
+        "i18n": {
+          "th": "ซึม"
+        },
+        "conditionI18n": {
+          "th": "ซึม"
+        }
+      }
+    },
+    {
+      "names": [
+        "dehydration",
+        "dehydrated"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "34095006",
+          "display": "Dehydration"
+        },
+        "text": "Dehydration",
+        "aliases": [
+          "ขาดน้ำ",
+          "ภาวะขาดน้ำ"
+        ],
+        "i18n": {
+          "th": "ขาดน้ำ"
+        },
+        "conditionI18n": {
+          "th": "มีภาวะขาดน้ำ"
+        }
+      }
+    },
+    {
+      "names": [
+        "hemoptysis",
+        "haemoptysis",
+        "coughing up blood"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "66857006",
+          "display": "Hemoptysis"
+        },
+        "text": "Hemoptysis",
+        "aliases": [
+          "ไอเป็นเลือด",
+          "ไอมีเลือด"
+        ],
+        "i18n": {
+          "th": "ไอเป็นเลือด"
+        },
+        "conditionI18n": {
+          "th": "ไอเป็นเลือด"
+        }
+      }
+    },
+    {
+      "names": [
+        "dysphagia",
+        "difficulty swallowing",
+        "trouble swallowing"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "40739000",
+          "display": "Dysphagia"
+        },
+        "text": "Dysphagia",
+        "aliases": [
+          "กลืนลำบาก",
+          "กลืนไม่สะดวก"
+        ],
+        "i18n": {
+          "th": "กลืนลำบาก"
+        },
+        "conditionI18n": {
+          "th": "กลืนลำบาก"
+        }
+      }
+    },
+    {
+      "names": [
+        "paresthesia",
+        "paraesthesia",
+        "tingling",
+        "pins and needles"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "91019004",
+          "display": "Paresthesia"
+        },
+        "text": "Paresthesia",
+        "aliases": [
+          "เหน็บชา",
+          "เสียวซ่า",
+          "รู้สึกซ่า"
+        ],
+        "i18n": {
+          "th": "เหน็บชา"
+        },
+        "conditionI18n": {
+          "th": "มีอาการเหน็บชา"
+        }
+      }
+    },
+    {
+      "names": [
+        "numbness",
+        "numb",
+        "loss of sensation"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "44077006",
+          "display": "Numbness"
+        },
+        "text": "Numbness",
+        "aliases": [
+          "ชา",
+          "อาการชา"
+        ],
+        "i18n": {
+          "th": "ชา"
+        },
+        "conditionI18n": {
+          "th": "มีอาการชา"
+        }
+      }
+    },
+    {
+      "names": [
+        "seizure",
+        "seizures",
+        "convulsion",
+        "convulsions",
+        "fitting"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "91175000",
+          "display": "Seizure"
+        },
+        "text": "Seizure",
+        "aliases": [
+          "ชัก",
+          "อาการชัก"
+        ],
+        "i18n": {
+          "th": "ชัก"
+        },
+        "conditionI18n": {
+          "th": "มีอาการชัก"
+        }
+      }
+    },
+    {
+      "names": [
+        "tremor",
+        "trembling",
+        "involuntary shaking"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "26079004",
+          "display": "Tremor"
+        },
+        "text": "Tremor",
+        "aliases": [
+          "มือสั่น",
+          "อาการสั่น",
+          "สั่นผิดปกติ"
+        ],
+        "i18n": {
+          "th": "มือสั่น"
+        },
+        "conditionI18n": {
+          "th": "มีอาการสั่น"
+        }
+      }
+    },
+    {
+      "names": [
+        "blurred vision",
+        "blurry vision",
+        "blurred sight"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "111516008",
+          "display": "Blurring of visual image"
+        },
+        "text": "Blurring of visual image",
+        "aliases": [
+          "ตามัว",
+          "มองไม่ชัด",
+          "มองเห็นไม่ชัด",
+          "ภาพมัว"
+        ],
+        "i18n": {
+          "th": "ตามัว"
+        },
+        "conditionI18n": {
+          "th": "ตามัว"
+        }
+      }
+    },
+    {
+      "names": [
+        "photophobia",
+        "light sensitivity",
+        "sensitivity to light"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "409668002",
+          "display": "Photophobia"
+        },
+        "text": "Photophobia",
+        "aliases": [
+          "แพ้แสง",
+          "กลัวแสง"
+        ],
+        "i18n": {
+          "th": "แพ้แสง"
+        },
+        "conditionI18n": {
+          "th": "แพ้แสง"
+        }
+      }
+    },
+    {
+      "names": [
+        "diplopia",
+        "double vision",
+        "seeing double"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "24982008",
+          "display": "Diplopia"
+        },
+        "text": "Diplopia",
+        "aliases": [
+          "เห็นภาพซ้อน",
+          "ภาพซ้อน"
+        ],
+        "i18n": {
+          "th": "เห็นภาพซ้อน"
+        },
+        "conditionI18n": {
+          "th": "เห็นภาพซ้อน"
+        }
+      }
+    },
+    {
+      "names": [
+        "epiphora",
+        "tearing",
+        "watery eyes",
+        "excessive tearing"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "193982009",
+          "display": "Epiphora"
+        },
+        "text": "Epiphora",
+        "aliases": [
+          "น้ำตาไหล",
+          "น้ำตาไหลมาก"
+        ],
+        "i18n": {
+          "th": "น้ำตาไหล"
+        },
+        "conditionI18n": {
+          "th": "น้ำตาไหล"
+        }
+      }
+    },
+    {
+      "names": [
+        "tinnitus",
+        "ringing in ears",
+        "noise in ears"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "60862001",
+          "display": "Tinnitus"
+        },
+        "text": "Tinnitus",
+        "aliases": [
+          "หูอื้อ",
+          "มีเสียงในหู"
+        ],
+        "i18n": {
+          "th": "หูอื้อ"
+        },
+        "conditionI18n": {
+          "th": "หูอื้อ"
+        }
+      }
+    },
+    {
+      "names": [
+        "hearing loss",
+        "hearing impairment",
+        "hard of hearing",
+        "difficulty hearing"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "15188001",
+          "display": "Hearing loss"
+        },
+        "text": "Hearing loss",
+        "aliases": [
+          "หูตึง",
+          "ได้ยินไม่ชัด",
+          "การได้ยินลดลง"
+        ],
+        "i18n": {
+          "th": "หูตึง"
+        },
+        "conditionI18n": {
+          "th": "ได้ยินลดลง"
+        }
+      }
+    },
+    {
+      "names": [
+        "hoarse",
+        "hoarseness",
+        "voice hoarseness"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "50219008",
+          "display": "Hoarse"
+        },
+        "text": "Hoarse",
+        "aliases": [
+          "เสียงแหบ"
+        ],
+        "i18n": {
+          "th": "เสียงแหบ"
+        },
+        "conditionI18n": {
+          "th": "เสียงแหบ"
+        }
+      }
+    },
+    {
+      "names": [
+        "hematuria",
+        "haematuria",
+        "blood in urine"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "34436003",
+          "display": "Blood in urine"
+        },
+        "text": "Blood in urine",
+        "aliases": [
+          "ปัสสาวะเป็นเลือด",
+          "ฉี่เป็นเลือด"
+        ],
+        "i18n": {
+          "th": "ปัสสาวะเป็นเลือด"
+        },
+        "conditionI18n": {
+          "th": "ปัสสาวะเป็นเลือด"
+        }
+      }
+    },
+    {
+      "names": [
+        "urinary retention",
+        "retention of urine",
+        "unable to urinate",
+        "cannot urinate",
+        "unable to empty bladder"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "267064002",
+          "display": "Retention of urine"
+        },
+        "text": "Retention of urine",
+        "aliases": [
+          "ปัสสาวะไม่ออก",
+          "ฉี่ไม่ออก"
+        ],
+        "i18n": {
+          "th": "ปัสสาวะไม่ออก"
+        },
+        "conditionI18n": {
+          "th": "ปัสสาวะไม่ออก"
+        }
+      }
+    },
+    {
+      "names": [
+        "urinary incontinence",
+        "urine incontinence",
+        "bladder incontinence",
+        "leaking urine"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "165232002",
+          "display": "Urinary incontinence"
+        },
+        "text": "Urinary incontinence",
+        "aliases": [
+          "กลั้นปัสสาวะไม่อยู่",
+          "ปัสสาวะเล็ด",
+          "ฉี่เล็ด"
+        ],
+        "i18n": {
+          "th": "กลั้นปัสสาวะไม่อยู่"
+        },
+        "conditionI18n": {
+          "th": "กลั้นปัสสาวะไม่อยู่"
+        }
+      }
+    },
+    {
+      "names": [
+        "amenorrhea",
+        "amenorrhoea",
+        "absence of menstruation",
+        "missed periods"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "14302001",
+          "display": "Amenorrhea"
+        },
+        "text": "Amenorrhea",
+        "aliases": [
+          "ประจำเดือนไม่มา",
+          "ขาดประจำเดือน"
+        ],
+        "i18n": {
+          "th": "ประจำเดือนไม่มา"
+        },
+        "conditionI18n": {
+          "th": "ประจำเดือนไม่มา"
+        }
+      }
+    },
+    {
+      "names": [
+        "menorrhagia",
+        "heavy menstrual bleeding",
+        "heavy period",
+        "heavy periods"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "386692008",
+          "display": "Menorrhagia"
+        },
+        "text": "Menorrhagia",
+        "aliases": [
+          "ประจำเดือนออกมาก",
+          "ประจำเดือนมาก",
+          "ประจำเดือนมามาก"
+        ],
+        "i18n": {
+          "th": "ประจำเดือนออกมาก"
+        },
+        "conditionI18n": {
+          "th": "ประจำเดือนออกมาก"
+        }
+      }
+    },
+    {
+      "names": [
+        "vaginal bleeding",
+        "bleeding from vagina"
+      ],
+      "definition": {
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "289530006",
+          "display": "Bleeding from vagina"
+        },
+        "text": "Bleeding from vagina",
+        "aliases": [
+          "เลือดออกทางช่องคลอด",
+          "มีเลือดออกทางช่องคลอด"
+        ],
+        "i18n": {
+          "th": "เลือดออกทางช่องคลอด"
+        },
+        "conditionI18n": {
+          "th": "มีเลือดออกทางช่องคลอด"
+        }
+      }
+    }
+  ]
+}

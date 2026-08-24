@@ -17,6 +17,10 @@ import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions, cloneI18nRecord } from "./fhir-translations";
 import { getDoseUnitSemantics } from "./unit-lexicon";
 import {
+  applyInstructionSemanticResolvers,
+  applyInstructionSemanticResolversAsync
+} from "./instruction-semantic-resolver";
+import {
   BodySiteCode,
   FhirDosage,
   FhirTimingRepeat,
@@ -32,7 +36,45 @@ import {
   CanonicalSigClause,
   TextRange
 } from "./types";
+export {
+  TIMING_FREQUENCY_MIN_EXTENSION_URL,
+  TIMING_OFFSET_MIN_EXTENSION_URL,
+  TIMING_OFFSET_MAX_EXTENSION_URL,
+  TIMING_OFFSET_EXACT_EXTENSION_URL
+} from "./fhir";
 export { suggestSig } from "./suggest";
+export {
+  parseInstructionActions,
+  realizeInstructionGraph
+} from "./instruction-graph";
+export {
+  MEDICATION_INSTRUCTION_ACTION_SYSTEM,
+  buildMedicationInstructionActionCodeSystem,
+  getMedicationInstructionAction,
+  listMedicationInstructionActions,
+  resolveMedicationInstructionAction
+} from "./instruction-action-terminology";
+export type { MedicationInstructionActionCodeSystem } from "./instruction-action-terminology";
+export {
+  MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
+  buildMedicationInstructionConceptCodeSystem,
+  getMedicationInstructionConcept,
+  listMedicationInstructionConcepts,
+  resolveMedicationInstructionConcept
+} from "./instruction-concept-terminology";
+export type { MedicationInstructionConceptCodeSystem } from "./instruction-concept-terminology";
+export {
+  findSymptomDefinitionByCoding,
+  listSymptomDefinitions,
+  normalizeSymptomKey,
+  resolveSymptomDefinition
+} from "./symptom-terminology";
+export type { SymptomDictionaryEntry } from "./symptom-terminology";
+export {
+  MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+  buildInstructionGraphExtension,
+  parseInstructionGraphExtension
+} from "./instruction-graph-fhir";
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
 export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
@@ -481,6 +523,82 @@ function appendParseResult(
   items.push(next);
 }
 
+function normalizedSafetyText(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+}
+
+function sameDosageConcept(
+  left: { coding?: Array<{ system?: string; code?: string }>; text?: string } | undefined,
+  right: { coding?: Array<{ system?: string; code?: string }>; text?: string } | undefined
+): boolean {
+  const leftCoding = left?.coding?.[0];
+  const rightCoding = right?.coding?.[0];
+  if (leftCoding?.code && rightCoding?.code) {
+    return leftCoding.code === rightCoding.code && (leftCoding.system ?? "") === (rightCoding.system ?? "");
+  }
+  return normalizedSafetyText(left?.text) === normalizedSafetyText(right?.text);
+}
+
+/**
+ * A semicolon-delimited trailing negated instruction after a heterogeneous
+ * dose regimen is regimen-level safety text. FHIR Dosage has no batch-level
+ * additionalInstruction slot, so copy that safety instruction onto each
+ * compatible Dosage item rather than silently attaching it only to the final
+ * dose clause.
+ */
+function propagateTrailingSharedSafety(results: ParseResult[], options?: ParseOptions): void {
+  if (results.length < 2) return;
+  const last = results[results.length - 1];
+  const clause = last.meta.canonical.clauses[0];
+  const raw = clause?.raw.text ?? "";
+  const separator = raw.lastIndexOf(";");
+  if (separator < 0) return;
+  const trailing = normalizedSafetyText(raw.slice(separator + 1));
+  if (!trailing) return;
+
+  const sharedCanonical = (clause?.additionalInstructions ?? []).filter((instruction) => {
+    const text = normalizedSafetyText(instruction.text);
+    return Boolean(
+      text && trailing.includes(text) &&
+      instruction.frames?.some((frame) => frame.polarity === "negate")
+    );
+  });
+  if (!sharedCanonical.length) return;
+  const sharedTexts = sharedCanonical.map((instruction) => normalizedSafetyText(instruction.text));
+  const sharedFhir = (last.fhir.additionalInstruction ?? []).filter((instruction) => {
+    const text = normalizedSafetyText(instruction.text);
+    return Boolean(text && sharedTexts.some((candidate) => text === candidate || text.includes(candidate) || candidate.includes(text)));
+  });
+  if (!sharedFhir.length) return;
+
+  for (let index = 0; index < results.length - 1; index += 1) {
+    const item = results[index];
+    if (!sameDosageConcept(item.fhir.route, last.fhir.route)) continue;
+    if (item.fhir.method && last.fhir.method && !sameDosageConcept(item.fhir.method, last.fhir.method)) {
+      continue;
+    }
+    const existing = item.fhir.additionalInstruction ?? [];
+    const additions = sharedFhir.filter((candidate) => {
+      const key = normalizedSafetyText(candidate.text);
+      return !existing.some((value) => normalizedSafetyText(value.text) === key);
+    });
+    if (!additions.length) continue;
+    item.fhir.additionalInstruction = [...existing, ...additions.map((value) => ({ ...value }))];
+    const canonical = item.meta.canonical.clauses[0];
+    if (canonical) {
+      canonical.additionalInstructions = [
+        ...(canonical.additionalInstructions ?? []),
+        ...sharedCanonical.filter((candidate) => !canonical.additionalInstructions?.some(
+          (value) => normalizedSafetyText(value.text) === normalizedSafetyText(candidate.text)
+        ))
+      ];
+    }
+    item.longText = formatSig(item.fhir, "long", options);
+    item.shortText = formatSig(item.fhir, "short", options);
+    item.fhir.text = item.longText;
+  }
+}
+
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
   const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
   for (const result of results) {
@@ -490,7 +608,7 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -499,12 +617,14 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
+    applyInstructionSemanticResolvers(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
   return {
@@ -528,7 +648,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: LintResult[] = [];
 
@@ -580,7 +700,7 @@ export async function parseSigAsync(
   input: string,
   options?: ParseOptions
 ): Promise<ParseBatchResult> {
-  const segments = expandMealDashSegments(parseSigSegments(input), options);
+  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
   const results: ParseResult[] = [];
 
@@ -589,12 +709,14 @@ export async function parseSigAsync(
     applyCarryForward(state, carry);
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
+    await applyInstructionSemanticResolversAsync(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     appendParseResult(results, result, options);
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
   return {
@@ -785,6 +907,7 @@ function buildNormalizedMetaFromClause(
         }
         : undefined,
     patientInstruction: clause.patientInstruction,
+    instructionGraph: clause.instructionGraph,
     prnReason:
       clause.prn?.reason?.text || clause.prn?.reason?.coding?.code
         ? {
@@ -818,10 +941,23 @@ function buildParseResult(
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
 
+  const graphUnderstoodSpans: TextRange[] = [];
+  for (const candidate of canonicalClauses) {
+    const graph = candidate.instructionGraph;
+    if (!graph) continue;
+    for (const action of graph.actions) graphUnderstoodSpans.push(action.span);
+    for (const relation of graph.relations ?? []) {
+      if (relation.span) graphUnderstoodSpans.push(relation.span);
+    }
+  }
+  const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
+    graphUnderstoodSpans.some((span) =>
+      span.start <= value.sourceStart && value.sourceEnd <= span.end
+    );
   const consumedTokens: string[] = [];
   const leftoverParts: string[] = [];
   for (const token of state.tokens) {
-    if (state.consumed.has(token.index)) {
+    if (state.consumed.has(token.index) || tokenUnderstoodByGraph(token)) {
       consumedTokens.push(token.original);
     } else {
       leftoverParts.push(token.original);
@@ -973,6 +1109,7 @@ function resolvePrimaryParseResult(
   const state = parseClauseState(input, options);
   applyPrnReasonCoding(state, options);
   applySiteCoding(state, options);
+  applyInstructionSemanticResolvers(state, options);
   return buildParseResult(state, options);
 }
 

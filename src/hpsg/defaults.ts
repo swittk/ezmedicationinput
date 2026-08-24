@@ -3,7 +3,8 @@ import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_ROUTE,
-  ROUTE_TEXT
+  ROUTE_TEXT,
+  normalizeBodySiteKey
 } from "../maps";
 import { ParserState } from "../parser-state";
 import { mergeI18nRecords } from "../fhir-translations";
@@ -47,6 +48,17 @@ function applyRouteDefault(
     deps.setRoute(state, RouteCode["Respiratory tract route (qualifier value)"], ROUTE_TEXT[RouteCode["Respiratory tract route (qualifier value)"]]);
     return;
   }
+  if (state.methodCoding?.code === "738991002" || state.methodText?.toLowerCase() === "apply") {
+    deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
+    return;
+  }
+  if (["785900008", "782155003"].indexOf(state.methodCoding?.code ?? "") >= 0 && state.siteText) {
+    const siteDefinition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(state.siteText)];
+    if (siteDefinition?.routeHint === RouteCode["Topical route"]) {
+      deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
+      return;
+    }
+  }
   const route = inferRouteFromContext(context);
   if (route !== undefined) {
     deps.setRoute(state, route, ROUTE_TEXT[route]);
@@ -55,7 +67,7 @@ function applyRouteDefault(
 
 function applyUnitDefault(
   state: ParserState,
-  tokens: readonly { lower: string; index: number }[],
+  tokens: readonly { lower: string; canonical?: string; index: number }[],
   context: MedicationContext | undefined,
   options: ParseOptions | undefined
 ): void {
@@ -66,7 +78,7 @@ function applyUnitDefault(
     if (state.consumed.has(token.index)) {
       continue;
     }
-    const unit = normalizeUnit(token.lower, options);
+    const unit = normalizeUnit(token.canonical ?? token.lower, options);
     if (unit) {
       state.unit = unit;
       state.consumed.add(token.index);
@@ -166,6 +178,9 @@ function hasStructuredTiming(state: ParserState): boolean {
     state.duration !== undefined ||
     state.durationMax !== undefined ||
     state.durationUnit !== undefined ||
+    state.offset !== undefined ||
+    state.offsetMin !== undefined ||
+    state.offsetMax !== undefined ||
     state.frequency !== undefined ||
     state.frequencyMax !== undefined ||
     state.period !== undefined ||
@@ -480,7 +495,7 @@ function applyWeeklyDefaultForDayFilters(state: ParserState): void {
 
 export function applyHpsgDefaultConstraints(
   state: ParserState,
-  tokens: readonly { lower: string; index: number }[],
+  tokens: readonly { lower: string; canonical?: string; index: number }[],
   options: ParseOptions | undefined,
   deps: HpsgDefaultConstraintDeps
 ): void {

@@ -19,11 +19,11 @@ export interface HpsgClauseContext {
 }
 
 export function normalizeTokenLower(token: Token): string {
-  return token.lower.replace(/[{};]/g, "").replace(/^\.+|\.+$/g, "");
+  return (token.canonical ?? token.lower).replace(/[{};]/g, "").replace(/^\.+|\.+$/g, "");
 }
 
 export function isPunctuation(lower: string): boolean {
-  return !lower || /^[;:(),]+$/.test(lower);
+  return !lower || /^[;:(),.]+$/.test(lower) || lower === "!" || lower === "?";
 }
 
 export function isClockLikeLower(lower: string): boolean {
@@ -163,11 +163,21 @@ export function hasLexicalSeparator(text: string, separators: ReadonlySet<string
 }
 
 export function joinTokenText(tokens: Token[]): string {
-  return tokens
-    .map((token) => token.original)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let text = "";
+  let previous: Token | undefined;
+  for (const current of tokens) {
+    if (previous) {
+      const sourceAdjacent = previous.sourceEnd === current.sourceStart;
+      const thaiBoundary = /[\u0E00-\u0E7F]/.test(previous.original) ||
+        /[\u0E00-\u0E7F]/.test(current.original);
+      if (!(sourceAdjacent && thaiBoundary)) {
+        text += " ";
+      }
+    }
+    text += current.original;
+    previous = current;
+  }
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export function lexicalRule(

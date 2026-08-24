@@ -26,6 +26,8 @@ export interface SurfaceToken {
 export interface LexToken {
   original: string;
   lower: string;
+  /** Canonical grammar lexeme when locale-aware normalization has one. */
+  canonical?: string;
   index: number;
   kind: LexKind;
   value?: number;

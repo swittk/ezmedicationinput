@@ -1,9 +1,14 @@
-import { EventTiming, FhirCoding, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirCoding, RouteCode } from "../types";
 import source from "./lexical-classes.json";
 
 type MealRelation = "before" | "after" | "with";
 type MealTimingByRelation = Map<MealRelation, Map<EventTiming, EventTiming>>;
 type BodySiteFeatureKind = "nominal" | "partitive" | "locative";
+type ContextualPrnReasonLead = {
+  parts: string[];
+  canonical: string;
+  requiresKnownReason?: boolean;
+};
 type CompoundDoseUnit = {
   head: string;
   tails: string[];
@@ -84,6 +89,34 @@ function numberRecord(record: Record<string, number>): Record<string, number> {
   return { ...record };
 }
 
+type InstructionQuantityUnitLabel = {
+  th: string;
+  enOne: string;
+  enOther: string;
+};
+
+function instructionQuantityUnitLabelMap(
+  record: Record<string, InstructionQuantityUnitLabel>
+): Map<string, InstructionQuantityUnitLabel> {
+  const result = new Map<string, InstructionQuantityUnitLabel>();
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      result.set(key, { ...record[key] });
+    }
+  }
+  return result;
+}
+
+function stringSetMap(record: Record<string, string[]>): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  for (const key in record) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      result.set(key, setOf(record[key]));
+    }
+  }
+  return result;
+}
+
 function numberEntries(record: Record<string, number>): Array<[string, number]> {
   const entries: Array<[string, number]> = [];
   for (const key in record) {
@@ -138,6 +171,7 @@ export const BODY_SITE_PARTITIVE_HEADS = setOf(source.bodySitePartitiveHeads);
 export const BODY_SITE_PARTITIVE_MODIFIERS = setOf(source.bodySitePartitiveModifiers);
 export const BODY_SITE_PARTITIVE_CONNECTORS = setOf(source.bodySitePartitiveConnectors);
 export const BODY_SITE_BARE_NOMINAL_PREFIXES = setOf(source.bodySiteBareNominalPrefixes);
+export const BODY_SITE_ATTRIBUTIVE_MODIFIERS = setOf(source.bodySiteAttributiveModifiers);
 export const OTIC_SITE_WORDS = setOf(source.oticSiteWords);
 export const OPHTHALMIC_SITE_WORDS = setOf(source.ophthalmicSiteWords);
 export const NASAL_SITE_WORDS = setOf(source.nasalSiteWords);
@@ -145,6 +179,10 @@ export const BODY_SITE_ADJECTIVE_SUFFIXES = source.bodySiteAdjectiveSuffixes as 
 export const BODY_SITE_DISPLAY_PENALTY_WORDS = setOf(source.bodySiteDisplayPenaltyWords);
 export const BODY_SITE_FEATURE_SCORE_BONUS = bodySiteFeatureScoreBonus(source.bodySiteFeatureScoreBonus);
 export const CONNECTORS = setOf(source.connectors);
+export const THAI_METHOD_AUXILIARY_VERBS = setOf(source.thaiMethodAuxiliaryVerbs);
+export const COORDINATED_NOUN_METHOD_VERBS = setOf(source.coordinatedNounMethodVerbs);
+export const METHOD_NOUN_LEFT_CONTEXT = stringSetMap(source.methodNounLeftContext);
+export const PRODUCT_EXTERNAL_MODIFIERS = setOf(source.productExternalModifiers);
 export const ROUTE_SITE_PREPOSITIONS = setOf(source.routeSitePrepositions);
 export const SITE_DISPLAY_FILLERS = SITE_FILLERS;
 export const SITE_MULTIPLICITY_WORDS = setOf(["both", "each", "bilateral"]);
@@ -157,6 +195,12 @@ export const ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS = setOf(
 export const PRN_LEADS = setOf(source.prnLeads);
 export const PRN_REASON_LEAD_INS = setOf(source.prnReasonLeadIns);
 export const PRN_STANDALONE_REASON_LEADS = setOf(source.prnStandaloneReasonLeads);
+export const PRN_CONTEXTUAL_REASON_LEADS: ContextualPrnReasonLead[] =
+  (source.prnContextualReasonLeads ?? []).map((lead) => ({
+    parts: [...lead.parts],
+    canonical: lead.canonical,
+    requiresKnownReason: lead.requiresKnownReason
+  }));
 export const PRN_REASON_MULTIWORD_LEAD_INS = setOf(source.prnReasonMultiwordLeadIns);
 export const PRN_REASON_SITE_CONNECTORS = setOf(source.prnReasonSiteConnectors);
 export const PRN_REASON_COORDINATORS = setOf(source.prnReasonCoordinators);
@@ -173,6 +217,7 @@ export const PRN_COMPACT_REASON_SEPARATORS = setOf(source.prnCompactReasonSepara
 export const SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR = routeCodeSet(source.siteRouteHintsAllowedInGrammar);
 export const PRODUCT_METHOD_TEXT = source.productMethodText as Record<string, Partial<Record<string, string>>>;
 export const PRODUCT_METHOD_THAI = source.productMethodThai as Record<string, string>;
+export const PRODUCT_FORM_MODIFIERS = setOf(source.productFormModifiers);
 export const COMPOUND_DOSE_UNITS = source.compoundDoseUnits as CompoundDoseUnit[];
 export const IMPLICIT_SINGLE_DOSE_UNITS = setOf(source.implicitSingleDoseUnits);
 export const PERCENT_BODY_AREA_UNITS = new Map<string, string>(
@@ -222,13 +267,52 @@ export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
 export const DAY_RANGE_CONNECTORS = setOf(source.dayRangeConnectors);
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = setOf(source.durationLeadTokens);
+export const EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES =
+  (source.eventOffsetMinimumLeadSequences ?? []).map((parts) => [...parts]);
+export const EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES =
+  (source.eventOffsetMaximumLeadSequences ?? []).map((parts) => [...parts]);
+export const EVENT_OFFSET_FRACTIONS = new Map<string, number>(
+  numberEntries(source.eventOffsetFractions ?? {})
+);
+export const EVENT_OFFSET_ARTICLES = setOf(source.eventOffsetArticles ?? []);
 
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
 export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);
+export const POSITIVE_DIRECTIVE_MARKERS = setOf(source.positiveDirectiveMarkers);
+export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((prefix) => ({
+  parts: prefix.parts as readonly string[],
+  polarity: prefix.polarity as AdvicePolarity | undefined,
+  modality: prefix.modality as AdviceModality | undefined
+}));
+export const ACTION_RELATION_BY_TOKEN = new Map<string, AdviceRelation>(
+  stringEntries(source.actionRelationTokens).map(([token, relation]) =>
+    [token, relation as AdviceRelation]
+  )
+);
+export const ACTION_SEQUENCE_MARKERS = setOf(source.actionSequenceMarkers);
+export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
+export const ACTION_SEQUENCE_RELATION_TOKENS = setOf(source.actionSequenceRelationTokens);
+export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
+  stringEntries(source.instructionDurationUnits)
+);
+export const INSTRUCTION_DURATION_APPROXIMATION_LEADS = setOf(
+  source.instructionDurationApproximationLeads
+);
+export const INSTRUCTION_QUANTITY_UNIT_LABELS = instructionQuantityUnitLabelMap(
+  source.instructionQuantityUnitLabels as Record<string, InstructionQuantityUnitLabel>
+);
+export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
+export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
 export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationLicenses);
+export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelationLeads);
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
+export const SYMPTOM_ADJUSTMENT_LEADS = setOf(source.symptomAdjustmentLeads);
+export const SYMPTOM_ADJUSTMENT_CONNECTORS = setOf(source.symptomAdjustmentConnectors);
+export const SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS = setOf(
+  source.symptomAdjustmentPatientInstructionLeads
+);
 
 export const EYE_SITE_ABBREVIATIONS = setOf(source.eyeSiteAbbreviations);
 export const NON_OCULAR_DOSE_UNITS = setOf(source.nonOcularDoseUnits);

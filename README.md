@@ -108,11 +108,15 @@ result.fhir.additionalInstruction;
 // → [{ text: "Do not exceed 6 tablets daily" }]
 ```
 
-Customize the dictionaries and lookups through `ParseOptions`:
+Default symptom vocabulary is vendored declaratively in `symptom-terminology.json`.
+It currently contains 100 exact coded symptom concepts with Thai/English surfaces;
+HPSG PRN/condition recognition, coding, localization, and `suggestSig` consume the
+same derived terminology index. Applications can add shared symptom vocabulary at
+runtime through `symptomMap`:
 
 ```ts
 parseSig(input, {
-  prnReasonMap: {
+  symptomMap: {
     migraine: {
       text: "Migraine",
       coding: {
@@ -126,6 +130,12 @@ parseSig(input, {
   prnReasonSuggestionResolvers: async (request) => terminologyService.suggest(request),
 });
 ```
+
+`prnReasonMap` remains supported as a backward-compatible PRN-only override and
+takes precedence over `symptomMap` for the same surface. Public helpers
+`listSymptomDefinitions`, `resolveSymptomDefinition`, and
+`findSymptomDefinitionByCoding` expose the default terminology without coupling
+callers to PRN internals.
 
 Use `{reason}` in the sig string (e.g. `prn {migraine}`) to force a lookup even
 when a direct match exists. Additional instructions are sourced from a built-in
@@ -163,6 +173,10 @@ const shortFromFhir = formatSigBatch(batch.items.map((item) => item.fhir), "shor
 Formatting options:
 
 - `locale`: selects the registered localization, such as `"en"` or `"th"`.
+- `realizationMode`: defaults to `"normalized"`. Use `"roundtrip"` when the
+  generated text is expected to be parsed again: it chooses attachment-safe
+  wording, preserves source-faithful clinician text when the semantic graph has
+  same-locale provenance, and realizes typed graph semantics across locales.
 - `i18n`: overrides or augments the registered localization callbacks.
 - `groupMealTimingsByRelation`: compacts repeated meal relation phrases when all
   meal anchors share the same relation.
@@ -187,38 +201,110 @@ Notes:
 
 ### Sig (directions) suggestions
 
-Use `suggestSig` to drive autocomplete experiences while the clinician is
-typing shorthand medication directions (sig = directions). It returns an array
-of canonical direction strings and accepts the same `ParseOptions` context plus
-a `limit` and custom PRN reasons.
+Use `suggestSig` to drive autocomplete while the clinician is typing medication
+directions. Completion is bounded and shares the parser's terminology and locale
+lexicons instead of generating a Cartesian product of canned sig strings. It
+accepts the same `ParseOptions` context plus a `limit` and optional custom PRN
+reasons.
 
 ```ts
 import { suggestSig } from "ezmedicationinput";
 
-const suggestions = suggestSig("1 drop to od q2h", {
-  limit: 5,
-  context: { dosageForm: "ophthalmic solution" },
-});
+suggestSig("1 tab po q", { limit: 5 });
+// → ["1 tab po qd", "1 tab po qid", "1 tab po q1h", ...]
 
-// → ["1 drop oph q2h", "1 drop oph q2h prn pain", ...]
+suggestSig("ทา", { locale: "th", limit: 5 });
+// → ["ทา", "ทา วันละครั้ง"]
 ```
 
 Highlights:
 
-- Recognizes plural units and their singular counterparts (`tab`/`tabs`,
-  `puff`/`puffs`, `mL`/`millilitres`, etc.) and normalizes spelled-out metric,
-  SI-prefixed masses/volumes (`micrograms`, `microliters`, `nanograms`,
-  `liters`, `kilograms`, etc.) alongside household measures like `teaspoon`
-  and `tablespoons` (set `allowHouseholdVolumeUnits: false` to omit them).
-- Keeps matching even when intermediary words such as `to`, `in`, or ocular
-  site shorthand (`od`, `os`, `ou`) appear in the prefix.
-- Emits dynamic interval suggestions, including arbitrary `q<number>h` cadences
-  and common range patterns like `q4-6h`.
-- Supports multiple timing tokens in sequence (e.g. `1 tab po morn hs`).
-- Surfaces PRN reasons from built-ins or custom `prnReasons` entries while
-  preserving numeric doses pulled from the typed prefix.
-- When `enableMealDashSyntax` is enabled, suggests dash-based meal patterns
-  (e.g. `1-0-1`, `1-0-0-1 ac`) only when dash syntax is being typed.
+- Complete semantic prefixes are recognized through the live parser/HPSG path
+  and short-circuit instead of searching an unrelated suggestion universe.
+- Action, route, unit, body-site, PRN, frequency, and timing extensions supplied
+  through `ParseOptions` participate in autocomplete where applicable; parser
+  terminology remains the source of truth.
+- Thai suggestions use the parser-owned Thai lexicon, including Thai defaults,
+  action prefixes, grammar words, and PRN symptom tails rather than falling back
+  to English shorthand.
+- Unit, route, timing, clock, PRN, and meal-dash partials use bounded specialized
+  completion paths; unknown prefixes cheaply return no suggestions.
+- Suggested representative EN/TH completions are regression-tested by reparsing
+  them through the real parser with no leftover text.
+- `npm run bench:suggest` reports latency, throughput, and retained/peak memory
+  without imposing timing-sensitive test thresholds.
+
+
+## Formal HPSG substrate
+
+The HPSG core now uses an actual typed-feature-structure runtime on the live parse path. Signs participate in a subtype hierarchy, feature appropriateness is validated, general feature unification preserves reentrancy/structure sharing, and phrase mothers unify daughter `SYNSEM` structures rather than relying only on flat TypeScript object merging. Structural AVMs are immutable and memoized because the medication grammar reuses a small number of SYNSEM shapes heavily.
+
+This is intentionally an incremental formalization rather than a claim that the entire grammar is already equivalent to a DELPH-IN grammar: domain leaf-value compatibility (for example route refinement and medication-specific schedule semantics) is still partly implemented in specialized constraint functions, and the semantic representation is the package medication instruction graph rather than MRS. The typed substrate allows those remaining constraints to migrate into declarative feature logic without rewriting the working parser.
+
+## Adversarial real-world parsing and HPSG performance
+
+The repository includes a 50-case TH/EN real-world torture corpus covering oral liquids, mouth rinses, topical workflows, vaginal/rectal applicators, inhalers, nasal sprays, eye/ear drops, patches, insulin/device steps, conditional instructions, and colloquial Thai sequences. A second 28-case weird-clinician corpus stresses eye-drop event sets, safety-condition scope, 0–2/day symptom-adjusted use, ranged leave-on/rinse workflows, patch application, abbreviations, punctuation variants, and TH/EN code-switching. Together they provide 78 adversarial directions plus dedicated FHIR round-trip invariants. The tests assert semantic contracts (dose/range, route, site, method, timing, procedural actions, and selected forbidden false interpretations), not merely that parsing succeeds.
+
+`npm run bench:torture` preserves the original 50-case apples-to-apples performance workload. `npm run bench:adversarial` runs the combined 78-case parser corpus. `npm run bench:roundtrip` measures the 87-case EN/TH/cross-language parse -> human realization -> reparse workload. The parse benchmarks report mean/p50/p95/p99 latency, throughput, and the slowest cases; they are intentionally benchmarks rather than timing-sensitive unit tests.
+
+The HPSG chart uses packed semantic state, an indexed agenda, and a compatible semantic cover across opaque gaps. Procedural constructions use typed local arguments so local instructions such as `wash hands`, `wait 30 minutes`, or inhaler priming do not overwrite the medication's global site, schedule, route, or dose. Additional typed constructions now distinguish safety-condition advice from PRN, symptom-adjusted use from fixed schedules, and the first workflow action (the possible administration head) from later dependent procedure actions. Separated and compact frequency ranges are grammatical schedule constituents, so `0 to 2 times per day` cannot be stolen by the dose grammar.
+
+FHIR cannot represent zero as `Timing.repeat.frequency` because the primitive is positive; a package-owned extension preserves an explicit lower bound of zero while `frequencyMax`, `period`, and `periodUnit` remain standard fields:
+
+`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+
+## Procedural instruction semantics and opaque-span enrichment
+
+Complex directions may contain preparation/application workflow that does not fit
+FHIR `Dosage` fields cleanly. `ParseResult.meta.normalized.instructionGraph`
+retains that meaning as ordered actions, typed arguments, relations, source
+spans, provenance, and semantic coverage. The same graph is carried through a
+FHIR extension while standard `Dosage.text`, `patientInstruction`, and
+`additionalInstruction` remain interoperable fallbacks.
+
+The built-in procedural action and argument vocabularies are declarative and can
+be extended with `instructionActionMap` / `instructionConceptMap`, including
+institution-owned coding systems. Exact external mappings (such as SNOMED CT)
+are additive rather than approximate.
+
+For opaque text that deterministic parsing deliberately leaves uninterpreted,
+applications may optionally register `instructionSemanticResolvers`. Resolver
+output is a proposal, not trusted parser state: ezmedicationinput revalidates
+source ranges, procedural action terminology, argument concepts/body sites, and
+units before accepting an action. Invalid proposals leave the source opaque.
+
+```ts
+const result = await parseSigAsync("shake bottle, then croon a song", {
+  instructionActionMap: {
+    sing: {
+      code: "sing",
+      semanticClass: "activity",
+      display: "Sing",
+      i18n: { th: "ร้องเพลง" },
+      procedural: true
+    }
+  },
+  instructionSemanticResolvers: async ({ sourceText }) => {
+    if (sourceText !== "croon a song") return undefined;
+    return {
+      actions: [
+        {
+          action: "sing",
+          range: { start: 0, end: sourceText.length },
+          confidence: 0.91
+        }
+      ]
+    };
+  }
+});
+```
+
+Resolver ranges are relative to the supplied opaque `sourceText`. Accepted
+actions are marked `origin: "semantic-resolver"`; optional resolver confidence
+is preserved separately from graph `coverage`, so learned semantics are never
+indistinguishable from grammar-derived semantics. A resolver failure preserves
+the original text and adds a warning. Synchronous resolvers may be used with
+`parseSig`; Promise-returning resolvers require `parseSigAsync`.
 
 ## Dictionaries
 
