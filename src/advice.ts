@@ -1723,15 +1723,18 @@ interface AdviceRealizationContext {
   frame: AdviceFrame;
   argText?: string;
   modalityText?: string;
+  relationText?: string;
 }
 
 type AdvicePredicateRealizer = (context: AdviceRealizationContext) => string;
 
-const DEFAULT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
+const DEFAULT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({
+  frame, argText, modalityText, relationText
+}) => {
   let text = modalityText
     ? `${modalityText} ${frame.predicate.lemma}`
     : capitalizeSentence(frame.predicate.lemma);
-  if (frame.relation) text += ` ${frame.relation}`;
+  if (relationText) text += ` ${relationText}`;
   if (argText) text += ` ${argText}`;
   return text;
 };
@@ -1756,10 +1759,41 @@ const ADVICE_PREDICATE_REALIZERS: Record<string, AdvicePredicateRealizer> = {
   effect: EFFECT_ADVICE_PREDICATE_REALIZER
 };
 
+const THAI_ADVICE_RELATION_TEXT: Record<AdviceRelation, string> = {
+  [AdviceRelation.With]: "พร้อม",
+  [AdviceRelation.Without]: "โดยไม่",
+  [AdviceRelation.Before]: "ก่อน",
+  [AdviceRelation.After]: "หลัง",
+  [AdviceRelation.During]: "ระหว่าง",
+  [AdviceRelation.Between]: "ระหว่าง",
+  [AdviceRelation.Then]: "จากนั้น",
+  [AdviceRelation.Until]: "จนกว่า",
+  [AdviceRelation.For]: "สำหรับ",
+  [AdviceRelation.In]: "ใน",
+  [AdviceRelation.Into]: "เข้าไปใน",
+  [AdviceRelation.On]: "บน",
+  [AdviceRelation.To]: "ไปยัง",
+  [AdviceRelation.If]: "ถ้า",
+  [AdviceRelation.Unless]: "เว้นแต่",
+  [AdviceRelation.When]: "เมื่อ",
+  [AdviceRelation.While]: "ขณะที่"
+};
+
+function realizeAdviceRelation(
+  relation: AdviceRelation | undefined,
+  locale: string
+): string | undefined {
+  if (!relation) return undefined;
+  return locale.toLowerCase().startsWith("th")
+    ? THAI_ADVICE_RELATION_TEXT[relation] ?? relation
+    : relation;
+}
+
 function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | undefined {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const argText = joinAdviceArgumentTexts(frame.args, locale);
   const modalityText = realizeAdviceModality(frame.modality, locale);
+  const relationText = realizeAdviceRelation(frame.relation, locale);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
   const localizedPredicate = language === "th"
     ? lexeme?.i18n?.th ?? frame.predicate.lemma
@@ -1768,7 +1802,7 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
     let text = language === "th"
       ? `ห้าม${localizedPredicate}`
       : `${frame.modality === AdviceModality.Must ? "Must not" : "Do not"} ${localizedPredicate}`;
-    if (frame.relation) text += ` ${frame.relation}`;
+    if (relationText) text += ` ${relationText}`;
     if (argText) text += ` ${argText}`;
     return text;
   }
@@ -1778,7 +1812,7 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
   const localizedFrame = language === "th"
     ? { ...frame, predicate: { ...frame.predicate, lemma: localizedPredicate } }
     : frame;
-  return realizer({ frame: localizedFrame, argText, modalityText });
+  return realizer({ frame: localizedFrame, argText, modalityText, relationText });
 }
 
 export function realizeAdviceFramesText(frames: AdviceFrame[], locale = "en"): string | undefined {

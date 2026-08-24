@@ -125,6 +125,37 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     ]);
   });
 
+  it("enforces second-based occurrence caps in shared period buckets", () => {
+    const dosage = {
+      timing: {
+        repeat: {
+          frequency: 1,
+          period: 10,
+          periodUnit: "s" as const,
+          extension: [{
+            url: TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+            extension: [
+              { url: "max", valueInteger: 1 },
+              { url: "period", valueQuantity: { value: 30, code: "s", unit: "s" } }
+            ]
+          }]
+        }
+      }
+    };
+
+    expect(nextDueDoses(dosage, {
+      from: "2026-08-24T00:00:00Z",
+      orderedAt: "2026-08-24T00:00:00Z",
+      timeZone: "UTC",
+      limit: 4
+    })).toEqual([
+      "2026-08-24T00:00:00+00:00",
+      "2026-08-24T00:00:30+00:00",
+      "2026-08-24T00:01:00+00:00",
+      "2026-08-24T00:01:30+00:00"
+    ]);
+  });
+
   it("round-trips the normalized Thai per-target nasal dose surface", () => {
     const first = parseSig("2 sprays each nostril daily", {
       context: { dosageForm: "nasal spray, solution" }

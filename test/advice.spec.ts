@@ -383,6 +383,25 @@ describe("additional instruction rule inventory", () => {
     }
   });;
 
+  it("localizes advice relations in both positive and negated Thai realization", () => {
+    const base = {
+      force: AdviceForce.Warning,
+      predicate: { lemma: "ใช้" },
+      relation: AdviceRelation.Before,
+      args: [{ role: AdviceArgumentRole.Object, text: "food", i18n: { th: "อาหาร" } }],
+      span: { start: 0, end: 1 },
+      sourceText: "x",
+      sequenceIndex: 0
+    };
+
+    expect(realizeAdviceFramesText([base], "th")).toBe("ใช้ ก่อน อาหาร");
+    expect(realizeAdviceFramesText([base], "en")).toBe("ใช้ before food");
+    expect(realizeAdviceFramesText([{ ...base, polarity: AdvicePolarity.Negate }], "th"))
+      .toBe("ห้ามใช้ ก่อน อาหาร");
+    expect(realizeAdviceFramesText([{ ...base, polarity: AdvicePolarity.Negate }], "en"))
+      .toBe("Do not ใช้ before food");
+  });
+
   it("uses locale-specific conjunctions when realizing multiple advice arguments", () => {
     const frame = {
       force: AdviceForce.Warning,

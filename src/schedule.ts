@@ -1027,6 +1027,8 @@ function occurrenceCapBucketKey(
   timeZone: string
 ): string {
   switch (cap.periodUnit) {
+    case FhirPeriodUnit.Second:
+      return `s:${Math.floor(date.getTime() / (cap.period * 1000))}`;
     case FhirPeriodUnit.Minute:
       return `min:${Math.floor(date.getTime() / (cap.period * 60 * 1000))}`;
     case FhirPeriodUnit.Hour:
