@@ -190,6 +190,7 @@ function mergePrn(
   return {
     enabled: true,
     reasonText: mergedReasonText,
+    triggerPhase: mergeOptionalScalar(left.triggerPhase, right.triggerPhase),
     lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest),
     reasons,
     lookupRequests
@@ -214,6 +215,7 @@ function mergePrnReasons(
   for (const reason of [...(left ?? []), ...(right ?? [])]) {
     if (!result.some((candidate) =>
       candidate.text === reason.text &&
+      candidate.triggerPhase === reason.triggerPhase &&
       samePrnLookupRequest(candidate.lookupRequest, reason.lookupRequest)
     )) {
       result.push(reason);
@@ -332,6 +334,26 @@ function appendUnique<T>(left: T[] | undefined, right: T[] | undefined): T[] | u
   return result.length ? result : undefined;
 }
 
+function appendUniqueStructured<T>(left: T[] | undefined, right: T[] | undefined): T[] | undefined {
+  const result: T[] = [];
+  const seen = new Set<string>();
+  for (const item of [...(left ?? []), ...(right ?? [])]) {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result.length ? result : undefined;
+}
+
+function sameOccurrenceCap(
+  left: HpsgScheduleFeature["occurrenceCap"],
+  right: HpsgScheduleFeature["occurrenceCap"]
+): boolean {
+  if (!left || !right) return left === right;
+  return left.max === right.max && left.period === right.period && left.periodUnit === right.periodUnit;
+}
+
 function mergeSchedule(
   left: HpsgScheduleFeature | undefined,
   right: HpsgScheduleFeature | undefined
@@ -355,7 +377,8 @@ function mergeSchedule(
     !sameOptionalScalar(left.periodUnit, right.periodUnit) ||
     !sameOptionalScalar(left.offset, right.offset) ||
     !sameOptionalScalar(left.offsetMin, right.offsetMin) ||
-    !sameOptionalScalar(left.offsetMax, right.offsetMax)
+    !sameOptionalScalar(left.offsetMax, right.offsetMax) ||
+    (!sameOccurrenceCap(left.occurrenceCap, right.occurrenceCap) && Boolean(left.occurrenceCap && right.occurrenceCap))
   ) {
     return undefined;
   }
@@ -377,7 +400,9 @@ function mergeSchedule(
     offsetMax: mergeOptionalScalar(left.offsetMax, right.offsetMax),
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
-    timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay)
+    timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
+    activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),
+    occurrenceCap: left.occurrenceCap ?? right.occurrenceCap
   };
 }
 

@@ -11,6 +11,8 @@ import {
   countFrequencyRule,
   dayRangeLexicalRule,
   eventOffsetRule,
+  alternateEventCadenceRule,
+  quantityFirstActivityTimingRule,
   quantityFirstEventOffsetRule,
   eventTimingPhraseRule,
   multiplicativeDoseFrequencyRule,
@@ -19,7 +21,7 @@ import {
   timeOfDayRule,
   timingLexicalRule
 } from "./rules/timing-rules";
-import { prnLexicalRule, symptomAdjustmentLexicalRule } from "./rules/prn-rules";
+import { prnLexicalRule, symptomAdjustmentLexicalRule, symptomOnsetPrnRule } from "./rules/prn-rules";
 import {
   instructionLexicalRule,
   proceduralActionLexicalRule,
@@ -32,6 +34,7 @@ import {
   connectorLexicalRule,
   directiveMarkerLexicalRule,
   doseLexicalRule,
+  perTargetCountDoseRule,
   fillerLexicalRule,
   methodLexicalRule,
   productLexicalRule,
@@ -100,6 +103,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       routeLexicalRule(),
       productLexicalRule(),
       multiplicativeDoseFrequencyRule(),
+      perTargetCountDoseRule(),
       doseLexicalRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
@@ -107,6 +111,8 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       cadenceFirstFrequencyRule(),
       separatedFrequencyRangeRule(),
       countFrequencyRule(),
+      alternateEventCadenceRule(),
+      quantityFirstActivityTimingRule(),
       quantityFirstEventOffsetRule(),
       eventOffsetRule(),
       eventTimingPhraseRule(),
@@ -115,6 +121,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       countAndDurationRule(),
       timeOfDayRule(),
       symptomAdjustmentLexicalRule(),
+      symptomOnsetPrnRule(),
       prnLexicalRule(),
       proceduralActionLexicalRule(),
       workflowLexicalRule(),

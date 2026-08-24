@@ -28,6 +28,8 @@ import {
   parseNumericRange
 } from "../timing-lexicon";
 import {
+  ADMINISTRATION_WINDOW_INSTRUCTIONS,
+  ALTERNATE_EVENT_CADENCES,
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
   DAY_RANGE_CONNECTORS,
@@ -42,7 +44,8 @@ import {
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_TOKENS,
+  MAXIMUM_COUNT_LEAD_SEQUENCES,
+  OCCURRENCE_CAP_PERIOD_PHRASES,
   OCCURRENCE_COUNT_WORDS,
   RANGE_CONNECTORS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
@@ -62,6 +65,7 @@ import {
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
@@ -750,6 +754,42 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+const ALTERNATE_EVENT_CADENCE_FIRST_TOKENS = new Set(
+  ALTERNATE_EVENT_CADENCES.map((definition) => definition.parts[0]).filter(Boolean)
+);
+
+export function alternateEventCadenceRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.alternateEventCadence", (context, start) => {
+    const first = context.tokens[start];
+    if (!first || !ALTERNATE_EVENT_CADENCE_FIRST_TOKENS.has(first.canonical ?? first.lower)) return [];
+    for (const definition of ALTERNATE_EVENT_CADENCES) {
+      const tokens = tokensAvailable(context, start, definition.parts.length);
+      if (!tokens) continue;
+      if (!tokens.every((token, index) => normalizeTokenLower(token) === definition.parts[index])) continue;
+      const periodUnit = mapIntervalUnit(definition.periodUnit);
+      if (!periodUnit) continue;
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.alternateEventCadence",
+        tokens,
+        synsem: {
+          head: {
+            schedule: {
+              period: definition.period,
+              periodUnit,
+              when: [definition.when]
+            }
+          },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 24 + tokens.length
+      })];
+    }
+    return [];
+  });
+}
+
 export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.timing", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -984,6 +1024,88 @@ function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undef
   const roundedSeconds = Math.round(seconds);
   if (Math.abs(seconds - roundedSeconds) > 1e-9) return undefined;
   return roundedSeconds / 60;
+}
+
+function semanticActivityWindowAt(
+  context: HpsgClauseContext,
+  start: number
+) {
+  for (const definition of ADMINISTRATION_WINDOW_INSTRUCTIONS) {
+    if (!definition.relation || !definition.activity) continue;
+    const tokens = tokensAvailable(context, start, definition.parts.length);
+    if (!tokens) continue;
+    if (!tokens.every((token, index) => normalizeTokenLower(token) === definition.parts[index])) continue;
+    return { definition, tokens };
+  }
+  return undefined;
+}
+
+export function quantityFirstActivityTimingRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.activityTiming.quantityFirst", (context, start) => {
+    const first = context.tokens[start];
+    if (!first || context.state.consumed.has(first.index)) return [];
+    const firstLower = normalizeTokenLower(first);
+    const canStartWithValue =
+      (first.kind === LexKind.Number && first.value !== undefined) ||
+      EVENT_OFFSET_FRACTIONS.has(firstLower);
+    if (!canStartWithValue && !EVENT_OFFSET_BOUND_LEADS.has(firstLower)) return [];
+
+    let cursor = start;
+    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
+    const maximumLead = minimumLead ? 0 : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
+    cursor += minimumLead || maximumLead;
+    const valueToken = context.tokens[cursor];
+    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
+    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
+      ? valueToken.value
+      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
+    if (value === undefined) return [];
+
+    let unitIndex = cursor + 1;
+    const article = context.tokens[unitIndex];
+    if (article && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(article))) unitIndex += 1;
+    const unitToken = context.tokens[unitIndex];
+    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
+    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
+    if (!unit) return [];
+    const minutes = eventOffsetMinutes(value, unit);
+    if (minutes === undefined) return [];
+
+    const window = semanticActivityWindowAt(context, unitIndex + 1);
+    if (!window) return [];
+    const activityKey = window.definition.activity;
+    const relation = window.definition.relation;
+    if (!activityKey || !relation) return [];
+    const activity = resolveMedicationInstructionConcept(activityKey, context.options);
+    if (!activity) return [];
+    const activityTiming = {
+      relation,
+      activity: {
+        text: activity.display,
+        i18n: activity.i18n ? { ...activity.i18n } : undefined,
+        coding: medicationInstructionConceptCodings(activity)[0]
+      },
+      ...(minimumLead ? { offsetMin: minutes } : maximumLead ? { offsetMax: minutes } : { offset: minutes })
+    };
+    const tokens = [
+      ...context.tokens.slice(start, cursor),
+      valueToken,
+      ...(unitIndex > cursor + 1 && article ? [article] : []),
+      unitToken,
+      ...window.tokens
+    ];
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.activityTiming.quantityFirst",
+      tokens,
+      synsem: {
+        head: { schedule: { activityTiming: [activityTiming] } },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 52 + tokens.length
+    })];
+  });
 }
 
 /**
@@ -1437,6 +1559,36 @@ function timingRangeIsProcedureLocalDuration(
   return false;
 }
 
+const MAXIMUM_COUNT_LEAD_FIRST_TOKENS = new Set(
+  MAXIMUM_COUNT_LEAD_SEQUENCES.map((parts) => parts[0]).filter(Boolean)
+);
+
+function maximumCountLeadAt(context: HpsgClauseContext, start: number): Token[] | undefined {
+  for (const parts of MAXIMUM_COUNT_LEAD_SEQUENCES) {
+    const tokens = tokensAvailable(context, start, parts.length);
+    if (!tokens) continue;
+    if (tokens.every((candidate, offset) => normalizeTokenLower(candidate) === parts[offset])) {
+      return tokens;
+    }
+  }
+  return undefined;
+}
+
+function occurrenceCapPeriodAt(
+  context: HpsgClauseContext,
+  start: number
+): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
+  for (const definition of OCCURRENCE_CAP_PERIOD_PHRASES) {
+    const tokens = tokensAvailable(context, start, definition.parts.length);
+    if (!tokens) continue;
+    if (!tokens.every((candidate, offset) => normalizeTokenLower(candidate) === definition.parts[offset])) continue;
+    const periodUnit = mapIntervalUnit(definition.periodUnit);
+    if (!periodUnit) continue;
+    return { tokens, period: definition.period, periodUnit };
+  }
+  return undefined;
+}
+
 export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.limit", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -1445,9 +1597,13 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
-    if (MAXIMUM_COUNT_LEAD_TOKENS.has(lower)) {
-      const valueToken = context.tokens[start + 1];
-      const occurrenceToken = context.tokens[start + 2];
+    const maximumLead = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
+      ? maximumCountLeadAt(context, start)
+      : undefined;
+    if (maximumLead) {
+      const valueIndex = start + maximumLead.length;
+      const valueToken = context.tokens.slice(valueIndex, valueIndex + 1).shift();
+      const occurrenceToken = context.tokens.slice(valueIndex + 1, valueIndex + 2).shift();
       if (
         valueToken && !context.state.consumed.has(valueToken.index) &&
         valueToken.kind === LexKind.Number && valueToken.value !== undefined && valueToken.value >= 1 &&
@@ -1455,16 +1611,41 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         occurrenceToken && !context.state.consumed.has(occurrenceToken.index) &&
         OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(occurrenceToken))
       ) {
+        const period = occurrenceCapPeriodAt(context, valueIndex + 2);
+        if (period) {
+          const matched = [...maximumLead, valueToken, occurrenceToken, ...period.tokens];
+          signs.push(lexicalSign({
+            type: "schedule-sign",
+            rule: "hpsg.lex.schedule.occurrenceCap.maximum",
+            tokens: matched,
+            synsem: {
+              head: {
+                schedule: {
+                  occurrenceCap: {
+                    max: valueToken.value,
+                    period: period.period,
+                    periodUnit: period.periodUnit
+                  }
+                }
+              },
+              valence: {},
+              cont: { clauseKind: "administration" }
+            },
+            score: 25 + matched.length
+          }));
+          return signs;
+        }
+        const matched = [...maximumLead, valueToken, occurrenceToken];
         signs.push(lexicalSign({
           type: "schedule-sign",
           rule: "hpsg.lex.schedule.count.maximum",
-          tokens: [token, valueToken, occurrenceToken],
+          tokens: matched,
           synsem: {
             head: { schedule: { count: 1, countMax: valueToken.value } },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: 18
+          score: 18 + matched.length
         }));
         return signs;
       }

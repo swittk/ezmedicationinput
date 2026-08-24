@@ -58,6 +58,19 @@ function applySchedule(
   if (schedule.offsetMax !== undefined) {
     state.offsetMax = schedule.offsetMax;
   }
+  if (schedule.occurrenceCap !== undefined) {
+    state.occurrenceCap = { ...schedule.occurrenceCap };
+  }
+  if (schedule.activityTiming?.length) {
+    const existing = state.activityTiming ? state.activityTiming.slice() : [];
+    for (const item of schedule.activityTiming) {
+      const key = JSON.stringify(item);
+      if (!existing.some((candidate) => JSON.stringify(candidate) === key)) {
+        existing.push(item);
+      }
+    }
+    state.activityTiming = existing;
+  }
   if (schedule.when) {
     for (const whenCode of schedule.when) {
       deps.addWhen(state.when, whenCode);
@@ -140,9 +153,13 @@ export function projectHpsgSignToState(
     if (prn.reasonText !== undefined) {
       state.asNeededReason = prn.reasonText;
     }
+    if (prn.triggerPhase !== undefined) {
+      state.asNeededReasonTriggerPhase = prn.triggerPhase;
+    }
     if (prn.reasons?.length) {
       state.asNeededReasons = prn.reasons.map((reason) => ({
-        text: reason.text
+        text: reason.text,
+        triggerPhase: reason.triggerPhase
       }));
     }
     if (prn.lookupRequests?.length) {
@@ -165,6 +182,7 @@ export function projectHpsgSignToState(
       ) {
         existing.push({
           text: instruction.text,
+          i18n: instruction.i18n ? { ...instruction.i18n } : undefined,
           coding: instruction.coding,
           frames: instruction.frames
         });

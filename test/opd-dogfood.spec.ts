@@ -119,9 +119,17 @@ describe("OPD clinician dogfood grammar", () => {
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.fhir.route?.coding?.[0]?.code).toBe(RouteCode["Respiratory tract route (qualifier value)"]);
     expect(parsed.fhir.timing?.repeat?.when).toBeUndefined();
-    expect(parsed.meta.canonical.clauses[0]?.additionalInstructions).toContainEqual(
-      expect.objectContaining({ text: "before exercise" })
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toContainEqual(
+      expect.objectContaining({
+        relation: "before",
+        activity: expect.objectContaining({ text: "exercise" })
+      })
     );
+    expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window"
+      })
+    ]));
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);
   });
 
@@ -152,12 +160,12 @@ describe("OPD clinician dogfood grammar", () => {
   it.each([
     [
       "take 1 tab now then repeat 1 tab after 2 hours if migraine persists",
-      "Take 1 tablet orally immediately. Repeat 1 tablet after 2 hours if migraine persists.",
+      "Take 1 tablet orally immediately; then repeat 1 tablet after 2 hours if migraine persists.",
       "ถ้ายังมีอาการไมเกรน"
     ],
     [
       "กิน 1 เม็ดทันที แล้วกินซ้ำหลัง 2 ชั่วโมงถ้ายังปวดไมเกรน",
-      "Take 1 tablet orally immediately. Repeat after 2 hours if migraine persists.",
+      "Take 1 tablet orally immediately; then repeat after 2 hours if migraine persists.",
       "ถ้ายังปวดไมเกรน"
     ]
   ] as const)("models dependent repeat timing and condition separately: %s", (source, english, thaiCondition) => {
@@ -185,7 +193,7 @@ describe("OPD clinician dogfood grammar", () => {
     const parsed = parseSig("dissolve 1 tab under tongue prn chest pain");
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("chest pain");
-    expect(parsed.longText).toBe("Dissolve 1 tab under tongue.");
+    expect(parsed.longText).toBe("Dissolve 1 tab under tongue as needed for chest pain.");
     expect(parsed.longText.match(/\b1 tab(?:let)?\b/gi)).toHaveLength(1);
   });
 

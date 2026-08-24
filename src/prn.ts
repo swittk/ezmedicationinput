@@ -60,3 +60,30 @@ export function getPreferredCanonicalPrnReasonText(
     ? joinCanonicalPrnReasonTexts(reasons, conjunction)
     : direct;
 }
+
+export function getLocalizedCanonicalPrnReasonText(
+  reason: CanonicalPrnReasonExpr | undefined,
+  reasons: CanonicalPrnReasonExpr[] | undefined,
+  locale: string,
+  conjunction?: string
+): string | undefined {
+  const thai = locale.toLowerCase().startsWith("th");
+  const localized = (item: CanonicalPrnReasonExpr | undefined): string | undefined => {
+    if (!item) return undefined;
+    if (thai) {
+      return item.i18n?.th ?? item.coding?.i18n?.th ?? item.text ?? item.coding?.display;
+    }
+    const text = item.text?.trim();
+    if (text && !/[\u0E00-\u0E7F]/u.test(text)) return text;
+    const display = item.coding?.display?.trim();
+    return display ? display.charAt(0).toLowerCase() + display.slice(1) : text;
+  };
+  const list = reasons?.length ? reasons : reason ? [reason] : [];
+  if (!list.length) return undefined;
+  const texts = list.map(localized).filter((value): value is string => Boolean(value?.trim()));
+  if (!texts.length) return undefined;
+  if (texts.length === 1) return texts[0];
+  const joiner = conjunction ?? (thai ? "หรือ" : "or");
+  if (texts.length === 2) return `${texts[0]} ${joiner} ${texts[1]}`;
+  return `${texts.slice(0, -1).join(", ")} ${joiner} ${texts[texts.length - 1]}`;
+}

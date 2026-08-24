@@ -257,6 +257,8 @@ function cleanupClause(state: ParserState): void {
       schedule.offset === undefined &&
       schedule.offsetMin === undefined &&
       schedule.offsetMax === undefined &&
+      !schedule.activityTiming?.length &&
+      schedule.occurrenceCap === undefined &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&

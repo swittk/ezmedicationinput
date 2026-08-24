@@ -1,6 +1,7 @@
 import adviceTerminologySource from "./advice-terminology.json";
 import adviceRulesSource from "./advice-rules.json";
 import { lexInput } from "./lexer/lex";
+import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdditionalInstructionDefinition,
   AdviceArgument,
@@ -24,6 +25,7 @@ interface AdviceLexemeEntry {
   semanticClass?: string;
   parserProfile?: string;
   realizerProfile?: string;
+  i18n?: Record<string, string>;
 }
 
 interface AdviceConceptEntry {
@@ -1673,15 +1675,36 @@ function capitalizeSentence(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function realizeAdviceModality(modality: AdviceModality | undefined): string | undefined {
-  return modality ? capitalizeSentence(modality) : undefined;
+function realizeAdviceModality(modality: AdviceModality | undefined, locale = "en"): string | undefined {
+  if (!modality) return undefined;
+  if (locale.toLowerCase().startsWith("th")) {
+    const thai: Partial<Record<AdviceModality, string>> = {
+      [AdviceModality.May]: "อาจ",
+      [AdviceModality.Can]: "สามารถ",
+      [AdviceModality.Should]: "ควร",
+      [AdviceModality.Must]: "ต้อง"
+    };
+    return thai[modality] ?? modality;
+  }
+  return capitalizeSentence(modality);
 }
 
-function joinAdviceArgumentTexts(args: AdviceArgument[]): string | undefined {
+function localizedAdviceArgumentText(arg: AdviceArgument, locale: string): string | undefined {
+  const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
+  if (arg.i18n?.[language]) return arg.i18n[language];
+  if (language === "th") {
+    const site = resolveBodySitePhrase(arg.text);
+    const siteText = site?.definition?.i18n?.th ?? site?.coding?.i18n?.th;
+    if (siteText) return /^บริเวณ/u.test(siteText) ? siteText : `บริเวณ${siteText}`;
+  }
+  return cleanFreeText(arg.text);
+}
+
+function joinAdviceArgumentTexts(args: AdviceArgument[], locale = "en"): string | undefined {
   let text = "";
   let added = 0;
   for (const arg of args) {
-    const trimmed = cleanFreeText(arg.text);
+    const trimmed = localizedAdviceArgumentText(arg, locale);
     if (!trimmed) {
       continue;
     }
@@ -1712,10 +1735,11 @@ const DEFAULT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, arg
 };
 
 const AVOIDANCE_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
+  const thai = /[\u0E00-\u0E7F]/u.test(frame.predicate.lemma);
   const predicate = modalityText
-    ? `${modalityText} ${frame.predicate.lemma}`
-    : capitalizeSentence(frame.predicate.lemma);
-  return argText ? `${predicate} ${argText}` : predicate;
+    ? thai ? `${modalityText}${frame.predicate.lemma}` : `${modalityText} ${frame.predicate.lemma}`
+    : thai ? frame.predicate.lemma : capitalizeSentence(frame.predicate.lemma);
+  return argText ? `${predicate}${thai ? "" : " "}${argText}` : predicate;
 };
 
 const EFFECT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
@@ -1730,28 +1754,37 @@ const ADVICE_PREDICATE_REALIZERS: Record<string, AdvicePredicateRealizer> = {
   effect: EFFECT_ADVICE_PREDICATE_REALIZER
 };
 
-function realizeSingleAdviceFrame(frame: AdviceFrame): string | undefined {
-  const argText = joinAdviceArgumentTexts(frame.args);
-  const modalityText = realizeAdviceModality(frame.modality);
+function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | undefined {
+  const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
+  const argText = joinAdviceArgumentTexts(frame.args, locale);
+  const modalityText = realizeAdviceModality(frame.modality, locale);
+  const lexeme = findVerbLexeme(frame.predicate.lemma);
+  const localizedPredicate = language === "th"
+    ? lexeme?.i18n?.th ?? frame.predicate.lemma
+    : frame.predicate.lemma;
   if (frame.polarity === AdvicePolarity.Negate) {
-    let text = `${frame.modality === AdviceModality.Must ? "Must not" : "Do not"} ${frame.predicate.lemma}`;
+    let text = language === "th"
+      ? `ห้าม${localizedPredicate}`
+      : `${frame.modality === AdviceModality.Must ? "Must not" : "Do not"} ${localizedPredicate}`;
     if (frame.relation) text += ` ${frame.relation}`;
     if (argText) text += ` ${argText}`;
     return text;
   }
 
-  const lexeme = findVerbLexeme(frame.predicate.lemma);
   const realizer = ADVICE_PREDICATE_REALIZERS[lexeme?.realizerProfile ?? "default"] ??
     DEFAULT_ADVICE_PREDICATE_REALIZER;
-  return realizer({ frame, argText, modalityText });
+  const localizedFrame = language === "th"
+    ? { ...frame, predicate: { ...frame.predicate, lemma: localizedPredicate } }
+    : frame;
+  return realizer({ frame: localizedFrame, argText, modalityText });
 }
 
-function realizeAdviceFramesText(frames: AdviceFrame[]): string | undefined {
+export function realizeAdviceFramesText(frames: AdviceFrame[], locale = "en"): string | undefined {
   if (frames.length !== 1) {
     return undefined;
   }
-  const realized = realizeSingleAdviceFrame(frames[0]);
-  return realized ? capitalizeSentence(realized) : undefined;
+  const realized = realizeSingleAdviceFrame(frames[0], locale);
+  return realized ? (locale.toLowerCase().startsWith("th") ? realized : capitalizeSentence(realized)) : undefined;
 }
 
 export function parseAdditionalInstructions(

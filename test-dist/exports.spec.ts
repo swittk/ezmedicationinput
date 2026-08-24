@@ -20,6 +20,11 @@ function runNode(args: string[], code: string): {
   findSymptomDefinitionByCodingType?: string;
   symptomCount?: number;
   timingFrequencyMinExtensionUrl?: string;
+  timingActivityWindowExtensionUrl?: string;
+  timingOccurrenceCapExtensionUrl?: string;
+  prnTriggerPhaseExtensionUrl?: string;
+  getTimingOccurrenceCapType?: string;
+  occurrenceCapMax?: number;
   roundTripText?: string;
   roundTripSiteCode?: string;
   roundTripFrequency?: number;
@@ -95,6 +100,13 @@ describe("published package entrypoints", () => {
           findSymptomDefinitionByCodingType: typeof mod.findSymptomDefinitionByCoding,
           symptomCount: mod.listSymptomDefinitions().length,
           timingFrequencyMinExtensionUrl: mod.TIMING_FREQUENCY_MIN_EXTENSION_URL,
+          timingActivityWindowExtensionUrl: mod.TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+          timingOccurrenceCapExtensionUrl: mod.TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+          prnTriggerPhaseExtensionUrl: mod.PRN_TRIGGER_PHASE_EXTENSION_URL,
+          getTimingOccurrenceCapType: typeof mod.getTimingOccurrenceCap,
+          occurrenceCapMax: mod.getTimingOccurrenceCap(
+            mod.parseSig("1 tab po q4h prn pain max 3 doses daily").fhir.timing?.repeat
+          )?.max,
           longText: actions.map((action) => action.predicate.lemma).join(",")
         }));
       `
@@ -114,6 +126,11 @@ describe("published package entrypoints", () => {
       findSymptomDefinitionByCodingType: "function",
       symptomCount: 100,
       timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
+      timingActivityWindowExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window",
+      timingOccurrenceCapExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap",
+      prnTriggerPhaseExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase",
+      getTimingOccurrenceCapType: "function",
+      occurrenceCapMax: 3,
       longText: "shake,rinse"
     });
   });

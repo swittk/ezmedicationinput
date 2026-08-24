@@ -1,6 +1,8 @@
 import { AdvicePolarity, AdviceRelation } from "../../types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
+import { MAXIMUM_COUNT_LEAD_SEQUENCES } from "../lexical-classes";
+import { hasSymptomOnsetPrnAt } from "./prn-rules";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { HpsgConditionFeature, HpsgLexicalRule, lexicalSign } from "../signature";
 
@@ -58,6 +60,15 @@ function conditionTokens(
   );
 }
 
+function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
+  return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
+    const available = context.tokens.slice(start, start + parts.length);
+    return available.length === parts.length && available.every(
+      (token, offset) => !context.state.consumed.has(token.index) && normalizeTokenLower(token) === parts[offset]
+    );
+  });
+}
+
 function postfixConditionEnd(context: HpsgClauseContext, start: number): number {
   const first = context.tokens[start];
   if (!first) return 0;
@@ -65,7 +76,7 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
   for (let index = start + 1; index < context.limit; index += 1) {
     const current = context.tokens.slice(index, index + 1)[0];
     if (!current) break;
-    if (/^[.;!?]$/u.test(current.original.trim())) {
+    if (/^[.;!?]$/u.test(current.original.trim()) || startsMaximumCountLead(context, index)) {
       end = current.sourceStart;
       break;
     }
@@ -79,6 +90,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!lead || context.state.consumed.has(lead.index)) return [];
     const relation = RELATION_BY_LEAD[normalizeTokenLower(lead)];
     if (!relation) return [];
+    if (relation === AdviceRelation.When && hasSymptomOnsetPrnAt(context, start)) return [];
 
     const frames = getProceduralFrames(context).slice().sort((a, b) =>
       a.span.start - b.span.start || a.span.end - b.span.end

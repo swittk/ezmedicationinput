@@ -478,6 +478,10 @@ export interface BodySiteDefinition {
   spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
   administrationTargetCount?: number;
+  /** Optional surface used when the dose applies independently to each target. */
+  perTargetText?: string;
+  /** Locale-specific per-target surface, e.g. Thai `รูจมูกข้างละ`. */
+  perTargetI18n?: Record<string, string>;
   /** Optional translations for different locales (e.g., { "th": "ตา" }) */
   i18n?: Record<string, string>;
   /**
@@ -599,6 +603,9 @@ export interface AdviceFrame {
     realizerConfig?: {
       thaiFallbackObject?: string;
       thaiSuppressActivityConcepts?: string[];
+      thaiSuppressSiteConcepts?: string[];
+      thaiImplicitMedicationObject?: boolean;
+      englishDirectSiteObject?: boolean;
     };
     /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
@@ -808,6 +815,7 @@ export type MedicationInstructionActionArgumentParser =
   | "site-relation"
   | "duration"
   | "bare-duration"
+  | "preposed-duration"
   | "duration-activity"
   | "activity";
 
@@ -869,6 +877,8 @@ export interface MedicationInstructionActionDefinition {
   realizerConfig?: {
     thaiFallbackObject?: string;
     thaiSuppressActivityConcepts?: string[];
+    /** Thai can omit selected site concepts already lexicalized by the verb (e.g. สระผม + hair). */
+    thaiSuppressSiteConcepts?: string[];
     /** Thai can omit an otherwise generic medication object for this action (e.g. รับประทานหลังอาหาร). */
     thaiImplicitMedicationObject?: boolean;
     /** English realizes the anatomical site as the verb's direct object instead of `to/at <site>`. */
@@ -1151,6 +1161,27 @@ export interface CanonicalMethodExpr {
   evidence?: CanonicalEvidence[];
 }
 
+export interface CanonicalOccurrenceCapExpr {
+  max: number;
+  period: number;
+  periodUnit: FhirPeriodUnit;
+}
+
+export interface CanonicalActivityTimingExpr {
+  relation: "before" | "after";
+  activity: {
+    text: string;
+    i18n?: Record<string, string>;
+    coding?: FhirCoding;
+  };
+  /** Exact offset from the activity in minutes. */
+  offset?: number;
+  /** Minimum offset from the activity in minutes. */
+  offsetMin?: number;
+  /** Maximum offset from the activity in minutes. */
+  offsetMax?: number;
+}
+
 export interface CanonicalScheduleExpr {
   timingCode?: string;
   count?: number;
@@ -1172,6 +1203,8 @@ export interface CanonicalScheduleExpr {
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];
+  activityTiming?: CanonicalActivityTimingExpr[];
+  occurrenceCap?: CanonicalOccurrenceCapExpr;
   evidence?: CanonicalEvidence[];
 }
 
@@ -1180,6 +1213,8 @@ export interface CanonicalPrnReasonExpr {
   i18n?: Record<string, string>;
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
+  /** Clinical trigger phase qualifying this PRN reason, e.g. symptom onset. */
+  triggerPhase?: "onset";
 }
 
 export interface CanonicalPrnExpr {
@@ -1427,6 +1462,8 @@ export interface NextDueDoseOptions {
   orderedAt?: Date | string;
   limit?: number;
   priorCount?: number;
+  /** Actual prior administration timestamps used for per-period occurrence caps. */
+  priorDoseTimes?: Array<Date | string>;
   timeZone?: string;
   eventClock?: EventClockMap;
   mealOffsets?: MealOffsetMap;

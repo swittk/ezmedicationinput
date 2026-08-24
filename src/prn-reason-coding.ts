@@ -604,18 +604,23 @@ function runMultiplePrnReasonResolutionSync(
 ): void {
   internal.prnReasonLookups = [];
   internal.asNeeded = true;
+  const existingReasons = internal.asNeededReasons?.slice() ?? [];
+  const primaryTrigger = internal.asNeededReasonTriggerPhase;
   const reasons = [];
   for (const request of requests) {
     const definition = resolvePrnReasonDefinitionSyncForRequest(internal, request, options);
+    const index: number = reasons.length;
     reasons.push({
       text: request.text,
       spatialRelation: request.locativeSiteSpatialRelation,
+      triggerPhase: existingReasons[index]?.triggerPhase ?? (requests.length === 1 ? primaryTrigger : undefined),
       coding: codingFromPrnDefinition(definition)
     });
     collectSuggestionsForRequestSync(internal, request, definition, options);
   }
   internal.asNeededReasons = reasons;
   internal.asNeededReason = joinPrnReasonTexts(reasons);
+  internal.asNeededReasonTriggerPhase = reasons[0]?.triggerPhase;
   if (reasons.length === 1) {
     internal.asNeededReasonCoding = reasons[0]?.coding;
   } else {
@@ -630,18 +635,23 @@ async function runMultiplePrnReasonResolutionAsync(
 ): Promise<void> {
   internal.prnReasonLookups = [];
   internal.asNeeded = true;
+  const existingReasons = internal.asNeededReasons?.slice() ?? [];
+  const primaryTrigger = internal.asNeededReasonTriggerPhase;
   const reasons = [];
   for (const request of requests) {
     const definition = await resolvePrnReasonDefinitionAsyncForRequest(internal, request, options);
+    const index: number = reasons.length;
     reasons.push({
       text: request.text,
       spatialRelation: request.locativeSiteSpatialRelation,
+      triggerPhase: existingReasons[index]?.triggerPhase ?? (requests.length === 1 ? primaryTrigger : undefined),
       coding: codingFromPrnDefinition(definition)
     });
     await collectSuggestionsForRequestAsync(internal, request, definition, options);
   }
   internal.asNeededReasons = reasons;
   internal.asNeededReason = joinPrnReasonTexts(reasons);
+  internal.asNeededReasonTriggerPhase = reasons[0]?.triggerPhase;
   if (reasons.length === 1) {
     internal.asNeededReasonCoding = reasons[0]?.coding;
   } else {

@@ -2685,7 +2685,7 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.site?.text).toBe("affected area");
     expect(result.fhir.site?.coding).toBeUndefined();
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Topical route"]);
-    expect(result.longText).toContain("บริเวณที่เป็น");
+    expect(result.longText).toContain("บริเวณที่มีอาการ");
   });
 
   it("normalizes affected areas to the built-in affected area site", () => {
@@ -2969,10 +2969,10 @@ describe("parseSig core scenarios", () => {
       ["apply to hairline gently", "hairline", "418449005", "Apply the medication to the hairline. Apply gently."],
       ["apply gently to lesion", "lesion", "418449005", "Apply the medication to the lesion. Apply gently."],
       ["apply to lesion gently", "lesion", "418449005", "Apply the medication to the lesion. Apply gently."],
-      ["apply thinly to face", "face", "420162004", "Apply the medication to the face. Apply thinly."],
-      ["apply thin layer to face", "face", "420162004", "Apply the medication to the face. Apply thinly."],
-      ["apply thinly to lesions", "lesions", "420162004", "Apply the medication to the lesions. Apply thinly."],
-      ["apply thinly to lesion", "lesion", "420162004", "Apply the medication to the lesion. Apply thinly."],
+      ["apply thinly to face", "face", "420162004", "Apply a thin layer to the face."],
+      ["apply thin layer to face", "face", "420162004", "Apply a thin layer to the face."],
+      ["apply thinly to lesions", "lesions", "420162004", "Apply a thin layer to the lesions."],
+      ["apply thinly to lesion", "lesion", "420162004", "Apply a thin layer to the lesion."],
       ["apply thickly to face", "face", "246703001", "Apply the medication to the face. Apply thickly."],
       ["apply thick layer to face", "face", "246703001", "Apply the medication to the face. Apply thickly."],
       ["apply to lesion thickly", "lesion", "246703001", "Apply the medication to the lesion. Apply thickly."]
@@ -2991,7 +2991,7 @@ describe("parseSig core scenarios", () => {
 
     const standalone = parseSig("apply thinly");
     expect(standalone.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("420162004");
-    expect(standalone.longText).toBe("Apply the medication topically. Apply thinly.");
+    expect(standalone.longText).toBe("Apply a thin layer topically.");
 
     const thickStandalone = parseSig("apply thickly");
     expect(thickStandalone.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("246703001");
@@ -4233,7 +4233,7 @@ describe("internationalization", () => {
 
     it("describes day-of-week schedules in Thai", () => {
       const result = parseSig("1 tab po every monday", { locale: "th" });
-      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด ในวันจันทร์.");
+      expect(result.longText).toBe("รับประทานครั้งละ 1 เม็ด สัปดาห์ละครั้ง ในวันจันทร์.");
     });
 
     it("groups Thai meal timings by relation without forcing a daily count", () => {

@@ -555,6 +555,8 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
         coding: { code: "244506005", display: "Anterior nares" },
         text: "both nostrils",
         administrationTargetCount: 2,
+        perTargetText: "each nostril",
+        perTargetI18n: { th: "รูจมูกข้างละ" },
         i18n: { th: "รูจมูกทั้งสองข้าง" },
         routeHint: RouteCode["Nasal route"]
       }
@@ -1103,9 +1105,14 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       names: [
         "affected area", "affected areas", "affected site",
         "painful area", "painful spot", "painful site", "area that hurts", "area that is painful", "where it hurts",
-        "บริเวณที่เป็น", "บริเวณที่มีอาการปวด", "ตรงที่ปวด", "ที่ปวด"
+        "บริเวณที่เป็น", "บริเวณที่มีอาการ", "ที่มีอาการ",
+        "บริเวณที่มีอาการปวด", "ตรงที่ปวด", "ที่ปวด"
       ],
-      definition: { text: "affected area", routeHint: RouteCode["Topical route"] }
+      definition: {
+        text: "affected area",
+        i18n: { th: "บริเวณที่มีอาการ" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["lesion", "skin lesion", "รอยโรค"],
@@ -1162,8 +1169,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "63762007", display: "Both breasts" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["axilla", "axillae", "armpit", "armpits"],
-      definition: { coding: { code: "34797008", display: "Axilla structure" }, routeHint: RouteCode["Topical route"] }
+      names: ["axilla", "axillae", "armpit", "armpits", "รักแร้"],
+      definition: {
+        coding: { code: "34797008", display: "Axilla structure" },
+        text: "axilla",
+        i18n: { th: "รักแร้" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["axillary hair", "armpit hair", "armpit hairs", "underarm hair", "underarm hairs"],
@@ -1174,8 +1186,56 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["groin"],
-      definition: { coding: { code: "26893007", display: "Inguinal region structure" }, routeHint: RouteCode["Topical route"] }
+      names: ["groin", "ขาหนีบ"],
+      definition: {
+        coding: { code: "26893007", display: "Inguinal region structure" },
+        text: "groin",
+        i18n: { th: "ขาหนีบ" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["groin and axilla", "groin and axillae", "axilla and groin", "ขาหนีบและรักแร้"],
+      definition: {
+        text: "groin and axilla",
+        i18n: { th: "ขาหนีบและรักแร้" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["rash", "rash area", "ผื่น", "บริเวณผื่น"],
+      definition: {
+        text: "rash",
+        i18n: { th: "บริเวณผื่น" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["face and eyes", "eyes and face", "ใบหน้าและดวงตา"],
+      definition: {
+        text: "face and eyes",
+        i18n: { th: "บริเวณใบหน้าและดวงตา" }
+      }
+    },
+    {
+      names: ["nasal septum", "septum", "nasal septum structure", "ผนังกั้นจมูก"],
+      definition: {
+        coding: { code: "68426009", display: "Nasal septum structure" },
+        text: "nasal septum",
+        i18n: { th: "ผนังกั้นจมูก" },
+        routeHint: RouteCode["Nasal route"]
+      }
+    },
+    {
+      names: [
+        "interdigital spaces", "interdigital space",
+        "ระหว่างร่องนิ้ว", "ร่องนิ้ว", "ซอกนิ้ว", "ระหว่างซอกนิ้ว"
+      ],
+      definition: {
+        text: "interdigital spaces",
+        i18n: { th: "ระหว่างร่องนิ้ว" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["scalp", "หนังศีรษะ", "ที่หนังศีรษะ"],
@@ -1501,9 +1561,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["hair"],
+      names: ["hair", "เส้นผม", "ผม"],
       definition: {
         coding: { code: "386045008", display: "Hair structure (body structure)" },
+        text: "hair",
+        i18n: { th: "เส้นผม" },
         routeHint: RouteCode["Topical route"]
       }
     },

@@ -1,6 +1,7 @@
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
+  DEFAULT_UNIT_BY_ROUTE,
   normalizeBodySiteKey,
   ROUTE_TEXT
 } from "../../maps";
@@ -612,6 +613,38 @@ function numericTokenIsProcedureLocalQuantity(
     }
   }
   return false;
+}
+
+export function perTargetCountDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.dose.perTargetCount", (context, start) => {
+    const valueToken = context.tokens[start];
+    const countToken = context.tokens[start + 1];
+    if (
+      !valueToken || valueToken.kind !== LexKind.Number || valueToken.value === undefined ||
+      !countToken || context.state.consumed.has(valueToken.index) || context.state.consumed.has(countToken.index) ||
+      normalizeTokenLower(countToken) !== "times"
+    ) return [];
+    const siteToken = context.tokens[start - 1];
+    if (!siteToken) return [];
+    const site = resolveBodySitePhrase(siteToken.original, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
+    const definition = site?.definition;
+    if (!definition?.perTargetText && !definition?.perTargetI18n) return [];
+    const unit = definition.routeHint ? DEFAULT_UNIT_BY_ROUTE[definition.routeHint] : undefined;
+    if (!unit) return [];
+    return [lexicalSign({
+      type: "dose-sign",
+      rule: "hpsg.lex.dose.perTargetCount",
+      tokens: [valueToken, countToken],
+      synsem: {
+        head: { dose: { value: valueToken.value, unit } },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 30
+    })];
+  });
 }
 
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {

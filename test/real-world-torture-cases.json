@@ -272,7 +272,7 @@
     "route": "intranasal",
     "timing": "QD",
     "actions": [
-      "aim"
+      "aim-away-from"
     ]
   },
   {
@@ -352,7 +352,7 @@
     "site": "right ear",
     "actions": [
       "warm",
-      "keep"
+      "keep-ear-upward"
     ]
   },
   {

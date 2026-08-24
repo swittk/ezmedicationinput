@@ -57,6 +57,26 @@ export function sourceRangeAttachmentClass(
   const localActivityRelation = relationCanAttachLocally &&
     enclosing.args.some((arg) => arg.role === AdviceArgumentRole.Activity);
   if (localActivityRelation) return "procedure";
+
+  if (definition?.primaryAdministrationHead && definition.semanticClass === "cleanse") {
+    const priorFrames = getProceduralFrames(context)
+      .filter((frame) => frame.span.end <= enclosing.span.start && frame.polarity !== AdvicePolarity.Negate)
+      .sort((left, right) => left.span.end - right.span.end);
+    const retention = priorFrames.slice().reverse().find((frame) =>
+      resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.semanticClass === "retain"
+    );
+    if (retention) {
+      const administrationBeforeRetention = priorFrames.some((frame) => {
+        if (frame.span.end > retention.span.start) return false;
+        const priorDefinition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+        return Boolean(priorDefinition && (
+          !priorDefinition.procedural || priorDefinition.primaryAdministrationHead
+        ));
+      });
+      if (administrationBeforeRetention) return "procedure";
+    }
+  }
+
   if (definition?.primaryAdministrationHead) return "administration";
   return enclosing.args.some((arg) => arg.role === AdviceArgumentRole.Site)
     ? "administration"

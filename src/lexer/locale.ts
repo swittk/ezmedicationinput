@@ -80,9 +80,13 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ขณะที่": "while",
   "ตื่น": "awake",
   "เฉพาะ": "only",
+  "เริ่ม": "start",
+  "จำเป็น": "needed",
   "ออกกำลังกาย": "exercise",
   "การออกกำลังกาย": "exercise",
   "ระหว่าง": "between",
+  "วันเว้นวัน": "qod",
+  "สัปดาห์ละครั้ง": "weekly",
   "จนกว่า": "until",
   "เว้นแต่": "unless",
 

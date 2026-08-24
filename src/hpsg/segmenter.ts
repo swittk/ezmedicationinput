@@ -240,6 +240,43 @@ function normalizeSegmentLexeme(item: Token): string {
  * its own explicit administration head, so ordinary `wash and rinse` prose is
  * not segmented here.
  */
+function scheduleOnlyAdministrationContinuation(
+  input: string,
+  tokens: Token[],
+  connectorIndex: number,
+  segmentStart: number,
+  options?: ParseOptions
+): boolean {
+  const connector = tokens[connectorIndex];
+  const first = tokens[connectorIndex + 1];
+  if (!connector || !first) return false;
+  const connectorLower = normalizeSegmentLexeme(connector);
+  if (!ACTION_SEQUENCE_MARKERS.has(connectorLower) && !ACTION_COORDINATION_CONNECTORS.has(connectorLower)) {
+    return false;
+  }
+  const probeEnd = nextContinuationProbeEnd(input, tokens, connectorIndex + 1);
+  const continuationText = input.slice(first.sourceStart, probeEnd).trim();
+  if (!continuationText) return false;
+  if (parseInstructionActions(continuationText, 0, options).length) return false;
+  const continuation = parseClauseState(continuationText, options);
+  if (findUnparsedTokenGroups(continuation).length || !hasMeaningfulSchedule(continuation)) return false;
+  if (hasAdministrationHead(continuation)) return false;
+
+  const prefixText = input.slice(segmentStart, connector.sourceStart).replace(/[,;]\s*$/u, "").trim();
+  if (!prefixText) return false;
+  const prefix = parseClauseState(prefixText, options);
+  if (!hasAdministrationHead(prefix)) return false;
+  if (connectorLower === "then") return true;
+  const prefixSchedule = prefix.primaryClause.schedule;
+  return Boolean(
+    prefixSchedule?.offset !== undefined || prefixSchedule?.offsetMin !== undefined ||
+    prefixSchedule?.offsetMax !== undefined ||
+    prefixSchedule?.activityTiming?.some((timing) =>
+      timing.offset !== undefined || timing.offsetMin !== undefined || timing.offsetMax !== undefined
+    )
+  );
+}
+
 function doseBearingAdministrationContinuation(
   input: string,
   tokens: Token[],
@@ -367,14 +404,20 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
     }
     const nextToken = tokens[index + 1];
     if (token.original === "," && nextToken) {
-      if (doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)) {
+      if (
+        scheduleOnlyAdministrationContinuation(input, tokens, index + 1, start, options) ||
+        doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)
+      ) {
         pushSegment(segments, input, start, token.sourceStart);
         start = nextToken.sourceEnd;
         index += 1;
         scannedOffset = nextToken.sourceEnd;
         continue;
       }
-    } else if (doseBearingAdministrationContinuation(input, tokens, index, start, options)) {
+    } else if (
+      scheduleOnlyAdministrationContinuation(input, tokens, index, start, options) ||
+      doseBearingAdministrationContinuation(input, tokens, index, start, options)
+    ) {
       pushSegment(segments, input, start, token.sourceStart);
       start = token.sourceEnd;
       scannedOffset = token.sourceEnd;

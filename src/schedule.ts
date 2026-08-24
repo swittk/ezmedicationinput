@@ -10,6 +10,7 @@ import {
   FhirTiming,
   FhirTimingRepeat,
   FrequencyFallbackTimes,
+  CanonicalOccurrenceCapExpr,
   EstimatedQuantity,
   MealOffsetMap,
   MedicationContext,
@@ -23,7 +24,11 @@ import { arrayIncludes } from "./utils/array";
 import { convertValue, getBaseUnitFactor, getUnitCategory } from "./utils/units";
 import { parseStrengthIntoRatio } from "./utils/strength";
 import { getDoseUnitSemantics } from "./unit-lexicon";
-import { getExactTimingOffsetMinutes } from "./fhir";
+import {
+  getExactTimingOffsetMinutes,
+  getTimingOccurrenceCap,
+  TIMING_OCCURRENCE_CAP_EXTENSION_URL
+} from "./fhir";
 
 /**
  * Default institution times used when a dosage only specifies frequency without
@@ -1016,6 +1021,79 @@ function resolveFrequencyClocks(
   return Array.from(collected).sort();
 }
 
+function occurrenceCapBucketKey(
+  date: Date,
+  cap: CanonicalOccurrenceCapExpr,
+  timeZone: string
+): string {
+  switch (cap.periodUnit) {
+    case FhirPeriodUnit.Minute:
+      return `min:${Math.floor(date.getTime() / (cap.period * 60 * 1000))}`;
+    case FhirPeriodUnit.Hour:
+      return `h:${Math.floor(date.getTime() / (cap.period * 60 * 60 * 1000))}`;
+    case FhirPeriodUnit.Day:
+      return `d:${Math.floor(getLocalDayNumber(date, timeZone) / cap.period)}`;
+    case FhirPeriodUnit.Week: {
+      const mondayWeek = Math.floor((getLocalDayNumber(date, timeZone) + 3) / 7);
+      return `wk:${Math.floor(mondayWeek / cap.period)}`;
+    }
+    case FhirPeriodUnit.Month:
+      return `mo:${Math.floor(getLocalMonthIndex(date, timeZone) / cap.period)}`;
+    case FhirPeriodUnit.Year: {
+      const { year } = getTimeParts(date, timeZone);
+      return `a:${Math.floor(year / cap.period)}`;
+    }
+    default:
+      return `raw:${date.getTime()}`;
+  }
+}
+
+function applyOccurrenceCap(
+  candidates: string[],
+  cap: CanonicalOccurrenceCapExpr,
+  priorDoseTimes: Array<Date | string> | undefined,
+  timeZone: string,
+  limit: number
+): string[] {
+  const priorCounts = new Map<string, number>();
+  for (const value of priorDoseTimes ?? []) {
+    const date = coerceDate(value, "priorDoseTimes");
+    const key = occurrenceCapBucketKey(date, cap, timeZone);
+    priorCounts.set(key, (priorCounts.get(key) ?? 0) + 1);
+  }
+  const generatedCounts = new Map<string, number>();
+  const accepted: string[] = [];
+  for (const candidate of candidates) {
+    const date = coerceDate(candidate, "candidate");
+    const key = occurrenceCapBucketKey(date, cap, timeZone);
+    const used = (priorCounts.get(key) ?? 0) + (generatedCounts.get(key) ?? 0);
+    if (used >= cap.max) continue;
+    generatedCounts.set(key, (generatedCounts.get(key) ?? 0) + 1);
+    accepted.push(candidate);
+    if (accepted.length >= limit) break;
+  }
+  return accepted;
+}
+
+function withoutOccurrenceCap(dosage: FhirDosage): FhirDosage {
+  const timing = dosage.timing;
+  const repeat = timing?.repeat;
+  if (!timing || !repeat) return dosage;
+  const extensions = (repeat.extension ?? []).filter(
+    (extension) => extension.url !== TIMING_OCCURRENCE_CAP_EXTENSION_URL
+  );
+  return {
+    ...dosage,
+    timing: {
+      ...timing,
+      repeat: {
+        ...repeat,
+        extension: extensions.length ? extensions : undefined
+      }
+    }
+  };
+}
+
 /**
  * Produces the next dose timestamps in ascending order according to the
  * provided configuration and dosage metadata.
@@ -1052,6 +1130,23 @@ export function nextDueDoses(
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
     throw new Error("Configuration with a valid timeZone is required");
+  }
+  const occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  if (occurrenceCap) {
+    const requestedLimit = Math.floor(limit);
+    const candidateLimit = Math.min(10000, Math.max(requestedLimit, requestedLimit * 512));
+    const uncapped = nextDueDoses(withoutOccurrenceCap(dosage), {
+      ...options,
+      limit: candidateLimit,
+      priorDoseTimes: undefined
+    });
+    return applyOccurrenceCap(
+      uncapped,
+      occurrenceCap,
+      options.priorDoseTimes,
+      timeZone,
+      requestedLimit
+    );
   }
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),

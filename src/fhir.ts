@@ -35,6 +35,8 @@ import {
 } from "./maps";
 import {
   AdvicePolarity,
+  CanonicalActivityTimingExpr,
+  CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
   BodySiteSpatialRelation,
@@ -55,9 +57,23 @@ export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
 export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
 export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
+export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
+export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
+export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
+
+function prnTriggerPhaseExtension(phase: "onset" | undefined) {
+  return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
+}
+
+function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset" | undefined {
+  const value = concept?.extension?.find(
+    (candidate) => candidate.url === PRN_TRIGGER_PHASE_EXTENSION_URL
+  )?.valueCode;
+  return value === "onset" ? "onset" : undefined;
+}
 
 function timingOffsetExtensionValue(
   repeat: FhirTimingRepeat | undefined,
@@ -81,6 +97,112 @@ export function getExactTimingOffsetMinutes(
 ): number | undefined {
   if (repeat?.offset !== undefined) return repeat.offset;
   return timingOffsetExtensionValue(repeat, TIMING_OFFSET_EXACT_EXTENSION_URL);
+}
+
+function activityTimingOffsetChild(url: string, value: number | undefined) {
+  if (value === undefined) return undefined;
+  return {
+    url,
+    valueQuantity: {
+      value,
+      unit: "minutes",
+      system: UCUM_SYSTEM,
+      code: "min"
+    }
+  };
+}
+
+function buildActivityTimingExtension(item: CanonicalActivityTimingExpr) {
+  const children = [
+    { url: "relation", valueCode: item.relation },
+    {
+      url: "activity",
+      valueCodeableConcept: {
+        text: item.activity.text,
+        coding: item.activity.coding?.code ? [{ ...item.activity.coding }] : undefined,
+        _text: buildTranslationPrimitiveElement(item.activity.i18n)
+      }
+    },
+    activityTimingOffsetChild("offset", item.offset),
+    activityTimingOffsetChild("offsetMin", item.offsetMin),
+    activityTimingOffsetChild("offsetMax", item.offsetMax)
+  ].filter((child): child is NonNullable<typeof child> => Boolean(child));
+  return { url: TIMING_ACTIVITY_WINDOW_EXTENSION_URL, extension: children };
+}
+
+function activityTimingQuantityMinutes(extension: NonNullable<FhirTimingRepeat["extension"]>[number] | undefined): number | undefined {
+  const value = extension?.valueQuantity?.value;
+  const unit = extension?.valueQuantity?.code ?? extension?.valueQuantity?.unit;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  if (!unit || unit === "min" || /^minutes?$/i.test(unit)) return value;
+  if (unit === "h" || /^hours?$/i.test(unit)) return value * 60;
+  if (unit === "d" || /^days?$/i.test(unit)) return value * 1440;
+  return undefined;
+}
+
+function buildOccurrenceCapExtension(cap: CanonicalOccurrenceCapExpr) {
+  return {
+    url: TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+    extension: [
+      { url: "max", valueInteger: cap.max },
+      {
+        url: "period",
+        valueQuantity: {
+          value: cap.period,
+          unit: cap.periodUnit,
+          system: UCUM_SYSTEM,
+          code: cap.periodUnit
+        }
+      }
+    ]
+  };
+}
+
+export function getTimingOccurrenceCap(
+  repeat: FhirTimingRepeat | undefined
+): CanonicalOccurrenceCapExpr | undefined {
+  const extension = repeat?.extension?.find(
+    (candidate) => candidate.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL
+  );
+  const child = (url: string) => extension?.extension?.find((candidate) => candidate.url === url);
+  const max = child("max")?.valueInteger;
+  const periodQuantity = child("period")?.valueQuantity;
+  const period = periodQuantity?.value;
+  const periodUnit = periodQuantity?.code ?? periodQuantity?.unit;
+  if (
+    typeof max !== "number" || !Number.isInteger(max) || max < 1 ||
+    typeof period !== "number" || !Number.isFinite(period) || period <= 0 ||
+    !periodUnit
+  ) return undefined;
+  const mappedUnit = periodUnit as FhirPeriodUnit;
+  if (["min", "h", "d", "wk", "mo", "a"].indexOf(mappedUnit) < 0) return undefined;
+  return { max, period, periodUnit: mappedUnit };
+}
+
+function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
+  const result: CanonicalActivityTimingExpr[] = [];
+  for (const extension of repeat?.extension ?? []) {
+    if (extension.url !== TIMING_ACTIVITY_WINDOW_EXTENSION_URL) continue;
+    const child = (url: string) => extension.extension?.find((candidate) => candidate.url === url);
+    const relation = child("relation")?.valueCode;
+    const activityConcept = child("activity")?.valueCodeableConcept;
+    const text = activityConcept?.text ?? activityConcept?.coding?.[0]?.display;
+    if ((relation !== "before" && relation !== "after") || !text) continue;
+    const coding = activityConcept?.coding?.find((candidate) => Boolean(candidate.code));
+    const i18n = getPrimitiveTranslations(activityConcept?._text) ?? {};
+    result.push({
+      relation,
+      activity: {
+        text,
+        i18n: Object.keys(i18n).length ? i18n : undefined,
+        coding: coding ? { ...coding } : undefined
+      },
+      offset: activityTimingQuantityMinutes(child("offset")),
+      offsetMin: activityTimingQuantityMinutes(child("offsetMin")),
+      offsetMax: activityTimingQuantityMinutes(child("offsetMax"))
+    });
+  }
+  return result.length ? result : undefined;
 }
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
@@ -589,6 +711,20 @@ export function canonicalToFhir(
     repeat.timeOfDay = [...schedule.timeOfDay];
     hasRepeat = true;
   }
+  if (schedule?.activityTiming?.length) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      ...schedule.activityTiming.map(buildActivityTimingExtension)
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.occurrenceCap) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      buildOccurrenceCapExtension(schedule.occurrenceCap)
+    ];
+    hasRepeat = true;
+  }
 
   if (hasRepeat) {
     dosage.timing = { repeat };
@@ -773,7 +909,12 @@ export function canonicalToFhir(
             }
           ];
         }
-        concept.extension = buildBodySiteSpatialRelationExtensions(reason.spatialRelation);
+        const triggerExtension = prnTriggerPhaseExtension(reason.triggerPhase);
+        const reasonExtensions = [
+          ...(buildBodySiteSpatialRelationExtensions(reason.spatialRelation) ?? []),
+          ...(triggerExtension ? [triggerExtension] : [])
+        ];
+        concept.extension = reasonExtensions.length ? reasonExtensions : undefined;
         dosage.asNeededFor.push(concept);
       }
     }
@@ -873,6 +1014,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.code?.coding?.[0]?.code ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
+    parseActivityTimingExtensions(repeat)?.length ||
+    getTimingOccurrenceCap(repeat) !== undefined ||
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
     repeat?.frequency !== undefined ||
@@ -904,6 +1047,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offset: repeat?.offset ?? offsetExactExtension,
       offsetMin: offsetMinExtension,
       offsetMax: offsetMaxExtension,
+      activityTiming: parseActivityTimingExtensions(repeat),
+      occurrenceCap: getTimingOccurrenceCap(repeat),
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
@@ -939,6 +1084,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
         text: getFallbackPrnReasonText(concept),
         i18n: i18n.text,
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
+        triggerPhase: parsePrnTriggerPhase(concept),
         coding: coding?.code
           ? {
             code: coding.code,
@@ -1019,6 +1165,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.offset = getExactTimingOffsetMinutes(dosage.timing?.repeat);
   state.offsetMin = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
+  state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
+  state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   state.siteText = getFallbackSiteText(dosage.site);
@@ -1039,6 +1187,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         text: getFallbackPrnReasonText(concept),
         i18n: i18n.text,
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
+        triggerPhase: parsePrnTriggerPhase(concept),
         coding: coding?.code
           ? {
             code: coding.code,
@@ -1053,6 +1202,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     });
     state.asNeededReasons = prnReasons;
     state.asNeededReason = joinCanonicalPrnReasonTexts(prnReasons);
+    state.asNeededReasonTriggerPhase = prnReasons[0]?.triggerPhase;
   }
 
   if (dosage.timing?.repeat?.dayOfWeek) {

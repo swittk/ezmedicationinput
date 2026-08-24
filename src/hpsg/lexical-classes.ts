@@ -199,6 +199,12 @@ export const ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS = setOf(
 );
 
 export const PRN_LEADS = setOf(source.prnLeads);
+export const SYMPTOM_ONSET_PREFIX_PATTERNS = (source.symptomOnsetPrefixPatterns ?? [])
+  .map((parts) => [...parts])
+  .sort((left, right) => right.length - left.length);
+export const SYMPTOM_ONSET_SUFFIX_PATTERNS = (source.symptomOnsetSuffixPatterns ?? [])
+  .map((entry) => ({ lead: [...entry.lead], suffix: [...entry.suffix] }))
+  .sort((left, right) => (right.lead.length + right.suffix.length) - (left.lead.length + left.suffix.length));
 export const PRN_REASON_LEAD_INS = setOf(source.prnReasonLeadIns);
 export const PRN_STANDALONE_REASON_LEADS = setOf(source.prnStandaloneReasonLeads);
 export const PRN_CONTEXTUAL_REASON_LEADS: ContextualPrnReasonLead[] =
@@ -246,7 +252,13 @@ export const EVERY_INTERVAL_TOKENS_DATA = setOf(source.everyIntervalTokens);
 export const COUNT_MARKER_TOKENS_DATA = setOf(source.countMarkerTokens);
 export const COUNT_CONNECTOR_WORDS_DATA = setOf(source.countConnectorWords);
 export const MAXIMUM_COUNT_LEAD_TOKENS = setOf(source.maximumCountLeadTokens ?? []);
+export const MAXIMUM_COUNT_LEAD_SEQUENCES = (source.maximumCountLeadSequences ?? [])
+  .map((parts) => [...parts])
+  .sort((left, right) => right.length - left.length);
 export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
+export const OCCURRENCE_CAP_PERIOD_PHRASES = (source.occurrenceCapPeriodPhrases ?? [])
+  .map((entry) => ({ parts: [...entry.parts], period: entry.period, periodUnit: entry.periodUnit }))
+  .sort((left, right) => right.parts.length - left.parts.length);
 export const FREQUENCY_SIMPLE_WORDS_DATA = numberRecord(source.frequencySimpleWords);
 export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWords);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
@@ -311,11 +323,25 @@ export const INSTRUCTION_QUANTITY_UNIT_LABELS = instructionQuantityUnitLabelMap(
 );
 export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
 export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
+export const ALTERNATE_EVENT_CADENCES = (source.alternateEventCadences ?? [])
+  .map((entry) => ({
+    parts: [...entry.parts],
+    when: EventTiming[entry.when as keyof typeof EventTiming],
+    period: entry.period,
+    periodUnit: entry.periodUnit
+  }))
+  .filter((entry): entry is { parts: string[]; when: EventTiming; period: number; periodUnit: string } =>
+    Boolean(entry.when && entry.parts.length && entry.period > 0)
+  )
+  .sort((left, right) => right.parts.length - left.parts.length);
+
 export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowInstructions ?? [])
   .map((entry) => ({
     parts: [...entry.parts],
     text: entry.text,
-    i18n: entry.i18n ? { ...entry.i18n } : undefined
+    i18n: entry.i18n ? { ...entry.i18n } : undefined,
+    relation: entry.relation as "before" | "after" | undefined,
+    activity: entry.activity as string | undefined
   }))
   .sort((left, right) => right.parts.length - left.parts.length);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);

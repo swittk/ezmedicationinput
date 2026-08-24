@@ -97,6 +97,9 @@ function cloneRealizerConfig(
     ...config,
     thaiSuppressActivityConcepts: config.thaiSuppressActivityConcepts
       ? [...config.thaiSuppressActivityConcepts]
+      : undefined,
+    thaiSuppressSiteConcepts: config.thaiSuppressSiteConcepts
+      ? [...config.thaiSuppressSiteConcepts]
       : undefined
   } : undefined;
 }

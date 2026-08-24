@@ -305,6 +305,22 @@ export class ParserState {
     this.ensureSchedule().timeOfDay = value;
   }
 
+  get activityTiming() {
+    return this.clause.schedule?.activityTiming;
+  }
+
+  set activityTiming(value) {
+    this.ensureSchedule().activityTiming = value;
+  }
+
+  get occurrenceCap() {
+    return this.clause.schedule?.occurrenceCap;
+  }
+
+  set occurrenceCap(value) {
+    this.ensureSchedule().occurrenceCap = value;
+  }
+
   get timingCode(): string | undefined {
     return this.clause.schedule?.timingCode;
   }
@@ -347,6 +363,16 @@ export class ParserState {
     prn.reason.text = value;
   }
 
+  get asNeededReasonTriggerPhase(): "onset" | undefined {
+    return this.clause.prn?.reason?.triggerPhase;
+  }
+
+  set asNeededReasonTriggerPhase(value: "onset" | undefined) {
+    const prn = this.clause.prn ?? (this.clause.prn = { enabled: true });
+    if (!prn.reason) prn.reason = {};
+    prn.reason.triggerPhase = value;
+  }
+
   get asNeededReasons(): CanonicalPrnReasonExpr[] | undefined {
     return this.clause.prn?.reasons;
   }
@@ -369,6 +395,7 @@ export class ParserState {
         text: reason.text,
         i18n: cloneI18nRecord(reason.i18n),
         spatialRelation: cloneBodySiteSpatialRelation(reason.spatialRelation),
+        triggerPhase: reason.triggerPhase,
         coding: reason.coding
           ? {
             code: reason.coding.code,
@@ -582,7 +609,8 @@ export class ParserState {
     if (
       prn.reason &&
       prn.reason.text === undefined &&
-      prn.reason.coding === undefined
+      prn.reason.coding === undefined &&
+      prn.reason.triggerPhase === undefined
     ) {
       delete prn.reason;
     }

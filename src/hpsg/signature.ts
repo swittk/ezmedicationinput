@@ -3,6 +3,8 @@ import {
   AdviceRelation,
   CanonicalDoseRange,
   CanonicalAdditionalInstructionExpr,
+  CanonicalActivityTimingExpr,
+  CanonicalOccurrenceCapExpr,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
@@ -94,9 +96,11 @@ export interface HpsgSiteFeature {
 export interface HpsgPrnFeature {
   enabled: true;
   reasonText?: string;
+  triggerPhase?: "onset";
   lookupRequest?: PrnReasonLookupRequest;
   reasons?: Array<{
     text: string;
+    triggerPhase?: "onset";
     lookupRequest?: PrnReasonLookupRequest;
   }>;
   lookupRequests?: PrnReasonLookupRequest[];
@@ -155,6 +159,8 @@ export interface HpsgScheduleFeature {
   when?: EventTiming[];
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];
+  activityTiming?: CanonicalActivityTimingExpr[];
+  occurrenceCap?: CanonicalOccurrenceCapExpr;
 }
 
 export interface HpsgSynsem {

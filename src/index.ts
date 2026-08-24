@@ -40,7 +40,11 @@ export {
   TIMING_FREQUENCY_MIN_EXTENSION_URL,
   TIMING_OFFSET_MIN_EXTENSION_URL,
   TIMING_OFFSET_MAX_EXTENSION_URL,
-  TIMING_OFFSET_EXACT_EXTENSION_URL
+  TIMING_OFFSET_EXACT_EXTENSION_URL,
+  TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+  TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+  PRN_TRIGGER_PHASE_EXTENSION_URL,
+  getTimingOccurrenceCap
 } from "./fhir";
 export { suggestSig } from "./suggest";
 export {
@@ -173,6 +177,11 @@ interface SegmentCarry {
   routeText?: ParserState["routeText"];
   unit?: string;
   dose?: number;
+  siteText?: ParserState["siteText"];
+  siteI18n?: ParserState["siteI18n"];
+  siteSource?: ParserState["siteSource"];
+  siteCoding?: ParserState["siteCoding"];
+  siteSpatialRelation?: ParserState["siteSpatialRelation"];
 }
 
 type MealDashRelation = "meal" | "ac" | "pc";
@@ -1036,6 +1045,14 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
     internal.unit = carry.unit;
   }
 
+  if (!internal.siteText && !internal.siteCoding && carry.siteText) {
+    internal.siteText = carry.siteText;
+    internal.siteI18n = carry.siteI18n;
+    internal.siteSource = carry.siteSource;
+    internal.siteCoding = carry.siteCoding;
+    internal.siteSpatialRelation = carry.siteSpatialRelation;
+  }
+
   if (
     internal.dose === undefined &&
     internal.doseRange === undefined &&
@@ -1056,6 +1073,13 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
   }
   if (internal.unit) {
     carry.unit = internal.unit;
+  }
+  if (internal.siteText || internal.siteCoding) {
+    carry.siteText = internal.siteText;
+    carry.siteI18n = internal.siteI18n;
+    carry.siteSource = internal.siteSource;
+    carry.siteCoding = internal.siteCoding;
+    carry.siteSpatialRelation = internal.siteSpatialRelation;
   }
   if (internal.dose !== undefined) {
     carry.dose = internal.dose;

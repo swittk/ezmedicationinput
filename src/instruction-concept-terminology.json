@@ -132,6 +132,35 @@
       ]
     },
     {
+      "code": "exercise",
+      "role": "activity",
+      "display": "exercise",
+      "i18n": {
+        "th": "ออกกำลังกาย"
+      },
+      "aliases": [
+        "exercise",
+        "exercising",
+        "ออกกำลังกาย",
+        "การออกกำลังกาย"
+      ]
+    },
+    {
+      "code": "intercourse",
+      "role": "activity",
+      "display": "intercourse",
+      "i18n": {
+        "th": "มีเพศสัมพันธ์"
+      },
+      "aliases": [
+        "intercourse",
+        "sexual intercourse",
+        "sex",
+        "มีเพศสัมพันธ์",
+        "เพศสัมพันธ์"
+      ]
+    },
+    {
       "code": "use",
       "role": "activity",
       "display": "use",
@@ -237,6 +266,18 @@
       ]
     },
     {
+      "code": "spacer",
+      "role": "object",
+      "display": "spacer",
+      "i18n": {
+        "th": "กระบอกช่วยพ่นยา"
+      },
+      "aliases": [
+        "spacer",
+        "กระบอกช่วยพ่นยา"
+      ]
+    },
+    {
       "code": "inhaler",
       "role": "object",
       "display": "inhaler",
@@ -313,6 +354,62 @@
         "after first dose",
         "after the first dose",
         "หลังครั้งแรก"
+      ]
+    },
+    {
+      "code": "needed",
+      "role": "condition",
+      "display": "needed",
+      "i18n": {
+        "th": "จำเป็น"
+      },
+      "aliases": [
+        "needed",
+        "as needed",
+        "จำเป็น"
+      ]
+    },
+    {
+      "code": "overnight",
+      "role": "duration",
+      "display": "overnight",
+      "i18n": {
+        "th": "ข้ามคืน"
+      },
+      "aliases": [
+        "overnight",
+        "through the night",
+        "ข้ามคืน",
+        "ข้าม night"
+      ]
+    },
+    {
+      "code": "application",
+      "role": "activity",
+      "display": "application",
+      "i18n": {
+        "th": "การทา"
+      },
+      "aliases": [
+        "application",
+        "applying",
+        "apply",
+        "การทา",
+        "ทา"
+      ]
+    },
+    {
+      "code": "bedtime",
+      "role": "time",
+      "display": "bedtime",
+      "i18n": {
+        "th": "นอน"
+      },
+      "aliases": [
+        "bed",
+        "bedtime",
+        "sleep",
+        "นอน"
       ]
     }
   ]

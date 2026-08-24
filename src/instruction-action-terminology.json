@@ -506,7 +506,7 @@
       ],
       "procedural": true,
       "safetyScopeTarget": true,
-      "argumentParser": "activity",
+      "argumentParser": "duration-activity",
       "realizer": "activity",
       "argumentParserConfig": {
         "implicitMatchedConcept": "use",
@@ -863,7 +863,15 @@
           "th": "ล้าง"
         }
       },
-      "verbRouteHint": "6064005"
+      "verbRouteHint": "6064005",
+      "argumentParser": "site-relation",
+      "realizer": "site-relation",
+      "realizerConfig": {
+        "englishDirectSiteObject": true,
+        "thaiSuppressSiteConcepts": [
+          "hair"
+        ]
+      }
     },
     {
       "code": "soak",
@@ -1827,6 +1835,134 @@
       ],
       "procedural": true,
       "realizer": "relation-duration"
+    },
+    {
+      "code": "lie-down",
+      "semanticClass": "position",
+      "display": "Lie down",
+      "i18n": {
+        "th": "นอนราบ"
+      },
+      "aliases": [
+        "lie down",
+        "lie flat",
+        "นอนราบ"
+      ],
+      "procedural": true,
+      "argumentParser": "duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "blow-nose",
+      "semanticClass": "prepare_site",
+      "display": "Blow nose",
+      "i18n": {
+        "th": "สั่งน้ำมูก"
+      },
+      "aliases": [
+        "blow nose",
+        "สั่งน้ำมูก"
+      ],
+      "procedural": true,
+      "argumentParser": "duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "keep-ear-upward",
+      "semanticClass": "position",
+      "display": "Keep ear upward",
+      "i18n": {
+        "th": "ให้หูข้างที่หยอดอยู่ด้านบน"
+      },
+      "aliases": [
+        "keep ear upward",
+        "keep ear up",
+        "keep affected ear upward",
+        "ให้หูข้างที่หยอดอยู่ด้านบน"
+      ],
+      "procedural": true,
+      "argumentParser": "bare-duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "keep-ear-dry",
+      "semanticClass": "site_care",
+      "display": "Keep ear dry",
+      "i18n": {
+        "th": "รักษาหูให้แห้ง"
+      },
+      "aliases": [
+        "keep ear dry",
+        "keep affected ear dry",
+        "รักษาหูให้แห้ง"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "aim-away-from",
+      "semanticClass": "position",
+      "display": "Aim away from",
+      "i18n": {
+        "th": "เล็งออกจาก"
+      },
+      "aliases": [
+        "aim away from",
+        "point away from",
+        "direct away from",
+        "เล็งออกจาก",
+        "หันหัวพ่นออกจาก"
+      ],
+      "procedural": true
+    },
+    {
+      "code": "pause-use",
+      "semanticClass": "stop",
+      "display": "Pause use",
+      "i18n": {
+        "th": "หยุดใช้"
+      },
+      "aliases": [
+        "off"
+      ],
+      "procedural": true,
+      "argumentParser": "preposed-duration",
+      "realizer": "duration"
+    },
+    {
+      "code": "wash-hair-out",
+      "semanticClass": "cleanse",
+      "display": "Wash out",
+      "i18n": {
+        "th": "สระออก"
+      },
+      "aliases": [
+        "wash hair out",
+        "wash it out",
+        "wash out",
+        "rinse hair out",
+        "สระออก",
+        "ล้างออกจากผม"
+      ],
+      "procedural": true,
+      "argumentParser": "object-time",
+      "realizer": "object-time"
+    },
+    {
+      "code": "eat-food",
+      "semanticClass": "ingest",
+      "display": "Eat food",
+      "i18n": {
+        "th": "รับประทานอาหาร"
+      },
+      "aliases": [
+        "eat food",
+        "consume food",
+        "ทานอาหาร",
+        "กินอาหาร",
+        "รับประทานอาหาร"
+      ],
+      "procedural": true,
+      "safetyScopeTarget": true
     }
   ]
 }

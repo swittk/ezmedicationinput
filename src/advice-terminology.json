@@ -10,7 +10,7 @@
     { "surface": "for", "lemma": "for", "partOfSpeech": "relation", "semanticClass": "relation" },
     { "surface": "in", "lemma": "in", "partOfSpeech": "relation", "semanticClass": "relation" },
     { "surface": "on", "lemma": "on", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "avoid", "lemma": "avoid", "partOfSpeech": "verb", "semanticClass": "avoidance", "realizerProfile": "avoidance" },
+    { "surface": "avoid", "lemma": "avoid", "partOfSpeech": "verb", "semanticClass": "avoidance", "realizerProfile": "avoidance", "i18n": { "th": "หลีกเลี่ยง" } },
     { "surface": "drink", "lemma": "drink", "partOfSpeech": "verb", "semanticClass": "ingest" },
     { "surface": "swallow", "lemma": "swallow", "partOfSpeech": "verb", "semanticClass": "ingest" },
     { "surface": "crush", "lemma": "crush", "partOfSpeech": "verb", "semanticClass": "manipulate" },

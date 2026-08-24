@@ -25,6 +25,7 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_START_WORDS,
+  MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_COUNT_LEAD_TOKENS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
@@ -42,7 +43,9 @@ import {
   SITE_DISPLAY_FILLERS,
   SYMPTOM_ADJUSTMENT_CONNECTORS,
   SYMPTOM_ADJUSTMENT_LEADS,
-  SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS
+  SYMPTOM_ADJUSTMENT_PATIENT_INSTRUCTION_LEADS,
+  SYMPTOM_ONSET_PREFIX_PATTERNS,
+  SYMPTOM_ONSET_SUFFIX_PATTERNS
 } from "../lexical-classes";
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
@@ -67,6 +70,15 @@ function startsDoseComplement(context: HpsgClauseContext, start: number): boolea
     return false;
   }
   return Boolean(normalizeUnit(normalizeTokenLower(unit), context.options));
+}
+
+function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
+  return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
+    const tokens = tokensAvailable(context, start, parts.length);
+    return Boolean(tokens && tokens.every(
+      (token, offset) => normalizeTokenLower(token) === parts[offset]
+    ));
+  });
 }
 
 function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {
@@ -610,6 +622,100 @@ export function tokenBelongsToContextualPrnReasonLead(
   return false;
 }
 
+function onsetPatternMatches(context: HpsgClauseContext, start: number, parts: readonly string[]): Token[] | undefined {
+  const tokens = tokensAvailable(context, start, parts.length);
+  if (!tokens) return undefined;
+  return tokens.every((token, offset) => normalizeTokenLower(token) === parts[offset]) ? tokens : undefined;
+}
+
+function knownSymptomSpan(
+  context: HpsgClauseContext,
+  start: number,
+  endLimit: number
+): { tokens: Token[]; text: string } | undefined {
+  for (let end = Math.min(endLimit, start + 6); end > start; end -= 1) {
+    const tokens = context.tokens.slice(start, end);
+    if (!tokens.length || tokens.some((token) => context.state.consumed.has(token.index))) continue;
+    const range = rangeFromTokens(tokens);
+    if (!range) continue;
+    const text = context.state.input.slice(range.start, range.end).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    if (resolveSymptomDefinition(text, context.options?.prnReasonMap, context.options?.symptomMap)) {
+      return { tokens, text };
+    }
+  }
+  return undefined;
+}
+
+function symptomOnsetMatch(
+  context: HpsgClauseContext,
+  start: number
+): { tokens: Token[]; reasonTokens: Token[]; reasonText: string } | undefined {
+  const first = context.tokens[start];
+  if (!first || context.state.consumed.has(first.index)) return undefined;
+  const firstKey = first.canonical ?? first.lower;
+  if (firstKey !== "at" && firstKey !== "when") return undefined;
+  for (const prefix of SYMPTOM_ONSET_PREFIX_PATTERNS) {
+    const lead = onsetPatternMatches(context, start, prefix);
+    if (!lead) continue;
+    const reasonStart = start + prefix.length;
+    const reason = knownSymptomSpan(context, reasonStart, context.limit);
+    if (reason) return { tokens: [...lead, ...reason.tokens], reasonTokens: reason.tokens, reasonText: reason.text };
+  }
+  for (const pattern of SYMPTOM_ONSET_SUFFIX_PATTERNS) {
+    const lead = onsetPatternMatches(context, start, pattern.lead);
+    if (!lead) continue;
+    const reasonStart = start + pattern.lead.length;
+    for (let suffixStart = reasonStart + 1; suffixStart < Math.min(context.limit, reasonStart + 7); suffixStart += 1) {
+      const suffix = onsetPatternMatches(context, suffixStart, pattern.suffix);
+      if (!suffix) continue;
+      const reason = knownSymptomSpan(context, reasonStart, suffixStart);
+      if (reason && reason.tokens.length === suffixStart - reasonStart) {
+        return { tokens: [...lead, ...reason.tokens, ...suffix], reasonTokens: reason.tokens, reasonText: reason.text };
+      }
+    }
+  }
+  return undefined;
+}
+
+export function hasSymptomOnsetPrnAt(context: HpsgClauseContext, start: number): boolean {
+  return Boolean(symptomOnsetMatch(context, start));
+}
+
+export function symptomOnsetPrnRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.prn.symptomOnset", (context, start) => {
+    const match = symptomOnsetMatch(context, start);
+    if (!match) return [];
+    const atoms = parsePrnReasonAtoms(context, match.reasonTokens, { predicative: true });
+    const primary = atoms[0];
+    if (!primary) return [];
+    return [lexicalSign({
+      type: "prn-sign",
+      rule: "hpsg.lex.prn.symptomOnset",
+      tokens: match.tokens,
+      synsem: {
+        head: {},
+        valence: {
+          prn: {
+            enabled: true,
+            reasonText: primary.text || match.reasonText,
+            triggerPhase: "onset",
+            lookupRequest: primary.request,
+            reasons: [{
+              text: primary.text || match.reasonText,
+              triggerPhase: "onset",
+              lookupRequest: primary.request
+            }],
+            lookupRequests: [primary.request]
+          }
+        },
+        cont: { clauseKind: "administration" }
+      },
+      score: 48 + match.tokens.length
+    })];
+  });
+}
+
 export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
@@ -698,6 +804,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (
         !PRN_REASON_COORDINATORS.has(lower) &&
         (
+          startsMaximumCountLead(context, cursor) ||
           prnReasonBoundary(lower, context) ||
           startsDoseComplement(context, cursor) ||
           (reasonTokens.length > 0 && isScheduleLead(context, cursor))

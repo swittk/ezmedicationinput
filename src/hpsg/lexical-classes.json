@@ -269,7 +269,10 @@
   ],
   "prnContextualReasonLeads": [
     {
-      "parts": ["เวลา", "ที่"],
+      "parts": [
+        "เวลา",
+        "ที่"
+      ],
       "canonical": "when",
       "requiresKnownReason": true
     }
@@ -750,9 +753,55 @@
     "max",
     "maximum"
   ],
+  "maximumCountLeadSequences": [
+    [
+      "max"
+    ],
+    [
+      "maximum"
+    ],
+    [
+      "ไม่",
+      "เกิน"
+    ]
+  ],
+  "occurrenceCapPeriodPhrases": [
+    {
+      "parts": [
+        "daily"
+      ],
+      "period": 1,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "per",
+        "day"
+      ],
+      "period": 1,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "a",
+        "day"
+      ],
+      "period": 1,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "attach",
+        "day"
+      ],
+      "period": 1,
+      "periodUnit": "d"
+    }
+  ],
   "occurrenceCountWords": [
     "dose",
     "doses",
+    "times",
     "ครั้ง"
   ],
   "frequencySimpleWords": {
@@ -938,18 +987,33 @@
     "for"
   ],
   "eventOffsetMinimumLeadSequences": [
-    ["at", "least"],
-    ["อย่าง", "น้อย"]
+    [
+      "at",
+      "least"
+    ],
+    [
+      "อย่าง",
+      "น้อย"
+    ]
   ],
   "eventOffsetMaximumLeadSequences": [
-    ["at", "most"],
-    ["ไม่", "เกิน"]
+    [
+      "at",
+      "most"
+    ],
+    [
+      "ไม่",
+      "เกิน"
+    ]
   ],
   "eventOffsetFractions": {
     "half": 0.5,
     "ครึ่ง": 0.5
   },
-  "eventOffsetArticles": ["a", "an"],
+  "eventOffsetArticles": [
+    "a",
+    "an"
+  ],
   "instructionLeadingSeparators": [
     ",",
     ";",
@@ -986,7 +1050,12 @@
     "thin",
     "use",
     "with",
-    "without"
+    "without",
+    "finish",
+    "complete",
+    "ใช้ยาให้ครบ",
+    "รับประทานยาให้ครบ",
+    "กินยาให้ครบ"
   ],
   "siteTrailingInstructionWords": [
     "gently",
@@ -1014,6 +1083,7 @@
   ],
   "asNeededLeadPhrases": [
     "as needed",
+    "when needed",
     "use when",
     "use if"
   ],
@@ -1113,26 +1183,114 @@
     "when",
     "while"
   ],
+  "alternateEventCadences": [
+    {
+      "parts": [
+        "every",
+        "other",
+        "night"
+      ],
+      "when": "Night",
+      "period": 2,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "day",
+        "เว้น",
+        "night"
+      ],
+      "when": "Night",
+      "period": 2,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "night",
+        "เว้น",
+        "night"
+      ],
+      "when": "Night",
+      "period": 2,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "every",
+        "other",
+        "morning"
+      ],
+      "when": "Morning",
+      "period": 2,
+      "periodUnit": "d"
+    },
+    {
+      "parts": [
+        "morning",
+        "เว้น",
+        "morning"
+      ],
+      "when": "Morning",
+      "period": 2,
+      "periodUnit": "d"
+    }
+  ],
   "administrationWindowInstructions": [
     {
-      "parts": ["while", "awake"],
+      "parts": [
+        "while",
+        "awake"
+      ],
       "text": "while awake",
-      "i18n": { "th": "ขณะตื่น" }
+      "i18n": {
+        "th": "ขณะตื่น"
+      }
     },
     {
-      "parts": ["while", "awake", "only"],
+      "parts": [
+        "while",
+        "awake",
+        "only"
+      ],
       "text": "while awake only",
-      "i18n": { "th": "เฉพาะขณะตื่น" }
+      "i18n": {
+        "th": "เฉพาะขณะตื่น"
+      }
     },
     {
-      "parts": ["only", "while", "awake"],
+      "parts": [
+        "only",
+        "while",
+        "awake"
+      ],
       "text": "while awake only",
-      "i18n": { "th": "เฉพาะขณะตื่น" }
+      "i18n": {
+        "th": "เฉพาะขณะตื่น"
+      }
     },
     {
-      "parts": ["before", "exercise"],
+      "parts": [
+        "before",
+        "exercise"
+      ],
       "text": "before exercise",
-      "i18n": { "th": "ก่อนออกกำลังกาย" }
+      "i18n": {
+        "th": "ก่อนออกกำลังกาย"
+      },
+      "relation": "before",
+      "activity": "exercise"
+    },
+    {
+      "parts": [
+        "after",
+        "intercourse"
+      ],
+      "text": "after intercourse",
+      "i18n": {
+        "th": "หลังมีเพศสัมพันธ์"
+      },
+      "relation": "after",
+      "activity": "intercourse"
     }
   ],
   "thaiMethodAuxiliaryVerbs": [
@@ -1258,7 +1416,16 @@
     "hr": "h",
     "hrs": "h",
     "day": "d",
-    "days": "d"
+    "days": "d",
+    "h": "h",
+    "week": "wk",
+    "weeks": "wk",
+    "wk": "wk",
+    "wks": "wk",
+    "month": "mo",
+    "months": "mo",
+    "year": "a",
+    "years": "a"
   },
   "instructionDurationApproximationLeads": [
     "about",
@@ -1331,6 +1498,21 @@
       "th": "ชิ้น",
       "enOne": "implant",
       "enOther": "implants"
+    },
+    "wk": {
+      "th": "สัปดาห์",
+      "enOne": "week",
+      "enOther": "weeks"
+    },
+    "mo": {
+      "th": "เดือน",
+      "enOne": "month",
+      "enOther": "months"
+    },
+    "a": {
+      "th": "ปี",
+      "enOne": "year",
+      "enOther": "years"
     }
   },
   "actionSequenceMarkers": [
@@ -1357,5 +1539,73 @@
   ],
   "symptomAdjustmentPatientInstructionLeads": [
     "adjust"
+  ],
+  "symptomOnsetPrefixPatterns": [
+    [
+      "at",
+      "onset",
+      "of"
+    ],
+    [
+      "at",
+      "the",
+      "onset",
+      "of"
+    ],
+    [
+      "upon",
+      "onset",
+      "of"
+    ],
+    [
+      "when",
+      "start"
+    ],
+    [
+      "when",
+      "begin"
+    ]
+  ],
+  "symptomOnsetSuffixPatterns": [
+    {
+      "lead": [
+        "at"
+      ],
+      "suffix": [
+        "onset"
+      ]
+    },
+    {
+      "lead": [
+        "when"
+      ],
+      "suffix": [
+        "start"
+      ]
+    },
+    {
+      "lead": [
+        "when"
+      ],
+      "suffix": [
+        "starts"
+      ]
+    },
+    {
+      "lead": [
+        "when"
+      ],
+      "suffix": [
+        "begin"
+      ]
+    },
+    {
+      "lead": [
+        "when"
+      ],
+      "suffix": [
+        "begins"
+      ]
+    }
   ]
 }

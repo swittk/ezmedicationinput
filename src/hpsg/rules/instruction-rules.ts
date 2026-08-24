@@ -1,7 +1,8 @@
 import { EVENT_TIMING_TOKENS } from "../../maps";
-import { parseAdditionalInstructions } from "../../advice";
+import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
@@ -194,6 +195,16 @@ function workflowStartIsAnchoredSiteModifier(
   return false;
 }
 
+function semanticActivityWindowStartsAt(context: HpsgClauseContext, start: number): boolean {
+  return ADMINISTRATION_WINDOW_INSTRUCTIONS.some((definition) => {
+    if (!definition.relation || !definition.activity) return false;
+    const tokens = tokensAvailable(context, start, definition.parts.length);
+    return Boolean(tokens && tokens.every(
+      (token, index) => normalizeTokenLower(token) === definition.parts[index]
+    ));
+  });
+}
+
 export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.patientInstruction.workflow", (context, start) => {
     let cursor = start;
@@ -213,6 +224,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
+    if (semanticActivityWindowStartsAt(context, cursor)) return [];
     if (workflowStartIsAnchoredSiteModifier(context, cursor)) return [];
     const firstFrame = getProceduralFrames(context).find((frame) =>
       frame.span.start <= first.sourceStart && first.sourceEnd <= frame.span.end
@@ -360,11 +372,17 @@ function parseInstructionCandidates(
       defaultForce: AdviceForce.Instruction,
       allowFreeTextFallback: true
     });
-    const instructions = parsed.map((instruction) => ({
-      text: instruction.text,
-      coding: instruction.coding,
-      frames: instruction.frames
-    }));
+    const instructions = parsed.map((instruction) => {
+      const thai = !instruction.coding?.code && instruction.frames?.length
+        ? realizeAdviceFramesText(instruction.frames, "th")
+        : undefined;
+      return {
+        text: instruction.text,
+        i18n: thai ? { th: thai } : undefined,
+        coding: instruction.coding,
+        frames: instruction.frames
+      };
+    });
     const score = instructions.reduce((sum, instruction) =>
       sum + (instruction.coding?.code ? 4 : 0) + (instruction.frames?.length ? 2 : 0) + (instruction.text ? 1 : 0),
       0
@@ -409,6 +427,33 @@ function administrationWindowInstructionAt(
     const tokens = tokensAvailable(context, start, definition.parts.length);
     if (!tokens) continue;
     if (!tokens.every((token, index) => normalizeTokenLower(token) === definition.parts[index])) continue;
+    if (definition.relation && definition.activity) {
+      const activity = resolveMedicationInstructionConcept(definition.activity, context.options);
+      if (activity) {
+        return lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.activityTiming",
+          tokens,
+          synsem: {
+            head: {
+              schedule: {
+                activityTiming: [{
+                  relation: definition.relation,
+                  activity: {
+                    text: activity.display,
+                    i18n: activity.i18n ? { ...activity.i18n } : undefined,
+                    coding: medicationInstructionConceptCodings(activity)[0]
+                  }
+                }]
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 26 + tokens.length
+        });
+      }
+    }
     return lexicalSign({
       type: "instruction-sign",
       rule: "hpsg.lex.instruction.administrationWindow",
@@ -509,12 +554,14 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (bodyTokens.length && isScheduleLead(context, cursor)) {
         break;
       }
-      if (
-        bodyTokens.length &&
-        SITE_ANCHORS.has(normalizeTokenLower(token)) &&
-        bodyParsesAsStyleInstruction(context, bodyTokens)
-      ) {
-        break;
+      if (bodyTokens.length && bodyParsesAsStyleInstruction(context, bodyTokens)) {
+        const lower = normalizeTokenLower(token);
+        const startsSite = SITE_ANCHORS.has(lower) || Boolean(resolveBodySitePhrase(
+          token.original,
+          context.options?.siteCodeMap,
+          { bodySiteContext: context.options?.context?.bodySiteContext }
+        ));
+        if (startsSite) break;
       }
       bodyTokens.push(token);
     }
