@@ -15,6 +15,11 @@ import {
   TextRange
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
+import {
+  ACTION_SEQUENCE_MARKERS,
+  localizeAdviceRelation,
+  resolveAdviceRelationSurface
+} from "./relation-terminology";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -24,6 +29,7 @@ interface AdviceLexemeEntry {
   partOfSpeech: string;
   semanticClass?: string;
   parserProfile?: string;
+  parserRelation?: string;
   realizerProfile?: string;
   i18n?: Record<string, string>;
 }
@@ -47,7 +53,6 @@ interface AdviceGrammarSource {
   warningModalities: string[];
   cautionModalities: string[];
   semanticClassRoles: Record<string, string>;
-  sequenceMarkers: string[];
   negativeNominalLeads: string[];
   ellipticalEffectSemanticClasses: string[];
   styleSemanticClasses: string[];
@@ -256,7 +261,7 @@ const WARNING_PREDICATE_SEMANTIC_CLASSES = new Set(
 const WARNING_MODALITIES = new Set(ADVICE_TERMINOLOGY.grammar.warningModalities);
 const CAUTION_MODALITIES = new Set(ADVICE_TERMINOLOGY.grammar.cautionModalities);
 const SEMANTIC_CLASS_ROLES = ADVICE_TERMINOLOGY.grammar.semanticClassRoles;
-const SEQUENCE_MARKERS = new Set(ADVICE_TERMINOLOGY.grammar.sequenceMarkers);
+const SEQUENCE_MARKERS = ACTION_SEQUENCE_MARKERS;
 const NEGATIVE_NOMINAL_LEADS = new Set(ADVICE_TERMINOLOGY.grammar.negativeNominalLeads);
 const ELLIPTICAL_EFFECT_SEMANTIC_CLASSES = new Set(
   ADVICE_TERMINOLOGY.grammar.ellipticalEffectSemanticClasses
@@ -1107,8 +1112,7 @@ function isAdministrationWord(word: string): boolean {
 }
 
 function isRelationWord(word: string): AdviceRelation | undefined {
-  const entry = findNormalizedLexeme(word, "relation");
-  return entry ? enumValue<AdviceRelation>(AdviceRelation, entry.lemma) : undefined;
+  return resolveAdviceRelationSurface(word);
 }
 
 function parseAdviceRelation(value: string | undefined): AdviceRelation | undefined {
@@ -1460,7 +1464,7 @@ interface AdviceVerbArgumentParse {
   args: AdviceArgument[];
 }
 
-type AdviceVerbArgumentParser = (words: string[]) => AdviceVerbArgumentParse;
+type AdviceVerbArgumentParser = (words: string[], lexeme?: AdviceLexemeEntry) => AdviceVerbArgumentParse;
 
 const DEFAULT_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
   const relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
@@ -1468,14 +1472,17 @@ const DEFAULT_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainder
   return { relation, args: objectText ? [classifyArgument(objectText)] : [] };
 };
 
-const LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
+const PARTICLE_RELATION_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords, lexeme) => {
   if (!remainderWords.length) {
     return DEFAULT_ADVICE_VERB_ARGUMENT_PARSER(remainderWords);
   }
-  if (isRelationWord(remainderWords[0]) !== AdviceRelation.On) {
+  const particleRelation = lexeme?.parserRelation
+    ? resolveAdviceRelationSurface(lexeme.parserRelation)
+    : undefined;
+  if (!particleRelation || isRelationWord(remainderWords[0]) !== particleRelation) {
     return DEFAULT_ADVICE_VERB_ARGUMENT_PARSER(remainderWords);
   }
-  const args = [createArgument(AdviceArgumentRole.Theme, AdviceRelation.On, AdviceRelation.On)];
+  const args = [createArgument(AdviceArgumentRole.Theme, particleRelation, particleRelation)];
   let relation: AdviceRelation | undefined;
   if (remainderWords.length > 1) {
     const nextRelation = isRelationWord(remainderWords[1]);
@@ -1493,7 +1500,7 @@ const LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainde
 
 const ADVICE_VERB_ARGUMENT_PARSERS: Record<string, AdviceVerbArgumentParser> = {
   default: DEFAULT_ADVICE_VERB_ARGUMENT_PARSER,
-  "leave-on": LEAVE_ON_ADVICE_VERB_ARGUMENT_PARSER
+  "particle-relation": PARTICLE_RELATION_ADVICE_VERB_ARGUMENT_PARSER
 };
 
 function tryParseClauseInstruction(
@@ -1541,7 +1548,7 @@ function tryParseClauseInstruction(
   const primaryVerb = verbEntries[0];
   const argumentParser = ADVICE_VERB_ARGUMENT_PARSERS[primaryVerb.parserProfile ?? "default"] ??
     DEFAULT_ADVICE_VERB_ARGUMENT_PARSER;
-  const parsedArguments = argumentParser(remainderWords);
+  const parsedArguments = argumentParser(remainderWords, primaryVerb);
   const relation = parsedArguments.relation;
   const args = parsedArguments.args;
 
@@ -1759,41 +1766,11 @@ const ADVICE_PREDICATE_REALIZERS: Record<string, AdvicePredicateRealizer> = {
   effect: EFFECT_ADVICE_PREDICATE_REALIZER
 };
 
-const THAI_ADVICE_RELATION_TEXT: Record<AdviceRelation, string> = {
-  [AdviceRelation.With]: "พร้อม",
-  [AdviceRelation.Without]: "โดยไม่",
-  [AdviceRelation.Before]: "ก่อน",
-  [AdviceRelation.After]: "หลัง",
-  [AdviceRelation.During]: "ระหว่าง",
-  [AdviceRelation.Between]: "ระหว่าง",
-  [AdviceRelation.Then]: "จากนั้น",
-  [AdviceRelation.Until]: "จนกว่า",
-  [AdviceRelation.For]: "สำหรับ",
-  [AdviceRelation.In]: "ใน",
-  [AdviceRelation.Into]: "เข้าไปใน",
-  [AdviceRelation.On]: "บน",
-  [AdviceRelation.To]: "ไปยัง",
-  [AdviceRelation.If]: "ถ้า",
-  [AdviceRelation.Unless]: "เว้นแต่",
-  [AdviceRelation.When]: "เมื่อ",
-  [AdviceRelation.While]: "ขณะที่"
-};
-
-function realizeAdviceRelation(
-  relation: AdviceRelation | undefined,
-  locale: string
-): string | undefined {
-  if (!relation) return undefined;
-  return locale.toLowerCase().startsWith("th")
-    ? THAI_ADVICE_RELATION_TEXT[relation] ?? relation
-    : relation;
-}
-
 function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | undefined {
   const language = locale.toLowerCase().startsWith("th") ? "th" : "en";
   const argText = joinAdviceArgumentTexts(frame.args, locale);
   const modalityText = realizeAdviceModality(frame.modality, locale);
-  const relationText = realizeAdviceRelation(frame.relation, locale);
+  const relationText = localizeAdviceRelation(frame.relation, locale);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
   const localizedPredicate = language === "th"
     ? lexeme?.i18n?.th ?? frame.predicate.lemma

@@ -1,6 +1,13 @@
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
+import {
+  getUniqueAdviceRelationByGrammarFeature,
+  getBodySiteRelationRealization,
+  localizeAdviceRelation,
+  relationHasGrammarFeature,
+  relationHasSemanticClass
+} from "./relation-terminology";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
 import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
@@ -1415,16 +1422,15 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
     return `เข้า${translated}`;
   }
   const spatialRelation = clause.site?.spatialRelation;
-  const spatialRelationText = spatialRelation?.relationText;
+  const spatialRealization = spatialRelation?.relationText
+    ? getBodySiteRelationRealization(spatialRelation.relationText, "th")
+    : undefined;
   const spatialTargetThai = spatialRelation
     ? translateSpatialTargetThai(spatialRelation)
     : undefined;
   if (
-    spatialRelationText &&
-    (
-      THAI_SELF_PREPOSITIONAL_SPATIAL_RELATIONS.has(spatialRelationText) ||
-      spatialTargetThai?.startsWith("บริเวณ")
-    )
+    spatialRealization &&
+    (spatialRealization.omitOuterSitePreposition || spatialTargetThai?.startsWith("บริเวณ"))
   ) {
     return translated;
   }
@@ -1435,39 +1441,6 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   const separator = /^[\u0E00-\u0E7F]/.test(translated) ? "" : " ";
   return `${preposition}${separator}${translated}`.trim();
 }
-
-const THAI_SPATIAL_RELATION_PREFIXES: Record<string, string> = {
-  above: "เหนือ",
-  around: "รอบ",
-  back: "ด้านหลัง",
-  behind: "ด้านหลัง",
-  below: "ใต้",
-  beneath: "ใต้",
-  center: "กลาง",
-  centre: "กลาง",
-  external: "ด้านนอก",
-  front: "ด้านหน้า",
-  inside: "ใน",
-  between: "ระหว่าง",
-  along: "ตามแนว",
-  "left side": "ด้านซ้ายของ",
-  lower: "ส่วนล่างของ",
-  middle: "กลาง",
-  near: "ใกล้",
-  outside: "ด้านนอก",
-  "right side": "ด้านขวาของ",
-  side: "ด้านข้าง",
-  "both sides": "ทั้งสองด้านของ",
-  "bilateral sides": "ทั้งสองด้านของ",
-  top: "ด้านบนของ",
-  under: "ใต้",
-  upper: "ส่วนบนของ"
-};
-
-const THAI_SELF_PREPOSITIONAL_SPATIAL_RELATIONS = new Set([
-  "near",
-  "along"
-]);
 
 const THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES: Record<string, string> = {
   abdomen: "ท้อง",
@@ -1501,26 +1474,17 @@ function translateSpatialSiteThai(
       return curated;
     }
   }
-  const prefix = THAI_SPATIAL_RELATION_PREFIXES[spatialRelation.relationText];
-  if (!prefix) {
+  const realization = getBodySiteRelationRealization(spatialRelation.relationText, "th");
+  if (!realization) {
     return undefined;
   }
   const target = translateSpatialTargetThai(spatialRelation);
   if (!target) {
     return undefined;
   }
-  switch (spatialRelation.relationText) {
-    case "left side":
-      return `${target}ด้านซ้าย`;
-    case "right side":
-      return `${target}ด้านขวา`;
-    case "both sides":
-    case "bilateral sides":
-      return `${target}ทั้งสองข้าง`;
-    default:
-      break;
-  }
-  return `${prefix}${target}`;
+  return realization.strategy === "suffix"
+    ? `${target}${realization.surface}`
+    : `${realization.surface}${target}`;
 }
 
 function translateSiteThai(
@@ -2115,14 +2079,17 @@ function formatLongThai(
     : -1;
   const graphContinuesWithThen = richPrimaryActionIndex >= 0 && Boolean(
     clause.instructionGraph?.relations?.some((relation) =>
-      relation.kind === AdviceRelation.Then && relation.fromActionIndex === richPrimaryActionIndex
+      relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === richPrimaryActionIndex
     )
   );
+  const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
+  if (!sequenceRelation) throw new Error("Missing declarative default sequence relation");
+  const sequenceSurface = localizeAdviceRelation(sequenceRelation, "th") ?? sequenceRelation;
   const rawGraphInstructionText = postFlowsFromAdministration
     ? undefined
     : formatPatientInstructionSentence(graphInstruction);
   const graphInstructionText = rawGraphInstructionText && graphContinuesWithThen
-    ? `จากนั้น${rawGraphInstructionText}`
+    ? `${sequenceSurface}${rawGraphInstructionText}`
     : rawGraphInstructionText;
   const patientSourceRepresented = Boolean(
     clause.patientInstruction &&
@@ -2188,10 +2155,10 @@ function formatLongThai(
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
   if (preFlowsIntoAdministration && preGraphInstruction) {
-    administrationText = `${preGraphInstruction} จากนั้น${administrationText}`;
+    administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;
   }
   if (postFlowsFromAdministration && postGraphInstruction) {
-    administrationText = `${administrationText} จากนั้น${postGraphInstruction}`;
+    administrationText = `${administrationText} ${sequenceSurface}${postGraphInstruction}`;
   }
   const baseSentence = /[.!?]$/u.test(administrationText)
     ? administrationText
@@ -2233,7 +2200,7 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
       instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
       instruction.frames?.some(
         (frame) =>
-          frame.relation === AdviceRelation.On &&
+          relationHasGrammarFeature(frame.relation, "mealStateComplement") &&
           frame.args.some(
             (arg) =>
               arg.role === AdviceArgumentRole.MealState &&

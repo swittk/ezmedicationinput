@@ -1,16 +1,14 @@
-import { AdvicePolarity, AdviceRelation } from "../../types";
+import { AdvicePolarity } from "../../types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import {
+  ACTION_SEQUENCE_RELATION_SURFACES,
+  relationHasGrammarFeature,
+  resolveActionRelationSurface
+} from "../../relation-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { HpsgConditionFeature, HpsgLexicalRule, lexicalSign } from "../signature";
-
-const RELATION_BY_LEAD: Readonly<Record<string, AdviceRelation>> = {
-  if: AdviceRelation.If,
-  unless: AdviceRelation.Unless,
-  when: AdviceRelation.When,
-  while: AdviceRelation.While
-};
 
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
   const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
@@ -25,9 +23,16 @@ function hasStrongBoundary(text: string): boolean {
   return /[.!?;]/u.test(text);
 }
 
-function explicitlySequences(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return /(?:\bthen\b|\band\b|แล้ว|จากนั้น|และ|,)/u.test(normalized);
+function explicitlySequences(
+  context: HpsgClauseContext,
+  startSource: number,
+  endSource: number
+): boolean {
+  if (context.state.input.slice(startSource, endSource).includes(",")) return true;
+  return context.tokens.some((token) =>
+    startSource <= token.sourceStart && token.sourceEnd <= endSource &&
+    ACTION_SEQUENCE_RELATION_SURFACES.has(normalizeTokenLower(token))
+  );
 }
 
 function prefixProgram(
@@ -41,7 +46,7 @@ function prefixProgram(
     const next = frames[index];
     const gap = context.state.input.slice(previous.span.end, next.span.start);
     if (hasStrongBoundary(gap)) break;
-    const linked = explicitlySequences(gap);
+    const linked = explicitlySequences(context, previous.span.end, next.span.start);
     if (!linked) break;
     result.push(next);
     previous = next;
@@ -79,9 +84,9 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.condition", (context, start) => {
     const lead = context.tokens[start];
     if (!lead || context.state.consumed.has(lead.index)) return [];
-    const relation = RELATION_BY_LEAD[normalizeTokenLower(lead)];
-    if (!relation) return [];
-    if (relation === AdviceRelation.When && hasSymptomOnsetPrnAt(context, start)) return [];
+    const relation = resolveActionRelationSurface(normalizeTokenLower(lead));
+    if (!relation || !relationHasGrammarFeature(relation, "conditionalTail")) return [];
+    if (relationHasGrammarFeature(relation, "symptomOnsetPrnLead") && hasSymptomOnsetPrnAt(context, start)) return [];
 
     const frames = getProceduralFrames(context).slice().sort((a, b) =>
       a.span.start - b.span.start || a.span.end - b.span.end
@@ -134,7 +139,10 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       .sort((a, b) => b.span.end - a.span.end)[0];
     if (!previous) return [];
     const gap = context.state.input.slice(previous.span.end, lead.sourceStart);
-    if (hasStrongBoundary(gap) || (gap.trim() && !explicitlySequences(gap))) return [];
+    if (
+      hasStrongBoundary(gap) ||
+      (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart))
+    ) return [];
     const conditionEnd = postfixConditionEnd(context, start);
     const tokens = conditionTokens(context, lead.sourceStart, conditionEnd);
     if (!tokens.length) return [];

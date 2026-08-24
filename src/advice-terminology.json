@@ -1,15 +1,5 @@
 {
   "lexemes": [
-    { "surface": "with", "lemma": "with", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "without", "lemma": "without", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "before", "lemma": "before", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "after", "lemma": "after", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "during", "lemma": "during", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "then", "lemma": "then", "partOfSpeech": "relation", "semanticClass": "sequence" },
-    { "surface": "until", "lemma": "until", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "for", "lemma": "for", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "in", "lemma": "in", "partOfSpeech": "relation", "semanticClass": "relation" },
-    { "surface": "on", "lemma": "on", "partOfSpeech": "relation", "semanticClass": "relation" },
     { "surface": "avoid", "lemma": "avoid", "partOfSpeech": "verb", "semanticClass": "avoidance", "realizerProfile": "avoidance", "i18n": { "th": "หลีกเลี่ยง" } },
     { "surface": "drink", "lemma": "drink", "partOfSpeech": "verb", "semanticClass": "ingest" },
     { "surface": "swallow", "lemma": "swallow", "partOfSpeech": "verb", "semanticClass": "ingest" },
@@ -22,7 +12,7 @@
     { "surface": "dry", "lemma": "dry", "partOfSpeech": "verb", "semanticClass": "cleanse" },
     { "surface": "rinse", "lemma": "rinse", "partOfSpeech": "verb", "semanticClass": "cleanse" },
     { "surface": "cover", "lemma": "cover", "partOfSpeech": "verb", "semanticClass": "cover" },
-    { "surface": "leave", "lemma": "leave", "partOfSpeech": "verb", "semanticClass": "retain", "parserProfile": "leave-on" },
+    { "surface": "leave", "lemma": "leave", "partOfSpeech": "verb", "semanticClass": "retain", "parserProfile": "particle-relation", "parserRelation": "on" },
     { "surface": "drive", "lemma": "drive", "partOfSpeech": "verb", "semanticClass": "activity" },
     { "surface": "driving", "lemma": "drive", "partOfSpeech": "verb", "semanticClass": "activity" },
     { "surface": "eat", "lemma": "eat", "partOfSpeech": "verb", "semanticClass": "ingest" },
@@ -224,9 +214,6 @@
       "time": "time",
       "substance": "substance"
     },
-    "sequenceMarkers": [
-      "then"
-    ],
     "negativeNominalLeads": [
       "no"
     ],

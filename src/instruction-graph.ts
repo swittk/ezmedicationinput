@@ -5,13 +5,21 @@ import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FRE
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import {
+  BODY_SITE_LOCATIVE_RELATION_PHRASES,
+  getUniqueAdviceRelationByGrammarFeature,
+  getAdviceRelationDefinition,
+  getAdviceRelationSurfaceForms,
+  localizeAdviceRelation,
+  relationHasGrammarFeature,
+  relationHasSemanticClass,
+  resolveActionRelationSurface
+} from "./relation-terminology";
+import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_DIRECTIVE_PREFIXES,
-  ACTION_RELATION_BY_TOKEN,
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_TOKENS,
   AS_NEEDED_LEAD_PHRASES,
-  BODY_SITE_LOCATIVE_RELATION_PHRASES,
   DURATION_LEAD_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
@@ -146,7 +154,7 @@ function actionMatchAt(
     return undefined;
   }
   const previous = parts.slice(index - 1, index)[0];
-  if (previous && ACTION_RELATION_BY_TOKEN.has(key(previous))) return undefined;
+  if (previous && Boolean(resolveActionRelationSurface(key(previous)))) return undefined;
   const maxSpan = Math.min(4, parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
     for (const candidate of actionPhraseCandidates(parts, index, length)) {
@@ -367,7 +375,7 @@ function tokenBelongsToBodySiteRelationPhrase(
 function relationIndex(parts: Lexeme[], start: number, endExclusive: number): number {
   for (let index = start; index < endExclusive; index += 1) {
     if (
-      ACTION_RELATION_BY_TOKEN.has(key(parts.slice(index, index + 1)[0])) &&
+      Boolean(resolveActionRelationSurface(key(parts.slice(index, index + 1)[0]))) &&
       !tokenBelongsToBodySiteRelationPhrase(parts, index, start, endExclusive)
     ) return index;
   }
@@ -558,10 +566,7 @@ function partIndexForAbsoluteSourceStart(
 
 function preferredRinseRole(relation: AdviceRelation | undefined): AdviceArgumentRole | undefined {
   if (relation === undefined) return undefined;
-  return relation === AdviceRelation.In ||
-    relation === AdviceRelation.On ||
-    relation === AdviceRelation.Before ||
-    relation === AdviceRelation.After
+  return relationHasGrammarFeature(relation, "rinseTimeComplement")
     ? AdviceArgumentRole.Time
     : AdviceArgumentRole.Substance;
 }
@@ -609,16 +614,14 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     }
   }
   if (typedLocalTime && duration) pushArgument(args, duration);
-  else if (relation === AdviceRelation.For && duration) pushArgument(args, duration);
+  else if (relationHasGrammarFeature(relation, "includeDuration") && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
-    const time = (relation === AdviceRelation.In || relation === AdviceRelation.On ||
-      relation === AdviceRelation.Before || relation === AdviceRelation.After ||
-      relation === AdviceRelation.With)
+    const time = relationHasGrammarFeature(relation, "timeComplement")
       ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
-    const relationDuration = relation === AdviceRelation.Before || relation === AdviceRelation.After
+    const relationDuration = relationHasGrammarFeature(relation, "durationComplement")
       ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
       : undefined;
-    const fallbackRole = relation === AdviceRelation.Before || relation === AdviceRelation.After
+    const fallbackRole = relationHasGrammarFeature(relation, "activityFallback")
       ? AdviceArgumentRole.Activity : undefined;
     pushArgument(args, time ?? relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
@@ -669,13 +672,12 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     : relIndex >= 0 ? relIndex + 1 : segmentEnd;
   if (tailStart < segmentEnd) {
     const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
-    if (relation === AdviceRelation.With || tail?.conceptId) pushArgument(args, tail);
+    if (relationHasGrammarFeature(relation, "accompanimentComplement") || tail?.conceptId) pushArgument(args, tail);
   }
   return { args };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const activity = c.relIndex >= 0 &&
-    (c.relation === AdviceRelation.Before || c.relation === AdviceRelation.After)
+  const activity = c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
       ? argumentFromParts(
           c.parts, c.relIndex + 1, c.relationTargetEnd, c.input, AdviceArgumentRole.Activity, c.options
         )
@@ -884,7 +886,7 @@ const DURATION_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const durationTailStart = duration?.span
     ? partIndexAfterAbsoluteSourceEnd(c.parts, duration.span.end, c.offset)
     : undefined;
-  const activityStart = c.relation === AdviceRelation.For && duration
+  const activityStart = relationHasGrammarFeature(c.relation, "includeDuration") && duration
     ? undefined
     : c.relIndex >= 0
       ? c.relIndex + 1
@@ -981,21 +983,15 @@ function buildActionFrame(
   const argumentStart = actionIndex + actionMatch.length;
   const relIndex = relationIndex(parts, argumentStart, segmentEnd);
   const rawRelation = relIndex >= 0
-    ? ACTION_RELATION_BY_TOKEN.get(key(parts.slice(relIndex, relIndex + 1)[0]))
+    ? resolveActionRelationSurface(key(parts.slice(relIndex, relIndex + 1)[0]))
     : undefined;
   const nextRelationIndex = relIndex >= 0 ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
   const nextRelation = nextRelationIndex >= 0
-    ? ACTION_RELATION_BY_TOKEN.get(key(parts[nextRelationIndex]))
+    ? resolveActionRelationSurface(key(parts[nextRelationIndex]))
     : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
-  const conditionalTail = rawRelation === AdviceRelation.If ||
-    rawRelation === AdviceRelation.Unless ||
-    rawRelation === AdviceRelation.When ||
-    rawRelation === AdviceRelation.While;
-  const secondaryConditionalTail = nextRelation === AdviceRelation.If ||
-    nextRelation === AdviceRelation.Unless ||
-    nextRelation === AdviceRelation.When ||
-    nextRelation === AdviceRelation.While;
+  const conditionalTail = relationHasGrammarFeature(rawRelation, "conditionalTail");
+  const secondaryConditionalTail = relationHasGrammarFeature(nextRelation, "conditionalTail");
   const relation = conditionalTail ? undefined : rawRelation;
   const amount = definition.acceptsAmount
     ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
@@ -1154,13 +1150,6 @@ const ACTION_DIRECTIVE_BOUNDARIES = new Set(
   ACTION_DIRECTIVE_PREFIXES.map((prefix) => prefix.parts[0])
 );
 
-const PREPOSED_ACTION_RELATIONS = new Set<AdviceRelation>([
-  AdviceRelation.Before,
-  AdviceRelation.After,
-  AdviceRelation.During,
-  AdviceRelation.Until
-]);
-
 interface PreposedActionRelation {
   relation: AdviceRelation;
   relationIndex: number;
@@ -1174,8 +1163,8 @@ function preposedActionRelation(
   actionStart: number
 ): PreposedActionRelation | undefined {
   if (cursor >= actionStart) return undefined;
-  const relation = ACTION_RELATION_BY_TOKEN.get(key(parts[cursor]));
-  if (!relation || !PREPOSED_ACTION_RELATIONS.has(relation)) return undefined;
+  const relation = resolveActionRelationSurface(key(parts[cursor]));
+  if (!relation || !relationHasGrammarFeature(relation, "preposedAction")) return undefined;
   const targetStart = cursor + 1;
   if (targetStart >= actionStart) return undefined;
   return { relation, relationIndex: cursor, targetStart, targetEnd: actionStart };
@@ -1197,8 +1186,7 @@ function attachPreposedActionRelation(
     attachment.targetEnd,
     sourceText
   );
-  const fallbackRole = attachment.relation === AdviceRelation.Before ||
-    attachment.relation === AdviceRelation.After
+  const fallbackRole = relationHasGrammarFeature(attachment.relation, "activityFallback")
     ? AdviceArgumentRole.Activity
     : undefined;
   pushArgument(
@@ -1239,7 +1227,7 @@ function actionTailStartsPhrase(parts: Lexeme[], index: number, phrases: Readonl
 
 function actionHasLocalRelationBefore(parts: Lexeme[], actionStart: number, index: number): boolean {
   for (let cursor = actionStart + 1; cursor < index; cursor += 1) {
-    if (ACTION_RELATION_BY_TOKEN.has(key(parts[cursor]))) return true;
+    if (Boolean(resolveActionRelationSurface(key(parts[cursor])))) return true;
   }
   return false;
 }
@@ -1555,31 +1543,16 @@ function attachDoseToNearestAction(
   best.sourceText = input.slice(best.span.start, best.span.end);
 }
 
-const CONDITION_RELATIONS = new Set<AdviceRelation>([
-  AdviceRelation.If,
-  AdviceRelation.Unless,
-  AdviceRelation.When,
-  AdviceRelation.While,
-  AdviceRelation.Before,
-  AdviceRelation.After,
-  AdviceRelation.Until
-]);
-
 function relationFromSourceText(text: string): AdviceRelation | undefined {
   const keys = lexInput(text).map((token) => key(token)).filter(Boolean);
   for (const candidate of keys) {
-    const relation = ACTION_RELATION_BY_TOKEN.get(candidate);
-    if (relation === AdviceRelation.Before ||
-      relation === AdviceRelation.After ||
-      relation === AdviceRelation.During ||
-      relation === AdviceRelation.While ||
-      relation === AdviceRelation.Until ||
-      relation === AdviceRelation.If ||
-      relation === AdviceRelation.Unless ||
-      relation === AdviceRelation.When) {
+    const relation = resolveActionRelationSurface(candidate);
+    if (relationHasGrammarFeature(relation, "detectInActionGap")) {
       return relation;
     }
-    if (ACTION_SEQUENCE_RELATION_TOKENS.has(candidate)) return AdviceRelation.Then;
+    if (ACTION_SEQUENCE_RELATION_TOKENS.has(candidate)) {
+      return getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
+    }
   }
   return undefined;
 }
@@ -1607,7 +1580,7 @@ function buildInstructionRelations(
       !explicitRelation &&
       (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution)
     ) continue;
-    if (explicitRelation && CONDITION_RELATIONS.has(explicitRelation)) {
+    if (explicitRelation && relationHasGrammarFeature(explicitRelation, "conditionScope")) {
       const conditionTargetsCurrent = /^[,;:.()\-]/.test(trimmed);
       relations.push({
         kind: explicitRelation,
@@ -1618,7 +1591,9 @@ function buildInstructionRelations(
       continue;
     }
     relations.push({
-      kind: explicitRelation ?? AdviceRelation.Then,
+      kind: explicitRelation ??
+        getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation") ??
+        (() => { throw new Error("Missing declarative default sequence relation"); })(),
       fromActionIndex: index - 1,
       toActionIndex: index,
       text: trimmed || undefined,
@@ -1628,7 +1603,7 @@ function buildInstructionRelations(
 
   for (const opaque of opaqueSpans) {
     const kind = relationFromSourceText(opaque.text);
-    if (!kind || !CONDITION_RELATIONS.has(kind)) continue;
+    if (!kind || !relationHasGrammarFeature(kind, "conditionScope")) continue;
     const after = actions.findIndex((action) => action.span.start >= opaque.end);
     let before = -1;
     for (let index = actions.length - 1; index >= 0; index -= 1) {
@@ -1899,7 +1874,7 @@ function conditionRelationsFromHpsgEvidence(
     for (const span of evidence.spans) {
       const conditionText = input.slice(span.start, span.end).trim();
       const kind = relationFromSourceText(conditionText);
-      if (!kind || !CONDITION_RELATIONS.has(kind)) continue;
+      if (!kind || !relationHasGrammarFeature(kind, "conditionScope")) continue;
       let target = -1;
       let distance = Number.POSITIVE_INFINITY;
       for (let index = 0; index < actions.length; index += 1) {
@@ -1940,7 +1915,7 @@ export function refreshInstructionGraphDerivedState(
   graph.opaqueSpans = opaqueSpans.length ? opaqueSpans : undefined;
   const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
   const preserved = (graph.relations ?? []).filter((relation) =>
-    CONDITION_RELATIONS.has(relation.kind) && relation.fromActionIndex === undefined
+    relationHasGrammarFeature(relation.kind, "conditionScope") && relation.fromActionIndex === undefined
   );
   const relations = derived.slice();
   for (const relation of preserved) {
@@ -2222,7 +2197,9 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     : c.amount;
   const relationTargetArg = objectArgs.length > 1 ? objectArgs[1] : undefined;
   const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
-  const withTarget = c.frame.relation === AdviceRelation.With ? relationTarget : undefined;
+  const withTarget = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement")
+    ? relationTarget
+    : undefined;
   return c.thai
     ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${c.duration ? ` ${c.duration}` : ""}${withTarget ? `ร่วมกับ${withTarget}` : ""}`
     : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}${withTarget ? ` with ${withTarget}` : ""}`;
@@ -2285,7 +2262,7 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
       (c.realizerConfig?.thaiSuppressSiteConcepts?.indexOf(siteArg.conceptId) ?? -1) !== -1
     );
     const target = c.site && !suppressThaiSite ? (c.thai ? c.site : ` ${c.site}`) : "";
-    if (c.time && (c.frame.relation === AdviceRelation.On || c.frame.relation === AdviceRelation.In)) {
+    if (c.time && relationHasGrammarFeature(c.frame.relation, "directTimeRealization")) {
       if (c.thai) {
         const timePhrase = c.time === "กลางคืน" ? "ตอนกลางคืน"
           : c.time === "นอน" || c.time === "bedtime" ? "ก่อนนอน"
@@ -2300,10 +2277,11 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
             : `at ${c.time}`;
       return `${c.label}${target} ${timePhrase}`;
     }
-    const relationText = c.frame.relation === AdviceRelation.Before ? (c.thai ? "ก่อน" : "before")
-      : c.frame.relation === AdviceRelation.After ? (c.thai ? "หลัง" : "after")
-      : c.frame.relation === AdviceRelation.On ? (c.thai ? "เมื่อ" : "on")
-      : (c.thai ? "ใน" : "in");
+    const semanticRelation = c.frame.relation ??
+      getUniqueAdviceRelationByGrammarFeature("defaultSiteRelation") ??
+      (() => { throw new Error("Missing declarative default site relation"); })();
+    const relationProfile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
+    const relationText = localizeAdviceRelation(semanticRelation, c.locale, relationProfile) ?? semanticRelation;
     return c.thai
       ? `${c.label}${target}${relationText}${relationTarget}`
       : `${c.label}${target} ${relationText} ${relationTarget}`;
@@ -2333,11 +2311,9 @@ const PRIME_REALIZER: ActionRealizer = (c) => {
 };
 const AMOUNT_DURATION_REALIZER: ActionRealizer = (c) => {
   const relationTarget = c.activity;
-  const relation = c.frame.relation === AdviceRelation.Before
-    ? (c.thai ? "ก่อน" : "before")
-    : c.frame.relation === AdviceRelation.After
-      ? (c.thai ? "หลัง" : "after")
-      : undefined;
+  const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
+    ? localizeAdviceRelation(c.frame.relation, c.locale)
+    : undefined;
   const base = c.thai
     ? `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` นาน ${c.duration}` : ""}`
     : `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
@@ -2362,11 +2338,12 @@ const SEPARABLE_OBJECT_RELATION_REALIZER: ActionRealizer = (c) => {
   );
   if (!alias) return RELATION_DURATION_REALIZER(c);
   const target = c.duration ?? c.time ?? c.activity;
-  const relationText = c.frame.relation === AdviceRelation.Before
-    ? (c.thai ? "ก่อน" : " before ")
-    : c.frame.relation === AdviceRelation.After
-      ? (c.thai ? "หลัง" : " after ")
-      : "";
+  const relationSurface = relationHasGrammarFeature(c.frame.relation, "activityFallback")
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? ""
+    : "";
+  const relationText = relationSurface
+    ? c.thai ? relationSurface : ` ${relationSurface} `
+    : "";
   return c.thai
     ? `${alias.lead}${object ?? ""}${alias.particle}${target ? `${relationText}${target}` : ""}`
     : `${alias.lead}${object ? ` ${object}` : ""} ${alias.particle}${target ? `${relationText}${target}` : ""}`;
@@ -2376,12 +2353,12 @@ const RELATION_DURATION_REALIZER: ActionRealizer = (c) => {
   const target = c.duration ?? c.time ?? c.activity;
   const thaiObject = object ? (/^[0-9A-Za-z]/u.test(object) ? ` ${object}` : object) : "";
   const thaiTarget = target && /^[0-9A-Za-z]/u.test(target) ? ` ${target}` : target;
-  if (target && c.frame.relation === AdviceRelation.After) return c.thai
-    ? `${c.label}${thaiObject}หลัง${thaiTarget}`
-    : `${c.label}${object ? ` ${object}` : ""} after ${target}`;
-  if (target && c.frame.relation === AdviceRelation.Before) return c.thai
-    ? `${c.label}${thaiObject}ก่อน${thaiTarget}`
-    : `${c.label}${object ? ` ${object}` : ""} before ${target}`;
+  if (target && relationHasGrammarFeature(c.frame.relation, "activityFallback")) {
+    const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    return c.thai
+      ? `${c.label}${thaiObject}${relation}${thaiTarget}`
+      : `${c.label}${object ? ` ${object}` : ""} ${relation} ${target}`;
+  }
   return c.thai ? `${c.label}${thaiObject}` : `${c.label}${object ? ` ${object}` : ""}`;
 };
 const LEAVE_DURATION_REALIZER: ActionRealizer = (c) => {
@@ -2398,10 +2375,11 @@ const DURATION_REALIZER: ActionRealizer = (c) => c.thai
   : `${c.label}${c.duration ? ` for ${c.duration}` : ""}`;
 const DURATION_ACTIVITY_REALIZER: ActionRealizer = (c) => {
   if (!c.activity) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
-  if (c.frame.relation === AdviceRelation.Between) {
+  if (relationHasSemanticClass(c.frame.relation, "interval")) {
+    const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
     return c.thai
-      ? `${c.label}${c.duration ? ` ${c.duration}` : ""} ระหว่าง${c.activity}`
-      : `${c.label}${c.duration ? ` ${c.duration}` : ""} between ${c.activity}`;
+      ? `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation}${c.activity}`
+      : `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation} ${c.activity}`;
   }
   return `${c.label}${c.duration ? ` ${c.duration}` : ""} ${c.activity}`;
 };
@@ -2506,33 +2484,14 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     const object = site ?? theme ?? substance ?? material;
     const relationTarget = activity ?? time;
     const prefix = negatedActionPrefix(frame, thai);
-    if (object && (
-      frame.relation === AdviceRelation.Into ||
-      frame.relation === AdviceRelation.In ||
-      frame.relation === AdviceRelation.On ||
-      frame.relation === AdviceRelation.To
-    )) {
-      const relationText = frame.relation === AdviceRelation.Into
-        ? (thai ? "เข้าไปใน" : "into")
-        : frame.relation === AdviceRelation.In
-          ? (thai ? "ใน" : "in")
-          : frame.relation === AdviceRelation.On
-            ? (thai ? "บน" : "on")
-            : (thai ? "ไปยัง" : "to");
+    if (object && relationHasGrammarFeature(frame.relation, "negatedObjectAttachment")) {
+      const relationText = localizeAdviceRelation(frame.relation, locale) ?? frame.relation;
       return thai
         ? `${prefix}${label}${relationText}${object}`
         : `${prefix}${label.toLowerCase()} ${relationText} ${object}`;
     }
-    if (relationTarget && (
-      frame.relation === AdviceRelation.Before ||
-      frame.relation === AdviceRelation.After ||
-      frame.relation === AdviceRelation.With
-    )) {
-      const relationText = frame.relation === AdviceRelation.Before
-        ? (thai ? "ก่อน" : "before")
-        : frame.relation === AdviceRelation.After
-          ? (thai ? "หลัง" : "after")
-          : (thai ? "พร้อม" : "with");
+    if (relationTarget && relationHasGrammarFeature(frame.relation, "negatedRelationTarget")) {
+      const relationText = localizeAdviceRelation(frame.relation, locale) ?? frame.relation;
       return thai
         ? `${prefix}${label}${object ?? ""}${relationText}${relationTarget}`
         : `${prefix}${label.toLowerCase()}${object ? ` ${object}` : ""} ${relationText} ${relationTarget}`;
@@ -2715,11 +2674,9 @@ function timeArgumentCoveredBySchedule(
   }
   const timing = arg.normalized as EventTiming;
   if (clause.schedule.when.indexOf(timing) >= 0) return true;
-  const relation = frame.relation === AdviceRelation.Before ? "before"
-    : frame.relation === AdviceRelation.After ? "after"
-    : frame.relation === AdviceRelation.With ? "with"
+  const related = frame.relation
+    ? MEAL_TIMING_BY_RELATION.get(frame.relation as "before" | "after" | "with")?.get(timing)
     : undefined;
-  const related = relation ? MEAL_TIMING_BY_RELATION.get(relation)?.get(timing) : undefined;
   return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
 }
 
@@ -2845,27 +2802,18 @@ function conditionRelationBody(text: string, kind: AdviceRelation): {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   let body = trimmed;
-  switch (kind) {
-    case AdviceRelation.If:
-      body = body.replace(/^(?:if\s+|ถ้า|หาก)/iu, "").trim();
-      break;
-    case AdviceRelation.Unless:
-      body = body.replace(/^(?:unless\s+|เว้นแต่)/iu, "").trim();
-      break;
-    case AdviceRelation.When:
-      body = body.replace(/^(?:when\s+|เมื่อ)/iu, "").trim();
-      break;
-    case AdviceRelation.While:
-      body = body.replace(/^(?:while\s+|ขณะที่|ขณะ)/iu, "").trim();
-      break;
-    case AdviceRelation.Before:
-      body = body.replace(/^(?:before\s+|ก่อน)/iu, "").trim();
-      break;
-    case AdviceRelation.After:
-      body = body.replace(/^(?:after\s+|หลัง)/iu, "").trim();
-      break;
-    default:
-      return undefined;
+  if (!relationHasGrammarFeature(kind, "conditionScope")) return undefined;
+  for (const surface of getAdviceRelationSurfaceForms(kind)) {
+    const normalizedSurface = surface.trim();
+    if (!normalizedSurface) continue;
+    const source = body.toLowerCase();
+    const candidate = normalizedSurface.toLowerCase();
+    if (!source.startsWith(candidate)) continue;
+    const remainder = body.slice(normalizedSurface.length);
+    const asciiWordSurface = /^[\x00-\x7F]+$/u.test(normalizedSurface) && /[A-Za-z0-9]$/u.test(normalizedSurface);
+    if (asciiWordSurface && remainder && !/^[\s,;:()]/u.test(remainder)) continue;
+    body = remainder.trim();
+    break;
   }
   if (!body) return undefined;
   let persists = false;
@@ -2917,15 +2865,7 @@ function localizeConditionRelationText(
       ? concept?.i18n?.th ?? action?.i18n?.th ?? concept?.display ?? action?.display
       : concept?.display ?? action?.display;
   }
-  const lead = targetLanguage === "th"
-    ? relation.kind === AdviceRelation.If ? "ถ้า"
-      : relation.kind === AdviceRelation.Unless ? "เว้นแต่"
-        : relation.kind === AdviceRelation.When ? "เมื่อ"
-          : relation.kind === AdviceRelation.While ? "ขณะที่"
-            : relation.kind === AdviceRelation.Before ? "ก่อน"
-              : relation.kind === AdviceRelation.After ? "หลัง"
-                : ""
-    : relation.kind;
+  const lead = localizeAdviceRelation(relation.kind, targetLocale) ?? relation.kind;
   return `${lead}${targetLanguage === "en" ? " " : ""}${body}`.trim();
 }
 
@@ -3113,7 +3053,7 @@ export function realizeInstructionGraph(
       output += `. ${node.text}`;
       continue;
     }
-    output += previous?.understood && node.understood && explicitRelation?.kind === AdviceRelation.Then
+    output += previous?.understood && node.understood && relationHasSemanticClass(explicitRelation?.kind, "sequence")
       ? (thai ? " จากนั้น" : "; then ")
       : "; ";
     const continuationText = !thai && node.understood

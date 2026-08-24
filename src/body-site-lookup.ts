@@ -7,6 +7,10 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import {
+  BODY_SITE_LOCATIVE_RELATIONS,
+  BODY_SITE_SPATIAL_RELATION_CODINGS
+} from "./relation-terminology";
+import {
   SNOMED_CT_BILATERAL_QUALIFIER_CODE,
   SNOMED_CT_LEFT_QUALIFIER_CODE,
   SNOMED_CT_RIGHT_QUALIFIER_CODE,
@@ -19,11 +23,9 @@ import {
   parseSnomedFindingSitePostcoordinationCode
 } from "./snomed-postcoordination";
 import {
-  BODY_SITE_LOCATIVE_RELATIONS,
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   BODY_SITE_PARTITIVE_MODIFIERS,
-  BODY_SITE_SPATIAL_RELATION_CODINGS,
   SITE_ANCHORS,
   SITE_SELF_DISPLAY_ANCHORS
 } from "./hpsg/lexical-classes";

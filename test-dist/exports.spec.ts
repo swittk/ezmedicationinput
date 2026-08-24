@@ -19,6 +19,13 @@ function runNode(args: string[], code: string): {
   resolveSymptomDefinitionType?: string;
   findSymptomDefinitionByCodingType?: string;
   symptomCount?: number;
+  listAdviceRelationDefinitionsType?: string;
+  localizeAdviceRelationType?: string;
+  resolveActionRelationSurfaceType?: string;
+  listBodySiteRelationDefinitionsType?: string;
+  adviceRelationCount?: number;
+  thaiBeforeRelation?: string;
+  nearRelationThai?: string;
   timingFrequencyMinExtensionUrl?: string;
   timingActivityWindowExtensionUrl?: string;
   timingOccurrenceCapExtensionUrl?: string;
@@ -99,6 +106,13 @@ describe("published package entrypoints", () => {
           resolveSymptomDefinitionType: typeof mod.resolveSymptomDefinition,
           findSymptomDefinitionByCodingType: typeof mod.findSymptomDefinitionByCoding,
           symptomCount: mod.listSymptomDefinitions().length,
+          listAdviceRelationDefinitionsType: typeof mod.listAdviceRelationDefinitions,
+          localizeAdviceRelationType: typeof mod.localizeAdviceRelation,
+          resolveActionRelationSurfaceType: typeof mod.resolveActionRelationSurface,
+          listBodySiteRelationDefinitionsType: typeof mod.listBodySiteRelationDefinitions,
+          adviceRelationCount: mod.listAdviceRelationDefinitions().length,
+          thaiBeforeRelation: mod.localizeAdviceRelation("before", "th"),
+          nearRelationThai: mod.getBodySiteRelationRealization("near", "th")?.surface,
           timingFrequencyMinExtensionUrl: mod.TIMING_FREQUENCY_MIN_EXTENSION_URL,
           timingActivityWindowExtensionUrl: mod.TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
           timingOccurrenceCapExtensionUrl: mod.TIMING_OCCURRENCE_CAP_EXTENSION_URL,
@@ -125,6 +139,13 @@ describe("published package entrypoints", () => {
       resolveSymptomDefinitionType: "function",
       findSymptomDefinitionByCodingType: "function",
       symptomCount: 100,
+      listAdviceRelationDefinitionsType: "function",
+      localizeAdviceRelationType: "function",
+      resolveActionRelationSurfaceType: "function",
+      listBodySiteRelationDefinitionsType: "function",
+      adviceRelationCount: 17,
+      thaiBeforeRelation: "ก่อน",
+      nearRelationThai: "ใกล้",
       timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
       timingActivityWindowExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window",
       timingOccurrenceCapExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap",

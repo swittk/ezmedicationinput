@@ -1,4 +1,12 @@
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirCoding, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, EventTiming, RouteCode } from "../types";
+import {
+  ACTION_SEQUENCE_MARKERS,
+  ACTION_SEQUENCE_RELATION_SURFACES,
+  BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES,
+  BODY_SITE_LOCATIVE_LEAD_TOKENS,
+  getAdviceRelationCanonicalSetByGrammarFeature
+} from "../relation-terminology";
+export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
 import source from "./lexical-classes.json";
 
 type MealRelation = "before" | "after" | "with";
@@ -147,32 +155,9 @@ function bodySiteFeatureScoreBonus(
   return map;
 }
 
-function codingRecord(record: Record<string, FhirCoding>): Map<string, FhirCoding> {
-  const map = new Map<string, FhirCoding>();
-  for (const key in record) {
-    if (Object.prototype.hasOwnProperty.call(record, key)) {
-      map.set(key, { ...record[key] });
-    }
-  }
-  return map;
-}
-
-export const SITE_ANCHORS = setOf(source.siteAnchors);
-export const SITE_SELF_DISPLAY_ANCHORS = setOf(source.siteSelfDisplayAnchors);
+export const SITE_ANCHORS = new Set([...source.siteAnchors, ...BODY_SITE_LOCATIVE_LEAD_TOKENS]);
+export const SITE_SELF_DISPLAY_ANCHORS = new Set(BODY_SITE_LOCATIVE_LEAD_TOKENS);
 export const SITE_FILLERS = setOf(source.siteFillers);
-export const BODY_SITE_LOCATIVE_RELATIONS = setOf(source.bodySiteLocativeRelations);
-export const BODY_SITE_LOCATIVE_RELATION_ALIASES = new Map<string, string>(
-  stringEntries(source.bodySiteLocativeRelationAliases ?? {})
-);
-export const BODY_SITE_LOCATIVE_RELATION_PHRASES = new Map<string, string>(
-  stringEntries(source.bodySiteLocativeRelationPhrases ?? {})
-);
-export const BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS = new Map<string, string>(
-  stringEntries(source.bodySiteLocativeRenderPrepositions)
-);
-export const BODY_SITE_SPATIAL_RELATION_CODINGS = codingRecord(
-  source.bodySiteSpatialRelationCodings
-);
 export const BODY_SITE_PARTITIVE_HEADS = setOf(source.bodySitePartitiveHeads);
 export const BODY_SITE_PARTITIVE_MODIFIERS = setOf(source.bodySitePartitiveModifiers);
 export const BODY_SITE_PARTITIVE_CONNECTORS = setOf(source.bodySitePartitiveConnectors);
@@ -193,7 +178,7 @@ export const ROUTE_SITE_PREPOSITIONS = setOf(source.routeSitePrepositions);
 export const SITE_DISPLAY_FILLERS = SITE_FILLERS;
 export const SITE_MULTIPLICITY_WORDS = setOf(["both", "each", "bilateral"]);
 export const NON_SITE_ANCHORED_PHRASES = setOf(source.nonSiteAnchoredPhrases);
-export const EXTERNAL_SITE_LOCATIVE_PREFIXES = setOf(source.externalSiteLocativePrefixes);
+export const EXTERNAL_SITE_LOCATIVE_PREFIXES = BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES;
 export const ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS = setOf(
   source.routeBlockedByFollowingPartitiveHeads
 );
@@ -266,7 +251,10 @@ export const FREQUENCY_CONNECTOR_WORDS_DATA = setOf(source.frequencyConnectorWor
 export const FREQUENCY_ADVERB_UNITS_DATA = periodUnitRecord(source.frequencyAdverbUnits);
 export const INTERVAL_UNIT_TOKENS_DATA = periodUnitRecord(source.intervalUnitTokens);
 
-export const WORKFLOW_START_WORDS = setOf(source.workflowStartWords);
+export const WORKFLOW_START_WORDS = new Set([
+  ...source.workflowStartWords,
+  ...getAdviceRelationCanonicalSetByGrammarFeature("workflowStart")
+]);
 export const WORKFLOW_NOUNS = setOf(source.workflowNouns);
 export const ANTE_MERIDIEM_TOKENS = setOf(source.anteMeridiemTokens);
 export const POST_MERIDIEM_TOKENS = setOf(source.postMeridiemTokens);
@@ -286,7 +274,7 @@ export const WAKE_EVENT_ALIASES = setOf(source.wakeEventAliases);
 export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
 export const DAY_RANGE_CONNECTORS = setOf(source.dayRangeConnectors);
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
-export const DURATION_LEAD_TOKENS = setOf(source.durationLeadTokens);
+export const DURATION_LEAD_TOKENS = getAdviceRelationCanonicalSetByGrammarFeature("durationLead");
 export const EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES =
   (source.eventOffsetMinimumLeadSequences ?? []).map((parts) => [...parts]);
 export const EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES =
@@ -297,21 +285,18 @@ export const EVENT_OFFSET_FRACTIONS = new Map<string, number>(
 export const EVENT_OFFSET_ARTICLES = setOf(source.eventOffsetArticles ?? []);
 
 export const INSTRUCTION_LEADING_SEPARATORS = setOf(source.instructionLeadingSeparators);
-export const INSTRUCTION_START_WORDS = setOf(source.instructionStartWords);
+export const INSTRUCTION_START_WORDS = new Set([
+  ...source.instructionStartWords,
+  ...getAdviceRelationCanonicalSetByGrammarFeature("instructionStart")
+]);
 export const POSITIVE_DIRECTIVE_MARKERS = setOf(source.positiveDirectiveMarkers);
 export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((prefix) => ({
   parts: prefix.parts as readonly string[],
   polarity: prefix.polarity as AdvicePolarity | undefined,
   modality: prefix.modality as AdviceModality | undefined
 }));
-export const ACTION_RELATION_BY_TOKEN = new Map<string, AdviceRelation>(
-  stringEntries(source.actionRelationTokens).map(([token, relation]) =>
-    [token, relation as AdviceRelation]
-  )
-);
-export const ACTION_SEQUENCE_MARKERS = setOf(source.actionSequenceMarkers);
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
-export const ACTION_SEQUENCE_RELATION_TOKENS = setOf(source.actionSequenceRelationTokens);
+export const ACTION_SEQUENCE_RELATION_TOKENS = ACTION_SEQUENCE_RELATION_SURFACES;
 export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
   stringEntries(source.instructionDurationUnits)
 );
@@ -321,8 +306,12 @@ export const INSTRUCTION_DURATION_APPROXIMATION_LEADS = setOf(
 export const INSTRUCTION_QUANTITY_UNIT_LABELS = instructionQuantityUnitLabelMap(
   source.instructionQuantityUnitLabels as Record<string, InstructionQuantityUnitLabel>
 );
-export const FREE_TEXT_DIRECTIVE_STARTS = setOf(source.freeTextDirectiveStarts);
-export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS = setOf(source.conditionalInstructionExclusiveLeads);
+export const FREE_TEXT_DIRECTIVE_STARTS = new Set([
+  ...source.freeTextDirectiveStarts,
+  ...getAdviceRelationCanonicalSetByGrammarFeature("freeTextDirectiveStart")
+]);
+export const CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS =
+  getAdviceRelationCanonicalSetByGrammarFeature("conditionalInstructionExclusive");
 export const ALTERNATE_EVENT_CADENCES = (source.alternateEventCadences ?? [])
   .map((entry) => ({
     parts: [...entry.parts],
@@ -346,7 +335,8 @@ export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowIn
   .sort((left, right) => right.parts.length - left.parts.length);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);
 export const WORKFLOW_CONTINUATION_LICENSES = setOf(source.workflowContinuationLicenses);
-export const WORKFLOW_ACTION_RELATION_LEADS = setOf(source.workflowActionRelationLeads);
+export const WORKFLOW_ACTION_RELATION_LEADS =
+  getAdviceRelationCanonicalSetByGrammarFeature("workflowActionLead");
 export const AS_NEEDED_LEAD_PHRASES = setOf(source.asNeededLeadPhrases);
 export const PRN_BREAKING_COORDINATORS = setOf(source.prnBreakingCoordinators);
 export const SYMPTOM_ADJUSTMENT_LEADS = setOf(source.symptomAdjustmentLeads);

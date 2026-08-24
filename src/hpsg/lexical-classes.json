@@ -8,43 +8,7 @@
     "over",
     "at",
     "ที่",
-    "บริเวณ",
-    "inside",
-    "within",
-    "underneath",
-    "next",
-    "adjacent",
-    "surrounding",
-    "along",
-    "around",
-    "behind",
-    "near",
-    "outside",
-    "external",
-    "under",
-    "above",
-    "below",
-    "beneath",
-    "between"
-  ],
-  "siteSelfDisplayAnchors": [
-    "inside",
-    "within",
-    "underneath",
-    "next",
-    "adjacent",
-    "surrounding",
-    "along",
-    "around",
-    "behind",
-    "near",
-    "outside",
-    "external",
-    "under",
-    "above",
-    "below",
-    "beneath",
-    "between"
+    "บริเวณ"
   ],
   "siteFillers": [
     "the",
@@ -56,83 +20,6 @@
     "their",
     "my"
   ],
-  "bodySiteLocativeRelationAliases": {
-    "within": "inside",
-    "underneath": "under",
-    "surrounding": "around"
-  },
-  "bodySiteLocativeRelationPhrases": {
-    "next to": "near",
-    "adjacent to": "near"
-  },
-  "bodySiteLocativeRelations": [
-    "behind",
-    "around",
-    "under",
-    "above",
-    "below",
-    "beneath",
-    "near",
-    "outside",
-    "inside",
-    "between",
-    "along"
-  ],
-  "bodySiteLocativeRenderPrepositions": {
-    "inside": "in"
-  },
-  "bodySiteSpatialRelationCodings": {
-    "above": {
-      "system": "http://snomed.info/sct",
-      "code": "352730000",
-      "display": "Above"
-    },
-    "back": {
-      "system": "http://snomed.info/sct",
-      "code": "255551008",
-      "display": "Posterior"
-    },
-    "behind": {
-      "system": "http://snomed.info/sct",
-      "code": "255551008",
-      "display": "Posterior"
-    },
-    "below": {
-      "system": "http://snomed.info/sct",
-      "code": "351726001",
-      "display": "Beneath"
-    },
-    "beneath": {
-      "system": "http://snomed.info/sct",
-      "code": "351726001",
-      "display": "Beneath"
-    },
-    "lower": {
-      "system": "http://snomed.info/sct",
-      "code": "261122009",
-      "display": "Lower"
-    },
-    "side": {
-      "system": "http://snomed.info/sct",
-      "code": "49370004",
-      "display": "Lateral"
-    },
-    "top": {
-      "system": "http://snomed.info/sct",
-      "code": "261183002",
-      "display": "Upper"
-    },
-    "under": {
-      "system": "http://snomed.info/sct",
-      "code": "351726001",
-      "display": "Beneath"
-    },
-    "upper": {
-      "system": "http://snomed.info/sct",
-      "code": "261183002",
-      "display": "Upper"
-    }
-  },
   "bodySitePartitiveHeads": [
     "top",
     "back",
@@ -239,14 +126,6 @@
     "empty stomach",
     "least",
     "most"
-  ],
-  "externalSiteLocativePrefixes": [
-    "around",
-    "behind",
-    "near",
-    "outside",
-    "external",
-    "between"
   ],
   "routeBlockedByFollowingPartitiveHeads": [
     "top"
@@ -866,9 +745,6 @@
     "nights": "Day"
   },
   "workflowStartWords": [
-    "after",
-    "before",
-    "with",
     "leave",
     "rinse",
     "wash",
@@ -983,9 +859,6 @@
     "-",
     "ถึง"
   ],
-  "durationLeadTokens": [
-    "for"
-  ],
   "eventOffsetMinimumLeadSequences": [
     [
       "at",
@@ -1039,7 +912,6 @@
     "mustnt",
     "no",
     "not",
-    "on",
     "should",
     "should-not",
     "slowly",
@@ -1049,8 +921,6 @@
     "thinly",
     "thin",
     "use",
-    "with",
-    "without",
     "finish",
     "complete",
     "ใช้ยาให้ครบ",
@@ -1174,14 +1044,7 @@
     "mustnt",
     "no",
     "not",
-    "should",
-    "without"
-  ],
-  "conditionalInstructionExclusiveLeads": [
-    "if",
-    "unless",
-    "when",
-    "while"
+    "should"
   ],
   "alternateEventCadences": [
     {
@@ -1312,11 +1175,6 @@
   "productExternalModifiers": [
     "external"
   ],
-  "workflowActionRelationLeads": [
-    "before",
-    "after",
-    "with"
-  ],
   "actionDirectivePrefixes": [
     {
       "parts": [
@@ -1384,24 +1242,6 @@
       ]
     }
   ],
-  "actionRelationTokens": {
-    "before": "before",
-    "after": "after",
-    "for": "for",
-    "with": "with",
-    "into": "into",
-    "in": "in",
-    "on": "on",
-    "at": "on",
-    "to": "to",
-    "if": "if",
-    "unless": "unless",
-    "when": "when",
-    "while": "while",
-    "during": "during",
-    "between": "between",
-    "until": "until"
-  },
   "instructionDurationUnits": {
     "second": "s",
     "seconds": "s",
@@ -1515,16 +1355,9 @@
       "enOther": "years"
     }
   },
-  "actionSequenceMarkers": [
-    "then"
-  ],
   "actionCoordinationConnectors": [
     "and",
     "or"
-  ],
-  "actionSequenceRelationTokens": [
-    "then",
-    "and"
   ],
   "symptomAdjustmentLeads": [
     "adjust",

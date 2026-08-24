@@ -7,6 +7,11 @@ import {
   TIMING_ABBREVIATIONS
 } from "../maps";
 import { DEFAULT_SYMPTOM_DEFINITIONS } from "../symptom-terminology";
+import {
+  getRelationLocaleLexemeAliases,
+  getRelationLocalePhrases,
+  getRelationSplitPrefixes
+} from "../relation-terminology";
 import unitTerminologySource from "../unit-terminology.json";
 import instructionActionSource from "../instruction-action-terminology.json";
 import instructionConceptSource from "../instruction-concept-terminology.json";
@@ -23,7 +28,7 @@ import { LexKind, LexToken } from "./token-types";
  * belong here. Unknown prose remains untouched and can still be preserved as
  * patient instructions.
  */
-const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
+const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   // administration / workflow
   "เขย่า": "shake",
   "เท": "pour",
@@ -45,21 +50,9 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ช่องคลอด": "vagina",
 
   // grammar / relations
-  "ก่อน": "before",
-  "หลัง": "after",
-  "พร้อม": "with",
   "ทุก": "every",
   "และ": "and",
   "หรือ": "or",
-  "ที่": "at",
-  "เวลา": "at",
-  "ใน": "in",
-  "บน": "on",
-  "ลง": "into",
-  "เข้า": "into",
-  "ด้วย": "with",
-  "กับ": "with",
-  "ภายนอก": "external",
   "บางๆ": "thinly",
   "ห้าม": "avoid",
   "ควร": "should",
@@ -71,24 +64,14 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ปรับ": "adjust",
   "ตาม": "depending",
   "แปะ": "apply_patch",
-  "แล้ว": "then",
-  "ต่อมา": "then",
-  "ถ้า": "if",
-  "หาก": "if",
-  "เมื่อ": "when",
-  "ขณะ": "while",
-  "ขณะที่": "while",
   "ตื่น": "awake",
   "เฉพาะ": "only",
   "เริ่ม": "start",
   "จำเป็น": "needed",
   "ออกกำลังกาย": "exercise",
   "การออกกำลังกาย": "exercise",
-  "ระหว่าง": "between",
   "วันเว้นวัน": "qod",
   "สัปดาห์ละครั้ง": "weekly",
-  "จนกว่า": "until",
-  "เว้นแต่": "unless",
 
   // cadence / event timing
   "ครั้ง": "times",
@@ -124,6 +107,11 @@ const THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "หยด": "drop",
   "พัฟ": "puff"
 };
+
+const THAI_LEXEME_ALIASES: Record<string, string> = { ...NON_RELATION_THAI_LEXEME_ALIASES };
+for (const [surface, canonical] of getRelationLocaleLexemeAliases("th")) {
+  THAI_LEXEME_ALIASES[surface] = canonical;
+}
 
 interface DeclarativeTerminologySource {
   actions?: Array<{ code?: string; aliases?: string[]; i18n?: Record<string, string> }>;
@@ -252,10 +240,9 @@ function isKnownThaiDomainTerm(value: string): boolean {
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
-  { parts: ["เข้าไป", "ภายใน"], canonical: "into" },
+  ...getRelationLocalePhrases("th"),
   { parts: ["หลัง", "ตื่น", "นอน"], canonical: "wake" },
   { parts: ["ตื่น", "นอน"], canonical: "wake" },
-  { parts: ["เป็น", "เวลา"], canonical: "for" },
   { parts: ["ยา", "พ่น"], canonical: "inhaler" },
   { parts: ["ยา", "เหน็บ"], canonical: "suppository" },
   { parts: ["แผ่น", "แปะ"], canonical: "patch" },
@@ -263,7 +250,6 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ไม่", "ควร"], canonical: "should-not" },
   { parts: ["กลาง", "วัน"], canonical: "noon" },
   { parts: ["ให้", "แห้ง"], canonical: "dry" },
-  { parts: ["แล้ว", "จึง"], canonical: "then" },
   { parts: ["บริเวณ", "ภายนอก", "จุด", "ซ่อน", "เร้น"], canonical: "external-intimate-area" },
   { parts: ["ให้", "เกิด", "ฟอง"], canonical: "foam-result" },
   { parts: ["น้ำ", "สะอาด"], canonical: "clean-water" },
@@ -274,8 +260,6 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ทุก", "สัปดาห์"], canonical: "weekly" },
   { parts: ["ทุก", "เดือน"], canonical: "monthly" },
   { parts: ["ทุก", "วัน"], canonical: "daily" },
-  { parts: ["จาก", "นั้น"], canonical: "then" },
-  { parts: ["หลัง", "จาก", "นั้น"], canonical: "then" },
   { parts: ["สวน", "ล้าง"], canonical: "douche" },
   { parts: ["ชั่วโมง", "ละ"], canonical: "hourly" },
   { parts: ["สัปดาห์", "ละ"], canonical: "weekly" },
@@ -318,7 +302,7 @@ function mergeSourceSpan(
   };
 }
 
-const THAI_GRAMMAR_PREFIXES = ["ระหว่าง", "ก่อน", "หลัง", "เมื่อ", "ขณะ"] as const;
+const THAI_GRAMMAR_PREFIXES = getRelationSplitPrefixes("th");
 
 function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
   const result: LexToken[] = [];

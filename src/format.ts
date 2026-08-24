@@ -19,6 +19,13 @@ import {
   realizeInstructionGraph
 } from "./instruction-graph";
 import { resolveBodySitePhrase } from "./body-site-grammar";
+import {
+  getUniqueAdviceRelationByGrammarFeature,
+  getBodySiteRelationRealization,
+  localizeAdviceRelation,
+  relationHasGrammarFeature,
+  relationHasSemanticClass
+} from "./relation-terminology";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import {
   AdviceArgumentRole,
@@ -775,19 +782,6 @@ function buildRoutePhrase(
   return `via ${text}`;
 }
 
-const ENGLISH_SPATIAL_PREPOSITIONS: Record<string, string> = {
-  above: "above",
-  around: "around",
-  behind: "behind",
-  below: "below",
-  beneath: "beneath",
-  between: "between",
-  inside: "in",
-  near: "near",
-  outside: "outside",
-  under: "under"
-};
-
 function renderSpatialSiteEnglish(
   relation: BodySiteSpatialRelation | undefined,
   grammar: RouteGrammar
@@ -802,30 +796,18 @@ function renderSpatialSiteEnglish(
   const resolvedTarget = resolveBodySitePhrase(rawTarget);
   const target = resolvedTarget?.englishObjectText ??
     `the ${rawTarget.charAt(0).toLowerCase()}${rawTarget.slice(1)}`;
-  const preposition = ENGLISH_SPATIAL_PREPOSITIONS[relation.relationText];
-  if (preposition) {
-    return `${preposition} ${target}`;
+  const realization = getBodySiteRelationRealization(relation.relationText, "en");
+  if (!realization) return undefined;
+  if (realization.strategy === "prefix") {
+    return `${realization.surface} ${target}`;
   }
-  switch (relation.relationText) {
-    case "back":
-    case "center":
-    case "centre":
-    case "front":
-    case "left side":
-    case "middle":
-    case "right side":
-    case "side":
-    case "both sides":
-    case "bilateral sides":
-    case "top":
-      return `${grammar.sitePreposition ?? "at"} ${
-        relation.relationText.startsWith("both") || relation.relationText.startsWith("bilateral")
-          ? relation.relationText
-          : `the ${relation.relationText}`
-      } of ${target}`.trim();
-    default:
-      return undefined;
+  if (realization.strategy === "partitive") {
+    const head = realization.article === "none"
+      ? realization.surface
+      : `the ${realization.surface}`;
+    return `${grammar.sitePreposition ?? "at"} ${head} of ${target}`.trim();
   }
+  return `${target} ${realization.surface}`;
 }
 
 function formatSite(
@@ -1246,10 +1228,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? clause.instructionGraph.actions.find((action) => {
         const primary = clause.instructionGraph?.primaryAdministrationSpan;
         if (!primary || action.span.end <= primary.start || action.span.start >= primary.end) return false;
-        const hasLocalRelation = [
-          AdviceRelation.Before, AdviceRelation.After, AdviceRelation.During, AdviceRelation.While,
-          AdviceRelation.Until, AdviceRelation.For
-        ].indexOf(action.relation as AdviceRelation) >= 0;
+        const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
         const hasRichArgument = action.args.some((arg) =>
           [
             AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
@@ -1476,7 +1455,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : undefined;
   const entersPrimaryWithThen = primaryActionIndex !== undefined && primaryActionIndex >= 0
     ? clause.instructionGraph?.relations?.some((relation) =>
-        relation.kind === AdviceRelation.Then && relation.toActionIndex === primaryActionIndex &&
+        relationHasSemanticClass(relation.kind, "sequence") && relation.toActionIndex === primaryActionIndex &&
         relation.fromActionIndex !== undefined
       )
     : false;
@@ -1485,30 +1464,33 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : -1;
   const graphContinuesWithThen = richPrimaryActionIndex >= 0 && Boolean(
     clause.instructionGraph?.relations?.some((relation) =>
-      relation.kind === AdviceRelation.Then && relation.fromActionIndex === richPrimaryActionIndex
+      relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === richPrimaryActionIndex
     )
   );
+  const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
+  if (!sequenceRelation) throw new Error("Missing declarative default sequence relation");
+  const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
-      effectiveBase = `${pre}; then ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`;
+      effectiveBase = `${pre}; ${sequenceSurface} ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`;
     }
     if (postFlowsFromAdministration && postGraphInstruction) {
       const post = postGraphInstruction.charAt(0).toLowerCase() + postGraphInstruction.slice(1);
-      effectiveBase = `${effectiveBase.replace(/[.!?]+$/, "")}; then ${post}`;
+      effectiveBase = `${effectiveBase.replace(/[.!?]+$/, "")}; ${sequenceSurface} ${post}`;
       if (!/[.!?]$/.test(effectiveBase)) effectiveBase += ".";
     }
     if (leadingInstructionText && effectiveBase && entersPrimaryWithThen) {
       const leading = leadingInstructionText.replace(/[.!?]+$/, "");
       return [
-        `${leading}; then ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`,
+        `${leading}; ${sequenceSurface} ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`,
         trailingInstructionText
       ].filter(Boolean).join(" ").trim();
     }
     const effectiveTrailing = trailingInstructionText && graphContinuesWithThen
-      ? `Then ${trailingInstructionText.charAt(0).toLowerCase()}${trailingInstructionText.slice(1)}`
+      ? `${sequenceSurface.charAt(0).toUpperCase()}${sequenceSurface.slice(1)} ${trailingInstructionText.charAt(0).toLowerCase()}${trailingInstructionText.slice(1)}`
       : trailingInstructionText;
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
@@ -1537,7 +1519,7 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
       instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
       instruction.frames?.some(
         (frame) =>
-          frame.relation === AdviceRelation.On &&
+          relationHasGrammarFeature(frame.relation, "mealStateComplement") &&
           frame.args.some(
             (arg) =>
               arg.role === AdviceArgumentRole.MealState &&

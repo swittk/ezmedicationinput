@@ -1,6 +1,7 @@
 import { parseInstructionActions } from "../instruction-graph";
-import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, type AdviceFrame } from "../types";
+import { AdviceArgumentRole, AdvicePolarity, type AdviceFrame } from "../types";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { relationHasGrammarFeature } from "../relation-terminology";
 import type { HpsgClauseContext } from "./rule-context";
 
 const PROCEDURAL_FRAME_CACHE = new WeakMap<object, AdviceFrame[]>();
@@ -37,8 +38,7 @@ export function sourceRangeAttachmentClass(
   if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural) return "administration";
 
-  const relationCanAttachLocally =
-    enclosing.relation === AdviceRelation.Before || enclosing.relation === AdviceRelation.After;
+  const relationCanAttachLocally = relationHasGrammarFeature(enclosing.relation, "activityFallback");
   const priorAdministrationCandidate = relationCanAttachLocally && getProceduralFrames(context).some((frame) => {
     if (frame === enclosing || frame.span.start >= enclosing.span.start || frame.polarity === AdvicePolarity.Negate) {
       return false;

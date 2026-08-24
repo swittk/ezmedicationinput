@@ -75,6 +75,26 @@ export {
 } from "./symptom-terminology";
 export type { SymptomDictionaryEntry } from "./symptom-terminology";
 export {
+  getAdviceRelationDefinition,
+  getBodySiteRelationDefinition,
+  getBodySiteRelationRealization,
+  listAdviceRelationDefinitions,
+  listBodySiteRelationDefinitions,
+  localizeAdviceRelation,
+  normalizeBodySiteRelation,
+  resolveActionRelationSurface,
+  resolveAdviceRelationSurface
+} from "./relation-terminology";
+export type {
+  AdviceRelationDefinition,
+  AdviceRelationGrammarFeatures,
+  BodySiteLocativeRelation,
+  BodySiteRelationDefinition,
+  BodySiteRelationGrammarFeatures,
+  BodySiteRelationRealization,
+  RelationLocaleLexeme
+} from "./relation-terminology";
+export {
   MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
   buildInstructionGraphExtension,
   parseInstructionGraphExtension

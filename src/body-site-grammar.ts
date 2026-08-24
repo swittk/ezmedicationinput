@@ -3,18 +3,21 @@ import { mergeI18nRecords } from "./fhir-translations";
 import { objectEntries } from "./utils/object";
 import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
+  BODY_SITE_LOCATIVE_RELATION_PHRASES,
+  BODY_SITE_LOCATIVE_RELATIONS,
+  BODY_SITE_SPATIAL_RELATION_CODINGS,
+  getBodySiteRelationRealization,
+  normalizeBodySiteRelation
+} from "./relation-terminology";
+import type { BodySiteLocativeRelation } from "./relation-terminology";
+import {
   BODY_SITE_ADJECTIVE_SUFFIXES,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
   BODY_SITE_DISPLAY_PENALTY_WORDS,
-  BODY_SITE_LOCATIVE_RELATION_ALIASES,
-  BODY_SITE_LOCATIVE_RELATION_PHRASES,
-  BODY_SITE_LOCATIVE_RELATIONS,
-  BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS,
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   BODY_SITE_PARTITIVE_MODIFIERS,
-  BODY_SITE_SPATIAL_RELATION_CODINGS,
   NASAL_SITE_WORDS,
   OPHTHALMIC_SITE_WORDS,
   OTIC_SITE_WORDS
@@ -45,18 +48,7 @@ const DEFAULT_SITE_SYNONYM_KEYS = (() => {
 })();
 
 export type BodySiteGrammarKind = "nominal" | "partitive" | "locative";
-export type BodySiteLocativeRelation =
-  | "behind"
-  | "around"
-  | "under"
-  | "above"
-  | "below"
-  | "beneath"
-  | "near"
-  | "outside"
-  | "inside"
-  | "between"
-  | "along";
+export type { BodySiteLocativeRelation };
 
 export interface BodySiteNominalFeatures {
   kind: "nominal";
@@ -452,8 +444,8 @@ function canonicalBodySiteLocativeRelation(
   value: string | undefined
 ): BodySiteLocativeRelation | undefined {
   if (!value) return undefined;
-  const canonical = BODY_SITE_LOCATIVE_RELATION_ALIASES.get(value) ?? value;
-  return BODY_SITE_LOCATIVE_RELATIONS.has(canonical)
+  const canonical = normalizeBodySiteRelation(value);
+  return canonical && BODY_SITE_LOCATIVE_RELATIONS.has(canonical as BodySiteLocativeRelation)
     ? canonical as BodySiteLocativeRelation
     : undefined;
 }
@@ -566,8 +558,10 @@ function renderBodySiteObject(
   features: BodySiteFeatureStructure
 ): string {
   switch (features.kind) {
-    case "locative":
-      return `${BODY_SITE_LOCATIVE_RENDER_PREPOSITIONS.get(features.relation) ?? features.relation} ${renderBodySiteObject(features.target)}`;
+    case "locative": {
+      const surface = getBodySiteRelationRealization(features.relation, "en")?.surface ?? features.relation;
+      return `${surface} ${renderBodySiteObject(features.target)}`;
+    }
     case "partitive":
       return `${
         features.part.startsWith("both") || features.part.startsWith("bilateral")

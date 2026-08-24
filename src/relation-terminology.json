@@ -1,0 +1,1025 @@
+{
+  "adviceRelations": [
+    {
+      "relation": "with",
+      "actionSurfaces": [
+        "with"
+      ],
+      "adviceSurfaces": [
+        "with"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "พร้อม",
+            "canonical": "with"
+          },
+          {
+            "surface": "ด้วย",
+            "canonical": "with"
+          },
+          {
+            "surface": "กับ",
+            "canonical": "with"
+          }
+        ]
+      },
+      "realization": {
+        "en": "with",
+        "th": "พร้อม"
+      },
+      "semanticClass": "accompaniment",
+      "grammar": {
+        "timeComplement": true,
+        "negatedRelationTarget": true,
+        "accompanimentComplement": true,
+        "workflowStart": true,
+        "workflowActionLead": true,
+        "instructionStart": true
+      }
+    },
+    {
+      "relation": "without",
+      "adviceSurfaces": [
+        "without"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "โดยไม่",
+            "canonical": "without"
+          }
+        ]
+      },
+      "realization": {
+        "en": "without",
+        "th": "โดยไม่"
+      },
+      "semanticClass": "accompaniment",
+      "grammar": {
+        "instructionStart": true,
+        "freeTextDirectiveStart": true
+      }
+    },
+    {
+      "relation": "before",
+      "actionSurfaces": [
+        "before"
+      ],
+      "adviceSurfaces": [
+        "before"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ก่อน",
+            "canonical": "before",
+            "splitPrefix": true
+          }
+        ]
+      },
+      "realization": {
+        "en": "before",
+        "th": "ก่อน"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "preposedAction": true,
+        "conditionScope": true,
+        "detectInActionGap": true,
+        "timeComplement": true,
+        "durationComplement": true,
+        "activityFallback": true,
+        "negatedRelationTarget": true,
+        "rinseTimeComplement": true,
+        "roundtripRichRelation": true,
+        "workflowStart": true,
+        "workflowActionLead": true
+      }
+    },
+    {
+      "relation": "after",
+      "actionSurfaces": [
+        "after"
+      ],
+      "adviceSurfaces": [
+        "after"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "หลัง",
+            "canonical": "after",
+            "splitPrefix": true
+          }
+        ]
+      },
+      "realization": {
+        "en": "after",
+        "th": "หลัง"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "preposedAction": true,
+        "conditionScope": true,
+        "detectInActionGap": true,
+        "timeComplement": true,
+        "durationComplement": true,
+        "activityFallback": true,
+        "negatedRelationTarget": true,
+        "rinseTimeComplement": true,
+        "roundtripRichRelation": true,
+        "workflowStart": true,
+        "workflowActionLead": true
+      }
+    },
+    {
+      "relation": "during",
+      "actionSurfaces": [
+        "during"
+      ],
+      "adviceSurfaces": [
+        "during"
+      ],
+      "realization": {
+        "en": "during",
+        "th": "ระหว่าง"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "preposedAction": true,
+        "detectInActionGap": true,
+        "roundtripRichRelation": true
+      }
+    },
+    {
+      "relation": "between",
+      "actionSurfaces": [
+        "between"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ระหว่าง",
+            "canonical": "between",
+            "splitPrefix": true
+          }
+        ]
+      },
+      "realization": {
+        "en": "between",
+        "th": "ระหว่าง"
+      },
+      "semanticClass": "interval",
+      "grammar": {}
+    },
+    {
+      "relation": "then",
+      "adviceSurfaces": [
+        "then"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "แล้ว",
+            "canonical": "then"
+          },
+          {
+            "surface": "ต่อมา",
+            "canonical": "then"
+          },
+          {
+            "surface": "จากนั้น",
+            "canonical": "then"
+          },
+          {
+            "surface": "แล้ว จึง",
+            "canonical": "then"
+          },
+          {
+            "surface": "จาก นั้น",
+            "canonical": "then"
+          },
+          {
+            "surface": "หลัง จาก นั้น",
+            "canonical": "then"
+          }
+        ]
+      },
+      "realization": {
+        "en": "then",
+        "th": "จากนั้น"
+      },
+      "semanticClass": "sequence",
+      "grammar": {
+        "defaultSequenceRelation": true
+      },
+      "sequenceMarkerSurfaces": [
+        "then"
+      ],
+      "sequenceRelationSurfaces": [
+        "then",
+        "and"
+      ]
+    },
+    {
+      "relation": "until",
+      "actionSurfaces": [
+        "until"
+      ],
+      "adviceSurfaces": [
+        "until"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "จนกว่า",
+            "canonical": "until"
+          }
+        ]
+      },
+      "realization": {
+        "en": "until",
+        "th": "จนกว่า"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "preposedAction": true,
+        "conditionScope": true,
+        "detectInActionGap": true,
+        "roundtripRichRelation": true
+      }
+    },
+    {
+      "relation": "for",
+      "actionSurfaces": [
+        "for"
+      ],
+      "adviceSurfaces": [
+        "for"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "สำหรับ",
+            "canonical": "for"
+          },
+          {
+            "surface": "เป็น เวลา",
+            "canonical": "for"
+          }
+        ]
+      },
+      "realization": {
+        "en": "for",
+        "th": "สำหรับ"
+      },
+      "realizationProfiles": {
+        "duration": {
+          "en": "for",
+          "th": "เป็นเวลา"
+        }
+      },
+      "semanticClass": "purpose",
+      "grammar": {
+        "includeDuration": true,
+        "roundtripRichRelation": true,
+        "durationLead": true
+      }
+    },
+    {
+      "relation": "in",
+      "actionSurfaces": [
+        "in"
+      ],
+      "adviceSurfaces": [
+        "in"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ใน",
+            "canonical": "in"
+          }
+        ]
+      },
+      "realization": {
+        "en": "in",
+        "th": "ใน"
+      },
+      "semanticClass": "locative",
+      "grammar": {
+        "timeComplement": true,
+        "negatedObjectAttachment": true,
+        "rinseTimeComplement": true,
+        "directTimeRealization": true,
+        "defaultSiteRelation": true
+      }
+    },
+    {
+      "relation": "into",
+      "actionSurfaces": [
+        "into"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ลง",
+            "canonical": "into"
+          },
+          {
+            "surface": "เข้า",
+            "canonical": "into"
+          },
+          {
+            "surface": "เข้าไปภายใน",
+            "canonical": "into"
+          },
+          {
+            "surface": "เข้าไป ภายใน",
+            "canonical": "into"
+          },
+          {
+            "surface": "เข้าไป ใน",
+            "canonical": "into"
+          }
+        ]
+      },
+      "realization": {
+        "en": "into",
+        "th": "เข้าไปใน"
+      },
+      "semanticClass": "locative",
+      "grammar": {
+        "negatedObjectAttachment": true
+      }
+    },
+    {
+      "relation": "on",
+      "actionSurfaces": [
+        "on",
+        "at"
+      ],
+      "adviceSurfaces": [
+        "on"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "บน",
+            "canonical": "on"
+          },
+          {
+            "surface": "ที่",
+            "canonical": "at"
+          },
+          {
+            "surface": "เวลา",
+            "canonical": "at"
+          }
+        ]
+      },
+      "realization": {
+        "en": "on",
+        "th": "บน"
+      },
+      "realizationProfiles": {
+        "temporal": {
+          "en": "on",
+          "th": "เมื่อ"
+        }
+      },
+      "semanticClass": "locative",
+      "grammar": {
+        "timeComplement": true,
+        "negatedObjectAttachment": true,
+        "rinseTimeComplement": true,
+        "directTimeRealization": true,
+        "timeRealizationProfile": "temporal",
+        "mealStateComplement": true,
+        "instructionStart": true
+      }
+    },
+    {
+      "relation": "to",
+      "actionSurfaces": [
+        "to"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ไปยัง",
+            "canonical": "to"
+          }
+        ]
+      },
+      "realization": {
+        "en": "to",
+        "th": "ไปยัง"
+      },
+      "semanticClass": "locative",
+      "grammar": {
+        "negatedObjectAttachment": true
+      }
+    },
+    {
+      "relation": "if",
+      "actionSurfaces": [
+        "if"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ถ้า",
+            "canonical": "if"
+          },
+          {
+            "surface": "หาก",
+            "canonical": "if"
+          }
+        ]
+      },
+      "realization": {
+        "en": "if",
+        "th": "ถ้า"
+      },
+      "semanticClass": "conditional",
+      "grammar": {
+        "conditionScope": true,
+        "conditionalTail": true,
+        "detectInActionGap": true,
+        "conditionalInstructionExclusive": true
+      }
+    },
+    {
+      "relation": "unless",
+      "actionSurfaces": [
+        "unless"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "เว้นแต่",
+            "canonical": "unless"
+          }
+        ]
+      },
+      "realization": {
+        "en": "unless",
+        "th": "เว้นแต่"
+      },
+      "semanticClass": "conditional",
+      "grammar": {
+        "conditionScope": true,
+        "conditionalTail": true,
+        "detectInActionGap": true,
+        "conditionalInstructionExclusive": true
+      }
+    },
+    {
+      "relation": "when",
+      "actionSurfaces": [
+        "when"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "เมื่อ",
+            "canonical": "when",
+            "splitPrefix": true
+          }
+        ]
+      },
+      "realization": {
+        "en": "when",
+        "th": "เมื่อ"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "conditionScope": true,
+        "conditionalTail": true,
+        "detectInActionGap": true,
+        "symptomOnsetPrnLead": true,
+        "conditionalInstructionExclusive": true
+      }
+    },
+    {
+      "relation": "while",
+      "actionSurfaces": [
+        "while"
+      ],
+      "adviceSurfaces": [],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ขณะ",
+            "canonical": "while",
+            "splitPrefix": true
+          },
+          {
+            "surface": "ขณะที่",
+            "canonical": "while",
+            "splitPrefix": true
+          }
+        ]
+      },
+      "realization": {
+        "en": "while",
+        "th": "ขณะที่"
+      },
+      "semanticClass": "temporal",
+      "grammar": {
+        "conditionScope": true,
+        "conditionalTail": true,
+        "detectInActionGap": true,
+        "roundtripRichRelation": true,
+        "conditionalInstructionExclusive": true
+      }
+    }
+  ],
+  "bodySiteRelations": [
+    {
+      "canonical": "above",
+      "aliases": [
+        "above"
+      ],
+      "locative": true,
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "352730000",
+        "display": "Above"
+      },
+      "realization": {
+        "en": {
+          "surface": "above",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "เหนือ",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "around",
+      "aliases": [
+        "around",
+        "surrounding"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "around",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "รอบ",
+          "strategy": "prefix"
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "back",
+      "aliases": [
+        "back"
+      ],
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "255551008",
+        "display": "Posterior"
+      },
+      "realization": {
+        "en": {
+          "surface": "back",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านหลัง",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "behind",
+      "aliases": [
+        "behind"
+      ],
+      "locative": true,
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "255551008",
+        "display": "Posterior"
+      },
+      "realization": {
+        "en": {
+          "surface": "behind",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ด้านหลัง",
+          "strategy": "prefix"
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "below",
+      "aliases": [
+        "below"
+      ],
+      "locative": true,
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "351726001",
+        "display": "Beneath"
+      },
+      "realization": {
+        "en": {
+          "surface": "below",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ใต้",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "beneath",
+      "aliases": [
+        "beneath"
+      ],
+      "locative": true,
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "351726001",
+        "display": "Beneath"
+      },
+      "realization": {
+        "en": {
+          "surface": "beneath",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ใต้",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "under",
+      "aliases": [
+        "under",
+        "underneath"
+      ],
+      "locative": true,
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "351726001",
+        "display": "Beneath"
+      },
+      "realization": {
+        "en": {
+          "surface": "under",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ใต้",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "inside",
+      "aliases": [
+        "inside",
+        "within"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "in",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ใน",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "near",
+      "aliases": [
+        "near",
+        "next to",
+        "adjacent to"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "near",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ใกล้",
+          "strategy": "prefix",
+          "omitOuterSitePreposition": true
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "outside",
+      "aliases": [
+        "outside"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "outside",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ด้านนอก",
+          "strategy": "prefix"
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "between",
+      "aliases": [
+        "between"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "between",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ระหว่าง",
+          "strategy": "prefix"
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "along",
+      "aliases": [
+        "along"
+      ],
+      "locative": true,
+      "realization": {
+        "en": {
+          "surface": "along",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ตามแนว",
+          "strategy": "prefix",
+          "omitOuterSitePreposition": true
+        }
+      }
+    },
+    {
+      "canonical": "external",
+      "aliases": [
+        "external"
+      ],
+      "localeLexemes": {
+        "th": [
+          {
+            "surface": "ภายนอก",
+            "canonical": "external"
+          }
+        ]
+      },
+      "realization": {
+        "th": {
+          "surface": "ด้านนอก",
+          "strategy": "prefix"
+        }
+      },
+      "grammar": {
+        "externalSiteLocativePrefix": true
+      }
+    },
+    {
+      "canonical": "center",
+      "aliases": [
+        "center",
+        "centre"
+      ],
+      "realization": {
+        "en": {
+          "surface": "center",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "กลาง",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "front",
+      "aliases": [
+        "front"
+      ],
+      "realization": {
+        "en": {
+          "surface": "front",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านหน้า",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "left side",
+      "aliases": [
+        "left side"
+      ],
+      "realization": {
+        "en": {
+          "surface": "left side",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านซ้าย",
+          "strategy": "suffix"
+        }
+      }
+    },
+    {
+      "canonical": "right side",
+      "aliases": [
+        "right side"
+      ],
+      "realization": {
+        "en": {
+          "surface": "right side",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านขวา",
+          "strategy": "suffix"
+        }
+      }
+    },
+    {
+      "canonical": "both sides",
+      "aliases": [
+        "both sides"
+      ],
+      "realization": {
+        "en": {
+          "surface": "both sides",
+          "strategy": "partitive",
+          "article": "none"
+        },
+        "th": {
+          "surface": "ทั้งสองข้าง",
+          "strategy": "suffix"
+        }
+      }
+    },
+    {
+      "canonical": "bilateral sides",
+      "aliases": [
+        "bilateral sides"
+      ],
+      "realization": {
+        "en": {
+          "surface": "bilateral sides",
+          "strategy": "partitive",
+          "article": "none"
+        },
+        "th": {
+          "surface": "ทั้งสองข้าง",
+          "strategy": "suffix"
+        }
+      }
+    },
+    {
+      "canonical": "middle",
+      "aliases": [
+        "middle"
+      ],
+      "realization": {
+        "en": {
+          "surface": "middle",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "กลาง",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "side",
+      "aliases": [
+        "side"
+      ],
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "49370004",
+        "display": "Lateral"
+      },
+      "realization": {
+        "en": {
+          "surface": "side",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านข้าง",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "top",
+      "aliases": [
+        "top"
+      ],
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "261183002",
+        "display": "Upper"
+      },
+      "realization": {
+        "en": {
+          "surface": "top",
+          "strategy": "partitive",
+          "article": "the"
+        },
+        "th": {
+          "surface": "ด้านบนของ",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "lower",
+      "aliases": [
+        "lower"
+      ],
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "261122009",
+        "display": "Lower"
+      },
+      "realization": {
+        "th": {
+          "surface": "ส่วนล่างของ",
+          "strategy": "prefix"
+        }
+      }
+    },
+    {
+      "canonical": "upper",
+      "aliases": [
+        "upper"
+      ],
+      "coding": {
+        "system": "http://snomed.info/sct",
+        "code": "261183002",
+        "display": "Upper"
+      },
+      "realization": {
+        "th": {
+          "surface": "ส่วนบนของ",
+          "strategy": "prefix"
+        }
+      }
+    }
+  ]
+}
