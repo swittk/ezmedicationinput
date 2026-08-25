@@ -9,9 +9,10 @@ import {
   resolveMedicationInstructionAction
 } from "../src/instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../src/instruction-concept-terminology";
-import { AdviceArgumentRole, AdviceRelation } from "../src/types";
+import { AdviceArgumentRole, AdviceRelation, RouteCode } from "../src/types";
 import { suggestSig } from "../src/suggest";
 import { localizeAdviceRelation } from "../src/relation-terminology";
+import { shouldJoinAdjacentSourceTokens } from "../src/locale-detection";
 import {
   getAdviceLocaleAdapter,
   getInstructionActionLocaleAdapter,
@@ -35,6 +36,12 @@ describe("locale-extensible language architecture", () => {
     expect(localizedConfig({ ja: { directSiteObject: true } }, "ja-JP")).toEqual({
       directSiteObject: true
     });
+    expect(localizedValue({ "JA_jP": "case-insensitive" }, "ja-JP")).toBe("case-insensitive");
+    expect(localizedValue({ "JA_jP": "", ja: "base-fallback" }, "ja-JP")).toBe("base-fallback");
+    expect(localizedConfig({ "LO_la": { directSiteObject: true } }, "lo-LA")).toEqual({
+      directSiteObject: true
+    });
+    expect(localizedValue({ "ja-JP-x": "compatible" }, "ja-JP")).toBe("compatible");
   });
 
   it("keeps display translation separate from parser lexical licensing", () => {
@@ -166,6 +173,57 @@ describe("locale-extensible language architecture", () => {
     const fallbackSuggest = getSuggestLocaleAdapter("unknown-locale");
     registerSuggestLocaleAdapter({ ...fallbackSuggest, locale: "xy" });
     expect(getSuggestLocaleAdapter("xy-XY").locale).toBe("xy");
+  });
+
+  it("joins adjacent source tokens only inside the same no-space locale script", () => {
+    expect(shouldJoinAdjacentSourceTokens("ผิว", "หนัง")).toBe(true);
+    expect(shouldJoinAdjacentSourceTokens("ผิว", "dry")).toBe(false);
+    expect(shouldJoinAdjacentSourceTokens("1", "เม็ด")).toBe(false);
+  });
+
+  it("invalidates suggestion lexeme caches when locale packs are replaced", () => {
+    expect(suggestSig("qx-fr", { locale: "qx", limit: 5 })).not.toContain("qx-fresh");
+    registerMedicationLexerLocalePack({
+      locale: "qx",
+      apply: (tokens) => tokens.map((token, index) => ({ ...token, index })),
+      listLexemes: () => [{ surface: "qx-fresh", canonical: "fresh" }]
+    });
+    expect(suggestSig("qx-fr", { locale: "qx", limit: 5 })).toContain("qx-fresh");
+  });
+
+  it("uses the active locale when building affected-area suggestion trajectories", () => {
+    const englishSuggest = getSuggestLocaleAdapter("en");
+    registerSuggestLocaleAdapter({ ...englishSuggest, locale: "qv" });
+    const suggestions = suggestSig("paint", {
+      locale: "qv",
+      limit: 10,
+      instructionActionMap: {
+        paint: {
+          code: "paint",
+          semanticClass: "administration",
+          display: "Paint",
+          aliases: ["paint"],
+          procedural: false,
+          argumentParser: "site-relation",
+          realizer: "site-relation",
+          administrationMethod: {
+            system: "http://snomed.info/sct",
+            code: "738991002",
+            display: "Apply"
+          },
+          verbRouteHint: RouteCode["Topical route"],
+          applicationVerb: true,
+          realizerConfig: {
+            locales: {
+              en: { directSiteObject: false },
+              qv: { directSiteObject: true }
+            }
+          }
+        }
+      }
+    });
+    expect(suggestions).toContain("paint affected area");
+    expect(suggestions).not.toContain("paint to affected area");
   });
 
 });

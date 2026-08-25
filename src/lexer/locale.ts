@@ -21,10 +21,16 @@ export interface MedicationLexerLocalePack {
 }
 
 const LOCALE_PACKS = new Map<string, MedicationLexerLocalePack>();
+let localePackRevision = 0;
 
 export function registerMedicationLexerLocalePack(pack: MedicationLexerLocalePack): void {
   const locale = baseLanguageTag(pack.locale) ?? pack.locale.toLowerCase();
   LOCALE_PACKS.set(locale, { ...pack, locale });
+  localePackRevision += 1;
+}
+
+export function medicationLexerLocalePackRevision(): number {
+  return localePackRevision;
 }
 
 export function getMedicationLexerLocalePack(locale: string): MedicationLexerLocalePack | undefined {

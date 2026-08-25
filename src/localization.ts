@@ -16,20 +16,62 @@ export function localeFallbackChain(locale: string | undefined): string[] {
   return base && base !== exact ? [exact, base] : [exact];
 }
 
+function normalizedRecordExact<T>(
+  record: Record<string, T> | undefined,
+  locale: string
+): T | undefined {
+  if (!record) return undefined;
+  for (const key of Object.keys(record)) {
+    if (normalizeLocaleTag(key) === locale) return record[key];
+  }
+  return undefined;
+}
+
+function normalizedRecordCompatible<T>(
+  record: Record<string, T> | undefined,
+  locale: string
+): T | undefined {
+  if (!record) return undefined;
+  for (const key of Object.keys(record)) {
+    const normalizedKey = normalizeLocaleTag(key);
+    if (!normalizedKey || normalizedKey === locale) continue;
+    if (locale.startsWith(`${normalizedKey}-`) || normalizedKey.startsWith(`${locale}-`)) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function localizedRecordEntry<T>(
+  record: Record<string, T> | undefined,
+  locale: string | undefined
+): T | undefined {
+  const chain = localeFallbackChain(locale);
+  for (const candidate of chain) {
+    const exact = normalizedRecordExact(record, candidate);
+    if (exact !== undefined) return exact;
+  }
+  const target = normalizeLocaleTag(locale);
+  return target ? normalizedRecordCompatible(record, target) : undefined;
+}
+
 export function localizedValue(
   i18n: Record<string, string | undefined> | undefined,
   locale: string | undefined
 ): string | undefined {
   if (!i18n) return undefined;
   for (const candidate of localeFallbackChain(locale)) {
-    const direct = i18n[candidate]?.trim();
-    if (direct) return direct;
+    for (const key of Object.keys(i18n)) {
+      if (normalizeLocaleTag(key) !== candidate) continue;
+      const value = i18n[key]?.trim();
+      if (value) return value;
+    }
   }
   const target = normalizeLocaleTag(locale);
   if (!target) return undefined;
   for (const key of Object.keys(i18n)) {
     const normalizedKey = normalizeLocaleTag(key);
-    if (!normalizedKey) continue;
+    if (!normalizedKey || normalizedKey === target) continue;
     if (target.startsWith(`${normalizedKey}-`) || normalizedKey.startsWith(`${target}-`)) {
       const value = i18n[key]?.trim();
       if (value) return value;
@@ -44,13 +86,9 @@ export function localizedConfig<T>(
   fallbackLocale?: string
 ): T | undefined {
   if (!configs) return undefined;
-  for (const candidate of localeFallbackChain(locale)) {
-    if (configs[candidate] !== undefined) return configs[candidate];
-  }
-  for (const candidate of localeFallbackChain(fallbackLocale)) {
-    if (configs[candidate] !== undefined) return configs[candidate];
-  }
-  return undefined;
+  const primary = localizedRecordEntry(configs, locale);
+  if (primary !== undefined) return primary;
+  return localizedRecordEntry(configs, fallbackLocale);
 }
 
 export function localeKeys(

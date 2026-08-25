@@ -376,6 +376,15 @@ describe("suggestSig", () => {
     })).toContain("apply to special spot");
   });
 
+  it("ranks built-in English body sites before matching runtime sites", () => {
+    expect(suggestSig("apply to ar", {
+      limit: 10,
+      siteCodeMap: {
+        "arm custom": { text: "arm custom" }
+      }
+    }).slice(0, 2)).toEqual(["apply to arm", "apply to arm custom"]);
+  });
+
   it("surfaces runtime unit aliases without adding a suggester branch", () => {
     expect(suggestSig("5 sco", {
       limit: 10,

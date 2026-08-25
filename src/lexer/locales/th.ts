@@ -18,6 +18,7 @@ import unitTerminologySource from "../../unit-terminology.json";
 import instructionActionSource from "../../instruction-action-terminology.json";
 import instructionConceptSource from "../../instruction-concept-terminology.json";
 import adviceRulesSource from "../../advice-rules.json";
+import meaningTerminologySource from "../meaning-terminology.json";
 import { LexKind, LexToken } from "../token-types";
 import { registerIntlMedicationSurfaceSegmenter } from "../surface-segmenter";
 
@@ -223,15 +224,18 @@ const DOSE_UNIT_CANONICALS = new Set(
     .map((term) => term.unit!.toLowerCase())
 );
 
-const LEGACY_THAI_GROUP_TERMS = [
-  "วันธรรมดา",
-  "วันทำงาน",
-  "วันหยุด",
-  "วันเสาร์อาทิตย์",
-  "สุดสัปดาห์",
-  "เสาร์อาทิตย์",
-  "จันทร์ถึงศุกร์"
-] as const;
+const THAI_DAY_GROUP_TERMS = Object.keys(meaningTerminologySource.dayGroups)
+  .filter((term) => /[\u0E00-\u0E7F]/u.test(term));
+const THAI_DAY_RANGE_CONNECTORS = meaningTerminologySource.dayRangeConnectors
+  .filter((connector) => /[\u0E00-\u0E7F]/u.test(connector))
+  .sort((left, right) => right.length - left.length);
+const THAI_DAY_RANGE_PATTERN = new RegExp(
+  `^(.+?)(?:${THAI_DAY_RANGE_CONNECTORS
+    .map((connector) => connector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})(.+)$`,
+  "u"
+);
+
 
 const KNOWN_THAI_DOMAIN_TERMS = new Set<string>();
 
@@ -261,7 +265,7 @@ registerKnownThaiTerms(Object.keys(DEFAULT_UNIT_SYNONYMS));
 registerKnownThaiTerms(Object.keys(DAY_OF_WEEK_TOKENS));
 registerKnownThaiTerms(Object.keys(EVENT_TIMING_TOKENS));
 registerKnownThaiTerms(Object.keys(TIMING_ABBREVIATIONS));
-registerKnownThaiTerms(LEGACY_THAI_GROUP_TERMS);
+registerKnownThaiTerms(THAI_DAY_GROUP_TERMS);
 for (const term of (unitTerminologySource as UnitTerminologySource).terms ?? []) {
   registerKnownThaiTerms([term.unit ?? "", ...(term.aliases ?? [])]);
 }
@@ -272,7 +276,7 @@ function isKnownThaiDomainTerm(value: string): boolean {
   if (KNOWN_THAI_DOMAIN_TERMS.has(normalized)) {
     return true;
   }
-  const range = normalized.match(/^(.+?)(?:ถึง|จนถึง)(.+)$/u);
+  const range = normalized.match(THAI_DAY_RANGE_PATTERN);
   return Boolean(
     range &&
     DAY_OF_WEEK_TOKENS[range[1]] &&

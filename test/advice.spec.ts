@@ -418,6 +418,7 @@ describe("additional instruction rule inventory", () => {
     expect(realizeAdviceFramesText([frame], "th")).toBe("หลีกเลี่ยงตา และ ปาก");
 
     frame.args.push({ role: AdviceArgumentRole.Object, text: "skin", i18n: { th: "ผิวหนัง" } });
+    expect(realizeAdviceFramesText([frame], "en")).toBe("Avoid eyes, mouth and skin");
     expect(realizeAdviceFramesText([frame], "th")).toBe("หลีกเลี่ยงตา, ปาก และ ผิวหนัง");
   });
 

@@ -4,7 +4,7 @@ import { inferMedicationLocale } from "./locale-detection";
 import { getSuggestLocaleAdapter } from "./suggest-locale-adapter";
 import { listSupportedBodySiteText } from "./body-site-lookup";
 import { listMedicationInstructionActions, medicationInstructionActionLocaleRealizerConfig } from "./instruction-action-terminology";
-import { listMedicationLocaleLexemes } from "./lexer/locale";
+import { listMedicationLocaleLexemes, medicationLexerLocalePackRevision } from "./lexer/locale";
 import {
   EYE_SITE_ABBREVIATIONS,
   FOOD_EVENT_ALIASES,
@@ -59,13 +59,17 @@ interface UnitRoutePreference {
 
 const DEFAULT_LIMIT = 10;
 
-const SUGGESTION_LEXEME_CACHE = new Map<string, ReturnType<typeof listMedicationLocaleLexemes>>();
+const SUGGESTION_LEXEME_CACHE = new Map<string, {
+  revision: number;
+  lexemes: ReturnType<typeof listMedicationLocaleLexemes>;
+}>();
 function suggestionLexemes(locale: string) {
   const key = baseLanguageTag(locale) ?? locale.toLowerCase();
+  const revision = medicationLexerLocalePackRevision();
   const cached = SUGGESTION_LEXEME_CACHE.get(key);
-  if (cached) return cached;
+  if (cached?.revision === revision) return cached.lexemes;
   const lexemes = listMedicationLocaleLexemes(locale);
-  SUGGESTION_LEXEME_CACHE.set(key, lexemes);
+  SUGGESTION_LEXEME_CACHE.set(key, { revision, lexemes });
   return lexemes;
 }
 const DEFAULT_SUGGESTION_ACTIONS = listMedicationInstructionActions();
@@ -710,7 +714,7 @@ function directBodySiteSuggestions(
     }
   }
   const localeCustomSites = options?.siteCodeMap;
-  if (localeCustomSites) {
+  if (localeCustomSites && localeAdapter.preferRawSiteMapSurfaces) {
     for (const surface in localeCustomSites) {
       if (!Object.prototype.hasOwnProperty.call(localeCustomSites, surface)) continue;
       const definition = localeCustomSites[surface];
@@ -729,7 +733,10 @@ function directBodySiteSuggestions(
     for (const surface in customSites) {
       if (!Object.prototype.hasOwnProperty.call(customSites, surface)) continue;
       const definition = customSites[surface];
-      if (add(surface) || (definition.text && add(definition.text))) return suggestions;
+      const localized = localizedValue(definition.i18n, locale);
+      if (add(surface) || (definition.text && add(definition.text)) || (localized && add(localized))) {
+        return suggestions;
+      }
       for (const alias of definition.aliases ?? []) {
         if (add(alias)) return suggestions;
       }
@@ -1252,7 +1259,7 @@ function semanticTrajectorySuggestions(
   if (topical && !clause.site) {
     const directSite = medicationInstructionActionLocaleRealizerConfig(
       actionDefinition?.realizerConfig,
-      "en"
+      locale
     )?.directSiteObject === true;
     push(localeAdapter.appendAffectedArea(normalized, directSite));
   }

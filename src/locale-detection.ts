@@ -22,7 +22,7 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
 
 export function shouldJoinAdjacentSourceTokens(left: string, right: string): boolean {
   return DETECTORS.some((detector) =>
-    detector.joinsAdjacentSourceTokens === true && (detector.test(left) || detector.test(right))
+    detector.joinsAdjacentSourceTokens === true && detector.test(left) && detector.test(right)
   );
 }
 

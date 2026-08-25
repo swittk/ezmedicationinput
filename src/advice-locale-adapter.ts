@@ -53,12 +53,9 @@ const EN_ADAPTER: AdviceLocaleAdapter = {
   siteArgument(text) { return text; },
   joinArguments(texts) {
     if (!texts.length) return undefined;
-    let text = "";
-    for (let index = 0; index < texts.length; index += 1) {
-      if (index > 0) text += index === 1 ? " and " : ", ";
-      text += texts[index];
-    }
-    return text;
+    if (texts.length === 1) return texts[0];
+    if (texts.length === 2) return `${texts[0]} and ${texts[1]}`;
+    return `${texts.slice(0, -1).join(", ")} and ${texts[texts.length - 1]}`;
   },
   realize({ frame, predicate, realizerProfile, argText, modalityText, relationText }) {
     if (frame.polarity === AdvicePolarity.Negate) {
