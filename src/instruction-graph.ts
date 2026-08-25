@@ -839,7 +839,10 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     if (objectEnd > argumentStart) pushArgument(args,
       argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options));
   }
-  const tailStart = amountIndex !== undefined ? Math.min(segmentEnd, amountIndex + 2)
+  const amountEnd = amount?.span
+    ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
+    : undefined;
+  const tailStart = amountEnd !== undefined ? Math.min(segmentEnd, amountEnd)
     : relIndex >= 0 ? relIndex + 1 : segmentEnd;
   if (tailStart < segmentEnd) {
     const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
@@ -910,7 +913,7 @@ function quantifiedEntityArgument(
   let entity: AdviceArgument | undefined;
   if (quantity?.span) {
     const quantityStart = partIndexForAbsoluteSourceStart(parts, quantity.span.start, offset);
-    const quantityEnd = quantityStart !== undefined ? quantityStart + 2 : undefined;
+    const quantityEnd = partIndexAfterAbsoluteSourceEnd(parts, quantity.span.end, offset);
     if (quantityStart !== undefined && quantityStart > start) {
       entity = argumentFromParts(parts, start, quantityStart, input, role, options);
     }

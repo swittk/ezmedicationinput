@@ -69,6 +69,27 @@ describe("procedural instruction graph", () => {
     });
   });
 
+  it("advances argument parsing past complete multi-token quantity units", () => {
+    const measured = parseInstructionActions("measure 1 cm ribbon cream")[0];
+    expect(measured?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "amount",
+        quantity: { value: 1, unit: "cm ribbon" }
+      }),
+      expect.objectContaining({ role: "material", conceptId: "cream", text: "cream" })
+    ]));
+
+    const mixed = parseInstructionActions("mix 1 fingertip unit ointment water")[0];
+    expect(mixed?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "theme",
+        conceptId: "ointment",
+        quantity: { value: 1, unit: "FTU" }
+      }),
+      expect.objectContaining({ role: "substance", conceptId: "water" })
+    ]));
+  });
+
   it("models workflow duration and time arguments without contaminating medication timing", () => {
     const leave = parseSig("leave on for 10 minutes then rinse");
     const leaveGraph = leave.meta.canonical.clauses[0]?.instructionGraph;

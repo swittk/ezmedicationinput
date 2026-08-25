@@ -52,8 +52,13 @@ describe("lex normalization", () => {
 
   it("recognizes compact Thai day ranges with the longer จนถึง connector", () => {
     const tokens = lexInput("จันทร์จนถึงศุกร์");
-    expect(tokens.map((token) => token.original).join("")).toBe("จันทร์จนถึงศุกร์");
-    expect(resolveDayMeaning("จันทร์จนถึงศุกร์")).toEqual([
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).toMatchObject({
+      kind: LexKind.Word,
+      original: "จันทร์จนถึงศุกร์",
+      derived: true
+    });
+    expect(resolveDayMeaning(tokens[0].lower)).toEqual([
       "mon", "tue", "wed", "thu", "fri"
     ]);
   });
