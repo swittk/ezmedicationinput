@@ -245,7 +245,8 @@ function scheduleOnlyAdministrationContinuation(
   tokens: Token[],
   connectorIndex: number,
   segmentStart: number,
-  options?: ParseOptions
+  options?: ParseOptions,
+  inheritedAdministrationHead = false
 ): boolean {
   const connector = tokens[connectorIndex];
   const first = tokens[connectorIndex + 1];
@@ -265,7 +266,10 @@ function scheduleOnlyAdministrationContinuation(
   const prefixText = input.slice(segmentStart, connector.sourceStart).replace(/[,;]\s*$/u, "").trim();
   if (!prefixText) return false;
   const prefix = parseClauseState(prefixText, options);
-  if (!hasAdministrationHead(prefix)) return false;
+  if (!hasAdministrationHead(prefix)) {
+    if (!inheritedAdministrationHead) return false;
+    if (findUnparsedTokenGroups(prefix).length || !hasMeaningfulSchedule(prefix)) return false;
+  }
   if (connectorLower === "then") return true;
   const prefixSchedule = prefix.primaryClause.schedule;
   return Boolean(
@@ -371,6 +375,7 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
   const proceduralActions = parseInstructionActions(input, 0, options);
   const segments: HpsgSigSegment[] = [];
   let start = 0;
+  let inheritedAdministrationContinuation = false;
   let parenDepth = 0;
   let scannedOffset = 0;
 
@@ -404,24 +409,32 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
     }
     const nextToken = tokens[index + 1];
     if (token.original === "," && nextToken) {
-      if (
-        scheduleOnlyAdministrationContinuation(input, tokens, index + 1, start, options) ||
-        doseBearingAdministrationContinuation(input, tokens, index + 1, start, options)
-      ) {
+      const scheduleContinuation = scheduleOnlyAdministrationContinuation(
+        input, tokens, index + 1, start, options, inheritedAdministrationContinuation
+      );
+      const doseContinuation = !scheduleContinuation &&
+        doseBearingAdministrationContinuation(input, tokens, index + 1, start, options);
+      if (scheduleContinuation || doseContinuation) {
         pushSegment(segments, input, start, token.sourceStart);
         start = nextToken.sourceEnd;
+        inheritedAdministrationContinuation = true;
         index += 1;
         scannedOffset = nextToken.sourceEnd;
         continue;
       }
-    } else if (
-      scheduleOnlyAdministrationContinuation(input, tokens, index, start, options) ||
-      doseBearingAdministrationContinuation(input, tokens, index, start, options)
-    ) {
-      pushSegment(segments, input, start, token.sourceStart);
-      start = token.sourceEnd;
-      scannedOffset = token.sourceEnd;
-      continue;
+    } else {
+      const scheduleContinuation = scheduleOnlyAdministrationContinuation(
+        input, tokens, index, start, options, inheritedAdministrationContinuation
+      );
+      const doseContinuation = !scheduleContinuation &&
+        doseBearingAdministrationContinuation(input, tokens, index, start, options);
+      if (scheduleContinuation || doseContinuation) {
+        pushSegment(segments, input, start, token.sourceStart);
+        start = token.sourceEnd;
+        inheritedAdministrationContinuation = true;
+        scannedOffset = token.sourceEnd;
+        continue;
+      }
     }
 
     const isBoundary =
@@ -434,6 +447,7 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
     }
     pushSegment(segments, input, start, token.sourceStart);
     start = token.sourceEnd;
+    inheritedAdministrationContinuation = false;
     scannedOffset = token.sourceEnd;
   }
 
