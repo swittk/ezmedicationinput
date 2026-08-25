@@ -6,7 +6,10 @@
         "pain",
         "ache",
         "aches",
-        "pains"
+        "pains",
+        "painful",
+        "hurt",
+        "hurts"
       ],
       "definition": {
         "coding": {
@@ -20,6 +23,10 @@
           "ปวด"
         ],
         "i18n": {
+          "th": "ปวด"
+        },
+        "conditionI18n": {
+          "en": "painful",
           "th": "ปวด"
         }
       }

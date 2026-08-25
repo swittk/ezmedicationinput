@@ -1,5 +1,6 @@
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { mergeI18nRecords } from "./fhir-translations";
+import { resolveSymptomDefinition } from "./symptom-terminology";
 import { objectEntries } from "./utils/object";
 import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
@@ -7,6 +8,7 @@ import {
   BODY_SITE_LOCATIVE_RELATIONS,
   BODY_SITE_SPATIAL_RELATION_CODINGS,
   getBodySiteRelationRealization,
+  listBodySiteRelationDefinitions,
   normalizeBodySiteRelation
 } from "./relation-terminology";
 import type { BodySiteLocativeRelation } from "./relation-terminology";
@@ -50,12 +52,17 @@ const DEFAULT_SITE_SYNONYM_KEYS = (() => {
 export type BodySiteGrammarKind = "nominal" | "partitive" | "locative";
 export type { BodySiteLocativeRelation };
 
+export type BodySiteQualifierFeatures =
+  | { kind: "symptom"; relation: string; text: string; canonical: string; coding?: FhirCoding; i18n?: Record<string, string> }
+  | { kind: "site"; relation: string; text: string; targetText: string; targetCoding?: FhirCoding };
+
 export interface BodySiteNominalFeatures {
   kind: "nominal";
   text: string;
   canonical: string;
   coding?: FhirCoding;
   article: "definite" | "bare";
+  qualifier?: BodySiteQualifierFeatures;
 }
 
 export interface BodySitePartitiveFeatures {
@@ -63,12 +70,15 @@ export interface BodySitePartitiveFeatures {
   part: string;
   relationKey?: string;
   whole: BodySiteNominalFeatures;
+  attributive?: boolean;
+  qualifier?: BodySiteQualifierFeatures;
 }
 
 export interface BodySiteLocativeFeatures {
   kind: "locative";
   relation: BodySiteLocativeRelation;
   target: BodySiteNominalFeatures | BodySitePartitiveFeatures;
+  qualifier?: BodySiteQualifierFeatures;
 }
 
 export type BodySiteFeatureStructure =
@@ -547,6 +557,25 @@ function parseBodySiteFeatures(
     };
   }
 
+  if (
+    words.length > 1 &&
+    (firstWord === "left" || firstWord === "right") &&
+    !lookupDefinitionForCanonical(normalized, customSiteMap)
+  ) {
+    const wholeText = words.slice(1).join(" ");
+    const wholeCanonical = normalizeBodySiteKey(wholeText);
+    const wholeDefinition = lookupDefinitionForCanonical(wholeCanonical, customSiteMap);
+    if (wholeDefinition?.coding?.code || wholeDefinition?.routeHint) {
+      return {
+        kind: "partitive",
+        part: `${firstWord} side`,
+        relationKey: "side",
+        whole: buildNominalFeatures(wholeText, wholeCanonical, undefined, customSiteMap),
+        attributive: true
+      };
+    }
+  }
+
   return buildNominalFeatures(text, normalized, coding, customSiteMap);
 }
 
@@ -563,6 +592,12 @@ function renderBodySiteObject(
       return `${surface} ${renderBodySiteObject(features.target)}`;
     }
     case "partitive":
+      if (features.attributive) {
+        const side = features.part.split(/\s+/u)[0] ?? features.part;
+        return features.whole.article === "bare"
+          ? `${side} ${features.whole.text}`
+          : `the ${side} ${features.whole.text}`;
+      }
       return `${
         features.part.startsWith("both") || features.part.startsWith("bilateral")
           ? features.part
@@ -578,7 +613,9 @@ function featureDisplayText(features: BodySiteFeatureStructure): string {
     case "locative":
       return `${features.relation} ${featureDisplayText(features.target)}`;
     case "partitive":
-      return `${features.part} of ${features.whole.text}`;
+      return features.attributive
+        ? `${features.part.split(/\s+/u)[0] ?? features.part} ${features.whole.text}`
+        : `${features.part} of ${features.whole.text}`;
     case "nominal":
       return features.text;
   }
@@ -677,6 +714,126 @@ function inferPreferredPreposition(
   return undefined;
 }
 
+function withBodySiteQualifier(
+  features: BodySiteFeatureStructure,
+  qualifier: BodySiteQualifierFeatures
+): BodySiteFeatureStructure {
+  return { ...features, qualifier } as BodySiteFeatureStructure;
+}
+
+interface BodySiteQualifierMatch {
+  relation: string;
+  target: "symptom" | "site";
+  start: number;
+  end: number;
+}
+
+interface BodySiteQualifierMatcher {
+  relation: string;
+  target: "symptom" | "site";
+  marker: string;
+}
+
+const BODY_SITE_QUALIFIER_MATCHERS: readonly BodySiteQualifierMatcher[] = (() => {
+  const matchers: BodySiteQualifierMatcher[] = [];
+  const seen = new Set<string>();
+  for (const definition of listBodySiteRelationDefinitions()) {
+    const target = definition.grammar.qualifierTarget;
+    if (!target) continue;
+    const surfaces = [
+      definition.canonical,
+      ...definition.aliases,
+      definition.realization.en?.surface,
+      definition.realization.th?.surface
+    ];
+    for (const surface of surfaces) {
+      const normalizedSurface = surface ? normalizeBodySiteKey(surface) : "";
+      if (!normalizedSurface) continue;
+      const key = `${definition.canonical}|${target}|${normalizedSurface}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matchers.push({
+        relation: definition.canonical,
+        target,
+        marker: ` ${normalizedSurface} `
+      });
+    }
+  }
+  return matchers.sort((left, right) => right.marker.length - left.marker.length);
+})();
+
+function matchBodySiteQualifier(lookupCanonical: string): BodySiteQualifierMatch | undefined {
+  let best: BodySiteQualifierMatch | undefined;
+  for (const matcher of BODY_SITE_QUALIFIER_MATCHERS) {
+    const index = lookupCanonical.lastIndexOf(matcher.marker);
+    if (index <= 0 || index + matcher.marker.length >= lookupCanonical.length) continue;
+    const candidate: BodySiteQualifierMatch = {
+      relation: matcher.relation,
+      target: matcher.target,
+      start: index,
+      end: index + matcher.marker.length
+    };
+    if (!best || candidate.start > best.start ||
+        candidate.start === best.start && candidate.end > best.end) best = candidate;
+  }
+  return best;
+}
+
+function qualifiedBodySitePhrase(
+  lookupCanonical: string,
+  customSiteMap?: Record<string, BodySiteDefinition>,
+  context?: BodySitePhraseContext
+): ResolvedBodySitePhrase | undefined {
+  const match = matchBodySiteQualifier(lookupCanonical);
+  if (!match) return undefined;
+  const base = resolveBodySitePhrase(lookupCanonical.slice(0, match.start), customSiteMap, context);
+  if (!base) return undefined;
+  const targetText = lookupCanonical.slice(match.end);
+  const realization = getBodySiteRelationRealization(match.relation, "en");
+  if (!realization) return undefined;
+
+  if (match.target === "symptom") {
+    const symptom = resolveSymptomDefinition(targetText);
+    if (!symptom) return undefined;
+    const conditionText = symptom.conditionI18n?.en ?? symptom.text?.toLowerCase() ?? targetText;
+    const qualifier: BodySiteQualifierFeatures = {
+      kind: "symptom", relation: match.relation, text: targetText,
+      canonical: symptom.text?.toLowerCase() ?? targetText,
+      coding: symptom.coding ? { ...symptom.coding } : undefined,
+      i18n: { en: conditionText, ...(symptom.i18n ?? {}), ...(symptom.conditionI18n ?? {}) }
+    };
+    return {
+      ...base,
+      lookupCanonical,
+      resolutionCanonical: `${base.resolutionCanonical} ${match.relation} ${qualifier.canonical}`,
+      canonical: `${base.canonical} ${match.relation} ${qualifier.canonical}`,
+      displayText: `${base.displayText} ${realization.surface} ${conditionText}`,
+      features: withBodySiteQualifier(base.features, qualifier),
+      englishObjectText: `${base.englishObjectText} ${realization.surface} ${conditionText}`
+    };
+  }
+
+  const target = resolveBodySitePhrase(targetText, customSiteMap, context);
+  if (!target) return undefined;
+  if (base.resolutionCanonical === target.resolutionCanonical) return base;
+  if (!(base.coding || base.definition || base.spatialRelation)) return undefined;
+  if (!(target.coding || target.definition || target.spatialRelation)) return undefined;
+  const qualifier: BodySiteQualifierFeatures = {
+    kind: "site", relation: match.relation, text: target.displayText,
+    targetText: target.displayText,
+    targetCoding: target.coding ? { ...target.coding } : undefined
+  };
+  return {
+    ...base,
+    lookupCanonical,
+    resolutionCanonical: `${base.resolutionCanonical} ${match.relation} ${target.resolutionCanonical}`,
+    canonical: `${base.canonical} ${match.relation} ${target.canonical}`,
+    displayText: `${base.displayText} ${realization.surface} ${target.displayText}`,
+    features: withBodySiteQualifier(base.features, qualifier),
+    englishObjectText: `${base.englishObjectText} ${realization.surface} ${target.englishObjectText}`
+  };
+}
+
 export function resolveBodySitePhrase(
   text: string,
   customSiteMap?: Record<string, BodySiteDefinition>,
@@ -686,8 +843,10 @@ export function resolveBodySitePhrase(
   if (!trimmed) {
     return undefined;
   }
-
   const lookupCanonical = normalizeBodySiteKey(trimmed);
+  const qualified = qualifiedBodySitePhrase(lookupCanonical, customSiteMap, context);
+  if (qualified) return qualified;
+
   const contextualCanonical = resolveContextualBodySiteAlias(lookupCanonical, context);
   const displaySourceText = contextualCanonical ?? trimmed;
   const displayText = normalizeSiteDisplayText(displaySourceText, customSiteMap);
@@ -708,9 +867,17 @@ export function resolveBodySitePhrase(
     !terminalInheritanceIsLicensed(canonical)
     ? undefined
     : longestTerminalBodySiteDefinition(canonical, customSiteMap);
-  const definition = directDefinition ?? terminal?.definition;
-  const coding = buildBodySiteCoding(definition);
+  const baseDefinition = directDefinition ?? terminal?.definition;
   const finalDisplayText = directDefinition?.text ?? displayText;
+  let inheritedDefinition: BodySiteDefinition | undefined;
+  if (!baseDefinition) {
+    const candidateFeatures = parseBodySiteFeatures(finalDisplayText, undefined, customSiteMap);
+    if (candidateFeatures.kind === "partitive" && candidateFeatures.attributive) {
+      inheritedDefinition = lookupDefinitionForCanonical(candidateFeatures.whole.canonical, customSiteMap);
+    }
+  }
+  const definition = baseDefinition ?? inheritedDefinition;
+  const coding = buildBodySiteCoding(definition);
   const features = parseBodySiteFeatures(finalDisplayText, coding, customSiteMap);
   const spatialRelation =
     definition?.spatialRelation ??

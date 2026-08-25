@@ -424,6 +424,21 @@
         "sleep",
         "นอน"
       ]
+    },
+    {
+      "code": "dissolved",
+      "role": "result",
+      "display": "dissolved",
+      "i18n": {
+        "th": "ละลายหมด"
+      },
+      "aliases": [
+        "dissolved",
+        "fully dissolved",
+        "completely dissolved",
+        "ละลายหมด",
+        "ละลายจนหมด"
+      ]
     }
   ]
 }

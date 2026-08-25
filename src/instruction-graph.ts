@@ -25,6 +25,7 @@ import {
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
+  INSTRUCTION_START_WORDS,
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
@@ -1001,6 +1002,15 @@ function buildActionFrame(
   const conditionalTail = relationHasGrammarFeature(rawRelation, "conditionalTail");
   const secondaryConditionalTail = relationHasGrammarFeature(nextRelation, "conditionalTail");
   const relation = conditionalTail ? undefined : rawRelation;
+  const secondaryActivityTarget = nextRelationIndex >= 0
+    ? resolveMedicationInstructionAction(key(parts[nextRelationIndex + 1]), options)
+    : undefined;
+  const secondaryActivityRelation = nextRelationIndex >= 0 &&
+    secondaryActivityTarget &&
+    relationHasGrammarFeature(nextRelation, "activityFallback")
+      ? nextRelation
+      : undefined;
+  const frameRelation = secondaryActivityRelation ?? relation;
   const amount = definition.acceptsAmount
     ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
     : undefined;
@@ -1019,6 +1029,11 @@ function buildActionFrame(
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
+  if (secondaryActivityRelation && nextRelationIndex >= 0) {
+    pushArgument(args, argumentFromParts(
+      parts, nextRelationIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options
+    ));
+  }
   if (definition.argumentParser === "preposed-duration" &&
       !args.some((arg) => arg.role === AdviceArgumentRole.Duration)) {
     return undefined;
@@ -1061,7 +1076,7 @@ function buildActionFrame(
       } : undefined,
       codings
     },
-    relation,
+    relation: frameRelation,
     args,
     span,
     sourceText: input.slice(span.start - offset, span.end - offset),
@@ -1313,6 +1328,13 @@ export function parseInstructionActions(
       if (ACTION_SEQUENCE_MARKERS.has(currentKey)) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
         end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ? index - 1 : index;
+        break;
+      }
+      if (
+        /^[,;:]$/u.test(currentKey) &&
+        INSTRUCTION_START_WORDS.has(key(parts[index + 1]))
+      ) {
+        end = index;
         break;
       }
       if (
@@ -1995,15 +2017,28 @@ function canonicalPrimaryAdministrationSpan(
     .filter((frame) => frame.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(frame, clause))
     .slice()
     .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)[0];
-  if (semantic) return { start: semantic.span.start, end: semantic.span.end };
-  const spans: TextRange[] = [];
+  if (semantic) {
+    let best: TextRange | undefined;
+    for (const evidence of clause.evidence) {
+      if (evidence.rule !== "hpsg.lex.method") continue;
+      for (const span of evidence.spans) {
+        if (span.start < semantic.span.start || semantic.span.end < span.end) continue;
+        const candidate = { start: span.start, end: span.end };
+        if (!best ||
+            candidate.end - candidate.start < best.end - best.start ||
+            candidate.end - candidate.start === best.end - best.start && candidate.start < best.start) {
+          best = candidate;
+        }
+      }
+    }
+    return best ?? { start: semantic.span.start, end: semantic.span.end };
+  }
   for (const evidence of clause.evidence) {
     if (evidence.rule !== "hpsg.lex.method") continue;
-    for (const span of evidence.spans) spans.push({ start: span.start, end: span.end });
+    const span = evidence.spans[0];
+    if (span) return { start: span.start, end: span.end };
   }
-  if (!spans.length) return undefined;
-  spans.sort((left, right) => left.start - right.start || left.end - right.end);
-  return spans[0];
+  return undefined;
 }
 
 export function buildInstructionGraph(
@@ -2222,9 +2257,15 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   const withTarget = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement")
     ? relationTarget
     : undefined;
+  const activityRelation = c.activity && relationHasGrammarFeature(c.frame.relation, "activityFallback")
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+    : undefined;
+  const activitySuffix = activityRelation && c.activity
+    ? (c.thai ? `${activityRelation}${c.activity}` : ` ${activityRelation} ${c.activity}`)
+    : "";
   return c.thai
-    ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${c.duration ? ` ${c.duration}` : ""}${withTarget ? `ร่วมกับ${withTarget}` : ""}`
-    : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}${withTarget ? ` with ${withTarget}` : ""}`;
+    ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${c.duration ? ` ${c.duration}` : ""}${withTarget ? `ร่วมกับ${withTarget}` : ""}${activitySuffix}`
+    : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}${withTarget ? ` with ${withTarget}` : ""}${activitySuffix}`;
 };
 const SOURCE_FAITHFUL_REALIZER: ActionRealizer = (c) => {
   const sourceIsThai = /[\u0E00-\u0E7F]/.test(c.frame.sourceText);
@@ -2397,14 +2438,20 @@ const DURATION_REALIZER: ActionRealizer = (c) => c.thai
   ? `${c.label}${c.duration ? ` ${c.duration}` : ""}`
   : `${c.label}${c.duration ? ` for ${c.duration}` : ""}`;
 const DURATION_ACTIVITY_REALIZER: ActionRealizer = (c) => {
-  if (!c.activity) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
-  if (relationHasSemanticClass(c.frame.relation, "interval")) {
+  const target = c.activity ?? c.result;
+  if (!target) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
+  if (c.frame.relation) {
     const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    if (relationHasSemanticClass(c.frame.relation, "interval")) {
+      return c.thai
+        ? `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation}${target}`
+        : `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation} ${target}`;
+    }
     return c.thai
-      ? `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation}${c.activity}`
-      : `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation} ${c.activity}`;
+      ? `${c.label}${c.duration ? ` ${c.duration}` : ""}${relation}${target}`
+      : `${c.label}${c.duration ? ` ${c.duration}` : ""} ${relation} ${target}`;
   }
-  return `${c.label}${c.duration ? ` ${c.duration}` : ""} ${c.activity}`;
+  return `${c.label}${c.duration ? ` ${c.duration}` : ""} ${target}`;
 };
 const ACTIVITY_REALIZER: ActionRealizer = (c) => {
   const activityArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Activity);
@@ -2794,6 +2841,29 @@ export function instructionGraphRichPrimaryAction(
     return (rich || suppliesMissingHead) && (!dose || matchesDose(action));
   });
 }
+
+export function instructionGraphRoundTripPrimaryAction(
+  clause: CanonicalSigClause
+): AdviceFrame | undefined {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  if (!graph || !primary) return undefined;
+  return graph.actions.find((action) => {
+    if (action.span.end <= primary.start || action.span.start >= primary.end) return false;
+    const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
+    const hasRichArgument = action.args.some((arg) =>
+      [
+        AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
+        AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+        AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+      ].indexOf(arg.role) >= 0 ||
+      ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+        /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
+    );
+    return hasLocalRelation || hasRichArgument;
+  });
+}
+
 
 export function instructionGraphPrimaryAdministrationModality(
   clause: CanonicalSigClause

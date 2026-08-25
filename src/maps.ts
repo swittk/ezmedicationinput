@@ -575,7 +575,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     },
     {
       names: ["tongue", "tongues"],
-      definition: { coding: { code: "21974007", display: "Tongue" }, routeHint: RouteCode["Sublingual route"] }
+      definition: {
+        coding: { code: "21974007", display: "Tongue" },
+        i18n: { th: "ลิ้น" },
+        routeHint: RouteCode["Sublingual route"]
+      }
     },
     {
       names: ["lip", "lips"],

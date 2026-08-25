@@ -164,6 +164,15 @@ describe("declarative relation terminology", () => {
     });
   });
 
+  it("owns body-site qualifier classes and their localized surfaces declaratively", () => {
+    expect(getBodySiteRelationDefinition("at")?.grammar.qualifierTarget).toBe("site");
+    expect(getBodySiteRelationDefinition("where")?.grammar.qualifierTarget).toBe("symptom");
+    expect(getBodySiteRelationRealization("at", "en")?.surface).toBe("at");
+    expect(getBodySiteRelationRealization("at", "th")?.surface).toBe("ตรง");
+    expect(getBodySiteRelationRealization("where", "en")?.surface).toBe("where");
+    expect(getBodySiteRelationRealization("where", "th")?.surface).toBe("ที่");
+  });
+
   it("owns trustworthy body-site spatial codings declaratively", () => {
     expect(getBodySiteRelationDefinition("under")?.coding).toMatchObject({
       system: "http://snomed.info/sct",

@@ -1,5 +1,5 @@
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
-import { resolveBodySitePhrase } from "./body-site-grammar";
+import { resolveBodySitePhrase, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
   getUniqueAdviceRelationByGrammarFeature,
@@ -28,6 +28,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  instructionGraphRoundTripPrimaryAction,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
@@ -1413,9 +1414,16 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   ) {
     return undefined;
   }
-  const translated = perTargetSiteThai(clause) ?? clause.site?.i18n?.th ?? clause.site?.coding?.i18n?.th ?? (text
-    ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
-    : translateSpatialSiteThai(undefined, clause.site?.spatialRelation));
+  const resolvedSite = text ? resolveBodySitePhrase(text) : undefined;
+  const structuralTranslation = clause.site?.spatialRelation || resolvedSite?.features.qualifier
+    ? (text
+      ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
+      : translateSpatialSiteThai(undefined, clause.site?.spatialRelation))
+    : undefined;
+  const translated = perTargetSiteThai(clause) ?? structuralTranslation ??
+    clause.site?.i18n?.th ?? clause.site?.coding?.i18n?.th ?? (text
+      ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
+      : translateSpatialSiteThai(undefined, clause.site?.spatialRelation));
   if (!translated) {
     return undefined;
   }
@@ -1488,6 +1496,21 @@ function translateSpatialSiteThai(
     : `${realization.surface}${target}`;
 }
 
+function appendBodySiteQualifierThai(
+  base: string,
+  qualifier: BodySiteQualifierFeatures | undefined
+): string {
+  if (!qualifier) return base;
+  const realization = getBodySiteRelationRealization(qualifier.relation, "th");
+  if (!realization) return base;
+  const relation = realization.surface;
+  if (qualifier.kind === "symptom") {
+    return `${base}${relation}${qualifier.i18n?.th ?? qualifier.text}`;
+  }
+  const target = translateSiteThai(qualifier.targetText, qualifier.targetCoding?.code) ?? qualifier.targetText;
+  return `${base}${relation}${target}`;
+}
+
 function translateSiteThai(
   site: string | undefined,
   code?: string,
@@ -1503,25 +1526,28 @@ function translateSiteThai(
   if (!normalized) {
     return site;
   }
+  const resolvedPhrase = resolveBodySitePhrase(site);
+  const qualifier = resolvedPhrase?.features.qualifier;
+  const qualified = (value: string): string => appendBodySiteQualifierThai(value, qualifier);
   const spatial = translateSpatialSiteThai(site, spatialRelation);
   if (spatial) {
-    return spatial;
+    return qualified(spatial);
   }
   if (code) {
     const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
     if (translatedByCode) {
-      return translatedByCode;
+      return qualified(translatedByCode);
     }
   }
   const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized];
   if (definitionTranslation) {
-    return definitionTranslation;
+    return qualified(definitionTranslation);
   }
   const direct = THAI_SITE_TRANSLATIONS[normalized];
   if (direct) {
-    return direct;
+    return qualified(direct);
   }
-  return site;
+  return qualified(site);
 }
 
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1934,9 +1960,9 @@ function formatLongThai(
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const richPrimaryGraphAction = options?.realizationMode !== "roundtrip"
-    ? instructionGraphRichPrimaryAction(clause)
-    : undefined;
+  const richPrimaryGraphAction = options?.realizationMode === "roundtrip"
+    ? instructionGraphRoundTripPrimaryAction(clause)
+    : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
     ? realizeInstructionAction(richPrimaryGraphAction, "th")
     : undefined;
@@ -2122,9 +2148,21 @@ function formatLongThai(
         })
       : undefined;
     const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
-    return wholeGraphText ?? (
-      [leadingInstructionText, trailingInstructionText].filter(Boolean).join(" ").trim() || `${verb}.`
-    );
+    const parts: string[] = [];
+    const normalizedInstruction = (value: string): string =>
+      value.toLowerCase().replace(/[\s,;:.()]+/gu, " ").trim();
+    for (const value of [
+      leadingInstructionText, wholeGraphText, directInstruction, graphInstructionText, fallbackPatientInstruction
+    ]) {
+      if (!value) continue;
+      const normalized = normalizedInstruction(value);
+      if (parts.some((existing) => {
+        const candidate = normalizedInstruction(existing);
+        return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+      })) continue;
+      parts.push(value);
+    }
+    return parts.join(" ").trim() || `${verb}.`;
   }
 
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);

@@ -1037,7 +1037,8 @@
       },
       "aliases": [
         "drink",
-        "ดื่ม"
+        "ดื่ม",
+        "drinking"
       ],
       "procedural": false,
       "acceptsAmount": true,

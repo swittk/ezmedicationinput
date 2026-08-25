@@ -67,6 +67,7 @@ export interface AdviceRelationDefinition {
 
 export interface BodySiteRelationGrammarFeatures {
   externalSiteLocativePrefix?: boolean;
+  qualifierTarget?: "symptom" | "site";
 }
 
 export interface BodySiteRelationRealization {

@@ -15,6 +15,7 @@ import {
   TextRange
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
+import { resolveSymptomDefinition } from "./symptom-terminology";
 import {
   ACTION_SEQUENCE_MARKERS,
   localizeAdviceRelation,
@@ -961,6 +962,23 @@ function classifyArgument(text: string): AdviceArgument {
     );
   }
 
+  const symptom = resolveSymptomDefinition(normalized);
+  if (symptom) {
+    const coding = symptom.coding ? { ...symptom.coding } : undefined;
+    return {
+      role: AdviceArgumentRole.Object,
+      text: cleaned,
+      normalized: symptom.text?.toLowerCase() ?? normalized,
+      conceptId: coding?.code ?? symptom.text ?? normalized,
+      coding,
+      codings: coding ? [coding] : undefined,
+      i18n: {
+        en: symptom.text ? symptom.text.charAt(0).toLowerCase() + symptom.text.slice(1) : cleaned,
+        ...(symptom.i18n ?? {})
+      }
+    };
+  }
+
   const parts = normalized.split(" ");
   if (parts.length >= 2) {
     const first = parts[0];
@@ -1756,8 +1774,11 @@ const AVOIDANCE_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, a
 
 const EFFECT_ADVICE_PREDICATE_REALIZER: AdvicePredicateRealizer = ({ frame, argText, modalityText }) => {
   const effectiveModality = modalityText ?? capitalizeSentence(AdviceModality.May);
-  const predicate = `${effectiveModality} ${frame.predicate.lemma}`;
-  return argText ? `${predicate} ${argText}` : predicate;
+  const thai = /[\u0E00-\u0E7F]/u.test(frame.predicate.lemma);
+  const predicate = thai
+    ? `${effectiveModality}${frame.predicate.lemma}`
+    : `${effectiveModality} ${frame.predicate.lemma}`;
+  return argText ? `${predicate}${thai ? "" : " "}${argText}` : predicate;
 };
 
 const ADVICE_PREDICATE_REALIZERS: Record<string, AdvicePredicateRealizer> = {

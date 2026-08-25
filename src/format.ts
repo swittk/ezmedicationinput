@@ -13,6 +13,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  instructionGraphRoundTripPrimaryAction,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
@@ -1225,22 +1226,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
         [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ")
       )
     : undefined;
-  const primaryGraphAction = roundTrip && clause.instructionGraph?.primaryAdministrationSpan
-    ? clause.instructionGraph.actions.find((action) => {
-        const primary = clause.instructionGraph?.primaryAdministrationSpan;
-        if (!primary || action.span.end <= primary.start || action.span.start >= primary.end) return false;
-        const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
-        const hasRichArgument = action.args.some((arg) =>
-          [
-            AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
-            AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-            AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
-          ].indexOf(arg.role) >= 0 ||
-          ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
-            /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
-        );
-        return hasLocalRelation || hasRichArgument;
-      })
+  const primaryGraphAction = roundTrip
+    ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
   const instructionPhrases: string[] = [];
   const hasCodedAdditionalInstruction = Boolean(
@@ -1420,7 +1407,17 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
         })
       : undefined;
     const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
-    return wholeGraphText ?? trailingInstructionText ?? `${verb}.`;
+    const parts: string[] = [];
+    for (const value of [wholeGraphText, ...instructionPhrases]) {
+      if (!value) continue;
+      const normalized = normalizeInstruction(value);
+      if (parts.some((existing) => {
+        const candidate = normalizeInstruction(existing);
+        return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+      })) continue;
+      parts.push(value);
+    }
+    return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
     ? undefined

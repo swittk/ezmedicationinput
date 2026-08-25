@@ -67,6 +67,36 @@ export function normalizePeriodRange(
   return { low, high, unit };
 }
 
+const FIXED_PERIOD_SECONDS: Partial<Record<FhirPeriodUnit, number>> = {
+  [FhirPeriodUnit.Second]: 1,
+  [FhirPeriodUnit.Minute]: 60,
+  [FhirPeriodUnit.Hour]: 60 * 60,
+  [FhirPeriodUnit.Day]: 24 * 60 * 60,
+  [FhirPeriodUnit.Week]: 7 * 24 * 60 * 60
+};
+
+/** Normalize a range whose endpoints use different exact-duration units. */
+export function normalizeMixedPeriodRange(
+  low: number,
+  lowUnit: FhirPeriodUnit,
+  high: number,
+  highUnit: FhirPeriodUnit
+): { low: number; high: number; unit: FhirPeriodUnit } | undefined {
+  if (lowUnit === highUnit) {
+    const normalized = normalizePeriodRange(low, high, lowUnit);
+    return normalized.low <= normalized.high ? normalized : undefined;
+  }
+  const lowScale = FIXED_PERIOD_SECONDS[lowUnit];
+  const highScale = FIXED_PERIOD_SECONDS[highUnit];
+  if (!lowScale || !highScale) return undefined;
+  const unit = lowScale <= highScale ? lowUnit : highUnit;
+  const unitScale = FIXED_PERIOD_SECONDS[unit]!;
+  const normalizedLow = Math.round((low * lowScale / unitScale) * 1000) / 1000;
+  const normalizedHigh = Math.round((high * highScale / unitScale) * 1000) / 1000;
+  if (normalizedLow > normalizedHigh) return undefined;
+  return { low: normalizedLow, high: normalizedHigh, unit };
+}
+
 export function periodUnitSuffix(unit: FhirPeriodUnit): string | undefined {
   switch (unit) {
     case FhirPeriodUnit.Minute:

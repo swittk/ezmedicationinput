@@ -755,7 +755,8 @@
     {
       "canonical": "outside",
       "aliases": [
-        "outside"
+        "outside",
+        "outside of"
       ],
       "locative": true,
       "realization": {
@@ -1029,6 +1030,46 @@
           "surface": "ส่วนบนของ",
           "strategy": "prefix"
         }
+      }
+    },
+    {
+      "canonical": "at",
+      "aliases": [
+        "at"
+      ],
+      "realization": {
+        "en": {
+          "surface": "at",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ตรง",
+          "strategy": "prefix",
+          "omitOuterSitePreposition": true
+        }
+      },
+      "grammar": {
+        "qualifierTarget": "site"
+      }
+    },
+    {
+      "canonical": "where",
+      "aliases": [
+        "where"
+      ],
+      "realization": {
+        "en": {
+          "surface": "where",
+          "strategy": "prefix"
+        },
+        "th": {
+          "surface": "ที่",
+          "strategy": "prefix",
+          "omitOuterSitePreposition": true
+        }
+      },
+      "grammar": {
+        "qualifierTarget": "symptom"
       }
     }
   ]

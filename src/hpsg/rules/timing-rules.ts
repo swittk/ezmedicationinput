@@ -23,6 +23,7 @@ import {
   buildPeriodScheduleFeature,
   mapFrequencyAdverb,
   mapIntervalUnit,
+  normalizeMixedPeriodRange,
   normalizePeriodRange,
   normalizePeriodValue,
   parseNumericRange
@@ -314,6 +315,50 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ];
     }
     const unitToken = context.tokens[start + 2];
+    const explicitLowUnit = unitToken && !context.state.consumed.has(unitToken.index)
+      ? mapIntervalUnit(normalizeTokenLower(unitToken))
+      : undefined;
+    const explicitRangeConnectorToken = context.tokens[start + 3];
+    const explicitRangeConnector = explicitRangeConnectorToken &&
+      !context.state.consumed.has(explicitRangeConnectorToken.index)
+      ? normalizeTokenLower(explicitRangeConnectorToken)
+      : undefined;
+    const explicitHighToken = context.tokens[start + 4];
+    const explicitHighLower = explicitHighToken && !context.state.consumed.has(explicitHighToken.index)
+      ? normalizeTokenLower(explicitHighToken)
+      : undefined;
+    const explicitHighUnitToken = context.tokens[start + 5];
+    const explicitHighUnit = explicitHighUnitToken &&
+      !context.state.consumed.has(explicitHighUnitToken.index)
+      ? mapIntervalUnit(normalizeTokenLower(explicitHighUnitToken))
+      : undefined;
+    if (
+      explicitLowUnit && explicitRangeConnector && RANGE_CONNECTORS.has(explicitRangeConnector) &&
+      explicitHighToken && explicitHighLower && explicitHighUnit && explicitHighUnitToken &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(quantityLower) &&
+      /^[0-9]+(?:\.[0-9]+)?$/.test(explicitHighLower)
+    ) {
+      const normalizedRange = normalizeMixedPeriodRange(
+        parseFloat(quantityLower), explicitLowUnit, parseFloat(explicitHighLower), explicitHighUnit
+      );
+      if (normalizedRange) {
+        return [lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.separatedMixedUnitIntervalRange",
+          tokens: [lead, quantity, unitToken, explicitRangeConnectorToken, explicitHighToken, explicitHighUnitToken],
+          synsem: {
+            head: { schedule: {
+              period: normalizedRange.low,
+              periodMax: normalizedRange.high,
+              periodUnit: normalizedRange.unit
+            } },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 14
+        })];
+      }
+    }
     const rangeConnector = unitToken && !context.state.consumed.has(unitToken.index)
       ? normalizeTokenLower(unitToken)
       : undefined;

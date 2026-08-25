@@ -9,10 +9,12 @@ import {
 import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { RouteCode } from "../../types";
+import { AdviceArgumentRole, RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
+  resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
 } from "../../relation-terminology";
 import { inferRouteFromContext } from "../../context";
@@ -27,6 +29,7 @@ import {
 } from "../timing-lexicon";
 import {
   ACTION_COORDINATION_CONNECTORS,
+  ACTION_SEQUENCE_MARKERS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
@@ -191,6 +194,24 @@ function hasSystemicCueBeforeSiteAbbreviation(context: HpsgClauseContext, start:
   return sawNonOcularDose;
 }
 
+function anchorTargetsTypedNonSiteConcept(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const current = tokensAvailable(context, start, 1)?.[0];
+  if (!current || !resolveActionRelationSurface(normalizeTokenLower(current))) return false;
+  for (let cursor = start + 1; cursor < Math.min(context.limit, start + 4); cursor += 1) {
+    const candidate = context.tokens[cursor];
+    if (!candidate || context.state.consumed.has(candidate.index)) break;
+    const lower = normalizeTokenLower(candidate);
+    if (isPunctuation(lower)) break;
+    const concept = resolveMedicationInstructionConcept(lower, context.options);
+    if (!concept) continue;
+    return concept.role !== AdviceArgumentRole.Site && concept.role !== AdviceArgumentRole.Destination;
+  }
+  return false;
+}
+
 function contextSuggestsNonOcularSite(context: HpsgClauseContext): boolean {
   const dosageForm = context.options?.context?.dosageForm?.trim().toLowerCase().replace(/\s+/g, " ");
   const route = inferRouteFromContext(context.options?.context ?? undefined) ??
@@ -217,7 +238,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
-    if (tokenBelongsToContextualPrnReasonLead(context, start)) {
+    if (
+      tokenBelongsToContextualPrnReasonLead(context, start) ||
+      anchorTargetsTypedNonSiteConcept(context, start)
+    ) {
       return signs;
     }
     const siteCandidate = getPrimarySiteMeaningCandidate(token);
@@ -283,7 +307,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (candidate.kind === LexKind.Number) {
         break;
       }
-      if (getDayOfWeekMeaning(candidate)) {
+      if (getDayOfWeekMeaning(candidate) || ACTION_SEQUENCE_MARKERS.has(candidateLower)) {
         break;
       }
       if (coordinationStartsAction(context, cursor)) break;
