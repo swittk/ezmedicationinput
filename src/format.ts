@@ -13,6 +13,7 @@ import { getMedicationInstructionConcept } from "./instruction-concept-terminolo
 import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
+  instructionGraphPrimarySiteRelation,
   instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphRepresentsText,
@@ -861,7 +862,11 @@ function formatSite(
   const noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   if (directObject) return noun;
   const preferredPreposition = resolvedSite?.preferredPreposition;
-  let preposition = grammar.sitePreposition;
+  const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
+  const sourcePreposition = relationHasSemanticClass(primarySiteRelation, "locative")
+    ? localizeAdviceRelation(primarySiteRelation, "en")
+    : undefined;
+  let preposition = sourcePreposition ?? grammar.sitePreposition;
   if (!preposition || (preposition === "to" && preferredPreposition && preferredPreposition !== "to")) {
     preposition = preferredPreposition;
   }

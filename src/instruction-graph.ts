@@ -1446,6 +1446,30 @@ function actionHasLocalRelationBefore(parts: Lexeme[], actionStart: number, inde
   return false;
 }
 
+function actionHasResolvedLocativeSiteBefore(
+  parts: Lexeme[],
+  actionStart: number,
+  index: number,
+  options?: ParseOptions
+): boolean {
+  for (let cursor = index - 1; cursor > actionStart; cursor -= 1) {
+    const relation = resolveActionRelationSurface(key(parts[cursor]));
+    if (!relation || !relationHasSemanticClass(relation, "locative")) continue;
+    const siteText = parts
+      .slice(cursor + 1, index)
+      .map((part) => part.original)
+      .join(" ")
+      .trim();
+    if (!siteText) continue;
+    const resolved = resolveBodySitePhrase(siteText, options?.siteCodeMap, {
+      bodySiteContext: options?.context?.bodySiteContext,
+      allowTerminalModifierInheritance: true
+    });
+    if (resolved?.coding || resolved?.definition) return true;
+  }
+  return false;
+}
+
 function actionTailIsRegimenModifier(
   parts: Lexeme[],
   actionStart: number,
@@ -1482,7 +1506,8 @@ function actionTailIsRegimenModifier(
     if (!eventTail.some((part) => Boolean(EVENT_TIMING_TOKENS[key(part)]))) return false;
   }
   if (definition?.argumentParser === "object-time") return false;
-  return !actionHasLocalRelationBefore(parts, actionStart, index);
+  if (!actionHasLocalRelationBefore(parts, actionStart, index)) return true;
+  return actionHasResolvedLocativeSiteBefore(parts, actionStart, index, options);
 }
 
 export function parseInstructionActions(
@@ -2839,6 +2864,28 @@ export function instructionGraphRoundTripPrimaryAction(
   });
 }
 
+
+export function instructionGraphPrimarySiteRelation(
+  clause: CanonicalSigClause
+): AdviceRelation | undefined {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  if (!graph || !primary || !clause.site) return undefined;
+  return graph.actions
+    .filter((action) =>
+      action.polarity !== AdvicePolarity.Negate &&
+      action.relation !== undefined &&
+      relationHasSemanticClass(action.relation, "locative") &&
+      action.span.start < primary.end && primary.start < action.span.end &&
+      actionMatchesCanonicalMethod(action, clause) &&
+      action.args.some((arg) =>
+        arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)
+      )
+    )
+    .sort((left, right) =>
+      left.span.start - right.span.start || left.span.end - right.span.end
+    )[0]?.relation;
+}
 
 export function instructionGraphPrimaryAdministrationModality(
   clause: CanonicalSigClause

@@ -1,6 +1,7 @@
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
+  EVENT_TIMING_TOKENS,
   DEFAULT_UNIT_BY_ROUTE,
   normalizeBodySiteKey,
   ROUTE_TEXT
@@ -165,6 +166,28 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function routeTokenIsTemporalPrepositionBeforeTiming(
+  context: HpsgClauseContext,
+  start: number,
+  span: number
+): boolean {
+  if (span !== 1) return false;
+  const token = context.tokens[start];
+  if (!token || !SITE_ANCHORS.has(normalizeTokenLower(token))) return false;
+  let cursor = start + 1;
+  while (cursor < context.limit) {
+    const candidate = context.tokens[cursor];
+    if (!candidate || context.state.consumed.has(candidate.index)) return false;
+    const lower = normalizeTokenLower(candidate);
+    if (SITE_FILLERS.has(lower)) {
+      cursor += 1;
+      continue;
+    }
+    return Boolean(EVENT_TIMING_TOKENS[lower]);
+  }
+  return false;
+}
+
 function routeTokenIsSitePrepositionBeforeResolvableSite(
   context: HpsgClauseContext,
   start: number,
@@ -212,7 +235,8 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (span === 1 && isMedicationAdministrationMethod(phrase, context.options)) continue;
       if (
         routeTokenIsPartitiveSiteHead(context, start, span) ||
-        routeTokenIsSitePrepositionBeforeResolvableSite(context, start, span)
+        routeTokenIsSitePrepositionBeforeResolvableSite(context, start, span) ||
+        routeTokenIsTemporalPrepositionBeforeTiming(context, start, span)
       ) {
         continue;
       }

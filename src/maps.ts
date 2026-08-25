@@ -804,10 +804,20 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["finger", "fingers"],
+      names: ["finger"],
+      definition: {
+        coding: { code: "7569003", display: "Finger structure" },
+        text: "finger",
+        i18n: { th: "นิ้วมือ" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["fingers"],
       definition: {
         coding: { code: "7569003", display: "Finger structure" },
         text: "fingers",
+        i18n: { th: "นิ้วมือ" },
         routeHint: RouteCode["Topical route"]
       }
     },
