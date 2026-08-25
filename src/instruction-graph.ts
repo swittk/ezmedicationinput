@@ -495,6 +495,42 @@ function instructionQuantityHasProductContext(
   return false;
 }
 
+function instructionQuantityHasResolvedSiteContext(
+  parts: Lexeme[],
+  endExclusive: number,
+  options?: ParseOptions
+): boolean {
+  const contextualSite = options?.context?.bodySiteContext?.trim();
+  if (contextualSite) {
+    const resolvedContext = resolveBodySitePhrase(contextualSite, options?.siteCodeMap, {
+      bodySiteContext: contextualSite,
+      allowTerminalModifierInheritance: true
+    });
+    if (resolvedContext?.coding || resolvedContext?.definition) return true;
+  }
+
+  const searchEnd = Math.min(parts.length, endExclusive);
+  for (let anchorIndex = 0; anchorIndex < searchEnd; anchorIndex += 1) {
+    const anchor = key(parts[anchorIndex]);
+    if (!SITE_ANCHORS.has(anchor) && !ROUTE_SITE_PREPOSITIONS.has(anchor)) continue;
+    const maxSiteEnd = Math.min(searchEnd, anchorIndex + 6);
+    for (let siteEnd = anchorIndex + 2; siteEnd <= maxSiteEnd; siteEnd += 1) {
+      const siteText = parts
+        .slice(anchorIndex + 1, siteEnd)
+        .map((part) => part.original)
+        .join(" ")
+        .trim();
+      if (!siteText) continue;
+      const resolved = resolveBodySitePhrase(siteText, options?.siteCodeMap, {
+        bodySiteContext: options?.context?.bodySiteContext,
+        allowTerminalModifierInheritance: true
+      });
+      if (resolved?.coding || resolved?.definition) return true;
+    }
+  }
+  return false;
+}
+
 function instructionQuantityUnitAt(
   parts: Lexeme[],
   start: number,
@@ -510,7 +546,10 @@ function instructionQuantityUnitAt(
   const head = key(parts[start]);
   for (const compound of COMPOUND_DOSE_UNITS) {
     if (compound.head !== head || !compound.requiresProductContext || compound.tails.length) continue;
-    if (instructionQuantityHasProductContext(parts, start + 1, endExclusive)) {
+    const hasProductContext = instructionQuantityHasProductContext(parts, start + 1, endExclusive);
+    const hasRequiredSiteContext = !compound.requiresSiteContext ||
+      instructionQuantityHasResolvedSiteContext(parts, endExclusive, options);
+    if (hasProductContext && hasRequiredSiteContext) {
       return { unit: compound.unit, endExclusive: start + 1 };
     }
   }
@@ -1408,7 +1447,8 @@ function actionTailIsRegimenModifier(
   parts: Lexeme[],
   actionStart: number,
   index: number,
-  definition: ActionDefinition | undefined
+  definition: ActionDefinition | undefined,
+  options?: ParseOptions
 ): boolean {
   const token = key(parts[index]);
   if (!token) return false;
@@ -1422,7 +1462,7 @@ function actionTailIsRegimenModifier(
       INSTRUCTION_NUMBER_WORDS[key(previous)] !== undefined
     : false;
   const localAmountUnit = definition?.acceptsAmount && previousValue
-    ? instructionQuantityUnitAt(parts, index, parts.length)
+    ? instructionQuantityUnitAt(parts, index, parts.length, options)
     : undefined;
   const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
@@ -1479,7 +1519,7 @@ export function parseInstructionActions(
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
       const currentKey = key(parts.slice(index, index + 1)[0]);
-      if (actionTailIsRegimenModifier(parts, actionStart, index, startingMatch?.definition)) {
+      if (actionTailIsRegimenModifier(parts, actionStart, index, startingMatch?.definition, options)) {
         end = index;
         break;
       }

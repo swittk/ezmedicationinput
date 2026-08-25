@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig, parseInstructionActions, parseSig } from "../src/index";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
 
 function clause(input: string) {
@@ -18,6 +18,34 @@ describe("topical and cosmetic clinician dogfood", () => {
       expect(parsed.meta.canonical.clauses[0]?.schedule?.when).toBeUndefined();
       expect(parsed.meta.canonical.clauses[0]?.leftovers).toEqual([]);
     }
+  });
+
+  it("requires site context for contextual semisolid extrusion lengths", () => {
+    const withoutSite = parseInstructionActions("squeeze 1 cm of cream");
+    const unanchoredAmount = withoutSite
+      .find((action) => action.predicate.lemma === "squeeze")
+      ?.args.find((arg) => arg.role === "amount");
+    expect(unanchoredAmount?.quantity?.unit).not.toBe("cm line");
+
+    const withResolvedSite = parseInstructionActions("squeeze 1 cm of cream onto fingertip");
+    const anchoredAmount = withResolvedSite
+      .find((action) => action.predicate.lemma === "squeeze")
+      ?.args.find((arg) => arg.role === "amount");
+    expect(anchoredAmount).toMatchObject({
+      text: "1 cm",
+      quantity: { value: 1, unit: "cm line" }
+    });
+
+    const withBodySiteContext = parseInstructionActions("squeeze 1 cm of cream", 0, {
+      context: { bodySiteContext: "fingertip" }
+    });
+    const contextualAmount = withBodySiteContext
+      .find((action) => action.predicate.lemma === "squeeze")
+      ?.args.find((arg) => arg.role === "amount");
+    expect(contextualAmount).toMatchObject({
+      text: "1 cm",
+      quantity: { value: 1, unit: "cm line" }
+    });
   });
 
   it("composes squeeze amount, material, destination, then application", () => {
