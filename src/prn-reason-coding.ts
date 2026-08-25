@@ -23,16 +23,20 @@ import {
 } from "./types";
 import { arrayIncludes } from "./utils/array";
 import { objectEntries } from "./utils/object";
+import { lexInput } from "./lexer/lex";
+import { ACTION_COORDINATION_CONNECTORS } from "./hpsg/lexical-classes";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
-const GENERIC_ITCH_REASON_TERMS = new Set([
-  "itch",
-  "itching",
-  "itchiness",
-  "itchy",
-  "คัน"
-]);
+const GENERIC_ITCH_REASON_TERMS = new Set<string>();
+for (const entry of DEFAULT_PRN_REASON_ENTRIES) {
+  if (entry.definition.coding?.code !== "418363000") continue;
+  for (const term of entry.terms) {
+    const normalized = normalizePrnReasonKey(term);
+    if (normalized) GENERIC_ITCH_REASON_TERMS.add(normalized);
+  }
+}
+
 
 const OPHTHALMIC_ROUTE_CODES = new Set<RouteCode>([
   RouteCode["Ophthalmic route"],
@@ -409,23 +413,26 @@ async function resolvePrnReasonDefinitionAsyncForRequest(
 
 function splitCoordinatedPrnReasonText(text: string): string[] | undefined {
   const trimmed = text.replace(/\s+/g, " ").trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const patterns = [
-    /\s+and\/or\s+/i,
-    /\s+หรือ\s+/,
-    /\s+or\s+/i,
-    /\s+และ\s+/,
-    /\s+and\s+/i,
-    /\s*\/\s*/,
-    /\s*,\s*/
-  ];
-  for (const pattern of patterns) {
-    const parts = trimmed.split(pattern).map((part) => part.trim()).filter(Boolean);
-    if (parts.length > 1) {
-      return parts;
+  if (!trimmed) return undefined;
+  const tokens = lexInput(trimmed);
+  const boundaries = tokens.filter((token) =>
+    ACTION_COORDINATION_CONNECTORS.has(token.canonical ?? token.lower)
+  );
+  if (boundaries.length) {
+    const parts: string[] = [];
+    let cursor = 0;
+    for (const boundary of boundaries) {
+      const part = trimmed.slice(cursor, boundary.sourceStart).trim();
+      if (part) parts.push(part);
+      cursor = boundary.sourceEnd;
     }
+    const tail = trimmed.slice(cursor).trim();
+    if (tail) parts.push(tail);
+    if (parts.length > 1) return parts;
+  }
+  for (const pattern of [/\s*\/\s*/, /\s*,\s*/]) {
+    const parts = trimmed.split(pattern).map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1) return parts;
   }
   return undefined;
 }

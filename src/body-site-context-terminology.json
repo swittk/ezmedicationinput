@@ -1,0 +1,28 @@
+{
+  "ambiguousDigitSiteKeys": [
+    "between digits",
+    "ระหว่างนิ้ว"
+  ],
+  "handContextKeys": [
+    "hand",
+    "hands",
+    "finger",
+    "fingers",
+    "นิ้วมือ",
+    "มือ"
+  ],
+  "footContextKeys": [
+    "foot",
+    "feet",
+    "toe",
+    "toes",
+    "นิ้วเท้า",
+    "เท้า"
+  ],
+  "sourceLeadPrefixes": [
+    "the",
+    "a",
+    "an",
+    "บริเวณ"
+  ]
+}

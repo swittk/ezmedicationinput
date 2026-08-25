@@ -52,6 +52,54 @@ export {
   realizeInstructionGraph
 } from "./instruction-graph";
 export {
+  getInstructionActionLocaleAdapter,
+  registerInstructionActionLocaleAdapter
+} from "./instruction-action-locale-adapter";
+export type {
+  InstructionActionLocaleAdapter,
+  InstructionActionRealizationInput
+} from "./instruction-action-locale-adapter";
+export {
+  getAdviceLocaleAdapter,
+  registerAdviceLocaleAdapter
+} from "./advice-locale-adapter";
+export type {
+  AdviceLocaleAdapter,
+  AdviceLocaleRealizationInput
+} from "./advice-locale-adapter";
+export {
+  inferMedicationLocale,
+  registerMedicationLocaleDetector
+} from "./locale-detection";
+export type { MedicationLocaleDetector } from "./locale-detection";
+export {
+  getMedicationLexerLocalePack,
+  listMedicationLocaleLexemes,
+  registerMedicationLexerLocalePack
+} from "./lexer/locale";
+export type {
+  MedicationLexerLocalePack,
+  MedicationLocaleLexeme
+} from "./lexer/locale";
+export {
+  listMedicationSurfaceSegmenters,
+  registerIntlMedicationSurfaceSegmenter,
+  registerMedicationSurfaceSegmenter
+} from "./lexer/surface-segmenter";
+export type {
+  MedicationSurfaceSegment,
+  MedicationSurfaceSegmenter
+} from "./lexer/surface-segmenter";
+export {
+  getSuggestLocaleAdapter,
+  registerSuggestLocaleAdapter
+} from "./suggest-locale-adapter";
+export type {
+  SuggestLocaleAdapter,
+  SuggestLocaleLexemeResolver,
+  SuggestLocaleUnitRoutePair
+} from "./suggest-locale-adapter";
+export {
   MEDICATION_INSTRUCTION_ACTION_SYSTEM,
   buildMedicationInstructionActionCodeSystem,
   getMedicationInstructionAction,

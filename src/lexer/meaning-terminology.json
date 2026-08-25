@@ -1,0 +1,89 @@
+{
+  "dayGroups": {
+    "weekend": [
+      "sat",
+      "sun"
+    ],
+    "weekends": [
+      "sat",
+      "sun"
+    ],
+    "wknd": [
+      "sat",
+      "sun"
+    ],
+    "weekdays": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "weekday": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "workday": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "workdays": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "วันธรรมดา": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "วันทำงาน": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ],
+    "วันหยุด": [
+      "sat",
+      "sun"
+    ],
+    "วันเสาร์อาทิตย์": [
+      "sat",
+      "sun"
+    ],
+    "สุดสัปดาห์": [
+      "sat",
+      "sun"
+    ],
+    "เสาร์อาทิตย์": [
+      "sat",
+      "sun"
+    ],
+    "จันทร์ถึงศุกร์": [
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri"
+    ]
+  },
+  "dayRangeConnectors": [
+    "-",
+    "to",
+    "through",
+    "thru",
+    "ถึง",
+    "จนถึง"
+  ]
+}

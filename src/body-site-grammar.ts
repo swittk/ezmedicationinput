@@ -2,6 +2,7 @@ import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { mergeI18nRecords } from "./fhir-translations";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { objectEntries } from "./utils/object";
+import { AMBIGUOUS_DIGIT_SITE_KEYS, HAND_CONTEXT_KEYS, FOOT_CONTEXT_KEYS } from "./body-site-context-terminology";
 import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
 import {
   BODY_SITE_LOCATIVE_RELATION_PHRASES,
@@ -104,9 +105,6 @@ export interface BodySitePhraseContext {
   allowTerminalModifierInheritance?: boolean;
 }
 
-const AMBIGUOUS_DIGIT_SITE_KEYS = new Set(["ระหว่างนิ้ว", "between digits"]);
-const HAND_CONTEXT_KEYS = new Set(["hand", "hands", "finger", "fingers", "นิ้วมือ", "มือ"]);
-const FOOT_CONTEXT_KEYS = new Set(["foot", "feet", "toe", "toes", "นิ้วเท้า", "เท้า"]);
 const BODY_SITE_ALIAS_INDEXES = new WeakMap<
   Record<string, BodySiteDefinition>,
   Map<string, BodySiteDefinition>

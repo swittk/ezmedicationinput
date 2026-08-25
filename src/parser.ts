@@ -144,8 +144,9 @@ function refreshMethodSurface(state: ParserState, options?: ParseOptions): void 
   if (!verb) return;
   const definition = resolveMedicationAdministrationMethod(verb, options);
   state.methodText = definition?.display ?? verb.charAt(0).toUpperCase() + verb.slice(1);
-  const thai = definition?.i18n?.th;
-  state.methodTextElement = thai ? buildTranslationPrimitiveElement({ th: thai }) : undefined;
+  state.methodTextElement = definition?.i18n
+    ? buildTranslationPrimitiveElement(definition.i18n)
+    : undefined;
 }
 
 function recordEvidence(

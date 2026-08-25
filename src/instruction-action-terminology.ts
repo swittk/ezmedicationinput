@@ -1,4 +1,5 @@
 import source from "./instruction-action-terminology.json";
+import { localizedConfig } from "./localization";
 import {
   FhirCoding,
   MedicationInstructionActionDefinition,
@@ -31,6 +32,7 @@ interface ActionSource {
   i18n?: Record<string, string>;
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
+  localeAliases?: Record<string, string[]>;
   separableAliases?: Array<{ lead: string; particle: string }>;
   procedural?: boolean;
   argumentParser?: MedicationInstructionActionDefinition["argumentParser"];
@@ -60,7 +62,10 @@ const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>(
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
-  const aliases = [definition.code, definition.display, ...(definition.aliases ?? [])];
+  const aliases = [
+    definition.code, definition.display, ...(definition.aliases ?? []),
+    ...flattenLocaleAliases(definition.localeAliases)
+  ];
   for (const alias of aliases) {
     const normalized = normalizeActionSurface(alias);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) {
@@ -78,6 +83,24 @@ export function normalizeActionSurface(value: string): string {
     .trim();
 }
 
+function cloneLocaleAliases(
+  aliases: Record<string, string[]> | undefined
+): Record<string, string[]> | undefined {
+  if (!aliases) return undefined;
+  const cloned: Record<string, string[]> = {};
+  for (const locale of Object.keys(aliases)) {
+    const values = aliases[locale];
+    if (values?.length) cloned[locale] = [...values];
+  }
+  return Object.keys(cloned).length ? cloned : undefined;
+}
+
+function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
+  const values: string[] = [];
+  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
+  return values;
+}
+
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding
     ? {
@@ -91,18 +114,28 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     : undefined;
 }
 
-function cloneRealizerConfig(
+export function cloneMedicationInstructionActionRealizerConfig(
   config: MedicationInstructionActionDefinition["realizerConfig"]
 ): MedicationInstructionActionDefinition["realizerConfig"] {
-  return config ? {
-    ...config,
-    thaiSuppressActivityConcepts: config.thaiSuppressActivityConcepts
-      ? [...config.thaiSuppressActivityConcepts]
-      : undefined,
-    thaiSuppressSiteConcepts: config.thaiSuppressSiteConcepts
-      ? [...config.thaiSuppressSiteConcepts]
-      : undefined
-  } : undefined;
+  if (!config) return undefined;
+  const locales: NonNullable<MedicationInstructionActionDefinition["realizerConfig"]>["locales"] = {};
+  for (const locale of Object.keys(config.locales ?? {})) {
+    const value = config.locales?.[locale];
+    if (!value) continue;
+    locales![locale] = {
+      ...value,
+      suppressActivityConcepts: value.suppressActivityConcepts ? [...value.suppressActivityConcepts] : undefined,
+      suppressSiteConcepts: value.suppressSiteConcepts ? [...value.suppressSiteConcepts] : undefined
+    };
+  }
+  return { locales: Object.keys(locales ?? {}).length ? locales : undefined };
+}
+
+export function medicationInstructionActionLocaleRealizerConfig(
+  config: MedicationInstructionActionDefinition["realizerConfig"],
+  locale: string
+) {
+  return localizedConfig(config?.locales, locale);
 }
 
 function cloneContextualCodings(
@@ -135,6 +168,7 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    localeAliases: cloneLocaleAliases(definition.localeAliases),
     separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: definition.procedural,
     argumentParser: definition.argumentParser,
@@ -144,7 +178,7 @@ function cloneDefinition(
       primaryConcepts: definition.argumentParserConfig.primaryConcepts ? [...definition.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: cloneRealizerConfig(definition.realizerConfig),
+    realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
     preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
@@ -172,6 +206,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: sourceDefinition.procedural,
     argumentParser: sourceDefinition.argumentParser,
@@ -181,7 +216,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
       primaryConcepts: sourceDefinition.argumentParserConfig.primaryConcepts ? [...sourceDefinition.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: sourceDefinition.argumentParserConfig.secondaryConcepts ? [...sourceDefinition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: cloneRealizerConfig(sourceDefinition.realizerConfig),
+    realizerConfig: cloneMedicationInstructionActionRealizerConfig(sourceDefinition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
     preferredRelationSemanticClasses: sourceDefinition.preferredRelationSemanticClasses ? [...sourceDefinition.preferredRelationSemanticClasses] : undefined,
@@ -213,6 +248,7 @@ function normalizeCustomDefinition(
     i18n: input.i18n ? { ...input.i18n } : undefined,
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
     procedural: input.procedural ?? true,
     argumentParser: input.argumentParser,
@@ -222,7 +258,7 @@ function normalizeCustomDefinition(
       primaryConcepts: input.argumentParserConfig.primaryConcepts ? [...input.argumentParserConfig.primaryConcepts] : undefined,
       secondaryConcepts: input.argumentParserConfig.secondaryConcepts ? [...input.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
-    realizerConfig: cloneRealizerConfig(input.realizerConfig),
+    realizerConfig: cloneMedicationInstructionActionRealizerConfig(input.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
     preferredRelationSemanticClasses: input.preferredRelationSemanticClasses ? [...input.preferredRelationSemanticClasses] : undefined,
@@ -251,7 +287,10 @@ function customDefinitionForSurface(
   const target = normalizeActionSurface(surface);
   for (const configuredSurface of Object.keys(map)) {
     const input = map[configuredSurface];
-    const candidates = [configuredSurface, input.code ?? "", ...(input.aliases ?? [])];
+    const candidates = [
+      configuredSurface, input.code ?? "", ...(input.aliases ?? []),
+      ...flattenLocaleAliases(input.localeAliases)
+    ];
     if (candidates.some((candidate) => normalizeActionSurface(candidate) === target)) {
       return normalizeCustomDefinition(configuredSurface, input);
     }

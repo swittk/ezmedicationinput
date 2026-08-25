@@ -1,70 +1,16 @@
 import { isWhitespaceChar } from "../utils/text";
 import { SurfaceToken, SurfaceTokenKind } from "./token-types";
+import { splitMedicationScriptRuns } from "./surface-segmenter";
 
 const SEPARATOR_CHARS = new Set([",", ";", "(", ")"]);
 const PUNCTUATION_CHARS = new Set(["\\", "+", "&"]);
 
-const THAI_SCRIPT = /[\u0E00-\u0E7F]/;
-
-interface IntlWordSegment {
-  segment: string;
-  index: number;
-  isWordLike?: boolean;
-}
-
-interface IntlWordSegmenter {
-  segment(input: string): Iterable<IntlWordSegment>;
-}
-
-type IntlWordSegmenterConstructor = new (
-  locales?: string | string[],
-  options?: { granularity: "word" }
-) => IntlWordSegmenter;
-
-let thaiWordSegmenter: IntlWordSegmenter | null | undefined;
-
-function getThaiWordSegmenter(): IntlWordSegmenter | undefined {
-  if (thaiWordSegmenter !== undefined) {
-    return thaiWordSegmenter ?? undefined;
-  }
-  const Segmenter = (Intl as unknown as { Segmenter?: IntlWordSegmenterConstructor }).Segmenter;
-  if (!Segmenter) {
-    thaiWordSegmenter = null;
-    return undefined;
-  }
-  try {
-    thaiWordSegmenter = new Segmenter("th", { granularity: "word" });
-    return thaiWordSegmenter;
-  } catch {
-    thaiWordSegmenter = null;
-    return undefined;
-  }
-}
-
-function splitThaiLatinRuns(value: string): Array<{ text: string; offset: number }> {
-  const runs: Array<{ text: string; offset: number }> = [];
-  let runStart = 0;
-  const script = (char: string): "thai" | "latin" | undefined =>
-    THAI_SCRIPT.test(char) ? "thai" : /[A-Za-z]/.test(char) ? "latin" : undefined;
-
-  for (let index = 1; index < value.length; index += 1) {
-    const previous = script(value[index - 1]);
-    const current = script(value[index]);
-    if (previous && current && previous !== current) {
-      runs.push({ text: value.slice(runStart, index), offset: runStart });
-      runStart = index;
-    }
-  }
-  runs.push({ text: value.slice(runStart), offset: runStart });
-  return runs;
-}
-
 function pushSingleScriptRun(
   tokens: SurfaceToken[],
   original: string,
-  start: number
+  start: number,
+  segmenter?: ReturnType<typeof splitMedicationScriptRuns>[number]["segmenter"]
 ): void {
-  const segmenter = THAI_SCRIPT.test(original) ? getThaiWordSegmenter() : undefined;
   if (!segmenter) {
     tokens.push({
       original,
@@ -78,9 +24,7 @@ function pushSingleScriptRun(
   }
 
   for (const part of segmenter.segment(original)) {
-    if (!part.segment || /^\s+$/.test(part.segment)) {
-      continue;
-    }
+    if (!part.segment || /^\s+$/u.test(part.segment)) continue;
     const partStart = start + part.index;
     const standaloneKind = part.segment.length === 1
       ? classifySurfaceKind(part.segment)
@@ -97,10 +41,8 @@ function pushSingleScriptRun(
 }
 
 function pushTextRun(tokens: SurfaceToken[], original: string, start: number): void {
-  for (const run of splitThaiLatinRuns(original)) {
-    if (run.text) {
-      pushSingleScriptRun(tokens, run.text, start + run.offset);
-    }
+  for (const run of splitMedicationScriptRuns(original)) {
+    if (run.text) pushSingleScriptRun(tokens, run.text, start + run.offset, run.segmenter);
   }
 }
 

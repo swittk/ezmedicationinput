@@ -116,9 +116,20 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     });
   }
   add(nested, valueCode("predicateRealizer", frame.predicate.realizer));
-  add(nested, valueString("predicateRealizerThaiFallbackObject", frame.predicate.realizerConfig?.thaiFallbackObject));
-  for (const conceptId of frame.predicate.realizerConfig?.thaiSuppressActivityConcepts ?? []) {
-    add(nested, valueString("predicateRealizerThaiSuppressActivityConcept", conceptId));
+  for (const locale of Object.keys(frame.predicate.realizerConfig?.locales ?? {})) {
+    const config = frame.predicate.realizerConfig?.locales?.[locale];
+    if (!config) continue;
+    const localized: FhirExtension[] = [{ url: "locale", valueCode: locale }];
+    add(localized, valueString("fallbackObject", config.fallbackObject));
+    add(localized, valueBoolean("implicitMedicationObject", config.implicitMedicationObject));
+    add(localized, valueBoolean("directSiteObject", config.directSiteObject));
+    for (const conceptId of config.suppressActivityConcepts ?? []) {
+      add(localized, valueString("suppressActivityConcept", conceptId));
+    }
+    for (const conceptId of config.suppressSiteConcepts ?? []) {
+      add(localized, valueString("suppressSiteConcept", conceptId));
+    }
+    nested.push({ url: "predicateRealizerLocale", extension: localized });
   }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: { ...coding } });
   add(nested, valueInteger("spanStart", frame.span.start));
@@ -225,10 +236,37 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const argument = parseArgumentExtension(argumentExtension);
     if (argument) args.push(argument);
   }
-  const thaiSuppressActivityConcepts = children(
+  const localeRealizerConfig: NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"] = {};
+  for (const localized of children(extension, "predicateRealizerLocale")) {
+    const locale = child(localized, "locale")?.valueCode;
+    if (!locale) continue;
+    const suppressActivityConcepts = children(localized, "suppressActivityConcept")
+      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
+    const suppressSiteConcepts = children(localized, "suppressSiteConcept")
+      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
+    localeRealizerConfig![locale] = {
+      fallbackObject: child(localized, "fallbackObject")?.valueString,
+      implicitMedicationObject: child(localized, "implicitMedicationObject")?.valueBoolean,
+      directSiteObject: child(localized, "directSiteObject")?.valueBoolean,
+      suppressActivityConcepts: suppressActivityConcepts.length ? suppressActivityConcepts : undefined,
+      suppressSiteConcepts: suppressSiteConcepts.length ? suppressSiteConcepts : undefined
+    };
+  }
+  // Backward-compatible read of the pre-locale-profile extension fields.
+  const legacyThaiSuppressActivityConcepts = children(
     extension,
     "predicateRealizerThaiSuppressActivityConcept"
   ).map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
+  const legacyThaiFallbackObject = child(extension, "predicateRealizerThaiFallbackObject")?.valueString;
+  if (legacyThaiFallbackObject || legacyThaiSuppressActivityConcepts.length) {
+    localeRealizerConfig!.th = {
+      ...(localeRealizerConfig!.th ?? {}),
+      fallbackObject: legacyThaiFallbackObject ?? localeRealizerConfig!.th?.fallbackObject,
+      suppressActivityConcepts: legacyThaiSuppressActivityConcepts.length
+        ? legacyThaiSuppressActivityConcepts
+        : localeRealizerConfig!.th?.suppressActivityConcepts
+    };
+  }
   const predicateI18n: Record<string, string> = {};
   for (const translation of children(extension, "predicateTranslation")) {
     const locale = child(translation, "locale")?.valueCode;
@@ -248,14 +286,8 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
       i18n: Object.keys(predicateI18n).length ? predicateI18n : undefined,
       semanticClass: child(extension, "semanticClass")?.valueString,
       realizer: child(extension, "predicateRealizer")?.valueCode as AdviceFrame["predicate"]["realizer"] | undefined,
-      realizerConfig: child(extension, "predicateRealizerThaiFallbackObject")?.valueString ||
-        thaiSuppressActivityConcepts.length
-        ? {
-            thaiFallbackObject: child(extension, "predicateRealizerThaiFallbackObject")?.valueString,
-            thaiSuppressActivityConcepts: thaiSuppressActivityConcepts.length
-              ? thaiSuppressActivityConcepts
-              : undefined
-          }
+      realizerConfig: Object.keys(localeRealizerConfig ?? {}).length
+        ? { locales: localeRealizerConfig }
         : undefined,
       codings: children(extension, "predicateCoding")
         .map((entry) => entry.valueCoding)

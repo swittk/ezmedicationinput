@@ -1,4 +1,9 @@
 import { CanonicalPrnReasonExpr } from "./types";
+import { baseLanguageTag, localizedValue } from "./localization";
+import { inferMedicationLocale } from "./locale-detection";
+import { joinLocalizedTokens } from "./locale-realization";
+import { ACTION_COORDINATION_CONNECTORS, ACTION_COORDINATION_CONNECTOR_I18N } from "./hpsg/lexical-classes";
+import { lexInput } from "./lexer/lex";
 
 export function getCanonicalPrnReasonText(reason: CanonicalPrnReasonExpr | undefined): string | undefined {
   return reason?.text ?? reason?.coding?.display;
@@ -56,9 +61,10 @@ export function getPreferredCanonicalPrnReasonText(
   if (!direct) {
     return joinCanonicalPrnReasonTexts(reasons, conjunction);
   }
-  return /[,/;]/.test(direct) || /\b(?:or|and|and\/or)\b/i.test(direct) || /\s(?:หรือ|และ)\s/.test(direct)
-    ? joinCanonicalPrnReasonTexts(reasons, conjunction)
-    : direct;
+  const coordinated = /[,/;]/.test(direct) || lexInput(direct).some((token) =>
+    ACTION_COORDINATION_CONNECTORS.has(token.canonical ?? token.lower)
+  );
+  return coordinated ? joinCanonicalPrnReasonTexts(reasons, conjunction) : direct;
 }
 
 export function getLocalizedCanonicalPrnReasonText(
@@ -67,23 +73,26 @@ export function getLocalizedCanonicalPrnReasonText(
   locale: string,
   conjunction?: string
 ): string | undefined {
-  const thai = locale.toLowerCase().startsWith("th");
+  const targetLocale = baseLanguageTag(locale) ?? locale.toLowerCase();
   const localized = (item: CanonicalPrnReasonExpr | undefined): string | undefined => {
     if (!item) return undefined;
-    if (thai) {
-      return item.i18n?.th ?? item.coding?.i18n?.th ?? item.text ?? item.coding?.display;
-    }
+    const translated = localizedValue(item.i18n, locale) ?? localizedValue(item.coding?.i18n, locale);
+    if (translated) return translated;
     const text = item.text?.trim();
-    if (text && !/[\u0E00-\u0E7F]/u.test(text)) return text;
+    if (text && inferMedicationLocale(text, "en") === targetLocale) return text;
     const display = item.coding?.display?.trim();
-    return display ? display.charAt(0).toLowerCase() + display.slice(1) : text;
+    if (display) return targetLocale === "en"
+      ? display.charAt(0).toLowerCase() + display.slice(1)
+      : display;
+    return text;
   };
   const list = reasons?.length ? reasons : reason ? [reason] : [];
   if (!list.length) return undefined;
   const texts = list.map(localized).filter((value): value is string => Boolean(value?.trim()));
   if (!texts.length) return undefined;
   if (texts.length === 1) return texts[0];
-  const joiner = conjunction ?? (thai ? "หรือ" : "or");
-  if (texts.length === 2) return `${texts[0]} ${joiner} ${texts[1]}`;
-  return `${texts.slice(0, -1).join(", ")} ${joiner} ${texts[texts.length - 1]}`;
+  const joiner = conjunction ?? localizedValue(ACTION_COORDINATION_CONNECTOR_I18N.or, locale) ?? "or";
+  if (texts.length === 2) return joinLocalizedTokens(locale, [texts[0], joiner, texts[1]]);
+  const head = texts.slice(0, -1).join(", ");
+  return joinLocalizedTokens(locale, [head, joiner, texts[texts.length - 1]]);
 }

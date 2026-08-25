@@ -281,7 +281,9 @@
       "argumentParser": "site-relation",
       "realizer": "site-relation",
       "realizerConfig": {
-        "englishDirectSiteObject": true
+        "locales": {
+          "en": { "directSiteObject": true }
+        }
       },
       "administrationMethod": {
         "system": "http://snomed.info/sct",
@@ -517,9 +519,9 @@
         "implicitMatchedRole": "activity"
       },
       "realizerConfig": {
-        "thaiSuppressActivityConcepts": [
-          "use"
-        ]
+        "locales": {
+          "th": { "suppressActivityConcepts": ["use"] }
+        }
       }
     },
     {
@@ -741,7 +743,9 @@
       "argumentParser": "object-amount-material",
       "realizer": "prime",
       "realizerConfig": {
-        "thaiFallbackObject": "อุปกรณ์พ่น"
+        "locales": {
+          "th": { "fallbackObject": "อุปกรณ์พ่น" }
+        }
       },
       "continuationLicenses": [
         {
@@ -871,10 +875,10 @@
       "argumentParser": "site-relation",
       "realizer": "site-relation",
       "realizerConfig": {
-        "englishDirectSiteObject": true,
-        "thaiSuppressSiteConcepts": [
-          "hair"
-        ]
+        "locales": {
+          "en": { "directSiteObject": true },
+          "th": { "suppressSiteConcepts": ["hair"] }
+        }
       }
     },
     {
@@ -928,7 +932,9 @@
         }
       },
       "realizerConfig": {
-        "thaiImplicitMedicationObject": true
+        "locales": {
+          "th": { "implicitMedicationObject": true }
+        }
       }
     },
     {
@@ -1026,7 +1032,9 @@
       },
       "verbRouteHint": "26643006",
       "realizerConfig": {
-        "thaiImplicitMedicationObject": true
+        "locales": {
+          "th": { "implicitMedicationObject": true }
+        }
       }
     },
     {
@@ -1054,7 +1062,9 @@
       },
       "verbRouteHint": "26643006",
       "realizerConfig": {
-        "thaiImplicitMedicationObject": true
+        "locales": {
+          "th": { "implicitMedicationObject": true }
+        }
       }
     },
     {

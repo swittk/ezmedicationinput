@@ -11,7 +11,10 @@ import {
 } from "./relation-terminology";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
-import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import {
+  medicationInstructionActionLocaleRealizerConfig,
+  resolveMedicationInstructionAction
+} from "./instruction-action-terminology";
 import { getMedicationInstructionConcept, resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
   collectLocalizedWhenPhrases,
@@ -750,7 +753,10 @@ function shouldUseGenericMedicationObjectThai(
   if (THAI_IMPLIED_OBJECT_VERBS.has(verb)) {
     return false;
   }
-  if (resolveMedicationInstructionAction(verb)?.realizerConfig?.thaiImplicitMedicationObject) {
+  if (medicationInstructionActionLocaleRealizerConfig(
+    resolveMedicationInstructionAction(verb)?.realizerConfig,
+    "th"
+  )?.implicitMedicationObject) {
     return false;
   }
   const primaryStart = clause.instructionGraph?.primaryAdministrationSpan?.start;

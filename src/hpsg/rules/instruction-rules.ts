@@ -3,10 +3,16 @@ import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advi
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
-import { localizeAdviceRelation, resolveActionRelationSurface } from "../../relation-terminology";
+import {
+  getAdviceRelationRealizations,
+  resolveActionRelationSurface
+} from "../../relation-terminology";
+import { composeLocalizedRecords } from "../../localization";
+import { joinLocalizedTokens } from "../../locale-realization";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
+import { lexInput } from "../../lexer/lex";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -101,6 +107,12 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   );
 }
 
+function containsCoordinationSurface(text: string): boolean {
+  return lexInput(text).some((token) =>
+    ACTION_COORDINATION_CONNECTORS.has(token.canonical ?? token.lower)
+  );
+}
+
 function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
   return getProceduralFrames(context).filter((frame) => {
     const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
@@ -117,7 +129,7 @@ function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
       !arg.conceptId &&
       !arg.coding?.code &&
       !arg.quantity &&
-      /(?:\band\b|\bor\b|และ|หรือ)/iu.test(arg.text)
+      containsCoordinationSurface(arg.text)
     );
   });
 }
@@ -386,8 +398,10 @@ function parseTypedConceptInstruction(
   const codings = medicationInstructionConceptCodings(concept);
   const action = resolveMedicationInstructionAction(predicate, context.options);
   const display = action?.display ?? predicate;
-  const thaiAction = action?.i18n?.th;
-  const thaiConcept = concept.i18n?.th;
+  const i18n = composeLocalizedRecords(
+    [action?.i18n, concept.i18n],
+    ([actionText, conceptText], locale) => joinLocalizedTokens(locale, [actionText, conceptText])
+  );
   const frame: AdviceFrame = {
     force: AdviceForce.Instruction,
     predicate: { lemma: predicate, semanticClass: "administration" },
@@ -406,7 +420,7 @@ function parseTypedConceptInstruction(
   };
   return {
     text: `${display} ${concept.display}`,
-    i18n: thaiAction && thaiConcept ? { th: `${thaiAction}${thaiConcept}` } : undefined,
+    i18n,
     coding: codings[0],
     frames: [frame]
   };
@@ -475,7 +489,7 @@ function bodyParsesAsStyleInstruction(
 function activityConceptAt(
   context: HpsgClauseContext,
   start: number
-): { length: number; display: string; th?: string } | undefined {
+): { length: number; display: string; i18n?: Record<string, string> } | undefined {
   const maxLength = Math.min(4, context.limit - start);
   for (let length = maxLength; length >= 1; length -= 1) {
     const tokens = tokensAvailable(context, start, length);
@@ -483,7 +497,7 @@ function activityConceptAt(
     const surface = tokens.map((token) => normalizeTokenLower(token)).join(" ");
     const concept = resolveMedicationInstructionConcept(surface, context.options);
     if (concept?.role !== AdviceArgumentRole.Activity) continue;
-    return { length, display: concept.display, th: concept.i18n?.th };
+    return { length, display: concept.display, i18n: concept.i18n ? { ...concept.i18n } : undefined };
   }
   return undefined;
 }
@@ -507,9 +521,12 @@ function coordinatedAdministrationWindowInstructionAt(
   const end = connectorIndex + 1 + right.length;
   const tokens = tokensAvailable(context, start, end - start);
   if (!tokens) return undefined;
-  const relationEn = localizeAdviceRelation(relation, "en") ?? relation;
-  const relationTh = localizeAdviceRelation(relation, "th") ?? relation;
-  const connectorTh = ACTION_COORDINATION_CONNECTOR_I18N[connector]?.th ?? connector;
+  const relationRealizations = getAdviceRelationRealizations(relation);
+  const i18n = composeLocalizedRecords(
+    [relationRealizations, left.i18n, ACTION_COORDINATION_CONNECTOR_I18N[connector], right.i18n],
+    ([relationText, leftText, connectorText, rightText], locale) =>
+      joinLocalizedTokens(locale, [relationText, leftText, connectorText, rightText])
+  );
   return lexicalSign({
     type: "instruction-sign",
     rule: "hpsg.lex.instruction.coordinatedAdministrationWindow",
@@ -518,10 +535,8 @@ function coordinatedAdministrationWindowInstructionAt(
       head: {},
       valence: {
         instructions: [{
-          text: `${relationEn} ${left.display} ${connector} ${right.display}`,
-          i18n: left.th && right.th
-            ? { th: `${relationTh}${left.th}${connectorTh}${right.th}` }
-            : undefined
+          text: `${relation} ${left.display} ${connector} ${right.display}`,
+          i18n
         }]
       },
       cont: { clauseKind: "administration" }

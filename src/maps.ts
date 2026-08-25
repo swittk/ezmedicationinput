@@ -239,7 +239,7 @@ interface LateralizableBodySiteDefinition {
   display: string;
   englishNames: string[];
   pluralEnglishNames: string[];
-  thaiNames: string[];
+  localeNames: Record<string, string[]>;
   routeHint?: RouteCode;
 }
 
@@ -247,21 +247,21 @@ const BODY_SITE_LATERALITIES = [
   {
     textPrefix: "left",
     englishPrefix: "left",
-    thaiSuffixes: ["ซ้าย"],
+    localeSuffixes: { th: ["ซ้าย"] },
     code: SNOMED_CT_LEFT_QUALIFIER_CODE,
     display: SNOMED_CT_LEFT_QUALIFIER_DISPLAY
   },
   {
     textPrefix: "right",
     englishPrefix: "right",
-    thaiSuffixes: ["ขวา"],
+    localeSuffixes: { th: ["ขวา"] },
     code: SNOMED_CT_RIGHT_QUALIFIER_CODE,
     display: SNOMED_CT_RIGHT_QUALIFIER_DISPLAY
   },
   {
     textPrefix: "both",
     englishPrefix: "both",
-    thaiSuffixes: ["ทั้งสองข้าง", "สองข้าง"],
+    localeSuffixes: { th: ["ทั้งสองข้าง", "สองข้าง"] },
     code: SNOMED_CT_BILATERAL_QUALIFIER_CODE,
     display: SNOMED_CT_BILATERAL_QUALIFIER_DISPLAY
   }
@@ -275,7 +275,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Thumb",
     englishNames: ["thumb"],
     pluralEnglishNames: ["thumbs"],
-    thaiNames: ["นิ้วโป้ง", "นิ้วโป้งมือ", "นิ้วหัวแม่มือ", "หัวแม่มือ"]
+    localeNames: { th: ["นิ้วโป้ง", "นิ้วโป้งมือ", "นิ้วหัวแม่มือ", "หัวแม่มือ"] }
   },
   {
     text: "index finger",
@@ -284,7 +284,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Index finger",
     englishNames: ["index finger"],
     pluralEnglishNames: ["index fingers"],
-    thaiNames: ["นิ้วชี้", "นิ้วชี้มือ"]
+    localeNames: { th: ["นิ้วชี้", "นิ้วชี้มือ"] }
   },
   {
     text: "middle finger",
@@ -293,7 +293,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Middle finger",
     englishNames: ["middle finger"],
     pluralEnglishNames: ["middle fingers"],
-    thaiNames: ["นิ้วกลาง", "นิ้วกลางมือ"]
+    localeNames: { th: ["นิ้วกลาง", "นิ้วกลางมือ"] }
   },
   {
     text: "ring finger",
@@ -302,7 +302,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Ring finger",
     englishNames: ["ring finger"],
     pluralEnglishNames: ["ring fingers"],
-    thaiNames: ["นิ้วนาง", "นิ้วนางมือ"]
+    localeNames: { th: ["นิ้วนาง", "นิ้วนางมือ"] }
   },
   {
     text: "little finger",
@@ -311,7 +311,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Little finger",
     englishNames: ["little finger", "pinky", "pinkie"],
     pluralEnglishNames: ["little fingers", "pinkies"],
-    thaiNames: ["นิ้วก้อย", "นิ้วก้อยมือ"]
+    localeNames: { th: ["นิ้วก้อย", "นิ้วก้อยมือ"] }
   },
   {
     text: "great toe",
@@ -320,7 +320,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Great toe",
     englishNames: ["great toe", "big toe"],
     pluralEnglishNames: ["great toes", "big toes"],
-    thaiNames: ["นิ้วโป้งเท้า", "นิ้วหัวแม่เท้า", "หัวแม่เท้า"]
+    localeNames: { th: ["นิ้วโป้งเท้า", "นิ้วหัวแม่เท้า", "หัวแม่เท้า"] }
   },
   {
     text: "second toe",
@@ -329,7 +329,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Second toe",
     englishNames: ["second toe", "2nd toe"],
     pluralEnglishNames: ["second toes", "2nd toes"],
-    thaiNames: ["นิ้วชี้เท้า"]
+    localeNames: { th: ["นิ้วชี้เท้า"] }
   },
   {
     text: "third toe",
@@ -338,7 +338,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Third toe",
     englishNames: ["third toe", "3rd toe"],
     pluralEnglishNames: ["third toes", "3rd toes"],
-    thaiNames: ["นิ้วกลางเท้า"]
+    localeNames: { th: ["นิ้วกลางเท้า"] }
   },
   {
     text: "fourth toe",
@@ -347,7 +347,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Fourth toe",
     englishNames: ["fourth toe", "4th toe"],
     pluralEnglishNames: ["fourth toes", "4th toes"],
-    thaiNames: ["นิ้วนางเท้า"]
+    localeNames: { th: ["นิ้วนางเท้า"] }
   },
   {
     text: "fifth toe",
@@ -356,7 +356,7 @@ const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
     display: "Fifth toe",
     englishNames: ["fifth toe", "5th toe", "little toe"],
     pluralEnglishNames: ["fifth toes", "5th toes", "little toes"],
-    thaiNames: ["นิ้วก้อยเท้า"]
+    localeNames: { th: ["นิ้วก้อยเท้า"] }
   }
 ];
 
@@ -368,9 +368,10 @@ function buildLateralizedDigitBodySiteEntries(): BodySiteSnomedSourceEntry[] {
       const text = `${laterality.textPrefix} ${isBilateral ? site.pluralText : site.text}`;
       const englishNames = isBilateral ? site.pluralEnglishNames : site.englishNames;
       const names = englishNames.map((name) => `${laterality.englishPrefix} ${name}`);
-      for (const name of site.thaiNames) {
-        for (const suffix of laterality.thaiSuffixes) {
-          names.push(`${name}${suffix}`);
+      for (const locale of Object.keys(site.localeNames)) {
+        const suffixes = laterality.localeSuffixes[locale as keyof typeof laterality.localeSuffixes] ?? [];
+        for (const name of site.localeNames[locale] ?? []) {
+          for (const suffix of suffixes) names.push(`${name}${suffix}`);
         }
       }
       entries.push({

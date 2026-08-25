@@ -1,7 +1,9 @@
 import source from "./relation-terminology.json";
+import { baseLanguageTag, localizedConfig, localizedValue } from "./localization";
 import { AdviceRelation, FhirCoding } from "./types";
+import { objectEntries, objectFromEntries, objectValues } from "./utils/object";
 
-type SupportedLocale = "en" | "th";
+type SupportedLocale = string;
 const BODY_SITE_LOCATIVE_RELATION_VALUES = [
   "above", "around", "behind", "below", "beneath", "under",
   "inside", "near", "outside", "between", "along"
@@ -120,7 +122,7 @@ function normalize(value: string): string {
 }
 
 function localeKey(locale: string): SupportedLocale {
-  return locale.toLowerCase().startsWith("th") ? "th" : "en";
+  return baseLanguageTag(locale) ?? "en";
 }
 
 const ADVICE_RELATION_VALUES = new Set<string>();
@@ -140,6 +142,27 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding ? { ...coding, i18n: coding.i18n ? { ...coding.i18n } : undefined } : undefined;
 }
 
+function cloneLocaleLexemes(
+  source: Partial<Record<SupportedLocale, RelationLocaleLexeme[]>> | undefined
+): Partial<Record<SupportedLocale, RelationLocaleLexeme[]>> {
+  const result: Partial<Record<SupportedLocale, RelationLocaleLexeme[]>> = {};
+  for (const locale of Object.keys(source ?? {})) {
+    const values = source?.[locale];
+    if (values?.length) result[locale] = values.map((lexeme) => ({ ...lexeme }));
+  }
+  return result;
+}
+
+function cloneBodySiteRealizations(
+  source: Partial<Record<SupportedLocale, BodySiteRelationRealization>> | undefined
+): Partial<Record<SupportedLocale, BodySiteRelationRealization>> {
+  const result: Partial<Record<SupportedLocale, BodySiteRelationRealization>> = {};
+  for (const [locale, value] of objectEntries(source ?? {})) {
+    if (value) result[locale as string] = { ...value };
+  }
+  return result;
+}
+
 function cloneRealizationProfiles(
   profiles: Record<string, Partial<Record<SupportedLocale, string>>> | undefined
 ): Record<string, Partial<Record<SupportedLocale, string>>> {
@@ -155,9 +178,8 @@ function cloneRealizationProfiles(
 const rawSource = source as RelationTerminologySource;
 const ADVICE_DEFINITIONS: AdviceRelationDefinition[] = (rawSource.adviceRelations ?? []).map((entry) => {
   const relation = asAdviceRelation(entry.relation);
-  const en = entry.realization?.en ?? relation;
-  const th = entry.realization?.th;
-  if (!th) throw new Error(`Missing Thai realization for AdviceRelation ${relation}`);
+  const realization = { ...(entry.realization ?? {}) };
+  realization.en = realization.en ?? relation;
   return {
     relation,
     semanticClass: entry.semanticClass?.trim() || "relation",
@@ -166,11 +188,8 @@ const ADVICE_DEFINITIONS: AdviceRelationDefinition[] = (rawSource.adviceRelation
     adviceSurfaces: [...(entry.adviceSurfaces ?? [])],
     sequenceMarkerSurfaces: [...(entry.sequenceMarkerSurfaces ?? [])],
     sequenceRelationSurfaces: [...(entry.sequenceRelationSurfaces ?? [])],
-    localeLexemes: {
-      en: entry.localeLexemes?.en?.map((lexeme) => ({ ...lexeme })),
-      th: entry.localeLexemes?.th?.map((lexeme) => ({ ...lexeme }))
-    },
-    realization: { en, th },
+    localeLexemes: cloneLocaleLexemes(entry.localeLexemes),
+    realization: realization as Record<SupportedLocale, string>,
     realizationProfiles: cloneRealizationProfiles(entry.realizationProfiles)
   };
 });
@@ -181,9 +200,13 @@ const ADVICE_RELATION_BY_SURFACE = new Map<string, AdviceRelation>();
 const ACTION_SEQUENCE_MARKERS_INTERNAL = new Set<string>();
 const ACTION_SEQUENCE_RELATION_SURFACES_INTERNAL = new Set<string>();
 const LOCALE_LEXEMES: Record<SupportedLocale, Map<string, RelationLocaleLexeme[]>> = {
-  en: new Map(),
-  th: new Map()
+  en: new Map()
 };
+
+function localeLexemeIndex(locale: string): Map<string, RelationLocaleLexeme[]> {
+  const key = localeKey(locale);
+  return LOCALE_LEXEMES[key] ?? (LOCALE_LEXEMES[key] = new Map());
+}
 
 function pushRelationCandidate(
   index: Map<string, AdviceRelation[]>,
@@ -209,14 +232,15 @@ function registerLocaleLexeme(
     surface: key,
     canonical: normalize(lexeme.canonical)
   };
-  const existing = LOCALE_LEXEMES[locale].get(key);
+  const index = localeLexemeIndex(locale);
+  const existing = index.get(key);
   if (existing) {
     if (!existing.some((candidate) =>
       candidate.canonical === normalizedLexeme.canonical &&
       candidate.defaultForAmbiguousSurface === normalizedLexeme.defaultForAmbiguousSurface
     )) existing.push(normalizedLexeme);
   } else {
-    LOCALE_LEXEMES[locale].set(key, [normalizedLexeme]);
+    index.set(key, [normalizedLexeme]);
   }
   return normalizedLexeme;
 }
@@ -230,7 +254,7 @@ for (const definition of ADVICE_DEFINITIONS) {
   for (const surface of definition.adviceSurfaces) ADVICE_RELATION_BY_SURFACE.set(normalize(surface), definition.relation);
   for (const surface of definition.sequenceMarkerSurfaces) ACTION_SEQUENCE_MARKERS_INTERNAL.add(normalize(surface));
   for (const surface of definition.sequenceRelationSurfaces) ACTION_SEQUENCE_RELATION_SURFACES_INTERNAL.add(normalize(surface));
-  for (const locale of ["en", "th"] as const) {
+  for (const locale of Object.keys(definition.localeLexemes)) {
     for (const lexeme of definition.localeLexemes[locale] ?? []) {
       const normalizedLexeme = registerLocaleLexeme(locale, lexeme);
       if (definition.actionSurfaces.length) {
@@ -271,8 +295,8 @@ export function resolveActionRelationSurface(
     if (preferred) return preferred;
   }
   if (candidates.length === 1) return candidates[0];
-  const localeCandidates = ["en", "th"]
-    .map((locale) => LOCALE_LEXEMES[locale as SupportedLocale].get(normalized) ?? [])
+  const localeCandidates = objectValues(LOCALE_LEXEMES)
+    .map((index) => index.get(normalized) ?? [])
     .reduce((all, values) => all.concat(values), [] as RelationLocaleLexeme[]);
   const preferredCanonical = localeCandidates.find((lexeme) => lexeme.defaultForAmbiguousSurface)?.canonical;
   if (preferredCanonical) {
@@ -306,10 +330,7 @@ export function getAdviceRelationDefinition(
     adviceSurfaces: [...definition.adviceSurfaces],
     sequenceMarkerSurfaces: [...definition.sequenceMarkerSurfaces],
     sequenceRelationSurfaces: [...definition.sequenceRelationSurfaces],
-    localeLexemes: {
-      en: definition.localeLexemes.en?.map((lexeme) => ({ ...lexeme })),
-      th: definition.localeLexemes.th?.map((lexeme) => ({ ...lexeme }))
-    },
+    localeLexemes: cloneLocaleLexemes(definition.localeLexemes),
     realization: { ...definition.realization },
     realizationProfiles: cloneRealizationProfiles(definition.realizationProfiles)
   };
@@ -361,15 +382,12 @@ export function getAdviceRelationSurfaceForms(relation: AdviceRelation): readonl
   for (const surface of definition.adviceSurfaces) values.add(surface);
   for (const surface of definition.sequenceMarkerSurfaces) values.add(surface);
   for (const surface of definition.sequenceRelationSurfaces) values.add(surface);
-  for (const locale of ["en", "th"] as const) {
-    values.add(definition.realization[locale]);
+  for (const localized of objectValues(definition.realization)) values.add(localized);
+  for (const locale of Object.keys(definition.localeLexemes)) {
     for (const lexeme of definition.localeLexemes[locale] ?? []) values.add(lexeme.surface);
   }
-  for (const profile in definition.realizationProfiles) {
-    if (!Object.prototype.hasOwnProperty.call(definition.realizationProfiles, profile)) continue;
-    const valuesByLocale = definition.realizationProfiles[profile];
-    if (valuesByLocale.en) values.add(valuesByLocale.en);
-    if (valuesByLocale.th) values.add(valuesByLocale.th);
+  for (const profile of objectValues(definition.realizationProfiles)) {
+    for (const localized of objectValues(profile)) if (localized) values.add(localized);
   }
   const surfaces = Array.from(values)
     .map((value) => value.trim())
@@ -379,6 +397,20 @@ export function getAdviceRelationSurfaceForms(relation: AdviceRelation): readonl
   return surfaces;
 }
 
+export function getAdviceRelationRealizations(
+  relation: AdviceRelation | undefined,
+  profile = "default"
+): Record<string, string> | undefined {
+  if (!relation) return undefined;
+  const definition = ADVICE_BY_RELATION.get(relation);
+  if (!definition) return undefined;
+  const result: Record<string, string> = { ...definition.realization };
+  for (const [locale, value] of objectEntries(definition.realizationProfiles[profile] ?? {})) {
+    if (value) result[locale as string] = value;
+  }
+  return result;
+}
+
 export function localizeAdviceRelation(
   relation: AdviceRelation | undefined,
   locale: string,
@@ -386,9 +418,9 @@ export function localizeAdviceRelation(
 ): string | undefined {
   if (!relation) return undefined;
   const definition = ADVICE_BY_RELATION.get(relation);
-  const language = localeKey(locale);
-  return definition?.realizationProfiles[profile]?.[language] ??
-    definition?.realization[language] ??
+  return localizedValue(definition?.realizationProfiles[profile], locale) ??
+    localizedValue(definition?.realization, locale) ??
+    definition?.realization.en ??
     relation;
 }
 
@@ -400,10 +432,7 @@ export function listAdviceRelationDefinitions(): AdviceRelationDefinition[] {
     adviceSurfaces: [...definition.adviceSurfaces],
     sequenceMarkerSurfaces: [...definition.sequenceMarkerSurfaces],
     sequenceRelationSurfaces: [...definition.sequenceRelationSurfaces],
-    localeLexemes: {
-      en: definition.localeLexemes.en?.map((lexeme) => ({ ...lexeme })),
-      th: definition.localeLexemes.th?.map((lexeme) => ({ ...lexeme }))
-    },
+    localeLexemes: cloneLocaleLexemes(definition.localeLexemes),
     realization: { ...definition.realization },
     realizationProfiles: cloneRealizationProfiles(definition.realizationProfiles)
   }));
@@ -414,15 +443,9 @@ const BODY_SITE_DEFINITIONS: BodySiteRelationDefinition[] = (rawSource.bodySiteR
   aliases: Array.from(new Set([entry.canonical, ...(entry.aliases ?? [])].map(normalize))),
   locative: entry.locative === true,
   grammar: { ...(entry.grammar ?? {}) },
-  localeLexemes: {
-    en: entry.localeLexemes?.en?.map((lexeme) => ({ ...lexeme })),
-    th: entry.localeLexemes?.th?.map((lexeme) => ({ ...lexeme }))
-  },
+  localeLexemes: cloneLocaleLexemes(entry.localeLexemes),
   coding: cloneCoding(entry.coding),
-  realization: {
-    en: entry.realization?.en ? { ...entry.realization.en } : undefined,
-    th: entry.realization?.th ? { ...entry.realization.th } : undefined
-  }
+  realization: cloneBodySiteRealizations(entry.realization)
 }));
 
 const BODY_SITE_BY_SURFACE = new Map<string, BodySiteRelationDefinition>();
@@ -455,7 +478,7 @@ for (const definition of BODY_SITE_DEFINITIONS) {
     if (definition.coding) BODY_SITE_SPATIAL_RELATION_CODINGS_INTERNAL.set(alias, cloneCoding(definition.coding)!);
   }
   if (definition.coding) BODY_SITE_SPATIAL_RELATION_CODINGS_INTERNAL.set(definition.canonical, cloneCoding(definition.coding)!);
-  for (const locale of ["en", "th"] as const) {
+  for (const locale of Object.keys(definition.localeLexemes)) {
     for (const lexeme of definition.localeLexemes[locale] ?? []) {
       registerLocaleLexeme(locale, lexeme);
     }
@@ -511,20 +534,14 @@ export function getBodySiteRelationDefinition(value: string): BodySiteRelationDe
     aliases: [...definition.aliases],
     grammar: { ...definition.grammar },
     coding: cloneCoding(definition.coding),
-    localeLexemes: {
-      en: definition.localeLexemes.en?.map((lexeme) => ({ ...lexeme })),
-      th: definition.localeLexemes.th?.map((lexeme) => ({ ...lexeme }))
-    },
-    realization: {
-      en: definition.realization.en ? { ...definition.realization.en } : undefined,
-      th: definition.realization.th ? { ...definition.realization.th } : undefined
-    }
+    localeLexemes: cloneLocaleLexemes(definition.localeLexemes),
+    realization: cloneBodySiteRealizations(definition.realization)
   };
 }
 
 export function getBodySiteRelationRealization(value: string, locale: string): BodySiteRelationRealization | undefined {
   const definition = BODY_SITE_BY_SURFACE.get(normalize(value)) ?? BODY_SITE_BY_CANONICAL.get(normalize(value));
-  const realization = definition?.realization[localeKey(locale)];
+  const realization = localizedConfig(definition?.realization, locale, "en");
   return realization ? { ...realization } : undefined;
 }
 
@@ -534,7 +551,7 @@ export function listBodySiteRelationDefinitions(): BodySiteRelationDefinition[] 
 
 export function getRelationLocaleLexemeAliases(locale: string): Map<string, string> {
   const result = new Map<string, string>();
-  for (const [surface, candidates] of LOCALE_LEXEMES[localeKey(locale)]) {
+  for (const [surface, candidates] of localeLexemeIndex(locale)) {
     const canonicals = Array.from(new Set(candidates.map((candidate) => candidate.canonical)));
     if (canonicals.length === 1) result.set(surface, canonicals[0]);
   }
@@ -543,7 +560,7 @@ export function getRelationLocaleLexemeAliases(locale: string): Map<string, stri
 
 export function getRelationLocaleSuggestionLexemes(locale: string): RelationLocaleLexeme[] {
   const result: RelationLocaleLexeme[] = [];
-  for (const [surface, candidates] of LOCALE_LEXEMES[localeKey(locale)]) {
+  for (const [surface, candidates] of localeLexemeIndex(locale)) {
     const preferred = candidates.find((candidate) => candidate.defaultForAmbiguousSurface) ?? candidates[0];
     if (preferred) result.push({ ...preferred, surface });
   }
@@ -552,7 +569,7 @@ export function getRelationLocaleSuggestionLexemes(locale: string): RelationLoca
 
 export function getRelationLocalePhrases(locale: string): Array<{ parts: string[]; canonical: string }> {
   const phrases: Array<{ parts: string[]; canonical: string }> = [];
-  for (const [surface, candidates] of LOCALE_LEXEMES[localeKey(locale)]) {
+  for (const [surface, candidates] of localeLexemeIndex(locale)) {
     if (!/\s/u.test(surface)) continue;
     const canonicals = Array.from(new Set(candidates.map((candidate) => candidate.canonical)));
     if (canonicals.length !== 1) continue;
@@ -563,7 +580,7 @@ export function getRelationLocalePhrases(locale: string): Array<{ parts: string[
 
 export function getRelationSplitPrefixes(locale: string): string[] {
   const result = new Set<string>();
-  for (const [surface, candidates] of LOCALE_LEXEMES[localeKey(locale)]) {
+  for (const [surface, candidates] of localeLexemeIndex(locale)) {
     if (!/\s/u.test(surface) && candidates.some((candidate) => candidate.splitPrefix)) {
       result.add(surface);
     }

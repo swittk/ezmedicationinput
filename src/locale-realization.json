@@ -1,0 +1,78 @@
+{
+  "default": {
+    "tokenSeparator": " ",
+    "quantitySeparator": " ",
+    "durationPrefix": "for",
+    "resultFormationPrefix": "to form",
+    "materialPrefix": "of",
+    "amountMaterialDestinationTemplate": "{label} {amount} {material}{destination}"
+  },
+  "locales": {
+    "en": {
+      "tokenSeparator": " ",
+      "quantitySeparator": " ",
+      "durationPrefix": "for",
+      "resultFormationPrefix": "to form",
+      "materialPrefix": "of",
+      "amountMaterialDestinationTemplate": "{label} {amount} {material}{destination}"
+    },
+    "th": {
+      "tokenSeparator": "",
+      "quantitySeparator": " ",
+      "durationPrefix": "",
+      "resultFormationPrefix": "ให้เกิด",
+      "materialPrefix": "",
+      "amountMaterialDestinationTemplate": "{label}{material} {amount}{destination}"
+    }
+  },
+  "timeArguments": {
+    "CM": {
+      "en": "breakfast",
+      "th": "อาหารเช้า"
+    },
+    "CD": {
+      "en": "lunch",
+      "th": "อาหารกลางวัน"
+    },
+    "CV": {
+      "en": "dinner",
+      "th": "อาหารเย็น"
+    },
+    "HS": {
+      "en": "sleep",
+      "th": "นอน"
+    },
+    "WAKE": {
+      "en": "waking",
+      "th": "ตื่นนอน"
+    },
+    "MORN": {
+      "en": "the morning",
+      "th": "ตอนเช้า"
+    },
+    "NOON": {
+      "en": "noon",
+      "th": "ตอนเที่ยง"
+    },
+    "AFT": {
+      "en": "the afternoon",
+      "th": "ตอนบ่าย"
+    },
+    "EVE": {
+      "en": "the evening",
+      "th": "ตอนเย็น"
+    },
+    "NIGHT": {
+      "en": "night",
+      "th": "ตอนกลางคืน"
+    },
+    "IMD": {
+      "en": "immediately",
+      "th": "ทันที"
+    },
+    "C": {
+      "en": "food",
+      "th": "อาหาร"
+    }
+  }
+}

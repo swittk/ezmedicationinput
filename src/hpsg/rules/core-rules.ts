@@ -37,13 +37,12 @@ import {
   RANGE_CONNECTORS,
   PRODUCT_EXTERNAL_MODIFIERS,
   PRODUCT_FORM_MODIFIERS,
-  PRODUCT_METHOD_TEXT,
-  PRODUCT_METHOD_THAI,
+  methodAuxiliaryVerbsForLocale,
+  productMethodRealizations,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
   ROUTE_SITE_PREPOSITIONS,
   SITE_ANCHORS,
-  SITE_FILLERS,
-  THAI_METHOD_AUXILIARY_VERBS
+  SITE_FILLERS
 } from "../lexical-classes";
 import {
   cloneMethodCoding,
@@ -61,11 +60,14 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, emptySynsem, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
+import { baseLanguageTag } from "../../localization";
+import { inferMedicationLocale } from "../../locale-detection";
 
-function looksLikeThaiGiveAuxiliary(context: HpsgClauseContext, start: number, verb: string): boolean {
-  if (!THAI_METHOD_AUXILIARY_VERBS.has(verb)) return false;
+function looksLikeLocaleMethodAuxiliary(context: HpsgClauseContext, start: number, verb: string): boolean {
   const token = context.tokens.slice(start, start + 1)[0];
-  if (!token || !/[\u0E00-\u0E7F]/.test(token.original)) return false;
+  if (!token) return false;
+  const locale = baseLanguageTag(context.options?.locale) ?? inferMedicationLocale(token.original, "en");
+  if (!methodAuxiliaryVerbsForLocale(locale).has(verb)) return false;
   const next = context.tokens[start + 1];
   if (!next) return false;
   return Boolean(resolveMedicationInstructionAction(normalizeTokenLower(next), context.options));
@@ -125,7 +127,7 @@ export function methodLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const verb = normalizeTokenLower(token);
     if (methodTokenBelongsToNegatedDirective(context, token)) return [];
-    if (looksLikeThaiGiveAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
+    if (looksLikeLocaleMethodAuxiliary(context, start, verb) || looksLikeCoordinatedNoun(context, start, verb)) {
       return [];
     }
     const methodDefinition = resolveMedicationAdministrationMethod(verb, context.options);
@@ -370,7 +372,8 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const previousVerb = previous && isMedicationAdministrationMethod(
         normalizeTokenLower(previous), context.options
       ) ? normalizeTokenLower(previous) : undefined;
-      const methodText = previousVerb ? PRODUCT_METHOD_TEXT[previousVerb]?.[productPhrase] : undefined;
+      const methodRealizations = previousVerb ? productMethodRealizations(previousVerb, productPhrase) : undefined;
+      const methodText = methodRealizations?.en;
       signs.push(
         lexicalSign({
           type: "phrase-sign",
@@ -384,8 +387,17 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                   verb: previousVerb,
                   headClass: "administration",
                   text: methodText,
-                  textElement: PRODUCT_METHOD_THAI[methodText]
-                    ? buildTranslationPrimitiveElement({ th: PRODUCT_METHOD_THAI[methodText] })
+                  textElement: methodRealizations
+                    ? (() => {
+                        const translations: Record<string, string> = {};
+                        for (const locale of Object.keys(methodRealizations)) {
+                          const value = methodRealizations[locale];
+                          if (locale !== "en" && value) translations[locale] = value;
+                        }
+                        return Object.keys(translations).length
+                          ? buildTranslationPrimitiveElement(translations)
+                          : undefined;
+                      })()
                     : undefined
                 }
                 : undefined

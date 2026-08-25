@@ -1,4 +1,5 @@
 import { Token, ParserState } from "../parser-state";
+import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
 import { ParseOptions } from "../types";
 import {
   ANTE_MERIDIEM_TOKENS,
@@ -168,9 +169,8 @@ export function joinTokenText(tokens: Token[]): string {
   for (const current of tokens) {
     if (previous) {
       const sourceAdjacent = previous.sourceEnd === current.sourceStart;
-      const thaiBoundary = /[\u0E00-\u0E7F]/.test(previous.original) ||
-        /[\u0E00-\u0E7F]/.test(current.original);
-      if (!(sourceAdjacent && thaiBoundary)) {
+      const unspacedBoundary = shouldJoinAdjacentSourceTokens(previous.original, current.original);
+      if (!(sourceAdjacent && unspacedBoundary)) {
         text += " ";
       }
     }

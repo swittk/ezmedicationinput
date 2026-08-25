@@ -1,4 +1,8 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
+import { baseLanguageTag } from "./localization";
+import { inferMedicationLocale } from "./locale-detection";
+import { lexInput } from "./lexer/lex";
+import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
   medicationInstructionActionCodings,
   resolveMedicationInstructionAction
@@ -118,7 +122,10 @@ function buildBodySiteArgument(
     i18n: {
       en: resolved.englishObjectText,
       ...(resolved.definition?.i18n ?? {}),
-      ...(/[\u0E00-\u0E7F]/.test(sourceText) ? { th: sourceText } : {})
+      ...(() => {
+        const sourceLocale = inferMedicationLocale(sourceText, "en");
+        return sourceLocale === "en" ? {} : { [sourceLocale]: sourceText };
+      })()
     },
     span: absolute
   };
@@ -267,16 +274,10 @@ function trimResidual(
   while (end > start && /[\s,;:.()]/.test(input[end - 1] ?? "")) end -= 1;
   if (end <= start) return undefined;
   const text = input.slice(start, end);
-  const normalized = text.trim().toLowerCase();
-  if (
-    normalized === "and" ||
-    normalized === "then" ||
-    normalized === "and then" ||
-    normalized === "แล้ว" ||
-    normalized === "แล้วจึง" ||
-    normalized === "จากนั้น" ||
-    normalized === "ต่อมา"
-  ) {
+  const structuralTokens = lexInput(text).map((token) => token.canonical ?? token.lower).filter(Boolean);
+  if (structuralTokens.length && structuralTokens.every((token) =>
+    ACTION_SEQUENCE_MARKERS.has(token) || ACTION_COORDINATION_CONNECTORS.has(token)
+  )) {
     return undefined;
   }
   return { start, end, text };

@@ -7,7 +7,8 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
-import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { baseLanguageTag } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
   instructionGraphHasNovelNonWarningContent,
@@ -1084,7 +1085,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     );
   const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
   const directSiteObject = Boolean(
-    !explicitDosePart && methodDefinition?.realizerConfig?.englishDirectSiteObject
+    !explicitDosePart && medicationInstructionActionLocaleRealizerConfig(
+      methodDefinition?.realizerConfig,
+      "en"
+    )?.directSiteObject
   );
   const dosePart = explicitDosePart ?? (
     integratedThinLayer ? "a thin layer" :
@@ -1391,7 +1395,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
   const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
-    !clause.instructionGraph.sourceLocale.toLowerCase().startsWith("th");
+    baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
     roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim()

@@ -31,6 +31,7 @@ interface ConceptSource {
   display: string;
   i18n?: Record<string, string>;
   aliases?: string[];
+  localeAliases?: Record<string, string[]>;
   externalCodings?: FhirCoding[];
 }
 
@@ -40,10 +41,31 @@ const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionConceptDefinition>
 
 for (const definition of DEFAULT_CONCEPTS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
-  for (const alias of [definition.code, definition.display, ...(definition.aliases ?? [])]) {
+  for (const alias of [
+    definition.code, definition.display, ...(definition.aliases ?? []),
+    ...flattenLocaleAliases(definition.localeAliases)
+  ]) {
     const normalized = normalizeConceptSurface(alias);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) DEFAULT_BY_ALIAS.set(normalized, definition);
   }
+}
+
+function cloneLocaleAliases(
+  aliases: Record<string, string[]> | undefined
+): Record<string, string[]> | undefined {
+  if (!aliases) return undefined;
+  const cloned: Record<string, string[]> = {};
+  for (const locale of Object.keys(aliases)) {
+    const values = aliases[locale];
+    if (values?.length) cloned[locale] = [...values];
+  }
+  return Object.keys(cloned).length ? cloned : undefined;
+}
+
+function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
+  const values: string[] = [];
+  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
+  return values;
 }
 
 export function normalizeConceptSurface(value: string): string {
@@ -72,6 +94,7 @@ function cloneDefinition(
     display: definition.display,
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    localeAliases: cloneLocaleAliases(definition.localeAliases),
     coding: cloneCoding(definition.coding),
     externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
@@ -84,6 +107,7 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     display: sourceDefinition.display,
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -99,6 +123,7 @@ function normalizeCustomDefinition(
     display: input.display?.trim() || surface.trim() || normalizedSurface,
     i18n: input.i18n ? { ...input.i18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    localeAliases: cloneLocaleAliases(input.localeAliases),
     coding: cloneCoding(input.coding),
     externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
@@ -113,7 +138,10 @@ function customDefinitionForSurface(
   const target = normalizeConceptSurface(surface);
   for (const configuredSurface of Object.keys(map)) {
     const input = map[configuredSurface];
-    const candidates = [configuredSurface, input.code ?? "", ...(input.aliases ?? [])];
+    const candidates = [
+      configuredSurface, input.code ?? "", ...(input.aliases ?? []),
+      ...flattenLocaleAliases(input.localeAliases)
+    ];
     if (candidates.some((candidate) => normalizeConceptSurface(candidate) === target)) {
       return normalizeCustomDefinition(configuredSurface, input);
     }

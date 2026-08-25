@@ -11,6 +11,7 @@ import { resolveMedicationInstructionAction } from "../instruction-action-termin
 import { arrayIncludes } from "../utils/array";
 import { EventTiming, FhirDayOfWeek, RouteCode } from "../types";
 import { LexToken } from "./token-types";
+import meaningTerminologySource from "./meaning-terminology.json";
 
 const CONNECTOR_WORDS = new Set([
   "to",
@@ -177,64 +178,13 @@ const TOKEN_SITE_CANDIDATES: Record<string, SiteMeaningCandidate[]> = {
   ]
 };
 
-const DAY_GROUP_TOKENS: Record<string, FhirDayOfWeek[]> = {
-  weekend: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  weekends: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  wknd: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  weekdays: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  weekday: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  workday: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  workdays: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันธรรมดา: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันทำงาน: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ],
-  วันหยุด: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  วันเสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  สุดสัปดาห์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  เสาร์อาทิตย์: [FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday],
-  จันทร์ถึงศุกร์: [
-    FhirDayOfWeek.Monday,
-    FhirDayOfWeek.Tuesday,
-    FhirDayOfWeek.Wednesday,
-    FhirDayOfWeek.Thursday,
-    FhirDayOfWeek.Friday
-  ]
-};
+const DAY_GROUP_TOKENS: Record<string, FhirDayOfWeek[]> = {};
+for (const key of Object.keys(meaningTerminologySource.dayGroups)) {
+  DAY_GROUP_TOKENS[key] = meaningTerminologySource.dayGroups[
+    key as keyof typeof meaningTerminologySource.dayGroups
+  ].map((value) => value as FhirDayOfWeek);
+}
+
 
 const DAY_SEQUENCE: readonly FhirDayOfWeek[] = [
   FhirDayOfWeek.Monday,
@@ -246,7 +196,15 @@ const DAY_SEQUENCE: readonly FhirDayOfWeek[] = [
   FhirDayOfWeek.Sunday
 ];
 
-const DAY_RANGE_CONNECTOR_WORDS = new Set(["-", "to", "through", "thru", "ถึง", "จนถึง"]);
+const DAY_RANGE_CONNECTOR_WORDS = new Set(meaningTerminologySource.dayRangeConnectors);
+const DAY_RANGE_CONNECTOR_PATTERN = new RegExp(
+  `^(.+?)(${[...DAY_RANGE_CONNECTOR_WORDS]
+    .filter((value) => value !== "-")
+    .sort((left, right) => right.length - left.length)
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})(.+)$`,
+  "u"
+);
 
 export enum ConnectorRole {
   General = "GENERAL",
@@ -359,7 +317,7 @@ export function resolveDayMeaning(tokenLower: string): FhirDayOfWeek[] | undefin
       return expandDayMeaningRange(start, end);
     }
   }
-  const compactConnectorRange = normalized.match(/^(.+?)(ถึง|จนถึง|to|through|thru)(.+)$/u);
+  const compactConnectorRange = normalized.match(DAY_RANGE_CONNECTOR_PATTERN);
   if (compactConnectorRange) {
     const startKey = compactConnectorRange[1].trim();
     const endKey = compactConnectorRange[3].trim();

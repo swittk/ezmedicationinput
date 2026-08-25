@@ -51,9 +51,15 @@
     "bilateral"
   ],
   "bodySiteBareNominalPrefixI18n": {
-    "each": { "th": "แต่ละ" },
-    "every": { "th": "ทุก" },
-    "all": { "th": "ทุก" }
+    "each": {
+      "th": "แต่ละ"
+    },
+    "every": {
+      "th": "ทุก"
+    },
+    "all": {
+      "th": "ทุก"
+    }
   },
   "oticSiteWords": [
     "ear",
@@ -216,22 +222,6 @@
     "Otic route",
     "Nasal route"
   ],
-  "productMethodText": {
-    "apply": {
-      "sunscreen": "Apply sunscreen"
-    },
-    "reapply": {
-      "sunscreen": "Reapply sunscreen"
-    },
-    "use": {
-      "shampoo": "Use shampoo"
-    }
-  },
-  "productMethodThai": {
-    "Apply sunscreen": "ทากันแดด",
-    "Reapply sunscreen": "ทากันแดดซ้ำ",
-    "Use shampoo": "สระ"
-  },
   "compoundDoseUnits": [
     {
       "head": "cm",
@@ -1039,12 +1029,24 @@
     "moist"
   ],
   "bodySiteAttributiveModifierI18n": {
-    "dry": { "th": "แห้ง" },
-    "clean": { "th": "สะอาด" },
-    "hairless": { "th": "ไม่มีขน" },
-    "intact": { "th": "ไม่เป็นแผล" },
-    "wet": { "th": "เปียก" },
-    "moist": { "th": "ชื้น" }
+    "dry": {
+      "th": "แห้ง"
+    },
+    "clean": {
+      "th": "สะอาด"
+    },
+    "hairless": {
+      "th": "ไม่มีขน"
+    },
+    "intact": {
+      "th": "ไม่เป็นแผล"
+    },
+    "wet": {
+      "th": "เปียก"
+    },
+    "moist": {
+      "th": "ชื้น"
+    }
   },
   "positiveDirectiveMarkers": [
     "should",
@@ -1172,53 +1174,81 @@
       "activity": "intercourse"
     },
     {
-      "parts": ["before", "going", "outdoors"],
+      "parts": [
+        "before",
+        "going",
+        "outdoors"
+      ],
       "text": "before going outdoors",
-      "i18n": { "th": "ก่อนออกกลางแจ้ง" },
+      "i18n": {
+        "th": "ก่อนออกกลางแจ้ง"
+      },
       "relation": "before",
       "activity": "going_outdoors"
     },
     {
-      "parts": ["after", "washing"],
+      "parts": [
+        "after",
+        "washing"
+      ],
       "text": "after washing",
       "offsetOnly": true,
-      "i18n": { "th": "หลังล้าง" },
+      "i18n": {
+        "th": "หลังล้าง"
+      },
       "relation": "after",
       "activity": "washing"
     },
     {
-      "parts": ["after", "showering"],
+      "parts": [
+        "after",
+        "showering"
+      ],
       "text": "after showering",
       "offsetOnly": true,
-      "i18n": { "th": "หลังอาบน้ำ" },
+      "i18n": {
+        "th": "หลังอาบน้ำ"
+      },
       "relation": "after",
       "activity": "showering"
     },
     {
-      "parts": ["after", "bathing"],
+      "parts": [
+        "after",
+        "bathing"
+      ],
       "text": "after bathing",
       "offsetOnly": true,
-      "i18n": { "th": "หลังอาบน้ำ" },
+      "i18n": {
+        "th": "หลังอาบน้ำ"
+      },
       "relation": "after",
       "activity": "bathing"
     },
     {
-      "parts": ["after", "swimming"],
+      "parts": [
+        "after",
+        "swimming"
+      ],
       "text": "after swimming",
-      "i18n": { "th": "หลังว่ายน้ำ" },
+      "i18n": {
+        "th": "หลังว่ายน้ำ"
+      },
       "relation": "after",
       "activity": "swimming"
     },
     {
-      "parts": ["after", "sweating"],
+      "parts": [
+        "after",
+        "sweating"
+      ],
       "text": "after sweating",
-      "i18n": { "th": "หลังเหงื่อออก" },
+      "i18n": {
+        "th": "หลังเหงื่อออก"
+      },
       "relation": "after",
       "activity": "sweating"
     }
-  ],
-  "thaiMethodAuxiliaryVerbs": [
-    "give"
   ],
   "coordinatedNounMethodVerbs": [
     "drink",
@@ -1336,99 +1366,232 @@
   ],
   "instructionQuantityUnitLabels": {
     "tab": {
-      "th": "เม็ด",
-      "enOne": "tablet",
-      "enOther": "tablets"
+      "locales": {
+        "en": {
+          "one": "tablet",
+          "other": "tablets"
+        },
+        "th": {
+          "one": "เม็ด",
+          "other": "เม็ด"
+        }
+      }
     },
     "cap": {
-      "th": "แคปซูล",
-      "enOne": "capsule",
-      "enOther": "capsules"
+      "locales": {
+        "en": {
+          "one": "capsule",
+          "other": "capsules"
+        },
+        "th": {
+          "one": "แคปซูล",
+          "other": "แคปซูล"
+        }
+      }
     },
     "drop": {
-      "th": "หยด",
-      "enOne": "drop",
-      "enOther": "drops"
+      "locales": {
+        "en": {
+          "one": "drop",
+          "other": "drops"
+        },
+        "th": {
+          "one": "หยด",
+          "other": "หยด"
+        }
+      }
     },
     "puff": {
-      "th": "พัฟ",
-      "enOne": "puff",
-      "enOther": "puffs"
+      "locales": {
+        "en": {
+          "one": "puff",
+          "other": "puffs"
+        },
+        "th": {
+          "one": "พัฟ",
+          "other": "พัฟ"
+        }
+      }
     },
     "mL": {
-      "th": "มิลลิลิตร",
-      "enOne": "mL",
-      "enOther": "mL"
+      "locales": {
+        "en": {
+          "one": "mL",
+          "other": "mL"
+        },
+        "th": {
+          "one": "มิลลิลิตร",
+          "other": "มิลลิลิตร"
+        }
+      }
     },
     "cm line": {
-      "th": "ซม.",
-      "enOne": "cm line",
-      "enOther": "cm lines"
+      "locales": {
+        "en": {
+          "one": "cm line",
+          "other": "cm lines"
+        },
+        "th": {
+          "one": "ซม.",
+          "other": "ซม."
+        }
+      }
     },
     "cm strip": {
-      "th": "ซม.",
-      "enOne": "cm strip",
-      "enOther": "cm strips"
+      "locales": {
+        "en": {
+          "one": "cm strip",
+          "other": "cm strips"
+        },
+        "th": {
+          "one": "ซม.",
+          "other": "ซม."
+        }
+      }
     },
     "cm ribbon": {
-      "th": "ซม.",
-      "enOne": "cm ribbon",
-      "enOther": "cm ribbons"
+      "locales": {
+        "en": {
+          "one": "cm ribbon",
+          "other": "cm ribbons"
+        },
+        "th": {
+          "one": "ซม.",
+          "other": "ซม."
+        }
+      }
     },
     "min": {
-      "th": "นาที",
-      "enOne": "minute",
-      "enOther": "minutes"
+      "locales": {
+        "en": {
+          "one": "minute",
+          "other": "minutes"
+        },
+        "th": {
+          "one": "นาที",
+          "other": "นาที"
+        }
+      }
     },
     "s": {
-      "th": "วินาที",
-      "enOne": "second",
-      "enOther": "seconds"
+      "locales": {
+        "en": {
+          "one": "second",
+          "other": "seconds"
+        },
+        "th": {
+          "one": "วินาที",
+          "other": "วินาที"
+        }
+      }
     },
     "h": {
-      "th": "ชั่วโมง",
-      "enOne": "hour",
-      "enOther": "hours"
+      "locales": {
+        "en": {
+          "one": "hour",
+          "other": "hours"
+        },
+        "th": {
+          "one": "ชั่วโมง",
+          "other": "ชั่วโมง"
+        }
+      }
     },
     "d": {
-      "th": "วัน",
-      "enOne": "day",
-      "enOther": "days"
+      "locales": {
+        "en": {
+          "one": "day",
+          "other": "days"
+        },
+        "th": {
+          "one": "วัน",
+          "other": "วัน"
+        }
+      }
     },
     "spray": {
-      "th": "พ่น",
-      "enOne": "spray",
-      "enOther": "sprays"
+      "locales": {
+        "en": {
+          "one": "spray",
+          "other": "sprays"
+        },
+        "th": {
+          "one": "พ่น",
+          "other": "พ่น"
+        }
+      }
     },
     "sachet": {
-      "th": "ซอง",
-      "enOne": "sachet",
-      "enOther": "sachets"
+      "locales": {
+        "en": {
+          "one": "sachet",
+          "other": "sachets"
+        },
+        "th": {
+          "one": "ซอง",
+          "other": "ซอง"
+        }
+      }
     },
     "dose": {
-      "th": "ครั้ง",
-      "enOne": "dose",
-      "enOther": "doses"
+      "locales": {
+        "en": {
+          "one": "dose",
+          "other": "doses"
+        },
+        "th": {
+          "one": "ครั้ง",
+          "other": "ครั้ง"
+        }
+      }
     },
     "implant": {
-      "th": "ชิ้น",
-      "enOne": "implant",
-      "enOther": "implants"
+      "locales": {
+        "en": {
+          "one": "implant",
+          "other": "implants"
+        },
+        "th": {
+          "one": "ชิ้น",
+          "other": "ชิ้น"
+        }
+      }
     },
     "wk": {
-      "th": "สัปดาห์",
-      "enOne": "week",
-      "enOther": "weeks"
+      "locales": {
+        "en": {
+          "one": "week",
+          "other": "weeks"
+        },
+        "th": {
+          "one": "สัปดาห์",
+          "other": "สัปดาห์"
+        }
+      }
     },
     "mo": {
-      "th": "เดือน",
-      "enOne": "month",
-      "enOther": "months"
+      "locales": {
+        "en": {
+          "one": "month",
+          "other": "months"
+        },
+        "th": {
+          "one": "เดือน",
+          "other": "เดือน"
+        }
+      }
     },
     "a": {
-      "th": "ปี",
-      "enOne": "year",
-      "enOther": "years"
+      "locales": {
+        "en": {
+          "one": "year",
+          "other": "years"
+        },
+        "th": {
+          "one": "ปี",
+          "other": "ปี"
+        }
+      }
     }
   },
   "actionCoordinationConnectors": [
@@ -1436,8 +1599,12 @@
     "or"
   ],
   "actionCoordinationConnectorI18n": {
-    "and": { "th": "และ" },
-    "or": { "th": "หรือ" }
+    "and": {
+      "th": "และ"
+    },
+    "or": {
+      "th": "หรือ"
+    }
   },
   "symptomAdjustmentLeads": [
     "adjust",
@@ -1520,5 +1687,30 @@
         "begins"
       ]
     }
-  ]
+  ],
+  "methodAuxiliaryVerbsByLocale": {
+    "th": [
+      "give"
+    ]
+  },
+  "productMethodRealizations": {
+    "apply": {
+      "sunscreen": {
+        "en": "Apply sunscreen",
+        "th": "ทากันแดด"
+      }
+    },
+    "reapply": {
+      "sunscreen": {
+        "en": "Reapply sunscreen",
+        "th": "ทากันแดดซ้ำ"
+      }
+    },
+    "use": {
+      "shampoo": {
+        "en": "Use shampoo",
+        "th": "สระ"
+      }
+    }
+  }
 }
