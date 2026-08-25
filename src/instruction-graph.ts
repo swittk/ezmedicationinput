@@ -58,6 +58,7 @@ import {
   medicationInstructionActionLocaleRealizerConfig,
   normalizeActionSurface,
   resolveMedicationInstructionAction,
+  resolveMedicationInstructionSequenceAction,
   resolveMedicationInstructionSeparableAction
 } from "./instruction-action-terminology";
 import {
@@ -207,7 +208,10 @@ function actionMatchAt(
   const maxSpan = Math.min(4, parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
     for (const candidate of actionPhraseCandidates(parts, index, length)) {
-      const definition = resolveMedicationInstructionAction(candidate, options);
+      const definition = previous && ACTION_SEQUENCE_MARKERS.has(key(previous))
+        ? resolveMedicationInstructionSequenceAction(candidate, options) ??
+          resolveMedicationInstructionAction(candidate, options)
+        : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
         const first = parts[index];
         const actionLocale = first

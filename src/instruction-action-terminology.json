@@ -510,6 +510,9 @@
         "หยุด",
         "หยุดใช้"
       ],
+      "sequenceAliases": [
+        "off"
+      ],
       "procedural": true,
       "safetyScopeTarget": true,
       "argumentParser": "duration-activity",

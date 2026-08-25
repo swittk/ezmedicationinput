@@ -440,7 +440,8 @@ function replaceWhen(state: ParserState, values: EventTiming[]): void {
 
 function applySmartMealExpansion(state: ParserState, options: ParseOptions | undefined): void {
   const effectiveOptions = options ?? {};
-  if (!options?.smartMealExpansion || !smartMealExpansionAllowed(state, options)) {
+  const mealExpansion = options?.smartMealExpansion;
+  if (!mealExpansion || !smartMealExpansionAllowed(state, options)) {
     replaceWhen(
       state,
       sortWhenCodes(
@@ -470,7 +471,7 @@ function applySmartMealExpansion(state: ParserState, options: ParseOptions | und
         ...expanded
       ];
     }
-  } else if (!when.length && dailyCadence) {
+  } else if (!when.length && dailyCadence && mealExpansion !== "explicit") {
     const expanded = expandRelationByFrequency(relationForContext(options), state.frequency, options);
     if (expanded) {
       when = expanded;

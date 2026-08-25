@@ -4591,6 +4591,19 @@ describe("smart meal expansion", () => {
     ]);
   });
 
+  it("supports source-faithful smart meal expansion without cadence-only meal invention", () => {
+    const cadenceOnly = parseSig("1x3", { smartMealExpansion: "explicit" });
+    expect(cadenceOnly.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(cadenceOnly.fhir.timing?.repeat?.frequency).toBe(3);
+
+    const explicitMeal = parseSig("1 tab tid pc", { smartMealExpansion: "explicit" });
+    expect(explicitMeal.fhir.timing?.repeat?.when).toEqual([
+      EventTiming["After Breakfast"],
+      EventTiming["After Lunch"],
+      EventTiming["After Dinner"]
+    ]);
+  });
+
   it("expands default with-meal timings for thrice-daily frequency", () => {
     const result = parseSig("1x3", { smartMealExpansion: true });
     expect(result.fhir.timing?.repeat?.when).toEqual([

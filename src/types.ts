@@ -869,6 +869,8 @@ export interface MedicationInstructionActionDefinition {
   roundtripI18n?: Record<string, string>;
   /** Surface forms that should resolve to this action. */
   aliases?: string[];
+  /** Surface forms licensed only when immediately sequence-scoped (e.g. `then off`). */
+  sequenceAliases?: string[];
   /** Locale-specific parser lexemes. Display translation belongs in `i18n`; parsing aliases are explicit. */
   localeAliases?: Record<string, string[]>;
   /** Discontinuous surface forms such as Thai `เอา X ออก` (remove X). */
@@ -1043,13 +1045,14 @@ export interface ParseOptions extends FormatOptions {
    */
   assumeSingleDiscreteDose?: boolean;
   /**
-   * Enables inferring with-meal timings when explicit meal language is present
-   * or implied by cadence alone. Generic meal abbreviations (AC/PC/C) and
-   * cadence-only instructions expand into specific breakfast/lunch/dinner (and
-   * bedtime) EventTiming entries. Works in conjunction with
-   * `context.mealRelation` when provided.
+   * Enables inferring with-meal timings. `true` and `"cadence"` preserve the
+   * legacy behavior: explicit meal abbreviations (AC/PC/C) and cadence-only
+   * instructions may expand into breakfast/lunch/dinner/(bedtime). `"explicit"`
+   * expands only explicit generic meal timing and never invents meal anchors
+   * from cadence alone. Works with `context.mealRelation` when cadence expansion
+   * is enabled.
    */
-  smartMealExpansion?: boolean;
+  smartMealExpansion?: boolean | "explicit" | "cadence";
   /**
    * Optional route/dosage-form policy overrides for smart meal expansion.
    * When omitted, the parser uses its built-in default heuristic.

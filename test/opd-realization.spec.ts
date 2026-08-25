@@ -62,6 +62,35 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     ]);
   });
 
+  it("treats terminal then-off as a typed discontinue instruction", () => {
+    const source =
+      "1 drop to ou q2h for 1 week, then q4h for 1 month, then qid for 2 weeks, " +
+      "then tid for 2 weeks, then once daily for 1 month, then off";
+    const parsed = parseSig(source);
+    expect(parsed.count).toBe(5);
+    expect(parsed.items.map((item) => item.meta.canonical.clauses[0]?.schedule?.timingCode)).toEqual([
+      "Q2H", "Q4H", "QID", "TID", "QD"
+    ]);
+    const final = parsed.items[4];
+    expect(final.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+    expect(final.meta.canonical.clauses[0]?.instructionGraph?.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ predicate: expect.objectContaining({ lemma: "stop" }) })
+      ])
+    );
+    expect(formatSig(final.fhir, "long", { locale: "th" })).toContain("หยุดใช้");
+    expect(formatSig(final.fhir, "long", { locale: "th" })).not.toContain("Off");
+
+    const bareOff = parseSig("off");
+    expect(bareOff.meta.leftoverText).toBe("off");
+
+    const boundedPause = parseSig("take 1 tab daily x21d then 7 days off");
+    expect(boundedPause.meta.leftoverText).toBeUndefined();
+    expect(boundedPause.meta.canonical.clauses.some((clause) =>
+      clause.instructionGraph?.actions.some((action) => action.predicate.lemma === "pause-use")
+    )).toBe(true);
+  });
+
   it.each([
     ["inhale 2 puffs before exercise", undefined],
     ["inhale 2 puffs 15 minutes before exercise", 15],

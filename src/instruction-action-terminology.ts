@@ -32,6 +32,7 @@ interface ActionSource {
   i18n?: Record<string, string>;
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
+  sequenceAliases?: string[];
   localeAliases?: Record<string, string[]>;
   separableAliases?: Array<{ lead: string; particle: string }>;
   procedural?: boolean;
@@ -168,6 +169,7 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    sequenceAliases: definition.sequenceAliases ? [...definition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
     separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: definition.procedural,
@@ -206,6 +208,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    sequenceAliases: sourceDefinition.sequenceAliases ? [...sourceDefinition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: sourceDefinition.procedural,
@@ -248,6 +251,7 @@ function normalizeCustomDefinition(
     i18n: input.i18n ? { ...input.i18n } : undefined,
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    sequenceAliases: input.sequenceAliases ? [...input.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
     procedural: input.procedural ?? true,
@@ -293,6 +297,28 @@ function customDefinitionForSurface(
     ];
     if (candidates.some((candidate) => normalizeActionSurface(candidate) === target)) {
       return normalizeCustomDefinition(configuredSurface, input);
+    }
+  }
+  return undefined;
+}
+
+export function resolveMedicationInstructionSequenceAction(
+  surface: string,
+  options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  const target = normalizeActionSurface(surface);
+  const map = options?.instructionActionMap;
+  if (map) {
+    for (const configuredSurface of Object.keys(map)) {
+      const input = map[configuredSurface];
+      if ((input.sequenceAliases ?? []).some((alias) => normalizeActionSurface(alias) === target)) {
+        return normalizeCustomDefinition(configuredSurface, input);
+      }
+    }
+  }
+  for (const definition of DEFAULT_ACTIONS) {
+    if ((definition.sequenceAliases ?? []).some((alias) => normalizeActionSurface(alias) === target)) {
+      return cloneDefinition(definition);
     }
   }
   return undefined;

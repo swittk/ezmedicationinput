@@ -104,7 +104,8 @@ export {
   buildMedicationInstructionActionCodeSystem,
   getMedicationInstructionAction,
   listMedicationInstructionActions,
-  resolveMedicationInstructionAction
+  resolveMedicationInstructionAction,
+  resolveMedicationInstructionSequenceAction
 } from "./instruction-action-terminology";
 export type { MedicationInstructionActionCodeSystem } from "./instruction-action-terminology";
 export {
