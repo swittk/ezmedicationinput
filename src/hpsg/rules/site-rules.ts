@@ -12,6 +12,9 @@ import { Token } from "../../parser-state";
 import { RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import {
+  resolveActionRelationSurfaceCandidates
+} from "../../relation-terminology";
 import { inferRouteFromContext } from "../../context";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -23,6 +26,7 @@ import {
   mapIntervalUnit
 } from "../timing-lexicon";
 import {
+  ACTION_COORDINATION_CONNECTORS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
@@ -72,6 +76,35 @@ function anchoredModifierLeadsToResolvableSite(
     if (resolved?.coding || resolved?.definition) return true;
   }
   return false;
+}
+
+function relationIntroducesNonSiteComplement(
+  context: HpsgClauseContext,
+  index: number
+): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  const relations = resolveActionRelationSurfaceCandidates(normalizeTokenLower(token));
+  if (!relations.length) return false;
+  for (let cursor = index + 1; cursor < Math.min(context.limit, index + 4); cursor += 1) {
+    const candidate = context.tokens[cursor];
+    if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) {
+      break;
+    }
+    if (EVENT_TIMING_TOKENS[normalizeTokenLower(candidate)]) return true;
+  }
+  return false;
+}
+
+function coordinationStartsAction(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token || !ACTION_COORDINATION_CONNECTORS.has(normalizeTokenLower(token))) return false;
+  const next = context.tokens[index + 1];
+  return Boolean(
+    next &&
+    !context.state.consumed.has(next.index) &&
+    resolveMedicationInstructionAction(normalizeTokenLower(next), context.options)
+  );
 }
 
 function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
@@ -253,13 +286,14 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (getDayOfWeekMeaning(candidate)) {
         break;
       }
+      if (coordinationStartsAction(context, cursor)) break;
       const siteModifierCanBridgeBoundary = (
         SITE_SELF_DISPLAY_ANCHORS.has(candidateLower) ||
         EXTERNAL_SITE_LOCATIVE_PREFIXES.has(candidateLower) ||
         BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(candidateLower)
       ) && anchoredModifierLeadsToResolvableSite(context, cursor);
       if (
-        siteBoundary(candidateLower, context) &&
+        (siteBoundary(candidateLower, context) || relationIntroducesNonSiteComplement(context, cursor)) &&
         (isPunctuation(candidateLower) || !siteModifierCanBridgeBoundary)
       ) {
         const next = context.tokens[cursor + 1];

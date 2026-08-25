@@ -32,6 +32,7 @@ import {
   RANGE_CONNECTORS,
   THAI_METHOD_AUXILIARY_VERBS
 } from "./hpsg/lexical-classes";
+import { FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -1254,8 +1255,20 @@ function actionTailIsRegimenModifier(
     return true;
   }
   if (ACTION_ROUTE_TAIL_SURFACES.has(token)) return true;
-  const timing = Boolean(TIMING_ABBREVIATIONS[token] || WORD_FREQUENCIES[token] || EVENT_TIMING_TOKENS[token]);
-  if (!timing) return false;
+  const timing = Boolean(
+    TIMING_ABBREVIATIONS[token] ||
+    WORD_FREQUENCIES[token] ||
+    EVENT_TIMING_TOKENS[token] ||
+    FREQUENCY_SIMPLE_WORDS[token] !== undefined
+  );
+  if (!timing) {
+    const previous = parts[index - 1];
+    if (!previous || !/^[,;:]$/u.test(previous.original.trim())) return false;
+    const relation = resolveActionRelationSurface(token);
+    if (!relation) return false;
+    const eventTail = parts.slice(index + 1, Math.min(parts.length, index + 4));
+    if (!eventTail.some((part) => Boolean(EVENT_TIMING_TOKENS[key(part)]))) return false;
+  }
   if (definition?.argumentParser === "object-time") return false;
   return !actionHasLocalRelationBefore(parts, actionStart, index);
 }
@@ -2186,6 +2199,7 @@ interface ActionRealizationContext {
   time?: string;
   duration?: string;
   material?: string;
+  manner?: string;
   realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
   definition?: ActionDefinition;
 }
@@ -2263,6 +2277,7 @@ const RESULT_REALIZER: ActionRealizer = (c) => c.thai
   : `${c.label}${c.result ? ` to form ${c.result}` : ""}`;
 const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
   const relationTarget = c.time ?? c.activity;
+  const mannerSuffix = c.manner ? (c.thai ? c.manner : ` ${c.manner}`) : "";
   if (relationTarget) {
     const siteArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Site);
     const suppressThaiSite = Boolean(
@@ -2275,7 +2290,7 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
         const timePhrase = c.time === "กลางคืน" ? "ตอนกลางคืน"
           : c.time === "นอน" || c.time === "bedtime" ? "ก่อนนอน"
             : c.time;
-        return `${c.label}${target}${timePhrase}`;
+        return `${c.label}${target}${mannerSuffix}${timePhrase}`;
       }
       const lower = c.time.toLowerCase();
       const timePhrase = lower === "night" ? "at night"
@@ -2283,7 +2298,7 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
           : /^(?:the )?(?:morning|afternoon|evening)$/.test(lower)
             ? `in ${lower.startsWith("the ") ? lower : `the ${lower}`}`
             : `at ${c.time}`;
-      return `${c.label}${target} ${timePhrase}`;
+      return `${c.label}${target}${mannerSuffix} ${timePhrase}`;
     }
     const semanticRelation = c.frame.relation ??
       getUniqueAdviceRelationByGrammarFeature("defaultSiteRelation") ??
@@ -2291,18 +2306,18 @@ const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
     const relationProfile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
     const relationText = localizeAdviceRelation(semanticRelation, c.locale, relationProfile) ?? semanticRelation;
     return c.thai
-      ? `${c.label}${target}${relationText}${relationTarget}`
-      : `${c.label}${target} ${relationText} ${relationTarget}`;
+      ? `${c.label}${target}${mannerSuffix}${relationText}${relationTarget}`
+      : `${c.label}${target}${mannerSuffix} ${relationText} ${relationTarget}`;
   }
   const resultSuffix = c.result
     ? (c.thai ? `ให้${c.result}` : ` until ${c.result}`)
     : "";
   if (c.site) return c.thai
-    ? `${c.label}${c.site}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
-    : `${c.label} ${c.site}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
+    ? `${c.label}${c.site}${mannerSuffix}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
+    : `${c.label} ${c.site}${mannerSuffix}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
   return c.thai
-    ? `${c.label}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
-    : `${c.label}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
+    ? `${c.label}${mannerSuffix}${c.substance ? `ด้วย${c.substance}` : ""}${resultSuffix}`
+    : `${c.label}${mannerSuffix}${c.substance ? ` with ${c.substance}` : ""}${resultSuffix}`;
 };
 const OBJECT_AMOUNT_MATERIAL_REALIZER: ActionRealizer = (c) => {
   const object = c.theme ?? c.container;
@@ -2487,6 +2502,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     : undefined;
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
+  const manner = first(AdviceArgumentRole.Manner);
 
   if (frame.polarity === AdvicePolarity.Negate) {
     const object = site ?? theme ?? substance ?? material;
@@ -2521,7 +2537,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const realizer = ACTION_REALIZERS[realizerKey] ?? DEFAULT_ACTION_REALIZER;
   const realized = realizer({
     frame, locale, thai, label, amount, theme, container, destination, site,
-    substance, result, activity, time, duration, material,
+    substance, result, activity, time, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition
   });
@@ -2568,6 +2584,28 @@ export function instructionGraphRepresentsText(
     const candidate = normalizedInstructionSurface(action.sourceText);
     return Boolean(candidate && (candidate === normalized || candidate.includes(normalized)));
   });
+}
+
+export function instructionGraphTextParticipatesInRelation(
+  graph: CanonicalInstructionGraph,
+  text: string
+): boolean {
+  const normalized = normalizedInstructionSurface(text);
+  if (!normalized) return false;
+  const compact = (value: string): string => value.replace(/\s+/gu, "");
+  const matchingIndices: number[] = [];
+  for (let index = 0; index < graph.actions.length; index += 1) {
+    const source = normalizedInstructionSurface(graph.actions[index]?.sourceText ?? "");
+    if (!source) continue;
+    if (source === normalized || compact(source).includes(compact(normalized)) || compact(normalized).includes(compact(source))) {
+      matchingIndices.push(index);
+    }
+  }
+  return matchingIndices.some((index) =>
+    graph.relations?.some((relation) =>
+      relation.fromActionIndex === index || relation.toActionIndex === index
+    ) ?? false
+  );
 }
 
 export function instructionGraphSingleActionRepresentsText(

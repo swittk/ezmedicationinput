@@ -15,6 +15,7 @@ import {
   instructionGraphRichPrimaryAction,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
+  instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
   realizeInstructionGraph
 } from "./instruction-graph";
@@ -1249,6 +1250,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
     action.polarity === AdvicePolarity.Negate
   ) ?? [];
+  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
   const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
     if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
     const normalized = normalizeInstruction(instruction.text);
@@ -1258,6 +1260,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     });
     return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
       representedByWarning || !instruction.frames?.length ||
+      (positionedGraph &&
+        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
+        instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
       (!canonicalClauseHasAdministrationSemantics(clause) &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
     );
@@ -1287,7 +1292,6 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       });
     })
   );
-  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
   const graphWholeInstruction = clause.instructionGraph &&
     !positionedGraph &&

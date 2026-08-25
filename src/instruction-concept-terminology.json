@@ -329,6 +329,19 @@
       ]
     },
     {
+      "code": "thoroughly",
+      "role": "manner",
+      "display": "thoroughly",
+      "i18n": {
+        "th": "ให้ทั่ว"
+      },
+      "aliases": [
+        "thoroughly",
+        "ให้ทั่ว",
+        "อย่างทั่วถึง"
+      ]
+    },
+    {
       "code": "clean-result",
       "role": "result",
       "display": "clean",

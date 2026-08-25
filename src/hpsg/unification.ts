@@ -572,6 +572,45 @@ export function unifySynsem(
   };
 }
 
+function hasDailyFrequencyDefaultEvidence(sign: HpsgSign): boolean {
+  return sign.evidence.some((item) => item.scheduleDefault === "daily-frequency");
+}
+
+function schedulePeriodMatches(left: HpsgScheduleFeature, right: HpsgScheduleFeature): boolean {
+  return left.period !== undefined && right.period !== undefined &&
+    left.period === right.period && left.periodUnit !== undefined &&
+    left.periodUnit === right.periodUnit;
+}
+
+function refinedDailyCadenceSynsem(
+  cadenceSign: HpsgSign,
+  explicitSign: HpsgSign
+): HpsgSynsem | undefined {
+  const cadence = cadenceSign.synsem.head.schedule;
+  const explicit = explicitSign.synsem.head.schedule;
+  if (!cadence || !explicit || !hasDailyFrequencyDefaultEvidence(cadenceSign)) return undefined;
+  if (cadence.frequency !== 1 || explicit.frequency === undefined || explicit.frequency === 1) return undefined;
+  if (!schedulePeriodMatches(cadence, explicit)) return undefined;
+  return {
+    ...cadenceSign.synsem,
+    head: {
+      ...cadenceSign.synsem.head,
+      schedule: { ...cadence, frequency: undefined, timingCode: undefined }
+    }
+  };
+}
+
+function scheduleRefinementSynsems(
+  left: HpsgSign,
+  right: HpsgSign
+): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
+  const refinedLeft = refinedDailyCadenceSynsem(left, right);
+  if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
+  const refinedRight = refinedDailyCadenceSynsem(right, left);
+  if (refinedRight) return { left: left.synsem, right: refinedRight, refined: true };
+  return { left: left.synsem, right: right.synsem, refined: false };
+}
+
 export function combineSigns(
   left: HpsgSign,
   right: HpsgSign,
@@ -582,16 +621,19 @@ export function combineSigns(
   if (!selectedConstruction) return undefined;
   const target = selectedConstruction.construction.headSide === "left" ? left : right;
   const condition = selectedConstruction.construction.headSide === "left" ? right : left;
+  const refinement = scheduleRefinementSynsems(left, right);
   const synsem = selectedConstruction.construction.operation === "scope"
     ? scopeSynsem(condition, target)
-    : unifySynsem(left.synsem, right.synsem, context);
+    : unifySynsem(refinement.left, refinement.right, context);
   if (!synsem) return undefined;
   const fs = combineSignFeatureStructures(
     left.fs,
     right.fs,
     selectedConstruction.motherType,
     selectedConstruction.construction.headSide,
-    selectedConstruction.construction.operation === "scope" ? synsem : undefined
+    selectedConstruction.construction.operation === "scope" || refinement.refined
+      ? synsem
+      : undefined
   );
   if (!fs) {
     return undefined;

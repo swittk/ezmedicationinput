@@ -308,6 +308,7 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
             valence: {},
             cont: { clauseKind: "administration" }
           },
+          scheduleDefault: directUnit === FhirPeriodUnit.Day ? "daily-frequency" : undefined,
           score: 9
         })
       ];

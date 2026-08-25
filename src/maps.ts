@@ -1229,6 +1229,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     {
       names: [
         "interdigital spaces", "interdigital space",
+        "interdigital web spaces", "interdigital web space", "web spaces", "web space",
         "ระหว่างร่องนิ้ว", "ร่องนิ้ว", "ซอกนิ้ว", "ระหว่างซอกนิ้ว"
       ],
       definition: {

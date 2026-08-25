@@ -46,6 +46,8 @@ export type HpsgType =
 export interface HpsgEvidence {
   rule: string;
   tokenIndices: number[];
+  /** Lexical evidence that a schedule field is an inferred, construction-local default. */
+  scheduleDefault?: "daily-frequency";
 }
 
 export type HpsgConstructionKind =
@@ -239,6 +241,7 @@ export function lexicalSign(args: {
   siteTokenIndices?: number[];
   warnings?: string[];
   score?: number;
+  scheduleDefault?: HpsgEvidence["scheduleDefault"];
 }): HpsgSign {
   const tokenIndices = args.tokens
     .map((token) => token.index)
@@ -261,7 +264,8 @@ export function lexicalSign(args: {
     evidence: [
       {
         rule: args.rule,
-        tokenIndices
+        tokenIndices,
+        scheduleDefault: args.scheduleDefault
       }
     ],
     score: args.score ?? 1
