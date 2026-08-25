@@ -82,6 +82,23 @@ describe("topical and cosmetic clinician dogfood", () => {
     expect(formatSig(small.fhir, "long", { locale: "th" })).toContain("เล็กน้อย");
   });
 
+  it("treats warts as localized topical targets without false anatomical coding", () => {
+    const english = parseSig("apply to wart once daily");
+    expect(english.meta.canonical.clauses[0]?.site).toMatchObject({
+      text: "wart",
+      i18n: { th: "หูด" },
+      source: "text"
+    });
+    expect(english.fhir.site?.text).toBe("wart");
+    expect(english.fhir.site?.coding).toBeUndefined();
+    expect(formatSig(english.fhir, "long", { locale: "th" })).toBe("ทาบริเวณหูด วันละครั้ง.");
+
+    const thai = parseSig("ทาหูดวันละครั้ง", { locale: "th" });
+    expect(thai.meta.canonical.clauses[0]?.site?.text).toBe("wart");
+    expect(thai.meta.canonical.clauses[0]?.leftovers).toEqual([]);
+    expect(thai.longText).toBe("ทาบริเวณหูด วันละครั้ง.");
+  });
+
   it("distinguishes site-state modifiers from imperative clean/dry actions", () => {
     const resolved = resolveBodySitePhrase("clean dry skin", undefined, { allowTerminalModifierInheritance: true });
     expect(resolved?.coding?.code).toBe("181469002");

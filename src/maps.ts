@@ -1163,6 +1163,22 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
+      names: ["wart", "หูด"],
+      definition: {
+        text: "wart",
+        i18n: { th: "หูด" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["warts"],
+      definition: {
+        text: "warts",
+        i18n: { th: "หูด" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["spot", "spots", "acne spot", "acne spots", "จุด"],
       definition: {
         text: "spot",
