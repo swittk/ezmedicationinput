@@ -582,8 +582,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["lip", "lips"],
-      definition: { coding: { code: "48477009", display: "Lip structure" }, routeHint: RouteCode["Topical route"] }
+      names: ["lip", "lips", "ริมฝีปาก"],
+      definition: {
+        coding: { code: "48477009", display: "Lip structure" },
+        text: "lip",
+        i18n: { th: "ริมฝีปาก" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["cheek", "cheeks"],
@@ -775,6 +780,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "85562004", display: "Hand" },
         text: "hand",
+        i18n: { th: "มือ" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -783,6 +789,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "85151006", display: "Left hand" },
         text: "left hand",
+        i18n: { th: "มือซ้าย" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -791,6 +798,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "78791008", display: "Right hand" },
         text: "right hand",
+        i18n: { th: "มือขวา" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -799,6 +807,15 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "7569003", display: "Finger structure" },
         text: "fingers",
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["fingertip", "finger tip", "ปลายนิ้ว", "ปลายนิ้วมือ"],
+      definition: {
+        coding: { code: "280424004", display: "Skin structure of fingertip" },
+        text: "fingertip",
+        i18n: { th: "ปลายนิ้ว" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -1137,6 +1154,30 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
+      names: ["wound", "wounds", "แผล"],
+      definition: {
+        text: "wound",
+        i18n: { th: "แผล" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["spot", "spots", "acne spot", "acne spots", "จุด"],
+      definition: {
+        text: "spot",
+        i18n: { th: "จุดที่มีอาการ" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["acne lesion", "acne lesions", "รอยโรคสิว"],
+      definition: {
+        text: "acne lesion",
+        i18n: { th: "รอยโรคสิว" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["left head", "left side of head"],
       definition: { coding: { code: "64237003", display: "Structure of left half of head" }, routeHint: RouteCode["Topical route"] }
     },
@@ -1247,6 +1288,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "41695006", display: "Scalp" },
         text: "scalp",
+        i18n: { th: "หนังศีรษะ" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -1471,6 +1513,15 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "45292006", display: "Vulval structure" },
         text: "vulva",
+        i18n: { th: "อวัยวะเพศหญิงภายนอก" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["external vulva", "external vulval area", "external vulvar area"],
+      definition: {
+        coding: { code: "45292006", display: "Vulval structure" },
+        text: "external vulva",
         i18n: { th: "อวัยวะเพศหญิงภายนอก" },
         routeHint: RouteCode["Topical route"]
       }

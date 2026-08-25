@@ -1,6 +1,7 @@
 {
   "lexemes": [
     { "surface": "avoid", "lemma": "avoid", "partOfSpeech": "verb", "semanticClass": "avoidance", "realizerProfile": "avoidance", "i18n": { "th": "หลีกเลี่ยง" } },
+    { "surface": "avoiding", "lemma": "avoid", "partOfSpeech": "verb", "semanticClass": "avoidance", "realizerProfile": "avoidance", "i18n": { "th": "หลีกเลี่ยง" } },
     { "surface": "drink", "lemma": "drink", "partOfSpeech": "verb", "semanticClass": "ingest" },
     { "surface": "swallow", "lemma": "swallow", "partOfSpeech": "verb", "semanticClass": "ingest" },
     { "surface": "crush", "lemma": "crush", "partOfSpeech": "verb", "semanticClass": "manipulate" },
@@ -43,6 +44,7 @@
     { "surface": "gently", "lemma": "gently", "partOfSpeech": "modifier", "semanticClass": "manner_style" },
     { "surface": "sparingly", "lemma": "sparingly", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "liberally", "lemma": "liberally", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
+    { "surface": "generously", "lemma": "liberally", "partOfSpeech": "modifier", "semanticClass": "amount_style" },
     { "surface": "slowly", "lemma": "slowly", "partOfSpeech": "modifier", "semanticClass": "manner_style" },
     { "surface": "pea sized amount", "lemma": "pea sized amount", "partOfSpeech": "noun", "semanticClass": "amount_style" },
     { "surface": "pea-sized amount", "lemma": "pea sized amount", "partOfSpeech": "noun", "semanticClass": "amount_style" },

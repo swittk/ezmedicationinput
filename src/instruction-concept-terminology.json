@@ -86,6 +86,34 @@
       ]
     },
     {
+      "code": "cream",
+      "role": "material",
+      "display": "cream",
+      "i18n": { "th": "ครีม" },
+      "aliases": ["cream", "ครีม"]
+    },
+    {
+      "code": "ointment",
+      "role": "material",
+      "display": "ointment",
+      "i18n": { "th": "ขี้ผึ้ง" },
+      "aliases": ["ointment", "ขี้ผึ้ง"]
+    },
+    {
+      "code": "gel",
+      "role": "material",
+      "display": "gel",
+      "i18n": { "th": "เจล" },
+      "aliases": ["gel", "เจล"]
+    },
+    {
+      "code": "area",
+      "role": "site",
+      "display": "the area",
+      "i18n": { "th": "บริเวณ" },
+      "aliases": ["area", "the area"]
+    },
+    {
       "code": "small_amount",
       "role": "amount",
       "display": "a small amount",
@@ -159,6 +187,48 @@
         "มีเพศสัมพันธ์",
         "เพศสัมพันธ์"
       ]
+    },
+    {
+      "code": "washing",
+      "role": "activity",
+      "display": "washing",
+      "i18n": { "th": "การล้าง" },
+      "aliases": ["washing", "wash", "การล้าง", "ล้าง"]
+    },
+    {
+      "code": "showering",
+      "role": "activity",
+      "display": "showering",
+      "i18n": { "th": "การอาบน้ำ" },
+      "aliases": ["showering", "shower", "การอาบน้ำ", "อาบน้ำ"]
+    },
+    {
+      "code": "bathing",
+      "role": "activity",
+      "display": "bathing",
+      "i18n": { "th": "การอาบน้ำ" },
+      "aliases": ["bathing", "bath", "การอาบน้ำ", "อาบน้ำ"]
+    },
+    {
+      "code": "swimming",
+      "role": "activity",
+      "display": "swimming",
+      "i18n": { "th": "ว่ายน้ำ" },
+      "aliases": ["swimming", "swim"]
+    },
+    {
+      "code": "sweating",
+      "role": "activity",
+      "display": "sweating",
+      "i18n": { "th": "เหงื่อออก" },
+      "aliases": ["sweating", "sweat"]
+    },
+    {
+      "code": "going_outdoors",
+      "role": "activity",
+      "display": "going outdoors",
+      "i18n": { "th": "ออกกลางแจ้ง" },
+      "aliases": ["going outdoors", "go outdoors", "outdoors", "ออกกลางแจ้ง"]
     },
     {
       "code": "use",
@@ -329,6 +399,13 @@
       ]
     },
     {
+      "code": "gently",
+      "role": "manner",
+      "display": "gently",
+      "i18n": { "th": "เบาๆ" },
+      "aliases": ["gently", "เบาๆ", "เบา ๆ"]
+    },
+    {
       "code": "thoroughly",
       "role": "manner",
       "display": "thoroughly",
@@ -424,6 +501,13 @@
         "sleep",
         "นอน"
       ]
+    },
+    {
+      "code": "absorbed",
+      "role": "result",
+      "display": "absorbed",
+      "i18n": { "th": "ซึมหมด" },
+      "aliases": ["absorbed", "fully absorbed", "completely absorbed", "ซึมหมด", "ซึมจนหมด"]
     },
     {
       "code": "dissolved",

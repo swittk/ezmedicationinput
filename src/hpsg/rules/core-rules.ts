@@ -487,6 +487,20 @@ function matchCompoundDoseUnit(
     }
     return false;
   };
+  const matchesProductContext = (): boolean => {
+    let cursor = start + 1;
+    while (cursor < context.limit) {
+      const candidate = context.tokens[cursor];
+      if (!candidate || context.state.consumed.has(candidate.index)) return false;
+      const candidateLower = normalizeTokenLower(candidate);
+      if (DOSE_UNIT_CONNECTORS.has(candidateLower)) {
+        cursor += 1;
+        continue;
+      }
+      return Boolean(productRouteHint(candidateLower));
+    }
+    return false;
+  };
   for (const compound of COMPOUND_DOSE_UNITS) {
     if (compound.head !== lower) {
       continue;
@@ -522,7 +536,10 @@ function matchCompoundDoseUnit(
       }
     }
 
-    if (compound.requiresSiteContext && matchesSiteContext()) {
+    if (
+      (compound.requiresSiteContext && matchesSiteContext()) ||
+      (compound.requiresProductContext && matchesProductContext())
+    ) {
       const head = context.tokens[start];
       return head ? { unit: compound.unit, tokens: [head] } : undefined;
     }

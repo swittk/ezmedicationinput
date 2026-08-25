@@ -1708,7 +1708,10 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       const governedByRangeConnector = Boolean(
         previousToken && RANGE_CONNECTORS.has(normalizeTokenLower(previousToken))
       );
-      if (unit && !governedByIntervalLead && !governedByRangeConnector &&
+      const governedByActivityWindow = Boolean(
+        unit && semanticActivityWindowAt(context, start + 2)
+      );
+      if (unit && !governedByIntervalLead && !governedByRangeConnector && !governedByActivityWindow &&
         !timingRangeIsProcedureLocalDuration(context, token.sourceStart, unitToken.sourceEnd)) {
         const schedule = buildDurationScheduleFeature(token.value, unit);
         if (schedule) {
@@ -1941,6 +1944,20 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return false;
   }
   const lower = normalizeTokenLower(token);
+  if (token.kind === LexKind.Number && token.value !== undefined) {
+    const unitToken = context.tokens[index + 1];
+    const unit = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) : undefined;
+    if (unit) {
+      const window = semanticActivityWindowAt(context, index + 2);
+      if (window) return true;
+      const relationToken = context.tokens[index + 2];
+      const relation = relationToken ? mealRelationFromToken(normalizeTokenLower(relationToken)) : undefined;
+      if (relation === "before" || relation === "after") {
+        const expression = eventExpressionPartsAt(context, index + 3);
+        if (resolveEventTimingExpression(expression.parts)) return true;
+      }
+    }
+  }
   if (
     /^\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower) ||
     /^\d+(?:\.\d+)?-\d+(?:\.\d+)?x\/(?:day|d|week|wk|w|month|mo|hour|h)$/.test(lower)

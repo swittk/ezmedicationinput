@@ -16,9 +16,12 @@ import {
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
 import { resolveSymptomDefinition } from "./symptom-terminology";
+import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { ACTION_COORDINATION_CONNECTOR_I18N } from "./hpsg/lexical-classes";
 import {
   ACTION_SEQUENCE_MARKERS,
   localizeAdviceRelation,
+  resolveActionRelationSurface,
   resolveAdviceRelationSurface
 } from "./relation-terminology";
 
@@ -945,6 +948,46 @@ function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgume
   return enumValue<AdviceArgumentRole>(AdviceArgumentRole, configured) ?? AdviceArgumentRole.Object;
 }
 
+function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
+  const cleaned = cleanFreeText(text);
+  const withoutArticle = cleaned.replace(/^(?:the|a|an)\s+/iu, "").trim();
+  const resolveOne = (value: string) => resolveBodySitePhrase(value, undefined, {
+    allowTerminalModifierInheritance: true
+  });
+  const direct = resolveOne(withoutArticle);
+  if (direct?.coding || direct?.definition || direct?.spatialRelation) {
+    const coding = direct.coding ? { ...direct.coding } : undefined;
+    return {
+      role: AdviceArgumentRole.Site,
+      text: cleaned,
+      normalized: direct.displayText,
+      conceptId: direct.resolutionCanonical,
+      coding,
+      codings: coding ? [coding] : undefined,
+      i18n: { en: cleaned }
+    };
+  }
+  const match = withoutArticle.match(/^(.+?)\s+(and|or)\s+(.+)$/iu);
+  if (!match) return undefined;
+  const left = resolveOne(match[1].replace(/^(?:the|a|an)\s+/iu, "").trim());
+  const right = resolveOne(match[3].replace(/^(?:the|a|an)\s+/iu, "").trim());
+  if (!(left?.coding || left?.definition) || !(right?.coding || right?.definition)) return undefined;
+  const connector = match[2].toLowerCase();
+  const leftTh = left.definition?.i18n?.th ?? left.coding?.i18n?.th;
+  const rightTh = right.definition?.i18n?.th ?? right.coding?.i18n?.th;
+  return {
+    role: AdviceArgumentRole.Site,
+    text: cleaned,
+    normalized: withoutArticle,
+    i18n: {
+      en: cleaned,
+      ...(leftTh && rightTh ? {
+        th: `${leftTh}${ACTION_COORDINATION_CONNECTOR_I18N[connector]?.th ?? connector}${rightTh}`
+      } : {})
+    }
+  };
+}
+
 function classifyArgument(text: string): AdviceArgument {
   const cleaned = cleanFreeText(text);
   const normalized = normalizeAdditionalInstructionKey(cleaned);
@@ -961,6 +1004,9 @@ function classifyArgument(text: string): AdviceArgument {
       concept.conceptId
     );
   }
+
+  const site = bodySiteAdviceArgument(cleaned);
+  if (site) return site;
 
   const symptom = resolveSymptomDefinition(normalized);
   if (symptom) {
@@ -1317,6 +1363,38 @@ function parseEmbeddedAvoidanceFrames(
   return frames;
 }
 
+function tryParseNegativeRelationInstruction(
+  sourceText: string,
+  span: TextRange,
+  context: AdviceParseContext,
+  sequenceIndex: number,
+  sequenceCount: number
+): AdviceFrame[] | undefined {
+  const words = normalizeWords(sourceText);
+  if (words.length < 3) return undefined;
+  const prefix = parseLeadingClauseFeatures(words);
+  if (!prefix || prefix.polarity !== AdvicePolarity.Negate || prefix.cursor >= words.length) return undefined;
+  const relation = isRelationWord(words[prefix.cursor]) ?? resolveActionRelationSurface(words[prefix.cursor]);
+  if (!relation) return undefined;
+  const targetText = words.slice(prefix.cursor + 1).join(" ");
+  if (!targetText) return undefined;
+  const argument = classifyArgument(targetText);
+  if (argument.role !== AdviceArgumentRole.Site && argument.role !== AdviceArgumentRole.Destination) {
+    return undefined;
+  }
+  return [createFrame(
+    sourceText,
+    span,
+    sequenceCount > 1 ? AdviceForce.Sequence : AdviceForce.Warning,
+    "apply",
+    "administration",
+    [argument],
+    sequenceIndex,
+    relation,
+    AdvicePolarity.Negate
+  )];
+}
+
 function tryParseNoObjectInstruction(
   sourceText: string,
   span: TextRange,
@@ -1485,7 +1563,9 @@ interface AdviceVerbArgumentParse {
 type AdviceVerbArgumentParser = (words: string[], lexeme?: AdviceLexemeEntry) => AdviceVerbArgumentParse;
 
 const DEFAULT_ADVICE_VERB_ARGUMENT_PARSER: AdviceVerbArgumentParser = (remainderWords) => {
-  const relation = remainderWords.length ? isRelationWord(remainderWords[0]) : undefined;
+  const relation = remainderWords.length
+    ? isRelationWord(remainderWords[0]) ?? resolveActionRelationSurface(remainderWords[0])
+    : undefined;
   const objectText = remainderWords.slice(relation ? 1 : 0).join(" ");
   return { relation, args: objectText ? [classifyArgument(objectText)] : [] };
 };
@@ -1643,6 +1723,7 @@ function parseSequenceFrames(
       tryParseRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseStyleInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
+      tryParseNegativeRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
       tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
       tryParseEllipticalEffectInstruction(
         segment.text,
@@ -1793,8 +1874,9 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
   const modalityText = realizeAdviceModality(frame.modality, locale);
   const relationText = localizeAdviceRelation(frame.relation, locale);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
+  const sharedAction = resolveMedicationInstructionAction(frame.predicate.lemma);
   const localizedPredicate = language === "th"
-    ? lexeme?.i18n?.th ?? frame.predicate.lemma
+    ? lexeme?.i18n?.th ?? sharedAction?.i18n?.th ?? frame.predicate.lemma
     : frame.predicate.lemma;
   if (frame.polarity === AdvicePolarity.Negate) {
     let text = language === "th"

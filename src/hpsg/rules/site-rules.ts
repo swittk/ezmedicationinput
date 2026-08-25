@@ -205,6 +205,13 @@ function anchorTargetsTypedNonSiteConcept(
     if (!candidate || context.state.consumed.has(candidate.index)) break;
     const lower = normalizeTokenLower(candidate);
     if (isPunctuation(lower)) break;
+    if (cursor > start + 1 && SITE_TRAILING_INSTRUCTION_WORDS.has(lower)) break;
+    if (
+      BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(lower) &&
+      anchoredModifierLeadsToResolvableSite(context, cursor)
+    ) {
+      continue;
+    }
     const concept = resolveMedicationInstructionConcept(lower, context.options);
     if (!concept) continue;
     return concept.role !== AdviceArgumentRole.Site && concept.role !== AdviceArgumentRole.Destination;

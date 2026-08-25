@@ -234,20 +234,16 @@ function lookupDefinitionForCanonical(
   );
 }
 
-function terminalInheritanceIsLicensed(canonical: string): boolean {
-  const words = canonical.split(/\s+/).filter(Boolean);
-  if (words.length < 2) return false;
-  return words.slice(0, -1).every((word) =>
-    BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word) || BODY_SITE_BARE_NOMINAL_PREFIXES.has(word)
-  );
-}
-
 function longestTerminalBodySiteDefinition(
   canonical: string,
   customSiteMap?: Record<string, BodySiteDefinition>
 ): { canonical: string; definition: BodySiteDefinition } | undefined {
   const words = canonical.split(/\s+/).filter(Boolean);
   for (let start = 1; start < words.length; start += 1) {
+    const prefix = words.slice(0, start);
+    if (!prefix.every((word) =>
+      BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word) || BODY_SITE_BARE_NOMINAL_PREFIXES.has(word)
+    )) continue;
     const suffix = words.slice(start).join(" ");
     const definition = lookupDefinitionForCanonical(suffix, customSiteMap);
     if (definition?.coding?.code || definition?.routeHint) return { canonical: suffix, definition };
@@ -863,8 +859,7 @@ export function resolveBodySitePhrase(
   const preliminaryFeatures = parseBodySiteFeatures(displayText, undefined, customSiteMap);
   const terminal = directDefinition ||
     !context?.allowTerminalModifierInheritance ||
-    preliminaryFeatures.kind !== "nominal" ||
-    !terminalInheritanceIsLicensed(canonical)
+    preliminaryFeatures.kind !== "nominal"
     ? undefined
     : longestTerminalBodySiteDefinition(canonical, customSiteMap);
   const baseDefinition = directDefinition ?? terminal?.definition;

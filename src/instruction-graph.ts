@@ -17,10 +17,13 @@ import {
 } from "./relation-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
+  ACTION_COORDINATION_CONNECTOR_I18N,
   ACTION_DIRECTIVE_PREFIXES,
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_TOKENS,
+  BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   AS_NEEDED_LEAD_PHRASES,
+  COMPOUND_DOSE_UNITS,
   DURATION_LEAD_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
@@ -31,9 +34,11 @@ import {
   MEAL_TIMING_BY_RELATION,
   PRN_LEADS,
   RANGE_CONNECTORS,
+  ROUTE_SITE_PREPOSITIONS,
+  SITE_ANCHORS,
   THAI_METHOD_AUXILIARY_VERBS
 } from "./hpsg/lexical-classes";
-import { FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -131,6 +136,37 @@ function actionPhraseCandidates(parts: Lexeme[], index: number, length: number):
   return Array.from(candidates).filter((candidate) => candidate.trim().length > 0);
 }
 
+function actionCandidateIsAnchoredSiteModifier(
+  parts: Lexeme[],
+  index: number,
+  options?: ParseOptions
+): boolean {
+  if (!BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(key(parts[index]))) return false;
+  let modifierStart = index;
+  while (
+    modifierStart > 0 &&
+    BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(key(parts[modifierStart - 1]))
+  ) modifierStart -= 1;
+  const anchorIndex = modifierStart - 1;
+  if (
+    anchorIndex < 0 ||
+    (!SITE_ANCHORS.has(key(parts[anchorIndex])) && !ROUTE_SITE_PREPOSITIONS.has(key(parts[anchorIndex])))
+  ) return false;
+  const maxEnd = Math.min(parts.length, index + 5);
+  for (let end = index + 2; end <= maxEnd; end += 1) {
+    const candidateText = parts
+      .slice(modifierStart, end)
+      .map((part) => part.original)
+      .join(" ");
+    const resolved = resolveBodySitePhrase(candidateText, options?.siteCodeMap, {
+      bodySiteContext: options?.context?.bodySiteContext,
+      allowTerminalModifierInheritance: true
+    });
+    if (resolved?.coding || resolved?.definition) return true;
+  }
+  return false;
+}
+
 function actionCandidateIsPerPeriodGrammar(parts: Lexeme[], index: number): boolean {
   const current = parts[index];
   const next = parts[index + 1];
@@ -206,7 +242,8 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
     .replace(/^\s*(?:the|a|an)\s+/i, "")
     .trim() || text;
   const resolved = resolveBodySitePhrase(lookupText, options?.siteCodeMap, {
-    bodySiteContext: options?.context?.bodySiteContext
+    bodySiteContext: options?.context?.bodySiteContext,
+    allowTerminalModifierInheritance: true
   });
   if (!resolved || (!resolved.coding && !resolved.definition)) return undefined;
   return {
@@ -328,6 +365,8 @@ function argumentFromParts(
     // constructional fallback. The fallback is only for opaque/free text.
     return direct;
   }
+  const coordinated = coordinatedTypedArgumentFromParts(parts, start, endExclusive, input, options);
+  if (coordinated) return coordinated;
   const resolvedSite = codingFromSite(text, options);
   if (resolvedSite) {
     if (preferredRole === AdviceArgumentRole.Destination) resolvedSite.role = AdviceArgumentRole.Destination;
@@ -341,6 +380,39 @@ function argumentFromParts(
     text,
     normalized: allPartsCanonical && canonical ? canonical : text.toLowerCase()
   };
+}
+
+function coordinatedTypedArgumentFromParts(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  options?: ParseOptions
+): AdviceArgument | undefined {
+  for (let index = start + 1; index + 1 < endExclusive; index += 1) {
+    const connector = key(parts[index]);
+    if (connector !== "and" && connector !== "or") continue;
+    const left = argumentFromParts(parts, start, index, input, AdviceArgumentRole.Activity, options);
+    const right = argumentFromParts(parts, index + 1, endExclusive, input, AdviceArgumentRole.Activity, options);
+    if (
+      !left?.conceptId || !right?.conceptId ||
+      left.role !== AdviceArgumentRole.Activity || right.role !== AdviceArgumentRole.Activity
+    ) continue;
+    const enLeft = left.i18n?.en ?? left.normalized ?? left.text;
+    const enRight = right.i18n?.en ?? right.normalized ?? right.text;
+    const thLeft = left.i18n?.th ?? left.normalized ?? left.text;
+    const thRight = right.i18n?.th ?? right.normalized ?? right.text;
+    return {
+      role: AdviceArgumentRole.Activity,
+      text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+      normalized: `${enLeft} ${connector} ${enRight}`,
+      i18n: {
+        en: `${enLeft} ${connector} ${enRight}`,
+        th: `${thLeft}${ACTION_COORDINATION_CONNECTOR_I18N[connector]?.th ?? connector}${thRight}`
+      }
+    };
+  }
+  return undefined;
 }
 
 function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefined): void {
@@ -390,6 +462,48 @@ const INSTRUCTION_NUMBER_WORDS: Readonly<Record<string, number>> = {
   seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12
 };
 
+interface InstructionQuantityUnitMatch { unit: string; endExclusive: number; }
+
+function instructionQuantityHasProductContext(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number
+): boolean {
+  let cursor = start;
+  while (cursor < endExclusive) {
+    const current = key(parts[cursor]);
+    if (!current) return false;
+    if (current === "of" || current === "a" || current === "an" || current === "the") {
+      cursor += 1;
+      continue;
+    }
+    return Boolean(PRODUCT_FORM_HINTS[current]);
+  }
+  return false;
+}
+
+function instructionQuantityUnitAt(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  options?: ParseOptions
+): InstructionQuantityUnitMatch | undefined {
+  const maxSpan = Math.min(3, endExclusive - start);
+  for (let span = maxSpan; span >= 1; span -= 1) {
+    const candidate = parts.slice(start, start + span).map((part) => key(part)).join(" ");
+    const unit = normalizeUnit(candidate, options);
+    if (unit) return { unit, endExclusive: start + span };
+  }
+  const head = key(parts[start]);
+  for (const compound of COMPOUND_DOSE_UNITS) {
+    if (compound.head !== head || !compound.requiresProductContext || compound.tails.length) continue;
+    if (instructionQuantityHasProductContext(parts, start + 1, endExclusive)) {
+      return { unit: compound.unit, endExclusive: start + 1 };
+    }
+  }
+  return undefined;
+}
+
 function parseQuantityArgument(
   parts: Lexeme[],
   start: number,
@@ -400,16 +514,18 @@ function parseQuantityArgument(
 ): AdviceArgument | undefined {
   for (let index = start; index + 1 < endExclusive; index += 1) {
     const valueToken = parts[index];
-    const unitToken = parts[index + 1];
-    if (!valueToken || !unitToken) continue;
-    const unit = normalizeUnit(key(unitToken), options);
-    if (!unit) continue;
+    if (!valueToken) continue;
+    const unitMatch = instructionQuantityUnitAt(parts, index + 1, endExclusive, options);
+    if (!unitMatch) continue;
+    const unitToken = parts[unitMatch.endExclusive - 1];
+    if (!unitToken) continue;
+    const unit = unitMatch.unit;
     const wordValue = INSTRUCTION_NUMBER_WORDS[key(valueToken)];
     if ((valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
       const value = valueToken.kind === "NUMBER" ? valueToken.value : wordValue;
       return {
         role: AdviceArgumentRole.Amount,
-        text: sourceFor(parts, index, index + 2, input),
+        text: sourceFor(parts, index, unitMatch.endExclusive, input),
         normalized: unit,
         quantity: { value, unit },
         span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
@@ -420,7 +536,7 @@ function parseQuantityArgument(
       if (!match) continue;
       return {
         role: AdviceArgumentRole.Amount,
-        text: sourceFor(parts, index, index + 2, input),
+        text: sourceFor(parts, index, unitMatch.endExclusive, input),
         normalized: unit,
         quantity: { range: { low: Number(match[1]), high: Number(match[2]) }, unit },
         span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
@@ -677,6 +793,27 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
     if (relationHasGrammarFeature(relation, "accompanimentComplement") || tail?.conceptId) pushArgument(args, tail);
   }
+  return { args };
+};
+const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, amount } = c;
+  const args = parsedArgs(amount);
+  const amountEnd = amount?.span
+    ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
+    : undefined;
+  let materialStart = amountEnd ?? argumentStart;
+  while (materialStart < segmentEnd) {
+    const lower = key(parts[materialStart]);
+    if (lower === "of" || lower === "a" || lower === "an" || lower === "the") materialStart += 1;
+    else break;
+  }
+  const materialEnd = relIndex >= materialStart ? relIndex : segmentEnd;
+  if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
+    parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
+  ));
+  if (relIndex >= 0 && relIndex + 1 < segmentEnd) pushArgument(args, argumentFromParts(
+    parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Destination, options
+  ));
   return { args };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
@@ -937,6 +1074,7 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   "container-activity": CONTAINER_ACTIVITY_ARGUMENT_PARSER,
   "theme-destination-amount": THEME_DESTINATION_AMOUNT_ARGUMENT_PARSER,
   "object-amount-material": OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER,
+  "amount-material-destination": AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER,
   "amount-duration": AMOUNT_DURATION_ARGUMENT_PARSER,
   "object-duration": OBJECT_DURATION_ARGUMENT_PARSER,
   "object-time": OBJECT_TIME_ARGUMENT_PARSER,
@@ -1270,14 +1408,22 @@ function actionTailIsRegimenModifier(
     return true;
   }
   if (ACTION_ROUTE_TAIL_SURFACES.has(token)) return true;
-  const timing = Boolean(
+  const previous = parts[index - 1];
+  const previousValue = previous
+    ? previous.kind === "NUMBER" || previous.kind === "NUMBER_RANGE" ||
+      INSTRUCTION_NUMBER_WORDS[key(previous)] !== undefined
+    : false;
+  const localAmountUnit = definition?.acceptsAmount && previousValue
+    ? instructionQuantityUnitAt(parts, index, parts.length)
+    : undefined;
+  const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
     WORD_FREQUENCIES[token] ||
     EVENT_TIMING_TOKENS[token] ||
+    EVERY_INTERVAL_TOKENS.has(token) ||
     FREQUENCY_SIMPLE_WORDS[token] !== undefined
   );
   if (!timing) {
-    const previous = parts[index - 1];
     if (!previous || !/^[,;:]$/u.test(previous.original.trim())) return false;
     const relation = resolveActionRelationSurface(token);
     if (!relation) return false;
@@ -1308,7 +1454,11 @@ export function parseInstructionActions(
         negative = prefixed.polarity === AdvicePolarity.Negate;
         break;
       }
-      if (actionMatchAt(parts, index, options) && !actionCandidateIsDoseUnit(parts, index, options)) {
+      if (
+        actionMatchAt(parts, index, options) &&
+        !actionCandidateIsDoseUnit(parts, index, options) &&
+        !actionCandidateIsAnchoredSiteModifier(parts, index, options)
+      ) {
         start = index;
         break;
       }
@@ -1353,6 +1503,7 @@ export function parseInstructionActions(
       if (
         nextActionMatch &&
         !actionCandidateIsDoseUnit(parts, index, options) &&
+        !actionCandidateIsAnchoredSiteModifier(parts, index, options) &&
         !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition, options)
       ) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
@@ -2263,9 +2414,24 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   const activitySuffix = activityRelation && c.activity
     ? (c.thai ? `${activityRelation}${c.activity}` : ` ${activityRelation} ${c.activity}`)
     : "";
+  const locativeRelation = c.site && c.frame.relation && relationHasSemanticClass(c.frame.relation, "locative")
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+    : undefined;
+  const mannerSuffix = c.manner ? (c.thai ? c.manner : ` ${c.manner}`) : "";
+  const resultRelation = c.result && c.frame.relation
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+    : undefined;
+  const resultSuffix = c.result && resultRelation
+    ? (c.thai ? `${resultRelation}${c.result}` : ` ${resultRelation} ${c.result}`)
+    : "";
+  if (locativeRelation && c.site) {
+    return c.thai
+      ? `${c.label}${amount ? ` ${amount}` : ""}${mannerSuffix}${locativeRelation}${c.site}${c.duration ? ` ${c.duration}` : ""}${resultSuffix}`
+      : `${c.label}${amount ? ` ${amount}` : ""}${mannerSuffix} ${locativeRelation} ${c.site}${c.duration ? ` for ${c.duration}` : ""}${resultSuffix}`;
+  }
   return c.thai
-    ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${c.duration ? ` ${c.duration}` : ""}${withTarget ? `ร่วมกับ${withTarget}` : ""}${activitySuffix}`
-    : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}${withTarget ? ` with ${withTarget}` : ""}${activitySuffix}`;
+    ? `${c.label}${object ?? ""}${amount ? ` ${amount}` : ""}${mannerSuffix}${c.duration ? ` ${c.duration}` : ""}${withTarget ? `ร่วมกับ${withTarget}` : ""}${activitySuffix}${resultSuffix}`
+    : `${c.label}${object ? ` ${object}` : ""}${amount ? ` ${amount}` : ""}${mannerSuffix}${c.duration ? ` for ${c.duration}` : ""}${withTarget ? ` with ${withTarget}` : ""}${activitySuffix}${resultSuffix}`;
 };
 const SOURCE_FAITHFUL_REALIZER: ActionRealizer = (c) => {
   const sourceIsThai = /[\u0E00-\u0E7F]/.test(c.frame.sourceText);
@@ -2314,8 +2480,8 @@ const MIX_SUBSTANCE_REALIZER: ActionRealizer = (c) => {
   return `${c.label}${themeText}${substanceText}`;
 };
 const RESULT_REALIZER: ActionRealizer = (c) => c.thai
-  ? `${c.label}${c.result ? `ให้เกิด${c.result}` : ""}`
-  : `${c.label}${c.result ? ` to form ${c.result}` : ""}`;
+  ? `${c.label}${c.manner ?? ""}${c.result ? `ให้เกิด${c.result}` : ""}`
+  : `${c.label}${c.manner ? ` ${c.manner}` : ""}${c.result ? ` to form ${c.result}` : ""}`;
 const SITE_RELATION_REALIZER: ActionRealizer = (c) => {
   const relationTarget = c.time ?? c.activity;
   const mannerSuffix = c.manner ? (c.thai ? c.manner : ` ${c.manner}`) : "";
@@ -2365,6 +2531,19 @@ const OBJECT_AMOUNT_MATERIAL_REALIZER: ActionRealizer = (c) => {
   return c.thai
     ? `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `ด้วย${c.material}` : ""}`
     : `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` with ${c.material}` : ""}`;
+};
+const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
+  const relation = c.destination && c.frame.relation
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+    : undefined;
+  if (c.thai) {
+    return `${c.label}${c.material ?? ""}${c.amount ? ` ${c.amount}` : ""}${
+      relation && c.destination ? `${relation}${c.destination}` : ""
+    }`;
+  }
+  return `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` of ${c.material}` : ""}${
+    relation && c.destination ? ` ${relation} ${c.destination}` : ""
+  }`;
 };
 const PRIME_REALIZER: ActionRealizer = (c) => {
   const object = c.theme ?? c.container;
@@ -2516,6 +2695,7 @@ const ACTION_REALIZERS: Record<MedicationInstructionActionRealizer, ActionRealiz
   result: RESULT_REALIZER,
   "site-relation": SITE_RELATION_REALIZER,
   "object-amount-material": OBJECT_AMOUNT_MATERIAL_REALIZER,
+  "amount-material-destination": AMOUNT_MATERIAL_DESTINATION_REALIZER,
   prime: PRIME_REALIZER,
   "amount-duration": AMOUNT_DURATION_REALIZER,
   "object-duration": OBJECT_DURATION_REALIZER,

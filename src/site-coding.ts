@@ -10,6 +10,7 @@ import {
   SiteCodeSuggestionsResult
 } from "./types";
 import { objectEntries } from "./utils/object";
+import { BODY_SITE_ATTRIBUTIVE_MODIFIERS, BODY_SITE_BARE_NOMINAL_PREFIXES } from "./hpsg/lexical-classes";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -255,6 +256,18 @@ function pickSiteSelection(
   return undefined;
 }
 
+function preserveInheritedSiteText(internal: ParserState): boolean {
+  const request = internal.siteLookupRequest;
+  const text = normalizeBodySiteKey(request?.text ?? "");
+  const canonical = normalizeBodySiteKey(request?.canonical ?? "");
+  if (!text || !canonical || text === canonical || !text.endsWith(` ${canonical}`)) return false;
+  const prefix = text.slice(0, text.length - canonical.length).trim();
+  const words = prefix.split(/\s+/u).filter(Boolean);
+  return words.length > 0 && words.every((word) =>
+    BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word) || BODY_SITE_BARE_NOMINAL_PREFIXES.has(word)
+  );
+}
+
 function applySiteDefinition(internal: ParserState, definition: BodySiteDefinition): void {
   const coding = definition.coding;
   internal.siteCoding = coding?.code
@@ -265,7 +278,9 @@ function applySiteDefinition(internal: ParserState, definition: BodySiteDefiniti
         i18n: mergeI18nRecords(definition.i18n, coding.i18n)
       }
     : undefined;
-  if (definition.text) {
+  if (preserveInheritedSiteText(internal) && internal.siteLookupRequest?.text) {
+    internal.siteText = internal.siteLookupRequest.text;
+  } else if (definition.text) {
     internal.siteText = definition.text;
   } else if (internal.siteLookupRequest?.text) {
     internal.siteText = internal.siteLookupRequest.text;

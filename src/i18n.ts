@@ -6,12 +6,13 @@ import {
   getBodySiteRelationRealization,
   localizeAdviceRelation,
   relationHasGrammarFeature,
-  relationHasSemanticClass
+  relationHasSemanticClass,
+  resolveActionRelationSurface
 } from "./relation-terminology";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
 import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
-import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
+import { getMedicationInstructionConcept, resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
   collectLocalizedWhenPhrases,
   combineLocalizedFrequencyAndEvents,
@@ -23,7 +24,15 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
-import { ADMINISTRATION_WINDOW_INSTRUCTIONS } from "./hpsg/lexical-classes";
+import {
+  ACTION_COORDINATION_CONNECTORS,
+  ACTION_COORDINATION_CONNECTOR_I18N,
+  ADMINISTRATION_WINDOW_INSTRUCTIONS,
+  BODY_SITE_ATTRIBUTIVE_MODIFIER_I18N,
+  BODY_SITE_ATTRIBUTIVE_MODIFIERS,
+  BODY_SITE_BARE_NOMINAL_PREFIX_I18N,
+  BODY_SITE_BARE_NOMINAL_PREFIXES
+} from "./hpsg/lexical-classes";
 import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
@@ -1414,12 +1423,17 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   ) {
     return undefined;
   }
-  const resolvedSite = text ? resolveBodySitePhrase(text) : undefined;
-  const structuralTranslation = clause.site?.spatialRelation || resolvedSite?.features.qualifier
-    ? (text
-      ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
-      : translateSpatialSiteThai(undefined, clause.site?.spatialRelation))
-    : undefined;
+  const resolvedSite = text ? resolveBodySitePhrase(text, undefined, {
+    allowTerminalModifierInheritance: true
+  }) : undefined;
+  const structuralTranslation =
+    clause.site?.spatialRelation ||
+    resolvedSite?.features.qualifier ||
+    bodySiteHasAttributiveModifiers(text, resolvedSite?.resolutionCanonical)
+      ? (text
+        ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
+        : translateSpatialSiteThai(undefined, clause.site?.spatialRelation))
+      : undefined;
   const translated = perTargetSiteThai(clause) ?? structuralTranslation ??
     clause.site?.i18n?.th ?? clause.site?.coding?.i18n?.th ?? (text
       ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
@@ -1511,6 +1525,62 @@ function appendBodySiteQualifierThai(
   return `${base}${relation}${target}`;
 }
 
+function bodySiteHasAttributiveModifiers(
+  site: string | undefined,
+  resolutionCanonical: string | undefined
+): boolean {
+  const normalized = normalizeBodySiteKey(site ?? "");
+  const base = normalizeBodySiteKey(resolutionCanonical ?? "");
+  if (!normalized || !base || normalized === base || !normalized.endsWith(` ${base}`)) return false;
+  const prefix = normalized.slice(0, normalized.length - base.length).trim();
+  const modifierWords = prefix.split(/\s+/u).filter(Boolean);
+  return modifierWords.length > 0 && modifierWords.every((word) => BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word));
+}
+
+function applyBodySiteBareNominalPrefixesThai(
+  site: string,
+  translatedBase: string,
+  resolutionCanonical: string | undefined
+): string {
+  const normalized = normalizeBodySiteKey(site);
+  const base = normalizeBodySiteKey(resolutionCanonical ?? "");
+  if (!normalized || !base || normalized === base || !normalized.endsWith(` ${base}`)) {
+    return translatedBase;
+  }
+  const prefix = normalized.slice(0, normalized.length - base.length).trim();
+  if (!prefix) return translatedBase;
+  const words = prefix.split(/\s+/u).filter(Boolean);
+  if (!words.length || !words.every((word) => BODY_SITE_BARE_NOMINAL_PREFIXES.has(word))) {
+    return translatedBase;
+  }
+  const translated = words.map((word) => BODY_SITE_BARE_NOMINAL_PREFIX_I18N[word]?.th);
+  if (translated.some((value) => !value)) return translatedBase;
+  return `${(translated as string[]).join("")}${translatedBase}`;
+}
+
+function applyBodySiteAttributiveModifiersThai(
+  site: string,
+  translatedBase: string,
+  resolutionCanonical: string | undefined
+): string {
+  const normalized = normalizeBodySiteKey(site);
+  const base = normalizeBodySiteKey(resolutionCanonical ?? "");
+  if (!normalized || !base || normalized === base || !normalized.endsWith(` ${base}`)) {
+    return translatedBase;
+  }
+  const prefix = normalized.slice(0, normalized.length - base.length).trim();
+  if (!prefix) return translatedBase;
+  const modifierWords = prefix.split(/\s+/u).filter(Boolean);
+  if (!modifierWords.length || !modifierWords.every((word) => BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(word))) {
+    return translatedBase;
+  }
+  const translatedModifiers = modifierWords.map((word) =>
+    BODY_SITE_ATTRIBUTIVE_MODIFIER_I18N[word]?.th
+  );
+  if (translatedModifiers.some((value) => !value)) return translatedBase;
+  return `${translatedBase}${joinWithAndThai(translatedModifiers as string[])}`;
+}
+
 function translateSiteThai(
   site: string | undefined,
   code?: string,
@@ -1526,7 +1596,9 @@ function translateSiteThai(
   if (!normalized) {
     return site;
   }
-  const resolvedPhrase = resolveBodySitePhrase(site);
+  const resolvedPhrase = resolveBodySitePhrase(site, undefined, {
+    allowTerminalModifierInheritance: true
+  });
   const qualifier = resolvedPhrase?.features.qualifier;
   const qualified = (value: string): string => appendBodySiteQualifierThai(value, qualifier);
   const spatial = translateSpatialSiteThai(site, spatialRelation);
@@ -1536,16 +1608,31 @@ function translateSiteThai(
   if (code) {
     const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
     if (translatedByCode) {
-      return qualified(translatedByCode);
+      return qualified(applyBodySiteAttributiveModifiersThai(
+        site, translatedByCode, resolvedPhrase?.resolutionCanonical
+      ));
     }
+  }
+  const resolvedDefinitionTranslation = resolvedPhrase?.definition?.i18n?.th;
+  if (resolvedDefinitionTranslation) {
+    const inherited = applyBodySiteBareNominalPrefixesThai(
+      site,
+      applyBodySiteAttributiveModifiersThai(site, resolvedDefinitionTranslation, resolvedPhrase?.resolutionCanonical),
+      resolvedPhrase?.resolutionCanonical
+    );
+    return qualified(inherited);
   }
   const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized];
   if (definitionTranslation) {
-    return qualified(definitionTranslation);
+    return qualified(applyBodySiteAttributiveModifiersThai(
+      site, definitionTranslation, resolvedPhrase?.resolutionCanonical
+    ));
   }
   const direct = THAI_SITE_TRANSLATIONS[normalized];
   if (direct) {
-    return qualified(direct);
+    return qualified(applyBodySiteAttributiveModifiersThai(
+      site, direct, resolvedPhrase?.resolutionCanonical
+    ));
   }
   return qualified(site);
 }
@@ -1808,7 +1895,13 @@ function thaiIntegratedAdministrationQualifier(
     coding.system ?? "http://snomed.info/sct",
     coding.code
   );
-  return definition?.verbSuffixI18n?.th?.trim() || undefined;
+  const declaredSuffix = definition?.verbSuffixI18n?.th?.trim();
+  if (declaredSuffix) return declaredSuffix;
+  const concept = getMedicationInstructionConcept(coding.code);
+  const typedStyle = concept && (
+    concept.role === AdviceArgumentRole.Manner || concept.role === AdviceArgumentRole.Amount
+  ) && instruction.frames?.some((frame) => frame.predicate.semanticClass === "administration");
+  return typedStyle ? concept?.i18n?.th?.trim() || undefined : undefined;
 }
 
 
@@ -2210,6 +2303,26 @@ function formatLongThai(
   return roundTrip ? makeThaiRoundTripSurface(rendered) : rendered;
 }
 
+function translateCoordinatedActivityWindowThai(text: string): string | undefined {
+  const parts = text.trim().toLowerCase().replace(/[.,;:!?]+$/u, "").split(/\s+/u).filter(Boolean);
+  if (parts.length < 4) return undefined;
+  const relation = resolveActionRelationSurface(parts[0]);
+  if (!relation) return undefined;
+  const connectorIndex = parts.findIndex((part, index) => index > 1 && ACTION_COORDINATION_CONNECTORS.has(part));
+  if (connectorIndex < 0 || connectorIndex >= parts.length - 1) return undefined;
+  const leftSurface = parts.slice(1, connectorIndex).join(" ");
+  const rightSurface = parts.slice(connectorIndex + 1).join(" ");
+  const left = resolveMedicationInstructionConcept(leftSurface);
+  const right = resolveMedicationInstructionConcept(rightSurface);
+  if (left?.role !== AdviceArgumentRole.Activity || right?.role !== AdviceArgumentRole.Activity) return undefined;
+  const leftTh = left.i18n?.th;
+  const rightTh = right.i18n?.th;
+  const relationTh = localizeAdviceRelation(relation, "th");
+  const connectorTh = ACTION_COORDINATION_CONNECTOR_I18N[parts[connectorIndex]]?.th;
+  if (!leftTh || !rightTh || !relationTh || !connectorTh) return undefined;
+  return `${relationTh}${leftTh}${connectorTh}${rightTh}`;
+}
+
 function reconstructAdditionalInstructionThai(text: string): string | undefined {
   const parsed = parseAdditionalInstructions(text, { start: 0, end: text.length }, {
     defaultPredicate: "take",
@@ -2256,14 +2369,16 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
     let text = instruction.i18n?.th ??
       (instruction.frames?.length ? realizeAdviceFramesText(instruction.frames, "th") : undefined) ??
       (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
+      (instruction.text ? translateCoordinatedActivityWindowThai(instruction.text) : undefined) ??
       (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??
       instruction.text ?? instruction.coding?.display;
     if (!instruction.i18n?.th && instruction.coding?.code) {
+      const concept = getMedicationInstructionConcept(instruction.coding.code);
       const definition = findAdditionalInstructionDefinitionByCoding(
         instruction.coding.system ?? "http://snomed.info/sct",
         instruction.coding.code
       );
-      text = definition?.i18n?.th ?? text;
+      text = concept?.i18n?.th ?? definition?.i18n?.th ?? text;
     }
     if (!text) {
       continue;

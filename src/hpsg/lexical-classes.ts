@@ -22,6 +22,7 @@ type CompoundDoseUnit = {
   tails: string[];
   tailSequences?: string[][];
   requiresSiteContext?: boolean;
+  requiresProductContext?: boolean;
   unit: string;
 };
 
@@ -169,7 +170,11 @@ export const BODY_SITE_PARTITIVE_HEADS = setOf(source.bodySitePartitiveHeads);
 export const BODY_SITE_PARTITIVE_MODIFIERS = setOf(source.bodySitePartitiveModifiers);
 export const BODY_SITE_PARTITIVE_CONNECTORS = setOf(source.bodySitePartitiveConnectors);
 export const BODY_SITE_BARE_NOMINAL_PREFIXES = setOf(source.bodySiteBareNominalPrefixes);
+export const BODY_SITE_BARE_NOMINAL_PREFIX_I18N = source.bodySiteBareNominalPrefixI18n as
+  Record<string, { en?: string; th?: string }>;
 export const BODY_SITE_ATTRIBUTIVE_MODIFIERS = setOf(source.bodySiteAttributiveModifiers);
+export const BODY_SITE_ATTRIBUTIVE_MODIFIER_I18N = source.bodySiteAttributiveModifierI18n as
+  Record<string, { en?: string; th?: string }>;
 export const OTIC_SITE_WORDS = setOf(source.oticSiteWords);
 export const OPHTHALMIC_SITE_WORDS = setOf(source.ophthalmicSiteWords);
 export const NASAL_SITE_WORDS = setOf(source.nasalSiteWords);
@@ -303,6 +308,8 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   modality: prefix.modality as AdviceModality | undefined
 }));
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
+export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
+  Record<string, { en?: string; th?: string }>;
 export const ACTION_SEQUENCE_RELATION_TOKENS = ACTION_SEQUENCE_RELATION_SURFACES;
 export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
   stringEntries(source.instructionDurationUnits)
@@ -335,6 +342,7 @@ export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowIn
   .map((entry) => ({
     parts: [...entry.parts],
     text: entry.text,
+    offsetOnly: (entry as { offsetOnly?: boolean }).offsetOnly === true,
     i18n: entry.i18n ? { ...entry.i18n } : undefined,
     relation: entry.relation as "before" | "after" | undefined,
     activity: entry.activity as string | undefined

@@ -50,6 +50,11 @@
     "all",
     "bilateral"
   ],
+  "bodySiteBareNominalPrefixI18n": {
+    "each": { "th": "แต่ละ" },
+    "every": { "th": "ทุก" },
+    "all": { "th": "ทุก" }
+  },
   "oticSiteWords": [
     "ear",
     "ears",
@@ -232,6 +237,7 @@
       "head": "cm",
       "tails": [],
       "requiresSiteContext": true,
+      "requiresProductContext": true,
       "unit": "cm line"
     },
     {
@@ -905,6 +911,7 @@
     "empty",
     "gently",
     "liberally",
+    "generously",
     "may",
     "might",
     "must",
@@ -930,6 +937,7 @@
   "siteTrailingInstructionWords": [
     "gently",
     "liberally",
+    "generously",
     "slowly",
     "sparingly",
     "thick",
@@ -1030,6 +1038,14 @@
     "wet",
     "moist"
   ],
+  "bodySiteAttributiveModifierI18n": {
+    "dry": { "th": "แห้ง" },
+    "clean": { "th": "สะอาด" },
+    "hairless": { "th": "ไม่มีขน" },
+    "intact": { "th": "ไม่เป็นแผล" },
+    "wet": { "th": "เปียก" },
+    "moist": { "th": "ชื้น" }
+  },
   "positiveDirectiveMarkers": [
     "should",
     "must"
@@ -1154,6 +1170,51 @@
       },
       "relation": "after",
       "activity": "intercourse"
+    },
+    {
+      "parts": ["before", "going", "outdoors"],
+      "text": "before going outdoors",
+      "i18n": { "th": "ก่อนออกกลางแจ้ง" },
+      "relation": "before",
+      "activity": "going_outdoors"
+    },
+    {
+      "parts": ["after", "washing"],
+      "text": "after washing",
+      "offsetOnly": true,
+      "i18n": { "th": "หลังล้าง" },
+      "relation": "after",
+      "activity": "washing"
+    },
+    {
+      "parts": ["after", "showering"],
+      "text": "after showering",
+      "offsetOnly": true,
+      "i18n": { "th": "หลังอาบน้ำ" },
+      "relation": "after",
+      "activity": "showering"
+    },
+    {
+      "parts": ["after", "bathing"],
+      "text": "after bathing",
+      "offsetOnly": true,
+      "i18n": { "th": "หลังอาบน้ำ" },
+      "relation": "after",
+      "activity": "bathing"
+    },
+    {
+      "parts": ["after", "swimming"],
+      "text": "after swimming",
+      "i18n": { "th": "หลังว่ายน้ำ" },
+      "relation": "after",
+      "activity": "swimming"
+    },
+    {
+      "parts": ["after", "sweating"],
+      "text": "after sweating",
+      "i18n": { "th": "หลังเหงื่อออก" },
+      "relation": "after",
+      "activity": "sweating"
     }
   ],
   "thaiMethodAuxiliaryVerbs": [
@@ -1299,6 +1360,21 @@
       "enOne": "mL",
       "enOther": "mL"
     },
+    "cm line": {
+      "th": "ซม.",
+      "enOne": "cm line",
+      "enOther": "cm lines"
+    },
+    "cm strip": {
+      "th": "ซม.",
+      "enOne": "cm strip",
+      "enOther": "cm strips"
+    },
+    "cm ribbon": {
+      "th": "ซม.",
+      "enOne": "cm ribbon",
+      "enOther": "cm ribbons"
+    },
     "min": {
       "th": "นาที",
       "enOne": "minute",
@@ -1359,6 +1435,10 @@
     "and",
     "or"
   ],
+  "actionCoordinationConnectorI18n": {
+    "and": { "th": "และ" },
+    "or": { "th": "หรือ" }
+  },
   "symptomAdjustmentLeads": [
     "adjust",
     "depending",

@@ -75,6 +75,7 @@
         "th": "ถู"
       },
       "aliases": [
+        "rub in",
         "rub",
         "ถู"
       ],
@@ -1651,10 +1652,15 @@
         "th": "บีบ"
       },
       "aliases": [
+        "squeeze out",
         "squeeze",
         "บีบ"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "amount-material-destination",
+      "realizer": "amount-material-destination",
+      "acceptsAmount": true,
+      "definesDose": true
     },
     {
       "code": "pull",

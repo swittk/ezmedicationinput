@@ -370,6 +370,8 @@
       "relation": "on",
       "actionSurfaces": [
         "on",
+        "onto",
+        "over",
         "at"
       ],
       "adviceSurfaces": [
