@@ -127,7 +127,8 @@ export function cloneMedicationInstructionActionRealizerConfig(
     locales![locale] = {
       ...value,
       suppressActivityConcepts: value.suppressActivityConcepts ? [...value.suppressActivityConcepts] : undefined,
-      suppressSiteConcepts: value.suppressSiteConcepts ? [...value.suppressSiteConcepts] : undefined
+      suppressSiteConcepts: value.suppressSiteConcepts ? [...value.suppressSiteConcepts] : undefined,
+      routePhrases: value.routePhrases ? { ...value.routePhrases } : undefined
     };
   }
   return { locales: Object.keys(locales ?? {}).length ? locales : undefined };

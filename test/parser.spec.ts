@@ -4949,12 +4949,20 @@ describe("topical product forms and workflow", () => {
     });
     expect(result.longText).toBe("Infuse 1 g intravenously every 8 hours over 30 minutes.");
     expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
-      "หยดยาครั้งละ 1 g เข้าหลอดเลือดดำ ทุก 8 ชั่วโมง โดยให้ยานาน 30 นาที."
+      "ให้ยา 1 g ทางหลอดเลือดดำแบบหยด ทุก 8 ชั่วโมง ใช้เวลาให้ยาครั้งละ 30 นาที."
     );
 
     const bounded = parseSig("infuse 1 g IV q8h for 5 days");
     expect(bounded.fhir.timing?.repeat?.duration).toBeUndefined();
     expect(bounded.fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 5, code: "d" });
+    expect(formatSig(bounded.fhir, "long", { locale: "th" })).toBe(
+      "ให้ยา 1 g ทางหลอดเลือดดำแบบหยด ทุก 8 ชั่วโมง เป็นเวลา 5 วัน."
+    );
+
+    const injection = parseSig("inject 1 g IV q8h");
+    expect(formatSig(injection.fhir, "long", { locale: "th" })).toBe(
+      "ฉีดครั้งละ 1 g เข้าหลอดเลือดดำ ทุก 8 ชั่วโมง."
+    );
   });
 
   it("captures topical quantity units including metric ribbons", () => {

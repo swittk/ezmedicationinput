@@ -1246,7 +1246,7 @@
       "semanticClass": "administration",
       "display": "Infuse",
       "i18n": {
-        "th": "หยดยา"
+        "th": "ให้ยา"
       },
       "aliases": [
         "infuse",
@@ -1256,6 +1256,17 @@
       "argumentParser": "amount-duration",
       "realizer": "amount-duration",
       "administrationDurationIntroducers": ["in", "over"],
+      "realizerConfig": {
+        "locales": {
+          "th": {
+            "directDose": true,
+            "routePhrases": {
+              "47625008": "ทางหลอดเลือดดำแบบหยด"
+            },
+            "administrationDurationPrefix": "ใช้เวลาให้ยาครั้งละ"
+          }
+        }
+      },
       "acceptsAmount": true,
       "definesDose": true,
       "externalCodings": [
@@ -1263,14 +1274,14 @@
           "system": "http://snomed.info/sct",
           "code": "764794000",
           "display": "Infuse",
-          "i18n": { "th": "หยดยา" }
+          "i18n": { "th": "ให้ยา" }
         }
       ],
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "764794000",
         "display": "Infuse",
-        "i18n": { "th": "หยดยา" }
+        "i18n": { "th": "ให้ยา" }
       }
     },
     {

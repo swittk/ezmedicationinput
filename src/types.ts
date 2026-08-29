@@ -855,6 +855,12 @@ export interface MedicationInstructionActionLocaleRealizerConfig {
   suppressSiteConcepts?: string[];
   implicitMedicationObject?: boolean;
   directSiteObject?: boolean;
+  /** Realize the dose as a direct amount instead of adding a locale-default per-dose prefix. */
+  directDose?: boolean;
+  /** Route-specific phrase overrides keyed by canonical RouteCode value. */
+  routePhrases?: Record<string, string>;
+  /** Prefix for the duration of each administration occurrence. */
+  administrationDurationPrefix?: string;
 }
 
 export interface MedicationInstructionActionRealizerConfig {
