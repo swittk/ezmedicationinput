@@ -346,6 +346,10 @@ export interface FhirTimingRepeat extends FhirElement {
   boundsRange?: FhirRange;
   frequency?: number;
   frequencyMax?: number;
+  /** Duration of each administration occurrence. */
+  duration?: number;
+  durationMax?: number;
+  durationUnit?: FhirPeriodUnit;
   period?: number;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
@@ -895,6 +899,8 @@ export interface MedicationInstructionActionDefinition {
     nextConcepts?: string[];
   }>;
   continuationAfterRelations?: string[];
+  /** Surface introducers that make a parsed duration describe each administration occurrence. */
+  administrationDurationIntroducers?: string[];
   /** Preferred relation semantic classes used to resolve lexically ambiguous relation surfaces. */
   preferredRelationSemanticClasses?: string[];
   /** Exact coding for FHIR Dosage.method when this action can head administration. */
@@ -1198,6 +1204,10 @@ export interface CanonicalScheduleExpr {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  /** Duration of each administration occurrence, distinct from regimen bounds duration. */
+  administrationDuration?: number;
+  administrationDurationMax?: number;
+  administrationDurationUnit?: FhirPeriodUnit;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

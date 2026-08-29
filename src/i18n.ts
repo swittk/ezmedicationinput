@@ -1712,6 +1712,20 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
   return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
 }
 
+function describeAdministrationDurationThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const value = schedule?.administrationDuration;
+  const unit = schedule?.administrationDurationUnit;
+  if (value === undefined || !unit) return undefined;
+  const label = unit === FhirPeriodUnit.Minute ? "นาที"
+    : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
+      : unit === FhirPeriodUnit.Second ? "วินาที"
+        : unit === FhirPeriodUnit.Day ? "วัน" : unit;
+  const max = schedule?.administrationDurationMax;
+  return max !== undefined && max !== value
+    ? `โดยให้ยานาน ${stripTrailingZero(value)} ถึง ${stripTrailingZero(max)} ${label}`
+    : `โดยให้ยานาน ${stripTrailingZero(value)} ${label}`;
+}
+
 function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
   system: string,
   code: string
@@ -1991,6 +2005,7 @@ function formatLongThai(
     : schedule.count !== undefined && !standaloneOccurrenceCount
       ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
       : undefined;
+  const administrationDurationPart = describeAdministrationDurationThai(schedule);
   const durationPart = describeDurationThai(schedule);
   const occurrenceCapPart = describeOccurrenceCapThai(schedule);
 
@@ -2035,6 +2050,9 @@ function formatLongThai(
   }
   if (countPart) {
     segments.push(countPart);
+  }
+  if (administrationDurationPart) {
+    segments.push(administrationDurationPart);
   }
   if (durationPart) {
     segments.push(durationPart);

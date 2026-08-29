@@ -52,6 +52,34 @@ describe("heterogeneous multi-dose regimens", () => {
     ]);
   });
 
+  it("parses compact Thai morning/evening dose changes and shares a trailing stage duration", async () => {
+    const input = "1 เม็ดเช้า 2 เม็ดเย็นเป็นเวลา 2 สัปดาห์ หลังจากนั้นทาน 1 เม็ดเช้า 1 เม็ดเย็น";
+    const options = { locale: "th" as const, context: TABLET_CONTEXT };
+    const result = parseSig(input, options);
+    expect(result.count).toBe(3);
+    expect(result.meta.segments.map((segment) => segment.text)).toEqual([
+      "1 เม็ดเช้า",
+      "2 เม็ดเย็นเป็นเวลา 2 สัปดาห์",
+      "ทาน 1 เม็ดเช้า",
+      "1 เม็ดเย็น"
+    ]);
+    expect(result.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+      { value: 1, unit: "tab" },
+      { value: 2, unit: "tab" },
+      { value: 1, unit: "tab" }
+    ]);
+    expect(result.items.map((item) => item.fhir.timing?.repeat?.when)).toEqual([
+      ["MORN"], ["EVE"], ["MORN", "EVE"]
+    ]);
+    expect(result.items[0].fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 2, code: "wk" });
+    expect(result.items[1].fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 2, code: "wk" });
+    expect(result.items[2].fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined, undefined]);
+
+    const asyncResult = await parseSigAsync(input, options);
+    expect(asyncResult.items.map((item) => item.fhir)).toEqual(result.items.map((item) => item.fhir));
+  });
+
   it("supports multiple timing anchors inside each heterogeneous dose group", () => {
     const result = parseSig(
       "Take 1 tab at wake and lunch, 2 tabs at dinner and 22:00",

@@ -6,6 +6,7 @@ import { parseAdditionalInstructions } from "../advice";
 import { parseInstructionActions } from "../instruction-graph";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { normalizeUnit } from "../unit-lexicon";
+import { EVENT_TIMING_TOKENS } from "../maps";
 import { AdviceForce, AdviceFrame, ParseOptions } from "../types";
 import {
   ACTION_COORDINATION_CONNECTORS,
@@ -20,6 +21,8 @@ export interface HpsgSigSegment {
   text: string;
   start: number;
   end: number;
+  /** A trailing duration on the next heterogeneous dose applies to this sibling too. */
+  inheritTrailingDurationFromNext?: boolean;
 }
 
 function isBoundaryToken(token: Token): boolean {
@@ -281,6 +284,48 @@ function scheduleOnlyAdministrationContinuation(
   );
 }
 
+function adjacentTimedDoseContinuation(
+  input: string,
+  tokens: Token[],
+  doseIndex: number,
+  segmentStart: number,
+  options?: ParseOptions
+): boolean {
+  const first = tokens[doseIndex];
+  const unitToken = tokens[doseIndex + 1];
+  if (!first || !unitToken || !normalizeUnit(normalizeSegmentLexeme(unitToken), options)) return false;
+  if (first.kind !== "NUMBER" && first.kind !== "NUMBER_RANGE") return false;
+
+  let hasPriorEventAnchor = false;
+  for (let cursor = doseIndex - 1; cursor >= 0; cursor -= 1) {
+    const prior = tokens[cursor];
+    if (!prior || prior.sourceStart < segmentStart) break;
+    const lower = normalizeSegmentLexeme(prior);
+    if (EVENT_TIMING_TOKENS[lower] || /^[0-9]{1,2}[:.][0-9]{2}$/.test(lower)) {
+      hasPriorEventAnchor = true;
+      break;
+    }
+  }
+  if (!hasPriorEventAnchor) return false;
+
+  const prefixText = input.slice(segmentStart, first.sourceStart).trim();
+  if (!prefixText) return false;
+  const prefix = parseClauseState(prefixText, options);
+  if (findUnparsedTokenGroups(prefix).length || !prefix.primaryClause.dose || !hasMeaningfulSchedule(prefix)) {
+    return false;
+  }
+
+  const probeEnd = nextContinuationProbeEnd(input, tokens, doseIndex);
+  const continuationText = input.slice(first.sourceStart, probeEnd).trim();
+  if (!continuationText || parseInstructionActions(continuationText, 0, options).length) return false;
+  const continuation = parseClauseState(continuationText, options);
+  return Boolean(
+    !findUnparsedTokenGroups(continuation).length &&
+    continuation.primaryClause.dose &&
+    hasMeaningfulSchedule(continuation)
+  );
+}
+
 function doseBearingAdministrationContinuation(
   input: string,
   tokens: Token[],
@@ -350,7 +395,8 @@ function pushSegment(
   segments: HpsgSigSegment[],
   input: string,
   start: number,
-  end: number
+  end: number,
+  inheritTrailingDurationFromNext = false
 ): void {
   let trimmedStart = start;
   let trimmedEnd = end;
@@ -366,7 +412,8 @@ function pushSegment(
   segments.push({
     text: input.slice(trimmedStart, trimmedEnd),
     start: trimmedStart,
-    end: trimmedEnd
+    end: trimmedEnd,
+    inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined
   });
 }
 
@@ -408,6 +455,13 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       continue;
     }
     const nextToken = tokens[index + 1];
+    if (index > 0 && adjacentTimedDoseContinuation(input, tokens, index, start, options)) {
+      pushSegment(segments, input, start, token.sourceStart, true);
+      start = token.sourceStart;
+      inheritedAdministrationContinuation = true;
+      scannedOffset = token.sourceStart;
+      continue;
+    }
     if (token.original === "," && nextToken) {
       const scheduleContinuation = scheduleOnlyAdministrationContinuation(
         input, tokens, index + 1, start, options, inheritedAdministrationContinuation

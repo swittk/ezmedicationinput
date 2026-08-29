@@ -42,6 +42,7 @@ interface ActionSource {
   realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
   continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
   continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
+  administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
   preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
   contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
   administrationMethod?: FhirCoding;
@@ -183,6 +184,7 @@ function cloneDefinition(
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
+    administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
     administrationMethod: cloneCoding(definition.administrationMethod),
@@ -222,6 +224,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(sourceDefinition.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
+    administrationDurationIntroducers: sourceDefinition.administrationDurationIntroducers ? [...sourceDefinition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: sourceDefinition.preferredRelationSemanticClasses ? [...sourceDefinition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
     administrationMethod: cloneCoding(sourceDefinition.administrationMethod),
@@ -265,6 +268,7 @@ function normalizeCustomDefinition(
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(input.realizerConfig),
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
+    administrationDurationIntroducers: input.administrationDurationIntroducers ? [...input.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: input.preferredRelationSemanticClasses ? [...input.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),
     administrationMethod: cloneCoding(input.administrationMethod),

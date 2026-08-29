@@ -15,6 +15,8 @@ import {
   normalizeUnit
 } from "../unit-lexicon";
 import { normalizeDosageForm } from "../context";
+import { lexInput } from "../lexer/lex";
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 
 export interface HpsgDefaultConstraintDeps {
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
@@ -481,6 +483,45 @@ function applySmartMealExpansion(state: ParserState, options: ParseOptions | und
   replaceWhen(state, sortWhenCodes(uniqueWhen(normalizeMealRelations(when, options)), options));
 }
 
+function applyAdministrationDurationSemantics(state: ParserState, options?: ParseOptions): void {
+  const schedule = state.primaryClause.schedule;
+  if (!schedule || schedule.duration === undefined || !schedule.durationUnit || state.methodText === undefined) return;
+  if (schedule.administrationDuration !== undefined || schedule.administrationDurationUnit !== undefined) return;
+
+  const definition = resolveMedicationInstructionAction(state.methodText, options);
+  const introducers = new Set(definition?.administrationDurationIntroducers ?? []);
+  if (!introducers.size) return;
+
+  let methodEnd = -1;
+  let durationSpan: { start: number; end: number } | undefined;
+  let durationSpanCount = 0;
+  for (const item of state.primaryClause.evidence) {
+    if (item.rule === "hpsg.lex.method") {
+      for (const span of item.spans) {
+        if (span.end > methodEnd) methodEnd = span.end;
+      }
+    } else if (item.rule.startsWith("hpsg.lex.schedule.duration")) {
+      for (const span of item.spans) {
+        durationSpan = span;
+        durationSpanCount += 1;
+      }
+    }
+  }
+  if (methodEnd < 0 || durationSpanCount !== 1 || !durationSpan) return;
+  if (durationSpan.start <= methodEnd) return;
+
+  const between = lexInput(state.input.slice(methodEnd, durationSpan.start));
+  const introducer = between.length ? (between[between.length - 1].canonical ?? between[between.length - 1].lower) : undefined;
+  if (!introducer || !introducers.has(introducer)) return;
+
+  schedule.administrationDuration = schedule.duration;
+  schedule.administrationDurationMax = schedule.durationMax;
+  schedule.administrationDurationUnit = schedule.durationUnit;
+  delete schedule.duration;
+  delete schedule.durationMax;
+  delete schedule.durationUnit;
+}
+
 function applyWeeklyDefaultForDayFilters(state: ParserState): void {
   if (
     state.dayOfWeek.length &&
@@ -509,6 +550,7 @@ export function applyHpsgDefaultConstraints(
   applySingleDoseDefault(state, options);
   applyRouteSiteDefault(state);
   applyWeeklyDefaultForDayFilters(state);
+  applyAdministrationDurationSemantics(state, options);
   applySmartMealExpansion(state, options);
   applyCompletenessWarnings(state);
 }

@@ -1245,23 +1245,32 @@
       "code": "infuse",
       "semanticClass": "administration",
       "display": "Infuse",
+      "i18n": {
+        "th": "หยดยา"
+      },
       "aliases": [
-        "infuse"
+        "infuse",
+        "drip"
       ],
       "procedural": false,
+      "argumentParser": "amount-duration",
+      "realizer": "amount-duration",
+      "administrationDurationIntroducers": ["in", "over"],
       "acceptsAmount": true,
       "definesDose": true,
       "externalCodings": [
         {
           "system": "http://snomed.info/sct",
           "code": "764794000",
-          "display": "Infuse"
+          "display": "Infuse",
+          "i18n": { "th": "หยดยา" }
         }
       ],
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "764794000",
-        "display": "Infuse"
+        "display": "Infuse",
+        "i18n": { "th": "หยดยา" }
       }
     },
     {

@@ -677,6 +677,46 @@ function propagateTrailingSharedSafety(results: ParseResult[], options?: ParseOp
   }
 }
 
+function propagateTrailingSharedDuration(
+  results: ParseResult[],
+  segments: ReturnType<typeof parseSigSegments>,
+  options?: ParseOptions
+): void {
+  for (let index = results.length - 2; index >= 0; index -= 1) {
+    if (!segments[index]?.inheritTrailingDurationFromNext) continue;
+    const current = results[index];
+    const next = results[index + 1];
+    const currentClause = current.meta.canonical.clauses[0];
+    const nextClause = next.meta.canonical.clauses[0];
+    const nextSchedule = nextClause?.schedule;
+    if (!currentClause || !nextSchedule?.durationUnit || nextSchedule.duration === undefined) continue;
+    if (currentClause.schedule?.duration !== undefined || currentClause.schedule?.durationUnit !== undefined) continue;
+
+    currentClause.schedule = {
+      ...(currentClause.schedule ?? {}),
+      duration: nextSchedule.duration,
+      durationMax: nextSchedule.durationMax,
+      durationUnit: nextSchedule.durationUnit
+    };
+    const nextRepeat = next.fhir.timing?.repeat;
+    if (nextRepeat?.boundsDuration || nextRepeat?.boundsRange) {
+      current.fhir.timing = current.fhir.timing ?? {};
+      current.fhir.timing.repeat = {
+        ...(current.fhir.timing.repeat ?? {}),
+        boundsDuration: nextRepeat.boundsDuration ? { ...nextRepeat.boundsDuration } : undefined,
+        boundsRange: nextRepeat.boundsRange ? {
+          ...nextRepeat.boundsRange,
+          low: nextRepeat.boundsRange.low ? { ...nextRepeat.boundsRange.low } : undefined,
+          high: nextRepeat.boundsRange.high ? { ...nextRepeat.boundsRange.high } : undefined
+        } : undefined
+      };
+    }
+    current.longText = formatSig(current.fhir, "long", options);
+    current.shortText = formatSig(current.fhir, "short", options);
+    current.fhir.text = current.longText;
+  }
+}
+
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
   const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
   for (const result of results) {
@@ -702,6 +742,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedDuration(results, segments, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
@@ -760,6 +801,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedDuration(results.map((item) => item.result), segments, options);
   const primary = resolvePrimaryLintResult(results, input, options);
 
   return {
@@ -794,6 +836,7 @@ export async function parseSigAsync(
     updateCarryForward(carry, state);
   }
 
+  propagateTrailingSharedDuration(results, segments, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 

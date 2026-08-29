@@ -4933,6 +4933,30 @@ describe("topical product forms and workflow", () => {
     expect(result.longText).toBe("สระวันละครั้ง.");
   });
 
+  it("models IV drip duration per administration rather than as regimen bounds", () => {
+    const result = parseSig("1 g IV Q 8h drip in 30 minutes");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhir.method?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct", code: "764794000", display: "Infuse"
+    });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 8, periodUnit: "h", duration: 30, durationUnit: "min"
+    });
+    expect(result.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      timingCode: "Q8H", period: 8, periodUnit: "h",
+      administrationDuration: 30, administrationDurationUnit: "min"
+    });
+    expect(result.longText).toBe("Infuse 1 g intravenously every 8 hours over 30 minutes.");
+    expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
+      "หยดยาครั้งละ 1 g เข้าหลอดเลือดดำ ทุก 8 ชั่วโมง โดยให้ยานาน 30 นาที."
+    );
+
+    const bounded = parseSig("infuse 1 g IV q8h for 5 days");
+    expect(bounded.fhir.timing?.repeat?.duration).toBeUndefined();
+    expect(bounded.fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 5, code: "d" });
+  });
+
   it("captures topical quantity units including metric ribbons", () => {
     const pumps = parseSig("apply 2 pumps to face every morning");
     expect(pumps.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
