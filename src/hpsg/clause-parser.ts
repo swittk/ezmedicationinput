@@ -18,6 +18,7 @@ import {
   multiplicativeDoseFrequencyRule,
   separatedFrequencyRangeRule,
   separatedIntervalRule,
+  singleOccurrencePhraseRule,
   timeOfDayRule,
   timingLexicalRule
 } from "./rules/timing-rules";
@@ -110,6 +111,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       cadenceFirstImplicitSingleDoseRule(),
       cadenceFirstFrequencyRule(),
       separatedFrequencyRangeRule(),
+      singleOccurrencePhraseRule(),
       countFrequencyRule(),
       alternateEventCadenceRule(),
       quantityFirstActivityTimingRule(),

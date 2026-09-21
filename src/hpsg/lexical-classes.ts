@@ -276,6 +276,10 @@ export const FREQUENCY_SIMPLE_WORDS_DATA = numberRecord(source.frequencySimpleWo
 export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWords);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
 export const FREQUENCY_CONNECTOR_WORDS_DATA = setOf(source.frequencyConnectorWords);
+export const FREQUENCY_ALTERNATIVE_CONNECTORS = setOf(source.frequencyAlternativeConnectors ?? []);
+export const SINGLE_OCCURRENCE_PHRASES = (source.singleOccurrencePhrases ?? [])
+  .map((parts) => [...parts])
+  .sort((left, right) => right.length - left.length);
 export const FREQUENCY_ADVERB_UNITS_DATA = periodUnitRecord(source.frequencyAdverbUnits);
 export const INTERVAL_UNIT_TOKENS_DATA = periodUnitRecord(source.intervalUnitTokens);
 

@@ -1157,7 +1157,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
-      ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
+      ? schedule.count === 1
+        ? "once only"
+        : `for ${stripTrailingZero(schedule.count)} doses`
       : undefined;
   const administrationDurationPart = describeAdministrationDuration(schedule);
   const durationPart = describeDuration(schedule);

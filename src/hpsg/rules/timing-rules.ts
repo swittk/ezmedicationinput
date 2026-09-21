@@ -42,6 +42,7 @@ import {
   EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES,
   EVENT_PREPOSITIONS,
   FOOD_EVENT_ALIASES,
+  FREQUENCY_ALTERNATIVE_CONNECTORS,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
@@ -50,6 +51,7 @@ import {
   OCCURRENCE_COUNT_WORDS,
   RANGE_CONNECTORS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
+  SINGLE_OCCURRENCE_PHRASES,
   SLEEP_EVENT_ALIASES,
   WAKE_EVENT_ALIASES
 } from "../lexical-classes";
@@ -450,36 +452,67 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function frequencyCardinalValue(token: Token | undefined): number | undefined {
+  if (!token) return undefined;
+  const lower = normalizeTokenLower(token);
+  const value =
+    FREQUENCY_SIMPLE_WORDS[lower] ??
+    FREQUENCY_NUMBER_WORDS[lower] ??
+    (token.kind === LexKind.Number ? token.value : undefined);
+  return value !== undefined && value >= 0 ? value : undefined;
+}
+
+function frequencyRangeConnector(token: Token | undefined): boolean {
+  if (!token) return false;
+  const lower = normalizeTokenLower(token);
+  return RANGE_CONNECTORS.has(lower) || FREQUENCY_ALTERNATIVE_CONNECTORS.has(lower);
+}
+
 export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.separatedFrequencyRange", (context, start) => {
-    const rangeTokens = tokensAvailable(context, start, 4);
-    const lowToken = rangeTokens?.[0];
-    const connector = rangeTokens?.[1];
-    const highToken = rangeTokens?.[2];
-    const timesToken = rangeTokens?.[3];
-    if (
-      !lowToken || lowToken.kind !== LexKind.Number || lowToken.value === undefined || lowToken.value < 0 ||
-      !connector || !RANGE_CONNECTORS.has(normalizeTokenLower(connector)) ||
-      !highToken || highToken.kind !== LexKind.Number || highToken.value === undefined || highToken.value <= 0 ||
-      highToken.value < lowToken.value ||
-      !timesToken || !FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(timesToken))
-    ) return [];
+    const lowToken = tokensAvailable(context, start, 1)?.[0];
+    const connector = context.tokens[start + 1];
+    const highToken = context.tokens[start + 2];
+    if (!lowToken || !connector || !highToken || !frequencyRangeConnector(connector)) return [];
 
-    let cursor = start + 4;
-    const consumed = [lowToken, connector, highToken, timesToken];
+    const low = frequencyCardinalValue(lowToken);
+    const high = frequencyCardinalValue(highToken);
+    if (low === undefined || high === undefined || high <= 0 || high < low) return [];
+
+    let cursor = start + 3;
+    const consumed = [lowToken, connector, highToken];
+    const timesToken = context.tokens[cursor];
+    if (
+      timesToken &&
+      !context.state.consumed.has(timesToken.index) &&
+      FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(timesToken))
+    ) {
+      consumed.push(timesToken);
+      cursor += 1;
+    } else if (
+      !(normalizeTokenLower(lowToken) in FREQUENCY_SIMPLE_WORDS) ||
+      !(normalizeTokenLower(highToken) in FREQUENCY_SIMPLE_WORDS)
+    ) {
+      return [];
+    }
+
     let unit: FhirPeriodUnit | undefined;
     const next = context.tokens[cursor];
     const nextLower = next ? normalizeTokenLower(next) : "";
     if (next && SCHEDULE_UNIT_SEPARATOR_TOKENS.has(nextLower)) {
       const unitToken = context.tokens[cursor + 1];
-      const mapped = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken)) : undefined;
+      const mapped = unitToken
+        ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken))
+        : undefined;
       if (mapped && unitToken) {
         consumed.push(next, unitToken);
         unit = mapped;
       }
     } else if (next && FREQUENCY_CONNECTOR_WORDS.has(nextLower)) {
       const unitToken = context.tokens[cursor + 1];
-      const mapped = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken)) : undefined;
+      const mapped = unitToken
+        ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken))
+        : undefined;
       if (mapped && unitToken) {
         consumed.push(next, unitToken);
         unit = mapped;
@@ -492,6 +525,7 @@ export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext
       }
     }
     if (!unit) return [];
+
     const normalized = normalizePeriodValue(1, unit);
     return [lexicalSign({
       type: "schedule-sign",
@@ -499,15 +533,15 @@ export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext
       tokens: consumed,
       synsem: {
         head: { schedule: {
-          frequency: lowToken.value,
-          frequencyMax: highToken.value,
+          frequency: low,
+          frequencyMax: high,
           period: normalized.value,
           periodUnit: normalized.unit
         } },
         valence: {},
         cont: { clauseKind: "administration" }
       },
-      score: 18
+      score: 22
     })];
   });
 }
@@ -572,6 +606,43 @@ export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> 
       return [];
     }
     const count = context.tokens[start + 1];
+    const possibleConnector = context.tokens[start + 2];
+    const possibleHigh = context.tokens[start + 3];
+    const possibleTimes = context.tokens[start + 4];
+    if (
+      count && possibleConnector && possibleHigh && possibleTimes &&
+      !context.state.consumed.has(count.index) &&
+      !context.state.consumed.has(possibleConnector.index) &&
+      !context.state.consumed.has(possibleHigh.index) &&
+      !context.state.consumed.has(possibleTimes.index) &&
+      frequencyRangeConnector(possibleConnector) &&
+      FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(possibleTimes))
+    ) {
+      const low = frequencyCardinalValue(count);
+      const high = frequencyCardinalValue(possibleHigh);
+      if (low !== undefined && high !== undefined && high > 0 && high >= low) {
+        const normalizedPeriod = normalizePeriodValue(1, periodUnit);
+        return [lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.cadenceFirstFrequencyRange",
+          tokens: [cadence, count, possibleConnector, possibleHigh, possibleTimes],
+          synsem: {
+            head: {
+              schedule: {
+                frequency: low,
+                frequencyMax: high,
+                period: normalizedPeriod.value,
+                periodUnit: normalizedPeriod.unit
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 22
+        })];
+      }
+    }
+
     const times = context.tokens[start + 2];
     if (
       !count ||
@@ -642,6 +713,35 @@ export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> 
         score: 13
       })
     ];
+  });
+}
+
+export function singleOccurrencePhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.singleOccurrencePhrase", (context, start) => {
+    for (const phrase of SINGLE_OCCURRENCE_PHRASES) {
+      const tokens = tokensAvailable(context, start, phrase.length);
+      if (!tokens) continue;
+      let matches = true;
+      for (let index = 0; index < phrase.length; index += 1) {
+        if (normalizeTokenLower(tokens[index]) !== phrase[index]) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) continue;
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.singleOccurrencePhrase",
+        tokens,
+        synsem: {
+          head: { schedule: { count: 1 } },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 20 + tokens.length
+      })];
+    }
+    return [];
   });
 }
 

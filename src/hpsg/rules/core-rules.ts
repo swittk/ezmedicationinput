@@ -29,6 +29,7 @@ import {
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
   IMPLICIT_SINGLE_DOSE_UNITS,
+  FREQUENCY_ALTERNATIVE_CONNECTORS,
   LIST_SEPARATORS,
   METHOD_NOUN_LEFT_CONTEXT,
   POSITIVE_DIRECTIVE_MARKERS,
@@ -911,7 +912,7 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const rangeHigh = context.tokens[start + 2];
     const rangeTimes = context.tokens[start + 3];
     if (
-      nextLower && RANGE_CONNECTORS.has(nextLower) &&
+      nextLower && (RANGE_CONNECTORS.has(nextLower) || FREQUENCY_ALTERNATIVE_CONNECTORS.has(nextLower)) &&
       rangeHigh?.kind === LexKind.Number && rangeHigh.value !== undefined &&
       rangeTimes && FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(rangeTimes))
     ) {

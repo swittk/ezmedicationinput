@@ -301,6 +301,39 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.leftoverText).toBeUndefined();
   });
 
+  it("models alternative daily frequencies as a range rather than count plus frequency", () => {
+    for (const source of ["once or twice daily", "1 or 2 times daily"]) {
+      const result = parseSig(source, { locale: "en" });
+      expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+        frequency: 1,
+        frequencyMax: 2,
+        period: 1,
+        periodUnit: "d"
+      });
+      expect(result.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+
+    const thai = parseSig("วันละ 1 หรือ 2 ครั้ง", { locale: "th" });
+    expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      frequency: 1,
+      frequencyMax: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(thai.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(thai.meta.leftoverText).toBeUndefined();
+  });
+
+  it("treats once-only surface variants as one total administration", () => {
+    for (const source of ["once only", "only once", "one time only", "only one time"]) {
+      const result = parseSig(source, { locale: "en" });
+      expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1 });
+      expect(result.meta.canonical.clauses[0]?.schedule?.frequency).toBeUndefined();
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
   it("treats bare once as a single administration instead of once daily", () => {
     const result = parseSig("insert 1 tab pv once", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
@@ -327,7 +360,7 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per vagina"]);
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
     expect(result.meta.leftoverText).toBeUndefined();
-    expect(result.longText).toBe("Insert 1 tablet vaginally at bedtime for 1 dose.");
+    expect(result.longText).toBe("Insert 1 tablet vaginally at bedtime once only.");
     expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
       "สอดครั้งละ 1 เม็ด ทางช่องคลอด ก่อนนอน ครั้งเดียว."
     );
