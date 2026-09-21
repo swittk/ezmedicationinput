@@ -317,6 +317,22 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Insert 1 tablet vaginally once.");
   });
 
+  it("composes Thai one-time-only timing into an English vaginal bedtime instruction", () => {
+    const result = parseSig("insert into vagina 1 tablet at before sleep ใช้ครั้งเดียว");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      count: 1,
+      when: ["HS"]
+    });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per vagina"]);
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Insert 1 tablet vaginally at bedtime for 1 dose.");
+    expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
+      "สอดครั้งละ 1 เม็ด ทางช่องคลอด ก่อนนอน ครั้งเดียว."
+    );
+  });
+
   it("keeps one-time event-relative instructions finite without coercing them to daily", () => {
     const result = parseSig("insert 1 tab pv once after menstruation ends", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });

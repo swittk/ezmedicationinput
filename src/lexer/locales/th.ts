@@ -294,6 +294,8 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ยา", "พ่น"], canonical: "inhaler" },
   { parts: ["ยา", "เหน็บ"], canonical: "suppository" },
   { parts: ["แผ่น", "แปะ"], canonical: "patch" },
+  { parts: ["ใช้", "ครั้ง", "เดียว"], canonical: "once" },
+  { parts: ["ครั้ง", "เดียว"], canonical: "once" },
   { parts: ["ครั้ง", "ละ"], canonical: "per-dose" },
   { parts: ["ไม่", "ควร"], canonical: "should-not" },
   { parts: ["กลาง", "วัน"], canonical: "noon" },

@@ -2018,7 +2018,9 @@ function formatLongThai(
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
-      ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
+      ? schedule.count === 1
+        ? "ครั้งเดียว"
+        : `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
       : undefined;
   const administrationDurationPart = describeAdministrationDurationThai(
     schedule,
