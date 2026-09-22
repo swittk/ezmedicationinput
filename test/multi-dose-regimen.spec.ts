@@ -80,6 +80,38 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(asyncResult.items.map((item) => item.fhir)).toEqual(result.items.map((item) => item.fhir));
   });
 
+  it("propagates a shared trailing duration before merging identical timed doses", async () => {
+    const input = "1 tab morning 1 tab evening for 2 weeks";
+    const result = parseSig(input, { context: TABLET_CONTEXT });
+
+    expect(result.meta.segments).toHaveLength(2);
+    expect(result.count).toBe(1);
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.timing?.repeat?.when).toEqual(["MORN", "EVE"]);
+    expect(result.fhir.timing?.repeat?.boundsDuration).toMatchObject({
+      value: 2,
+      code: "wk",
+      system: "http://unitsofmeasure.org"
+    });
+    expect(result.meta.canonical.clauses).toHaveLength(2);
+    expect(result.meta.canonical.clauses.every((clause) =>
+      clause.schedule?.duration === 2 && clause.schedule?.durationUnit === "wk"
+    )).toBe(true);
+
+    const asyncResult = await parseSigAsync(input, { context: TABLET_CONTEXT });
+    expect(asyncResult.items.map((item) => item.fhir)).toEqual(result.items.map((item) => item.fhir));
+  });
+
+  it("does not merge timed doses with different course durations", () => {
+    const result = parseSig(
+      "1 tab morning for 1 week 1 tab evening for 2 weeks",
+      { context: TABLET_CONTEXT }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items.map((item) => item.fhir.timing?.repeat?.boundsDuration?.value)).toEqual([1, 2]);
+    expect(result.items.map((item) => item.fhir.timing?.repeat?.when)).toEqual([["MORN"], ["EVE"]]);
+  });
+
   it("supports multiple timing anchors inside each heterogeneous dose group", () => {
     const result = parseSig(
       "Take 1 tab at wake and lunch, 2 tabs at dinner and 22:00",

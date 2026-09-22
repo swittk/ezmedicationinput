@@ -1059,7 +1059,11 @@ function formatShort(clause: CanonicalSigClause): string {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
-    parts.push(`over${stripTrailingZero(schedule.administrationDuration)}${schedule.administrationDurationUnit}`);
+    const max = schedule.administrationDurationMax;
+    const duration = max !== undefined && max !== schedule.administrationDuration
+      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
+      : stripTrailingZero(schedule.administrationDuration);
+    parts.push(`over${duration}${schedule.administrationDurationUnit}`);
   }
   const durationShort = formatDurationShort(schedule);
   if (durationShort) {
@@ -1248,6 +1252,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (dayPart) graphRegimenTail.push(dayPart);
     if (countPart) graphRegimenTail.push(countPart);
+    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);
     if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
     if (asNeededPart) graphRegimenTail.push(asNeededPart);

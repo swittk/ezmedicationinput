@@ -3,6 +3,7 @@ import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "
 import {
   buildMedicationInstructionActionCodeSystem,
   buildMedicationInstructionConceptCodeSystem,
+  formatSig,
   fromFhirDosage,
   getMedicationInstructionAction,
   getMedicationInstructionConcept,
@@ -43,6 +44,20 @@ describe("procedural instruction graph", () => {
     const start = input.indexOf("instill");
     expect(graph?.primaryAdministrationSpan).toEqual({ start, end: start + "instill".length });
     expect(graph?.actions.every((action) => action.span.start >= parsed.meta.segments[1].range.start)).toBe(true);
+  });
+
+  it("retains administration duration when rich graph realization owns the English sentence", () => {
+    const parsed = parseSig("squeeze 1 cm ribbon cream onto each spot");
+    const dosage = {
+      ...parsed.fhir,
+      timing: {
+        repeat: {
+          duration: 30,
+          durationUnit: "min" as const
+        }
+      }
+    };
+    expect(formatSig(dosage, "long", { locale: "en" })).toContain("over 30 minutes");
   });
 
   it("preserves opaque text next to understood actions through FHIR", () => {

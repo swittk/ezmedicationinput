@@ -1873,6 +1873,13 @@ function formatShortThai(clause: CanonicalSigClause): string {
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
+  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+    const max = schedule.administrationDurationMax;
+    const duration = max !== undefined && max !== schedule.administrationDuration
+      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
+      : stripTrailingZero(schedule.administrationDuration);
+    parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
+  }
   const durationShort = formatDurationShortThai(schedule);
   if (durationShort) {
     parts.push(durationShort);

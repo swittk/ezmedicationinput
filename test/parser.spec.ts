@@ -5001,6 +5001,21 @@ describe("topical product forms and workflow", () => {
       "ให้ยา 1 g ทางหลอดเลือดดำแบบหยด ทุก 8 ชั่วโมง ใช้เวลาให้ยาครั้งละ 30 นาที."
     );
 
+    const rangedDuration = {
+      ...result.fhir,
+      timing: {
+        ...(result.fhir.timing ?? {}),
+        repeat: {
+          ...(result.fhir.timing?.repeat ?? {}),
+          duration: 30,
+          durationMax: 60,
+          durationUnit: "min" as const
+        }
+      }
+    };
+    expect(formatSig(rangedDuration, "short", { locale: "en" })).toContain("over30-60min");
+    expect(formatSig(rangedDuration, "short", { locale: "th" })).toContain("นาน30-60min");
+
     const bounded = parseSig("infuse 1 g IV q8h for 5 days");
     expect(bounded.fhir.timing?.repeat?.duration).toBeUndefined();
     expect(bounded.fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 5, code: "d" });

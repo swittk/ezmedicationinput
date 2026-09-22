@@ -255,14 +255,25 @@ interface SegmentCarry {
 
 type MealDashRelation = "meal" | "ac" | "pc";
 
-const REPEAT_NON_ANCHOR_KEYS: Array<keyof FhirTimingRepeat> = [
-  "count",
-  "frequency",
-  "frequencyMax",
-  "period",
-  "periodMax",
-  "periodUnit",
-  "offset"
+const MERGEABLE_REPEAT_KEYS = new Set<keyof FhirTimingRepeat>([
+  "when",
+  "timeOfDay",
+  "dayOfWeek",
+  "boundsDuration",
+  "boundsPeriod",
+  "boundsRange",
+  "duration",
+  "durationMax",
+  "durationUnit"
+]);
+
+const MERGEABLE_SHARED_REPEAT_KEYS: Array<keyof FhirTimingRepeat> = [
+  "boundsDuration",
+  "boundsPeriod",
+  "boundsRange",
+  "duration",
+  "durationMax",
+  "durationUnit"
 ];
 
 function parseMealDashValues(token: string): number[] | undefined {
@@ -455,17 +466,31 @@ function sameStringSet(left?: string[], right?: string[]): boolean {
 }
 
 /**
- * Determines whether a repeat block only uses merge-safe anchor fields.
+ * Determines whether a repeat block only uses merge-safe anchor fields plus
+ * shared course/administration duration fields. Shared fields are compared
+ * separately before merging.
  *
  * @param repeat FHIR timing repeat payload.
- * @returns `true` when repeat contains only `when`/`timeOfDay`/`dayOfWeek`.
+ * @returns `true` when repeat contains only explicitly merge-safe fields.
  */
 function isMergeableAnchorRepeat(repeat?: FhirTimingRepeat): boolean {
   if (!repeat) {
     return true;
   }
-  for (const key of REPEAT_NON_ANCHOR_KEYS) {
-    if (repeat[key] !== undefined) {
+  for (const key of Object.keys(repeat) as Array<keyof FhirTimingRepeat>) {
+    if (repeat[key] !== undefined && !MERGEABLE_REPEAT_KEYS.has(key)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameMergeableSharedRepeat(
+  left: FhirTimingRepeat | undefined,
+  right: FhirTimingRepeat | undefined
+): boolean {
+  for (const key of MERGEABLE_SHARED_REPEAT_KEYS) {
+    if (!deepEqual(left?.[key], right?.[key])) {
       return false;
     }
   }
@@ -477,7 +502,8 @@ function isMergeableAnchorRepeat(repeat?: FhirTimingRepeat): boolean {
  *
  * @param base Existing merged item candidate.
  * @param next Incoming parsed item.
- * @returns `true` when both items differ only by merge-safe timing anchors.
+ * @returns `true` when both items differ only by timing anchors and any
+ * shared duration/bounds fields are identical.
  */
 function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
   const baseTiming = base.fhir.timing;
@@ -492,6 +518,9 @@ function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
     return false;
   }
   if (!sameStringSet(baseRepeat.dayOfWeek, nextRepeat.dayOfWeek)) {
+    return false;
+  }
+  if (!sameMergeableSharedRepeat(baseRepeat, nextRepeat)) {
     return false;
   }
   if (!deepEqual(baseTiming?.code, nextTiming?.code)) {
@@ -599,6 +628,17 @@ function appendParseResult(
     return;
   }
   items.push(next);
+}
+
+function mergeParseResultList(
+  rawResults: ParseResult[],
+  options?: ParseOptions
+): ParseResult[] {
+  const merged: ParseResult[] = [];
+  for (const result of rawResults) {
+    appendParseResult(merged, result, options);
+  }
+  return merged;
 }
 
 function normalizedSafetyText(value: string | undefined): string {
@@ -728,7 +768,7 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
-  const results: ParseResult[] = [];
+  const rawResults: ParseResult[] = [];
 
   for (const segment of segments) {
     const state = parseClauseState(segment.text, options);
@@ -738,11 +778,12 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyInstructionSemanticResolvers(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
-    appendParseResult(results, result, options);
+    rawResults.push(result);
     updateCarryForward(carry, state);
   }
 
-  propagateTrailingSharedDuration(results, segments, options);
+  propagateTrailingSharedDuration(rawResults, segments, options);
+  const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
@@ -822,7 +863,7 @@ export async function parseSigAsync(
 ): Promise<ParseBatchResult> {
   const segments = expandMealDashSegments(parseSigSegments(input, options), options);
   const carry: SegmentCarry = {};
-  const results: ParseResult[] = [];
+  const rawResults: ParseResult[] = [];
 
   for (const segment of segments) {
     const state = parseClauseState(segment.text, options);
@@ -832,11 +873,12 @@ export async function parseSigAsync(
     await applyInstructionSemanticResolversAsync(state, options);
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
-    appendParseResult(results, result, options);
+    rawResults.push(result);
     updateCarryForward(carry, state);
   }
 
-  propagateTrailingSharedDuration(results, segments, options);
+  propagateTrailingSharedDuration(rawResults, segments, options);
+  const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
 
