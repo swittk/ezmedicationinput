@@ -654,6 +654,14 @@ export function canonicalToFhir(
     repeat.countMax = schedule.countMax;
     hasRepeat = true;
   }
+  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+    repeat.duration = schedule.administrationDuration;
+    repeat.durationUnit = schedule.administrationDurationUnit;
+    if (schedule.administrationDurationMax !== undefined) {
+      repeat.durationMax = schedule.administrationDurationMax;
+    }
+    hasRepeat = true;
+  }
   if (schedule?.duration !== undefined && schedule.durationUnit) {
     if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
       repeat.boundsRange = buildFhirBoundsRange(
@@ -1025,6 +1033,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     occurrenceCap !== undefined ||
     repeat?.boundsDuration ||
     repeat?.boundsRange ||
+    repeat?.duration !== undefined ||
+    repeat?.durationMax !== undefined ||
+    repeat?.durationUnit !== undefined ||
     repeat?.frequency !== undefined ||
     frequencyMinExtension !== undefined ||
     repeat?.frequencyMax !== undefined ||
@@ -1046,6 +1057,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
+      administrationDuration: repeat?.duration,
+      administrationDurationMax: repeat?.durationMax,
+      administrationDurationUnit: repeat?.durationUnit,
       frequency: repeat?.frequency ?? frequencyMinExtension,
       frequencyMax: repeat?.frequencyMax,
       period: repeat?.period,
@@ -1164,6 +1178,14 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
+  if (dosage.timing?.repeat?.duration !== undefined && dosage.timing.repeat.durationUnit) {
+    state.primaryClause.schedule = {
+      ...(state.primaryClause.schedule ?? {}),
+      administrationDuration: dosage.timing.repeat.duration,
+      administrationDurationMax: dosage.timing.repeat.durationMax,
+      administrationDurationUnit: dosage.timing.repeat.durationUnit
+    };
+  }
   state.frequency = dosage.timing?.repeat?.frequency;
   state.frequencyMax = dosage.timing?.repeat?.frequencyMax;
   state.period = dosage.timing?.repeat?.period;

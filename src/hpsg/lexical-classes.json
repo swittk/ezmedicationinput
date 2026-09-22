@@ -710,6 +710,16 @@
     "each",
     "every"
   ],
+  "frequencyAlternativeConnectors": [
+    "or",
+    "หรือ"
+  ],
+  "singleOccurrencePhrases": [
+    ["once", "only"],
+    ["only", "once"],
+    ["one", "time", "only"],
+    ["only", "one", "time"]
+  ],
   "frequencyAdverbUnits": {
     "daily": "Day",
     "weekly": "Week",

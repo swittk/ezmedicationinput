@@ -301,6 +301,39 @@ describe("parseSig core scenarios", () => {
     expect(result.meta.leftoverText).toBeUndefined();
   });
 
+  it("models alternative daily frequencies as a range rather than count plus frequency", () => {
+    for (const source of ["once or twice daily", "1 or 2 times daily"]) {
+      const result = parseSig(source, { locale: "en" });
+      expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+        frequency: 1,
+        frequencyMax: 2,
+        period: 1,
+        periodUnit: "d"
+      });
+      expect(result.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+
+    const thai = parseSig("วันละ 1 หรือ 2 ครั้ง", { locale: "th" });
+    expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      frequency: 1,
+      frequencyMax: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(thai.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(thai.meta.leftoverText).toBeUndefined();
+  });
+
+  it("treats once-only surface variants as one total administration", () => {
+    for (const source of ["once only", "only once", "one time only", "only one time"]) {
+      const result = parseSig(source, { locale: "en" });
+      expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1 });
+      expect(result.meta.canonical.clauses[0]?.schedule?.frequency).toBeUndefined();
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
   it("treats bare once as a single administration instead of once daily", () => {
     const result = parseSig("insert 1 tab pv once", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
@@ -315,6 +348,22 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
     expect(result.fhir.timing?.repeat?.period).toBeUndefined();
     expect(result.longText).toBe("Insert 1 tablet vaginally once.");
+  });
+
+  it("composes Thai one-time-only timing into an English vaginal bedtime instruction", () => {
+    const result = parseSig("insert into vagina 1 tablet at before sleep ใช้ครั้งเดียว");
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      count: 1,
+      when: ["HS"]
+    });
+    expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per vagina"]);
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.longText).toBe("Insert 1 tablet vaginally at bedtime once only.");
+    expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
+      "สอดครั้งละ 1 เม็ด ทางช่องคลอด ก่อนนอน ครั้งเดียว."
+    );
   });
 
   it("keeps one-time event-relative instructions finite without coercing them to daily", () => {
@@ -4931,6 +4980,53 @@ describe("topical product forms and workflow", () => {
   it("renders shampoo naturally in Thai when product form is preserved", () => {
     const result = parseSig("use shampoo daily", { locale: "th" });
     expect(result.longText).toBe("สระวันละครั้ง.");
+  });
+
+  it("models IV drip duration per administration rather than as regimen bounds", () => {
+    const result = parseSig("1 g IV Q 8h drip in 30 minutes");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhir.method?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct", code: "764794000", display: "Infuse"
+    });
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      period: 8, periodUnit: "h", duration: 30, durationUnit: "min"
+    });
+    expect(result.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      timingCode: "Q8H", period: 8, periodUnit: "h",
+      administrationDuration: 30, administrationDurationUnit: "min"
+    });
+    expect(result.longText).toBe("Infuse 1 g intravenously every 8 hours over 30 minutes.");
+    expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
+      "ให้ยา 1 g ทางหลอดเลือดดำแบบหยด ทุก 8 ชั่วโมง ใช้เวลาให้ยาครั้งละ 30 นาที."
+    );
+
+    const rangedDuration = {
+      ...result.fhir,
+      timing: {
+        ...(result.fhir.timing ?? {}),
+        repeat: {
+          ...(result.fhir.timing?.repeat ?? {}),
+          duration: 30,
+          durationMax: 60,
+          durationUnit: "min" as const
+        }
+      }
+    };
+    expect(formatSig(rangedDuration, "short", { locale: "en" })).toContain("over30-60min");
+    expect(formatSig(rangedDuration, "short", { locale: "th" })).toContain("นาน30-60min");
+
+    const bounded = parseSig("infuse 1 g IV q8h for 5 days");
+    expect(bounded.fhir.timing?.repeat?.duration).toBeUndefined();
+    expect(bounded.fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 5, code: "d" });
+    expect(formatSig(bounded.fhir, "long", { locale: "th" })).toBe(
+      "ให้ยา 1 g ทางหลอดเลือดดำแบบหยด ทุก 8 ชั่วโมง เป็นเวลา 5 วัน."
+    );
+
+    const injection = parseSig("inject 1 g IV q8h");
+    expect(formatSig(injection.fhir, "long", { locale: "th" })).toBe(
+      "ฉีดครั้งละ 1 g เข้าหลอดเลือดดำ ทุก 8 ชั่วโมง."
+    );
   });
 
   it("captures topical quantity units including metric ribbons", () => {

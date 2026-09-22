@@ -715,6 +715,10 @@ function resolveThaiMethodVerb(
     if (overridden) {
       return overridden;
     }
+    const localizedAction = resolveMedicationInstructionAction(methodText)?.i18n?.th?.trim();
+    if (localizedAction) {
+      return localizedAction;
+    }
   }
 
   const translatedDisplay =
@@ -1712,6 +1716,23 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
   return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
 }
 
+function describeAdministrationDurationThai(
+  schedule: CanonicalScheduleExpr | undefined,
+  prefix = "โดยให้ยานาน"
+): string | undefined {
+  const value = schedule?.administrationDuration;
+  const unit = schedule?.administrationDurationUnit;
+  if (value === undefined || !unit) return undefined;
+  const label = unit === FhirPeriodUnit.Minute ? "นาที"
+    : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
+      : unit === FhirPeriodUnit.Second ? "วินาที"
+        : unit === FhirPeriodUnit.Day ? "วัน" : unit;
+  const max = schedule?.administrationDurationMax;
+  return max !== undefined && max !== value
+    ? `${prefix} ${stripTrailingZero(value)} ถึง ${stripTrailingZero(max)} ${label}`
+    : `${prefix} ${stripTrailingZero(value)} ${label}`;
+}
+
 function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
   system: string,
   code: string
@@ -1852,6 +1873,13 @@ function formatShortThai(clause: CanonicalSigClause): string {
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
+  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+    const max = schedule.administrationDurationMax;
+    const duration = max !== undefined && max !== schedule.administrationDuration
+      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
+      : stripTrailingZero(schedule.administrationDuration);
+    parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
+  }
   const durationShort = formatDurationShortThai(schedule);
   if (durationShort) {
     parts.push(durationShort);
@@ -1924,6 +1952,11 @@ function formatLongThai(
   }
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
+  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? "");
+  const methodLocaleConfig = medicationInstructionActionLocaleRealizerConfig(
+    methodDefinition?.realizerConfig,
+    "th"
+  );
   const baseVerb = resolveThaiMethodVerb(clause, grammar);
   const integratedQualifiers = new Map<
     NonNullable<CanonicalSigClause["additionalInstructions"]>[number],
@@ -1939,7 +1972,7 @@ function formatLongThai(
   const qualifierSuffix = Array.from(integratedQualifiers.values()).join("");
   const verb = `${modalVerb}${qualifierSuffix}`;
   const distributedPerTarget = options?.realizationMode !== "roundtrip" && Boolean(perTargetSiteThai(clause));
-  const explicitDosePart = distributedPerTarget
+  const explicitDosePart = distributedPerTarget || methodLocaleConfig?.directDose
     ? formatDoseThaiPerTarget(clause.dose)
     : formatDoseThaiLong(clause.dose);
   const sitePart = formatSiteThai(clause, grammar);
@@ -1949,6 +1982,9 @@ function formatLongThai(
     explicitDosePart
   );
   const dosePart = usesGenericMedicationObject ? explicitDosePart ?? "ยา" : explicitDosePart;
+  const configuredRoutePhrase = clause.route?.code
+    ? methodLocaleConfig?.routePhrases?.[clause.route.code]
+    : undefined;
   const routePart = shouldSuppressRoutePhraseThai(
     clause,
     baseVerb,
@@ -1956,7 +1992,7 @@ function formatLongThai(
     explicitDosePart
   )
     ? undefined
-    : buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
+    : configuredRoutePhrase ?? buildRoutePhraseThai(clause, grammar, Boolean(sitePart));
   const standaloneOccurrenceCount = describeStandaloneOccurrenceCountThai(schedule);
   const alternateEventCadence = options?.realizationMode !== "roundtrip"
     ? describeAlternateEventCadenceThai(schedule)
@@ -1989,8 +2025,14 @@ function formatLongThai(
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
-      ? `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
+      ? schedule.count === 1
+        ? "ครั้งเดียว"
+        : `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
       : undefined;
+  const administrationDurationPart = describeAdministrationDurationThai(
+    schedule,
+    methodLocaleConfig?.administrationDurationPrefix
+  );
   const durationPart = describeDurationThai(schedule);
   const occurrenceCapPart = describeOccurrenceCapThai(schedule);
 
@@ -2035,6 +2077,9 @@ function formatLongThai(
   }
   if (countPart) {
     segments.push(countPart);
+  }
+  if (administrationDurationPart) {
+    segments.push(administrationDurationPart);
   }
   if (durationPart) {
     segments.push(durationPart);
@@ -2102,6 +2147,7 @@ function formatLongThai(
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
     if (dayPart) graphRegimenTail.push(dayPart);
     if (countPart) graphRegimenTail.push(countPart);
+    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);
     if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
     if (asNeeded) graphRegimenTail.push(asNeeded);

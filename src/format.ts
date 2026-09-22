@@ -942,6 +942,20 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
   return `for ${stripTrailingZero(schedule.duration)} ${label(schedule.duration)}`;
 }
 
+function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const value = schedule?.administrationDuration;
+  const unit = schedule?.administrationDurationUnit;
+  if (value === undefined || !unit) return undefined;
+  const label = unit === FhirPeriodUnit.Minute ? (value === 1 ? "minute" : "minutes")
+    : unit === FhirPeriodUnit.Hour ? (value === 1 ? "hour" : "hours")
+      : unit === FhirPeriodUnit.Second ? (value === 1 ? "second" : "seconds")
+        : unit === FhirPeriodUnit.Day ? (value === 1 ? "day" : "days") : unit;
+  const max = schedule?.administrationDurationMax;
+  return max !== undefined && max !== value
+    ? `over ${stripTrailingZero(value)} to ${stripTrailingZero(max)} ${label}`
+    : `over ${stripTrailingZero(value)} ${label}`;
+}
+
 function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
   const methodText = clause.method?.text?.trim();
   switch (methodText) {
@@ -1044,6 +1058,13 @@ function formatShort(clause: CanonicalSigClause): string {
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
+  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+    const max = schedule.administrationDurationMax;
+    const duration = max !== undefined && max !== schedule.administrationDuration
+      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
+      : stripTrailingZero(schedule.administrationDuration);
+    parts.push(`over${duration}${schedule.administrationDurationUnit}`);
+  }
   const durationShort = formatDurationShort(schedule);
   if (durationShort) {
     parts.push(durationShort);
@@ -1140,8 +1161,11 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
-      ? `for ${stripTrailingZero(schedule.count)} ${schedule.count === 1 ? "dose" : "doses"}`
+      ? schedule.count === 1
+        ? "once only"
+        : `for ${stripTrailingZero(schedule.count)} doses`
       : undefined;
+  const administrationDurationPart = describeAdministrationDuration(schedule);
   const durationPart = describeDuration(schedule);
   const occurrenceCapPart = describeOccurrenceCapEnglish(schedule);
   const reason = getLocalizedCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons, "en");
@@ -1179,6 +1203,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   if (countPart) {
     segments.push(countPart);
+  }
+  if (administrationDurationPart) {
+    segments.push(administrationDurationPart);
   }
   if (durationPart) {
     segments.push(durationPart);
@@ -1225,6 +1252,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (dayPart) graphRegimenTail.push(dayPart);
     if (countPart) graphRegimenTail.push(countPart);
+    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);
     if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
     if (asNeededPart) graphRegimenTail.push(asNeededPart);
