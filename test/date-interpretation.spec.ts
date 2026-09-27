@@ -141,6 +141,85 @@ describe("calendar date interpretation", () => {
     });
   });
 
+  it("infers omitted years from the reference date for explicit date contexts", () => {
+    const mixed = parseSig(
+      "take 1 tab after breakfast on 28/9 และ 1,4/10 then every Sunday",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(mixed.items[0]?.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+    expect(mixed.items[0]?.meta.leftoverText).toBeUndefined();
+    expect(mixed.items[1]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { start: "2026-10-05" },
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["sun"],
+      when: ["PCM"]
+    });
+
+    const thai = parseSig(
+      "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9 และ 1,4/10 จากนั้น ทุกวันอาทิตย์",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(thai.items[0]?.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+    expect(thai.items[0]?.meta.canonical.clauses[0]?.schedule?.calendarEvents).toEqual([
+      expect.objectContaining({ isoDate: "2026-09-28", inferredYear: true }),
+      expect.objectContaining({ isoDate: "2026-10-01", inferredYear: true }),
+      expect.objectContaining({ isoDate: "2026-10-04", inferredYear: true })
+    ]);
+
+    const us = parseSig("take 1 tab on 09/28", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(us.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(us.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
+      calendar: "gregory",
+      calendarYear: 2026,
+      month: 9,
+      day: 28,
+      inferredYear: true
+    });
+
+    const sharedForward = parseSig("take 1 tab on 28/9/2026 and 1,4/10", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(sharedForward.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+
+    const sharedBackward = parseSig("take 1 tab on 28/9 and 1,4/10/2026", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(sharedBackward.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+  });
+
+  it("does not reinterpret unanchored slash fractions as yearless dates", () => {
+    const fraction = parseSig("take 1/2 tablet after breakfast", {
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(fraction.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 0.5,
+      unit: "tab"
+    });
+    expect(fraction.fhir.timing?.event).toBeUndefined();
+  });
+
   it("uses explicit locale date order for Gregorian two-digit dates", () => {
     const result = parseSig("take 1 tab on 09/28/26", {
       locale: "en-US",
@@ -187,6 +266,14 @@ describe("calendar date interpretation", () => {
       },
       {
         input: "take orally 1 tablet after breakfast วันที่ 28/9/69 และ 1,4/10/69 then every Sunday",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take orally 1 tablet after breakfast on 28/9 and 1,4/10 then every Sunday",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take orally 1 tablet after breakfast on 28/9 และ 1,4/10 จากนั้น every Sunday",
         options: { datePolicy: { referenceDate: REFERENCE_DATE } }
       },
       {
@@ -260,6 +347,9 @@ describe("calendar date interpretation", () => {
 
     registerMedicationDateResolver({
       id: "test-offset-calendar",
+      calendarYearFromIsoYear(isoYear) {
+        return isoYear + 1000;
+      },
       resolveYear(sourceYear, sourceYearDigits) {
         if (sourceYearDigits !== 4 || sourceYear < 3000) return undefined;
         return {
@@ -279,6 +369,19 @@ describe("calendar date interpretation", () => {
     expect(custom.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
       calendar: "test-offset-calendar",
       calendarYear: 3026
+    });
+
+    const customYearless = parseSig("take 1 tab on 28/9", {
+      datePolicy: {
+        calendars: ["test-offset-calendar"],
+        referenceDate: REFERENCE_DATE
+      }
+    });
+    expect(customYearless.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(customYearless.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
+      calendar: "test-offset-calendar",
+      calendarYear: 3026,
+      inferredYear: true
     });
   });
 

@@ -1054,6 +1054,11 @@ export interface MedicationDateResolver {
     sourceYearDigits: number,
     context: MedicationDateResolverContext
   ): MedicationDateResolverResult | undefined;
+  /**
+   * Optional reverse mapping used when the source omitted a year and the
+   * parser inferred an ISO year from the reference date.
+   */
+  calendarYearFromIsoYear?(isoYear: number): number | undefined;
 }
 
 export interface ParseOptions extends FormatOptions {

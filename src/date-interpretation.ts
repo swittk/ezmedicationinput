@@ -18,13 +18,15 @@ export interface MedicationDateListMatch {
 }
 
 const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
-const FULL_NUMERIC_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
+const YEARFUL_NUMERIC_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
+const NUMERIC_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}(?:\/\d{2,4})?`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
-const DATE_LIST_PART_SOURCE = String.raw`(?:${FULL_NUMERIC_DATE_SOURCE}|\d{1,2})`;
-const DATE_LIST_SOURCE = String.raw`${FULL_NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const DATE_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)?`;
-const FULL_NUMERIC_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/u;
-const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}/gu;
+const DATE_LIST_PART_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|\d{1,2})`;
+const DATE_LIST_SOURCE = String.raw`${NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const YEARFUL_DATE_LIST_SOURCE = String.raw`${YEARFUL_NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
+const NUMERIC_DATE_RE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/u;
+const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}/gu;
 
 /** Register or replace a calendar resolver used by medication date interpretation. */
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
@@ -74,6 +76,9 @@ function nearestCenturyYear(twoDigitYear: number, reference: number): number {
 
 registerMedicationDateResolver({
   id: "gregory",
+  calendarYearFromIsoYear(isoYearValue) {
+    return isoYearValue;
+  },
   resolveYear(sourceYear, sourceYearDigits, context): MedicationDateResolverResult | undefined {
     if (sourceYearDigits <= 2) {
       const calendarYear = nearestCenturyYear(sourceYear, referenceYear(context));
@@ -86,6 +91,9 @@ registerMedicationDateResolver({
 
 registerMedicationDateResolver({
   id: "buddhist",
+  calendarYearFromIsoYear(isoYearValue) {
+    return isoYearValue + 543;
+  },
   resolveYear(sourceYear, sourceYearDigits, context): MedicationDateResolverResult | undefined {
     if (sourceYearDigits <= 2) {
       const referenceBuddhistYear = referenceYear(context) + 543;
@@ -145,6 +153,31 @@ function dateFields(
   return { day, month };
 }
 
+function nearestReferenceIsoYear(month: number, day: number, referenceDate: string): number | undefined {
+  const reference = new Date(`${referenceDate}T00:00:00Z`);
+  if (Number.isNaN(reference.getTime())) return undefined;
+  const referenceYearValue = reference.getUTCFullYear();
+  let bestYear: number | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestFuture = false;
+  for (const year of [referenceYearValue - 1, referenceYearValue, referenceYearValue + 1]) {
+    if (!validGregorianDate(year, month, day)) continue;
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+    const delta = candidate.getTime() - reference.getTime();
+    const distance = Math.abs(delta);
+    const future = delta >= 0;
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance && future && !bestFuture)
+    ) {
+      bestYear = year;
+      bestDistance = distance;
+      bestFuture = future;
+    }
+  }
+  return bestYear;
+}
+
 function inferredYearPlausible(
   isoYear: number,
   context: MedicationDateResolverContext,
@@ -164,6 +197,7 @@ interface NumericDatePart {
   month?: number;
   year?: number;
   yearDigits?: number;
+  yearWasExplicit?: boolean;
 }
 
 function parseStructuralParts(listText: string): { parts: NumericDatePart[]; effectiveEnd: number } {
@@ -171,7 +205,7 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
   DATE_COMPONENT_RE.lastIndex = 0;
   for (let match = DATE_COMPONENT_RE.exec(listText); match; match = DATE_COMPONENT_RE.exec(listText)) {
     const text = match[0];
-    const full = text.match(FULL_NUMERIC_DATE_RE);
+    const full = text.match(NUMERIC_DATE_RE);
     parts.push({
       sourceText: text,
       start: match.index,
@@ -180,31 +214,56 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
         ? {
             day: Number(full[1]),
             month: Number(full[2]),
-            year: Number(full[3]),
-            yearDigits: full[3].length
+            year: full[3] !== undefined ? Number(full[3]) : undefined,
+            yearDigits: full[3]?.length,
+            yearWasExplicit: full[3] !== undefined
           }
-        : { day: Number(text) })
+        : { day: Number(text), yearWasExplicit: false })
     });
   }
   if (!parts.length) return { parts, effectiveEnd: 0 };
 
-  // A bare day is only treated as compressed date syntax when a later full
-  // date supplies its month/year. This avoids stealing `, 1 tablet` as a date.
+  // A bare day is only compressed date syntax when a later date supplies
+  // its month. This avoids stealing `, 1 tablet` as a date.
   for (let index = 0; index < parts.length; index += 1) {
-    if (parts[index].year !== undefined) continue;
-    let followingFull = false;
+    if (parts[index].month !== undefined) continue;
+    let followingDate = false;
     for (let cursor = index + 1; cursor < parts.length; cursor += 1) {
-      if (parts[cursor].year !== undefined) {
-        followingFull = true;
+      if (parts[cursor].month !== undefined) {
+        followingDate = true;
         break;
       }
     }
-    if (!followingFull) {
+    if (!followingDate) {
       const keep = parts.slice(0, index);
       return {
         parts: keep,
         effectiveEnd: keep.length ? keep[keep.length - 1].end : 0
       };
+    }
+  }
+
+  // Explicit years within a date list are shared by yearless d/m members.
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index].year !== undefined) continue;
+    let inheritedYear: NumericDatePart | undefined;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (parts[cursor].year !== undefined) {
+        inheritedYear = parts[cursor];
+        break;
+      }
+    }
+    if (!inheritedYear) {
+      for (let cursor = index + 1; cursor < parts.length; cursor += 1) {
+        if (parts[cursor].year !== undefined) {
+          inheritedYear = parts[cursor];
+          break;
+        }
+      }
+    }
+    if (inheritedYear) {
+      parts[index].year = inheritedYear.year;
+      parts[index].yearDigits = inheritedYear.yearDigits;
     }
   }
   return { parts, effectiveEnd: parts[parts.length - 1].end };
@@ -216,16 +275,13 @@ function resolveDatePart(
   locale: string,
   options?: ParseOptions
 ): CanonicalCalendarEventExpr | undefined {
-  const source = part.year !== undefined ? part : {
+  const source: NumericDatePart = {
     ...part,
-    month: inherited?.month,
-    year: inherited?.year,
-    yearDigits: inherited?.yearDigits
+    month: part.month ?? inherited?.month,
+    year: part.year ?? inherited?.year,
+    yearDigits: part.yearDigits ?? inherited?.yearDigits
   };
-  if (
-    source.day === undefined || source.month === undefined ||
-    source.year === undefined || source.yearDigits === undefined
-  ) return undefined;
+  if (source.day === undefined || source.month === undefined) return undefined;
 
   const order = defaultDateOrder(locale, options);
   const fields = dateFields(source.day, source.month, order);
@@ -239,25 +295,53 @@ function resolveDatePart(
   const enabled = configuredCalendars !== undefined
     ? configuredCalendars.map((id) => id.toLowerCase())
     : defaultCalendars(locale);
+  if (!enabled.length) return undefined;
+
   const candidates: CanonicalCalendarEventExpr[] = [];
-  for (const id of enabled) {
-    const resolver = DATE_RESOLVERS.get(id);
-    if (!resolver) continue;
-    const resolved = resolver.resolveYear(source.year, source.yearDigits, context);
-    if (!resolved) continue;
-    if (resolved.inferredYear && !inferredYearPlausible(resolved.isoYear, context, options?.datePolicy)) {
-      continue;
+  if (source.year === undefined || source.yearDigits === undefined) {
+    const inferredIsoYear = nearestReferenceIsoYear(fields.month, fields.day, context.referenceDate);
+    if (inferredIsoYear === undefined || !inferredYearPlausible(inferredIsoYear, context, options?.datePolicy)) {
+      return undefined;
     }
-    if (!validGregorianDate(resolved.isoYear, fields.month, fields.day)) continue;
+    let preferredResolver: MedicationDateResolver | undefined;
+    for (const id of enabled) {
+      const resolver = DATE_RESOLVERS.get(id);
+      if (resolver?.calendarYearFromIsoYear) {
+        preferredResolver = resolver;
+        break;
+      }
+    }
+    const calendarYear = preferredResolver?.calendarYearFromIsoYear?.(inferredIsoYear);
+    if (!preferredResolver || calendarYear === undefined) return undefined;
     candidates.push({
-      isoDate: isoDate(resolved.isoYear, fields.month, fields.day),
-      calendar: resolver.id,
-      calendarYear: resolved.calendarYear,
+      isoDate: isoDate(inferredIsoYear, fields.month, fields.day),
+      calendar: preferredResolver.id,
+      calendarYear,
       month: fields.month,
       day: fields.day,
       sourceText: part.sourceText,
-      inferredYear: resolved.inferredYear || undefined
+      inferredYear: true
     });
+  } else {
+    for (const id of enabled) {
+      const resolver = DATE_RESOLVERS.get(id);
+      if (!resolver) continue;
+      const resolved = resolver.resolveYear(source.year, source.yearDigits, context);
+      if (!resolved) continue;
+      if (resolved.inferredYear && !inferredYearPlausible(resolved.isoYear, context, options?.datePolicy)) {
+        continue;
+      }
+      if (!validGregorianDate(resolved.isoYear, fields.month, fields.day)) continue;
+      candidates.push({
+        isoDate: isoDate(resolved.isoYear, fields.month, fields.day),
+        calendar: resolver.id,
+        calendarYear: resolved.calendarYear,
+        month: fields.month,
+        day: fields.day,
+        sourceText: part.sourceText,
+        inferredYear: resolved.inferredYear || !part.yearWasExplicit || undefined
+      });
+    }
   }
 
   if (!candidates.length) return undefined;
@@ -284,9 +368,9 @@ function parseMatchedDateList(
   for (let index = 0; index < structural.parts.length; index += 1) {
     const part = structural.parts[index];
     let inherited: NumericDatePart | undefined;
-    if (part.year === undefined) {
+    if (part.month === undefined) {
       for (let cursor = index + 1; cursor < structural.parts.length; cursor += 1) {
-        if (structural.parts[cursor].year !== undefined) {
+        if (structural.parts[cursor].month !== undefined) {
           inherited = structural.parts[cursor];
           break;
         }
@@ -320,14 +404,34 @@ export function findMedicationDateListSpans(
   options?: ParseOptions
 ): MedicationDateListMatch[] {
   if (input.indexOf("/") < 0) return [];
-  const pattern = new RegExp(`${DATE_LEAD_SOURCE}(${DATE_LIST_SOURCE})`, "giu");
   const output: MedicationDateListMatch[] = [];
-  for (let match = pattern.exec(input); match; match = pattern.exec(input)) {
-    const parsed = parseMatchedDateList(input, match.index, match[0], options);
-    if (parsed) output.push(parsed);
-    if (match[0].length === 0) pattern.lastIndex += 1;
+  const seen = new Set<string>();
+  const patterns = [
+    new RegExp(`${DATE_LEAD_REQUIRED_SOURCE}(${DATE_LIST_SOURCE})`, "giu"),
+    new RegExp(`(${YEARFUL_DATE_LIST_SOURCE})`, "giu")
+  ];
+  for (const pattern of patterns) {
+    for (let match = pattern.exec(input); match; match = pattern.exec(input)) {
+      const parsed = parseMatchedDateList(input, match.index, match[0], options);
+      if (parsed) {
+        const key = `${parsed.start}:${parsed.end}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          output.push(parsed);
+        }
+      }
+      if (match[0].length === 0) pattern.lastIndex += 1;
+    }
   }
-  return output;
+  output.sort((left, right) => left.start - right.start || right.end - left.end);
+  return output.filter((span, index) =>
+    !output.some((other, otherIndex) =>
+      otherIndex !== index &&
+      other.start <= span.start &&
+      other.end >= span.end &&
+      (other.start < span.start || other.end > span.end)
+    )
+  );
 }
 
 /** Resolve a date list beginning exactly at the supplied source offset. */
@@ -338,7 +442,10 @@ export function parseMedicationDateListAt(
 ): MedicationDateListMatch | undefined {
   if (start < 0 || start >= input.length || input.indexOf("/", start) < 0) return undefined;
   const source = input.slice(start);
-  const pattern = new RegExp(`^${DATE_LEAD_SOURCE}(${DATE_LIST_SOURCE})`, "iu");
+  const hasExplicitLead = new RegExp(`^${DATE_LEAD_REQUIRED_SOURCE}`, "iu").test(source);
+  const pattern = hasExplicitLead
+    ? new RegExp(`^${DATE_LEAD_REQUIRED_SOURCE}(${DATE_LIST_SOURCE})`, "iu")
+    : new RegExp(`^(${YEARFUL_DATE_LIST_SOURCE})`, "iu");
   const match = source.match(pattern);
   if (!match) return undefined;
   return parseMatchedDateList(input, start, match[0], options);
@@ -355,9 +462,4 @@ export function sourceRangeOverlapsMedicationDate(
   return findMedicationDateListSpans(input, options).some((span) =>
     start < span.end && span.start < end
   );
-}
-
-/** Cheap structural check used to stop date-like tokens becoming body sites. */
-export function isMedicationDateSurface(value: string): boolean {
-  return /\d{1,2}\/\d{1,2}\/\d{2,4}/u.test(value);
 }
