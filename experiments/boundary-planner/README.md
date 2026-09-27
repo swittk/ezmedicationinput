@@ -1,103 +1,102 @@
-# Shadow boundary-planner experiment
+# Explainable regimen experiment
 
-This is an **offline experiment**, not a replacement for `src/hpsg/segmenter.ts`.
-The published parser, clause HPSG, carry-forward, FHIR projection, formatter, and
-scheduler are unchanged. Nothing here is imported by the production entrypoint
-or included in the npm package's `files` list. Do not enable it for live orders.
+This is a development-only alternative to the production 0.1.66 pipeline.
+Production `src/`, published exports, and npm package behavior remain unchanged.
+The experiment now covers boundary planning, typed inter-clause phases, finite
+cycle constructions, and shared scheduler primitives—not just segmentation.
 
-## Hypothesis
-
-Repeated failures cluster at structural ownership and inter-clause scope. An
-explainable boundary grammar can keep coherent lists intact, distinguish paired
-clocks from shared clocks, and reduce redundant clause probes without asking one
-large HPSG chart to parse a whole regimen.
-
-This first experiment intentionally changes **only boundary planning**. The
-existing downstream carry/propagation code remains in place. A failure after
-correct segmentation is evidence against treating boundary cleanup alone as a
-complete regimen fix.
-
-## Architecture
-
-- `structures.ts` obtains calendar spans from the existing date recognizer and
-  composes clock/weekday lists from existing typed tokens and canonical connector
-  terminology. Fraction/range and parenthesis spans retain source ownership.
-- Ownership forbids **external splits**, not internal HPSG analysis. Probe windows
-  obey ownership too; protecting just the final split is insufficient.
-- `grammar.ts` defines typed constructions and named constraints. Surface/locale
-  strings are not conditions in those constructions. Equal-priority incompatible
-  proposals are reported as unresolved, not silently selected by iteration order.
-- `evidence.ts` lazily obtains existing HPSG clause analyses and action frames,
-  cached within one input/options context. There is no global semantic cache.
-- `planner.ts` enumerates candidate seams and arbitrates ownership, grammatical
-  proposals, and explicit compatibility rules. Existing comma/head and procedural
-  behavior has **not** magically become a full discourse grammar: those bounded
-  compatibility policies remain visible and named.
-- `explain.mjs` shows selected rules, structural owners, source ranges, and rejected
-  constraints. Trace mode deliberately performs more evidence work than the
-  trace-disabled benchmark path. Rule priorities are policy, not probabilities.
-
-This is HPSG-inspired typed boundary reasoning, **not** a claim to have implemented
-a second complete HPSG chart or a full `CanonicalRegimen` grammar. It never calls
-the legacy segmenter as a hidden fallback.
-
-## Reproduce
-
-From the repository root, using the existing installed development dependencies:
+## Run
 
 ```sh
 npm run typecheck:boundaries
+npm run typecheck:boundary-integration
 npm run test:boundaries
+npm run test:boundary-clinical
 npm run test:shadow-boundaries
-npm run experiment:boundaries -- --rounds=20
-npm run explain:boundaries -- 'รับประทานครั้งละ 1 เม็ด วันละครั้ง หลังอาหารเช้า. วันที่ 28/9/69, 1/10/69 และ 4/10/69 จากนั้น ทุกวันอาทิตย์' --locale=th --reference-date=2026-09-27
+npm run experiment:boundaries -- --rounds=30
+npm run explain:boundaries -- '<sig>' --locale=th --reference-date=2026-09-27
 ```
 
-The shadow-suite config uses a test-only module substitution to run every existing
-source test with the candidate planner. The runner builds baseline/candidate
-bundles into ignored `.generated/`, substitutes the planner only in the candidate,
-and instruments separate bundles for call/chart counters. Runtime source files
-and published `dist/` are never patched by this harness.
+`test:boundaries` runs structural planner contracts. `test:boundary-clinical`
+runs independent dose/date/occurrence/total oracles, negative safety cases,
+sync/async/lint parity, and English/Thai realization round trips with candidate
+integration enabled. `test:shadow-boundaries` runs the unchanged existing source
+suite with the candidate. These configurations are deliberately separate.
 
-`node experiments/boundary-planner/run.mjs --audit` runs correctness, costs, and
-ablations without a timing benchmark. `--strict` also treats challenge failures as a failing exit. Historical or
-metamorphic oracle failures already cause a nonzero exit in normal mode. Normal mode completes the
-experiment and records failures; a zero exit is **not** a production-promotion
-verdict.
+The experiment command is strict: any failed golden scenario or performance gate
+causes a failing exit. It writes evidence, never updates expected values, never
+activates production, and never pushes or publishes.
 
-## Evidence and measurement
+## Components
 
-`corpus.ts` contains independently authored expected meanings, linked to historical
-fixes, plus controlled bilingual/code-switched variations and challenge cases.
-The baseline is a comparator, **not the correctness oracle**. Assertions cover
-dose values, dated occurrences, clocks, weekday/boundary scope, and actual
-`nextDueDoses` timestamps. The differential also compares canonical clinical
-fields, FHIR, leftovers, warnings, and `calculateTotalUnits`. Full suite testing
-retains the broader safety/formatting/round-trip coverage.
+- `planner.ts`, `structures.ts`, `evidence.ts`, `grammar.ts`: structural claims,
+  bounded typed evidence, named boundary constructions, and explicit relations.
+  Claims cover lookahead as well as final boundaries. A date proposal cannot
+  swallow a quantity/unit constituent. Explanations retain competing constraints.
+- `regimen.ts`: groups coordinated administrations and explicit sequence edges.
+  A later phase uses the complete predecessor group's finite endpoint. An explicit
+  phase end outranks the date of its last dose. Explicit local anchors outrank
+  inheritance; heterogeneous predecessor clocks are not arbitrarily selected.
+- `cycles.ts`, `cycle-lexicon.ts`: a real HPSG schedule constituent for finite,
+  explicitly anchored day lists/ranges and cycle counts. Date anchors reuse the
+  existing date parser, including named months and the numeric DMY policy.
+  No drug/specialty lookup invents a cycle length, anchor, or dose.
+- `scheduler-primitives.ts`: one clock/default and cadence implementation shared
+  by occurrence generation, historical count calculation, and total-unit counting.
+  It reuses the existing timezone/calendar primitives.
+- `bounds.ts`: anchored exact day/week durations lower to a single FHIR bounds
+  choice; multi-clock frequency is made explicit where the input left it implicit.
+- `admissibility.ts`: recognized invalid cycles or contradictory phase constraints
+  preserve the instruction and dose, emit a diagnostic, and do not execute a
+  fabricated schedule.
 
-Timing compares full `parseSig` on identical inputs in uninstrumented baseline
-and candidate bundles. AB/BA round ordering limits systematic warm-up/order bias.
-Counters run separately, so diagnostic work is not silently included in one
-timed lane. Existing torture cases and composed cases are reported separately.
-The predeclared timing gate allows 5% measurement noise on **both** mean and p95;
-results outside it are not relabelled as a pass. Do not run other validation jobs
-concurrently with the timing measurement. Other host activity can still add noise.
+`integration.mjs` is the build/test adapter, not a production runtime patcher. It
+selects actual experimental modules and small audited integration seams. It
+asserts that the expected source anchors exist rather than silently applying a
+partial transform. `typecheck-integration.mjs` checks the transformed candidate in
+an isolated mirror, in addition to ordinary source/experiment type checks.
+No output is mocked to match an oracle, and the candidate does not fall back to
+the old segmenter when an experiment fails.
 
-Results are retained in `results/`. The first timing attempt is preserved separately
-rather than discarded when the lazy-evidence design is improved. Historical
-audits retain selected diffs and test additions. File-touch and subject counts
-are not defect counts and do not establish a statistical failure rate.
+## Corpus and acceptance
 
-## Non-negotiable semantics
+`corpus.ts` retains the original 104 historical/metamorphic/challenge scenarios.
+`specialty-corpus.ts` adds 31 independently specified specialty-style seed inputs
+and controlled English/Thai/code-switch/spacing variants, for 112 additional
+positive scenarios. The specialty labels exist only in the tests, not the parser.
 
-Numeric dates default to DMY in every locale; numeric MDY needs explicit
-`datePolicy.dateOrder: "MDY"`. Named months can use either textual order.
-Fractional doses and dose ranges remain medication syntax. Independent schedule
-pairings must not become a Cartesian product. `and` and `then` are not
-interchangeable. Unknown/conflicting syntax must not acquire invented doses.
+These are synthetic syntax fixtures, not patient prescriptions or treatment
+recommendations. They test variable weekday doses, weekly dosing, alternate-day
+and multi-week intervals, multiple clocks, anchored tapers, cross-midnight pairs,
+finite treatment/rest cycles, quarter-tablets/liquids, and calendar edge cases.
+Expected dates and totals are independently authored, not copied from production.
 
-## Promotion
+Negative cases deliberately require diagnostics instead of invented schedules:
+missing/invalid cycle anchors, absent cycle length/count, invalid day ranges,
+contradictory phase starts, and ambiguous inherited clocks. They are not counted
+as successful medication schedules. Finite-cycle expansion is bounded (at most
+100 cycles, day indices through 366, and 10,000 generated events).
 
-No automatic production switch, release, merge, or publish is part of this
-experiment. Passing old tests is necessary, not sufficient. Read `REPORT.md` and
-the retained challenge failures before considering a production proposal.
+Numeric dates default to DMY in every locale. Numeric MDY requires the existing
+explicit caller override; English month names remain unambiguous in either order.
+
+## Evidence and promotion
+
+Read `REPORT.md` and `results/`. The initial red experiment is preserved under
+`results/initial-experiment/`. Current evidence includes explicit expected/actual
+executions and phase graphs, source fingerprints, validation results, counters,
+paired performance samples, and scaling checks.
+
+Legacy performance corpora retain their existing 5% mean/p95 tolerance. The new
+specialty corpus also has a stated 100 ms p95 guard; its ratio against the old
+parser is descriptive because the old parser fails many of those inputs.
+Performance is measured without concurrent test/build jobs from this session and
+without instrumentation in the timed bundles. Other host activity remains possible.
+
+Passing this finite matrix is not a proof over arbitrary language or a full HL7
+validator certificate. Tests check dose and executable-timing preservation across
+FHIR round trips and the relevant bounds/clock choice constraints. Natural-language
+realization is not intended to preserve original typography or byte-for-byte text.
+
+Review is still required before promoting the modules into production. Do not ship
+the source-transform test adapter as the production integration.

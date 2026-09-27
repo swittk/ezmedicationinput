@@ -22,11 +22,13 @@
     "bench:adversarial": "npm run build && node bench/adversarial.mjs",
     "bench:roundtrip": "npm run build && node bench/roundtrip.mjs",
     "bench:suggest": "npm run build && node --expose-gc bench/suggest.mjs",
-    "experiment:boundaries": "node experiments/boundary-planner/run.mjs --audit --bench",
+    "experiment:boundaries": "node experiments/boundary-planner/run.mjs --audit --bench --strict",
     "test:boundaries": "vitest run --config experiments/boundary-planner/vitest.experiment.config.ts",
     "test:shadow-boundaries": "vitest run --config experiments/boundary-planner/vitest.shadow.config.ts",
     "typecheck:boundaries": "tsc -p experiments/boundary-planner/tsconfig.json",
-    "explain:boundaries": "node experiments/boundary-planner/explain.mjs"
+    "explain:boundaries": "node experiments/boundary-planner/explain.mjs",
+    "test:boundary-clinical": "vitest run --config experiments/boundary-planner/vitest.acceptance.config.ts",
+    "typecheck:boundary-integration": "node experiments/boundary-planner/typecheck-integration.mjs"
   },
   "files": [
     "dist"

@@ -1,244 +1,213 @@
-# EZMEDINPUT: explainable boundary-planner experiment
+# EZMEDINPUT: green regimen experiment
 
-**Date:** 28 September 2026 (Asia/Bangkok).
-**Baseline:** `ezmedicationinput@0.1.66`, commit `e63ca7b255d222034f6ac4b896d8b7ff99863838`.
-**Branch:** `experiment/explainable-boundary-planner`.
-**Status:** experiment implemented and measured; **not activated in production**.
-**Implementation/corpus fingerprint:** `b6fa42ebd527421c4140b0b395537fbe3d508fedb1e8c8572b17e1ea85121764`.
+Date: 28 September 2026 (Asia/Bangkok).
+Branch: `experiment/explainable-boundary-planner`.
+Baseline: production source at `e63ca7b` / version 0.1.66.
+Initial experiment: `c9fe4fd`.
+Implementation/corpus fingerprint: `e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286`.
 
-## Decision
+A final whitespace check removed one extra blank line at the end of `corpus.ts`;
+the fingerprint above identifies the measured version. No executable logic changed.
 
-The experiment supports structural ownership plus typed, explainable boundary
-rules as a useful replacement direction. It is not evidence that the entire
-regimen problem is solved. Keep the production parser unchanged for now.
+## Result
 
-The candidate preserves all 1,210 existing source tests and fixes one additional
-independently specified pairing case. It meets the predeclared performance gate
-after lazy evidence evaluation. However, stricter independent oracles exposed two
-shared downstream defect families: phase-wide transition scope and inconsistent
-meal-clock defaults between occurrence generation and total-unit counting.
+The retained failures are fixed in the experimental candidate. The expanded
+positive clinical matrix is **216/216**, and all recorded correctness, type,
+distribution and performance gates pass. Production source, published exports and
+npm behavior remain unchanged. No push, merge, publication or production activation
+was performed.
 
-The full experiment intentionally exits **1** while those independent expectations
-fail. The failed results are retained, not changed to match either implementation.
-
-## What was built
-
-A separate experiment under `experiments/boundary-planner/` provides:
-
-- Reused structural recognition for dates; typed clock/weekday lists; numeric and
-  parenthesis spans. Claims forbid only external splitting. Internal tokens still
-  reach clause HPSG. Lookahead/probe windows also respect the claims.
-- A boundary grammar with named feature constraints and explicit decisions:
-  ownership, coordination, sequence, distinct date-clock pairing, adjacent doses,
-  fronted adjuncts, and procedural scope. Conflicting equal-priority conclusions
-  are exposed rather than silently resolved by iteration order.
-- Lazy, per-input HPSG/action evidence with a bounded-lifetime cache. No cross-input
-  cache, locale-derived MDY, or new medication-phrase vocabulary is introduced.
-- An explanation CLI, historical and generated fixtures, test-only substitution
-  of the segmenter, instrumented cost comparison, paired runtime benchmarks,
-  ownership/cache ablations, a short scaling probe, and retained JSON results.
-
-This is an HPSG-inspired typed boundary planner, **not a second full HPSG chart**.
-Some existing comma/head and procedural compatibility policies remain, now named
-and inspectable. Merely moving them behind typed interfaces does not prove that
-all heuristics have disappeared. No runtime call falls back to the old segmenter.
-
-## Audit basis and recurring pattern
-
-The retained causal audit inspects ten selected historical changes, including
-`5fca1fc`, `245b697`, `1f23c87`, `892e6fb`, `d03174f`, `34f7bd1`, `1f45525`,
-`cb315c5`, `f7e5a2e`, and `11b34f0`. Selected diffs and test additions are in
-`results/history-audit.json`.
-
-They repeatedly concern the ownership and scope of otherwise recognized material:
-omitted administration heads, a duration belonging to a group, an internal list
-separator being mistaken for a clause boundary, or phase relationships recovered
-after segmentation. This is a targeted engineering finding, not a statistical
-ranking of every parser subsystem. File-touch counts are not defect counts.
+This is a measured candidate ready for code review, not a proof that arbitrary
+medical prose can be interpreted without ambiguity.
 
 ## Validation
 
 | Check | Result |
 |---|---:|
-| Unchanged production source suite | 1,210 / 1,210 pass |
-| Same existing suite using candidate boundaries | 1,210 / 1,210 pass |
-| Structural, explanation, determinism, cache and ownership contracts | 104 / 104 pass |
-| Distribution/export tests | 4 / 4 pass |
-| Production build and declaration generation | pass |
-| Strict experiment TypeScript check | pass |
-| Production `src/` diff | empty |
-| npm dry-run package | 85 files, no experiment files |
+| Existing suite on unchanged native parser | 1,210/1,210 |
+| Same existing suite on candidate pipeline | 1,210/1,210 |
+| Structural planner contracts | 104/104 |
+| Clinical/API/English-and-Thai round-trip/safety controls | 324/324 |
+| Distribution tests | 4/4 |
+| Production build/declarations | pass |
+| Experiment TypeScript | pass |
+| Actual transformed candidate TypeScript | pass |
+| Strict clinical/performance experiment | exit 0 |
+| Runtime src diff / packaged experiment files | none / none |
 
-The independent 104-case clinical corpus is **separate** from the 104 structural
-contract tests. The latter verify planner invariants; they do not substitute for
-clinical expectations.
+The 324 clinical checks include the 216 golden scenarios, 31 sync/async/lint
+comparisons, 62 English/Thai realization-reparse checks, 11 negative/safety checks,
+and 4 independent scheduler boundary controls. These counts overlap in inputs;
+they are not claims of 324 independent prescriptions. The two 1,210-test rows are
+the same existing suite run against two implementations.
 
-| Independent clinical corpus | Baseline | Candidate |
+### Independent golden scenarios
+
+| Partition | Native baseline | Candidate |
 |---|---:|---:|
-| Historical fixtures | 15 / 15 | 15 / 15 |
-| Controlled English/Thai/code-switch variants | 72 / 84 | 72 / 84 |
-| Additional challenges | 3 / 5 | 4 / 5 |
-| **Total** | **90 / 104** | **91 / 104** |
+| historical | 15/15 | 15/15 |
+| metamorphic | 72/84 | 84/84 |
+| challenge | 3/5 | 5/5 |
+| specialty | 50/112 | 112/112 |
+| **Total** | **140/216** | **216/216** |
 
-All 84 controlled variants preserve the expected dates, doses, and occurrence
-lists; 12 Thai variants fail the newly added independent **total-unit** assertion.
-The candidate adds no new golden-case failure relative to the baseline. Full
-clinical differential output matches in 103 / 104 cases; the one change is the
-corrected date-clock pairing below.
+The original 104-case corpus remains. The additional 112 specialty-style cases
+come from 31 independently specified seeds and controlled language/spacing variants.
+Expected dose, dates, clocks, phase bounds, occurrences and totals are not copied
+from the baseline. All positive specialty inputs must parse without leftovers;
+rejecting them as unsupported would fail, not turn the run green.
 
-This distinction is important: before independent total assertions were added,
-those variants appeared green. Comparing only baseline and candidate would also
-have missed the error because both agree on zero.
+The fixtures are synthetic parser tests—not real patient records or recommended
+treatment regimens. Specialty labels never enter runtime parsing or select drug
+specific doses, cycle lengths, or defaults.
 
-## A boundary bug fixed by the design
+## What changed, and why
 
-Input:
+**Whole-phase scope.** Boundary decisions now retain typed coordination/sequence
+relations. The regimen graph groups coordinated administrations. A sequence uses
+the complete preceding group's finite endpoint, not the immediately preceding
+array item. Explicit phase end limits outrank inference from the last dose date.
+Anchored exact day/week durations support successive finite taper phases.
 
-```text
-take 1 tab at 08:00 on 28/9 and 1/10, at 20:00 on 4/10 and 5/10
-```
+**One source of clock/cadence semantics.** Occurrence enumeration, historical
+count caps and unit totals now share `scheduler-primitives.ts`. A weekday meal
+schedule no longer yields eight occurrences but zero tablets. Explicit clocks do
+not erase every-other-day, multi-week or monthly cadence. Querying partway through
+a regimen keeps its original anchor. A timezone-dependent month-end calculation
+was corrected; January 31 does not become the first of subsequent months.
 
-The baseline collapses both lists into one schedule with both clocks on all four
-dates: eight occurrences. The candidate emits two correctly scoped items:
+**Validated structural ownership.** A date recognizer's candidate span cannot
+swallow a following numeric dose plus unit. This fixes forms where an `until`
+date followed by `and 1/2 tab` previously prevented a legitimate boundary. The
+constraint is on typed quantity structure, not a new Thai/comma string exception.
 
-```text
-28 September and 1 October at 08:00
-4 October and 5 October at 20:00
-```
+**Finite cycle HPSG construction.** A shared constituent accepts explicitly
+anchored day lists/ranges and finite cycle counts. It reuses the existing date
+parser (including named months) and lowers to native exact `Timing.event` dates.
+Day 1 is the written anchor; later offsets and cycles are arithmetic from the
+written period. Missing information is never filled from a specialty label.
 
-That is four occurrences, not eight. No literal case-specific rule was added.
-The date-list ownership keeps internal coordinators out of probe boundaries;
-the existing typed date-clock construction can then see both complete operands.
+**FHIR lowering and inheritance.** An anchored exact day/week duration uses one
+bounds choice rather than exporting both a duration and period. Explicit target
+clocks override inherited meal/time anchors together. Multiple clocks make an
+otherwise implicit frequency explicit. The relevant FHIR bounds and time/when
+choice constraints are asserted across the specialty matrix.
 
-## Two shared failures that boundary cleanup does not fix
+**Lexical round-trip coverage.** The Thai formatter's `เดือนละครั้ง` now maps to
+the existing monthly frequency meaning. This is a lexical entry, not a formatting
+regex or segmentation exception. Numeric DMY remains the universal default; MDY
+still requires explicit opt-in. Named-month anchors accept either textual order.
 
-### 1. Transition after a coordinated phase uses the last-written date
+## Harder coverage
 
-```text
-take 1 tab at 08:00 on 4/10 and at 20:00 on 28/9
-then every Sunday at 09:30 until 30/11
-```
+The new scenarios include variable weekday half-tablet doses; weekly rather than
+daily administration; alternating days and multi-week intervals; distinct
+clock-specific doses; finite steroid-style tapers; renal weekday schedules;
+ophthalmic clock tapers; cross-midnight pairs; treatment/rest cycles; quarter-tablets
+and fractional liquids; and night/week skin-care patterns. English, Thai lexemes,
+fully Thai examples, code switching and lazy spacing are exercised.
 
-Both planners produce the same correct three segment ranges. The unchanged
-`propagateDateTransitionEventTiming` then consults only the immediately preceding
-item, whose date is 28 September. It sets the recurring start to 29 September.
-The phase's latest exact date is 4 October, so the expected start is 5 October.
-Both pipelines incorrectly include 4 October at 09:30; the expected first Sunday
-is 11 October. This is **inter-clause group scope**, not a separator decision.
-
-### 2. Meal-clock defaults disagree between scheduling APIs
-
-For the bounded Thai Sunday phase after the explicit dates, the emitted FHIR has
-`frequency: 1`, `period: 1`, `periodUnit: "wk"`, `dayOfWeek: ["sun"]`,
-`when: ["PCM"]`, bounds 5 October through 30 November, and dose 0.5 tablet.
-
-`nextDueDoses` emits eight after-breakfast Sunday occurrences. In the same window,
-`calculateTotalUnits` returns **0**, rather than **4 tablets**. Supplying
-`eventClock: { CM: "08:00" }` or an explicit `timeOfDay: ["08:30:00"]` returns 4.
-The failure is shared by baseline and candidate; it survives identical segmentation
-and FHIR. See `results/totals-diagnostic.json` for the controlled comparison.
-
-The 08:30 timestamps in this experiment are the scheduler's default-clock fixture,
-not a medically required breakfast time. No production fix is smuggled into this
-boundary experiment.
-
-## Explanation example
-
-For the originally reported Thai date list, the actual CLI reports:
+Representative positive inputs:
 
 ```text
-KEEP  ","       [64..65] structure.no-external-split
-      owner: calendar-date-list [50..85]
-KEEP  "และ"     [74..77] structure.no-external-split
-      owner: calendar-date-list [50..85]
-SPLIT "จากนั้น" [86..93] regimen.sequence
-      left: administration with dates
-      right: complete recurring schedule, omitted head
+take 4 tab daily at 08:00 from 28/9 for 3 days
+then 2 tab daily at 08:00 for 3 days
+then 1 tab daily at 08:00 for 3 days
+
+take 1 tab at 08:00 and 20:00 on days 1-14
+every 21 days starting 28/9/2026 for 2 cycles
+
+รับประทาน .5 เม็ด เวลา 08:00 วันที่ของรอบ 1,8,15
+ทุก 28 วัน เริ่มวันที่ 28/9/69 จำนวน 2 รอบ
 ```
 
-Source offsets are JavaScript string offsets. Use `--json` to inspect selected
-and rejected constraints, alternative proposals, and cost counters. Trace mode
-may collect additional evidence and is excluded from runtime timing claims.
+The first has separate September 28–30, October 1–3 and October 4–6 phases,
+with totals 12, 6 and 3 tablets. The treatment/rest example produces 56 occurrences,
+not continuous daily dosing through the rest week. The Thai cycle example produces
+six explicit occurrences, totaling three tablets for the synthetic half-tablet dose.
+
+Negative tests cover absent/invalid cycle anchors, missing period or cycle count,
+invalid/out-of-cycle day ranges, contradictory explicit phase starts, ambiguous
+inherited clocks, and preservation of PRN/ranged-dose semantics. Invalid recognized
+schedules retain original text and dose with diagnostics; they do not become a
+fabricated recurring schedule. These are negative checks, not supported protocols.
+
+Scheduler controls directly test DST wall-clock stability, month-end anchoring,
+historical count caps on non-daily cadence, and duplicate date/clock deduplication.
+Default after-breakfast times in fixtures are scheduler configuration, not medical
+recommendations.
 
 ## Performance
 
-Measurements use Node `v24.14.1` on `Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz`. Both lanes execute full
-`parseSig` in uninstrumented bundles. AB/BA rounds use identical inputs and options;
-counters are collected separately. No test/build jobs were running concurrently
-from this session. Other host activity and normal timing noise remain possible.
+Paired AB/BA full `parseSig` calls, 30 rounds, with instrumentation disabled in the
+timed bundles. The legacy corpora are unchanged. No tests/build jobs from this
+session ran concurrently; other host activity remains possible.
 
-| Corpus | Baseline mean ms | Candidate mean ms | Baseline p95 ms | Candidate p95 ms | Gate |
+| Corpus | Native mean ms | Candidate mean ms | Native p95 ms | Candidate p95 ms | Gate |
 |---|---:|---:|---:|---:|---|
-| torture (50 cases) | 8.419 | 8.247 | 23.948 | 24.233 | pass |
-| composed (20 cases) | 7.199 | 6.298 | 14.429 | 12.159 | pass |
+| torture (50 cases) | 8.543 | 8.275 | 23.679 | 23.791 | pass |
+| composed (20 cases) | 6.976 | 6.095 | 14.197 | 11.950 | pass |
+| specialty (112 cases) | 10.039 | 8.098 | 24.598 | 19.229 | pass |
 
-There are 1,000 measured parses per lane for torture and 400 per lane for composed
-cases, plus warm-ups. The predeclared gate permits 5% variation on both mean and
-p95. Ordinary-input p95 is slightly higher, not a proven improvement; composed
-cases improve materially in this sample. These are not cross-machine guarantees.
+The ordinary-input p95 is essentially flat, not a uniform speedup. Legacy composed
+schedules improve about 12.6% in mean and 15.8% at p95 in this run. The specialty
+ratio is descriptive: the baseline is incorrect on many new scenarios, so it is
+not an equal-correctness throughput comparison. Its candidate p95 also passes the
+separate predeclared 100 ms guard. Legacy mean/p95 retain the 5% tolerance gate.
 
-The first, eager-evidence attempt missed the torture p95 gate (about +5.7%). It is
-retained as `results/performance-first.json`. Lazy evaluation removed unnecessary
-HPSG probes before this result; the intermediate measurement is retained too.
-No unfavorable measurement was deleted or relabelled as passing.
+Across the 216 golden scenarios, speculative HPSG probes fall from
+**420 to 290** and total clause parses from
+**812 to 661**. Both lanes have zero chart truncations.
+The small 16-administration scaling check is retained separately; it is not an
+asymptotic complexity proof.
 
-The 1/2/4/8/16-administration sanity probe retained the correct item count in both
-lanes. At 16 items, baseline median was 104.74 ms versus candidate 67.22 ms in the
-final run. Five samples per size are not enough to establish a complexity bound.
-See `results/scaling.json`.
+Both new-generation performance runs are retained, along with the original
+experiment's measurements. No claim of improved correctness is inferred from
+speed: independent oracles and execution checks establish the measured correctness.
 
-## Cost counters and ablations
+## Architecture and delivery boundary
 
-Across the independent 104-case corpus:
+This remains a bounded clause HPSG plus an explainable boundary/regimen layer,
+not one unbounded chart over an entire prescription. Some existing compatibility
+rules and carry-forward behavior remain; this is not a claim to have removed all
+heuristics or solved arbitrary discourse.
 
-| Counter | Baseline | Candidate |
-|---|---:|---:|
-| speculativeProbes | 199 | 184 |
-| clauseCalls | 395 | 381 |
-| lexicalCalls | 2,188 | 2,033 |
-| chartSigns | 7,208 | 7,075 |
-| combinationAttempts | 17,860 | 17,455 |
-| chartTruncations | 0 | 0 |
+The test/build adapter selects real experimental modules and verified integration
+seams without editing production files. The transformed implementation itself is
+typechecked in a separate mirror. The adapter must not be shipped as a production
+runtime source patcher; reviewed integration should move the components into their
+proper source modules.
 
-Speculative probes decrease by about 7.5%, a useful but **modest** reduction, not
-an order-of-magnitude result. The planner lexes once for its own walk, but the
-unchanged downstream parser and action analyses still re-lex. This is not a claim
-that the complete pipeline is now one lexical pass.
+FHIR tests verify relevant structure and executable round trips, not byte-identical
+natural-language output or a complete official HL7 validation certificate. Anchored
+finite day/week phase inference and finite cycle/day-offset syntax have explicit
+scope; unspecified future clinical decisions are not guessed.
 
-Ownership-disabled segmentation changed these historical fixtures:
-`shared-clocks-shared-dates`. For the original Thai case, other grammatical
-constraints now independently retain the correct segmentation even with ownership
-disabled; it takes extra evidence work. We therefore do not claim the ablation
-must reproduce that original bug in every version of the experiment.
-
-Cache-disabled segment outputs all match: **true**. Ablations
-compare the same trace-disabled mode and report probe counts separately from
-correctness. No timing advantage is credited to instrumentation overhead.
-
-## Recommended next experiment
-
-Use the successful boundary planner as the experimental front end, then represent
-coordinated administration groups and sequence edges explicitly. Test inheritance
-and the latest date across a whole predecessor phase, not just adjacent result
-indices. Separately unify the effective timing defaults/counting behavior so that
-unit totals agree with occurrence enumeration under the same configuration.
-
-Keep production on 0.1.66 until those independent failures are fixed, the complete
-pipeline is revalidated, and the change is reviewed. Do not replace the current
-clause parser with a single whole-prescription chart as part of this experiment.
-
-## Reproduction
+## Reproduction and retained evidence
 
 ```sh
-npm run typecheck:boundaries
+npm run typecheck:boundary-integration
 npm run test:boundaries
+npm run test:boundary-clinical
 npm run test:shadow-boundaries
-npm run experiment:boundaries -- --rounds=20
+npm run experiment:boundaries -- --rounds=30
 npm run explain:boundaries -- '<sig>' --locale=th --reference-date=2026-09-27
 ```
 
-The experiment command currently returns a nonzero exit for the retained clinical
-oracle failures. All evidence is under `experiments/boundary-planner/results/`;
-`validation.json` summarizes the executed suite results and package isolation is
-recorded separately. Implementation, tests, and documentation remain local to the
-experiment branch; no push, release, or production activation is included.
+`results/clinical-executions.json` contains expected and actual executable timelines
+and phase graphs. `correctness.json`, `validation.json`, `performance.json`,
+`costs.json`, `scaling.json`, and `promotion-gates.json` record the checks.
+The initial red experiment is preserved under `results/initial-experiment/`.
+All code and evidence remain on the local experiment branch; no BPP was performed.
+
+## Source notes
+
+FHIR R5 datatype definitions specify the single `Timing.repeat.bounds[x]` choice
+and the `when`/`timeOfDay` constraint (tim-10):
+https://hl7.org/fhir/R5/datatypes-definitions.html#Timing.repeat.bounds_x_
+
+The broad weekly/cycle syntax categories were informed by public NHS methotrexate
+and NCI chemotherapy descriptions. Exact test inputs and quantities above were
+independently authored and are not clinical protocols from those sources:
+https://www.nhs.uk/medicines/methotrexate/how-and-when-to-take-methotrexate/
+https://www.cancer.gov/about-cancer/treatment/types/chemotherapy

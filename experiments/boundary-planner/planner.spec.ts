@@ -5,7 +5,7 @@ import { arbitrate } from './grammar';
 import { EvidenceContext } from './evidence';
 import { lexInput } from '../../src/lexer/lex';
 import { annotateLexTokens } from '../../src/lexer/meaning';
-import { CORPUS, historicalCases } from './corpus';
+import { ORIGINAL_CORPUS as CORPUS, historicalCases } from './corpus';
 import type { BoundarySite, StructuralClaim } from './types';
 
 describe('experimental boundary planner structural contracts', () => {

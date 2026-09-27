@@ -2680,3 +2680,8 @@ SYNSEM leaves. It is still intentionally not advertised as a fully declarative
 DELPH-IN/ERG grammar because some medication-specific leaf compatibility,
 semantic assembly, and terminology defaults remain explicit TypeScript domain
 constraints where that is clearer and safer.
+
+
+## 2026-09-28 — green experimental regimen pipeline
+
+Branch `experiment/explainable-boundary-planner`, continuing `c9fe4fd`; production source remains untouched. Fixed retained whole-phase and totals failures, added typed finite cycle/day-range HPSG construction, shared scheduler primitives and calendar alignment, typed ownership conflict handling, FHIR anchored-bound lowering, and monthly Thai lexical round-trip coverage. Golden matrix 216/216; native and shadow source suites both 1210/1210; planner contracts 104/104; clinical/API/EN+TH round-trip/safety controls 324/324; dist 4/4; both experiment and actual transformed-candidate TypeScript pass. Final strict 30-round benchmark passes all gates. See `experiments/boundary-planner/REPORT.md` and retained JSON evidence. Initial red experiment retained under `results/initial-experiment/`. Not activated, pushed or published. Next authorized step is review/promotion, not another blind boundary exception.

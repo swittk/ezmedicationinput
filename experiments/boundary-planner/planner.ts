@@ -60,7 +60,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const owners = new OwnershipIndex(experiment.ownership === false ? [] : claims);
   const sites = candidateSites(input, tokens, options);
   const evidence = new EvidenceContext(input, tokens, options, metrics, experiment.cache !== false);
-  const plan: BoundaryPlan = { experimental: true, segments: [], claims, decisions: [], metrics };
+  const plan: BoundaryPlan = { experimental: true, segments: [], claims, decisions: [], relations: [], metrics };
   let start = 0, inheritedAdministration = false;
 
   const segment = (end: number, inheritTrailingDurationFromNext = false) => {
@@ -161,6 +161,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     if (experiment.trace) { decision.rejectedRules = rejected; plan.decisions.push(decision); }
     if (decision.selected.action === 'split') {
       segment(site.start, decision.selected.relation === 'shared-duration');
+      plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
+        kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
+        range: { start: site.start, end: site.end } });
       start = site.end;
       inheritedAdministration = decision.selected.relation !== 'independent';
     }

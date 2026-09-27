@@ -1,5 +1,7 @@
+import { recognizeCycles } from './cycles';
 import { findMedicationDateListSpans } from '../../src/date-interpretation';
 import { getDayOfWeekMeaning } from '../../src/lexer/meaning';
+import { normalizeUnit } from '../../src/unit-lexicon';
 import { LexKind } from '../../src/lexer/token-types';
 import { ACTION_COORDINATION_CONNECTORS, MERIDIEM_TOKENS } from '../../src/hpsg/lexical-classes';
 import type { Token } from '../../src/parser-state';
@@ -35,8 +37,21 @@ export function recognizeStructures(context: PlanningInput): StructuralClaim[] {
     if (end > start) claims.push({ id: `${kind}:${start}:${end}`, kind, start, end, producer, resolved, policy: 'no-external-split' });
   };
   for (const span of findMedicationDateListSpans(input, options)) {
-    add('calendar-date-list', span.start, span.end, 'findMedicationDateListSpans', !span.unresolved);
+    // A structural proposal is not authority to swallow a typed dose. Numeric date
+    // regexes can overrun `until 30/9 and 1/2 tab`; let the quantity/unit constituent
+    // bound the proposal before it becomes an ownership claim. No separator-language exception.
+    let end = span.end;
+    for (let i = 0; i + 1 < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.sourceStart <= span.start || t.sourceStart >= end) continue;
+      if ((t.kind !== LexKind.Number && t.kind !== LexKind.NumberRange) || !normalizeUnit(lexeme(tokens[i + 1]), options)) continue;
+      const previous = tokens[i - 1];
+      end = previous && listConnector(previous) ? previous.sourceStart : t.sourceStart;
+      break;
+    }
+    add('calendar-date-list', span.start, end, 'findMedicationDateListSpans', !span.unresolved);
   }
+  for (const cycle of recognizeCycles(input, options)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
   // List constructions compose typed atoms and canonical coordinators, not medication phrases.
   for (const kind of ['clock-list', 'weekday-list'] as const) {
     const atomEnd = (index: number): number | undefined => kind === 'clock-list'

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
-export default defineConfig({ test: {
+import { candidatePlugin } from './integration.mjs';
+export default defineConfig({ plugins: [candidatePlugin()], test: {
   include: ['test/**/*.spec.ts'],
   setupFiles: ['experiments/boundary-planner/shadow.setup.ts'],
   testTimeout: 20000

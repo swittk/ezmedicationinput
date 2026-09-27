@@ -1,36 +1,24 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "b6fa42ebd527421c4140b0b395537fbe3d508fedb1e8c8572b17e1ea85121764",
-    "base": "e63ca7b255d222034f6ac4b896d8b7ff99863838",
-    "createdAt": "2026-09-27T22:34:08.070Z",
+    "experimentalSourceSha256": "e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286",
+    "base": "c9fe4fddafe2fd995057d334546ed3b195085778",
+    "createdAt": "2026-09-27T23:30:57.020Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      1.99,
-      4.18,
-      7.26
+      1.07,
+      1.93,
+      4.73
     ],
-    "rounds": 20,
+    "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
   },
   "historical": true,
-  "metamorphic": false,
-  "challenges": false,
-  "unresolved": [
-    "list-th-26",
-    "list-th-27",
-    "list-th-30",
-    "list-th-31",
-    "list-th-34",
-    "list-th-35",
-    "list-th-38",
-    "list-th-39",
-    "list-th-42",
-    "list-th-43",
-    "list-th-46",
-    "list-th-47",
-    "reverse-ordered-exact-phase"
-  ],
+  "metamorphic": true,
+  "challenges": true,
+  "specialty": true,
+  "performance": true,
+  "unresolved": [],
   "productionPromotion": false,
   "reason": "This command records a shadow experiment; production promotion is never automatic. Read REPORT.md and validation/performance evidence."
 }

@@ -1,0 +1,77 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '../..');
+function replace(source, anchor, replacement, count = 1) {
+  if (source.split(anchor).length !== count + 1) throw new Error(`Candidate integration contract changed: ${anchor.slice(0, 100)}`);
+  return source.split(anchor).join(replacement);
+}
+
+/** Build-only injection of real experimental components. No working-tree or published-source edits. */
+export function candidateTransform(source, filename) {
+  const file = filename.split('?')[0];
+  if (file === path.join(root, 'src/index.ts')) {
+    source = replace(source,
+      'const segments = expandMealDashSegments(parseSigSegments(input, options), options);',
+      'const boundaryPlan = createBoundaryPlan(input, options);\n  const segments = expandMealDashSegments(boundaryPlan.segments, options);', 3);
+    source = replace(source, 'propagateDateTransitionEventTiming(rawResults, segments, input, options);',
+      'composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);', 2);
+    source = replace(source, 'propagateDateTransitionEventTiming(lintParseResults, segments, input, options);',
+      'composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);');
+    return `import { createBoundaryPlan } from ${JSON.stringify(path.join(here, 'candidate-adapter.ts'))};\n` +
+      `import { composeRegimenPhases } from ${JSON.stringify(path.join(here, 'regimen.ts'))};\n` + source;
+  }
+  if (file === path.join(root, 'src/lexer/locales/th.ts')) {
+    return replace(source, '  "สัปดาห์ละครั้ง": "weekly",',
+      '  "สัปดาห์ละครั้ง": "weekly",\n  "เดือนละครั้ง": "monthly",');
+  }
+  if (file === path.join(root, 'src/fhir.ts')) {
+    source = replace(source, '  if (schedule?.frequencyMax !== undefined) {',
+      '  normalizeAnchoredBounds(repeat, schedule);\n  if (schedule?.frequencyMax !== undefined) {');
+    source = replace(source, '  if (hasRepeat) {', '  normalizeClockFrequency(repeat);\n  if (hasRepeat) {');
+    return `import { normalizeAnchoredBounds, normalizeClockFrequency } from ${JSON.stringify(path.join(here, 'bounds.ts'))};\n` + source;
+  }
+  if (file === path.join(root, 'src/hpsg/clause-parser.ts')) {
+    source = replace(source, '      calendarDateListRule(),', '      cycleScheduleRule(),\n      calendarDateListRule(),');
+    source = replace(source, '      const conditions = getConditionFeatures(context);',
+      "      if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];\n      const conditions = getConditionFeatures(context);");
+    return `import { cycleScheduleRule, insideCycle } from ${JSON.stringify(path.join(here, 'cycles.ts'))};\n` + source;
+  }
+  if (file === path.join(root, 'src/schedule.ts')) {
+    source = replace(source,
+      '  const lastDay = new Date(candidate.getTime());\n  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);\n  lastDay.setUTCDate(0);\n  const maxDay = getTimeParts(lastDay, timeZone).day;',
+      '  const maxDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();');
+
+    const begin = '    const expanded = expandWhenCodes(whenCodes, config, repeat);';
+    // Both occurrence and totals paths must use the SAME anchor-expansion implementation.
+    const next = source.indexOf(begin), end = source.indexOf('    const includesImmediate', next);
+    if (next < 0 || end < next) throw new Error('nextDueDoses anchor seam changed');
+    source = source.slice(0, next) + '    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);\n' + source.slice(end);
+    for (let remaining = 0; remaining < 2; remaining++) {
+      const count = source.indexOf(begin), tail = source.indexOf('    if (arrayIncludes(whenCodes, EventTiming.Immediate))', count);
+      if (count < 0 || tail < count) throw new Error('history/count anchor seam changed');
+      source = source.slice(0, count) + '    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);\n\n' + source.slice(tail);
+    }
+    source = replace(source, 'const baseCandidate = effectiveOrderedAt ?? from;', 'const baseCandidate = effectiveOrderedAt ?? boundsStart ?? from;');
+    source = replace(source, 'const baseCandidate = effectiveOrderedAt ?? countFrom;', 'const baseCandidate = effectiveOrderedAt ?? boundsStart ?? countFrom;');
+    source = replace(source, '    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);',
+      '    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;\n    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);', 3);
+    source = replace(source,
+      'if (!enforceDayFilter || dayFilter.has(weekday)) {\n          for (const entry of expanded)',
+      'if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {\n          for (const entry of expanded)', 3);
+    source += `
+const { resolveExplicitClockEntries, clockCadenceEligible } = createTimingPrimitives({
+  expandWhenCodes, normalizeClock, inferWhenFallbackEntries, getLocalDayNumber, getLocalMonthIndex,
+  getTimeParts, addCalendarMonths, isDateAlignedToPeriodCycle
+});
+`;
+    source = `import { createTimingPrimitives } from ${JSON.stringify(path.join(here,'scheduler-primitives.ts'))};\n` + source;
+    return source;
+  }
+  return undefined;
+}
+export function candidatePlugin() {
+  return { name: 'experimental-regimen-composition', enforce: 'pre', transform(source, id) {
+    const changed = candidateTransform(source, id); return changed === undefined ? undefined : { code: changed, map: null };
+  } };
+}

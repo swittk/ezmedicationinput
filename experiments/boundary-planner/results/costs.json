@@ -1,39 +1,39 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "b6fa42ebd527421c4140b0b395537fbe3d508fedb1e8c8572b17e1ea85121764",
-    "base": "e63ca7b255d222034f6ac4b896d8b7ff99863838",
-    "createdAt": "2026-09-27T22:34:08.070Z",
+    "experimentalSourceSha256": "e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286",
+    "base": "c9fe4fddafe2fd995057d334546ed3b195085778",
+    "createdAt": "2026-09-27T23:30:57.020Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      1.99,
-      4.18,
-      7.26
+      1.07,
+      1.93,
+      4.73
     ],
-    "rounds": 20,
+    "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
   },
   "baseline": {
-    "clauseCalls": 395,
-    "speculativeProbes": 199,
-    "lexicalCalls": 2188,
-    "chartCalls": 395,
+    "clauseCalls": 812,
+    "speculativeProbes": 420,
+    "lexicalCalls": 4574,
+    "chartCalls": 812,
     "chartTruncations": 0,
-    "chartSigns": 7208,
-    "agendaItems": 7807,
-    "combinationAttempts": 17860,
+    "chartSigns": 16654,
+    "agendaItems": 19288,
+    "combinationAttempts": 47842,
     "cacheHits": 0
   },
   "candidate": {
-    "clauseCalls": 381,
-    "speculativeProbes": 184,
-    "lexicalCalls": 2033,
-    "chartCalls": 381,
+    "clauseCalls": 661,
+    "speculativeProbes": 290,
+    "lexicalCalls": 3471,
+    "chartCalls": 661,
     "chartTruncations": 0,
-    "chartSigns": 7075,
-    "agendaItems": 7641,
-    "combinationAttempts": 17455,
-    "cacheHits": 6
+    "chartSigns": 14670,
+    "agendaItems": 17028,
+    "combinationAttempts": 43040,
+    "cacheHits": 26
   },
   "cases": [
     {
@@ -2738,6 +2738,2918 @@
         "agendaItems": 122,
         "combinationAttempts": 230,
         "cacheHits": 1
+      }
+    },
+    {
+      "id": "variable-weekday-half-tablet",
+      "family": "anticoagulation",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 19,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 212,
+        "agendaItems": 250,
+        "combinationAttempts": 991,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 166,
+        "agendaItems": 196,
+        "combinationAttempts": 766,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "weekly-not-daily",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 47,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 47,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-explicit-clock",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fortnightly-explicit-clock",
+      "family": "gastroenterology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "bounded-three-stage-taper",
+      "family": "respiratory",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 170,
+        "agendaItems": 210,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 122,
+        "agendaItems": 150,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "duration-three-stage-taper",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 188,
+        "agendaItems": 228,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 134,
+        "agendaItems": 162,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "clock-specific-neurology",
+      "family": "movement-disorders",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 115,
+        "agendaItems": 143,
+        "combinationAttempts": 322,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 146,
+        "combinationAttempts": 264,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "renal-fixed-weekdays",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 11,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 70,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 70,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "left-eye-clock-taper",
+      "family": "ophthalmology",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 25,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 170,
+        "agendaItems": 215,
+        "combinationAttempts": 475,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 168,
+        "agendaItems": 214,
+        "combinationAttempts": 480,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-list",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 27,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-range",
+      "family": "reproductive-endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 16,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 42,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cross-midnight-distinct-dates",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 135,
+        "combinationAttempts": 246,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 94,
+        "agendaItems": 122,
+        "combinationAttempts": 230,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "loading-phase-later-clock-overrides-meal",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 68,
+        "agendaItems": 80,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 68,
+        "agendaItems": 80,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thai-clock-specific-neurology",
+      "family": "movement-disorders",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 121,
+        "agendaItems": 149,
+        "combinationAttempts": 322,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 120,
+        "agendaItems": 154,
+        "combinationAttempts": 264,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thyroid-weekend-distinct-dose",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 5,
+        "lexicalCalls": 32,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 184,
+        "agendaItems": 226,
+        "combinationAttempts": 821,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 196,
+        "agendaItems": 244,
+        "combinationAttempts": 934,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "every-three-days-two-clocks",
+      "family": "transplant",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 69,
+        "agendaItems": 81,
+        "combinationAttempts": 199,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 42,
+        "agendaItems": 51,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-resumed-query",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "three-week-interval-multiple-weekdays",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 108,
+        "combinationAttempts": 393,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 61,
+        "agendaItems": 73,
+        "combinationAttempts": 323,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-abbreviation",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 22,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 44,
+        "combinationAttempts": 95,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 105,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "monthly-end-of-month",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-leap-day-pair",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 98,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 98,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-successor-members-inherit-whole-phase",
+      "family": "neurology",
+      "baseline": {
+        "clauseCalls": 13,
+        "speculativeProbes": 9,
+        "lexicalCalls": 53,
+        "chartCalls": 13,
+        "chartTruncations": 0,
+        "chartSigns": 256,
+        "agendaItems": 331,
+        "combinationAttempts": 726,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 8,
+        "speculativeProbes": 4,
+        "lexicalCalls": 34,
+        "chartCalls": 8,
+        "chartTruncations": 0,
+        "chartSigns": 160,
+        "agendaItems": 206,
+        "combinationAttempts": 456,
+        "cacheHits": 2
+      }
+    },
+    {
+      "id": "two-clock-weekday-weekly-total",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 4,
+        "lexicalCalls": 28,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 124,
+        "agendaItems": 153,
+        "combinationAttempts": 519,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 83,
+        "combinationAttempts": 327,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-weeks-on-one-week-off",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 1,
+        "lexicalCalls": 43,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 53,
+        "agendaItems": 57,
+        "combinationAttempts": 83,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 28,
+        "combinationAttempts": 49,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "full-thai-finite-cycle",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 34,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 29,
+        "agendaItems": 31,
+        "combinationAttempts": 34,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "quarter-tablet-finite-course",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 12,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 47,
+        "agendaItems": 57,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 30,
+        "agendaItems": 38,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fractional-liquid-finite-course",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 47,
+        "agendaItems": 57,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 30,
+        "agendaItems": 38,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "eight-hour-interval",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 20,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 20,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "three-nights-per-week",
+      "family": "dermatology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 57,
+        "agendaItems": 71,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 57,
+        "agendaItems": 71,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-phase-end-outweighs-last-dose",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 88,
+        "agendaItems": 112,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 88,
+        "agendaItems": 112,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-named-month-anchor",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 0,
+        "lexicalCalls": 24,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "variable-weekday-half-tablet-code-switch",
+      "family": "anticoagulation",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 19,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 217,
+        "agendaItems": 255,
+        "combinationAttempts": 991,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 170,
+        "agendaItems": 200,
+        "combinationAttempts": 766,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "variable-weekday-half-tablet-thai-lexemes",
+      "family": "anticoagulation",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 19,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 222,
+        "agendaItems": 260,
+        "combinationAttempts": 991,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 174,
+        "agendaItems": 204,
+        "combinationAttempts": 766,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "variable-weekday-half-tablet-lazy-spacing",
+      "family": "anticoagulation",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 19,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 212,
+        "agendaItems": 250,
+        "combinationAttempts": 991,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 166,
+        "agendaItems": 196,
+        "combinationAttempts": 766,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "weekly-not-daily-code-switch",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 38,
+        "agendaItems": 48,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 38,
+        "agendaItems": 48,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "weekly-not-daily-thai-lexemes",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "weekly-not-daily-lazy-spacing",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 47,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 47,
+        "combinationAttempts": 158,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-explicit-clock-code-switch",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-explicit-clock-thai-lexemes",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-explicit-clock-lazy-spacing",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fortnightly-explicit-clock-code-switch",
+      "family": "gastroenterology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 35,
+        "agendaItems": 41,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 35,
+        "agendaItems": 41,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fortnightly-explicit-clock-thai-lexemes",
+      "family": "gastroenterology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 36,
+        "agendaItems": 42,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 36,
+        "agendaItems": 42,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fortnightly-explicit-clock-lazy-spacing",
+      "family": "gastroenterology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 120,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "bounded-three-stage-taper-code-switch",
+      "family": "respiratory",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 179,
+        "agendaItems": 219,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 128,
+        "agendaItems": 156,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "bounded-three-stage-taper-thai-lexemes",
+      "family": "respiratory",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 181,
+        "agendaItems": 221,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 130,
+        "agendaItems": 158,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "bounded-three-stage-taper-lazy-spacing",
+      "family": "respiratory",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 170,
+        "agendaItems": 210,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 122,
+        "agendaItems": 150,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "duration-three-stage-taper-code-switch",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 188,
+        "agendaItems": 228,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 134,
+        "agendaItems": 162,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "duration-three-stage-taper-thai-lexemes",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 190,
+        "agendaItems": 230,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 136,
+        "agendaItems": 164,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "duration-three-stage-taper-lazy-spacing",
+      "family": "rheumatology",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 188,
+        "agendaItems": 228,
+        "combinationAttempts": 492,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 134,
+        "agendaItems": 162,
+        "combinationAttempts": 372,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "clock-specific-neurology-code-switch",
+      "family": "movement-disorders",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 118,
+        "agendaItems": 146,
+        "combinationAttempts": 322,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 116,
+        "agendaItems": 150,
+        "combinationAttempts": 264,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "clock-specific-neurology-thai-lexemes",
+      "family": "movement-disorders",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 121,
+        "agendaItems": 149,
+        "combinationAttempts": 322,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 120,
+        "agendaItems": 154,
+        "combinationAttempts": 264,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "clock-specific-neurology-lazy-spacing",
+      "family": "movement-disorders",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 115,
+        "agendaItems": 143,
+        "combinationAttempts": 322,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 146,
+        "combinationAttempts": 264,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "renal-fixed-weekdays-code-switch",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 11,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 57,
+        "agendaItems": 71,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 57,
+        "agendaItems": 71,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "renal-fixed-weekdays-thai-lexemes",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 11,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 58,
+        "agendaItems": 72,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 58,
+        "agendaItems": 72,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "renal-fixed-weekdays-lazy-spacing",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 11,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 70,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 70,
+        "combinationAttempts": 309,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-list-code-switch",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 27,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-list-thai-lexemes",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 27,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-list-lazy-spacing",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 27,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-range-code-switch",
+      "family": "reproductive-endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 16,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 42,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-range-thai-lexemes",
+      "family": "reproductive-endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 16,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 42,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cyclic-day-range-lazy-spacing",
+      "family": "reproductive-endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 16,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 42,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cross-midnight-distinct-dates-code-switch",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 106,
+        "agendaItems": 137,
+        "combinationAttempts": 246,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 96,
+        "agendaItems": 124,
+        "combinationAttempts": 230,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "cross-midnight-distinct-dates-thai-lexemes",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 96,
+        "agendaItems": 121,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 86,
+        "agendaItems": 108,
+        "combinationAttempts": 192,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "cross-midnight-distinct-dates-lazy-spacing",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 135,
+        "combinationAttempts": 246,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 94,
+        "agendaItems": 122,
+        "combinationAttempts": 230,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "loading-phase-later-clock-overrides-meal-code-switch",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 82,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 82,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "loading-phase-later-clock-overrides-meal-thai-lexemes",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 60,
+        "agendaItems": 66,
+        "combinationAttempts": 104,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 60,
+        "agendaItems": 66,
+        "combinationAttempts": 104,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "loading-phase-later-clock-overrides-meal-lazy-spacing",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 68,
+        "agendaItems": 80,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 68,
+        "agendaItems": 80,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thyroid-weekend-distinct-dose-code-switch",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 5,
+        "lexicalCalls": 32,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 188,
+        "agendaItems": 230,
+        "combinationAttempts": 821,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 200,
+        "agendaItems": 248,
+        "combinationAttempts": 934,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thyroid-weekend-distinct-dose-thai-lexemes",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 5,
+        "lexicalCalls": 32,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 192,
+        "agendaItems": 234,
+        "combinationAttempts": 821,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 204,
+        "agendaItems": 252,
+        "combinationAttempts": 934,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thyroid-weekend-distinct-dose-lazy-spacing",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 5,
+        "lexicalCalls": 32,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 184,
+        "agendaItems": 226,
+        "combinationAttempts": 821,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 196,
+        "agendaItems": 244,
+        "combinationAttempts": 934,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "every-three-days-two-clocks-code-switch",
+      "family": "transplant",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 71,
+        "agendaItems": 83,
+        "combinationAttempts": 199,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 43,
+        "agendaItems": 52,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "every-three-days-two-clocks-thai-lexemes",
+      "family": "transplant",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 73,
+        "agendaItems": 85,
+        "combinationAttempts": 199,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 44,
+        "agendaItems": 53,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "every-three-days-two-clocks-lazy-spacing",
+      "family": "transplant",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 69,
+        "agendaItems": 81,
+        "combinationAttempts": 199,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 42,
+        "agendaItems": 51,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-resumed-query-code-switch",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-resumed-query-thai-lexemes",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 37,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "alternate-day-resumed-query-lazy-spacing",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "three-week-interval-multiple-weekdays-code-switch",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 94,
+        "agendaItems": 110,
+        "combinationAttempts": 393,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 74,
+        "combinationAttempts": 323,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "three-week-interval-multiple-weekdays-thai-lexemes",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 96,
+        "agendaItems": 112,
+        "combinationAttempts": 393,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 63,
+        "agendaItems": 75,
+        "combinationAttempts": 323,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "three-week-interval-multiple-weekdays-lazy-spacing",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 108,
+        "combinationAttempts": 393,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 61,
+        "agendaItems": 73,
+        "combinationAttempts": 323,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-abbreviation-code-switch",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 22,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 44,
+        "combinationAttempts": 95,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 105,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-abbreviation-thai-lexemes",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 22,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 44,
+        "combinationAttempts": 95,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 105,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-abbreviation-lazy-spacing",
+      "family": "hematology",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 0,
+        "lexicalCalls": 22,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 37,
+        "agendaItems": 44,
+        "combinationAttempts": 95,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 10,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 105,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "monthly-end-of-month-code-switch",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 33,
+        "agendaItems": 39,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "monthly-end-of-month-thai-lexemes",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 34,
+        "agendaItems": 40,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "monthly-end-of-month-lazy-spacing",
+      "family": "endocrinology",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 38,
+        "combinationAttempts": 111,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-leap-day-pair-code-switch",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 78,
+        "agendaItems": 100,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 78,
+        "agendaItems": 100,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-leap-day-pair-thai-lexemes",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 78,
+        "agendaItems": 100,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 78,
+        "agendaItems": 100,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-leap-day-pair-lazy-spacing",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 98,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 98,
+        "combinationAttempts": 198,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-successor-members-inherit-whole-phase-code-switch",
+      "family": "neurology",
+      "baseline": {
+        "clauseCalls": 13,
+        "speculativeProbes": 9,
+        "lexicalCalls": 53,
+        "chartCalls": 13,
+        "chartTruncations": 0,
+        "chartSigns": 263,
+        "agendaItems": 338,
+        "combinationAttempts": 726,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 8,
+        "speculativeProbes": 4,
+        "lexicalCalls": 34,
+        "chartCalls": 8,
+        "chartTruncations": 0,
+        "chartSigns": 164,
+        "agendaItems": 210,
+        "combinationAttempts": 456,
+        "cacheHits": 2
+      }
+    },
+    {
+      "id": "two-successor-members-inherit-whole-phase-thai-lexemes",
+      "family": "neurology",
+      "baseline": {
+        "clauseCalls": 13,
+        "speculativeProbes": 9,
+        "lexicalCalls": 53,
+        "chartCalls": 13,
+        "chartTruncations": 0,
+        "chartSigns": 239,
+        "agendaItems": 302,
+        "combinationAttempts": 614,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 8,
+        "speculativeProbes": 4,
+        "lexicalCalls": 34,
+        "chartCalls": 8,
+        "chartTruncations": 0,
+        "chartSigns": 152,
+        "agendaItems": 192,
+        "combinationAttempts": 400,
+        "cacheHits": 2
+      }
+    },
+    {
+      "id": "two-successor-members-inherit-whole-phase-lazy-spacing",
+      "family": "neurology",
+      "baseline": {
+        "clauseCalls": 13,
+        "speculativeProbes": 9,
+        "lexicalCalls": 53,
+        "chartCalls": 13,
+        "chartTruncations": 0,
+        "chartSigns": 256,
+        "agendaItems": 331,
+        "combinationAttempts": 726,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 8,
+        "speculativeProbes": 4,
+        "lexicalCalls": 34,
+        "chartCalls": 8,
+        "chartTruncations": 0,
+        "chartSigns": 160,
+        "agendaItems": 206,
+        "combinationAttempts": 456,
+        "cacheHits": 2
+      }
+    },
+    {
+      "id": "two-clock-weekday-weekly-total-code-switch",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 4,
+        "lexicalCalls": 28,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 126,
+        "agendaItems": 155,
+        "combinationAttempts": 519,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 65,
+        "agendaItems": 84,
+        "combinationAttempts": 327,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-clock-weekday-weekly-total-thai-lexemes",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 4,
+        "lexicalCalls": 28,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 106,
+        "agendaItems": 127,
+        "combinationAttempts": 373,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 17,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 88,
+        "agendaItems": 109,
+        "combinationAttempts": 307,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-clock-weekday-weekly-total-lazy-spacing",
+      "family": "renal",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 4,
+        "lexicalCalls": 28,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 124,
+        "agendaItems": 153,
+        "combinationAttempts": 519,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 83,
+        "combinationAttempts": 327,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-weeks-on-one-week-off-code-switch",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 1,
+        "lexicalCalls": 43,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 53,
+        "agendaItems": 57,
+        "combinationAttempts": 83,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 28,
+        "combinationAttempts": 49,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-weeks-on-one-week-off-thai-lexemes",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 1,
+        "lexicalCalls": 43,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 53,
+        "agendaItems": 57,
+        "combinationAttempts": 83,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 28,
+        "combinationAttempts": 49,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "two-weeks-on-one-week-off-lazy-spacing",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 1,
+        "lexicalCalls": 43,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 53,
+        "agendaItems": 57,
+        "combinationAttempts": 83,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 28,
+        "combinationAttempts": 49,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "quarter-tablet-finite-course-code-switch",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 12,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 49,
+        "agendaItems": 59,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 39,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "quarter-tablet-finite-course-thai-lexemes",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 12,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 51,
+        "agendaItems": 61,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "quarter-tablet-finite-course-lazy-spacing",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 12,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 47,
+        "agendaItems": 57,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 30,
+        "agendaItems": 38,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fractional-liquid-finite-course-code-switch",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 49,
+        "agendaItems": 59,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 39,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fractional-liquid-finite-course-thai-lexemes",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 51,
+        "agendaItems": 61,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 32,
+        "agendaItems": 40,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fractional-liquid-finite-course-lazy-spacing",
+      "family": "pediatrics",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 47,
+        "agendaItems": 57,
+        "combinationAttempts": 113,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 30,
+        "agendaItems": 38,
+        "combinationAttempts": 85,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "eight-hour-interval-code-switch",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 21,
+        "agendaItems": 21,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 21,
+        "agendaItems": 21,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "eight-hour-interval-thai-lexemes",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 22,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 22,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "eight-hour-interval-lazy-spacing",
+      "family": "infectious-diseases",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 20,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 20,
+        "combinationAttempts": 48,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-phase-end-outweighs-last-dose-code-switch",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 116,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 116,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-phase-end-outweighs-last-dose-thai-lexemes",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 82,
+        "agendaItems": 100,
+        "combinationAttempts": 214,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 82,
+        "agendaItems": 100,
+        "combinationAttempts": 214,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "explicit-phase-end-outweighs-last-dose-lazy-spacing",
+      "family": "cardiology",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 88,
+        "agendaItems": 112,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 88,
+        "agendaItems": 112,
+        "combinationAttempts": 252,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-named-month-anchor-code-switch",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 0,
+        "lexicalCalls": 24,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-named-month-anchor-thai-lexemes",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 0,
+        "lexicalCalls": 24,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "cycle-named-month-anchor-lazy-spacing",
+      "family": "oncology",
+      "baseline": {
+        "clauseCalls": 2,
+        "speculativeProbes": 0,
+        "lexicalCalls": 24,
+        "chartCalls": 2,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 34,
+        "combinationAttempts": 56,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 20,
+        "combinationAttempts": 40,
+        "cacheHits": 0
       }
     }
   ]

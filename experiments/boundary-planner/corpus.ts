@@ -1,8 +1,12 @@
-import type { ParseOptions } from '../../src/types';
+import type { ParseOptions, NextDueDoseOptions } from '../../src/types';
 
 export interface GoldenItem {
   dose?: number;
   noDose?: boolean;
+  unit?: string;
+  period?: number;
+  periodUnit?: string;
+  frequency?: number;
   totalUnits?: number;
   dates?: string[];
   clocks?: string[];
@@ -16,9 +20,12 @@ export interface GoldenItem {
   due?: string[];
 }
 export interface GoldenCase {
-  id: string; family: string; partition: 'historical' | 'metamorphic' | 'challenge';
+  id: string; family: string; partition: 'historical' | 'metamorphic' | 'challenge' | 'specialty';
   history: string[]; input: string; options?: ParseOptions; items: GoldenItem[];
   noLeftovers?: boolean;
+  scheduleOptions?: Partial<NextDueDoseOptions>;
+  totalDays?: number;
+  specialty?: string;
 }
 export const REFERENCE_DATE = '2026-09-27';
 export const SCHEDULE_OPTIONS = { from: '2026-09-27T00:00:00+07:00', timeZone: 'Asia/Bangkok', limit: 20 };
@@ -133,4 +140,4 @@ export const challengeCases: GoldenCase[] = [
       { dose: 1, weekdays: ['sun'], clocks: ['09:30:00'], start: '2026-10-05', end: '2026-11-30', due: sundayDays.map(d => iso(d, '09:30')) }] }
 ];
 
-export const CORPUS = [...historicalCases, ...metamorphicCases(), ...challengeCases];
+export const ORIGINAL_CORPUS = [...historicalCases, ...metamorphicCases(), ...challengeCases];

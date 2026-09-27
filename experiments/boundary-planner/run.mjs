@@ -8,6 +8,7 @@ import os from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
+import { candidateTransform } from './integration.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -22,7 +23,7 @@ const audit = process.argv.includes('--audit');
 await fs.mkdir(generated, { recursive: true });
 await fs.mkdir(results, { recursive: true });
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim();
-const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts'];
+const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts', 'regimen.ts', 'integration.mjs', 'specialty-corpus.ts', 'cycles.ts', 'cycle-lexicon.ts', 'bounds.ts', 'admissibility.ts', 'acceptance.spec.ts', 'scheduler-primitives.ts'];
 const sourceHash = createHash('sha256');
 for (const file of sourceFiles) sourceHash.update(file).update(await fs.readFile(path.join(here, file)));
 const metadata = { experimentalSourceSha256: sourceHash.digest('hex'), base: git('rev-parse', 'HEAD'), createdAt: new Date().toISOString(),
@@ -45,8 +46,10 @@ async function bundle(candidate, instrumented) {
         const resolved = path.resolve(args.resolveDir, args.path);
         if (resolved === path.join(root, 'src/hpsg/segmenter')) return { path: path.join(here, 'candidate-adapter.ts') };
       });
-      if (instrumented) b.onLoad({ filter: /\/(?:src\/(?:parser|hpsg\/(?:chart|segmenter)|lexer\/lex))\.ts$/ }, async args => {
+      b.onLoad({ filter: /\/(?:src\/(?:index|fhir|schedule|parser|hpsg\/(?:chart|segmenter|clause-parser)|lexer\/(?:lex|locales\/th)))\.ts$/ }, async args => {
         let text = await fs.readFile(args.path, 'utf8');
+        if (candidate) text = candidateTransform(text, args.path) ?? text;
+        if (!instrumented) return { contents: text, loader: 'ts' };
         const relative = path.relative(root, args.path);
         const prefix = `import { stats as experimentStats } from ${JSON.stringify(statsPath)};\n`;
         if (relative === 'src/parser.ts') text = replaceOnce(text,
@@ -83,9 +86,9 @@ const corpus = native.CORPUS;
 
 function actualCase(api, c) {
   const parsed = api.parseSig(c.input, c.options);
-  const due = parsed.items.map(i => api.nextDueDoses(i.fhir, api.SCHEDULE_OPTIONS));
+  const due = parsed.items.map(i => api.nextDueDoses(i.fhir, { ...api.SCHEDULE_OPTIONS, ...c.scheduleOptions }));
   const totals = parsed.items.map(i => api.calculateTotalUnits({ dosage: i.fhir, from: api.SCHEDULE_OPTIONS.from,
-    timeZone: api.SCHEDULE_OPTIONS.timeZone, durationValue: 70, durationUnit: 'd' }));
+    timeZone: api.SCHEDULE_OPTIONS.timeZone, durationValue: c.totalDays ?? 70, durationUnit: 'd', ...c.scheduleOptions }));
   return { parsed, due, totals };
 }
 function clinical(result) {
@@ -103,10 +106,10 @@ function goldenErrors(actual, c) {
     const fhir = item.fhir, repeat = fhir.timing?.repeat;
     if (c.noLeftovers !== false) eq(`items[${index}].leftover`, item.meta.leftoverText ?? '', '');
     const expected = [
-      ['dose', fhir.doseAndRate?.[0]?.doseQuantity?.value], ['dates', fhir.timing?.event],
+      ['unit', fhir.doseAndRate?.[0]?.doseQuantity?.unit], ['period', repeat?.period], ['periodUnit',repeat?.periodUnit], ['frequency',repeat?.frequency], ['dose', fhir.doseAndRate?.[0]?.doseQuantity?.value], ['dates', fhir.timing?.event],
       ['clocks', repeat?.timeOfDay], ['when', repeat?.when], ['weekdays', repeat?.dayOfWeek],
       ['start', repeat?.boundsPeriod?.start], ['end', repeat?.boundsPeriod?.end],
-      ['duration', repeat?.boundsDuration?.value], ['due', actual.due[index]], ['totalUnits', actual.totals[index]?.totalUnits]
+      ['duration', item.meta.canonical.clauses[0]?.schedule?.duration ?? repeat?.boundsDuration?.value], ['due', actual.due[index]], ['totalUnits', actual.totals[index]?.totalUnits]
     ];
     for (const [key, got] of expected) if (key in wanted) eq(`items[${index}].${key}`, got, wanted[key]);
     if (wanted.noStart) eq(`items[${index}].start`, repeat?.boundsPeriod?.start, undefined);
@@ -115,13 +118,19 @@ function goldenErrors(actual, c) {
   }
   return errors;
 }
-const correctness = [];
+const correctness = [], executions = [];
 for (const c of corpus) {
   const baseline = actualCase(native, c);
   const shadow = actualCase(candidate, c);
   const plan = candidate.planBoundaries(c.input, c.options, { trace: true });
   const baselineErrors = goldenErrors(baseline, c), candidateErrors = goldenErrors(shadow, c);
   const same = isDeepStrictEqual(clinical(baseline), clinical(shadow));
+  executions.push({id:c.id,partition:c.partition,input:c.input,options:c.options,
+    scheduleOptions:{...candidate.SCHEDULE_OPTIONS,...c.scheduleOptions},expected:c.items,
+    phaseGraph:candidate.buildRegimenGraph(plan,plan.segments),
+    items:shadow.parsed.items.map((item,index)=>({doseAndRate:item.fhir.doseAndRate,
+      timing:{event:item.fhir.timing?.event,repeat:item.fhir.timing?.repeat},warnings:item.warnings,
+      leftover:item.meta.leftoverText,due:shadow.due[index],totals:shadow.totals[index]}))});
   correctness.push({ id: c.id, family: c.family, partition: c.partition, history: c.history,
     baselinePass: !baselineErrors.length, candidatePass: !candidateErrors.length, sameClinicalOutput: same,
     baselineErrors, candidateErrors, input: c.input,
@@ -130,14 +139,15 @@ for (const c of corpus) {
     ...(!same || candidateErrors.length || c.id === 'reported-thai-date-list' ? { decisions: plan.decisions } : {}) });
 }
 const partitions = {};
-for (const partition of ['historical', 'metamorphic', 'challenge']) {
+for (const partition of ['historical', 'metamorphic', 'challenge', 'specialty']) {
   const rows = correctness.filter(r => r.partition === partition);
   partitions[partition] = { total: rows.length, baselinePassed: rows.filter(r => r.baselinePass).length,
     candidatePassed: rows.filter(r => r.candidatePass).length, sameClinicalOutput: rows.filter(r => r.sameClinicalOutput).length };
 }
 await fs.writeFile(path.join(results, 'correctness.json'), JSON.stringify({ metadata, partitions, cases: correctness }, null, 2) + '\n');
+await fs.writeFile(path.join(results,'clinical-executions.json'),JSON.stringify({metadata,cases:executions},null,2)+'\n');
 console.log('CORRECTNESS', JSON.stringify(partitions));
-for (const row of correctness.filter(r => !r.candidatePass || !r.sameClinicalOutput)) console.log('DIFFERENCE', JSON.stringify({
+for (const row of correctness.filter(r => !r.candidatePass || process.argv.includes('--verbose') && !r.sameClinicalOutput)) console.log('DIFFERENCE', JSON.stringify({
   id: row.id, baselinePass: row.baselinePass, candidatePass: row.candidatePass, fields: row.candidateErrors.map(e => e.field) }));
 
 // Diagnose shared execution failures with structured FHIR controls, independently of segmentation.
@@ -177,15 +187,17 @@ const ablation = corpus.filter(c => c.partition === 'historical').map(c => {
 });
 await fs.writeFile(path.join(results, 'ablations.json'), JSON.stringify({ metadata, cases: ablation }, null, 2) + '\n');
 
+let performancePassed = true;
 if (benchmark) {
   const torture = JSON.parse(await fs.readFile(path.join(root, 'test/real-world-torture-cases.json'), 'utf8'))
     .map(c => ({ id: c.name, input: c.input, options: { locale: c.locale, context: c.context, datePolicy: { referenceDate: '2026-09-27' } } }));
-  const composed = corpus.filter(c => c.partition !== 'metamorphic');
+  const composed = corpus.filter(c => c.partition === 'historical' || c.partition === 'challenge');
+  const specialty = corpus.filter(c => c.partition === 'specialty');
   const pct = (array, p) => [...array].sort((a, b) => a - b)[Math.min(array.length - 1, Math.ceil(array.length * p) - 1)];
   const summarize = samples => ({ meanMs: samples.reduce((a, b) => a + b, 0) / samples.length,
     p50Ms: pct(samples, 0.5), p95Ms: pct(samples, 0.95), p99Ms: pct(samples, 0.99), parses: samples.length });
   const benches = [];
-  for (const [name, cases] of [['torture', torture], ['composed', composed]]) {
+  for (const [name, cases] of [['torture', torture], ['composed', composed], ['specialty', specialty]]) {
     for (let w = 0; w < 3; w++) for (const c of cases) { native.parseSig(c.input, c.options); candidate.parseSig(c.input, c.options); }
     const samples = { baseline: [], candidate: [] }, epochRatios = [];
     for (let r = 0; r < rounds; r++) {
@@ -205,9 +217,11 @@ if (benchmark) {
     benches.push({ name, cases: cases.length, baseline, candidate: shadow,
       meanRatio: shadow.meanMs / baseline.meanMs, p95Ratio: shadow.p95Ms / baseline.p95Ms,
       pairedRoundRatioMedian: pct(epochRatios, 0.5), pairedRoundRatios: epochRatios,
-      performanceGate: shadow.meanMs <= baseline.meanMs * 1.05 && shadow.p95Ms <= baseline.p95Ms * 1.05 });
+      performanceGate: name === 'specialty' ? shadow.p95Ms <= 100 : shadow.meanMs <= baseline.meanMs * 1.05 && shadow.p95Ms <= baseline.p95Ms * 1.05,
+      gateBasis: name === 'specialty' ? 'p95 <= 100ms; old lane fails many new semantic cases, so ratio is descriptive only' : 'legacy corpus mean and p95 <= baseline * 1.05' });
     console.log('BENCH', JSON.stringify(benches.at(-1)));
   }
+  performancePassed = benches.every(b => b.performanceGate);
   const scaling = [];
   for (const count of [1, 2, 4, 8, 16]) {
     const input = Array.from({ length: count }, (_, i) =>
@@ -259,9 +273,10 @@ const failedRequired = correctness.filter(r => r.partition !== 'challenge' && !r
 const failedChallenges = correctness.filter(r => r.partition === 'challenge' && !r.candidatePass);
 const gates = { metadata, historical: partitions.historical.candidatePassed === partitions.historical.total,
   metamorphic: partitions.metamorphic.candidatePassed === partitions.metamorphic.total,
-  challenges: failedChallenges.length === 0, unresolved: [...failedRequired, ...failedChallenges].map(c => c.id),
+  challenges: failedChallenges.length === 0, specialty: partitions.specialty.candidatePassed === partitions.specialty.total,
+  performance: benchmark ? performancePassed : null, unresolved: [...failedRequired, ...failedChallenges].map(c => c.id),
   productionPromotion: false,
   reason: 'This command records a shadow experiment; production promotion is never automatic. Read REPORT.md and validation/performance evidence.' };
 await fs.writeFile(path.join(results, 'promotion-gates.json'), JSON.stringify(gates, null, 2) + '\n');
-console.log('PROMOTION', failedRequired.length || failedChallenges.length ? 'BLOCKED: independent golden failures remain' : 'NOT AUTOMATIC: review all evidence');
-if (failedRequired.length || process.argv.includes('--strict') && failedChallenges.length) process.exitCode = 1;
+console.log('PROMOTION', failedRequired.length || failedChallenges.length || !performancePassed ? 'BLOCKED: an independent correctness/performance gate failed' : 'NOT AUTOMATIC: review all evidence');
+if (failedRequired.length || process.argv.includes('--strict') && failedChallenges.length || !performancePassed) process.exitCode = 1;

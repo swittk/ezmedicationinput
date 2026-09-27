@@ -1,396 +1,156 @@
 {
-  "production-source": {
-    "numTotalTests": 1210,
-    "numPassedTests": 1210,
-    "numFailedTests": 0,
-    "files": [
-      {
-        "file": "advanced-composition-followup.spec.ts",
-        "status": "passed",
-        "tests": 18
-      },
-      {
-        "file": "advice.spec.ts",
-        "status": "passed",
-        "tests": 17
-      },
-      {
-        "file": "body-site-grammar.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "body-site-prepositions.spec.ts",
-        "status": "passed",
-        "tests": 43
-      },
-      {
-        "file": "date-interpretation.spec.ts",
-        "status": "passed",
-        "tests": 27
-      },
-      {
-        "file": "event-offset.spec.ts",
-        "status": "passed",
-        "tests": 16
-      },
-      {
-        "file": "generation-roundtrip.spec.ts",
-        "status": "passed",
-        "tests": 87
-      },
-      {
-        "file": "hpsg-type-system.spec.ts",
-        "status": "passed",
-        "tests": 9
-      },
-      {
-        "file": "instruction-graph.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "lexer.spec.ts",
-        "status": "passed",
-        "tests": 16
-      },
-      {
-        "file": "lint.spec.ts",
-        "status": "passed",
-        "tests": 6
-      },
-      {
-        "file": "locale-architecture.spec.ts",
-        "status": "passed",
-        "tests": 10
-      },
-      {
-        "file": "localized-timing.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "multi-dose-regimen.spec.ts",
-        "status": "passed",
-        "tests": 13
-      },
-      {
-        "file": "multiclause.spec.ts",
-        "status": "passed",
-        "tests": 20
-      },
-      {
-        "file": "opd-dogfood.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "opd-realization.spec.ts",
-        "status": "passed",
-        "tests": 44
-      },
-      {
-        "file": "parser-state.spec.ts",
-        "status": "passed",
-        "tests": 21
-      },
-      {
-        "file": "parser.spec.ts",
-        "status": "passed",
-        "tests": 436
-      },
-      {
-        "file": "permutation-invariance.spec.ts",
-        "status": "passed",
-        "tests": 8
-      },
-      {
-        "file": "pill-count.spec.ts",
-        "status": "passed",
-        "tests": 43
-      },
-      {
-        "file": "real-world-torture.spec.ts",
-        "status": "passed",
-        "tests": 50
-      },
-      {
-        "file": "relation-terminology.spec.ts",
-        "status": "passed",
-        "tests": 12
-      },
-      {
-        "file": "routes.spec.ts",
-        "status": "passed",
-        "tests": 8
-      },
-      {
-        "file": "schedule.spec.ts",
-        "status": "passed",
-        "tests": 45
-      },
-      {
-        "file": "stable-structure.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "strength.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "suggest.spec.ts",
-        "status": "passed",
-        "tests": 49
-      },
-      {
-        "file": "symptom-terminology.spec.ts",
-        "status": "passed",
-        "tests": 32
-      },
-      {
-        "file": "terminology-coverage.spec.ts",
-        "status": "passed",
-        "tests": 15
-      },
-      {
-        "file": "thai-complex.spec.ts",
-        "status": "passed",
-        "tests": 14
-      },
-      {
-        "file": "thai-review-followup.spec.ts",
-        "status": "passed",
-        "tests": 21
-      },
-      {
-        "file": "topical-cosmetic-dogfood.spec.ts",
-        "status": "passed",
-        "tests": 13
-      },
-      {
-        "file": "weird-clinician-instructions.spec.ts",
-        "status": "passed",
-        "tests": 30
-      },
-      {
-        "file": "workflow-composition.spec.ts",
-        "status": "passed",
-        "tests": 6
-      }
-    ]
+  "metadata": {
+    "experimentalSourceSha256": "e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286",
+    "base": "c9fe4fddafe2fd995057d334546ed3b195085778",
+    "createdAt": "2026-09-27T23:30:57.020Z",
+    "node": "v24.14.1",
+    "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+    "loadAverage": [
+      1.07,
+      1.93,
+      4.73
+    ],
+    "rounds": 30,
+    "experiment": "shadow boundary planner; production source unchanged"
   },
-  "shadow-source": {
-    "numTotalTests": 1210,
-    "numPassedTests": 1210,
-    "numFailedTests": 0,
-    "files": [
-      {
-        "file": "advanced-composition-followup.spec.ts",
-        "status": "passed",
-        "tests": 18
-      },
-      {
-        "file": "advice.spec.ts",
-        "status": "passed",
-        "tests": 17
-      },
-      {
-        "file": "body-site-grammar.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "body-site-prepositions.spec.ts",
-        "status": "passed",
-        "tests": 43
-      },
-      {
-        "file": "date-interpretation.spec.ts",
-        "status": "passed",
-        "tests": 27
-      },
-      {
-        "file": "event-offset.spec.ts",
-        "status": "passed",
-        "tests": 16
-      },
-      {
-        "file": "generation-roundtrip.spec.ts",
-        "status": "passed",
-        "tests": 87
-      },
-      {
-        "file": "hpsg-type-system.spec.ts",
-        "status": "passed",
-        "tests": 9
-      },
-      {
-        "file": "instruction-graph.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "lexer.spec.ts",
-        "status": "passed",
-        "tests": 16
-      },
-      {
-        "file": "lint.spec.ts",
-        "status": "passed",
-        "tests": 6
-      },
-      {
-        "file": "locale-architecture.spec.ts",
-        "status": "passed",
-        "tests": 10
-      },
-      {
-        "file": "localized-timing.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "multi-dose-regimen.spec.ts",
-        "status": "passed",
-        "tests": 13
-      },
-      {
-        "file": "multiclause.spec.ts",
-        "status": "passed",
-        "tests": 20
-      },
-      {
-        "file": "opd-dogfood.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "opd-realization.spec.ts",
-        "status": "passed",
-        "tests": 44
-      },
-      {
-        "file": "parser-state.spec.ts",
-        "status": "passed",
-        "tests": 21
-      },
-      {
-        "file": "parser.spec.ts",
-        "status": "passed",
-        "tests": 436
-      },
-      {
-        "file": "permutation-invariance.spec.ts",
-        "status": "passed",
-        "tests": 8
-      },
-      {
-        "file": "pill-count.spec.ts",
-        "status": "passed",
-        "tests": 43
-      },
-      {
-        "file": "real-world-torture.spec.ts",
-        "status": "passed",
-        "tests": 50
-      },
-      {
-        "file": "relation-terminology.spec.ts",
-        "status": "passed",
-        "tests": 12
-      },
-      {
-        "file": "routes.spec.ts",
-        "status": "passed",
-        "tests": 8
-      },
-      {
-        "file": "schedule.spec.ts",
-        "status": "passed",
-        "tests": 45
-      },
-      {
-        "file": "stable-structure.spec.ts",
-        "status": "passed",
-        "tests": 2
-      },
-      {
-        "file": "strength.spec.ts",
-        "status": "passed",
-        "tests": 25
-      },
-      {
-        "file": "suggest.spec.ts",
-        "status": "passed",
-        "tests": 49
-      },
-      {
-        "file": "symptom-terminology.spec.ts",
-        "status": "passed",
-        "tests": 32
-      },
-      {
-        "file": "terminology-coverage.spec.ts",
-        "status": "passed",
-        "tests": 15
-      },
-      {
-        "file": "thai-complex.spec.ts",
-        "status": "passed",
-        "tests": 14
-      },
-      {
-        "file": "thai-review-followup.spec.ts",
-        "status": "passed",
-        "tests": 21
-      },
-      {
-        "file": "topical-cosmetic-dogfood.spec.ts",
-        "status": "passed",
-        "tests": 13
-      },
-      {
-        "file": "weird-clinician-instructions.spec.ts",
-        "status": "passed",
-        "tests": 30
-      },
-      {
-        "file": "workflow-composition.spec.ts",
-        "status": "passed",
-        "tests": 6
-      }
-    ]
+  "suites": [
+    {
+      "name": "native",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--reporter=json",
+        "--outputFile=experiments/boundary-planner/.generated/final-native.json"
+      ],
+      "exitCode": 0,
+      "seconds": 9.197,
+      "numTotalTests": 1210,
+      "numPassedTests": 1210,
+      "numFailedTests": 0
+    },
+    {
+      "name": "dist",
+      "command": [
+        "npm",
+        "run",
+        "test:dist"
+      ],
+      "exitCode": 0,
+      "seconds": 7.007
+    },
+    {
+      "name": "shadow",
+      "command": [
+        "npm",
+        "run",
+        "test:shadow-boundaries",
+        "--",
+        "--reporter=json",
+        "--outputFile=experiments/boundary-planner/.generated/final-shadow.json"
+      ],
+      "exitCode": 0,
+      "seconds": 9.611,
+      "numTotalTests": 1210,
+      "numPassedTests": 1210,
+      "numFailedTests": 0
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "npm",
+        "run",
+        "test:boundaries",
+        "--",
+        "--reporter=json",
+        "--outputFile=experiments/boundary-planner/.generated/final-contracts.json"
+      ],
+      "exitCode": 0,
+      "seconds": 6.167,
+      "numTotalTests": 104,
+      "numPassedTests": 104,
+      "numFailedTests": 0
+    },
+    {
+      "name": "clinical",
+      "command": [
+        "npm",
+        "run",
+        "test:boundary-clinical",
+        "--",
+        "--reporter=json",
+        "--outputFile=experiments/boundary-planner/.generated/final-clinical.json"
+      ],
+      "exitCode": 0,
+      "seconds": 11.747,
+      "numTotalTests": 324,
+      "numPassedTests": 324,
+      "numFailedTests": 0
+    },
+    {
+      "name": "types",
+      "command": [
+        "npm",
+        "run",
+        "typecheck:boundaries"
+      ],
+      "exitCode": 0,
+      "seconds": 3.473
+    },
+    {
+      "name": "integration-types",
+      "command": [
+        "npm",
+        "run",
+        "typecheck:boundary-integration"
+      ],
+      "exitCode": 0,
+      "seconds": 3.584
+    }
+  ],
+  "goldens": {
+    "historical": {
+      "total": 15,
+      "baselinePassed": 15,
+      "candidatePassed": 15,
+      "sameClinicalOutput": 14
+    },
+    "metamorphic": {
+      "total": 84,
+      "baselinePassed": 72,
+      "candidatePassed": 84,
+      "sameClinicalOutput": 60
+    },
+    "challenge": {
+      "total": 5,
+      "baselinePassed": 3,
+      "candidatePassed": 5,
+      "sameClinicalOutput": 3
+    },
+    "specialty": {
+      "total": 112,
+      "baselinePassed": 50,
+      "candidatePassed": 112,
+      "sameClinicalOutput": 46
+    }
   },
-  "boundary-contracts": {
-    "numTotalTests": 104,
-    "numPassedTests": 104,
-    "numFailedTests": 0,
-    "files": [
-      {
-        "file": "planner.spec.ts",
-        "status": "passed",
-        "tests": 104
-      }
-    ]
+  "performanceGates": {
+    "torture": true,
+    "composed": true,
+    "specialty": true
   },
-  "distribution": {
-    "testsPassed": 4,
-    "testsTotal": 4,
-    "build": "pass",
-    "declarations": "pass",
-    "process": "proc-1a9b0368-1e98-40f9-b225-2182b0fb8516"
+  "packageIsolation": {
+    "version": "0.1.66",
+    "fileCount": 85,
+    "experimentFiles": [],
+    "sourceDiff": ""
   },
-  "experiment-types": {
-    "result": "pass",
-    "process": "proc-ac80598f-38c6-4a6f-ace9-0d2c3b8d5279"
-  },
-  "independent-golden-run": {
-    "exitCode": 1,
-    "expectedToRemainRed": true,
-    "reason": "12 total-unit mismatches plus one whole-phase transition mismatch, shared with baseline",
-    "process": "proc-62a42d1d-3506-4742-a67a-b74c33e95296"
-  },
-  "sourceFingerprint": "b6fa42ebd527421c4140b0b395537fbe3d508fedb1e8c8572b17e1ea85121764"
+  "allMeasuredGatesPass": true,
+  "productionActivated": false,
+  "pushed": false,
+  "published": false,
+  "postValidationFormattingOnly": {
+    "path": "corpus.ts",
+    "change": "Removed one blank line at EOF after measured validation; no executable change. Recorded performance source fingerprint is the tested version."
+  }
 }

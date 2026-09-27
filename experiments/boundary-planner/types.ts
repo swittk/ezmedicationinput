@@ -3,7 +3,7 @@ import type { CanonicalSigClause, ParseOptions } from '../../src/types';
 import type { Token } from '../../src/parser-state';
 
 export interface Range { start: number; end: number }
-export type StructureKind = 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized';
+export type StructureKind = 'cycle-schedule' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized';
 export interface StructuralClaim extends Range {
   id: string;
   kind: StructureKind;
@@ -69,6 +69,7 @@ export interface BoundaryPlan {
   segments: HpsgSigSegment[];
   claims: StructuralClaim[];
   decisions: BoundaryDecision[];
+  relations: BoundaryRelation[];
   metrics: PlannerMetrics;
 }
 export interface PlannerOptions {
@@ -77,3 +78,12 @@ export interface PlannerOptions {
   cache?: boolean;
 }
 export interface PlanningInput { input: string; options?: ParseOptions; tokens: Token[] }
+
+/** A licensed relation connects segment identities, never reconstructed from display text. */
+export interface BoundaryRelation {
+  from: number;
+  to: number;
+  kind: RegimenRelation;
+  rule: string;
+  range: Range;
+}
