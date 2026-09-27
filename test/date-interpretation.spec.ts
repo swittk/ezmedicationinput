@@ -703,6 +703,42 @@ describe("calendar date interpretation", () => {
   });
 
 
+  it("keeps a full Thai explicit date list together before a recurring transition", () => {
+    const result = parseSig(
+      "รับประทานครั้งละ 1 เม็ด วันละครั้ง หลังอาหารเช้า. วันที่ 28/9/69, 1/10/69 และ 4/10/69 จากนั้น ทุกวันอาทิตย์",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.meta.leftoverText).toBeUndefined();
+    expect(result.items[0]?.fhir.timing).toMatchObject({
+      event: ["2026-09-28", "2026-10-01", "2026-10-04"],
+      repeat: {
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        when: ["PCM"]
+      }
+    });
+    expect(result.items[1]?.meta.leftoverText).toBeUndefined();
+    expect(result.items[1]?.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["sun"],
+      when: ["PCM"],
+      boundsPeriod: { start: "2026-10-05" }
+    });
+    expect(nextDueDoses(result.items[1]!.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 2
+    })).toEqual([
+      "2026-10-11T08:30:00+07:00",
+      "2026-10-18T08:30:00+07:00"
+    ]);
+  });
+
   it("composes exact date-time pairs with bounded recurrence in English, Thai, and code-switch", () => {
     const cases = [
       {

@@ -505,10 +505,15 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       continue;
     }
     const nextToken = tokens[index + 1];
-    const commaInsideDateList = token.original === "," && dateSpans.some((span) =>
+    const tokenInsideDateList = dateSpans.some((span) =>
       token.sourceStart >= span.start && token.sourceEnd <= span.end
     );
-    if (commaInsideDateList) {
+    const dateListSeparator = tokenInsideDateList && (
+      token.original === "," ||
+      normalizeSegmentLexeme(token) === "and" ||
+      normalizeSegmentLexeme(token) === "และ"
+    );
+    if (dateListSeparator) {
       scannedOffset = token.sourceEnd;
       continue;
     }
