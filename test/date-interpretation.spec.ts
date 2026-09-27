@@ -175,18 +175,24 @@ describe("calendar date interpretation", () => {
       expect.objectContaining({ isoDate: "2026-10-04", inferredYear: true })
     ]);
 
-    const us = parseSig("take 1 tab on 09/28", {
+    const usDmy = parseSig("take 1 tab on 28/9", {
       locale: "en-US",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(us.fhir.timing?.event).toEqual(["2026-09-28"]);
-    expect(us.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
-      calendar: "gregory",
-      calendarYear: 2026,
-      month: 9,
-      day: 28,
-      inferredYear: true
+    expect(usDmy.fhir.timing?.event).toEqual(["2026-09-28"]);
+
+    const usMdyWithoutOptIn = parseSig("take 1 tab on 09/28", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
     });
+    expect(usMdyWithoutOptIn.fhir.timing?.event).toBeUndefined();
+    expect(usMdyWithoutOptIn.meta.leftoverText).toContain("09/28");
+
+    const usMdyExplicit = parseSig("take 1 tab on 09/28", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+    });
+    expect(usMdyExplicit.fhir.timing?.event).toEqual(["2026-09-28"]);
 
     const sharedForward = parseSig("take 1 tab on 28/9/2026 and 1,4/10", {
       locale: "en-GB",
@@ -291,13 +297,20 @@ describe("calendar date interpretation", () => {
     expect(bareAmbiguous.meta.leftoverText).toContain("28-9-26");
   });
 
-  it("uses explicit locale date order for Gregorian two-digit dates", () => {
-    const result = parseSig("take 1 tab on 09/28/26", {
+  it("requires an explicit opt-in for MDY numeric dates", () => {
+    const defaultDmy = parseSig("take 1 tab on 09/28/26", {
       locale: "en-US",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(result.fhir.timing?.event).toEqual(["2026-09-28"]);
-    expect(result.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
+    expect(defaultDmy.fhir.timing?.event).toBeUndefined();
+    expect(defaultDmy.meta.leftoverText).toContain("09/28/26");
+
+    const explicitMdy = parseSig("take 1 tab on 09/28/26", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+    });
+    expect(explicitMdy.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(explicitMdy.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
       calendar: "gregory",
       calendarYear: 2026,
       month: 9,
@@ -317,7 +330,10 @@ describe("calendar date interpretation", () => {
       },
       {
         input: "take orally 1 tablet after breakfast on 09/28/26,10/1/26 and 10/4/26 then every Sunday",
-        options: { locale: "en-US", datePolicy: { referenceDate: REFERENCE_DATE } }
+        options: {
+          locale: "en-US",
+          datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+        }
       },
       {
         input: "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9/2569 และ 1/10/2569,4/10/2569 จากนั้น ทุกวันอาทิตย์",

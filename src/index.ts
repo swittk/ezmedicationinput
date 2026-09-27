@@ -1215,7 +1215,7 @@ function buildParseResult(
     if (state.consumed.has(token.index) || tokenUnderstoodByGraph(token)) {
       consumedTokens.push(token.original);
     } else {
-      leftoverParts.push(token.original);
+      leftoverParts.push(token.sourceText || token.original);
     }
   }
 

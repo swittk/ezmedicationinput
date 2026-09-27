@@ -184,10 +184,8 @@ function defaultCalendars(locale: string): string[] {
     : ["gregory"];
 }
 
-function defaultDateOrder(locale: string, options?: ParseOptions): MedicationDateOrder {
-  if (options?.datePolicy?.dateOrder) return options.datePolicy.dateOrder;
-  if (locale.toLowerCase().startsWith("th")) return "DMY";
-  return options?.locale?.toLowerCase() === "en-us" ? "MDY" : "DMY";
+function effectiveDateOrder(options?: ParseOptions): MedicationDateOrder {
+  return options?.datePolicy?.dateOrder ?? "DMY";
 }
 
 function dateFields(
@@ -342,7 +340,7 @@ function resolveDatePart(
   if (source.day === undefined || source.month === undefined) return undefined;
 
   const textualEnglishDate = TEXTUAL_ENGLISH_DATE_RE.test(part.sourceText);
-  const order = defaultDateOrder(locale, options);
+  const order = effectiveDateOrder(options);
   const fields = textualEnglishDate
     ? dateFields(source.day, source.month, "DMY")
     : dateFields(source.day, source.month, order);
