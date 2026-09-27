@@ -156,6 +156,97 @@ describe("calendar date interpretation", () => {
     });
   });
 
+  it("handles Thai, English, and code-switched date-list surfaces consistently", () => {
+    const cases: Array<{
+      input: string;
+      options?: Parameters<typeof parseSig>[1];
+    }> = [
+      {
+        input: "take orally 1 tablet after breakfast on 28/9/2026 and 1/10/2026,4/10/2026 then every Sunday",
+        options: { locale: "en-GB" }
+      },
+      {
+        input: "take orally 1 tablet after breakfast on 09/28/26,10/1/26 and 10/4/26 then every Sunday",
+        options: { locale: "en-US", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9/2569 และ 1/10/2569,4/10/2569 จากนั้น ทุกวันอาทิตย์",
+        options: { locale: "th" }
+      },
+      {
+        input: "take orally 1 tablet after breakfast on 28/9/69 และ 1,4/10/69 จากนั้น ทุกวันอาทิตย์",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9/69 และ 1,4/10/69 then every Sunday",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด หลังอาหารเช้า on 28/9/69 and 1,4/10/69 then every Sunday",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take orally 1 tablet after breakfast วันที่ 28/9/69 และ 1,4/10/69 then every Sunday",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take 1 tab after breakfast on 28/9/26,1,4/10/26 then every Sunday",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      }
+    ];
+
+    for (const item of cases) {
+      const result = parseSig(item.input, item.options);
+      expect(result.count).toBe(2);
+      expect(result.items[0]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[0]?.fhir.site).toBeUndefined();
+      expect(result.items[0]?.fhir.timing?.event).toEqual([
+        "2026-09-28",
+        "2026-10-01",
+        "2026-10-04"
+      ]);
+      expect(result.items[0]?.fhir.timing?.repeat?.when).toEqual(["PCM"]);
+      expect(result.items[1]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[1]?.fhir.timing?.repeat).toMatchObject({
+        boundsPeriod: { start: "2026-10-05" },
+        period: 1,
+        periodUnit: "wk",
+        dayOfWeek: ["sun"],
+        when: ["PCM"]
+      });
+    }
+  });
+
+  it("does not silently assume Buddhist years for pure-English two-digit 69 dates", () => {
+    const unresolved = parseSig(
+      "take 1 tab after breakfast on 28/9/69, 1/10/69 and 4/10/69 then every Sunday",
+      {
+        locale: "en-GB",
+        datePolicy: { referenceDate: REFERENCE_DATE }
+      }
+    );
+    expect(unresolved.items[0]?.fhir.timing?.event).toBeUndefined();
+    expect(unresolved.items[0]?.meta.leftoverText).toContain("28/9/69");
+    expect(unresolved.items[0]?.fhir.site).toBeUndefined();
+
+    const explicitlyEnabled = parseSig(
+      "take 1 tab after breakfast on 28/9/69, 1/10/69 and 4/10/69 then every Sunday",
+      {
+        locale: "en-GB",
+        datePolicy: {
+          calendars: ["buddhist", "gregory"],
+          referenceDate: REFERENCE_DATE
+        }
+      }
+    );
+    expect(explicitlyEnabled.items[0]?.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+    expect(explicitlyEnabled.items[0]?.meta.leftoverText).toBeUndefined();
+  });
+
   it("allows callers to disable or extend calendar resolvers without changing parser grammar", () => {
     expect(listMedicationDateResolvers()).toEqual(expect.arrayContaining(["gregory", "buddhist"]));
 
