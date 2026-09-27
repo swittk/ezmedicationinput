@@ -1647,6 +1647,24 @@ function translateSiteThai(
   return qualified(site);
 }
 
+function formatIsoCalendarDateThai(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!match) return value;
+  return `${Number(match[3])}/${Number(match[2])}/${match[1]}`;
+}
+
+function describeCalendarBoundsThai(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const start = formatIsoCalendarDateThai(schedule?.boundsStart);
+  const end = formatIsoCalendarDateThai(schedule?.boundsEnd);
+  if (start && end) return `ตั้งแต่วันที่ ${start} ถึงวันที่ ${end}`;
+  if (start) return `ตั้งแต่วันที่ ${start}`;
+  if (end) return `ถึงวันที่ ${end}`;
+  return undefined;
+}
+
 function describeCalendarEventsThai(
   schedule: CanonicalScheduleExpr | undefined
 ): string | undefined {
@@ -1886,6 +1904,12 @@ function formatShortThai(clause: CanonicalSigClause): string {
   if (schedule.calendarEvents?.length) {
     parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
   }
+  if (schedule.boundsStart) {
+    parts.push(`ตั้งแต่${schedule.boundsStart}`);
+  }
+  if (schedule.boundsEnd) {
+    parts.push(`ถึง${schedule.boundsEnd}`);
+  }
   if (schedule.countMax !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
@@ -2041,6 +2065,7 @@ function formatLongThai(
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
   const calendarEventPart = describeCalendarEventsThai(schedule);
+  const calendarBoundsPart = describeCalendarBoundsThai(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
@@ -2096,6 +2121,9 @@ function formatLongThai(
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (calendarBoundsPart) {
+    segments.push(calendarBoundsPart);
   }
   if (countPart) {
     segments.push(countPart);
@@ -2169,6 +2197,7 @@ function formatLongThai(
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
+    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);

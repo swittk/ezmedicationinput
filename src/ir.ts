@@ -201,6 +201,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined ||
     schedule.boundsStart !== undefined ||
+    schedule.boundsEnd !== undefined ||
     schedule.administrationDuration !== undefined ||
     schedule.administrationDurationMax !== undefined ||
     schedule.administrationDurationUnit !== undefined ||

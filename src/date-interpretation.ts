@@ -9,10 +9,18 @@ import {
   ParseOptions
 } from "./types";
 
+export type MedicationDateRelation =
+  | "event"
+  | "start-inclusive"
+  | "start-exclusive"
+  | "end-inclusive"
+  | "end-exclusive";
+
 export interface MedicationDateListMatch {
   start: number;
   end: number;
   sourceText: string;
+  relation: MedicationDateRelation;
   events: CanonicalCalendarEventExpr[];
   unresolved: boolean;
 }
@@ -24,9 +32,31 @@ const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
 const DATE_LIST_PART_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|\d{1,2})`;
 const DATE_LIST_SOURCE = String.raw`${NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const YEARFUL_DATE_LIST_SOURCE = String.raw`${YEARFUL_NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
+const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
+const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bfrom\b\s+|\bstarting(?:\s+(?:on|from))?\b\s+|ตั้งแต่(?:วันที่)?\s*)`;
+const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bafter\b\s+|หลัง(?:วันที่)?\s*)`;
+const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+|\btill\b\s+|(?:จน)?ถึง(?:วันที่)?\s*)`;
+const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
+const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
 const NUMERIC_DATE_RE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/u;
 const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}/gu;
+
+function matchedDateRelationLead(
+  text: string
+): { length: number; relation: MedicationDateRelation } {
+  const candidates: Array<{ pattern: RegExp; relation: MedicationDateRelation }> = [
+    { pattern: new RegExp(`^${DATE_START_INCLUSIVE_LEAD_SOURCE}`, "iu"), relation: "start-inclusive" },
+    { pattern: new RegExp(`^${DATE_START_EXCLUSIVE_LEAD_SOURCE}`, "iu"), relation: "start-exclusive" },
+    { pattern: new RegExp(`^${DATE_END_INCLUSIVE_LEAD_SOURCE}`, "iu"), relation: "end-inclusive" },
+    { pattern: new RegExp(`^${DATE_END_EXCLUSIVE_LEAD_SOURCE}`, "iu"), relation: "end-exclusive" },
+    { pattern: new RegExp(`^${DATE_EVENT_LEAD_SOURCE}`, "iu"), relation: "event" }
+  ];
+  for (const candidate of candidates) {
+    const match = text.match(candidate.pattern);
+    if (match?.[0]) return { length: match[0].length, relation: candidate.relation };
+  }
+  return { length: 0, relation: "event" };
+}
 
 /** Register or replace a calendar resolver used by medication date interpretation. */
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
@@ -357,7 +387,7 @@ function parseMatchedDateList(
   matchedText: string,
   options?: ParseOptions
 ): MedicationDateListMatch | undefined {
-  const lead = matchedText.match(/^(?:on\b\s+|วันที่\s*)/iu)?.[0] ?? "";
+  const lead = matchedDateRelationLead(matchedText);
   const listText = matchedText.slice(lead.length);
   const structural = parseStructuralParts(listText);
   if (!structural.parts.length || structural.effectiveEnd <= 0) return undefined;
@@ -382,6 +412,7 @@ function parseMatchedDateList(
         start,
         end: start + lead.length + structural.effectiveEnd,
         sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
+        relation: lead.relation,
         events: [],
         unresolved: true
       };
@@ -393,8 +424,9 @@ function parseMatchedDateList(
     start,
     end: start + lead.length + structural.effectiveEnd,
     sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
-    events,
-    unresolved: false
+    relation: lead.relation,
+    events: lead.relation === "event" || events.length === 1 ? events : [],
+    unresolved: lead.relation !== "event" && events.length !== 1
   };
 }
 

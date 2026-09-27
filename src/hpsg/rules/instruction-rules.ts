@@ -250,6 +250,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
+    if (sourceRangeOverlapsContextDate(context, first.sourceStart, first.sourceEnd)) return [];
     if (semanticActivityWindowStartsAt(context, cursor)) return [];
     if (workflowStartIsAnchoredSiteModifier(context, cursor)) return [];
     const firstFrame = getProceduralFrames(context).find((frame) =>

@@ -632,6 +632,36 @@ function resolveRepeatBoundsStart(
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function resolveRepeatBoundsEndExclusive(
+  repeat: FhirTimingRepeat | undefined,
+  timeZone: string
+): Date | null {
+  const value = repeat?.boundsPeriod?.end;
+  if (!value) return null;
+  const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (dateOnly) {
+    const endDay = makeZonedDate(
+      timeZone,
+      Number(dateOnly[1]),
+      Number(dateOnly[2]),
+      Number(dateOnly[3]),
+      0,
+      0,
+      0
+    );
+    return endDay ? addLocalDays(endDay, 1, timeZone) : null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getTime() + 1);
+}
+
+function earlierDate(left: Date | null, right: Date | null): Date | null {
+  if (!left) return right;
+  if (!right) return left;
+  return left <= right ? left : right;
+}
+
 function resolveRepeatDurationCapEnd(
   repeat: FhirTimingRepeat | undefined,
   anchor: Date,
@@ -1277,8 +1307,12 @@ export function nextDueDoses(
   }
   const baseCandidate = orderedAt ?? from;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
-  const courseEnd =
-    timing && repeat ? resolveRepeatDurationCapEnd(repeat, baseTime, timeZone) : null;
+  const courseEnd = timing && repeat
+    ? earlierDate(
+      resolveRepeatDurationCapEnd(repeat, baseTime, timeZone),
+      resolveRepeatBoundsEndExclusive(repeat, timeZone)
+    )
+    : null;
 
   if (timing) {
     const exactEvents = exactTimingEventOccurrences(
@@ -2297,6 +2331,10 @@ function calculateTotalUnitsSingle(
   endDay = minDate(
     endDay,
     resolveRepeatDurationCapEnd(dosage.timing?.repeat, orderedAtDate ?? from, timeZone)
+  );
+  endDay = minDate(
+    endDay,
+    resolveRepeatBoundsEndExclusive(dosage.timing?.repeat, timeZone)
   );
 
   const count = countScheduleEvents(

@@ -102,7 +102,7 @@ describe("calendar date interpretation", () => {
       "2026-10-18T08:30:00+07:00"
     ]);
     expect(recurring.longText).toBe(
-      "Take 1 tablet orally once weekly after breakfast on Sunday."
+      "Take 1 tablet orally once weekly after breakfast on Sunday starting 5 Oct 2026."
     );
   });
 
@@ -419,6 +419,167 @@ describe("calendar date interpretation", () => {
     expect(result.meta.segments).toHaveLength(1);
     expect(result.fhir.timing?.event).toEqual(["2026-09-28", "2026-10-01"]);
     expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("keeps exact dates attached correctly across arbitrary clause positions", () => {
+    const cases: Array<{
+      input: string;
+      options?: Parameters<typeof parseSig>[1];
+      dates: string[];
+      when?: string[];
+      site?: string;
+      prn?: boolean;
+      count?: number;
+    }> = [
+      {
+        input: "on 28/9/26 take 1 tab po after breakfast",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"]
+      },
+      {
+        input: "take 1 tab on 28/9/26 po after breakfast",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"]
+      },
+      {
+        input: "take 1 tab po after breakfast on 28/9/26 as needed for pain",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"],
+        prn: true
+      },
+      {
+        input: "apply on 28/9/26 to affected area",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        site: "affected area"
+      },
+      {
+        input: "take 1 tab at 08:00 on 28/9/26",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"]
+      },
+      {
+        input: "take 1 tab on 28/9,1,4/10 after breakfast",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28", "2026-10-01", "2026-10-04"],
+        when: ["PCM"]
+      },
+      {
+        input: "วันที่ 28/9/69 รับประทาน 1 เม็ด หลังอาหารเช้า",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"]
+      },
+      {
+        input: "รับประทาน 1 เม็ด วันที่ 28/9 และ 1,4/10 หลังอาหารเช้า",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28", "2026-10-01", "2026-10-04"],
+        when: ["PCM"]
+      },
+      {
+        input: "on 28/9/69 รับประทาน 1 เม็ด หลังอาหารเช้า",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"]
+      },
+      {
+        input: "วันที่ 28/9/69 take 1 tab po after breakfast",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } },
+        dates: ["2026-09-28"],
+        when: ["PCM"]
+      }
+    ];
+
+    for (const item of cases) {
+      const result = parseSig(item.input, item.options);
+      expect(result.count).toBe(item.count ?? 1);
+      const first = result.items[0];
+      expect(first?.meta.leftoverText).toBeUndefined();
+      expect(first?.fhir.timing?.event).toEqual(item.dates);
+      if (item.when) expect(first?.fhir.timing?.repeat?.when).toEqual(item.when);
+      if (item.site) expect(first?.fhir.site?.text).toBe(item.site);
+      if (item.prn) expect(first?.fhir.asNeededBoolean).toBe(true);
+    }
+  });
+
+  it("models relational calendar dates as native timing bounds instead of exact events", () => {
+    const cases: Array<{
+      input: string;
+      options?: Parameters<typeof parseSig>[1];
+      bounds: { start?: string; end?: string };
+    }> = [
+      {
+        input: "take 1 tab daily until 28/9/2026",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { end: "2026-09-28" }
+      },
+      {
+        input: "take 1 tab daily from 28/9",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { start: "2026-09-28" }
+      },
+      {
+        input: "take 1 tab before 30/9 after breakfast",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { end: "2026-09-29" }
+      },
+      {
+        input: "take 1 tab after 28/9 at 08:00",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { start: "2026-09-29" }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ถึงวันที่ 28/9/2569",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { end: "2026-09-28" }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่วันที่ 28/9",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } },
+        bounds: { start: "2026-09-28" }
+      }
+    ];
+
+    for (const item of cases) {
+      const result = parseSig(item.input, item.options);
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.timing?.event).toBeUndefined();
+      expect(result.fhir.timing?.repeat?.boundsPeriod).toEqual(item.bounds);
+      expect(result.fhir.site).toBeUndefined();
+    }
+  });
+
+  it("supports bounded schedules with dates in medial positions and honors inclusive end dates", () => {
+    const result = parseSig(
+      "from 28/9 take 1 tab at 08:00 daily until 30/9",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { start: "2026-09-28", end: "2026-09-30" },
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      timeOfDay: ["08:00:00"]
+    });
+    expect(nextDueDoses(result.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 10
+    })).toEqual([
+      "2026-09-28T08:00:00+07:00",
+      "2026-09-29T08:00:00+07:00",
+      "2026-09-30T08:00:00+07:00"
+    ]);
+
+    const restored = fromFhirDosage(result.fhir);
+    expect(restored.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      boundsStart: "2026-09-28",
+      boundsEnd: "2026-09-30"
+    });
   });
 
   it("round-trips exact FHIR Timing.event dates into canonical schedule semantics", () => {

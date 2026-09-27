@@ -35,6 +35,11 @@ function applySchedule(
   if (schedule.durationUnit !== undefined) {
     state.durationUnit = schedule.durationUnit;
   }
+  if (schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;
+    if (schedule.boundsEnd !== undefined) target.boundsEnd = schedule.boundsEnd;
+  }
   if (schedule.frequency !== undefined) {
     state.frequency = schedule.frequency;
   }

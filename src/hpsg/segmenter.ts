@@ -94,6 +94,8 @@ function hasMeaningfulSchedule(state: ReturnType<typeof parseClauseState>): bool
     schedule.periodMax !== undefined ||
     schedule.duration !== undefined ||
     schedule.durationMax !== undefined ||
+    schedule.boundsStart !== undefined ||
+    schedule.boundsEnd !== undefined ||
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||

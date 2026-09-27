@@ -876,22 +876,40 @@ function formatSite(
   return `${preposition} ${noun}`.trim();
 }
 
+function formatIsoCalendarDateEnglish(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!match) return value;
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  ];
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!months[month - 1] || !day) return value;
+  return `${day} ${months[month - 1]} ${match[1]}`;
+}
+
+function describeCalendarBoundsEnglish(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const start = formatIsoCalendarDateEnglish(schedule?.boundsStart);
+  const end = formatIsoCalendarDateEnglish(schedule?.boundsEnd);
+  if (start && end) return `from ${start} through ${end}`;
+  if (start) return `starting ${start}`;
+  if (end) return `through ${end}`;
+  return undefined;
+}
+
 function describeCalendarEventsEnglish(
   schedule: CanonicalScheduleExpr | undefined
 ): string | undefined {
   const events = schedule?.calendarEvents;
   if (!events?.length) return undefined;
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-  ];
   const parts: string[] = [];
   for (const event of events) {
-    const year = Number(event.isoDate.slice(0, 4));
-    const month = Number(event.isoDate.slice(5, 7));
-    const day = Number(event.isoDate.slice(8, 10));
-    if (!year || !month || !day || !months[month - 1]) continue;
-    parts.push(`${day} ${months[month - 1]} ${year}`);
+    const formatted = formatIsoCalendarDateEnglish(event.isoDate);
+    if (formatted) parts.push(formatted);
   }
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
 }
@@ -1076,6 +1094,12 @@ function formatShort(clause: CanonicalSigClause): string {
   if (schedule.calendarEvents?.length) {
     parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
   }
+  if (schedule.boundsStart) {
+    parts.push(`from${schedule.boundsStart}`);
+  }
+  if (schedule.boundsEnd) {
+    parts.push(`thru${schedule.boundsEnd}`);
+  }
   if (schedule.countMax !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
@@ -1182,6 +1206,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
   const calendarEventPart = describeCalendarEventsEnglish(schedule);
+  const calendarBoundsPart = describeCalendarBoundsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
@@ -1227,6 +1252,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (calendarBoundsPart) {
+    segments.push(calendarBoundsPart);
   }
   if (countPart) {
     segments.push(countPart);
@@ -1279,6 +1307,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
+    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);

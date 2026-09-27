@@ -1285,6 +1285,8 @@ export interface CanonicalScheduleExpr {
   durationUnit?: FhirPeriodUnit;
   /** Earliest calendar date/time on which this schedule becomes active. */
   boundsStart?: string;
+  /** Latest inclusive calendar date/time on which this schedule remains active. */
+  boundsEnd?: string;
   /** Duration of each administration occurrence, distinct from regimen bounds duration. */
   administrationDuration?: number;
   administrationDurationMax?: number;

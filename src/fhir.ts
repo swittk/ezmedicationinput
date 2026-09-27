@@ -706,8 +706,11 @@ export function canonicalToFhir(
       _event: schedule.calendarEvents.map(calendarEventPrimitive)
     };
   }
-  if (schedule?.boundsStart) {
-    repeat.boundsPeriod = { start: schedule.boundsStart };
+  if (schedule?.boundsStart || schedule?.boundsEnd) {
+    repeat.boundsPeriod = {
+      ...(schedule.boundsStart ? { start: schedule.boundsStart } : {}),
+      ...(schedule.boundsEnd ? { end: schedule.boundsEnd } : {})
+    };
     hasRepeat = true;
   }
 
@@ -1112,6 +1115,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     occurrenceCap !== undefined ||
     repeat?.boundsDuration ||
     repeat?.boundsPeriod?.start ||
+    repeat?.boundsPeriod?.end ||
     repeat?.boundsRange ||
     repeat?.duration !== undefined ||
     repeat?.durationMax !== undefined ||
@@ -1139,6 +1143,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
       boundsStart: repeat?.boundsPeriod?.start,
+      boundsEnd: repeat?.boundsPeriod?.end,
       administrationDuration: repeat?.duration,
       administrationDurationMax: repeat?.durationMax,
       administrationDurationUnit: repeat?.durationUnit,
@@ -1271,10 +1276,11 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
-  if (dosage.timing?.repeat?.boundsPeriod?.start) {
+  if (dosage.timing?.repeat?.boundsPeriod?.start || dosage.timing?.repeat?.boundsPeriod?.end) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),
-      boundsStart: dosage.timing.repeat.boundsPeriod.start
+      boundsStart: dosage.timing.repeat.boundsPeriod.start,
+      boundsEnd: dosage.timing.repeat.boundsPeriod.end
     };
   }
   if (dosage.timing?.repeat?.duration !== undefined && dosage.timing.repeat.durationUnit) {

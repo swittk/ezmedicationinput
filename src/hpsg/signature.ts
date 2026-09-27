@@ -151,6 +151,8 @@ export interface HpsgScheduleFeature {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  boundsStart?: string;
+  boundsEnd?: string;
   frequency?: number;
   frequencyMax?: number;
   period?: number;
