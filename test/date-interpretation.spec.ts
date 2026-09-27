@@ -175,18 +175,24 @@ describe("calendar date interpretation", () => {
       expect.objectContaining({ isoDate: "2026-10-04", inferredYear: true })
     ]);
 
-    const us = parseSig("take 1 tab on 09/28", {
+    const usDmy = parseSig("take 1 tab on 28/9", {
       locale: "en-US",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(us.fhir.timing?.event).toEqual(["2026-09-28"]);
-    expect(us.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
-      calendar: "gregory",
-      calendarYear: 2026,
-      month: 9,
-      day: 28,
-      inferredYear: true
+    expect(usDmy.fhir.timing?.event).toEqual(["2026-09-28"]);
+
+    const usMdyWithoutOptIn = parseSig("take 1 tab on 09/28", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
     });
+    expect(usMdyWithoutOptIn.fhir.timing?.event).toBeUndefined();
+    expect(usMdyWithoutOptIn.meta.leftoverText).toContain("09/28");
+
+    const usMdyExplicit = parseSig("take 1 tab on 09/28", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+    });
+    expect(usMdyExplicit.fhir.timing?.event).toEqual(["2026-09-28"]);
 
     const sharedForward = parseSig("take 1 tab on 28/9/2026 and 1,4/10", {
       locale: "en-GB",
@@ -291,13 +297,20 @@ describe("calendar date interpretation", () => {
     expect(bareAmbiguous.meta.leftoverText).toContain("28-9-26");
   });
 
-  it("uses explicit locale date order for Gregorian two-digit dates", () => {
-    const result = parseSig("take 1 tab on 09/28/26", {
+  it("requires an explicit opt-in for MDY numeric dates", () => {
+    const defaultDmy = parseSig("take 1 tab on 09/28/26", {
       locale: "en-US",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(result.fhir.timing?.event).toEqual(["2026-09-28"]);
-    expect(result.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
+    expect(defaultDmy.fhir.timing?.event).toBeUndefined();
+    expect(defaultDmy.meta.leftoverText).toContain("09/28/26");
+
+    const explicitMdy = parseSig("take 1 tab on 09/28/26", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+    });
+    expect(explicitMdy.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(explicitMdy.meta.canonical.clauses[0]?.schedule?.calendarEvents?.[0]).toMatchObject({
       calendar: "gregory",
       calendarYear: 2026,
       month: 9,
@@ -317,7 +330,10 @@ describe("calendar date interpretation", () => {
       },
       {
         input: "take orally 1 tablet after breakfast on 09/28/26,10/1/26 and 10/4/26 then every Sunday",
-        options: { locale: "en-US", datePolicy: { referenceDate: REFERENCE_DATE } }
+        options: {
+          locale: "en-US",
+          datePolicy: { referenceDate: REFERENCE_DATE, dateOrder: "MDY" }
+        }
       },
       {
         input: "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9/2569 และ 1/10/2569,4/10/2569 จากนั้น ทุกวันอาทิตย์",
@@ -684,5 +700,217 @@ describe("calendar date interpretation", () => {
       "2026-09-28"
     ]);
     expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain("28 Sep 2026");
+  });
+
+
+  it("composes exact date-time pairs with bounded recurrence in English, Thai, and code-switch", () => {
+    const cases = [
+      {
+        input: "take 1 tab at 08:00 on 28/9 and at 20:00 on 1/10 then every Sunday at 09:30 until 30/11",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด เวลา 08:00 วันที่ 28/9 และ เวลา 20:00 วันที่ 1/10 จากนั้น ทุกวันอาทิตย์ เวลา 09:30 ถึงวันที่ 30/11",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take 1 tab เวลา 08:00 วันที่ 28/9 and at 20:00 on 1/10 จากนั้น every Sunday เวลา 09:30 until 30/11",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      }
+    ];
+
+    for (const item of cases) {
+      const result = parseSig(item.input, item.options);
+      expect(result.count).toBe(3);
+      expect(result.items[0]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[1]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[2]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[0]?.fhir.timing).toMatchObject({
+        event: ["2026-09-28"],
+        repeat: { timeOfDay: ["08:00:00"] }
+      });
+      expect(result.items[1]?.fhir.timing).toMatchObject({
+        event: ["2026-10-01"],
+        repeat: { timeOfDay: ["20:00:00"] }
+      });
+      expect(result.items[2]?.fhir.timing?.repeat).toMatchObject({
+        boundsPeriod: { start: "2026-10-02", end: "2026-11-30" },
+        dayOfWeek: ["sun"],
+        timeOfDay: ["09:30:00"]
+      });
+      expect(nextDueDoses(result.items[2]!.fhir, {
+        from: "2026-09-27T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: 2
+      })).toEqual([
+        "2026-10-04T09:30:00+07:00",
+        "2026-10-11T09:30:00+07:00"
+      ]);
+    }
+  });
+
+  it("keeps distinct date-time pairs separate instead of creating a Cartesian product", () => {
+    const result = parseSig(
+      "take 1 tab at 08:00 on 28/9 and at 20:00 on 1/10",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(nextDueDoses(result.items[0]!.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 10
+    })).toEqual(["2026-09-28T08:00:00+07:00"]);
+    expect(nextDueDoses(result.items[1]!.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 10
+    })).toEqual(["2026-10-01T20:00:00+07:00"]);
+  });
+
+  it("separates recurring and exact-date unions that cannot share one FHIR Timing", () => {
+    const result = parseSig(
+      "take 1 tab every Sunday at 09:30 until 30/11 and on 28/9 at 08:00",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.fhir.timing?.event).toBeUndefined();
+    expect(result.items[0]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-30" },
+      dayOfWeek: ["sun"],
+      timeOfDay: ["09:30:00"]
+    });
+    expect(result.items[1]?.fhir.timing).toMatchObject({
+      event: ["2026-09-28"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+  });
+
+
+  it("treats exact-date AND recurrence as a union, not a transition", () => {
+    const result = parseSig(
+      "take 1 tab on 28/9 at 08:00 and every Sunday at 09:30 until 30/11",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.fhir.timing).toMatchObject({
+      event: ["2026-09-28"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+    expect(result.items[1]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-30" },
+      dayOfWeek: ["sun"],
+      timeOfDay: ["09:30:00"]
+    });
+    expect(result.items[1]?.fhir.timing?.repeat?.boundsPeriod?.start).toBeUndefined();
+  });
+
+  it("accepts unambiguous English month-name dates in either textual order", () => {
+    const cases = [
+      "take 1 tab on 5 Oct 2026 at 08:00",
+      "take 1 tab on Oct 5 2026 at 08:00",
+      "take 1 tab on October 5, 2026 at 08:00",
+      "รับประทาน 1 เม็ด on Oct 5 2026 เวลา 08:00"
+    ];
+    for (const input of cases) {
+      const result = parseSig(input, {
+        locale: "en-US",
+        datePolicy: { referenceDate: REFERENCE_DATE }
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.timing).toMatchObject({
+        event: ["2026-10-05"],
+        repeat: { timeOfDay: ["08:00:00"] }
+      });
+    }
+  });
+
+  it("keeps English month-name dates in day-month order under en-US locale", () => {
+    const exact = parseSig("take 1 tab on 5 Oct 2026 at 08:00", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(exact.meta.leftoverText).toBeUndefined();
+    expect(exact.fhir.timing).toMatchObject({
+      event: ["2026-10-05"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+
+    const unambiguous = parseSig("take 1 tab on 28 Sep 2026 at 08:00", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(unambiguous.meta.leftoverText).toBeUndefined();
+    expect(unambiguous.fhir.timing?.event).toEqual(["2026-09-28"]);
+  });
+
+  it("reparses English month-name dates emitted by formatSig without losing timing semantics", () => {
+    const exact = parseSig(
+      "take 1 tab at 08:00 and 20:00 on 28/9 and 1,4/10",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    const exactText = formatSig(exact.fhir, "long", { locale: "en" });
+    const exactRoundTrip = parseSig(exactText, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(exactRoundTrip.fhir.timing?.event).toEqual(exact.fhir.timing?.event);
+    expect(exactRoundTrip.fhir.timing?.repeat).toEqual(exact.fhir.timing?.repeat);
+    expect(exactRoundTrip.meta.leftoverText).toBeUndefined();
+
+    const recurring = parseSig(
+      "take 1 tab every Sunday at 09:30 from 5/10 until 30/11",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    const recurringText = formatSig(recurring.fhir, "long", { locale: "en" });
+    const recurringRoundTrip = parseSig(recurringText, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(recurringRoundTrip.fhir.timing?.event).toEqual(recurring.fhir.timing?.event);
+    expect(recurringRoundTrip.fhir.timing?.repeat).toEqual(recurring.fhir.timing?.repeat);
+    expect(recurringRoundTrip.meta.leftoverText).toBeUndefined();
+  });
+
+  it("counts weekday and clock combinations in weekly FHIR frequency", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 09:30 และ 20:30 ถึงวันที่ 12/10",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 4,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: ["09:30:00", "20:30:00"],
+      boundsPeriod: { end: "2026-10-12" }
+    });
+    expect(nextDueDoses(result.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 6
+    })).toEqual([
+      "2026-09-28T09:30:00+07:00",
+      "2026-09-28T20:30:00+07:00",
+      "2026-10-01T09:30:00+07:00",
+      "2026-10-01T20:30:00+07:00",
+      "2026-10-05T09:30:00+07:00",
+      "2026-10-05T20:30:00+07:00"
+    ]);
+  });
+
+  it("encodes multiple explicit weekly weekdays with matching weekly frequency in Thai", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 09:30 ถึงวันที่ 30/11",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: ["09:30:00"],
+      boundsPeriod: { end: "2026-11-30" }
+    });
+    expect(result.longText).toContain("สัปดาห์ละ 2 ครั้ง");
   });
 });

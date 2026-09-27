@@ -1022,7 +1022,10 @@ export interface MedicationDatePlausibleWindow {
 export interface MedicationDatePolicy {
   /** Enabled calendar resolver ids, in preference order. Defaults by detected locale. */
   calendars?: string[];
-  /** Numeric date field order. Defaults to DMY for Thai and MDY for en-US. */
+  /**
+   * Numeric date field order. Defaults to DMY for every locale.
+   * MDY is accepted only when explicitly requested by the caller.
+   */
   dateOrder?: MedicationDateOrder;
   /** ISO date used to resolve two-digit years. Defaults to the current date. */
   referenceDate?: string;
