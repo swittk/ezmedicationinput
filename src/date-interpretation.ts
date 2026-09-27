@@ -29,7 +29,9 @@ const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
 const YEARFUL_SLASH_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
 const NUMERIC_DATE_SOURCE = String.raw`(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?)`;
 const ENGLISH_MONTH_NAME_SOURCE = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
-const TEXTUAL_ENGLISH_DATE_SOURCE = String.raw`\d{1,2}\s+${ENGLISH_MONTH_NAME_SOURCE}\s+\d{4}`;
+const TEXTUAL_ENGLISH_DMY_DATE_SOURCE = String.raw`\d{1,2}\s+${ENGLISH_MONTH_NAME_SOURCE}\s+\d{4}`;
+const TEXTUAL_ENGLISH_MDY_DATE_SOURCE = String.raw`${ENGLISH_MONTH_NAME_SOURCE}\s+\d{1,2}(?:,\s*|\s+)\d{4}`;
+const TEXTUAL_ENGLISH_DATE_SOURCE = String.raw`(?:${TEXTUAL_ENGLISH_DMY_DATE_SOURCE}|${TEXTUAL_ENGLISH_MDY_DATE_SOURCE})`;
 const CALENDAR_DATE_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
 const DATE_LIST_PART_SOURCE = String.raw`(?:${CALENDAR_DATE_SOURCE}|\d{1,2})`;
@@ -42,8 +44,12 @@ const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+
 const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
 const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
-const TEXTUAL_ENGLISH_DATE_RE = new RegExp(
+const TEXTUAL_ENGLISH_DMY_DATE_RE = new RegExp(
   `^(\\d{1,2})\\s+(${ENGLISH_MONTH_NAME_SOURCE})\\s+(\\d{4})$`,
+  "iu"
+);
+const TEXTUAL_ENGLISH_MDY_DATE_RE = new RegExp(
+  `^(${ENGLISH_MONTH_NAME_SOURCE})\\s+(\\d{1,2})(?:,\\s*|\\s+)(\\d{4})$`,
   "iu"
 );
 const DATE_COMPONENT_RE = new RegExp(
@@ -252,8 +258,13 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
   for (let match = DATE_COMPONENT_RE.exec(listText); match; match = DATE_COMPONENT_RE.exec(listText)) {
     const text = match[0];
     const full = text.match(NUMERIC_DATE_RE);
-    const textual = text.match(TEXTUAL_ENGLISH_DATE_RE);
-    const textualMonth = textual ? englishMonthNumber(textual[2]) : undefined;
+    const textualDmy = text.match(TEXTUAL_ENGLISH_DMY_DATE_RE);
+    const textualMdy = text.match(TEXTUAL_ENGLISH_MDY_DATE_RE);
+    const textualMonth = textualDmy
+      ? englishMonthNumber(textualDmy[2])
+      : textualMdy
+        ? englishMonthNumber(textualMdy[1])
+        : undefined;
     parts.push({
       sourceText: text,
       start: match.index,
@@ -266,15 +277,23 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
             yearDigits: full[4]?.length,
             yearWasExplicit: full[4] !== undefined
           }
-        : textual && textualMonth !== undefined
+        : textualDmy && textualMonth !== undefined
           ? {
-              day: Number(textual[1]),
+              day: Number(textualDmy[1]),
               month: textualMonth,
-              year: Number(textual[3]),
-              yearDigits: textual[3].length,
+              year: Number(textualDmy[3]),
+              yearDigits: textualDmy[3].length,
               yearWasExplicit: true
             }
-          : { day: Number(text), yearWasExplicit: false })
+          : textualMdy && textualMonth !== undefined
+            ? {
+                day: Number(textualMdy[2]),
+                month: textualMonth,
+                year: Number(textualMdy[3]),
+                yearDigits: textualMdy[3].length,
+                yearWasExplicit: true
+              }
+            : { day: Number(text), yearWasExplicit: false })
     });
   }
   if (!parts.length) return { parts, effectiveEnd: 0 };
@@ -339,7 +358,9 @@ function resolveDatePart(
   };
   if (source.day === undefined || source.month === undefined) return undefined;
 
-  const textualEnglishDate = TEXTUAL_ENGLISH_DATE_RE.test(part.sourceText);
+  const textualEnglishDate =
+    TEXTUAL_ENGLISH_DMY_DATE_RE.test(part.sourceText) ||
+    TEXTUAL_ENGLISH_MDY_DATE_RE.test(part.sourceText);
   const order = effectiveDateOrder(options);
   const fields = textualEnglishDate
     ? dateFields(source.day, source.month, "DMY")

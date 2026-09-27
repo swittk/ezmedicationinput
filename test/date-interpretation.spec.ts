@@ -804,6 +804,26 @@ describe("calendar date interpretation", () => {
     expect(result.items[1]?.fhir.timing?.repeat?.boundsPeriod?.start).toBeUndefined();
   });
 
+  it("accepts unambiguous English month-name dates in either textual order", () => {
+    const cases = [
+      "take 1 tab on 5 Oct 2026 at 08:00",
+      "take 1 tab on Oct 5 2026 at 08:00",
+      "take 1 tab on October 5, 2026 at 08:00",
+      "รับประทาน 1 เม็ด on Oct 5 2026 เวลา 08:00"
+    ];
+    for (const input of cases) {
+      const result = parseSig(input, {
+        locale: "en-US",
+        datePolicy: { referenceDate: REFERENCE_DATE }
+      });
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.timing).toMatchObject({
+        event: ["2026-10-05"],
+        repeat: { timeOfDay: ["08:00:00"] }
+      });
+    }
+  });
+
   it("keeps English month-name dates in day-month order under en-US locale", () => {
     const exact = parseSig("take 1 tab on 5 Oct 2026 at 08:00", {
       locale: "en-US",
