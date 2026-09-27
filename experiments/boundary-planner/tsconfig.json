@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "es6", "module": "ESNext", "moduleResolution": "node",
+    "rootDir": "../..", "noEmit": true, "declaration": false,
+    "types": ["vitest/globals"], "lib": ["ES6", "DOM", "ES2019.Array"]
+  },
+  "include": ["./**/*.ts", "../../src/**/*.ts"],
+  "exclude": [".generated", "../../node_modules", "../../dist"]
+}

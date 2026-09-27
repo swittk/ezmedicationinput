@@ -1,0 +1,2744 @@
+{
+  "metadata": {
+    "experimentalSourceSha256": "b6fa42ebd527421c4140b0b395537fbe3d508fedb1e8c8572b17e1ea85121764",
+    "base": "e63ca7b255d222034f6ac4b896d8b7ff99863838",
+    "createdAt": "2026-09-27T22:34:08.070Z",
+    "node": "v24.14.1",
+    "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+    "loadAverage": [
+      1.99,
+      4.18,
+      7.26
+    ],
+    "rounds": 20,
+    "experiment": "shadow boundary planner; production source unchanged"
+  },
+  "baseline": {
+    "clauseCalls": 395,
+    "speculativeProbes": 199,
+    "lexicalCalls": 2188,
+    "chartCalls": 395,
+    "chartTruncations": 0,
+    "chartSigns": 7208,
+    "agendaItems": 7807,
+    "combinationAttempts": 17860,
+    "cacheHits": 0
+  },
+  "candidate": {
+    "clauseCalls": 381,
+    "speculativeProbes": 184,
+    "lexicalCalls": 2033,
+    "chartCalls": 381,
+    "chartTruncations": 0,
+    "chartSigns": 7075,
+    "agendaItems": 7641,
+    "combinationAttempts": 17455,
+    "cacheHits": 6
+  },
+  "cases": [
+    {
+      "id": "reported-thai-date-list",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "english-omitted-head",
+      "family": "dose-continuation",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 70,
+        "combinationAttempts": 84,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 44,
+        "agendaItems": 50,
+        "combinationAttempts": 64,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "thai-omitted-head",
+      "family": "dose-continuation",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 39,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 70,
+        "combinationAttempts": 84,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 44,
+        "agendaItems": 50,
+        "combinationAttempts": 64,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "thai-taper-duration",
+      "family": "shared-modifier-scope",
+      "baseline": {
+        "clauseCalls": 10,
+        "speculativeProbes": 6,
+        "lexicalCalls": 45,
+        "chartCalls": 10,
+        "chartTruncations": 0,
+        "chartSigns": 63,
+        "agendaItems": 63,
+        "combinationAttempts": 77,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 9,
+        "speculativeProbes": 5,
+        "lexicalCalls": 40,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 55,
+        "agendaItems": 55,
+        "combinationAttempts": 70,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "duration-before-merge",
+      "family": "shared-modifier-scope",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 22,
+        "combinationAttempts": 18,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 22,
+        "agendaItems": 22,
+        "combinationAttempts": 18,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "independent-date-clock-pairs",
+      "family": "pairing-versus-product",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 78,
+        "combinationAttempts": 150,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 78,
+        "combinationAttempts": 150,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "pairs-then-recurring",
+      "family": "sequence-versus-union",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 135,
+        "combinationAttempts": 246,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 94,
+        "agendaItems": 122,
+        "combinationAttempts": 230,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "union-not-sequence",
+      "family": "sequence-versus-union",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 15,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 88,
+        "combinationAttempts": 170,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 14,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 88,
+        "combinationAttempts": 170,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "shared-clocks-shared-dates",
+      "family": "pairing-versus-product",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 47,
+        "agendaItems": 57,
+        "combinationAttempts": 100,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 31,
+        "agendaItems": 39,
+        "combinationAttempts": 75,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fronted-date-comma",
+      "family": "fronted-attachment",
+      "baseline": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 18,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 48,
+        "agendaItems": 56,
+        "combinationAttempts": 136,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 3,
+        "speculativeProbes": 2,
+        "lexicalCalls": 19,
+        "chartCalls": 3,
+        "chartTruncations": 0,
+        "chartSigns": 48,
+        "agendaItems": 56,
+        "combinationAttempts": 136,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "bounded-fronted-schedule",
+      "family": "fronted-attachment",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 29,
+        "agendaItems": 35,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 29,
+        "agendaItems": 35,
+        "combinationAttempts": 106,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "fraction-not-date",
+      "family": "dose-protection",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 9,
+        "agendaItems": 9,
+        "combinationAttempts": 9,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 9,
+        "agendaItems": 9,
+        "combinationAttempts": 9,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "leading-decimal",
+      "family": "dose-protection",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 6,
+        "agendaItems": 6,
+        "combinationAttempts": 7,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 6,
+        "agendaItems": 6,
+        "combinationAttempts": 7,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "procedural-not-administration-split",
+      "family": "procedural-scope",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 15,
+        "agendaItems": 17,
+        "combinationAttempts": 31,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 7,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 15,
+        "agendaItems": 17,
+        "combinationAttempts": 31,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "shared-safety",
+      "family": "procedural-scope",
+      "baseline": {
+        "clauseCalls": 9,
+        "speculativeProbes": 6,
+        "lexicalCalls": 52,
+        "chartCalls": 9,
+        "chartTruncations": 0,
+        "chartSigns": 97,
+        "agendaItems": 108,
+        "combinationAttempts": 174,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 40,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 79,
+        "agendaItems": 88,
+        "combinationAttempts": 154,
+        "cacheHits": 1
+      }
+    },
+    {
+      "id": "list-en-0",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-1",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-2",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-3",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-4",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-5",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-6",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-7",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-8",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-9",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-10",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-11",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-12",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-13",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-14",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-15",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-16",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-17",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-18",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-19",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-20",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 56,
+        "agendaItems": 56,
+        "combinationAttempts": 114,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-21",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 70,
+        "combinationAttempts": 176,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-22",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 62,
+        "agendaItems": 64,
+        "combinationAttempts": 124,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-en-23",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 76,
+        "agendaItems": 78,
+        "combinationAttempts": 186,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-24",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-25",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-26",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-27",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-28",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-29",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-30",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-31",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-32",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-33",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-34",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-35",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-36",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-37",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-38",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-39",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-40",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-41",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-42",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-43",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-44",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 64,
+        "agendaItems": 70,
+        "combinationAttempts": 138,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-45",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 234,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-46",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 70,
+        "agendaItems": 76,
+        "combinationAttempts": 142,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-th-47",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 90,
+        "agendaItems": 96,
+        "combinationAttempts": 238,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-48",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-49",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-50",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-51",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-52",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-53",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-54",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-55",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-56",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-57",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-58",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-59",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-60",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-61",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-62",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-63",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-64",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-65",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-66",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-67",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-68",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 84,
+        "agendaItems": 90,
+        "combinationAttempts": 208,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-69",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 110,
+        "combinationAttempts": 308,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-70",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 92,
+        "agendaItems": 100,
+        "combinationAttempts": 218,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "list-mixed-71",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 27,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 26,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 112,
+        "agendaItems": 120,
+        "combinationAttempts": 318,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-5 Oct 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-Oct 5 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-October 5, 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-US-5 Oct 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-US-Oct 5 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-US-October 5, 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-GB-5 Oct 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-GB-Oct 5 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-en-GB-October 5, 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-th-5 Oct 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-th-Oct 5 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 19,
+        "agendaItems": 22,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "month-th-October 5, 2026",
+      "family": "date-policy",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 5,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 4,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 20,
+        "agendaItems": 23,
+        "combinationAttempts": 45,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "oxford-date-list",
+      "family": "list-ownership",
+      "baseline": {
+        "clauseCalls": 8,
+        "speculativeProbes": 6,
+        "lexicalCalls": 41,
+        "chartCalls": 8,
+        "chartTruncations": 0,
+        "chartSigns": 142,
+        "agendaItems": 166,
+        "combinationAttempts": 454,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 4,
+        "lexicalCalls": 30,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 119,
+        "agendaItems": 138,
+        "combinationAttempts": 395,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "clock-pair-comma-date-lists",
+      "family": "pairing-versus-product",
+      "baseline": {
+        "clauseCalls": 1,
+        "speculativeProbes": 0,
+        "lexicalCalls": 8,
+        "chartCalls": 1,
+        "chartTruncations": 0,
+        "chartSigns": 63,
+        "agendaItems": 89,
+        "combinationAttempts": 339,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 66,
+        "agendaItems": 82,
+        "combinationAttempts": 150,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "thai-union-no-explicit-clock",
+      "family": "sequence-versus-union",
+      "baseline": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 21,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 16,
+        "combinationAttempts": 14,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 16,
+        "agendaItems": 16,
+        "combinationAttempts": 14,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "same-date-different-doses",
+      "family": "dose-continuation",
+      "baseline": {
+        "clauseCalls": 5,
+        "speculativeProbes": 3,
+        "lexicalCalls": 25,
+        "chartCalls": 5,
+        "chartTruncations": 0,
+        "chartSigns": 87,
+        "agendaItems": 109,
+        "combinationAttempts": 217,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 4,
+        "speculativeProbes": 2,
+        "lexicalCalls": 20,
+        "chartCalls": 4,
+        "chartTruncations": 0,
+        "chartSigns": 72,
+        "agendaItems": 90,
+        "combinationAttempts": 184,
+        "cacheHits": 0
+      }
+    },
+    {
+      "id": "reverse-ordered-exact-phase",
+      "family": "shared-modifier-scope",
+      "baseline": {
+        "clauseCalls": 7,
+        "speculativeProbes": 4,
+        "lexicalCalls": 31,
+        "chartCalls": 7,
+        "chartTruncations": 0,
+        "chartSigns": 104,
+        "agendaItems": 135,
+        "combinationAttempts": 246,
+        "cacheHits": 0
+      },
+      "candidate": {
+        "clauseCalls": 6,
+        "speculativeProbes": 3,
+        "lexicalCalls": 27,
+        "chartCalls": 6,
+        "chartTruncations": 0,
+        "chartSigns": 94,
+        "agendaItems": 122,
+        "combinationAttempts": 230,
+        "cacheHits": 1
+      }
+    }
+  ]
+}
