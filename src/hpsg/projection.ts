@@ -35,6 +35,11 @@ function applySchedule(
   if (schedule.durationUnit !== undefined) {
     state.durationUnit = schedule.durationUnit;
   }
+  if (schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;
+    if (schedule.boundsEnd !== undefined) target.boundsEnd = schedule.boundsEnd;
+  }
   if (schedule.frequency !== undefined) {
     state.frequency = schedule.frequency;
   }
@@ -79,6 +84,17 @@ function applySchedule(
   }
   if (schedule.dayOfWeek) {
     deps.addDayOfWeekList(state, schedule.dayOfWeek);
+  }
+  if (schedule.calendarEvents?.length) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    const existing = target.calendarEvents ? target.calendarEvents.slice() : [];
+    for (const event of schedule.calendarEvents) {
+      const key = stableStructureKey(event);
+      if (!existing.some((candidate) => stableStructureKey(candidate) === key)) {
+        existing.push(event);
+      }
+    }
+    target.calendarEvents = existing;
   }
   if (schedule.timeOfDay?.length) {
     const existing = state.timeOfDay ? state.timeOfDay.slice() : [];

@@ -1647,6 +1647,41 @@ function translateSiteThai(
   return qualified(site);
 }
 
+function formatIsoCalendarDateThai(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!match) return value;
+  const buddhistYear = Number(match[1]) + 543;
+  return `${Number(match[3])}/${Number(match[2])}/${buddhistYear}`;
+}
+
+function describeCalendarBoundsThai(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const start = formatIsoCalendarDateThai(schedule?.boundsStart);
+  const end = formatIsoCalendarDateThai(schedule?.boundsEnd);
+  if (start && end) return `ตั้งแต่วันที่ ${start} ถึงวันที่ ${end}`;
+  if (start) return `ตั้งแต่วันที่ ${start}`;
+  if (end) return `ถึงวันที่ ${end}`;
+  return undefined;
+}
+
+function describeCalendarEventsThai(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const events = schedule?.calendarEvents;
+  if (!events?.length) return undefined;
+  const parts: string[] = [];
+  for (const event of events) {
+    const formatted = formatIsoCalendarDateThai(event.isoDate);
+    if (formatted) parts.push(formatted);
+  }
+  if (!parts.length) return undefined;
+  if (parts.length === 1) return `วันที่ ${parts[0]}`;
+  if (parts.length === 2) return `วันที่ ${parts[0]} และ ${parts[1]}`;
+  return `วันที่ ${parts.slice(0, -1).join(", ")} และ ${parts[parts.length - 1]}`;
+}
+
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -1868,6 +1903,15 @@ function formatShortThai(clause: CanonicalSigClause): string {
     }
     parts.push(days.join(","));
   }
+  if (schedule.calendarEvents?.length) {
+    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+  }
+  if (schedule.boundsStart) {
+    parts.push(`ตั้งแต่${schedule.boundsStart}`);
+  }
+  if (schedule.boundsEnd) {
+    parts.push(`ถึง${schedule.boundsEnd}`);
+  }
   if (schedule.countMax !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
@@ -2022,6 +2066,8 @@ function formatLongThai(
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
+  const calendarEventPart = describeCalendarEventsThai(schedule);
+  const calendarBoundsPart = describeCalendarBoundsThai(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
@@ -2072,8 +2118,14 @@ function formatLongThai(
   for (const activityTiming of formatActivityTimingThai(schedule)) {
     segments.push(activityTiming);
   }
+  if (calendarEventPart) {
+    segments.push(calendarEventPart);
+  }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (calendarBoundsPart) {
+    segments.push(calendarBoundsPart);
   }
   if (countPart) {
     segments.push(countPart);
@@ -2145,7 +2197,9 @@ function formatLongThai(
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
+    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
+    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
     if (durationPart) graphRegimenTail.push(durationPart);

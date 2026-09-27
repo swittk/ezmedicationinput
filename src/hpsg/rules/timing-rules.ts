@@ -65,7 +65,7 @@ import {
   splitByLexicalSeparators,
   tokensAvailable
 } from "../rule-context";
-import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
+import { HpsgLexicalRule, HpsgScheduleFeature, HpsgSign, lexicalSign } from "../signature";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
@@ -936,6 +936,72 @@ export function alternateEventCadenceRule(): HpsgLexicalRule<HpsgClauseContext> 
   });
 }
 
+function shiftCalendarIsoDate(value: string, days: number): string | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!match) return undefined;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime())) return undefined;
+  date.setUTCDate(date.getUTCDate() + days);
+  const year = String(date.getUTCFullYear());
+  const monthValue = String(date.getUTCMonth() + 1);
+  const dayValue = String(date.getUTCDate());
+  const month = monthValue.length < 2 ? `0${monthValue}` : monthValue;
+  const day = dayValue.length < 2 ? `0${dayValue}` : dayValue;
+  return `${year}-${month}-${day}`;
+}
+
+export function calendarDateListRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.calendarDateList", (context, start) => {
+    const first = tokensAvailable(context, start, 1)?.[0];
+    if (!first) return [];
+    const match = context.dateSpans.find((span) => span.start === first.sourceStart);
+    if (!match || match.unresolved || !match.events.length) return [];
+
+    const members: Token[] = [];
+    for (let cursor = start; cursor < context.limit; cursor += 1) {
+      const token = context.tokens[cursor];
+      if (!token || context.state.consumed.has(token.index)) break;
+      if (token.sourceStart >= match.end) break;
+      members.push(token);
+    }
+    if (!members.length || members[members.length - 1].sourceEnd > match.end) return [];
+
+    let schedule: HpsgScheduleFeature | undefined;
+    if (match.relation === "event") {
+      schedule = { calendarEvents: match.events };
+    } else {
+      const event = match.events.length === 1 ? match.events[0] : undefined;
+      if (!event) return [];
+      if (match.relation === "start-inclusive") {
+        schedule = { boundsStart: event.isoDate };
+      } else if (match.relation === "start-exclusive") {
+        const start = shiftCalendarIsoDate(event.isoDate, 1);
+        if (!start) return [];
+        schedule = { boundsStart: start };
+      } else if (match.relation === "end-inclusive") {
+        schedule = { boundsEnd: event.isoDate };
+      } else if (match.relation === "end-exclusive") {
+        const end = shiftCalendarIsoDate(event.isoDate, -1);
+        if (!end) return [];
+        schedule = { boundsEnd: end };
+      }
+    }
+    if (!schedule) return [];
+
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.calendarDateList",
+      tokens: members,
+      synsem: {
+        head: { schedule },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 36 + members.length
+    })];
+  });
+}
+
 export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.timing", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -979,6 +1045,29 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             ? [`Avoid ambiguous timing abbreviation ${descriptor.discouraged}.`]
             : undefined,
           score: 8
+        })
+      ];
+    }
+    const weeklyWeekday = lower.match(/^weekly-(mon|tue|wed|thu|fri|sat|sun)$/u);
+    if (weeklyWeekday) {
+      return [
+        lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.weekdayRecurrence",
+          tokens: [token],
+          synsem: {
+            head: {
+              schedule: {
+                frequency: 1,
+                period: 1,
+                periodUnit: FhirPeriodUnit.Week,
+                dayOfWeek: [weeklyWeekday[1] as FhirDayOfWeek]
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 18
         })
       ];
     }

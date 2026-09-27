@@ -582,6 +582,42 @@ describe("calculateTotalUnits", () => {
     timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
   };
 
+  it("counts exact Timing.event doses and respects boundsPeriod.start", () => {
+    const exact: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      timing: {
+        event: ["2024-01-02", "2024-01-04", "2024-01-10"]
+      }
+    };
+    expect(calculateTotalUnits({
+      dosage: exact,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 7,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    }).totalUnits).toBe(4);
+
+    const bounded: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: {
+        repeat: {
+          frequency: 1,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00"],
+          boundsPeriod: { start: "2024-01-03" }
+        }
+      }
+    };
+    expect(calculateTotalUnits({
+      dosage: bounded,
+      from: "2024-01-01T00:00:00Z",
+      durationValue: 5,
+      durationUnit: FhirPeriodUnit.Day,
+      timeZone: "UTC"
+    }).totalUnits).toBe(3);
+  });
+
   it("calculates total for cream (weight/weight)", () => {
     const res = calculateTotalUnits({
       dosage: dosageBID,

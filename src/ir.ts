@@ -200,6 +200,8 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.duration !== undefined ||
     schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined ||
+    schedule.boundsStart !== undefined ||
+    schedule.boundsEnd !== undefined ||
     schedule.administrationDuration !== undefined ||
     schedule.administrationDurationMax !== undefined ||
     schedule.administrationDurationUnit !== undefined ||
@@ -212,7 +214,8 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||
     schedule.when?.length ||
-    schedule.timeOfDay?.length
+    schedule.timeOfDay?.length ||
+    schedule.calendarEvents?.length
   ));
   return Boolean(
     clause.method?.coding?.code || clause.method?.text ||

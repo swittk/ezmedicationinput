@@ -372,6 +372,8 @@ function mergeSchedule(
     !sameOptionalScalar(left.duration, right.duration) ||
     !sameOptionalScalar(left.durationMax, right.durationMax) ||
     !sameOptionalScalar(left.durationUnit, right.durationUnit) ||
+    !sameOptionalScalar(left.boundsStart, right.boundsStart) ||
+    !sameOptionalScalar(left.boundsEnd, right.boundsEnd) ||
     !sameOptionalScalar(left.frequency, right.frequency) ||
     !sameOptionalScalar(left.frequencyMax, right.frequencyMax) ||
     !sameOptionalScalar(left.period, right.period) ||
@@ -392,6 +394,8 @@ function mergeSchedule(
     duration: mergeOptionalScalar(left.duration, right.duration),
     durationMax: mergeOptionalScalar(left.durationMax, right.durationMax),
     durationUnit: mergeOptionalScalar(left.durationUnit, right.durationUnit),
+    boundsStart: mergeOptionalScalar(left.boundsStart, right.boundsStart),
+    boundsEnd: mergeOptionalScalar(left.boundsEnd, right.boundsEnd),
     frequency: mergeOptionalScalar(left.frequency, right.frequency),
     frequencyMax: mergeOptionalScalar(left.frequencyMax, right.frequencyMax),
     period: mergeOptionalScalar(left.period, right.period),
@@ -403,6 +407,7 @@ function mergeSchedule(
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
+    calendarEvents: appendUniqueStructured(left.calendarEvents, right.calendarEvents),
     activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),
     occurrenceCap: left.occurrenceCap ?? right.occurrenceCap
   };

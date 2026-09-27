@@ -43,6 +43,7 @@ export {
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+  TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
   PRN_TRIGGER_PHASE_EXTENSION_URL,
   getTimingOccurrenceCap
 } from "./fhir";
@@ -233,6 +234,12 @@ export type {
   SigTranslation,
   SigTranslationConfig
 } from "./i18n";
+export {
+  findMedicationDateListSpans,
+  listMedicationDateResolvers,
+  parseMedicationDateListAt,
+  registerMedicationDateResolver
+} from "./date-interpretation";
 export {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
@@ -757,6 +764,79 @@ function propagateTrailingSharedDuration(
   }
 }
 
+function nextIsoCalendarDay(value: string): string | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!match) return undefined;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime())) return undefined;
+  date.setUTCDate(date.getUTCDate() + 1);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1);
+  const day = String(date.getUTCDate());
+  return `${year}-${month.length < 2 ? `0${month}` : month}-${day.length < 2 ? `0${day}` : day}`;
+}
+
+function propagateDateTransitionEventTiming(
+  results: ParseResult[],
+  options?: ParseOptions
+): void {
+  for (let index = 1; index < results.length; index += 1) {
+    const previous = results[index - 1];
+    const current = results[index];
+    const previousSchedule = previous.meta.canonical.clauses[0]?.schedule;
+    const currentClause = current.meta.canonical.clauses[0];
+    const currentSchedule = currentClause?.schedule;
+    if (!previousSchedule?.calendarEvents?.length || !currentClause || !currentSchedule) continue;
+    const isRecurring = Boolean(
+      currentSchedule.dayOfWeek?.length ||
+      currentSchedule.frequency !== undefined ||
+      currentSchedule.period !== undefined ||
+      currentSchedule.timingCode
+    );
+    if (!isRecurring || currentSchedule.calendarEvents?.length) continue;
+
+    let changed = false;
+    if (!currentSchedule.boundsStart) {
+      let latestDate: string | undefined;
+      for (const event of previousSchedule.calendarEvents) {
+        if (!latestDate || event.isoDate > latestDate) latestDate = event.isoDate;
+      }
+      const nextDay = latestDate ? nextIsoCalendarDay(latestDate) : undefined;
+      if (nextDay) {
+        currentSchedule.boundsStart = nextDay;
+        changed = true;
+      }
+    }
+    if (!currentSchedule.when?.length && previousSchedule.when?.length) {
+      currentSchedule.when = [...previousSchedule.when];
+      changed = true;
+    }
+    if (!currentSchedule.timeOfDay?.length && previousSchedule.timeOfDay?.length) {
+      currentSchedule.timeOfDay = [...previousSchedule.timeOfDay];
+      changed = true;
+    }
+    if (!changed) continue;
+
+    current.fhir.timing = current.fhir.timing ?? {};
+    current.fhir.timing.repeat = {
+      ...(current.fhir.timing.repeat ?? {}),
+      ...(currentSchedule.boundsStart || currentSchedule.boundsEnd
+        ? {
+          boundsPeriod: {
+            ...(currentSchedule.boundsStart ? { start: currentSchedule.boundsStart } : {}),
+            ...(currentSchedule.boundsEnd ? { end: currentSchedule.boundsEnd } : {})
+          }
+        }
+        : {}),
+      ...(currentSchedule.when?.length ? { when: [...currentSchedule.when] } : {}),
+      ...(currentSchedule.timeOfDay?.length ? { timeOfDay: [...currentSchedule.timeOfDay] } : {})
+    };
+    current.longText = formatSig(current.fhir, "long", options);
+    current.shortText = formatSig(current.fhir, "short", options);
+    current.fhir.text = current.longText;
+  }
+}
+
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
   const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
   for (const result of results) {
@@ -783,6 +863,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
+  propagateDateTransitionEventTiming(rawResults, options);
   const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
@@ -842,7 +923,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     updateCarryForward(carry, state);
   }
 
-  propagateTrailingSharedDuration(results.map((item) => item.result), segments, options);
+  const lintParseResults = results.map((item) => item.result);
+  propagateTrailingSharedDuration(lintParseResults, segments, options);
+  propagateDateTransitionEventTiming(lintParseResults, options);
   const primary = resolvePrimaryLintResult(results, input, options);
 
   return {
@@ -878,6 +961,7 @@ export async function parseSigAsync(
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
+  propagateDateTransitionEventTiming(rawResults, options);
   const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);

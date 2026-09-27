@@ -53,6 +53,7 @@ import {
 } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  sourceRangeOverlapsContextDate,
   isClockLikeLower,
   isPunctuation,
   joinTokenText,
@@ -713,6 +714,13 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     if (numericTokenIsProcedureLocalQuantity(context, token)) {
+      return [];
+    }
+    if (sourceRangeOverlapsContextDate(
+      context,
+      token.sourceStart,
+      token.sourceEnd
+    )) {
       return [];
     }
     const percentBodyAreaDose = percentBodyAreaDoseAfter(context, start, lower);

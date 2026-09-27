@@ -5,6 +5,7 @@ import { findUnparsedTokenGroups, parseClauseState } from "../parser";
 import { parseAdditionalInstructions } from "../advice";
 import { parseInstructionActions } from "../instruction-graph";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { findMedicationDateListSpans } from "../date-interpretation";
 import { normalizeUnit } from "../unit-lexicon";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { AdviceForce, AdviceFrame, ParseOptions } from "../types";
@@ -93,11 +94,14 @@ function hasMeaningfulSchedule(state: ReturnType<typeof parseClauseState>): bool
     schedule.periodMax !== undefined ||
     schedule.duration !== undefined ||
     schedule.durationMax !== undefined ||
+    schedule.boundsStart !== undefined ||
+    schedule.boundsEnd !== undefined ||
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||
     schedule.when?.length ||
-    schedule.timeOfDay?.length
+    schedule.timeOfDay?.length ||
+    schedule.calendarEvents?.length
   ));
 }
 
@@ -420,6 +424,7 @@ function pushSegment(
 export function parseSigSegments(input: string, options?: ParseOptions): HpsgSigSegment[] {
   const tokens = annotateLexTokens(lexInput(input));
   const proceduralActions = parseInstructionActions(input, 0, options);
+  const dateSpans = findMedicationDateListSpans(input, options);
   const segments: HpsgSigSegment[] = [];
   let start = 0;
   let inheritedAdministrationContinuation = false;
@@ -455,6 +460,13 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       continue;
     }
     const nextToken = tokens[index + 1];
+    const commaInsideDateList = token.original === "," && dateSpans.some((span) =>
+      token.sourceStart >= span.start && token.sourceEnd <= span.end
+    );
+    if (commaInsideDateList) {
+      scannedOffset = token.sourceEnd;
+      continue;
+    }
     if (index > 0 && adjacentTimedDoseContinuation(input, tokens, index, start, options)) {
       pushSegment(segments, input, start, token.sourceStart, true);
       start = token.sourceStart;

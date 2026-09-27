@@ -37,11 +37,11 @@ function classifyLexKind(value: string): {
 } {
   const lower = value.toLowerCase();
 
-  if (/^[0-9]+(?:\.[0-9]+)?$/.test(lower)) {
+  if (/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(lower)) {
     return { kind: LexKind.Number, value: parseFloat(value) };
   }
 
-  const rangeMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)[-–—]([0-9]+(?:\.[0-9]+)?)$/);
+  const rangeMatch = lower.match(/^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))[-–—]((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))$/);
   if (rangeMatch) {
     return {
       kind: LexKind.NumberRange,
@@ -73,7 +73,7 @@ function classifyLexKind(value: string): {
 }
 
 function isNumericText(value: string): boolean {
-  return /^[0-9]+(?:\.[0-9]+)?$/.test(value);
+  return /^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(value);
 }
 
 function escapeRegExp(value: string): string {
@@ -494,7 +494,7 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
   }
 
   const compactDiscrete = surface.original.match(
-    /^([0-9]+(?:\.[0-9]+)?)([A-Za-z-]+)$/
+    /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))([A-Za-z-]+)$/
   );
   if (
     compactDiscrete &&

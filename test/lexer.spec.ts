@@ -130,6 +130,20 @@ describe("lex normalization", () => {
     expect(tokens[1]?.kind).toBe(LexKind.Word);
   });
 
+  it("keeps clinician shorthand leading decimals numeric", () => {
+    const spaced = lexInput(".5 tab");
+    expect(spaced[0]).toMatchObject({
+      original: ".5",
+      kind: LexKind.Number,
+      value: 0.5
+    });
+
+    const compact = lexInput(".5tab");
+    expect(compact.map((token) => token.original)).toEqual([".5", "tab"]);
+    expect(compact[0]).toMatchObject({ kind: LexKind.Number, value: 0.5 });
+    expect(compact[1]?.kind).toBe(LexKind.Word);
+  });
+
   it("splits compact hyphenated natural units", () => {
     const stickPack = lexInput("1stick-pack");
     expect(stickPack.map((token) => token.original)).toEqual(["1", "stick-pack"]);

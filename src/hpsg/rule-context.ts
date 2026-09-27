@@ -1,6 +1,7 @@
 import { Token, ParserState } from "../parser-state";
 import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
 import { ParseOptions } from "../types";
+import type { MedicationDateListMatch } from "../date-interpretation";
 import {
   ANTE_MERIDIEM_TOKENS,
   MERIDIEM_TOKENS,
@@ -14,9 +15,21 @@ export interface HpsgClauseContext {
   state: ParserState;
   tokens: Token[];
   options?: ParseOptions;
+  dateSpans: MedicationDateListMatch[];
   limit: number;
   deps: HpsgProjectionDeps & HpsgUnificationContext;
   project?: boolean;
+}
+
+export function sourceRangeOverlapsContextDate(
+  context: HpsgClauseContext,
+  start: number,
+  end: number
+): boolean {
+  for (const span of context.dateSpans) {
+    if (start < span.end && span.start < end) return true;
+  }
+  return false;
 }
 
 export function normalizeTokenLower(token: Token): string {

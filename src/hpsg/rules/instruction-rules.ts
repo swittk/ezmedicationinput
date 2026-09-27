@@ -48,6 +48,7 @@ import {
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  sourceRangeOverlapsContextDate,
   joinTokenText,
   lexicalRule,
   normalizeTokenLower,
@@ -249,6 +250,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
+    if (sourceRangeOverlapsContextDate(context, first.sourceStart, first.sourceEnd)) return [];
     if (semanticActivityWindowStartsAt(context, cursor)) return [];
     if (workflowStartIsAnchoredSiteModifier(context, cursor)) return [];
     const firstFrame = getProceduralFrames(context).find((frame) =>
@@ -709,6 +711,13 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? context.state.input.slice(range.start, range.end).replace(/\s+/g, " ").trim()
       : joinTokenText(bodyTokens);
     if (!range || !text) {
+      return [];
+    }
+    if (sourceRangeOverlapsContextDate(
+      context,
+      range.start,
+      range.end
+    )) {
       return [];
     }
     const previous = context.tokens[bodyStart - 1];
