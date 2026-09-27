@@ -1,4 +1,5 @@
 import { parseHpsgClause } from "./hpsg/clause-parser";
+import { findMedicationDateListSpans } from "./date-interpretation";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
 import { buildTranslationPrimitiveElement, mergeI18nRecords } from "./fhir-translations";
 import { lexInput } from "./lexer/lex";
@@ -244,12 +245,14 @@ function cleanupClause(state: ParserState): void {
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
+    if (!schedule.calendarEvents?.length) delete schedule.calendarEvents;
     if (
       schedule.count === undefined &&
       schedule.countMax === undefined &&
       schedule.duration === undefined &&
       schedule.durationMax === undefined &&
       schedule.durationUnit === undefined &&
+      schedule.boundsStart === undefined &&
       schedule.frequency === undefined &&
       schedule.frequencyMax === undefined &&
       schedule.period === undefined &&
@@ -263,7 +266,8 @@ function cleanupClause(state: ParserState): void {
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&
-      !schedule.timeOfDay
+      !schedule.timeOfDay &&
+      !schedule.calendarEvents
     ) {
       delete clause.schedule;
     }
@@ -421,6 +425,7 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
     state,
     tokens,
     options,
+    dateSpans: findMedicationDateListSpans(input, options),
     limit: tokens.length,
     deps: {
       addDayOfWeekList,

@@ -936,6 +936,36 @@ export function alternateEventCadenceRule(): HpsgLexicalRule<HpsgClauseContext> 
   });
 }
 
+export function calendarDateListRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.calendarDateList", (context, start) => {
+    const first = tokensAvailable(context, start, 1)?.[0];
+    if (!first) return [];
+    const match = context.dateSpans.find((span) => span.start === first.sourceStart);
+    if (!match || match.unresolved || !match.events.length) return [];
+
+    const members: Token[] = [];
+    for (let cursor = start; cursor < context.limit; cursor += 1) {
+      const token = context.tokens[cursor];
+      if (!token || context.state.consumed.has(token.index)) break;
+      if (token.sourceStart >= match.end) break;
+      members.push(token);
+    }
+    if (!members.length || members[members.length - 1].sourceEnd > match.end) return [];
+
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.calendarDateList",
+      tokens: members,
+      synsem: {
+        head: { schedule: { calendarEvents: match.events } },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 36 + members.length
+    })];
+  });
+}
+
 export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.timing", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -979,6 +1009,29 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             ? [`Avoid ambiguous timing abbreviation ${descriptor.discouraged}.`]
             : undefined,
           score: 8
+        })
+      ];
+    }
+    const weeklyWeekday = lower.match(/^weekly-(mon|tue|wed|thu|fri|sat|sun)$/u);
+    if (weeklyWeekday) {
+      return [
+        lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.weekdayRecurrence",
+          tokens: [token],
+          synsem: {
+            head: {
+              schedule: {
+                frequency: 1,
+                period: 1,
+                periodUnit: FhirPeriodUnit.Week,
+                dayOfWeek: [weeklyWeekday[1] as FhirDayOfWeek]
+              }
+            },
+            valence: {},
+            cont: { clauseKind: "administration" }
+          },
+          score: 18
         })
       ];
     }

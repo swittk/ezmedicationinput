@@ -610,6 +610,28 @@ function resolveRepeatBoundsDuration(
   };
 }
 
+function resolveRepeatBoundsStart(
+  repeat: FhirTimingRepeat | undefined,
+  timeZone: string
+): Date | null {
+  const value = repeat?.boundsPeriod?.start;
+  if (!value) return null;
+  const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (dateOnly) {
+    return makeZonedDate(
+      timeZone,
+      Number(dateOnly[1]),
+      Number(dateOnly[2]),
+      Number(dateOnly[3]),
+      0,
+      0,
+      0
+    );
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function resolveRepeatDurationCapEnd(
   repeat: FhirTimingRepeat | undefined,
   anchor: Date,
@@ -938,6 +960,78 @@ function inferWhenFallbackEntries(
   });
 }
 
+function exactTimingEventOccurrences(
+  timing: FhirTiming,
+  repeat: FhirTimingRepeat | undefined,
+  config: NextDueDoseConfig,
+  from: Date,
+  orderedAt: Date | null,
+  courseEnd: Date | null,
+  timeZone: string,
+  limit: number,
+  priorCount: number
+): string[] | undefined {
+  if (!timing.event?.length) return undefined;
+
+  const whenCodes = repeat?.when ?? [];
+  const expanded = repeat ? expandWhenCodes(whenCodes, config, repeat) : [];
+  for (const clock of repeat?.timeOfDay ?? []) {
+    expanded.push({ time: normalizeClock(clock), dayShift: 0 });
+  }
+  if (!expanded.length && repeat && whenCodes.length) {
+    expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
+  }
+
+  const candidates: Date[] = [];
+  for (const value of timing.event) {
+    const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+    if (dateOnly) {
+      const day = makeZonedDate(
+        timeZone,
+        Number(dateOnly[1]),
+        Number(dateOnly[2]),
+        Number(dateOnly[3]),
+        0,
+        0,
+        0
+      );
+      if (!day) continue;
+      if (expanded.length) {
+        for (const entry of expanded) {
+          const targetDay = entry.dayShift === 0 ? day : addLocalDays(day, entry.dayShift, timeZone);
+          const target = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+          if (target) candidates.push(target);
+        }
+      } else {
+        candidates.push(day);
+      }
+      continue;
+    }
+
+    const instant = new Date(value);
+    if (!Number.isNaN(instant.getTime())) candidates.push(instant);
+  }
+
+  candidates.sort((left, right) => left.getTime() - right.getTime());
+  const unique: Date[] = [];
+  let previousTime: number | undefined;
+  for (const candidate of candidates) {
+    const time = candidate.getTime();
+    if (time === previousTime) continue;
+    previousTime = time;
+    if (candidate < from) continue;
+    if (orderedAt && candidate < orderedAt) continue;
+    if (courseEnd && candidate >= courseEnd) continue;
+    unique.push(candidate);
+  }
+
+  const countCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  const remaining = countCap === undefined
+    ? limit
+    : Math.max(0, Math.min(limit, countCap - priorCount));
+  return unique.slice(0, remaining).map((candidate) => formatZonedIso(candidate, timeZone));
+}
+
 function mergeFrequencyDefaults(
   base?: FrequencyFallbackTimes,
   override?: FrequencyFallbackTimes
@@ -1115,7 +1209,7 @@ export function nextDueDoses(
     return [];
   }
 
-  const from = coerceDate(options.from, "from");
+  let from = coerceDate(options.from, "from");
   const orderedAt =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
   const priorCountInput = options.priorCount;
@@ -1126,7 +1220,6 @@ export function nextDueDoses(
   }
   let priorCount = priorCountInput !== undefined ? Math.floor(priorCountInput) : 0;
   const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt;
-  const baseTime = orderedAt ?? from;
 
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
@@ -1178,8 +1271,31 @@ export function nextDueDoses(
   };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
+  const boundsStart = resolveRepeatBoundsStart(repeat, timeZone);
+  if (boundsStart && boundsStart > from) {
+    from = boundsStart;
+  }
+  const baseCandidate = orderedAt ?? from;
+  const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd =
     timing && repeat ? resolveRepeatDurationCapEnd(repeat, baseTime, timeZone) : null;
+
+  if (timing) {
+    const exactEvents = exactTimingEventOccurrences(
+      timing,
+      repeat,
+      config,
+      from,
+      orderedAt,
+      courseEnd,
+      timeZone,
+      Math.floor(limit),
+      priorCount
+    );
+    if (exactEvents !== undefined) {
+      return exactEvents;
+    }
+  }
 
   if (
     needsDerivedPriorCount &&
@@ -1252,7 +1368,7 @@ export function nextDueDoses(
     if (
       expanded.length === 0 &&
       timeOfDayEntries.length === 0 &&
-      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
+      (enforceDayFilter || !repeat.frequency || !repeat.period || !repeat.periodUnit)
     ) {
       expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
     }

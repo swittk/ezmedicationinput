@@ -48,6 +48,7 @@ import {
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  sourceRangeOverlapsContextDate,
   joinTokenText,
   lexicalRule,
   normalizeTokenLower,
@@ -709,6 +710,13 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? context.state.input.slice(range.start, range.end).replace(/\s+/g, " ").trim()
       : joinTokenText(bodyTokens);
     if (!range || !text) {
+      return [];
+    }
+    if (sourceRangeOverlapsContextDate(
+      context,
+      range.start,
+      range.end
+    )) {
       return [];
     }
     const previous = context.tokens[bodyStart - 1];

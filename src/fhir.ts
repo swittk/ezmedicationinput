@@ -36,6 +36,7 @@ import {
 import {
   AdvicePolarity,
   CanonicalActivityTimingExpr,
+  CanonicalCalendarEventExpr,
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
@@ -44,6 +45,7 @@ import {
   FhirCodeableConcept,
   FhirDosage,
   FhirPeriodUnit,
+  FhirPrimitiveElement,
   FhirQuantity,
   FhirRange,
   FhirTimingRepeat,
@@ -59,6 +61,7 @@ export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/Str
 export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
 export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
 export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
+export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -472,6 +475,67 @@ function describeDurationUnit(unit: FhirPeriodUnit, value: number | undefined): 
   }
 }
 
+function extensionChild(
+  extension: { extension?: Array<{ url: string; valueCode?: string; valueString?: string; valueBoolean?: boolean; valueInteger?: number }> },
+  url: string
+) {
+  return extension.extension?.find((candidate) => candidate.url === url);
+}
+
+function calendarEventPrimitive(event: CanonicalCalendarEventExpr): FhirPrimitiveElement {
+  return {
+    extension: [{
+      url: TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
+      extension: [
+        { url: "calendar", valueCode: event.calendar },
+        { url: "calendarYear", valueInteger: event.calendarYear },
+        { url: "month", valueInteger: event.month },
+        { url: "day", valueInteger: event.day },
+        { url: "sourceText", valueString: event.sourceText },
+        ...(event.inferredYear ? [{ url: "inferredYear", valueBoolean: true }] : [])
+      ]
+    }]
+  };
+}
+
+function calendarEventFromFhir(
+  value: string,
+  primitive?: FhirPrimitiveElement
+): CanonicalCalendarEventExpr | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  if (!match) return undefined;
+  const isoYear = Number(match[1]);
+  const isoMonth = Number(match[2]);
+  const isoDay = Number(match[3]);
+  if (!Number.isFinite(isoYear) || !Number.isFinite(isoMonth) || !Number.isFinite(isoDay)) return undefined;
+  const date = new Date(Date.UTC(isoYear, isoMonth - 1, isoDay));
+  if (
+    date.getUTCFullYear() !== isoYear ||
+    date.getUTCMonth() !== isoMonth - 1 ||
+    date.getUTCDate() !== isoDay
+  ) return undefined;
+
+  const metadata = primitive?.extension?.find(
+    (candidate) => candidate.url === TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL
+  );
+  const calendar = extensionChild(metadata ?? {}, "calendar")?.valueCode;
+  const calendarYear = extensionChild(metadata ?? {}, "calendarYear")?.valueInteger;
+  const month = extensionChild(metadata ?? {}, "month")?.valueInteger;
+  const day = extensionChild(metadata ?? {}, "day")?.valueInteger;
+  const sourceText = extensionChild(metadata ?? {}, "sourceText")?.valueString;
+  const inferredYear = extensionChild(metadata ?? {}, "inferredYear")?.valueBoolean;
+
+  return {
+    isoDate: `${match[1]}-${match[2]}-${match[3]}`,
+    calendar: calendar || "gregory",
+    calendarYear: calendarYear ?? isoYear,
+    month: month ?? isoMonth,
+    day: day ?? isoDay,
+    sourceText: sourceText ?? value,
+    inferredYear: inferredYear || undefined
+  };
+}
+
 function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirQuantity {
   return {
     value,
@@ -635,6 +699,18 @@ export function canonicalToFhir(
   let hasRepeat = false;
   const schedule = clause.schedule;
 
+  if (schedule?.calendarEvents?.length) {
+    dosage.timing = {
+      ...(dosage.timing ?? {}),
+      event: schedule.calendarEvents.map((event) => event.isoDate),
+      _event: schedule.calendarEvents.map(calendarEventPrimitive)
+    };
+  }
+  if (schedule?.boundsStart) {
+    repeat.boundsPeriod = { start: schedule.boundsStart };
+    hasRepeat = true;
+  }
+
   if (schedule?.frequency !== undefined && schedule.frequency > 0) {
     repeat.frequency = schedule.frequency;
     hasRepeat = true;
@@ -740,7 +816,10 @@ export function canonicalToFhir(
   }
 
   if (hasRepeat) {
-    dosage.timing = { repeat };
+    dosage.timing = {
+      ...(dosage.timing ?? {}),
+      repeat
+    };
   }
 
   if (schedule?.timingCode) {
@@ -1032,6 +1111,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     activityTiming?.length ||
     occurrenceCap !== undefined ||
     repeat?.boundsDuration ||
+    repeat?.boundsPeriod?.start ||
     repeat?.boundsRange ||
     repeat?.duration !== undefined ||
     repeat?.durationMax !== undefined ||
@@ -1048,7 +1128,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     offsetMaxExtension !== undefined ||
     repeat?.dayOfWeek?.length ||
     repeat?.when?.length ||
-    repeat?.timeOfDay?.length
+    repeat?.timeOfDay?.length ||
+    dosage.timing?.event?.length
   ) {
     clause.schedule = {
       timingCode: dosage.timing?.code?.coding?.[0]?.code,
@@ -1057,6 +1138,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
+      boundsStart: repeat?.boundsPeriod?.start,
       administrationDuration: repeat?.duration,
       administrationDurationMax: repeat?.durationMax,
       administrationDurationUnit: repeat?.durationUnit,
@@ -1072,7 +1154,10 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       occurrenceCap,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
-      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined
+      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
+      calendarEvents: dosage.timing?.event
+        ?.map((value, index) => calendarEventFromFhir(value, dosage.timing?._event?.[index]))
+        .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
     clause.warnings = appendWarning(clause.warnings, timingBounds.warning);
   }
@@ -1172,12 +1257,26 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
+  if (dosage.timing?.event?.length) {
+    state.primaryClause.schedule = {
+      ...(state.primaryClause.schedule ?? {}),
+      calendarEvents: dosage.timing.event
+        .map((value, index) => calendarEventFromFhir(value, dosage.timing?._event?.[index]))
+        .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
+    };
+  }
   state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
+  if (dosage.timing?.repeat?.boundsPeriod?.start) {
+    state.primaryClause.schedule = {
+      ...(state.primaryClause.schedule ?? {}),
+      boundsStart: dosage.timing.repeat.boundsPeriod.start
+    };
+  }
   if (dosage.timing?.repeat?.duration !== undefined && dosage.timing.repeat.durationUnit) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),

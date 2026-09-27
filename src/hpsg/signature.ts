@@ -4,6 +4,7 @@ import {
   CanonicalDoseRange,
   CanonicalAdditionalInstructionExpr,
   CanonicalActivityTimingExpr,
+  CanonicalCalendarEventExpr,
   CanonicalOccurrenceCapExpr,
   BodySiteSpatialRelation,
   EventTiming,
@@ -161,6 +162,7 @@ export interface HpsgScheduleFeature {
   when?: EventTiming[];
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];
+  calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
   occurrenceCap?: CanonicalOccurrenceCapExpr;
 }

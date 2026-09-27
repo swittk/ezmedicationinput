@@ -1647,6 +1647,21 @@ function translateSiteThai(
   return qualified(site);
 }
 
+function describeCalendarEventsThai(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const events = schedule?.calendarEvents;
+  if (!events?.length) return undefined;
+  const parts: string[] = [];
+  for (const event of events) {
+    parts.push(`${event.day}/${event.month}/${event.calendarYear}`);
+  }
+  if (!parts.length) return undefined;
+  if (parts.length === 1) return `วันที่ ${parts[0]}`;
+  if (parts.length === 2) return `วันที่ ${parts[0]} และ ${parts[1]}`;
+  return `วันที่ ${parts.slice(0, -1).join(", ")} และ ${parts[parts.length - 1]}`;
+}
+
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -1868,6 +1883,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
     }
     parts.push(days.join(","));
   }
+  if (schedule.calendarEvents?.length) {
+    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+  }
   if (schedule.countMax !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
@@ -2022,6 +2040,7 @@ function formatLongThai(
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
+  const calendarEventPart = describeCalendarEventsThai(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
@@ -2071,6 +2090,9 @@ function formatLongThai(
   }
   for (const activityTiming of formatActivityTimingThai(schedule)) {
     segments.push(activityTiming);
+  }
+  if (calendarEventPart) {
+    segments.push(calendarEventPart);
   }
   if (dayPart) {
     segments.push(dayPart);
@@ -2145,6 +2167,7 @@ function formatLongThai(
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
+    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);

@@ -6,6 +6,7 @@ import { combineSigns } from "./unification";
 import {
   compactIntervalRule,
   cadenceFirstFrequencyRule,
+  calendarDateListRule,
   cadenceFirstImplicitSingleDoseRule,
   countAndDurationRule,
   countFrequencyRule,
@@ -106,6 +107,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       multiplicativeDoseFrequencyRule(),
       perTargetCountDoseRule(),
       doseLexicalRule(),
+      calendarDateListRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
       cadenceFirstImplicitSingleDoseRule(),

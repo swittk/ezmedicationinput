@@ -52,6 +52,7 @@ import {
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
+  sourceRangeOverlapsContextDate,
   isAmPmLower,
   isClockLikeLower,
   isPunctuation,
@@ -299,6 +300,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const secondAfterAnchorLower = secondAfterAnchor && !context.state.consumed.has(secondAfterAnchor.index)
       ? normalizeTokenLower(secondAfterAnchor)
       : undefined;
+    if (
+      firstAfterAnchor &&
+      sourceRangeOverlapsContextDate(
+        context,
+        firstAfterAnchor.sourceStart,
+        firstAfterAnchor.sourceEnd
+      )
+    ) {
+      return signs;
+    }
     if (
       firstAfterAnchorLower &&
       (

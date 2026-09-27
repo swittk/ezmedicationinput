@@ -360,8 +360,10 @@ export interface FhirTimingRepeat extends FhirElement {
   offset?: number;
 }
 
-export interface FhirTiming {
+export interface FhirTiming extends FhirElement {
   event?: string[];
+  /** Primitive metadata corresponding positionally to event. */
+  _event?: FhirPrimitiveElement[];
   repeat?: FhirTimingRepeat;
   code?: FhirCodeableConcept;
 }
@@ -1008,12 +1010,63 @@ export type InstructionSemanticResolver = (
   | undefined
   | Promise<InstructionSemanticResolution | null | undefined>;
 
+export type MedicationDateOrder = "DMY" | "MDY";
+
+export interface MedicationDatePlausibleWindow {
+  /** Maximum inferred-year distance into the past. Defaults to 5 years. */
+  pastYears?: number;
+  /** Maximum inferred-year distance into the future. Defaults to 10 years. */
+  futureYears?: number;
+}
+
+export interface MedicationDatePolicy {
+  /** Enabled calendar resolver ids, in preference order. Defaults by detected locale. */
+  calendars?: string[];
+  /** Numeric slash-date field order. Defaults to DMY for Thai and MDY for en-US. */
+  dateOrder?: MedicationDateOrder;
+  /** ISO date used to resolve two-digit years. Defaults to the current date. */
+  referenceDate?: string;
+  /** Plausibility window applied only to inferred two-digit years. */
+  plausibleWindow?: MedicationDatePlausibleWindow;
+  /** How to handle multiple valid calendar interpretations. Defaults to prefer-first. */
+  ambiguity?: "prefer-first" | "preserve" | "reject";
+}
+
+export interface MedicationDateResolverContext {
+  locale: string;
+  referenceDate: string;
+}
+
+export interface MedicationDateResolverResult {
+  /** Gregorian year used in the normalized ISO date. */
+  isoYear: number;
+  /** Full year in the resolver's source calendar. */
+  calendarYear: number;
+  /** Whether a two-digit source year was expanded. */
+  inferredYear: boolean;
+}
+
+export interface MedicationDateResolver {
+  /** Stable resolver/calendar id, e.g. gregory or buddhist. */
+  id: string;
+  resolveYear(
+    sourceYear: number,
+    sourceYearDigits: number,
+    context: MedicationDateResolverContext
+  ): MedicationDateResolverResult | undefined;
+}
+
 export interface ParseOptions extends FormatOptions {
   /**
    * Optional medication context that assists with default unit inference.
    * May be omitted or explicitly set to null when no contextual clues exist.
    */
   context?: MedicationContext | null;
+  /**
+   * Advanced date interpretation overrides. Ordinary callers can omit this:
+   * locale-relevant calendar resolvers are enabled automatically.
+   */
+  datePolicy?: MedicationDatePolicy;
   routeMap?: Record<string, RouteCode>;
   unitMap?: Record<string, string>;
   /**
@@ -1203,6 +1256,21 @@ export interface CanonicalActivityTimingExpr {
   offsetMax?: number;
 }
 
+export interface CanonicalCalendarEventExpr {
+  /** Gregorian ISO calendar date used for FHIR Timing.event. */
+  isoDate: string;
+  /** Resolver/calendar that interpreted the source year. */
+  calendar: string;
+  /** Full source-calendar year after any two-digit expansion. */
+  calendarYear: number;
+  month: number;
+  day: number;
+  /** Exact source fragment representing this event or inherited day. */
+  sourceText: string;
+  /** True when a two-digit source year was expanded using the reference date. */
+  inferredYear?: boolean;
+}
+
 export interface CanonicalScheduleExpr {
   timingCode?: string;
   count?: number;
@@ -1210,6 +1278,8 @@ export interface CanonicalScheduleExpr {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  /** Earliest calendar date/time on which this schedule becomes active. */
+  boundsStart?: string;
   /** Duration of each administration occurrence, distinct from regimen bounds duration. */
   administrationDuration?: number;
   administrationDurationMax?: number;
@@ -1228,6 +1298,8 @@ export interface CanonicalScheduleExpr {
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];
+  /** Explicit calendar occurrences, projected to FHIR Timing.event. */
+  calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
   occurrenceCap?: CanonicalOccurrenceCapExpr;
   evidence?: CanonicalEvidence[];

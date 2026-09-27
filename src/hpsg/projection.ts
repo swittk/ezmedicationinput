@@ -80,6 +80,17 @@ function applySchedule(
   if (schedule.dayOfWeek) {
     deps.addDayOfWeekList(state, schedule.dayOfWeek);
   }
+  if (schedule.calendarEvents?.length) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    const existing = target.calendarEvents ? target.calendarEvents.slice() : [];
+    for (const event of schedule.calendarEvents) {
+      const key = stableStructureKey(event);
+      if (!existing.some((candidate) => stableStructureKey(candidate) === key)) {
+        existing.push(event);
+      }
+    }
+    target.calendarEvents = existing;
+  }
   if (schedule.timeOfDay?.length) {
     const existing = state.timeOfDay ? state.timeOfDay.slice() : [];
     for (const time of schedule.timeOfDay) {

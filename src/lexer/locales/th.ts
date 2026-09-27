@@ -284,10 +284,28 @@ function isKnownThaiDomainTerm(value: string): boolean {
   );
 }
 
+const THAI_WEEKDAY_RECURRENCE_PHRASES: LocalePhrase[] = [];
+{
+  const seen = new Set<string>();
+  for (const daySurface of Object.keys(DAY_OF_WEEK_TOKENS)) {
+    if (!/[\u0E00-\u0E7F]/u.test(daySurface)) continue;
+    const bare = daySurface.startsWith("วัน") ? daySurface.slice(3) : daySurface;
+    if (!bare || seen.has(bare)) continue;
+    seen.add(bare);
+    const day = DAY_OF_WEEK_TOKENS[daySurface] ?? DAY_OF_WEEK_TOKENS[bare];
+    if (!day) continue;
+    THAI_WEEKDAY_RECURRENCE_PHRASES.push(
+      { parts: ["ทุก", `วัน${bare}`], canonical: `weekly-${day}` },
+      { parts: ["ทุก", "วัน", bare], canonical: `weekly-${day}` }
+    );
+  }
+}
+
 // Longest phrases first. ICU segments Thai compounds into linguistic words;
 // this layer recomposes medication-specific multiword lexemes where the grammar
 // benefits from a single canonical item.
 const THAI_PHRASES: readonly LocalePhrase[] = [
+  ...THAI_WEEKDAY_RECURRENCE_PHRASES,
   ...getRelationLocalePhrases("th"),
   { parts: ["หลัง", "ตื่น", "นอน"], canonical: "wake" },
   { parts: ["ตื่น", "นอน"], canonical: "wake" },

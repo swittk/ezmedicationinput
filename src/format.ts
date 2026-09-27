@@ -876,6 +876,26 @@ function formatSite(
   return `${preposition} ${noun}`.trim();
 }
 
+function describeCalendarEventsEnglish(
+  schedule: CanonicalScheduleExpr | undefined
+): string | undefined {
+  const events = schedule?.calendarEvents;
+  if (!events?.length) return undefined;
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  ];
+  const parts: string[] = [];
+  for (const event of events) {
+    const year = Number(event.isoDate.slice(0, 4));
+    const month = Number(event.isoDate.slice(5, 7));
+    const day = Number(event.isoDate.slice(8, 10));
+    if (!year || !month || !day || !months[month - 1]) continue;
+    parts.push(`${day} ${months[month - 1]} ${year}`);
+  }
+  return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
+}
+
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -1053,6 +1073,9 @@ function formatShort(clause: CanonicalSigClause): string {
     }
     parts.push(times.join(","));
   }
+  if (schedule.calendarEvents?.length) {
+    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+  }
   if (schedule.countMax !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
@@ -1158,6 +1181,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
+  const calendarEventPart = describeCalendarEventsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
     ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
@@ -1197,6 +1221,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   for (const activityTiming of formatActivityTimingEnglish(schedule)) {
     segments.push(activityTiming);
+  }
+  if (calendarEventPart) {
+    segments.push(calendarEventPart);
   }
   if (dayPart) {
     segments.push(dayPart);
@@ -1250,6 +1277,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
+    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
