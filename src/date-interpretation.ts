@@ -28,10 +28,13 @@ export interface MedicationDateListMatch {
 const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
 const YEARFUL_SLASH_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
 const NUMERIC_DATE_SOURCE = String.raw`(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?)`;
+const ENGLISH_MONTH_NAME_SOURCE = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
+const TEXTUAL_ENGLISH_DATE_SOURCE = String.raw`\d{1,2}\s+${ENGLISH_MONTH_NAME_SOURCE}\s+\d{4}`;
+const CALENDAR_DATE_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
-const DATE_LIST_PART_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|\d{1,2})`;
-const DATE_LIST_SOURCE = String.raw`${NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`${YEARFUL_SLASH_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const DATE_LIST_PART_SOURCE = String.raw`(?:${CALENDAR_DATE_SOURCE}|\d{1,2})`;
+const DATE_LIST_SOURCE = String.raw`${CALENDAR_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
 const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bfrom\b\s+|\bstarting(?:\s+(?:on|from))?\b\s+|ตั้งแต่(?:วันที่)?\s*)`;
 const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bafter\b\s+|หลัง(?:วันที่)?\s*)`;
@@ -39,7 +42,22 @@ const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+
 const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
 const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
-const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?|\d{1,2}/gu;
+const TEXTUAL_ENGLISH_DATE_RE = new RegExp(
+  `^(\\d{1,2})\\s+(${ENGLISH_MONTH_NAME_SOURCE})\\s+(\\d{4})$`,
+  "iu"
+);
+const DATE_COMPONENT_RE = new RegExp(
+  `${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE}|\\d{1,2}`,
+  "giu"
+);
+const ENGLISH_MONTH_TOKEN_RE = new RegExp(`\\b${ENGLISH_MONTH_NAME_SOURCE}\\b`, "iu");
+
+function englishMonthNumber(value: string): number | undefined {
+  const key = value.toLowerCase().slice(0, 3);
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const index = months.indexOf(key);
+  return index >= 0 ? index + 1 : undefined;
+}
 
 function matchedDateRelationLead(
   text: string
@@ -236,6 +254,8 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
   for (let match = DATE_COMPONENT_RE.exec(listText); match; match = DATE_COMPONENT_RE.exec(listText)) {
     const text = match[0];
     const full = text.match(NUMERIC_DATE_RE);
+    const textual = text.match(TEXTUAL_ENGLISH_DATE_RE);
+    const textualMonth = textual ? englishMonthNumber(textual[2]) : undefined;
     parts.push({
       sourceText: text,
       start: match.index,
@@ -248,7 +268,15 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
             yearDigits: full[4]?.length,
             yearWasExplicit: full[4] !== undefined
           }
-        : { day: Number(text), yearWasExplicit: false })
+        : textual && textualMonth !== undefined
+          ? {
+              day: Number(textual[1]),
+              month: textualMonth,
+              year: Number(textual[3]),
+              yearDigits: textual[3].length,
+              yearWasExplicit: true
+            }
+          : { day: Number(text), yearWasExplicit: false })
     });
   }
   if (!parts.length) return { parts, effectiveEnd: 0 };
@@ -435,7 +463,7 @@ export function findMedicationDateListSpans(
   input: string,
   options?: ParseOptions
 ): MedicationDateListMatch[] {
-  if (input.indexOf("/") < 0 && input.indexOf("-") < 0) return [];
+  if (input.indexOf("/") < 0 && input.indexOf("-") < 0 && !ENGLISH_MONTH_TOKEN_RE.test(input)) return [];
   const output: MedicationDateListMatch[] = [];
   const seen = new Set<string>();
   const patterns = [
@@ -472,7 +500,11 @@ export function parseMedicationDateListAt(
   start: number,
   options?: ParseOptions
 ): MedicationDateListMatch | undefined {
-  if (start < 0 || start >= input.length || (input.indexOf("/", start) < 0 && input.indexOf("-", start) < 0)) return undefined;
+  if (
+    start < 0 ||
+    start >= input.length ||
+    (input.indexOf("/", start) < 0 && input.indexOf("-", start) < 0 && !ENGLISH_MONTH_TOKEN_RE.test(input.slice(start)))
+  ) return undefined;
   const source = input.slice(start);
   const hasExplicitLead = new RegExp(`^${DATE_LEAD_REQUIRED_SOURCE}`, "iu").test(source);
   const pattern = hasExplicitLead
@@ -490,7 +522,7 @@ export function sourceRangeOverlapsMedicationDate(
   end: number,
   options?: ParseOptions
 ): boolean {
-  if (input.indexOf("/") < 0 && input.indexOf("-") < 0) return false;
+  if (input.indexOf("/") < 0 && input.indexOf("-") < 0 && !ENGLISH_MONTH_TOKEN_RE.test(input)) return false;
   return findMedicationDateListSpans(input, options).some((span) =>
     start < span.end && span.start < end
   );

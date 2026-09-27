@@ -242,6 +242,16 @@ function cleanupClause(state: ParserState): void {
   const clause = state.primaryClause;
   const schedule = clause.schedule;
   if (schedule) {
+    if (
+      schedule.dayOfWeek &&
+      schedule.dayOfWeek.length > 1 &&
+      schedule.frequency === 1 &&
+      schedule.period === 1 &&
+      schedule.periodUnit === "wk" &&
+      schedule.timingCode === undefined
+    ) {
+      schedule.frequency = schedule.dayOfWeek.length;
+    }
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;

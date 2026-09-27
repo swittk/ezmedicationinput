@@ -685,4 +685,150 @@ describe("calendar date interpretation", () => {
     ]);
     expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain("28 Sep 2026");
   });
+
+
+  it("composes exact date-time pairs with bounded recurrence in English, Thai, and code-switch", () => {
+    const cases = [
+      {
+        input: "take 1 tab at 08:00 on 28/9 and at 20:00 on 1/10 then every Sunday at 09:30 until 30/11",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด เวลา 08:00 วันที่ 28/9 และ เวลา 20:00 วันที่ 1/10 จากนั้น ทุกวันอาทิตย์ เวลา 09:30 ถึงวันที่ 30/11",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take 1 tab เวลา 08:00 วันที่ 28/9 and at 20:00 on 1/10 จากนั้น every Sunday เวลา 09:30 until 30/11",
+        options: { datePolicy: { referenceDate: REFERENCE_DATE } }
+      }
+    ];
+
+    for (const item of cases) {
+      const result = parseSig(item.input, item.options);
+      expect(result.count).toBe(3);
+      expect(result.items[0]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[1]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[2]?.meta.leftoverText).toBeUndefined();
+      expect(result.items[0]?.fhir.timing).toMatchObject({
+        event: ["2026-09-28"],
+        repeat: { timeOfDay: ["08:00:00"] }
+      });
+      expect(result.items[1]?.fhir.timing).toMatchObject({
+        event: ["2026-10-01"],
+        repeat: { timeOfDay: ["20:00:00"] }
+      });
+      expect(result.items[2]?.fhir.timing?.repeat).toMatchObject({
+        boundsPeriod: { start: "2026-10-02", end: "2026-11-30" },
+        dayOfWeek: ["sun"],
+        timeOfDay: ["09:30:00"]
+      });
+      expect(nextDueDoses(result.items[2]!.fhir, {
+        from: "2026-09-27T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: 2
+      })).toEqual([
+        "2026-10-04T09:30:00+07:00",
+        "2026-10-11T09:30:00+07:00"
+      ]);
+    }
+  });
+
+  it("keeps distinct date-time pairs separate instead of creating a Cartesian product", () => {
+    const result = parseSig(
+      "take 1 tab at 08:00 on 28/9 and at 20:00 on 1/10",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(nextDueDoses(result.items[0]!.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 10
+    })).toEqual(["2026-09-28T08:00:00+07:00"]);
+    expect(nextDueDoses(result.items[1]!.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 10
+    })).toEqual(["2026-10-01T20:00:00+07:00"]);
+  });
+
+  it("separates recurring and exact-date unions that cannot share one FHIR Timing", () => {
+    const result = parseSig(
+      "take 1 tab every Sunday at 09:30 until 30/11 and on 28/9 at 08:00",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.fhir.timing?.event).toBeUndefined();
+    expect(result.items[0]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-30" },
+      dayOfWeek: ["sun"],
+      timeOfDay: ["09:30:00"]
+    });
+    expect(result.items[1]?.fhir.timing).toMatchObject({
+      event: ["2026-09-28"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+  });
+
+
+  it("treats exact-date AND recurrence as a union, not a transition", () => {
+    const result = parseSig(
+      "take 1 tab on 28/9 at 08:00 and every Sunday at 09:30 until 30/11",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.fhir.timing).toMatchObject({
+      event: ["2026-09-28"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+    expect(result.items[1]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-30" },
+      dayOfWeek: ["sun"],
+      timeOfDay: ["09:30:00"]
+    });
+    expect(result.items[1]?.fhir.timing?.repeat?.boundsPeriod?.start).toBeUndefined();
+  });
+
+  it("reparses English month-name dates emitted by formatSig without losing timing semantics", () => {
+    const exact = parseSig(
+      "take 1 tab at 08:00 and 20:00 on 28/9 and 1,4/10",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    const exactText = formatSig(exact.fhir, "long", { locale: "en" });
+    const exactRoundTrip = parseSig(exactText, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(exactRoundTrip.fhir.timing?.event).toEqual(exact.fhir.timing?.event);
+    expect(exactRoundTrip.fhir.timing?.repeat).toEqual(exact.fhir.timing?.repeat);
+    expect(exactRoundTrip.meta.leftoverText).toBeUndefined();
+
+    const recurring = parseSig(
+      "take 1 tab every Sunday at 09:30 from 5/10 until 30/11",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    const recurringText = formatSig(recurring.fhir, "long", { locale: "en" });
+    const recurringRoundTrip = parseSig(recurringText, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(recurringRoundTrip.fhir.timing?.event).toEqual(recurring.fhir.timing?.event);
+    expect(recurringRoundTrip.fhir.timing?.repeat).toEqual(recurring.fhir.timing?.repeat);
+    expect(recurringRoundTrip.meta.leftoverText).toBeUndefined();
+  });
+
+  it("encodes multiple explicit weekly weekdays with matching weekly frequency in Thai", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 09:30 ถึงวันที่ 30/11",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: ["09:30:00"],
+      boundsPeriod: { end: "2026-11-30" }
+    });
+    expect(result.longText).toContain("สัปดาห์ละ 2 ครั้ง");
+  });
 });

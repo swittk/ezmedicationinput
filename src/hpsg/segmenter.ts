@@ -105,6 +105,50 @@ function hasMeaningfulSchedule(state: ReturnType<typeof parseClauseState>): bool
   ));
 }
 
+function hasCalendarEvents(state: ReturnType<typeof parseClauseState>): boolean {
+  return Boolean(state.primaryClause.schedule?.calendarEvents?.length);
+}
+
+function hasClockAnchors(state: ReturnType<typeof parseClauseState>): boolean {
+  return Boolean(state.primaryClause.schedule?.timeOfDay?.length);
+}
+
+function hasRecurringCadence(state: ReturnType<typeof parseClauseState>): boolean {
+  const schedule = state.primaryClause.schedule;
+  return Boolean(schedule && (
+    schedule.timingCode ||
+    schedule.frequency !== undefined ||
+    schedule.period !== undefined ||
+    schedule.dayOfWeek?.length
+  ));
+}
+
+function sameClockSet(
+  left: ReturnType<typeof parseClauseState>,
+  right: ReturnType<typeof parseClauseState>
+): boolean {
+  const leftTimes = [...(left.primaryClause.schedule?.timeOfDay ?? [])].sort();
+  const rightTimes = [...(right.primaryClause.schedule?.timeOfDay ?? [])].sort();
+  return leftTimes.length === rightTimes.length &&
+    leftTimes.every((value, index) => value === rightTimes[index]);
+}
+
+function shouldSeparateCalendarSchedules(
+  prefix: ReturnType<typeof parseClauseState>,
+  continuation: ReturnType<typeof parseClauseState>
+): boolean {
+  const distinctExactClockPairs =
+    hasCalendarEvents(prefix) &&
+    hasCalendarEvents(continuation) &&
+    hasClockAnchors(prefix) &&
+    hasClockAnchors(continuation) &&
+    !sameClockSet(prefix, continuation);
+  const exactRecurringUnion =
+    (hasCalendarEvents(prefix) && hasRecurringCadence(continuation)) ||
+    (hasRecurringCadence(prefix) && hasCalendarEvents(continuation));
+  return distinctExactClockPairs || exactRecurringUnion;
+}
+
 function hasAdministrationHead(state: ReturnType<typeof parseClauseState>): boolean {
   const clause = state.primaryClause;
   return Boolean(
@@ -278,6 +322,7 @@ function scheduleOnlyAdministrationContinuation(
     if (findUnparsedTokenGroups(prefix).length || !hasMeaningfulSchedule(prefix)) return false;
   }
   if (connectorLower === "then") return true;
+  if (shouldSeparateCalendarSchedules(prefix, continuation)) return true;
   const prefixSchedule = prefix.primaryClause.schedule;
   return Boolean(
     prefixSchedule?.offset !== undefined || prefixSchedule?.offsetMin !== undefined ||
@@ -475,6 +520,34 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       continue;
     }
     if (token.original === "," && nextToken) {
+      const continuationEnd = nextContinuationProbeEnd(input, tokens, index);
+      const prefixHasDate = dateSpans.some((span) =>
+        span.start >= start && span.end <= token.sourceStart
+      );
+      const continuationHasDate = dateSpans.some((span) =>
+        span.start >= nextToken.sourceStart && span.end <= continuationEnd
+      );
+      if (prefixHasDate && continuationHasDate) {
+        const prefixText = input.slice(start, token.sourceStart).trim();
+        const continuationText = input.slice(nextToken.sourceStart, continuationEnd).trim();
+        const clockPattern = /(?:^|\s)\d{1,2}[:.]\d{2}(?=\s|$)/u;
+        if (clockPattern.test(prefixText) && clockPattern.test(continuationText)) {
+          const prefix = parseClauseState(prefixText, options);
+          const continuation = parseClauseState(continuationText, options);
+          if (
+            !findUnparsedTokenGroups(prefix).length &&
+            !findUnparsedTokenGroups(continuation).length &&
+            hasAdministrationHead(prefix) &&
+            shouldSeparateCalendarSchedules(prefix, continuation)
+          ) {
+            pushSegment(segments, input, start, token.sourceStart);
+            start = nextToken.sourceStart;
+            inheritedAdministrationContinuation = true;
+            scannedOffset = nextToken.sourceStart;
+            continue;
+          }
+        }
+      }
       const scheduleContinuation = scheduleOnlyAdministrationContinuation(
         input, tokens, index + 1, start, options, inheritedAdministrationContinuation
       );

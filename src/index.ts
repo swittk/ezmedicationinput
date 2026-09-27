@@ -778,9 +778,17 @@ function nextIsoCalendarDay(value: string): string | undefined {
 
 function propagateDateTransitionEventTiming(
   results: ParseResult[],
+  segments: ReturnType<typeof parseSigSegments>,
+  input: string,
   options?: ParseOptions
 ): void {
   for (let index = 1; index < results.length; index += 1) {
+    const previousSegment = segments[index - 1];
+    const currentSegment = segments[index];
+    if (!previousSegment || !currentSegment) continue;
+    const transitionGap = input.slice(previousSegment.end, currentSegment.start);
+    if (!/(?:\bthen\b|จากนั้น)/iu.test(transitionGap)) continue;
+
     const previous = results[index - 1];
     const current = results[index];
     const previousSchedule = previous.meta.canonical.clauses[0]?.schedule;
@@ -863,7 +871,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
-  propagateDateTransitionEventTiming(rawResults, options);
+  propagateDateTransitionEventTiming(rawResults, segments, input, options);
   const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
@@ -925,7 +933,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
 
   const lintParseResults = results.map((item) => item.result);
   propagateTrailingSharedDuration(lintParseResults, segments, options);
-  propagateDateTransitionEventTiming(lintParseResults, options);
+  propagateDateTransitionEventTiming(lintParseResults, segments, input, options);
   const primary = resolvePrimaryLintResult(results, input, options);
 
   return {
@@ -961,7 +969,7 @@ export async function parseSigAsync(
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
-  propagateDateTransitionEventTiming(rawResults, options);
+  propagateDateTransitionEventTiming(rawResults, segments, input, options);
   const results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const primary = resolvePrimaryParseResult(results, input, options);
