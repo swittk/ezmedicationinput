@@ -243,6 +243,27 @@ describe("FHIR parser-state import", () => {
     });
   });
 
+  it("preserves timestamp-valued Timing.event through canonical and parser-state conversion", () => {
+    const input = {
+      timing: {
+        event: ["2026-09-28T14:30:00Z"]
+      }
+    };
+
+    const clause = canonicalFromFhir(input);
+    expect(clause.schedule?.calendarEvents?.[0]).toMatchObject({
+      isoDate: "2026-09-28",
+      fhirDateTime: "2026-09-28T14:30:00Z"
+    });
+    expect(canonicalToFhir(clause).timing?.event).toEqual(["2026-09-28T14:30:00Z"]);
+
+    const state = parserStateFromFhir(input);
+    expect(state.primaryClause.schedule?.calendarEvents?.[0]).toMatchObject({
+      isoDate: "2026-09-28",
+      fhirDateTime: "2026-09-28T14:30:00Z"
+    });
+  });
+
   it("preserves extension-only administration target counts when importing canonical site state", () => {
     const clause = canonicalFromFhir({
       site: {

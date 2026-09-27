@@ -377,7 +377,7 @@ function resolveDatePart(
   if (!candidates.length) return undefined;
   if (candidates.length === 1) return candidates[0];
   const ambiguity = options?.datePolicy?.ambiguity ?? "prefer-first";
-  if (ambiguity === "reject" || ambiguity === "preserve") return undefined;
+  if (ambiguity === "reject") return undefined;
   return candidates[0];
 }
 

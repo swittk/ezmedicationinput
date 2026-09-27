@@ -820,7 +820,14 @@ function propagateDateTransitionEventTiming(
     current.fhir.timing = current.fhir.timing ?? {};
     current.fhir.timing.repeat = {
       ...(current.fhir.timing.repeat ?? {}),
-      ...(currentSchedule.boundsStart ? { boundsPeriod: { start: currentSchedule.boundsStart } } : {}),
+      ...(currentSchedule.boundsStart || currentSchedule.boundsEnd
+        ? {
+          boundsPeriod: {
+            ...(currentSchedule.boundsStart ? { start: currentSchedule.boundsStart } : {}),
+            ...(currentSchedule.boundsEnd ? { end: currentSchedule.boundsEnd } : {})
+          }
+        }
+        : {}),
       ...(currentSchedule.when?.length ? { when: [...currentSchedule.when] } : {}),
       ...(currentSchedule.timeOfDay?.length ? { timeOfDay: [...currentSchedule.timeOfDay] } : {})
     };

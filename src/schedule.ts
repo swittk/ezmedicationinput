@@ -999,7 +999,8 @@ function exactTimingEventOccurrences(
   courseEnd: Date | null,
   timeZone: string,
   limit: number,
-  priorCount: number
+  priorCount: number,
+  derivePriorCount: boolean
 ): string[] | undefined {
   if (!timing.event?.length) return undefined;
 
@@ -1044,11 +1045,21 @@ function exactTimingEventOccurrences(
 
   candidates.sort((left, right) => left.getTime() - right.getTime());
   const unique: Date[] = [];
+  let historicalCount = 0;
   let previousTime: number | undefined;
   for (const candidate of candidates) {
     const time = candidate.getTime();
     if (time === previousTime) continue;
     previousTime = time;
+    if (
+      derivePriorCount &&
+      orderedAt &&
+      candidate >= orderedAt &&
+      candidate < from &&
+      (!courseEnd || candidate < courseEnd)
+    ) {
+      historicalCount += 1;
+    }
     if (candidate < from) continue;
     if (orderedAt && candidate < orderedAt) continue;
     if (courseEnd && candidate >= courseEnd) continue;
@@ -1056,9 +1067,10 @@ function exactTimingEventOccurrences(
   }
 
   const countCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  const effectivePriorCount = derivePriorCount ? historicalCount : priorCount;
   const remaining = countCap === undefined
     ? limit
-    : Math.max(0, Math.min(limit, countCap - priorCount));
+    : Math.max(0, Math.min(limit, countCap - effectivePriorCount));
   return unique.slice(0, remaining).map((candidate) => formatZonedIso(candidate, timeZone));
 }
 
@@ -1305,7 +1317,9 @@ export function nextDueDoses(
   if (boundsStart && boundsStart > from) {
     from = boundsStart;
   }
-  const baseCandidate = orderedAt ?? from;
+  const effectiveOrderedAt =
+    orderedAt && boundsStart && boundsStart > orderedAt ? boundsStart : orderedAt;
+  const baseCandidate = effectiveOrderedAt ?? from;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd = timing && repeat
     ? earlierDate(
@@ -1320,11 +1334,12 @@ export function nextDueDoses(
       repeat,
       config,
       from,
-      orderedAt,
+      effectiveOrderedAt,
       courseEnd,
       timeZone,
       Math.floor(limit),
-      priorCount
+      priorCount,
+      needsDerivedPriorCount
     );
     if (exactEvents !== undefined) {
       return exactEvents;
@@ -1333,7 +1348,7 @@ export function nextDueDoses(
 
   if (
     needsDerivedPriorCount &&
-    orderedAt &&
+    effectiveOrderedAt &&
     timing &&
     repeat &&
     repeatOccurrenceCap(repeat) !== undefined
@@ -1342,7 +1357,7 @@ export function nextDueDoses(
       timing,
       repeat,
       config,
-      orderedAt,
+      effectiveOrderedAt,
       from,
       timeZone
     );
@@ -2328,24 +2343,47 @@ function calculateTotalUnitsSingle(
   } else {
     endDay = from;
   }
+  const repeat = dosage.timing?.repeat;
+  const boundsStart = resolveRepeatBoundsStart(repeat, timeZone);
+  const countFrom = boundsStart && boundsStart > from ? boundsStart : from;
+  const effectiveOrderedAt =
+    orderedAtDate && boundsStart && boundsStart > orderedAtDate ? boundsStart : orderedAtDate;
+  const baseCandidate = effectiveOrderedAt ?? countFrom;
+  const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   endDay = minDate(
     endDay,
-    resolveRepeatDurationCapEnd(dosage.timing?.repeat, orderedAtDate ?? from, timeZone)
+    resolveRepeatDurationCapEnd(repeat, baseTime, timeZone)
   );
   endDay = minDate(
     endDay,
-    resolveRepeatBoundsEndExclusive(dosage.timing?.repeat, timeZone)
+    resolveRepeatBoundsEndExclusive(repeat, timeZone)
   );
 
-  const count = countScheduleEvents(
-    dosage,
-    from,
-    endDay,
-    config,
-    orderedAtDate ?? from,
-    orderedAtDate,
-    2000
-  );
+  const exactEvents = dosage.timing
+    ? exactTimingEventOccurrences(
+      dosage.timing,
+      repeat,
+      config,
+      countFrom,
+      effectiveOrderedAt,
+      endDay,
+      timeZone,
+      2000,
+      0,
+      Boolean(effectiveOrderedAt)
+    )
+    : undefined;
+  const count = exactEvents !== undefined
+    ? exactEvents.length
+    : countScheduleEvents(
+      dosage,
+      countFrom,
+      endDay,
+      config,
+      baseTime,
+      effectiveOrderedAt,
+      2000
+    );
 
   const doseQuantity = dosage.doseAndRate?.[0]?.doseQuantity?.value ?? 0;
   const targetMultiplier = getAdministrationTargetMultiplier(dosage, context);

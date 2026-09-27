@@ -623,6 +623,28 @@ describe("calendar date interpretation", () => {
     }
   });
 
+  it("preserves an existing end bound when transition propagation adds a start bound", () => {
+    const result = parseSig(
+      "take 1 tab after breakfast on 28/9/2026 then every Sunday until 30/11/2026",
+      { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[1]?.fhir.timing?.repeat?.boundsPeriod).toEqual({
+      start: "2026-09-29",
+      end: "2026-11-30"
+    });
+  });
+
+  it("uses Buddhist years consistently for Thai event and bound realization", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด หลังอาหารเช้า วันที่ 28/9/2026 จากนั้น ทุกวันอาทิตย์",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.count).toBe(2);
+    expect(result.items[0]?.longText).toContain("28/9/2569");
+    expect(result.items[1]?.longText).toContain("29/9/2569");
+  });
+
   it("supports bounded schedules with dates in medial positions and honors inclusive end dates", () => {
     const result = parseSig(
       "from 28/9 take 1 tab at 08:00 daily until 30/9",

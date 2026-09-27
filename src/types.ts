@@ -1022,14 +1022,14 @@ export interface MedicationDatePlausibleWindow {
 export interface MedicationDatePolicy {
   /** Enabled calendar resolver ids, in preference order. Defaults by detected locale. */
   calendars?: string[];
-  /** Numeric slash-date field order. Defaults to DMY for Thai and MDY for en-US. */
+  /** Numeric date field order. Defaults to DMY for Thai and MDY for en-US. */
   dateOrder?: MedicationDateOrder;
   /** ISO date used to resolve two-digit years. Defaults to the current date. */
   referenceDate?: string;
   /** Plausibility window applied only to inferred two-digit years. */
   plausibleWindow?: MedicationDatePlausibleWindow;
   /** How to handle multiple valid calendar interpretations. Defaults to prefer-first. */
-  ambiguity?: "prefer-first" | "preserve" | "reject";
+  ambiguity?: "prefer-first" | "reject";
 }
 
 export interface MedicationDateResolverContext {
@@ -1262,8 +1262,10 @@ export interface CanonicalActivityTimingExpr {
 }
 
 export interface CanonicalCalendarEventExpr {
-  /** Gregorian ISO calendar date used for FHIR Timing.event. */
+  /** Gregorian ISO calendar date used for date-only FHIR Timing.event values and display. */
   isoDate: string;
+  /** Original timestamp-valued FHIR Timing.event value, retained losslessly when present. */
+  fhirDateTime?: string;
   /** Resolver/calendar that interpreted the source year. */
   calendar: string;
   /** Full source-calendar year after any two-digit expansion. */

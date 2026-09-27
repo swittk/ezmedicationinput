@@ -525,8 +525,10 @@ function calendarEventFromFhir(
   const sourceText = extensionChild(metadata ?? {}, "sourceText")?.valueString;
   const inferredYear = extensionChild(metadata ?? {}, "inferredYear")?.valueBoolean;
 
+  const isoDate = `${match[1]}-${match[2]}-${match[3]}`;
   return {
-    isoDate: `${match[1]}-${match[2]}-${match[3]}`,
+    isoDate,
+    ...(value === isoDate ? {} : { fhirDateTime: value }),
     calendar: calendar || "gregory",
     calendarYear: calendarYear ?? isoYear,
     month: month ?? isoMonth,
@@ -702,7 +704,7 @@ export function canonicalToFhir(
   if (schedule?.calendarEvents?.length) {
     dosage.timing = {
       ...(dosage.timing ?? {}),
-      event: schedule.calendarEvents.map((event) => event.isoDate),
+      event: schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate),
       _event: schedule.calendarEvents.map(calendarEventPrimitive)
     };
   }
