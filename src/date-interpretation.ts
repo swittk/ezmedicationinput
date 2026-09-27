@@ -341,8 +341,11 @@ function resolveDatePart(
   };
   if (source.day === undefined || source.month === undefined) return undefined;
 
+  const textualEnglishDate = TEXTUAL_ENGLISH_DATE_RE.test(part.sourceText);
   const order = defaultDateOrder(locale, options);
-  const fields = dateFields(source.day, source.month, order);
+  const fields = textualEnglishDate
+    ? dateFields(source.day, source.month, "DMY")
+    : dateFields(source.day, source.month, order);
   if (!fields) return undefined;
 
   const context: MedicationDateResolverContext = {

@@ -788,6 +788,25 @@ describe("calendar date interpretation", () => {
     expect(result.items[1]?.fhir.timing?.repeat?.boundsPeriod?.start).toBeUndefined();
   });
 
+  it("keeps English month-name dates in day-month order under en-US locale", () => {
+    const exact = parseSig("take 1 tab on 5 Oct 2026 at 08:00", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(exact.meta.leftoverText).toBeUndefined();
+    expect(exact.fhir.timing).toMatchObject({
+      event: ["2026-10-05"],
+      repeat: { timeOfDay: ["08:00:00"] }
+    });
+
+    const unambiguous = parseSig("take 1 tab on 28 Sep 2026 at 08:00", {
+      locale: "en-US",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(unambiguous.meta.leftoverText).toBeUndefined();
+    expect(unambiguous.fhir.timing?.event).toEqual(["2026-09-28"]);
+  });
+
   it("reparses English month-name dates emitted by formatSig without losing timing semantics", () => {
     const exact = parseSig(
       "take 1 tab at 08:00 and 20:00 on 28/9 and 1,4/10",
@@ -814,6 +833,33 @@ describe("calendar date interpretation", () => {
     expect(recurringRoundTrip.fhir.timing?.event).toEqual(recurring.fhir.timing?.event);
     expect(recurringRoundTrip.fhir.timing?.repeat).toEqual(recurring.fhir.timing?.repeat);
     expect(recurringRoundTrip.meta.leftoverText).toBeUndefined();
+  });
+
+  it("counts weekday and clock combinations in weekly FHIR frequency", () => {
+    const result = parseSig(
+      "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 09:30 และ 20:30 ถึงวันที่ 12/10",
+      { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+    );
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 4,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: ["09:30:00", "20:30:00"],
+      boundsPeriod: { end: "2026-10-12" }
+    });
+    expect(nextDueDoses(result.fhir, {
+      from: "2026-09-27T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 6
+    })).toEqual([
+      "2026-09-28T09:30:00+07:00",
+      "2026-09-28T20:30:00+07:00",
+      "2026-10-01T09:30:00+07:00",
+      "2026-10-01T20:30:00+07:00",
+      "2026-10-05T09:30:00+07:00",
+      "2026-10-05T20:30:00+07:00"
+    ]);
   });
 
   it("encodes multiple explicit weekly weekdays with matching weekly frequency in Thai", () => {

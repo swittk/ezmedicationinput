@@ -250,7 +250,8 @@ function cleanupClause(state: ParserState): void {
       schedule.periodUnit === "wk" &&
       schedule.timingCode === undefined
     ) {
-      schedule.frequency = schedule.dayOfWeek.length;
+      schedule.frequency =
+        schedule.dayOfWeek.length * (schedule.timeOfDay?.length || 1);
     }
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
