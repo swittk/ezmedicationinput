@@ -70,8 +70,10 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   if (char !== ".") return false;
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
-  // Keep decimal points inside numeric tokens (e.g. 1.5 mL).
-  if (/\d/.test(before) && /\d/.test(after)) return false;
+  // Keep decimal points inside numeric tokens (e.g. 1.5 mL or clinician shorthand .5 tab).
+  if (/\d/.test(after) && (/\d/.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
+    return false;
+  }
   // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.).
   if (/[A-Za-z]/.test(before) && /[A-Za-z]/.test(after)) return false;
   const preceding = input.slice(Math.max(0, index - 3), index);

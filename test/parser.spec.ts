@@ -137,6 +137,26 @@ describe("parseSig core scenarios", () => {
     expect(result.longText).toBe("Use 1.5 tablets three times daily.");
   });
 
+  it("parses clinician shorthand leading-decimal doses", () => {
+    const spaced = parseSig("take .5 tablet daily");
+    expect(spaced.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(spaced.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(spaced.meta.leftoverText).toBeUndefined();
+
+    const compact = parseSig("take .5tab daily");
+    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(compact.meta.leftoverText).toBeUndefined();
+
+    const thai = parseSig("รับประทาน .5 เม็ด หลังอาหารเช้า");
+    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(thai.fhir.timing?.repeat?.when).toEqual(["PCM"]);
+    expect(thai.meta.leftoverText).toBeUndefined();
+  });
+
   it("keeps meal dash syntax disabled by default", () => {
     const result = parseSig("1-0-1 ac", { context: TAB_CONTEXT });
     expect(result.count).toBe(1);

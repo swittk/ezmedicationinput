@@ -220,6 +220,77 @@ describe("calendar date interpretation", () => {
     expect(fraction.fhir.timing?.event).toBeUndefined();
   });
 
+  it("supports explicit hyphen dates without stealing medication ranges", () => {
+    const dated = parseSig("take 1 tab on 28-9-26 after breakfast", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(dated.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(dated.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(dated.fhir.timing?.repeat?.when).toEqual(["PCM"]);
+    expect(dated.meta.leftoverText).toBeUndefined();
+
+    const yearless = parseSig("take 1 tab on 28-9 after breakfast", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(yearless.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(yearless.meta.leftoverText).toBeUndefined();
+
+    const bounded = parseSig("take 1 tab daily until 30-9-2026", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(bounded.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-09-30");
+    expect(bounded.meta.leftoverText).toBeUndefined();
+
+    const compressed = parseSig("take 1 tab on 28-9-26 and 1,4-10-26 after breakfast", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(compressed.fhir.timing?.event).toEqual([
+      "2026-09-28",
+      "2026-10-01",
+      "2026-10-04"
+    ]);
+    expect(compressed.meta.leftoverText).toBeUndefined();
+
+    const thai = parseSig("รับประทาน 1 เม็ด วันที่ 28-9-69 หลังอาหารเช้า", {
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(thai.fhir.timing?.event).toEqual(["2026-09-28"]);
+    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(thai.meta.leftoverText).toBeUndefined();
+
+    const doseRange = parseSig("take 1-2 tablets daily", {
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(doseRange.fhir.doseAndRate?.[0]?.doseRange).toMatchObject({
+      low: { value: 1, unit: "tab" },
+      high: { value: 2, unit: "tab" }
+    });
+    expect(doseRange.fhir.timing?.event).toBeUndefined();
+
+    const frequencyRange = parseSig("take 1 tab po 1-2 times daily", {
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(frequencyRange.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      frequencyMax: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(frequencyRange.fhir.timing?.event).toBeUndefined();
+
+    const bareAmbiguous = parseSig("take 1 tab 28-9-26 after breakfast", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(bareAmbiguous.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(bareAmbiguous.fhir.timing?.event).toBeUndefined();
+    expect(bareAmbiguous.meta.leftoverText).toContain("28-9-26");
+  });
+
   it("uses explicit locale date order for Gregorian two-digit dates", () => {
     const result = parseSig("take 1 tab on 09/28/26", {
       locale: "en-US",

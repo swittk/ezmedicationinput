@@ -26,20 +26,20 @@ export interface MedicationDateListMatch {
 }
 
 const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
-const YEARFUL_NUMERIC_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
-const NUMERIC_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}(?:\/\d{2,4})?`;
+const YEARFUL_SLASH_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
+const NUMERIC_DATE_SOURCE = String.raw`(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?)`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
 const DATE_LIST_PART_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|\d{1,2})`;
 const DATE_LIST_SOURCE = String.raw`${NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const YEARFUL_DATE_LIST_SOURCE = String.raw`${YEARFUL_NUMERIC_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`${YEARFUL_SLASH_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
 const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bfrom\b\s+|\bstarting(?:\s+(?:on|from))?\b\s+|ตั้งแต่(?:วันที่)?\s*)`;
 const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bafter\b\s+|หลัง(?:วันที่)?\s*)`;
 const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+|\btill\b\s+|(?:จน)?ถึง(?:วันที่)?\s*)`;
 const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
-const NUMERIC_DATE_RE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/u;
-const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}/gu;
+const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
+const DATE_COMPONENT_RE = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?|\d{1,2}/gu;
 
 function matchedDateRelationLead(
   text: string
@@ -243,10 +243,10 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
       ...(full
         ? {
             day: Number(full[1]),
-            month: Number(full[2]),
-            year: full[3] !== undefined ? Number(full[3]) : undefined,
-            yearDigits: full[3]?.length,
-            yearWasExplicit: full[3] !== undefined
+            month: Number(full[3]),
+            year: full[4] !== undefined ? Number(full[4]) : undefined,
+            yearDigits: full[4]?.length,
+            yearWasExplicit: full[4] !== undefined
           }
         : { day: Number(text), yearWasExplicit: false })
     });
@@ -435,12 +435,12 @@ export function findMedicationDateListSpans(
   input: string,
   options?: ParseOptions
 ): MedicationDateListMatch[] {
-  if (input.indexOf("/") < 0) return [];
+  if (input.indexOf("/") < 0 && input.indexOf("-") < 0) return [];
   const output: MedicationDateListMatch[] = [];
   const seen = new Set<string>();
   const patterns = [
     new RegExp(`${DATE_LEAD_REQUIRED_SOURCE}(${DATE_LIST_SOURCE})`, "giu"),
-    new RegExp(`(${YEARFUL_DATE_LIST_SOURCE})`, "giu")
+    new RegExp(`(${UNANCHORED_YEARFUL_DATE_LIST_SOURCE})`, "giu")
   ];
   for (const pattern of patterns) {
     for (let match = pattern.exec(input); match; match = pattern.exec(input)) {
@@ -472,12 +472,12 @@ export function parseMedicationDateListAt(
   start: number,
   options?: ParseOptions
 ): MedicationDateListMatch | undefined {
-  if (start < 0 || start >= input.length || input.indexOf("/", start) < 0) return undefined;
+  if (start < 0 || start >= input.length || (input.indexOf("/", start) < 0 && input.indexOf("-", start) < 0)) return undefined;
   const source = input.slice(start);
   const hasExplicitLead = new RegExp(`^${DATE_LEAD_REQUIRED_SOURCE}`, "iu").test(source);
   const pattern = hasExplicitLead
     ? new RegExp(`^${DATE_LEAD_REQUIRED_SOURCE}(${DATE_LIST_SOURCE})`, "iu")
-    : new RegExp(`^(${YEARFUL_DATE_LIST_SOURCE})`, "iu");
+    : new RegExp(`^(${UNANCHORED_YEARFUL_DATE_LIST_SOURCE})`, "iu");
   const match = source.match(pattern);
   if (!match) return undefined;
   return parseMatchedDateList(input, start, match[0], options);
@@ -490,7 +490,7 @@ export function sourceRangeOverlapsMedicationDate(
   end: number,
   options?: ParseOptions
 ): boolean {
-  if (input.indexOf("/") < 0) return false;
+  if (input.indexOf("/") < 0 && input.indexOf("-") < 0) return false;
   return findMedicationDateListSpans(input, options).some((span) =>
     start < span.end && span.start < end
   );
