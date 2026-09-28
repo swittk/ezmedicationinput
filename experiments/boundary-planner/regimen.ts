@@ -1,4 +1,5 @@
 import { normalizeOpenEndedSchedule } from './open-ended';
+import { normalizeTemporalBoundArtifacts, quarantineAmbiguousTemporalBounds } from './temporal-artifact-ownership';
 import { recognizeCycles } from './cycles';
 import { quarantineSchedule } from './admissibility';
 import { normalizeAnchoredBounds, normalizeClockFrequency } from './bounds';
@@ -70,13 +71,16 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
-    const openEndedChanged = normalizeOpenEndedSchedule(results[index], segments[index]?.text ?? '', options);
-    if (openEndedChanged) {
+    const source = segments[index]?.text ?? '';
+    if (quarantineAmbiguousTemporalBounds(results[index], source, options)) continue;
+    const temporalChanged = normalizeTemporalBoundArtifacts(results[index], source, options);
+    const openEndedChanged = normalizeOpenEndedSchedule(results[index], source, options);
+    if (temporalChanged || openEndedChanged) {
       results[index].longText = render(results[index].fhir, 'long', options);
       results[index].shortText = render(results[index].fhir, 'short', options);
       results[index].fhir.text = results[index].longText;
     }
-    const invalid = recognizeCycles(segments[index]?.text ?? '', options).find(c => c.error);
+    const invalid = recognizeCycles(source, options).find(c => c.error);
     if (invalid) quarantineSchedule(results[index], segments[index].text, invalid.error!);
   }
   if (results.length < 2) return [];

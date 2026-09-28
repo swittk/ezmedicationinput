@@ -8,7 +8,7 @@ import type { Token } from '../../src/parser-state';
 import type { ParseOptions, ParseResult } from '../../src/types';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from '../../src/hpsg/lexical-classes';
 import { quarantineSchedule } from './admissibility';
-import { buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from '../../src/instruction-graph-fhir';
+import { removeInstructionArtifactsOwnedByTemporalRanges } from './temporal-artifact-ownership';
 import { OPEN_ENDED_WORDS } from './temporal-relation-vocabulary';
 
 interface OpenEndedMarkerMatch {
@@ -103,33 +103,6 @@ export function openEndedBoundMarkerRule() {
   });
 }
 
-function removeOwnedInstructionArtifacts(item: ParseResult, markers: OpenEndedMarkerMatch[]): void {
-  const clause = item.meta.canonical.clauses[0];
-  if (!clause) return;
-  const base = clause.raw.start;
-  const ranges = markers.map(marker => ({ start: base + marker.start, end: base + marker.end }));
-  const overlaps = (start: number, end: number) => ranges.some(range => start < range.end && end > range.start);
-  const graph = clause.instructionGraph;
-  if (graph) {
-    graph.actions = graph.actions.filter(action => !overlaps(action.span.start, action.span.end));
-    graph.opaqueSpans = (graph.opaqueSpans ?? []).filter(span => !overlaps(span.start, span.end));
-    if (graph.coverage) {
-      const opaqueCharacters = (graph.opaqueSpans ?? []).reduce((sum, span) => sum + Math.max(0, span.end - span.start), 0);
-      graph.coverage.opaqueCharacters = opaqueCharacters;
-      graph.coverage.complete = opaqueCharacters === 0;
-    }
-    if (!graph.actions.length && !graph.opaqueSpans?.length) delete clause.instructionGraph;
-  }
-  if (clause.patientInstruction && markers.some(marker =>
-    clause.patientInstruction!.replace(/\s+/gu, '') === item.meta.canonical.clauses[0].rawText.slice(marker.start, marker.end).replace(/\s+/gu, '')
-  )) {
-    delete clause.patientInstruction;
-  }
-  const retained = (item.fhir.extension ?? []).filter(extension => extension.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
-  const graphExtension = buildInstructionGraphExtension(clause.instructionGraph);
-  item.fhir.extension = graphExtension ? [...retained, graphExtension] : retained.length ? retained : undefined;
-}
-
 /**
  * Open continuation is semantically compatible with event/start bounds only.
  * End bounds followed by an open-continuation marker are contradictory and
@@ -141,7 +114,7 @@ export function normalizeOpenEndedSchedule(item: ParseResult, source: string, op
   if (!clause || !schedule) return false;
   const markers = findOpenEndedMarkers(source, options);
   if (!markers.length) return false;
-  removeOwnedInstructionArtifacts(item, markers);
+  removeInstructionArtifactsOwnedByTemporalRanges(item, markers.map(marker => ({ start: marker.start, end: marker.end })));
 
   const recurring = Boolean(
     schedule.frequency !== undefined || schedule.period !== undefined || schedule.dayOfWeek?.length || schedule.timingCode

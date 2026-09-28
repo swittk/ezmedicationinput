@@ -23,7 +23,7 @@ const audit = process.argv.includes('--audit');
 await fs.mkdir(generated, { recursive: true });
 await fs.mkdir(results, { recursive: true });
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim();
-const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts', 'regimen.ts', 'integration.mjs', 'specialty-corpus.ts', 'cycles.ts', 'cycle-lexicon.ts', 'bounds.ts', 'admissibility.ts', 'acceptance.spec.ts', 'scheduler-primitives.ts', 'targets.ts', 'open-ended.ts', 'temporal-relation-vocabulary.ts', 'temporal-site-boundary.ts', 'thai-date-token-boundaries.ts'];
+const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts', 'regimen.ts', 'integration.mjs', 'specialty-corpus.ts', 'cycles.ts', 'cycle-lexicon.ts', 'bounds.ts', 'admissibility.ts', 'acceptance.spec.ts', 'scheduler-primitives.ts', 'targets.ts', 'open-ended.ts', 'temporal-relation-vocabulary.ts', 'temporal-site-boundary.ts', 'thai-date-token-boundaries.ts', 'temporal-artifact-ownership.ts'];
 const sourceHash = createHash('sha256');
 for (const file of sourceFiles) sourceHash.update(file).update(await fs.readFile(path.join(here, file)));
 const metadata = { experimentalSourceSha256: sourceHash.digest('hex'), base: git('rev-parse', 'HEAD'), createdAt: new Date().toISOString(),

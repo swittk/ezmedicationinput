@@ -4,7 +4,7 @@ Date: 28 September 2026 (Asia/Bangkok).
 Branch: `experiment/explainable-boundary-planner`.
 Baseline: production source at `e63ca7b` / version 0.1.66.
 Initial experiment: `c9fe4fd`.
-Implementation/corpus fingerprint: `9eb2ea3797b457aac466b35e343b21019cedf804eeb8c3802552712a839651c4`.
+Implementation/corpus fingerprint: `dcbfaf1da36c052b48c6d3a1930a5ba003b9464e6efbac4bf205d8857457273e`.
 
 A final whitespace check removed one extra blank line at the end of `corpus.ts`;
 the fingerprint above identifies the measured version. No executable logic changed.
@@ -27,7 +27,7 @@ medical prose can be interpreted without ambiguity.
 | Existing suite on unchanged native parser | 1,210/1,210 |
 | Same existing suite on candidate pipeline | 1,210/1,210 |
 | Structural planner contracts | 107/107 |
-| Clinical/API/English-and-Thai round-trip/safety controls | 464/464 |
+| Clinical/API/English-and-Thai round-trip/safety controls | 477/477 |
 | Distribution tests | 4/4 |
 | Production build/declarations | pass |
 | Experiment TypeScript | pass |
@@ -35,11 +35,11 @@ medical prose can be interpreted without ambiguity.
 | Strict clinical/performance experiment | exit 0 |
 | Runtime src diff / packaged experiment files | none / none |
 
-The 464 clinical checks include the 231 golden scenarios, 31 sync/async/lint
+The 477 clinical checks include the 231 golden scenarios, 31 sync/async/lint
 comparisons, 62 English/Thai realization-reparse checks, 11 negative/safety checks,
-4 independent scheduler boundary controls, and 75 dedicated lazy temporal-relation
+4 independent scheduler boundary controls, and 88 dedicated lazy temporal-relation
 checks covering order, spacing, synonyms, contradictions, and cadence omission. These counts overlap in inputs;
-they are not claims of 464 independent prescriptions. The two 1,210-test rows are
+they are not claims of 477 independent prescriptions. The two 1,210-test rows are
 the same existing suite run against two implementations.
 
 ### Independent golden scenarios
@@ -115,11 +115,11 @@ The target recognizer is bounded and cue-gated: only coordinators with resolvabl
 
 ## Lazy temporal-relation audit
 
-The temporal bound surface is now normalized through one typed relation vocabulary rather than phrase-order patches. Positive coverage includes English `after`, `before`, `from`, `since`, `starting`, `beginning`, `as of`, `as from`, `prior to`, `through`, `till`, and `from DATE on`; Thai covers `หลัง`, `หลังจาก`, `ก่อน`, `ก่อนถึง`, `ตั้งแต่`, `นับตั้งแต่`, `นับจาก`, `นับแต่`, `เริ่ม`, `ถึง`, `ต่อไป`, and `เป็นต้นไป`. Cadence may precede or follow the bound, a dangling `and/และ` before cadence no longer contaminates the site, and common Thai no-space forms are exercised.
+The temporal bound surface is now normalized through one typed relation vocabulary rather than phrase-order patches. Positive coverage includes English `after`, `before`, `from`, `since`, `starting`, `beginning`, `as of`, `as from`, `prior to`, `through`, `till`, and `from DATE on`; Thai covers `หลัง`, `หลังจาก`, `ก่อน`, `ก่อนถึง`, `ตั้งแต่`, `นับตั้งแต่`, `นับจาก`, `นับแต่`, `เริ่ม`, `เริ่มใช้`, `มีผลตั้งแต่`, `ถึง`, `ต่อไป`, and `เป็นต้นไป`. Cadence may precede or follow the bound, a dangling `and/และ` before cadence no longer contaminates the site, and common Thai no-space forms are exercised.
 
 The experiment also handles date-bound text glued directly to Thai text when the raw calendar recognizer already confirms the date span, e.g. `ตั้งแต่22/9/69ไป` and `หลังจาก22/9/69เป็นต้นไป`. This uses a bounded lexical split at the recognized numeric date boundaries, not a general Thai/digit split.
 
-Bare `after X / before X / หลัง X / ก่อน X` without cadence is recognized as a bound but remains incomplete; no daily frequency is invented. Contradictory forms such as `before DATE onwards` or `ถึง DATE ต่อไป` are quarantined as non-executable instead of guessed. Workflow timing such as `after each bowel movement` remains distinct from calendar-date bounds; the full 1,210-case shadow suite explicitly caught and protected that distinction.
+Bare `after X / before X / หลัง X / ก่อน X` without cadence is recognized as a bound but remains incomplete; no daily frequency is invented. Contradictory forms such as `before DATE onwards` or `ถึง DATE ต่อไป` are quarantined as non-executable instead of guessed. Workflow timing such as `after each bowel movement` remains distinct from calendar-date bounds; the full 1,210-case shadow suite explicitly caught and protected that distinction. Ambiguous `up to DATE` is quarantined rather than assigned inclusive or exclusive semantics.
 
 ## Harder coverage
 
@@ -168,13 +168,13 @@ session ran concurrently; other host activity remains possible.
 
 | Corpus | Native mean ms | Candidate mean ms | Native p95 ms | Candidate p95 ms | Gate |
 |---|---:|---:|---:|---:|---|
-| torture (50 cases) | 8.312 | 8.412 | 23.548 | 23.848 | pass |
-| composed (20 cases) | 7.104 | 6.331 | 14.473 | 12.453 | pass |
-| new challenges (15 cases) | 7.069 | 8.489 | 11.590 | 14.662 | pass* |
-| specialty (112 cases) | 10.059 | 8.467 | 24.616 | 20.171 | pass* |
+| torture (50 cases) | 8.395 | 8.655 | 23.608 | 24.077 | pass |
+| composed (20 cases) | 7.443 | 6.828 | 14.791 | 13.153 | pass |
+| new challenges (15 cases) | 7.409 | 9.173 | 12.188 | 16.018 | pass* |
+| specialty (112 cases) | 9.993 | 8.640 | 24.546 | 20.255 | pass* |
 
-The ordinary-input result is essentially flat (~1.2% slower mean / ~1.3% slower p95). The fixed
-20-case legacy composed corpus is faster (~10.9% mean / ~14.0% p95). New-challenge
+The ordinary-input result remains within the legacy tolerance (~3.1% slower mean / ~2.0% slower p95). The fixed
+20-case legacy composed corpus is faster (~8.3% mean / ~11.1% p95). New-challenge
 and specialty ratios are descriptive because the old parser is wrong on many of
 those inputs; those sets use the stated candidate p95 <100 ms guard. The fixed
 legacy torture/composed corpora retain the 5% mean/p95 gate.

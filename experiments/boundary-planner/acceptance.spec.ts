@@ -415,3 +415,47 @@ describe('additional lazy bound synonyms and fully glued Thai date surfaces', ()
     });
   });
 });
+
+
+describe('residual clear shorthand bounds stay typed', () => {
+  const en = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  const th = { locale: 'th' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  it.each([
+    ['Apply to right arm daily commencing 22/09/2026', en, '2026-09-22', undefined],
+    ['Apply to right arm commence 22/09/2026 daily', en, '2026-09-22', undefined],
+    ['Apply to right arm daily effective from 22/09/2026', en, '2026-09-22', undefined],
+    ['Apply to right arm daily effective 22/09/2026', en, '2026-09-22', undefined],
+    ['Apply to right arm daily prior 22/09/2026', en, undefined, '2026-09-21'],
+    ['Apply to right arm daily from 22/09/2026 forward', en, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง มีผลตั้งแต่22/9/69', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง เริ่มใช้22/9/69', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ตั้งแต่วัน22/9/69', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง หลังวัน22/9/69', th, '2026-09-23', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ก่อนวัน22/9/69', th, undefined, '2026-09-21'],
+    ['ทาที่แขนขวา วันละครั้ง ถึงวัน22/9/69', th, undefined, '2026-09-22']
+  ] as const)('%s', (input, options, start, end) => {
+    const parsed = parseSig(input, options);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.site?.text).toBe('right arm');
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.timing?.event).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: FhirPeriodUnit.Day,
+      boundsPeriod: {
+        ...(start ? { start } : {}),
+        ...(end ? { end } : {})
+      }
+    });
+    expect(parsed.longText).not.toMatch(/จากนั้น(?:ใช้|ต่อไป)/u);
+  });
+
+  it('quarantines ambiguous up-to date bounds instead of guessing inclusion', () => {
+    const input = 'Apply to right arm daily up to 22/09/2026';
+    const parsed = parseSig(input, en);
+    expect(parsed.fhir.timing).toBeUndefined();
+    expect(parsed.warnings.join(' ')).toContain('ambiguous-up-to-date-bound');
+    expect(parsed.meta.leftoverText).toBe(input);
+  });
+});
