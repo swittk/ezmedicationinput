@@ -1,0 +1,543 @@
+{
+  "metadata": {
+    "experimentalSourceSha256": "428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1",
+    "base": "0b5bf04aca26c15b988ffda5844c2f0b40fce31f",
+    "createdAt": "2026-09-28T07:49:52.295Z",
+    "node": "v24.14.1",
+    "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+    "loadAverage": [
+      2.93,
+      2.47,
+      2.17
+    ],
+    "rounds": 30,
+    "experiment": "shadow boundary planner; production source unchanged"
+  },
+  "cases": [
+    {
+      "id": "reported-thai-date-list",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 17,
+        "candidates": 5,
+        "claimedCandidates": 2
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 3,
+        "clauseProbes": 4,
+        "probeCacheHits": 0,
+        "probedTokens": 32,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 17,
+        "candidates": 5,
+        "claimedCandidates": 2
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "english-omitted-head",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 4,
+        "probeCacheHits": 0,
+        "probedTokens": 17,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "thai-omitted-head",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 4,
+        "probeCacheHits": 0,
+        "probedTokens": 17,
+        "candidates": 5,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "thai-taper-duration",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 3,
+        "clauseProbes": 5,
+        "probeCacheHits": 1,
+        "probedTokens": 23,
+        "candidates": 4,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 3,
+        "clauseProbes": 5,
+        "probeCacheHits": 1,
+        "probedTokens": 23,
+        "candidates": 4,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 3,
+        "clauseProbes": 6,
+        "probeCacheHits": 0,
+        "probedTokens": 29,
+        "candidates": 4,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "duration-before-merge",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 9,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 9,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 9,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "independent-date-clock-pairs",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 11,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 11,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 11,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "pairs-then-recurring",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 17,
+        "candidates": 3,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 17,
+        "candidates": 3,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 4,
+        "probeCacheHits": 0,
+        "probedTokens": 21,
+        "candidates": 3,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "union-not-sequence",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 13,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 13,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 13,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "shared-clocks-shared-dates",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 4,
+        "claimedCandidates": 3
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 3,
+        "clauseProbes": 3,
+        "probeCacheHits": 0,
+        "probedTokens": 9,
+        "candidates": 4,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 4,
+        "claimedCandidates": 3
+      },
+      "unownedSameSegments": false,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "fronted-date-comma",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 10,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 10,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 2,
+        "probeCacheHits": 0,
+        "probedTokens": 10,
+        "candidates": 2,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "bounded-fronted-schedule",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "fraction-not-date",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "leading-decimal",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 0,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "procedural-not-administration-split",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 1,
+        "clauseProbes": 0,
+        "probeCacheHits": 0,
+        "probedTokens": 0,
+        "candidates": 1,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    },
+    {
+      "id": "shared-safety",
+      "fullMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 6,
+        "claimedCandidates": 0
+      },
+      "unownedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 3,
+        "probeCacheHits": 1,
+        "probedTokens": 13,
+        "candidates": 6,
+        "claimedCandidates": 0
+      },
+      "uncachedMetrics": {
+        "lexicalPasses": 1,
+        "dateScans": 1,
+        "actionScans": 2,
+        "clauseProbes": 4,
+        "probeCacheHits": 0,
+        "probedTokens": 17,
+        "candidates": 6,
+        "claimedCandidates": 0
+      },
+      "unownedSameSegments": true,
+      "uncachedSameSegments": true
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+[
+  {
+    "name": "native",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "exitCode": 0,
+    "numTotalTests": 1210,
+    "numPassedTests": 1210,
+    "numFailedTests": 0
+  },
+  {
+    "name": "dist",
+    "command": [
+      "npm",
+      "run",
+      "test:dist"
+    ],
+    "exitCode": 0,
+    "numTotalTests": 4,
+    "numPassedTests": 4,
+    "numFailedTests": 0
+  },
+  {
+    "name": "shadow",
+    "command": [
+      "npm",
+      "run",
+      "test:shadow-boundaries"
+    ],
+    "exitCode": 0,
+    "numTotalTests": 1210,
+    "numPassedTests": 1210,
+    "numFailedTests": 0
+  },
+  {
+    "name": "contracts",
+    "command": [
+      "npm",
+      "run",
+      "test:boundaries"
+    ],
+    "exitCode": 0,
+    "numTotalTests": 113,
+    "numPassedTests": 113,
+    "numFailedTests": 0
+  },
+  {
+    "name": "clinical",
+    "command": [
+      "npm",
+      "run",
+      "test:boundary-clinical"
+    ],
+    "exitCode": 0,
+    "numTotalTests": 477,
+    "numPassedTests": 477,
+    "numFailedTests": 0
+  },
+  {
+    "name": "types",
+    "command": [
+      "npm",
+      "run",
+      "typecheck:boundaries"
+    ],
+    "exitCode": 0
+  },
+  {
+    "name": "integration-types",
+    "command": [
+      "npm",
+      "run",
+      "typecheck:boundary-integration"
+    ],
+    "exitCode": 0,
+    "staleMirrorSentinelRemoved": true
+  },
+  {
+    "name": "strict-correctness",
+    "command": [
+      "node",
+      "experiments/boundary-planner/run.mjs",
+      "--audit",
+      "--strict"
+    ],
+    "exitCode": 0
+  },
+  {
+    "name": "strict-performance",
+    "command": [
+      "node",
+      "experiments/boundary-planner/run.mjs",
+      "--audit",
+      "--strict",
+      "--bench",
+      "--rounds=30"
+    ],
+    "exitCode": 0,
+    "sourceFingerprint": "428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1"
+  }
+]

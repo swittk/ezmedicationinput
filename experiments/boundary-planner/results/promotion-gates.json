@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "experimentalSourceSha256": "428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1",
+    "base": "0b5bf04aca26c15b988ffda5844c2f0b40fce31f",
+    "createdAt": "2026-09-28T07:49:52.295Z",
+    "node": "v24.14.1",
+    "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+    "loadAverage": [
+      2.93,
+      2.47,
+      2.17
+    ],
+    "rounds": 30,
+    "experiment": "shadow boundary planner; production source unchanged"
+  },
+  "historical": true,
+  "metamorphic": true,
+  "challenges": true,
+  "specialty": true,
+  "performance": true,
+  "unresolved": [],
+  "productionPromotion": false,
+  "reason": "This command records a shadow experiment; production promotion is never automatic. Read REPORT.md and validation/performance evidence."
+}

@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "experimentalSourceSha256": "428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1",
+    "base": "0b5bf04aca26c15b988ffda5844c2f0b40fce31f",
+    "createdAt": "2026-09-28T07:49:52.295Z",
+    "node": "v24.14.1",
+    "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+    "loadAverage": [
+      2.93,
+      2.47,
+      2.17
+    ],
+    "rounds": 30,
+    "experiment": "shadow boundary planner; production source unchanged"
+  },
+  "cases": [
+    {
+      "administrations": 1,
+      "characters": 32,
+      "baseline": {
+        "medianMs": 2.0293499999970663,
+        "p95Ms": 4.0731289999966975,
+        "itemCount": 1
+      },
+      "candidate": {
+        "medianMs": 2.048339999979362,
+        "p95Ms": 2.147982000024058,
+        "itemCount": 1
+      }
+    },
+    {
+      "administrations": 2,
+      "characters": 69,
+      "baseline": {
+        "medianMs": 8.173458000004757,
+        "p95Ms": 8.485014999983832,
+        "itemCount": 2
+      },
+      "candidate": {
+        "medianMs": 8.095663999993121,
+        "p95Ms": 11.009504999994533,
+        "itemCount": 2
+      }
+    },
+    {
+      "administrations": 4,
+      "characters": 143,
+      "baseline": {
+        "medianMs": 19.7741490000044,
+        "p95Ms": 21.642451000021538,
+        "itemCount": 4
+      },
+      "candidate": {
+        "medianMs": 16.470845999981975,
+        "p95Ms": 18.459060000022873,
+        "itemCount": 4
+      }
+    },
+    {
+      "administrations": 8,
+      "characters": 291,
+      "baseline": {
+        "medianMs": 44.35506400000304,
+        "p95Ms": 47.19408400001703,
+        "itemCount": 8
+      },
+      "candidate": {
+        "medianMs": 33.38420699999551,
+        "p95Ms": 34.36282700000447,
+        "itemCount": 8
+      }
+    },
+    {
+      "administrations": 16,
+      "characters": 594,
+      "baseline": {
+        "medianMs": 95.01587199998903,
+        "p95Ms": 97.01107599999523,
+        "itemCount": 16
+      },
+      "candidate": {
+        "medianMs": 65.38680500001647,
+        "p95Ms": 67.24908900001901,
+        "itemCount": 16
+      }
+    }
+  ]
+}
