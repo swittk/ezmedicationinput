@@ -13,7 +13,7 @@ for(const file of await fs.readdir(here)) {
   if (!/\.(?:ts|mts|mjs)$/.test(file)) continue;
   await fs.copyFile(path.join(here,file),path.join(experimentMirror,file));
 }
-for(const file of ['index.ts','fhir.ts','schedule.ts','hpsg/clause-parser.ts','lexer/locales/th.ts']) {
+for(const file of ['index.ts','fhir.ts','schedule.ts','hpsg/clause-parser.ts','hpsg/rules/site-rules.ts','date-interpretation.ts','lexer/locales/th.ts']) {
   const original=path.join(root,'src',file);
   const code=candidateTransform(await fs.readFile(original,'utf8'),original);
   if(code===undefined) throw new Error(`No transform for ${file}`);

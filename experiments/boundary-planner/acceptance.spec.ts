@@ -4,6 +4,7 @@ import { canonicalFromFhir, canonicalToFhir } from '../../src/fhir';
 import { ORIGINAL_CORPUS, SCHEDULE_OPTIONS } from './corpus';
 import { SPECIALTY_CASES, SPECIALTY_SEEDS } from './specialty-corpus';
 import type { GoldenCase } from './corpus';
+import type { ParseOptions } from '../../src/types';
 
 const corpus = [...ORIGINAL_CORPUS, ...SPECIALTY_CASES];
 function siteSemantic(site: any) {
@@ -233,5 +234,184 @@ describe('independent scheduler boundary controls', () => {
     const due=nextDueDoses(dosage,SCHEDULE_OPTIONS);
     expect(due).toEqual(['2026-09-28T08:00:00+07:00','2026-09-28T20:00:00+07:00','2026-10-01T08:00:00+07:00','2026-10-01T20:00:00+07:00']);
     expect(calculateTotalUnits({dosage,from:SCHEDULE_OPTIONS.from,timeZone:'Asia/Bangkok',durationValue:10,durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(1);
+  });
+});
+
+
+describe('lazy temporal relation layouts normalize without phrase-order hacks', () => {
+  const en = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  const th = { locale: 'th' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  type LazyTemporalCase = { input: string; options: ParseOptions; start?: string; end?: string };
+  const cases: LazyTemporalCase[] = [
+    ...[
+      'Apply to right arm daily after 22/09/2026',
+      'Apply to right arm after 22/09/2026 daily',
+      'Apply to right arm after 22/09/2026, daily',
+      'Apply to right arm and daily after 22/09/2026',
+      'Apply to right arm and after 22/09/2026 daily',
+      'Apply to right arm after 22/09/2026 onwards daily',
+      'Apply to right arm daily after 22/09/2026 onwards'
+    ].map(input => ({ input, options: en, start: '2026-09-23' })),
+    ...[
+      'Apply to right arm daily before 22/09/2026',
+      'Apply to right arm before 22/09/2026 daily',
+      'Apply to right arm before 22/09/2026, daily',
+      'Apply to right arm and daily before 22/09/2026',
+      'Apply to right arm and before 22/09/2026 daily'
+    ].map(input => ({ input, options: en, end: '2026-09-21' })),
+    ...[
+      'Apply to right arm daily since 22/09/2026',
+      'Apply to right arm since 22/09/2026 daily',
+      'Apply to right arm daily beginning 22/09/2026',
+      'Apply to right arm beginning 22/09/2026 daily',
+      'Apply to right arm daily as of 22/09/2026',
+      'Apply to right arm as of 22/09/2026 daily',
+      'Apply to right arm daily starting 22/09/2026'
+    ].map(input => ({ input, options: en, start: '2026-09-22' })),
+    { input: 'Apply to right arm daily through 22/09/2026', options: en, end: '2026-09-22' },
+    ...[
+      'ทาที่แขนขวา วันละครั้ง หลัง 22/9/69',
+      'ทาที่แขนขวา หลัง 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง หลังวันที่ 22/9/69',
+      'ทาที่แขนขวา หลังจากวันที่ 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา และวันละครั้งหลัง 22/9/69',
+      'ทาที่แขนขวา และ หลัง 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา หลัง 22/9/69 เป็นต้นไป วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง หลัง 22/9/69 ต่อไป',
+      'ทาที่แขนขวา วันละครั้ง หลัง22/9/69'
+    ].map(input => ({ input, options: th, start: '2026-09-23' })),
+    ...[
+      'ทาที่แขนขวา วันละครั้ง ก่อน 22/9/69',
+      'ทาที่แขนขวา ก่อน 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง ก่อนวันที่ 22/9/69',
+      'ทาที่แขนขวา ก่อน ถึง วันที่ 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา และวันละครั้งก่อน 22/9/69',
+      'ทาที่แขนขวา และ ก่อน 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง ก่อนถึงวันที่ 22/9/69',
+      'ทาที่แขนขวา วันละครั้ง ก่อน22/9/69'
+    ].map(input => ({ input, options: th, end: '2026-09-21' })),
+    ...[
+      'ทาที่แขนขวา วันละครั้ง ตั้งแต่ 22/9/69',
+      'ทาที่แขนขวา วันละครั้ง นับตั้งแต่วันที่ 22/9/69',
+      'ทาที่แขนขวา นับตั้งแต่ 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง นับจากวันที่ 22/9/69',
+      'ทาที่แขนขวา นับ จาก 22/9/69 วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง เริ่มวันที่ 22/9/69',
+      'ทาที่แขนขวา วันที่ 22/9/69 ต่อไป วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง วันที่ 22/9/69 ต่อไป',
+      'ทาที่แขนขวา วันที่ 22/9/69 เป็นต้นไป วันละครั้ง',
+      'ทาที่แขนขวา วันละครั้ง วันที่ 22/9/69 เป็นต้นไป'
+    ].map(input => ({ input, options: th, start: '2026-09-22' })),
+    { input: 'ทาที่แขนขวา วันละครั้ง ถึง 22/9/69', options: th, end: '2026-09-22' }
+  ];
+
+  it.each(cases)('$input', ({ input, options, start, end }) => {
+    const parsed = parseSig(input, options);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.site?.text).toBe('right arm');
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.timing?.event).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: FhirPeriodUnit.Day,
+      boundsPeriod: {
+        ...(start ? { start } : {}),
+        ...(end ? { end } : {})
+      }
+    });
+    expect(parsed.longText).not.toMatch(/จากนั้นต่อไป/u);
+  });
+
+  it.each([
+    ['Apply to right arm daily before 22/09/2026 onwards', en, 'open-ended-marker-after-end-bound'],
+    ['Apply to right arm daily until 22/09/2026 onwards', en, 'open-ended-marker-after-end-bound'],
+    ['ทาที่แขนขวา วันละครั้ง ก่อน 22/9/69 เป็นต้นไป', th, 'open-ended-marker-after-end-bound'],
+    ['ทาที่แขนขวา วันละครั้ง ถึง 22/9/69 ต่อไป', th, 'open-ended-marker-after-end-bound'],
+    ['Apply to right arm on 22/09/2026 onwards', en, 'open-ended-bound-without-cadence'],
+    ['ทาที่แขนขวา วันที่ 22/9/69 ต่อไป', th, 'open-ended-bound-without-cadence']
+  ] as const)('refuses contradictory/underspecified lazy bound: %s', (input, options, warning) => {
+    const parsed = parseSig(input, options);
+    expect(parsed.fhir.timing).toBeUndefined();
+    expect(parsed.warnings.join(' ')).toContain(warning);
+    expect(parsed.meta.leftoverText).toBe(input);
+  });
+});
+
+
+describe('compact Thai temporal relation surfaces and bare-bound conservatism', () => {
+  const th = { locale: 'th' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  it.each([
+    ['ทาที่แขนขวา วันละครั้ง หลังจาก22/9/69', '2026-09-23', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ก่อนถึง22/9/69', undefined, '2026-09-21'],
+    ['ทาที่แขนขวา วันละครั้ง นับตั้งแต่22/9/69', '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง นับจาก22/9/69', '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง เริ่ม22/9/69', '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ตั้งแต่วันที่22/9/69', '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ถึงวันที่22/9/69', undefined, '2026-09-22']
+  ] as const)('%s', (input, start, end) => {
+    const parsed = parseSig(input, th);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.site?.text).toBe('right arm');
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: FhirPeriodUnit.Day,
+      boundsPeriod: {
+        ...(start ? { start } : {}),
+        ...(end ? { end } : {})
+      }
+    });
+  });
+
+  it.each([
+    ['Apply to right arm after 22/09/2026', { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } }, '2026-09-23', undefined],
+    ['Apply to right arm before 22/09/2026', { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } }, undefined, '2026-09-21'],
+    ['ทาที่แขนขวา หลัง 22/9/69', th, '2026-09-23', undefined],
+    ['ทาที่แขนขวา ก่อน 22/9/69', th, undefined, '2026-09-21']
+  ] as const)('recognizes but does not invent cadence: %s', (input, options, start, end) => {
+    const parsed = parseSig(input, options);
+    const repeat = parsed.fhir.timing?.repeat;
+    expect(repeat?.boundsPeriod).toEqual({
+      ...(start ? { start } : {}),
+      ...(end ? { end } : {})
+    });
+    expect(repeat?.frequency).toBeUndefined();
+    expect(repeat?.period).toBeUndefined();
+    expect(parsed.warnings.join(' ')).toContain('Incomplete sig');
+  });
+});
+
+
+describe('additional lazy bound synonyms and fully glued Thai date surfaces', () => {
+  const en = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  const th = { locale: 'th' as const, datePolicy: { referenceDate: '2026-09-20' } };
+  it.each([
+    ['Apply to right arm daily prior to 22/09/2026', en, undefined, '2026-09-21'],
+    ['Apply to right arm prior to 22/09/2026 daily', en, undefined, '2026-09-21'],
+    ['Apply to right arm daily as from 22/09/2026', en, '2026-09-22', undefined],
+    ['Apply to right arm daily from 22/09/2026 on', en, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง นับแต่22/9/69', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา นับแต่ 22/9/69 วันละครั้ง', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง ตั้งแต่22/9/69ไป', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา ตั้งแต่22/9/69ไป วันละครั้ง', th, '2026-09-22', undefined],
+    ['ทาที่แขนขวา วันละครั้ง หลังจาก22/9/69เป็นต้นไป', th, '2026-09-23', undefined],
+    ['ทาที่แขนขวา และวันละครั้งหลังวันที่22/9/69', th, '2026-09-23', undefined]
+  ] as const)('%s', (input, options, start, end) => {
+    const parsed = parseSig(input, options);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.site?.text).toBe('right arm');
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.timing?.event).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: FhirPeriodUnit.Day,
+      boundsPeriod: {
+        ...(start ? { start } : {}),
+        ...(end ? { end } : {})
+      }
+    });
   });
 });

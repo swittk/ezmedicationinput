@@ -1,14 +1,14 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "e35a24633bb5783bea84cd2d70e3d91a9a70c210c5a564c9c8ebfc7fb96c2ee8",
-    "base": "3b90e1e6f9fe7fdf743a8aed2d88cb7fd4fdf912",
-    "createdAt": "2026-09-28T03:36:01.660Z",
+    "experimentalSourceSha256": "9eb2ea3797b457aac466b35e343b21019cedf804eeb8c3802552712a839651c4",
+    "base": "b320c4a41a49b04f10934a8007854c74116e64ba",
+    "createdAt": "2026-09-28T04:44:49.924Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      4.48,
-      4.52,
-      4.27
+      3.66,
+      2.03,
+      2.41
     ],
     "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
@@ -27,12 +27,12 @@
   "candidate": {
     "clauseCalls": 703,
     "speculativeProbes": 308,
-    "lexicalCalls": 3746,
+    "lexicalCalls": 4140,
     "chartCalls": 703,
     "chartTruncations": 0,
-    "chartSigns": 15650,
-    "agendaItems": 18036,
-    "combinationAttempts": 45894,
+    "chartSigns": 15647,
+    "agendaItems": 18031,
+    "combinationAttempts": 45893,
     "cacheHits": 26
   },
   "cases": [
@@ -53,7 +53,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -79,7 +79,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 44,
@@ -105,7 +105,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 44,
@@ -131,7 +131,7 @@
       "candidate": {
         "clauseCalls": 9,
         "speculativeProbes": 5,
-        "lexicalCalls": 40,
+        "lexicalCalls": 44,
         "chartCalls": 9,
         "chartTruncations": 0,
         "chartSigns": 55,
@@ -157,7 +157,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -183,7 +183,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -209,7 +209,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -235,7 +235,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -261,7 +261,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -287,7 +287,7 @@
       "candidate": {
         "clauseCalls": 3,
         "speculativeProbes": 2,
-        "lexicalCalls": 19,
+        "lexicalCalls": 20,
         "chartCalls": 3,
         "chartTruncations": 0,
         "chartSigns": 48,
@@ -313,7 +313,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 29,
@@ -339,7 +339,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 9,
@@ -365,7 +365,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 6,
@@ -417,7 +417,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 40,
+        "lexicalCalls": 43,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 79,
@@ -443,7 +443,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -469,7 +469,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -495,7 +495,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -521,7 +521,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -547,7 +547,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -573,7 +573,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -599,7 +599,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -625,7 +625,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -651,7 +651,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -677,7 +677,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -703,7 +703,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -729,7 +729,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -755,7 +755,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -781,7 +781,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -807,7 +807,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -833,7 +833,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -859,7 +859,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -885,7 +885,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -911,7 +911,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -937,7 +937,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -963,7 +963,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -989,7 +989,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1015,7 +1015,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -1041,7 +1041,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -1067,7 +1067,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1093,7 +1093,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1119,7 +1119,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1145,7 +1145,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1171,7 +1171,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1197,7 +1197,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1223,7 +1223,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1249,7 +1249,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1275,7 +1275,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1301,7 +1301,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1327,7 +1327,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1353,7 +1353,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1379,7 +1379,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1405,7 +1405,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1431,7 +1431,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1457,7 +1457,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1483,7 +1483,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1509,7 +1509,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1535,7 +1535,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1561,7 +1561,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1587,7 +1587,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -1613,7 +1613,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1639,7 +1639,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -1665,7 +1665,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -1691,7 +1691,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1717,7 +1717,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -1743,7 +1743,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -1769,7 +1769,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -1795,7 +1795,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1821,7 +1821,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -1847,7 +1847,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -1873,7 +1873,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -1899,7 +1899,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -1925,7 +1925,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -1951,7 +1951,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -1977,7 +1977,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -2003,7 +2003,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -2029,7 +2029,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -2055,7 +2055,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -2081,7 +2081,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -2107,7 +2107,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -2133,7 +2133,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -2159,7 +2159,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -2185,7 +2185,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -2211,7 +2211,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 84,
@@ -2237,7 +2237,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 104,
@@ -2263,7 +2263,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -2289,7 +2289,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -2315,7 +2315,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2341,7 +2341,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2367,7 +2367,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -2393,7 +2393,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2419,7 +2419,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2445,7 +2445,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -2471,7 +2471,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2497,7 +2497,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2523,7 +2523,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -2549,7 +2549,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2575,7 +2575,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 19,
@@ -2601,7 +2601,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -2627,7 +2627,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 4,
-        "lexicalCalls": 30,
+        "lexicalCalls": 32,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 119,
@@ -2653,7 +2653,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 21,
+        "lexicalCalls": 23,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 66,
@@ -2679,7 +2679,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -2705,7 +2705,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 72,
@@ -2731,7 +2731,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -2757,7 +2757,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 30,
+        "lexicalCalls": 32,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 90,
@@ -2783,7 +2783,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 74,
@@ -2809,7 +2809,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 11,
+        "lexicalCalls": 12,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 30,
@@ -2835,12 +2835,12 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
-        "chartSigns": 29,
-        "agendaItems": 31,
-        "combinationAttempts": 77,
+        "chartSigns": 26,
+        "agendaItems": 26,
+        "combinationAttempts": 76,
         "cacheHits": 0
       }
     },
@@ -2861,7 +2861,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 26,
@@ -2887,7 +2887,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 114,
@@ -2913,7 +2913,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 82,
@@ -2939,7 +2939,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 27,
+        "lexicalCalls": 29,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -2965,7 +2965,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 110,
@@ -2991,7 +2991,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 32,
+        "lexicalCalls": 34,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -3017,7 +3017,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 26,
+        "lexicalCalls": 28,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -3043,7 +3043,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -3069,7 +3069,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 23,
@@ -3095,7 +3095,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 36,
+        "lexicalCalls": 38,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 60,
@@ -3121,7 +3121,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 11,
+        "lexicalCalls": 12,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 47,
@@ -3147,7 +3147,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 166,
@@ -3173,7 +3173,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 37,
@@ -3199,7 +3199,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -3225,7 +3225,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 34,
@@ -3251,7 +3251,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 122,
@@ -3277,7 +3277,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 134,
@@ -3303,7 +3303,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -3329,7 +3329,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -3355,7 +3355,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 168,
@@ -3381,7 +3381,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -3407,7 +3407,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -3433,7 +3433,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -3459,7 +3459,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 68,
@@ -3485,7 +3485,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 120,
@@ -3511,7 +3511,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 196,
@@ -3537,7 +3537,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 42,
@@ -3563,7 +3563,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -3589,7 +3589,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 61,
@@ -3615,7 +3615,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -3641,7 +3641,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -3667,7 +3667,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -3693,7 +3693,7 @@
       "candidate": {
         "clauseCalls": 8,
         "speculativeProbes": 4,
-        "lexicalCalls": 34,
+        "lexicalCalls": 38,
         "chartCalls": 8,
         "chartTruncations": 0,
         "chartSigns": 160,
@@ -3719,7 +3719,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -3745,7 +3745,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -3771,7 +3771,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -3797,7 +3797,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 30,
@@ -3823,7 +3823,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 30,
@@ -3849,7 +3849,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -3875,7 +3875,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 57,
@@ -3901,7 +3901,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 88,
@@ -3927,7 +3927,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -3953,7 +3953,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 170,
@@ -3979,7 +3979,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 174,
@@ -4005,7 +4005,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 166,
@@ -4031,7 +4031,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 38,
@@ -4057,7 +4057,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -4083,7 +4083,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 37,
@@ -4109,7 +4109,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 33,
@@ -4135,7 +4135,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -4161,7 +4161,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -4187,7 +4187,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 35,
@@ -4213,7 +4213,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 36,
@@ -4239,7 +4239,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 34,
@@ -4265,7 +4265,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 128,
@@ -4291,7 +4291,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 130,
@@ -4317,7 +4317,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 122,
@@ -4343,7 +4343,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 134,
@@ -4369,7 +4369,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 136,
@@ -4395,7 +4395,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 134,
@@ -4421,7 +4421,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 116,
@@ -4447,7 +4447,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 120,
@@ -4473,7 +4473,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 14,
+        "lexicalCalls": 16,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 112,
@@ -4499,7 +4499,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 57,
@@ -4525,7 +4525,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 58,
@@ -4551,7 +4551,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 56,
@@ -4577,7 +4577,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4603,7 +4603,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4629,7 +4629,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4655,7 +4655,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4681,7 +4681,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4707,7 +4707,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -4733,7 +4733,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 96,
@@ -4759,7 +4759,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 86,
@@ -4785,7 +4785,7 @@
       "candidate": {
         "clauseCalls": 6,
         "speculativeProbes": 3,
-        "lexicalCalls": 27,
+        "lexicalCalls": 30,
         "chartCalls": 6,
         "chartTruncations": 0,
         "chartSigns": 94,
@@ -4811,7 +4811,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 70,
@@ -4837,7 +4837,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 60,
@@ -4863,7 +4863,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 68,
@@ -4889,7 +4889,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 200,
@@ -4915,7 +4915,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 204,
@@ -4941,7 +4941,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 196,
@@ -4967,7 +4967,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 43,
@@ -4993,7 +4993,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 44,
@@ -5019,7 +5019,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 42,
@@ -5045,7 +5045,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 33,
@@ -5071,7 +5071,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -5097,7 +5097,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5123,7 +5123,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 62,
@@ -5149,7 +5149,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 63,
@@ -5175,7 +5175,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 61,
@@ -5201,7 +5201,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5227,7 +5227,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5253,7 +5253,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 10,
+        "lexicalCalls": 11,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5279,7 +5279,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 33,
@@ -5305,7 +5305,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 34,
@@ -5331,7 +5331,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5357,7 +5357,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 78,
@@ -5383,7 +5383,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 78,
@@ -5409,7 +5409,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 76,
@@ -5435,7 +5435,7 @@
       "candidate": {
         "clauseCalls": 8,
         "speculativeProbes": 4,
-        "lexicalCalls": 34,
+        "lexicalCalls": 38,
         "chartCalls": 8,
         "chartTruncations": 0,
         "chartSigns": 164,
@@ -5461,7 +5461,7 @@
       "candidate": {
         "clauseCalls": 8,
         "speculativeProbes": 4,
-        "lexicalCalls": 34,
+        "lexicalCalls": 38,
         "chartCalls": 8,
         "chartTruncations": 0,
         "chartSigns": 152,
@@ -5487,7 +5487,7 @@
       "candidate": {
         "clauseCalls": 8,
         "speculativeProbes": 4,
-        "lexicalCalls": 34,
+        "lexicalCalls": 38,
         "chartCalls": 8,
         "chartTruncations": 0,
         "chartSigns": 160,
@@ -5513,7 +5513,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 65,
@@ -5539,7 +5539,7 @@
       "candidate": {
         "clauseCalls": 3,
         "speculativeProbes": 2,
-        "lexicalCalls": 17,
+        "lexicalCalls": 18,
         "chartCalls": 3,
         "chartTruncations": 0,
         "chartSigns": 88,
@@ -5565,7 +5565,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 64,
@@ -5591,7 +5591,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -5617,7 +5617,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -5643,7 +5643,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -5669,7 +5669,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -5695,7 +5695,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5721,7 +5721,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 4,
+        "lexicalCalls": 5,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 30,
@@ -5747,7 +5747,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 31,
@@ -5773,7 +5773,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 32,
@@ -5799,7 +5799,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 30,
@@ -5825,7 +5825,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 21,
@@ -5851,7 +5851,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 22,
@@ -5877,7 +5877,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 20,
@@ -5903,7 +5903,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 92,
@@ -5929,7 +5929,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 82,
@@ -5955,7 +5955,7 @@
       "candidate": {
         "clauseCalls": 4,
         "speculativeProbes": 2,
-        "lexicalCalls": 20,
+        "lexicalCalls": 22,
         "chartCalls": 4,
         "chartTruncations": 0,
         "chartSigns": 88,
@@ -5981,7 +5981,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -6007,7 +6007,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,
@@ -6033,7 +6033,7 @@
       "candidate": {
         "clauseCalls": 1,
         "speculativeProbes": 0,
-        "lexicalCalls": 7,
+        "lexicalCalls": 8,
         "chartCalls": 1,
         "chartTruncations": 0,
         "chartSigns": 16,

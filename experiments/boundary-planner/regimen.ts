@@ -70,7 +70,12 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
-    normalizeOpenEndedSchedule(results[index], segments[index]?.text ?? '', options);
+    const openEndedChanged = normalizeOpenEndedSchedule(results[index], segments[index]?.text ?? '', options);
+    if (openEndedChanged) {
+      results[index].longText = render(results[index].fhir, 'long', options);
+      results[index].shortText = render(results[index].fhir, 'short', options);
+      results[index].fhir.text = results[index].longText;
+    }
     const invalid = recognizeCycles(segments[index]?.text ?? '', options).find(c => c.error);
     if (invalid) quarantineSchedule(results[index], segments[index].text, invalid.error!);
   }

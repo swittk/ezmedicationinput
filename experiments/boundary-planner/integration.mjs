@@ -33,9 +33,34 @@ export function candidateTransform(source, filename) {
       `import { composeRegimenPhases } from ${JSON.stringify(path.join(here, 'regimen.ts'))};\n` +
       `import { expandAdministrationTargets, expandLintAdministrationTargets } from ${JSON.stringify(path.join(here, 'targets.ts'))};\n` + source;
   }
+  if (file === path.join(root, 'src/date-interpretation.ts')) {
+    source = replace(source,
+      'const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\\bfrom\\b\\s+|\\bstarting(?:\\s+(?:on|from))?\\b\\s+|ตั้งแต่(?:วันที่)?\\s*)`;',
+      'const DATE_START_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startInclusive;');
+    source = replace(source,
+      'const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\\bafter\\b\\s+|หลัง(?:วันที่)?\\s*)`;',
+      'const DATE_START_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startExclusive;');
+    source = replace(source,
+      'const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\\buntil\\b\\s+|\\bthrough\\b\\s+|\\btill\\b\\s+|(?:จน)?ถึง(?:วันที่)?\\s*)`;',
+      'const DATE_END_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endInclusive;');
+    source = replace(source,
+      'const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\\bbefore\\b\\s+|ก่อน(?:วันที่)?\\s*)`;',
+      'const DATE_END_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endExclusive;');
+    return `import { TEMPORAL_DATE_RELATION_SOURCES } from ${JSON.stringify(path.join(here,'temporal-relation-vocabulary.ts'))};\n` + source;
+  }
+  if (file === path.join(root, 'src/hpsg/rules/site-rules.ts')) {
+    source = replace(source,
+      '      const candidateLower = normalizeTokenLower(candidate);',
+      '      const candidateLower = normalizeTokenLower(candidate);\n      if (temporalRelationStarts(context, cursor) || coordinationLeadsToSchedule(context, cursor)) break;');
+    return `import { temporalRelationStarts, coordinationLeadsToSchedule } from ${JSON.stringify(path.join(here,'temporal-site-boundary.ts'))};\n` + source;
+  }
   if (file === path.join(root, 'src/lexer/locales/th.ts')) {
-    return replace(source, '  "สัปดาห์ละครั้ง": "weekly",',
+    source = replace(source, '  "สัปดาห์ละครั้ง": "weekly",',
       '  "สัปดาห์ละครั้ง": "weekly",\n  "เดือนละครั้ง": "monthly",');
+    source = replace(source,
+      '  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(tokens));',
+      '  const dateBounded = splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" });\n  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(dateBounded));');
+    return `import { splitTokensAtRecognizedThaiDateBoundaries } from ${JSON.stringify(path.join(here,'thai-date-token-boundaries.ts'))};\n` + source;
   }
   if (file === path.join(root, 'src/fhir.ts')) {
     source = replace(source, '  if (schedule?.frequencyMax !== undefined) {',
@@ -47,9 +72,9 @@ export function candidateTransform(source, filename) {
     source = replace(source, '      calendarDateListRule(),',
       '      cycleScheduleRule(),\n      calendarDateListRule(),\n      openEndedBoundMarkerRule(),');
     source = replace(source, '      const conditions = getConditionFeatures(context);',
-      "      if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];\n      const conditions = getConditionFeatures(context);");
+      "      if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];\n      if (rule.id !== 'hpsg.lex.schedule.openEndedMarker' && insideOpenEndedMarker(context, start)) return [];\n      const conditions = getConditionFeatures(context);");
     return `import { cycleScheduleRule, insideCycle } from ${JSON.stringify(path.join(here, 'cycles.ts'))};\n` +
-      `import { openEndedBoundMarkerRule } from ${JSON.stringify(path.join(here, 'open-ended.ts'))};\n` + source;
+      `import { openEndedBoundMarkerRule, insideOpenEndedMarker } from ${JSON.stringify(path.join(here, 'open-ended.ts'))};\n` + source;
   }
   if (file === path.join(root, 'src/schedule.ts')) {
     source = replace(source,

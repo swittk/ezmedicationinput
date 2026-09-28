@@ -106,3 +106,9 @@ the source-transform test adapter as the production integration.
 The candidate treats changes in administration targets as regimen evidence. A coordinated multi-target phase is represented structurally and lowers to multiple FHIR Dosage items only because `Dosage.site` is singular. Pre-coordinated coded sites such as `both eyes` stay singular; explicit conjunctions such as `right eye and left eye` may lower separately. Disjunctions remain alternatives with a warning.
 
 Open-ended recurrence markers (`onward`, `onwards`, Thai `เป็นต้นไป`) are grammar contributions tied to a preceding date and an actual recurrence cadence. Anatomical phrases inside warnings/advice remain outside target ownership and cannot become extra administration sites.
+
+## Lazy temporal relation coverage
+
+Calendar bounds use a shared relation vocabulary, not per-sentence exceptions. English includes `after/before/from/since/starting/beginning/as of/as from/prior to/through/till`; Thai includes `หลัง/หลังจาก/ก่อน/ก่อนถึง/ตั้งแต่/นับตั้งแต่/นับจาก/นับแต่/เริ่ม/ถึง` plus open-continuation forms `ต่อไป/เป็นต้นไป`. Cadence can appear before or after the bound. Common Thai no-space forms are supported by splitting only at numeric boundaries inside a date span already recognized from the raw input.
+
+Bare bounds without cadence are kept incomplete rather than defaulting to daily. End bounds followed by `onwards/ต่อไป` are treated as contradictory and quarantined. Event/workflow phrases such as `after each bowel movement` are not reclassified as calendar bounds.
