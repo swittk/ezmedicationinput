@@ -104,6 +104,35 @@ describe('target ownership and open-ended surfaces stay stable across APIs and r
     expect(shape(asynchronous.items)).toEqual(shape(sync.items));
     expect(shape(lint.items.map(item => item.result))).toEqual(shape(sync.items));
   });
+  it('does not promote anatomical warning text into administration targets', () => {
+    const single = parseSig('Apply to right arm daily from 22/09/2026; avoid face and eyes', {
+      locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' }
+    });
+    expect(single.items).toHaveLength(1);
+    expect(single.fhir.site?.text).toBe('right arm');
+    expect(single.longText).toContain('Avoid face and eyes');
+
+    const compound = parseSig('Apply to right arm and right leg daily from 22/09/2026; avoid face', {
+      locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' }
+    });
+    expect(compound.items.map(item => item.fhir.site?.text)).toEqual(['right arm', 'right leg']);
+    expect(compound.items.every(item => item.longText.includes('Avoid face'))).toBe(true);
+  });
+
+  it('keeps pre-coordinated both-eyes singular but decomposes explicit two-eye conjunction', () => {
+    const both = parseSig('Instill 1 drop into both eyes daily from 22/09/2026 onwards', {
+      locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' }
+    });
+    expect(both.items).toHaveLength(1);
+    expect(both.fhir.site?.text).toBe('both eyes');
+    expect(both.fhir.site?.coding?.[0]?.code).toBe('40638003');
+
+    const explicit = parseSig('Instill 1 drop into right eye and left eye daily from 22/09/2026 onwards', {
+      locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' }
+    });
+    expect(explicit.items.map(item => item.fhir.site?.text)).toEqual(['right eye', 'left eye']);
+  });
+
   it.each(cases.flatMap(c => ['en', 'th'].map(locale => ({ ...c, renderLocale: locale }))))(
     'target FHIR -> $renderLocale text -> parse: $id', c => {
       const parsed = parseSig(c.input, c.options);

@@ -1,16 +1,16 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "b2ca2cdf725b64dade03f405c7b770b85243d43c9a7a1f4d8a2b664ff5be9ba4",
-    "base": "e0e2bb70a7c78a549a18e74bcf8c211e56aa6576",
-    "createdAt": "2026-09-28T03:30:37.304Z",
+    "experimentalSourceSha256": "e35a24633bb5783bea84cd2d70e3d91a9a70c210c5a564c9c8ebfc7fb96c2ee8",
+    "base": "3b90e1e6f9fe7fdf743a8aed2d88cb7fd4fdf912",
+    "createdAt": "2026-09-28T03:36:01.660Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      4.98,
-      5.71,
-      4.51
+      4.48,
+      4.52,
+      4.27
     ],
-    "rounds": 20,
+    "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
   },
   "case": "list-th-26",

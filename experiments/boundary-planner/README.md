@@ -100,3 +100,9 @@ realization is not intended to preserve original typography or byte-for-byte tex
 
 Review is still required before promoting the modules into production. Do not ship
 the source-transform test adapter as the production integration.
+
+## Administration-target scope
+
+The candidate treats changes in administration targets as regimen evidence. A coordinated multi-target phase is represented structurally and lowers to multiple FHIR Dosage items only because `Dosage.site` is singular. Pre-coordinated coded sites such as `both eyes` stay singular; explicit conjunctions such as `right eye and left eye` may lower separately. Disjunctions remain alternatives with a warning.
+
+Open-ended recurrence markers (`onward`, `onwards`, Thai `เป็นต้นไป`) are grammar contributions tied to a preceding date and an actual recurrence cadence. Anatomical phrases inside warnings/advice remain outside target ownership and cannot become extra administration sites.

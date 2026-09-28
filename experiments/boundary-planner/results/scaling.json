@@ -1,14 +1,14 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "b2ca2cdf725b64dade03f405c7b770b85243d43c9a7a1f4d8a2b664ff5be9ba4",
-    "base": "e0e2bb70a7c78a549a18e74bcf8c211e56aa6576",
-    "createdAt": "2026-09-28T03:25:17.374Z",
+    "experimentalSourceSha256": "e35a24633bb5783bea84cd2d70e3d91a9a70c210c5a564c9c8ebfc7fb96c2ee8",
+    "base": "3b90e1e6f9fe7fdf743a8aed2d88cb7fd4fdf912",
+    "createdAt": "2026-09-28T03:36:01.660Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      4.45,
-      4.06,
-      3.58
+      4.48,
+      4.52,
+      4.27
     ],
     "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
@@ -18,13 +18,13 @@
       "administrations": 1,
       "characters": 32,
       "baseline": {
-        "medianMs": 2.0157080000208225,
-        "p95Ms": 2.1699850000150036,
+        "medianMs": 2.082128999987617,
+        "p95Ms": 4.048276000015903,
         "itemCount": 1
       },
       "candidate": {
-        "medianMs": 1.956302999984473,
-        "p95Ms": 2.1169340000196826,
+        "medianMs": 1.8769299999985378,
+        "p95Ms": 1.9785020000126678,
         "itemCount": 1
       }
     },
@@ -32,13 +32,13 @@
       "administrations": 2,
       "characters": 69,
       "baseline": {
-        "medianMs": 7.955090000003111,
-        "p95Ms": 8.512552000000142,
+        "medianMs": 7.950431000004755,
+        "p95Ms": 8.135657000006177,
         "itemCount": 2
       },
       "candidate": {
-        "medianMs": 8.452584000013303,
-        "p95Ms": 10.032700999989174,
+        "medianMs": 7.437815999990562,
+        "p95Ms": 9.906752999988385,
         "itemCount": 2
       }
     },
@@ -46,13 +46,13 @@
       "administrations": 4,
       "characters": 143,
       "baseline": {
-        "medianMs": 19.300167000008514,
-        "p95Ms": 21.66109600002528,
+        "medianMs": 19.286772999999812,
+        "p95Ms": 21.61999300000025,
         "itemCount": 4
       },
       "candidate": {
-        "medianMs": 15.514277999987826,
-        "p95Ms": 16.763537999999244,
+        "medianMs": 15.220958999998402,
+        "p95Ms": 16.930171000014525,
         "itemCount": 4
       }
     },
@@ -60,13 +60,13 @@
       "administrations": 8,
       "characters": 291,
       "baseline": {
-        "medianMs": 44.22928800000227,
-        "p95Ms": 46.99756600000546,
+        "medianMs": 44.84949699998833,
+        "p95Ms": 46.83251900001778,
         "itemCount": 8
       },
       "candidate": {
-        "medianMs": 31.27195299998857,
-        "p95Ms": 34.078103999985615,
+        "medianMs": 32.90806099999463,
+        "p95Ms": 33.902413000003435,
         "itemCount": 8
       }
     },
@@ -74,13 +74,13 @@
       "administrations": 16,
       "characters": 594,
       "baseline": {
-        "medianMs": 93.56761900000856,
-        "p95Ms": 99.6452500000014,
+        "medianMs": 94.28343199999654,
+        "p95Ms": 95.88231299998006,
         "itemCount": 16
       },
       "candidate": {
-        "medianMs": 66.26882300002035,
-        "p95Ms": 69.06026200001361,
+        "medianMs": 64.08614400000079,
+        "p95Ms": 64.97886200001813,
         "itemCount": 16
       }
     }
