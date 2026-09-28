@@ -1,4 +1,5 @@
 import { recognizeCycles } from './cycles';
+import { mayContainAdministrationTargetGroup, recognizeAdministrationTargetGroups } from './targets';
 import { findMedicationDateListSpans } from '../../src/date-interpretation';
 import { getDayOfWeekMeaning } from '../../src/lexer/meaning';
 import { normalizeUnit } from '../../src/unit-lexicon';
@@ -52,6 +53,11 @@ export function recognizeStructures(context: PlanningInput): StructuralClaim[] {
     add('calendar-date-list', span.start, end, 'findMedicationDateListSpans', !span.unresolved);
   }
   for (const cycle of recognizeCycles(input, options)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
+  const hasTargetListSurface = mayContainAdministrationTargetGroup(input, options, tokens);
+  if (hasTargetListSurface) {
+    for (const group of recognizeAdministrationTargetGroups(input, options))
+      add('target-list', group.start, group.end, 'structure.administration-target-list');
+  }
   // List constructions compose typed atoms and canonical coordinators, not medication phrases.
   for (const kind of ['clock-list', 'weekday-list'] as const) {
     const atomEnd = (index: number): number | undefined => kind === 'clock-list'

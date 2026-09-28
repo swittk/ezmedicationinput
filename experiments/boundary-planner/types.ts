@@ -3,7 +3,7 @@ import type { CanonicalSigClause, ParseOptions } from '../../src/types';
 import type { Token } from '../../src/parser-state';
 
 export interface Range { start: number; end: number }
-export type StructureKind = 'cycle-schedule' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized';
+export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized';
 export interface StructuralClaim extends Range {
   id: string;
   kind: StructureKind;
@@ -52,6 +52,8 @@ export interface ProbeSummary extends Range {
   prn: boolean;
   clocks: readonly string[];
   conditionStarts: readonly number[];
+  targets: readonly string[];
+  hasTargets: boolean;
   clause: CanonicalSigClause;
 }
 export interface PlannerMetrics {

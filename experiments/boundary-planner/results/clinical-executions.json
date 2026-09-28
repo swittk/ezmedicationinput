@@ -1,16 +1,16 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286",
-    "base": "c9fe4fddafe2fd995057d334546ed3b195085778",
-    "createdAt": "2026-09-27T23:30:57.020Z",
+    "experimentalSourceSha256": "b2ca2cdf725b64dade03f405c7b770b85243d43c9a7a1f4d8a2b664ff5be9ba4",
+    "base": "e0e2bb70a7c78a549a18e74bcf8c211e56aa6576",
+    "createdAt": "2026-09-28T03:30:37.304Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      1.07,
-      1.93,
-      4.73
+      4.98,
+      5.71,
+      4.51
     ],
-    "rounds": 30,
+    "rounds": 20,
     "experiment": "shadow boundary planner; production source unchanged"
   },
   "cases": [
@@ -15295,6 +15295,2033 @@
           ],
           "totals": {
             "totalUnits": 8
+          }
+        }
+      ]
+    },
+    {
+      "id": "target-phase-expansion-onwards",
+      "partition": "challenge",
+      "input": "Apply to right arm on 21/09/2026 and right arm and right leg on 22/09/2026 onwards daily",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-phase-transition",
+              "range": {
+                "start": 33,
+                "end": 36
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "target-change-explicit-then",
+      "partition": "challenge",
+      "input": "Apply to right arm on 21/09/2026 then apply to right leg daily from 22/09/2026",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 33,
+                "end": 37
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "compound-target-lowers-to-singular-sites",
+      "partition": "challenge",
+      "input": "Apply to right arm and right leg daily from 22/09/2026",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "open-ended-bound-order-before-cadence",
+      "partition": "challenge",
+      "input": "Apply to right arm from 22/09/2026 onwards daily",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "open-ended-bound-order-after-cadence",
+      "partition": "challenge",
+      "input": "Apply to right arm daily from 22/09/2026 onward",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "eye-target-sequence",
+      "partition": "challenge",
+      "input": "Instill 1 drop into right eye on 21/09/2026 then instill 1 drop into both eyes daily from 22/09/2026 onwards",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "right eye",
+          "siteCode": "1290032005",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "both eyes",
+          "siteCode": "40638003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 44,
+                "end": 48
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [],
+          "due": [],
+          "totals": {
+            "totalUnits": 0,
+            "totalApproximateQuantity": {
+              "value": 0,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
+          }
+        },
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 140,
+            "totalApproximateQuantity": {
+              "value": 7,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eye-target-compact-union",
+      "partition": "challenge",
+      "input": "Instill 1 drop into right eye on 21/09/2026 and both eyes on 22/09/2026 onwards daily",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "right eye",
+          "siteCode": "1290032005",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "both eyes",
+          "siteCode": "40638003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-phase-transition",
+              "range": {
+                "start": 44,
+                "end": 47
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [],
+          "due": [],
+          "totals": {
+            "totalUnits": 0,
+            "totalApproximateQuantity": {
+              "value": 0,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
+          }
+        },
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 140,
+            "totalApproximateQuantity": {
+              "value": 7,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wound-target-expansion",
+      "partition": "challenge",
+      "input": "Apply to wound on 21/09/2026 then apply to wound and scalp daily from 22/09/2026 onwards",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "site": "wound",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "site": "wound",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "site": "scalp",
+          "siteCode": "41695006",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 29,
+                "end": 33
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "target-reduction",
+      "partition": "challenge",
+      "input": "Apply to right arm and right leg on 21/09/2026 then apply to right arm daily from 22/09/2026 onwards",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 47,
+                "end": 51
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "thai-target-expansion",
+      "partition": "challenge",
+      "input": "ทาที่แขนขวา วันที่ 21/09/2026 จากนั้น ทาที่แขนขวาและขาขวา วันละครั้ง ตั้งแต่วันที่ 22/09/2026",
+      "options": {
+        "locale": "th",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 30,
+                "end": 37
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code-switch-target-expansion",
+      "partition": "challenge",
+      "input": "ทาที่แขนขวา on 21/09/2026 then ทาที่แขนขวาและขาขวา daily from 22/09/2026 onwards",
+      "options": {
+        "locale": "th",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-change",
+              "range": {
+                "start": 26,
+                "end": 30
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "open-ended-bare-date-cadence-before-marker",
+      "partition": "challenge",
+      "input": "Apply to right arm on 22/09/2026 daily onwards",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "thai-open-ended-marker",
+      "partition": "challenge",
+      "input": "ทาที่แขนขวา วันละครั้ง ตั้งแต่วันที่ 22/9/69 เป็นต้นไป",
+      "options": {
+        "locale": "th",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "thai-target-expansion-open-ended",
+      "partition": "challenge",
+      "input": "ทาที่แขนขวา วันที่ 21/9/69 และ แขนขวา และ ขาขวา วันที่ 22/9/69 เป็นต้นไป วันละครั้ง",
+      "options": {
+        "locale": "th",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "dates": [
+            "2026-09-21"
+          ]
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right arm",
+          "siteCode": "368209003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "noDose": true,
+          "method": "Apply",
+          "site": "right leg",
+          "siteCode": "213289002",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          },
+          {
+            "id": 1,
+            "members": [
+              1
+            ]
+          }
+        ],
+        "sequences": [
+          {
+            "from": 0,
+            "to": 1,
+            "relation": {
+              "from": 0,
+              "to": 1,
+              "kind": "sequence",
+              "rule": "regimen.target-phase-transition",
+              "range": {
+                "start": 27,
+                "end": 30
+              }
+            }
+          }
+        ]
+      },
+      "items": [
+        {
+          "timing": {
+            "event": [
+              "2026-09-21"
+            ]
+          },
+          "warnings": [
+            "Incomplete sig: missing timing or PRN qualifier for topical site administration."
+          ],
+          "due": [],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        },
+        {
+          "timing": {
+            "repeat": {
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d",
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              }
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "explicit-two-eye-targets-lower-separately",
+      "partition": "challenge",
+      "input": "Instill 1 drop into right eye and left eye daily from 22/09/2026 onwards",
+      "options": {
+        "locale": "en-GB",
+        "datePolicy": {
+          "referenceDate": "2026-09-27"
+        }
+      },
+      "scheduleOptions": {
+        "from": "2026-09-27T00:00:00+07:00",
+        "timeZone": "Asia/Bangkok",
+        "limit": 20
+      },
+      "expected": [
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "right eye",
+          "siteCode": "1290032005",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        },
+        {
+          "dose": 1,
+          "method": "Instill",
+          "unit": "drop",
+          "site": "left eye",
+          "siteCode": "1290031003",
+          "start": "2026-09-22",
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      ],
+      "phaseGraph": {
+        "phases": [
+          {
+            "id": 0,
+            "members": [
+              0
+            ]
+          }
+        ],
+        "sequences": []
+      },
+      "items": [
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 70,
+            "totalApproximateQuantity": {
+              "value": 3.5,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
+          }
+        },
+        {
+          "doseAndRate": [
+            {
+              "doseQuantity": {
+                "value": 1,
+                "unit": "drop"
+              }
+            }
+          ],
+          "timing": {
+            "repeat": {
+              "boundsPeriod": {
+                "start": "2026-09-22"
+              },
+              "frequency": 1,
+              "period": 1,
+              "periodUnit": "d"
+            }
+          },
+          "warnings": [],
+          "due": [
+            "2026-09-27T09:00:00+07:00",
+            "2026-09-28T09:00:00+07:00",
+            "2026-09-29T09:00:00+07:00",
+            "2026-09-30T09:00:00+07:00",
+            "2026-10-01T09:00:00+07:00",
+            "2026-10-02T09:00:00+07:00",
+            "2026-10-03T09:00:00+07:00",
+            "2026-10-04T09:00:00+07:00",
+            "2026-10-05T09:00:00+07:00",
+            "2026-10-06T09:00:00+07:00",
+            "2026-10-07T09:00:00+07:00",
+            "2026-10-08T09:00:00+07:00",
+            "2026-10-09T09:00:00+07:00",
+            "2026-10-10T09:00:00+07:00",
+            "2026-10-11T09:00:00+07:00",
+            "2026-10-12T09:00:00+07:00",
+            "2026-10-13T09:00:00+07:00",
+            "2026-10-14T09:00:00+07:00",
+            "2026-10-15T09:00:00+07:00",
+            "2026-10-16T09:00:00+07:00"
+          ],
+          "totals": {
+            "totalUnits": 70,
+            "totalApproximateQuantity": {
+              "value": 3.5,
+              "unit": "mL",
+              "confidence": "approximate",
+              "basis": "Generic ophthalmic drop default; product/dropper-specific values should override this",
+              "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3217709/"
+            }
           }
         }
       ]

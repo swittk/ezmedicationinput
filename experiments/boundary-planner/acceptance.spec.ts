@@ -6,6 +6,28 @@ import { SPECIALTY_CASES, SPECIALTY_SEEDS } from './specialty-corpus';
 import type { GoldenCase } from './corpus';
 
 const corpus = [...ORIGINAL_CORPUS, ...SPECIALTY_CASES];
+function siteSemantic(site: any) {
+  const coding = site?.coding?.find((value: any) => value.code);
+  return { text: site?.text, code: coding?.code, system: coding?.system, display: coding?.display };
+}
+function timingSemantic(timing: any) {
+  const repeat = timing?.repeat;
+  return {
+    event: [...(timing?.event ?? [])].sort(),
+    repeat: repeat ? {
+      count: repeat.count, countMax: repeat.countMax,
+      boundsPeriod: repeat.boundsPeriod,
+      boundsDuration: repeat.boundsDuration,
+      boundsRange: repeat.boundsRange,
+      duration: repeat.duration, durationMax: repeat.durationMax, durationUnit: repeat.durationUnit,
+      frequency: repeat.frequency, frequencyMax: repeat.frequencyMax,
+      period: repeat.period, periodMax: repeat.periodMax, periodUnit: repeat.periodUnit,
+      dayOfWeek: [...(repeat.dayOfWeek ?? [])].sort(),
+      when: [...(repeat.when ?? [])].sort(),
+      timeOfDay: [...(repeat.timeOfDay ?? [])].sort()
+    } : undefined
+  };
+}
 function checkClinical(c: GoldenCase) {
   const parsed = parseSig(c.input, c.options), scheduleOptions = { ...SCHEDULE_OPTIONS, ...c.scheduleOptions };
   expect(parsed.items.length, c.id).toBe(c.items.length);
@@ -14,7 +36,8 @@ function checkClinical(c: GoldenCase) {
     const due = nextDueDoses(fhir, scheduleOptions);
     const total = calculateTotalUnits({ dosage: fhir, from: scheduleOptions.from, timeZone: scheduleOptions.timeZone,
       durationValue: c.totalDays ?? 70, durationUnit: FhirPeriodUnit.Day, ...c.scheduleOptions }).totalUnits;
-    const actual = { dose: fhir.doseAndRate?.[0]?.doseQuantity?.value, unit: fhir.doseAndRate?.[0]?.doseQuantity?.unit,
+    const actual = { method: fhir.method?.text, site: fhir.site?.text, siteCode: fhir.site?.coding?.find(code => code.code)?.code,
+      dose: fhir.doseAndRate?.[0]?.doseQuantity?.value, unit: fhir.doseAndRate?.[0]?.doseQuantity?.unit,
       dates: fhir.timing?.event, clocks: repeat?.timeOfDay, when: repeat?.when, weekdays: repeat?.dayOfWeek,
       start: repeat?.boundsPeriod?.start, end: repeat?.boundsPeriod?.end,
       duration: item.meta.canonical.clauses[0]?.schedule?.duration ?? repeat?.boundsDuration?.value,
@@ -30,6 +53,7 @@ function checkClinical(c: GoldenCase) {
     const restored = canonicalToFhir(canonicalFromFhir(JSON.parse(JSON.stringify(fhir))));
     expect(nextDueDoses(restored, scheduleOptions), `${c.id}:FHIR-occurrences`).toEqual(due);
     expect(restored.doseAndRate).toEqual(fhir.doseAndRate);
+    expect(siteSemantic(restored.site)).toEqual(siteSemantic(fhir.site));
     if (c.partition === 'specialty') {
       expect([repeat?.boundsDuration,repeat?.boundsRange,repeat?.boundsPeriod].filter(Boolean).length).toBeLessThanOrEqual(1);
       expect(Boolean(repeat?.when?.length && repeat?.timeOfDay?.length)).toBe(false);
@@ -66,6 +90,39 @@ const invalidCycles = [
   'on days 1,8 every 28 days starting 31/2/2026 for 2 cycles',
   'on days 1,8 every 28 days starting 09/28/26 for 2 cycles'
 ];
+describe('target ownership and open-ended surfaces stay stable across APIs and realization', () => {
+  const cases = corpus.filter(value => value.family === 'administration-target-scope' || value.family === 'open-ended-bound');
+  it.each(cases)('sync/async/lint target ownership: $id', async c => {
+    const sync = parseSig(c.input, c.options);
+    const asynchronous = await parseSigAsync(c.input, c.options);
+    const lint = lintSig(c.input, c.options);
+    const shape = (items: typeof sync.items) => items.map(item => ({
+      site: item.fhir.site,
+      timing: item.fhir.timing,
+      leftover: item.meta.leftoverText
+    }));
+    expect(shape(asynchronous.items)).toEqual(shape(sync.items));
+    expect(shape(lint.items.map(item => item.result))).toEqual(shape(sync.items));
+  });
+  it.each(cases.flatMap(c => ['en', 'th'].map(locale => ({ ...c, renderLocale: locale }))))(
+    'target FHIR -> $renderLocale text -> parse: $id', c => {
+      const parsed = parseSig(c.input, c.options);
+      for (const item of parsed.items) {
+        const text = formatSig(item.fhir, 'long', { locale: c.renderLocale });
+        const reparsed = parseSig(text, { ...c.options, locale: c.renderLocale });
+        const matching = reparsed.items.find(value =>
+          JSON.stringify(siteSemantic(value.fhir.site)) === JSON.stringify(siteSemantic(item.fhir.site)) &&
+          JSON.stringify(timingSemantic(value.fhir.timing)) === JSON.stringify(timingSemantic(item.fhir.timing))
+        );
+        expect(matching, text).toBeDefined();
+        const scheduleOptions = { ...SCHEDULE_OPTIONS, ...c.scheduleOptions };
+        expect(nextDueDoses(matching!.fhir, scheduleOptions), text).toEqual(nextDueDoses(item.fhir, scheduleOptions));
+        expect(reparsed.items.every(value => !value.meta.leftoverText), text).toBe(true);
+      }
+    }
+  );
+});
+
 describe('known-invalid input never becomes a fabricated executable regimen', () => {
   it.each(invalidCycles)('retains dose but refuses unsafe cycle: %s', text => {
     const input=`take .5 tab at 08:00 ${text}`, parsed=parseSig(input,{locale:'en-US',datePolicy:{referenceDate:'2026-09-27'}});
@@ -88,6 +145,27 @@ describe('known-invalid input never becomes a fabricated executable regimen', ()
     expect(parsed.items[2].warnings.join(' ')).toContain('ambiguous-inherited-clock');
     expect(nextDueDoses(parsed.items[2].fhir,SCHEDULE_OPTIONS)).toEqual([]);
   });
+  it.each([
+    'Apply to right arm or right leg daily from 22/09/2026 onwards',
+    'ทาที่แขนขวาหรือขาขวา วันละครั้ง ตั้งแต่วันที่ 22/09/2026'
+  ])('retains disjunctive target choice instead of fabricating simultaneous administrations: %s', input => {
+    const parsed = parseSig(input, { locale: input.startsWith('ทา') ? 'th' : 'en-GB', datePolicy: { referenceDate: '2026-09-20' } });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.site?.text).toMatch(/(?:or|หรือ)/u);
+    expect(parsed.warnings.join(' ')).toContain('Alternative administration targets retained as text');
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.start).toBe('2026-09-22');
+  });
+
+  it('does not silently consume an open-ended marker when no recurrence cadence was specified', () => {
+    const parsed = parseSig('Apply to right arm on 22/09/2026 onwards', {
+      locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' }
+    });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.warnings.join(' ')).toContain('open-ended-bound-without-cadence');
+    expect(parsed.fhir.timing).toBeUndefined();
+    expect(parsed.longText).toContain('onwards');
+  });
+
   it('does not silently turn a range or PRN into a precise fixed dose', () => {
     const parsed=parseSig('take 1-2 tablets every 6 hours as needed for pain');
     expect(parsed.fhir.asNeededBoolean).toBe(true);

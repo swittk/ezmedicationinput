@@ -1,3 +1,4 @@
+import { normalizeOpenEndedSchedule } from './open-ended';
 import { recognizeCycles } from './cycles';
 import { quarantineSchedule } from './admissibility';
 import { normalizeAnchoredBounds, normalizeClockFrequency } from './bounds';
@@ -69,6 +70,7 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
+    normalizeOpenEndedSchedule(results[index], segments[index]?.text ?? '', options);
     const invalid = recognizeCycles(segments[index]?.text ?? '', options).find(c => c.error);
     if (invalid) quarantineSchedule(results[index], segments[index].text, invalid.error!);
   }
@@ -76,6 +78,14 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
   const graph = buildRegimenGraph(plan, segments), evidence: InheritanceEvidence[] = [];
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
+    const priorMethods = prior.map(i => results[i]?.fhir.method).filter(Boolean);
+    const sharedMethod = priorMethods.length && priorMethods.every(method =>
+      JSON.stringify(method) === JSON.stringify(priorMethods[0]))
+      ? priorMethods[0] : undefined;
+    const sharedCanonicalMethod = prior.length && prior.every(i =>
+      JSON.stringify(results[i]?.meta.canonical.clauses[0]?.method) ===
+      JSON.stringify(results[prior[0]]?.meta.canonical.clauses[0]?.method))
+      ? results[prior[0]]?.meta.canonical.clauses[0]?.method : undefined;
     const schedules = prior.map(i => results[i]?.meta.canonical.clauses[0]?.schedule);
     const endpoints = schedules.map(phaseEndExclusive);
     // All members must have an explicit finite end; an unbounded sibling prevents inference.
@@ -86,6 +96,13 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
     for (const index of graph.phases[edge.to].members) {
       const item = results[index], clause = item?.meta.canonical.clauses[0], schedule = clause?.schedule;
       if (!item || !schedule || schedule.calendarEvents?.length) continue;
+      if (edge.relation.rule.indexOf('regimen.target-') === 0 &&
+          !item.fhir.method && sharedMethod && !clause?.method) {
+        item.fhir.method = JSON.parse(JSON.stringify(sharedMethod));
+        if (clause && sharedCanonicalMethod) {
+          clause.method = JSON.parse(JSON.stringify(sharedCanonicalMethod));
+        }
+      }
       if (!schedule.dayOfWeek?.length && schedule.frequency === undefined && schedule.period === undefined && !schedule.timingCode && !schedule.when?.length && !schedule.timeOfDay?.length) continue;
       if (start && schedule.boundsStart && schedule.boundsStart < start) {
         quarantineSchedule(item, segments[index].text, 'phase-start-precedes-predecessor-end');

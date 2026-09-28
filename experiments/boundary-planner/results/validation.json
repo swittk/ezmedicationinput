@@ -1,113 +1,45 @@
 {
   "metadata": {
-    "experimentalSourceSha256": "e1eb03f961d2fdde7b19b9ffa6178d55b35cc877e98dc410b561d8f28add1286",
-    "base": "c9fe4fddafe2fd995057d334546ed3b195085778",
-    "createdAt": "2026-09-27T23:30:57.020Z",
+    "experimentalSourceSha256": "b2ca2cdf725b64dade03f405c7b770b85243d43c9a7a1f4d8a2b664ff5be9ba4",
+    "base": "e0e2bb70a7c78a549a18e74bcf8c211e56aa6576",
+    "createdAt": "2026-09-28T03:25:17.374Z",
     "node": "v24.14.1",
     "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
     "loadAverage": [
-      1.07,
-      1.93,
-      4.73
+      4.45,
+      4.06,
+      3.58
     ],
     "rounds": 30,
     "experiment": "shadow boundary planner; production source unchanged"
   },
-  "suites": [
-    {
-      "name": "native",
-      "command": [
-        "npm",
-        "test",
-        "--",
-        "--reporter=json",
-        "--outputFile=experiments/boundary-planner/.generated/final-native.json"
-      ],
-      "exitCode": 0,
-      "seconds": 9.197,
-      "numTotalTests": 1210,
-      "numPassedTests": 1210,
-      "numFailedTests": 0
-    },
-    {
-      "name": "dist",
-      "command": [
-        "npm",
-        "run",
-        "test:dist"
-      ],
-      "exitCode": 0,
-      "seconds": 7.007
-    },
-    {
-      "name": "shadow",
-      "command": [
-        "npm",
-        "run",
-        "test:shadow-boundaries",
-        "--",
-        "--reporter=json",
-        "--outputFile=experiments/boundary-planner/.generated/final-shadow.json"
-      ],
-      "exitCode": 0,
-      "seconds": 9.611,
-      "numTotalTests": 1210,
-      "numPassedTests": 1210,
-      "numFailedTests": 0
-    },
-    {
-      "name": "contracts",
-      "command": [
-        "npm",
-        "run",
-        "test:boundaries",
-        "--",
-        "--reporter=json",
-        "--outputFile=experiments/boundary-planner/.generated/final-contracts.json"
-      ],
-      "exitCode": 0,
-      "seconds": 6.167,
-      "numTotalTests": 104,
-      "numPassedTests": 104,
-      "numFailedTests": 0
-    },
-    {
-      "name": "clinical",
-      "command": [
-        "npm",
-        "run",
-        "test:boundary-clinical",
-        "--",
-        "--reporter=json",
-        "--outputFile=experiments/boundary-planner/.generated/final-clinical.json"
-      ],
-      "exitCode": 0,
-      "seconds": 11.747,
-      "numTotalTests": 324,
-      "numPassedTests": 324,
-      "numFailedTests": 0
-    },
-    {
-      "name": "types",
-      "command": [
-        "npm",
-        "run",
-        "typecheck:boundaries"
-      ],
-      "exitCode": 0,
-      "seconds": 3.473
-    },
-    {
-      "name": "integration-types",
-      "command": [
-        "npm",
-        "run",
-        "typecheck:boundary-integration"
-      ],
-      "exitCode": 0,
-      "seconds": 3.584
-    }
-  ],
+  "native": {
+    "total": 1210,
+    "passed": 1210,
+    "failed": 0
+  },
+  "shadow": {
+    "total": 1210,
+    "passed": 1210,
+    "failed": 0
+  },
+  "contracts": {
+    "total": 107,
+    "passed": 107,
+    "failed": 0
+  },
+  "clinical": {
+    "total": 387,
+    "passed": 387,
+    "failed": 0
+  },
+  "dist": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0
+  },
+  "typecheckBoundaries": "pass",
+  "typecheckIntegratedCandidate": "pass",
   "goldens": {
     "historical": {
       "total": 15,
@@ -122,9 +54,9 @@
       "sameClinicalOutput": 60
     },
     "challenge": {
-      "total": 5,
+      "total": 20,
       "baselinePassed": 3,
-      "candidatePassed": 5,
+      "candidatePassed": 20,
       "sameClinicalOutput": 3
     },
     "specialty": {
@@ -134,23 +66,6276 @@
       "sameClinicalOutput": 46
     }
   },
-  "performanceGates": {
-    "torture": true,
-    "composed": true,
-    "specialty": true
-  },
-  "packageIsolation": {
-    "version": "0.1.66",
-    "fileCount": 85,
-    "experimentFiles": [],
-    "sourceDiff": ""
+  "performance": [
+    {
+      "name": "torture",
+      "cases": 50,
+      "baseline": {
+        "meanMs": 8.773083227999948,
+        "p50Ms": 6.44941299999482,
+        "p95Ms": 25.09046700000181,
+        "p99Ms": 29.23538499999995,
+        "parses": 1500
+      },
+      "candidate": {
+        "meanMs": 8.83282701466665,
+        "p50Ms": 6.541550000001735,
+        "p95Ms": 25.444131000000198,
+        "p99Ms": 29.314511999997194,
+        "parses": 1500
+      },
+      "meanRatio": 1.006809896260419,
+      "p95Ratio": 1.014095552705271,
+      "pairedRoundRatioMedian": 1.0037953547414342,
+      "pairedRoundRatios": [
+        1.0203550183363022,
+        1.0162244086298737,
+        1.0076768123544522,
+        0.9885913422780388,
+        0.9948556994497538,
+        1.0153901502286766,
+        1.019107942609072,
+        0.9869449310579342,
+        0.9739901431921284,
+        0.9977609056589563,
+        1.0333150041031054,
+        1.0136193520808991,
+        1.0386434061941727,
+        1.0024456052571586,
+        1.0574975208414126,
+        0.9785703159031451,
+        1.013044857458378,
+        1.0401292148208767,
+        1.104851179023336,
+        0.9959219208267397,
+        0.9906246881536367,
+        1.0125768049573258,
+        0.9462230094242728,
+        1.0048765252730278,
+        1.023564878794687,
+        1.0037953547414342,
+        0.998151412573169,
+        0.9570382350638138,
+        0.9937886022334842,
+        0.9832601353388104
+      ],
+      "performanceGate": true,
+      "gateBasis": "fixed legacy corpus mean and p95 <= baseline * 1.05"
+    },
+    {
+      "name": "composed",
+      "cases": 20,
+      "baseline": {
+        "meanMs": 7.7836096150000955,
+        "p50Ms": 7.713194000003568,
+        "p95Ms": 15.42605299999559,
+        "p99Ms": 18.81780499999877,
+        "parses": 600
+      },
+      "candidate": {
+        "meanMs": 6.980476058333152,
+        "p50Ms": 6.818639999997686,
+        "p95Ms": 13.554200999999011,
+        "p99Ms": 15.678607000001648,
+        "parses": 600
+      },
+      "meanRatio": 0.8968173384339325,
+      "p95Ratio": 0.8786564521723662,
+      "pairedRoundRatioMedian": 0.8942603572092512,
+      "pairedRoundRatios": [
+        0.8266755571674856,
+        0.9151941264914117,
+        0.9029995416283664,
+        0.9334609591679147,
+        0.7564024297991411,
+        0.8735928800951019,
+        0.9482591506962097,
+        0.8436430760008304,
+        0.8179346638052188,
+        0.892860409712792,
+        0.8683836610295285,
+        0.8942603572092512,
+        0.9434050362986017,
+        1.19364653497819,
+        0.7852785970335598,
+        0.8653755936338714,
+        0.8838729675161225,
+        0.842178892891999,
+        0.8702820089968214,
+        0.8981000689768217,
+        0.9908461244552905,
+        0.9267872686255418,
+        0.917464185056551,
+        0.8625923929446772,
+        0.9154007327616207,
+        0.9306752062620298,
+        0.8994545511020728,
+        0.8814187910812438,
+        0.9226218045850321,
+        0.8986698744064127
+      ],
+      "performanceGate": true,
+      "gateBasis": "fixed legacy corpus mean and p95 <= baseline * 1.05"
+    },
+    {
+      "name": "new-challenges",
+      "cases": 15,
+      "baseline": {
+        "meanMs": 8.304570897777804,
+        "p50Ms": 8.566904999999679,
+        "p95Ms": 14.384879999997793,
+        "p99Ms": 16.622119999999995,
+        "parses": 450
+      },
+      "candidate": {
+        "meanMs": 9.986654077777672,
+        "p50Ms": 9.741432000002533,
+        "p95Ms": 17.527103000000352,
+        "p99Ms": 20.63644600000407,
+        "parses": 450
+      },
+      "meanRatio": 1.2025490781769317,
+      "p95Ratio": 1.2184392918121696,
+      "pairedRoundRatioMedian": 1.2152064659912385,
+      "pairedRoundRatios": [
+        1.1459196616741745,
+        1.231093845180516,
+        1.219331608049533,
+        1.2222682295011604,
+        1.1308713065799074,
+        1.1957791419502453,
+        1.166889707187813,
+        1.2571721116713985,
+        1.2195213460966565,
+        1.2045712638466528,
+        1.1405737310633384,
+        1.2389680394876563,
+        1.2543203330725812,
+        1.1157582480482542,
+        1.2716653781031277,
+        1.0837364737615682,
+        1.2236927258981776,
+        1.1689362446118767,
+        1.0984653947301222,
+        1.1332856285423616,
+        1.2152064659912385,
+        1.2564003289189347,
+        1.3157515239098503,
+        1.1026148727281013,
+        1.2880361761072352,
+        1.496267766577282,
+        1.2350645193986007,
+        1.149721517747993,
+        1.104034919539708,
+        1.2434144520338835
+      ],
+      "performanceGate": true,
+      "gateBasis": "p95 <= 100ms; old lane is not an equal-correctness comparator for new semantics"
+    },
+    {
+      "name": "specialty",
+      "cases": 112,
+      "baseline": {
+        "meanMs": 12.067787556845195,
+        "p50Ms": 9.327186000009533,
+        "p95Ms": 30.128389000019524,
+        "p99Ms": 40.6902390000032,
+        "parses": 3360
+      },
+      "candidate": {
+        "meanMs": 9.579632884523752,
+        "p50Ms": 6.857394000006025,
+        "p95Ms": 23.596560999998474,
+        "p99Ms": 29.805222000009962,
+        "parses": 3360
+      },
+      "meanRatio": 0.7938184890477219,
+      "p95Ratio": 0.7832002235493967,
+      "pairedRoundRatioMedian": 0.815069071923786,
+      "pairedRoundRatios": [
+        0.7727554788016854,
+        0.7728110962991388,
+        0.8312967988997465,
+        0.8086374296116121,
+        0.8296776506388208,
+        0.8449450495799972,
+        0.7279673862492676,
+        0.6301005418881408,
+        0.5274408043178356,
+        0.8090568742643226,
+        0.7617661924141733,
+        0.8596432219166814,
+        0.6496346570410779,
+        0.816731609462355,
+        0.848373356264643,
+        0.7928062212211793,
+        0.902927554458135,
+        0.815069071923786,
+        0.8530287944087235,
+        0.8366555200751987,
+        0.8704522460781198,
+        0.8005463218054344,
+        0.9031741753320927,
+        0.9391095320090145,
+        0.7781884102803158,
+        0.8063922933763092,
+        0.8007670069760731,
+        0.8496122532225204,
+        0.8153808896939392,
+        0.8357607158808424
+      ],
+      "performanceGate": true,
+      "gateBasis": "p95 <= 100ms; old lane is not an equal-correctness comparator for new semantics"
+    }
+  ],
+  "costs": {
+    "metadata": {
+      "experimentalSourceSha256": "b2ca2cdf725b64dade03f405c7b770b85243d43c9a7a1f4d8a2b664ff5be9ba4",
+      "base": "e0e2bb70a7c78a549a18e74bcf8c211e56aa6576",
+      "createdAt": "2026-09-28T03:30:37.304Z",
+      "node": "v24.14.1",
+      "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
+      "loadAverage": [
+        4.98,
+        5.71,
+        4.51
+      ],
+      "rounds": 20,
+      "experiment": "shadow boundary planner; production source unchanged"
+    },
+    "baseline": {
+      "clauseCalls": 841,
+      "speculativeProbes": 433,
+      "lexicalCalls": 4878,
+      "chartCalls": 841,
+      "chartTruncations": 0,
+      "chartSigns": 17449,
+      "agendaItems": 20098,
+      "combinationAttempts": 51405,
+      "cacheHits": 0
+    },
+    "candidate": {
+      "clauseCalls": 703,
+      "speculativeProbes": 308,
+      "lexicalCalls": 3746,
+      "chartCalls": 703,
+      "chartTruncations": 0,
+      "chartSigns": 15650,
+      "agendaItems": 18036,
+      "combinationAttempts": 45894,
+      "cacheHits": 26
+    },
+    "cases": [
+      {
+        "id": "reported-thai-date-list",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "english-omitted-head",
+        "family": "dose-continuation",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 70,
+          "combinationAttempts": 84,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 44,
+          "agendaItems": 50,
+          "combinationAttempts": 64,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "thai-omitted-head",
+        "family": "dose-continuation",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 70,
+          "combinationAttempts": 84,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 44,
+          "agendaItems": 50,
+          "combinationAttempts": 64,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "thai-taper-duration",
+        "family": "shared-modifier-scope",
+        "baseline": {
+          "clauseCalls": 10,
+          "speculativeProbes": 6,
+          "lexicalCalls": 45,
+          "chartCalls": 10,
+          "chartTruncations": 0,
+          "chartSigns": 63,
+          "agendaItems": 63,
+          "combinationAttempts": 77,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 9,
+          "speculativeProbes": 5,
+          "lexicalCalls": 40,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 55,
+          "agendaItems": 55,
+          "combinationAttempts": 70,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "duration-before-merge",
+        "family": "shared-modifier-scope",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 22,
+          "combinationAttempts": 18,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 22,
+          "combinationAttempts": 18,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "independent-date-clock-pairs",
+        "family": "pairing-versus-product",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 78,
+          "combinationAttempts": 150,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 78,
+          "combinationAttempts": 150,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "pairs-then-recurring",
+        "family": "sequence-versus-union",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 135,
+          "combinationAttempts": 246,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 122,
+          "combinationAttempts": 230,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "union-not-sequence",
+        "family": "sequence-versus-union",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 88,
+          "combinationAttempts": 170,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 88,
+          "combinationAttempts": 170,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "shared-clocks-shared-dates",
+        "family": "pairing-versus-product",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 57,
+          "combinationAttempts": 100,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 39,
+          "combinationAttempts": 75,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fronted-date-comma",
+        "family": "fronted-attachment",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 48,
+          "agendaItems": 56,
+          "combinationAttempts": 136,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 19,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 48,
+          "agendaItems": 56,
+          "combinationAttempts": 136,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "bounded-fronted-schedule",
+        "family": "fronted-attachment",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 29,
+          "agendaItems": 35,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 29,
+          "agendaItems": 35,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fraction-not-date",
+        "family": "dose-protection",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 9,
+          "agendaItems": 9,
+          "combinationAttempts": 9,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 9,
+          "agendaItems": 9,
+          "combinationAttempts": 9,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "leading-decimal",
+        "family": "dose-protection",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 6,
+          "agendaItems": 6,
+          "combinationAttempts": 7,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 6,
+          "agendaItems": 6,
+          "combinationAttempts": 7,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "procedural-not-administration-split",
+        "family": "procedural-scope",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 15,
+          "agendaItems": 17,
+          "combinationAttempts": 31,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 15,
+          "agendaItems": 17,
+          "combinationAttempts": 31,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "shared-safety",
+        "family": "procedural-scope",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 52,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 97,
+          "agendaItems": 108,
+          "combinationAttempts": 174,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 40,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 79,
+          "agendaItems": 88,
+          "combinationAttempts": 154,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "list-en-0",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-1",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-2",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-3",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-4",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-5",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-6",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-7",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-8",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-9",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-10",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-11",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-12",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-13",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-14",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-15",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-16",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-17",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-18",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-19",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-20",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 56,
+          "combinationAttempts": 114,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-21",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 70,
+          "combinationAttempts": 176,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-22",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 64,
+          "combinationAttempts": 124,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-en-23",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 186,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-24",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-25",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-26",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-27",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-28",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-29",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-30",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-31",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-32",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-33",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-34",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-35",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-36",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-37",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-38",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-39",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-40",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-41",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-42",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-43",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-44",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 70,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-45",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 234,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-46",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 76,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-th-47",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 96,
+          "combinationAttempts": 238,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-48",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-49",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-50",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-51",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-52",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-53",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-54",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-55",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-56",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-57",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-58",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-59",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-60",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-61",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-62",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-63",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-64",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-65",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-66",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-67",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-68",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 84,
+          "agendaItems": 90,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-69",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 110,
+          "combinationAttempts": 308,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-70",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 100,
+          "combinationAttempts": 218,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "list-mixed-71",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 120,
+          "combinationAttempts": 318,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-5 Oct 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-Oct 5 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-October 5, 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-US-5 Oct 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-US-Oct 5 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-US-October 5, 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-GB-5 Oct 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-GB-Oct 5 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-en-GB-October 5, 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-th-5 Oct 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-th-Oct 5 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "month-th-October 5, 2026",
+        "family": "date-policy",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 23,
+          "combinationAttempts": 45,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "oxford-date-list",
+        "family": "list-ownership",
+        "baseline": {
+          "clauseCalls": 8,
+          "speculativeProbes": 6,
+          "lexicalCalls": 41,
+          "chartCalls": 8,
+          "chartTruncations": 0,
+          "chartSigns": 142,
+          "agendaItems": 166,
+          "combinationAttempts": 454,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 4,
+          "lexicalCalls": 30,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 119,
+          "agendaItems": 138,
+          "combinationAttempts": 395,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "clock-pair-comma-date-lists",
+        "family": "pairing-versus-product",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 63,
+          "agendaItems": 89,
+          "combinationAttempts": 339,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 66,
+          "agendaItems": 82,
+          "combinationAttempts": 150,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thai-union-no-explicit-clock",
+        "family": "sequence-versus-union",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 16,
+          "combinationAttempts": 14,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 16,
+          "combinationAttempts": 14,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "same-date-different-doses",
+        "family": "dose-continuation",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 25,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 87,
+          "agendaItems": 109,
+          "combinationAttempts": 217,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 72,
+          "agendaItems": 90,
+          "combinationAttempts": 184,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "reverse-ordered-exact-phase",
+        "family": "shared-modifier-scope",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 135,
+          "combinationAttempts": 246,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 122,
+          "combinationAttempts": 230,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "target-phase-expansion-onwards",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 28,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 63,
+          "combinationAttempts": 237,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 30,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 90,
+          "agendaItems": 94,
+          "combinationAttempts": 244,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "target-change-explicit-then",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 14,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 61,
+          "agendaItems": 61,
+          "combinationAttempts": 354,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 74,
+          "agendaItems": 74,
+          "combinationAttempts": 162,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "compound-target-lowers-to-singular-sites",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 12,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 39,
+          "agendaItems": 41,
+          "combinationAttempts": 110,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 30,
+          "agendaItems": 32,
+          "combinationAttempts": 98,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "open-ended-bound-order-before-cadence",
+        "family": "open-ended-bound",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 5,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 17,
+          "agendaItems": 18,
+          "combinationAttempts": 26,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 29,
+          "agendaItems": 31,
+          "combinationAttempts": 77,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "open-ended-bound-order-after-cadence",
+        "family": "open-ended-bound",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 13,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 19,
+          "combinationAttempts": 44,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 26,
+          "agendaItems": 26,
+          "combinationAttempts": 76,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eye-target-sequence",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 32,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 98,
+          "agendaItems": 98,
+          "combinationAttempts": 270,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 114,
+          "agendaItems": 114,
+          "combinationAttempts": 356,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eye-target-compact-union",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 24,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 55,
+          "agendaItems": 56,
+          "combinationAttempts": 217,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 82,
+          "agendaItems": 82,
+          "combinationAttempts": 188,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "wound-target-expansion",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 28,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 77,
+          "agendaItems": 79,
+          "combinationAttempts": 473,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 27,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 98,
+          "combinationAttempts": 310,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "target-reduction",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 23,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 83,
+          "agendaItems": 84,
+          "combinationAttempts": 488,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 110,
+          "agendaItems": 112,
+          "combinationAttempts": 330,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thai-target-expansion",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 21,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 78,
+          "combinationAttempts": 461,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 32,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 80,
+          "combinationAttempts": 206,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "code-switch-target-expansion",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 28,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 77,
+          "agendaItems": 79,
+          "combinationAttempts": 473,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 26,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 98,
+          "combinationAttempts": 310,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "open-ended-bare-date-cadence-before-marker",
+        "family": "open-ended-bound",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 24,
+          "agendaItems": 24,
+          "combinationAttempts": 58,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 31,
+          "combinationAttempts": 90,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thai-open-ended-marker",
+        "family": "open-ended-bound",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 13,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 17,
+          "agendaItems": 17,
+          "combinationAttempts": 39,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 23,
+          "agendaItems": 23,
+          "combinationAttempts": 66,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thai-target-expansion-open-ended",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 31,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 43,
+          "agendaItems": 44,
+          "combinationAttempts": 159,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 36,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 60,
+          "agendaItems": 64,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-two-eye-targets-lower-separately",
+        "family": "administration-target-scope",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 22,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 49,
+          "combinationAttempts": 154,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 49,
+          "combinationAttempts": 203,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "variable-weekday-half-tablet",
+        "family": "anticoagulation",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 19,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 212,
+          "agendaItems": 250,
+          "combinationAttempts": 991,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 166,
+          "agendaItems": 196,
+          "combinationAttempts": 766,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "weekly-not-daily",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 47,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 47,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-explicit-clock",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fortnightly-explicit-clock",
+        "family": "gastroenterology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "bounded-three-stage-taper",
+        "family": "respiratory",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 170,
+          "agendaItems": 210,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 122,
+          "agendaItems": 150,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "duration-three-stage-taper",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 188,
+          "agendaItems": 228,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 134,
+          "agendaItems": 162,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "clock-specific-neurology",
+        "family": "movement-disorders",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 115,
+          "agendaItems": 143,
+          "combinationAttempts": 322,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 146,
+          "combinationAttempts": 264,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "renal-fixed-weekdays",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 70,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 70,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "left-eye-clock-taper",
+        "family": "ophthalmology",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 25,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 170,
+          "agendaItems": 215,
+          "combinationAttempts": 475,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 168,
+          "agendaItems": 214,
+          "combinationAttempts": 480,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-list",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 27,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-range",
+        "family": "reproductive-endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 16,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 42,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cross-midnight-distinct-dates",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 135,
+          "combinationAttempts": 246,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 122,
+          "combinationAttempts": 230,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "loading-phase-later-clock-overrides-meal",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 68,
+          "agendaItems": 80,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 68,
+          "agendaItems": 80,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thai-clock-specific-neurology",
+        "family": "movement-disorders",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 121,
+          "agendaItems": 149,
+          "combinationAttempts": 322,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 120,
+          "agendaItems": 154,
+          "combinationAttempts": 264,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thyroid-weekend-distinct-dose",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 5,
+          "lexicalCalls": 32,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 184,
+          "agendaItems": 226,
+          "combinationAttempts": 821,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 196,
+          "agendaItems": 244,
+          "combinationAttempts": 934,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "every-three-days-two-clocks",
+        "family": "transplant",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 69,
+          "agendaItems": 81,
+          "combinationAttempts": 199,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 42,
+          "agendaItems": 51,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-resumed-query",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "three-week-interval-multiple-weekdays",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 108,
+          "combinationAttempts": 393,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 61,
+          "agendaItems": 73,
+          "combinationAttempts": 323,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-abbreviation",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 22,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 44,
+          "combinationAttempts": 95,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 105,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "monthly-end-of-month",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-leap-day-pair",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 98,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 98,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-successor-members-inherit-whole-phase",
+        "family": "neurology",
+        "baseline": {
+          "clauseCalls": 13,
+          "speculativeProbes": 9,
+          "lexicalCalls": 53,
+          "chartCalls": 13,
+          "chartTruncations": 0,
+          "chartSigns": 256,
+          "agendaItems": 331,
+          "combinationAttempts": 726,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 8,
+          "speculativeProbes": 4,
+          "lexicalCalls": 34,
+          "chartCalls": 8,
+          "chartTruncations": 0,
+          "chartSigns": 160,
+          "agendaItems": 206,
+          "combinationAttempts": 456,
+          "cacheHits": 2
+        }
+      },
+      {
+        "id": "two-clock-weekday-weekly-total",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 4,
+          "lexicalCalls": 28,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 124,
+          "agendaItems": 153,
+          "combinationAttempts": 519,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 83,
+          "combinationAttempts": 327,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-weeks-on-one-week-off",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 43,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 53,
+          "agendaItems": 57,
+          "combinationAttempts": 83,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 28,
+          "combinationAttempts": 49,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "full-thai-finite-cycle",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 34,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 29,
+          "agendaItems": 31,
+          "combinationAttempts": 34,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "quarter-tablet-finite-course",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 12,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 57,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 30,
+          "agendaItems": 38,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fractional-liquid-finite-course",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 57,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 30,
+          "agendaItems": 38,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eight-hour-interval",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 20,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 20,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "three-nights-per-week",
+        "family": "dermatology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 57,
+          "agendaItems": 71,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 57,
+          "agendaItems": 71,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-phase-end-outweighs-last-dose",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 88,
+          "agendaItems": 112,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 88,
+          "agendaItems": 112,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-named-month-anchor",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 0,
+          "lexicalCalls": 24,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "variable-weekday-half-tablet-code-switch",
+        "family": "anticoagulation",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 19,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 217,
+          "agendaItems": 255,
+          "combinationAttempts": 991,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 170,
+          "agendaItems": 200,
+          "combinationAttempts": 766,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "variable-weekday-half-tablet-thai-lexemes",
+        "family": "anticoagulation",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 19,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 222,
+          "agendaItems": 260,
+          "combinationAttempts": 991,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 174,
+          "agendaItems": 204,
+          "combinationAttempts": 766,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "variable-weekday-half-tablet-lazy-spacing",
+        "family": "anticoagulation",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 3,
+          "lexicalCalls": 19,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 212,
+          "agendaItems": 250,
+          "combinationAttempts": 991,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 166,
+          "agendaItems": 196,
+          "combinationAttempts": 766,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "weekly-not-daily-code-switch",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 38,
+          "agendaItems": 48,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 38,
+          "agendaItems": 48,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "weekly-not-daily-thai-lexemes",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "weekly-not-daily-lazy-spacing",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 47,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 47,
+          "combinationAttempts": 158,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-explicit-clock-code-switch",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-explicit-clock-thai-lexemes",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-explicit-clock-lazy-spacing",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fortnightly-explicit-clock-code-switch",
+        "family": "gastroenterology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 35,
+          "agendaItems": 41,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 35,
+          "agendaItems": 41,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fortnightly-explicit-clock-thai-lexemes",
+        "family": "gastroenterology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 36,
+          "agendaItems": 42,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 36,
+          "agendaItems": 42,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fortnightly-explicit-clock-lazy-spacing",
+        "family": "gastroenterology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 120,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "bounded-three-stage-taper-code-switch",
+        "family": "respiratory",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 179,
+          "agendaItems": 219,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 128,
+          "agendaItems": 156,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "bounded-three-stage-taper-thai-lexemes",
+        "family": "respiratory",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 181,
+          "agendaItems": 221,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 130,
+          "agendaItems": 158,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "bounded-three-stage-taper-lazy-spacing",
+        "family": "respiratory",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 170,
+          "agendaItems": 210,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 122,
+          "agendaItems": 150,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "duration-three-stage-taper-code-switch",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 188,
+          "agendaItems": 228,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 134,
+          "agendaItems": 162,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "duration-three-stage-taper-thai-lexemes",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 190,
+          "agendaItems": 230,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 136,
+          "agendaItems": 164,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "duration-three-stage-taper-lazy-spacing",
+        "family": "rheumatology",
+        "baseline": {
+          "clauseCalls": 9,
+          "speculativeProbes": 6,
+          "lexicalCalls": 39,
+          "chartCalls": 9,
+          "chartTruncations": 0,
+          "chartSigns": 188,
+          "agendaItems": 228,
+          "combinationAttempts": 492,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 134,
+          "agendaItems": 162,
+          "combinationAttempts": 372,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "clock-specific-neurology-code-switch",
+        "family": "movement-disorders",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 118,
+          "agendaItems": 146,
+          "combinationAttempts": 322,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 116,
+          "agendaItems": 150,
+          "combinationAttempts": 264,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "clock-specific-neurology-thai-lexemes",
+        "family": "movement-disorders",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 121,
+          "agendaItems": 149,
+          "combinationAttempts": 322,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 120,
+          "agendaItems": 154,
+          "combinationAttempts": 264,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "clock-specific-neurology-lazy-spacing",
+        "family": "movement-disorders",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 15,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 115,
+          "agendaItems": 143,
+          "combinationAttempts": 322,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 14,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 112,
+          "agendaItems": 146,
+          "combinationAttempts": 264,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "renal-fixed-weekdays-code-switch",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 57,
+          "agendaItems": 71,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 57,
+          "agendaItems": 71,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "renal-fixed-weekdays-thai-lexemes",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 58,
+          "agendaItems": 72,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 58,
+          "agendaItems": 72,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "renal-fixed-weekdays-lazy-spacing",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 11,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 70,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 56,
+          "agendaItems": 70,
+          "combinationAttempts": 309,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-list-code-switch",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 27,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-list-thai-lexemes",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 27,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-list-lazy-spacing",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 27,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-range-code-switch",
+        "family": "reproductive-endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 16,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 42,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-range-thai-lexemes",
+        "family": "reproductive-endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 16,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 42,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cyclic-day-range-lazy-spacing",
+        "family": "reproductive-endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 16,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 19,
+          "agendaItems": 22,
+          "combinationAttempts": 42,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cross-midnight-distinct-dates-code-switch",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 106,
+          "agendaItems": 137,
+          "combinationAttempts": 246,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 96,
+          "agendaItems": 124,
+          "combinationAttempts": 230,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "cross-midnight-distinct-dates-thai-lexemes",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 96,
+          "agendaItems": 121,
+          "combinationAttempts": 208,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 86,
+          "agendaItems": 108,
+          "combinationAttempts": 192,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "cross-midnight-distinct-dates-lazy-spacing",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 4,
+          "lexicalCalls": 31,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 104,
+          "agendaItems": 135,
+          "combinationAttempts": 246,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 6,
+          "speculativeProbes": 3,
+          "lexicalCalls": 27,
+          "chartCalls": 6,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 122,
+          "combinationAttempts": 230,
+          "cacheHits": 1
+        }
+      },
+      {
+        "id": "loading-phase-later-clock-overrides-meal-code-switch",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 82,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 70,
+          "agendaItems": 82,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "loading-phase-later-clock-overrides-meal-thai-lexemes",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 60,
+          "agendaItems": 66,
+          "combinationAttempts": 104,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 60,
+          "agendaItems": 66,
+          "combinationAttempts": 104,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "loading-phase-later-clock-overrides-meal-lazy-spacing",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 68,
+          "agendaItems": 80,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 68,
+          "agendaItems": 80,
+          "combinationAttempts": 142,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thyroid-weekend-distinct-dose-code-switch",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 5,
+          "lexicalCalls": 32,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 188,
+          "agendaItems": 230,
+          "combinationAttempts": 821,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 200,
+          "agendaItems": 248,
+          "combinationAttempts": 934,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thyroid-weekend-distinct-dose-thai-lexemes",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 5,
+          "lexicalCalls": 32,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 192,
+          "agendaItems": 234,
+          "combinationAttempts": 821,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 204,
+          "agendaItems": 252,
+          "combinationAttempts": 934,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "thyroid-weekend-distinct-dose-lazy-spacing",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 7,
+          "speculativeProbes": 5,
+          "lexicalCalls": 32,
+          "chartCalls": 7,
+          "chartTruncations": 0,
+          "chartSigns": 184,
+          "agendaItems": 226,
+          "combinationAttempts": 821,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 196,
+          "agendaItems": 244,
+          "combinationAttempts": 934,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "every-three-days-two-clocks-code-switch",
+        "family": "transplant",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 71,
+          "agendaItems": 83,
+          "combinationAttempts": 199,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 43,
+          "agendaItems": 52,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "every-three-days-two-clocks-thai-lexemes",
+        "family": "transplant",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 73,
+          "agendaItems": 85,
+          "combinationAttempts": 199,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 44,
+          "agendaItems": 53,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "every-three-days-two-clocks-lazy-spacing",
+        "family": "transplant",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 69,
+          "agendaItems": 81,
+          "combinationAttempts": 199,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 42,
+          "agendaItems": 51,
+          "combinationAttempts": 138,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-resumed-query-code-switch",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-resumed-query-thai-lexemes",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 37,
+          "combinationAttempts": 106,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "alternate-day-resumed-query-lazy-spacing",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "three-week-interval-multiple-weekdays-code-switch",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 94,
+          "agendaItems": 110,
+          "combinationAttempts": 393,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 62,
+          "agendaItems": 74,
+          "combinationAttempts": 323,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "three-week-interval-multiple-weekdays-thai-lexemes",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 96,
+          "agendaItems": 112,
+          "combinationAttempts": 393,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 63,
+          "agendaItems": 75,
+          "combinationAttempts": 323,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "three-week-interval-multiple-weekdays-lazy-spacing",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 108,
+          "combinationAttempts": 393,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 61,
+          "agendaItems": 73,
+          "combinationAttempts": 323,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-abbreviation-code-switch",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 22,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 44,
+          "combinationAttempts": 95,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 105,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-abbreviation-thai-lexemes",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 22,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 44,
+          "combinationAttempts": 95,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 105,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-abbreviation-lazy-spacing",
+        "family": "hematology",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 0,
+          "lexicalCalls": 22,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 37,
+          "agendaItems": 44,
+          "combinationAttempts": 95,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 10,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 105,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "monthly-end-of-month-code-switch",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 33,
+          "agendaItems": 39,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "monthly-end-of-month-thai-lexemes",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 34,
+          "agendaItems": 40,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "monthly-end-of-month-lazy-spacing",
+        "family": "endocrinology",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 38,
+          "combinationAttempts": 111,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-leap-day-pair-code-switch",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 78,
+          "agendaItems": 100,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 78,
+          "agendaItems": 100,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-leap-day-pair-thai-lexemes",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 78,
+          "agendaItems": 100,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 78,
+          "agendaItems": 100,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-leap-day-pair-lazy-spacing",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 98,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 76,
+          "agendaItems": 98,
+          "combinationAttempts": 198,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-successor-members-inherit-whole-phase-code-switch",
+        "family": "neurology",
+        "baseline": {
+          "clauseCalls": 13,
+          "speculativeProbes": 9,
+          "lexicalCalls": 53,
+          "chartCalls": 13,
+          "chartTruncations": 0,
+          "chartSigns": 263,
+          "agendaItems": 338,
+          "combinationAttempts": 726,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 8,
+          "speculativeProbes": 4,
+          "lexicalCalls": 34,
+          "chartCalls": 8,
+          "chartTruncations": 0,
+          "chartSigns": 164,
+          "agendaItems": 210,
+          "combinationAttempts": 456,
+          "cacheHits": 2
+        }
+      },
+      {
+        "id": "two-successor-members-inherit-whole-phase-thai-lexemes",
+        "family": "neurology",
+        "baseline": {
+          "clauseCalls": 13,
+          "speculativeProbes": 9,
+          "lexicalCalls": 53,
+          "chartCalls": 13,
+          "chartTruncations": 0,
+          "chartSigns": 239,
+          "agendaItems": 302,
+          "combinationAttempts": 614,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 8,
+          "speculativeProbes": 4,
+          "lexicalCalls": 34,
+          "chartCalls": 8,
+          "chartTruncations": 0,
+          "chartSigns": 152,
+          "agendaItems": 192,
+          "combinationAttempts": 400,
+          "cacheHits": 2
+        }
+      },
+      {
+        "id": "two-successor-members-inherit-whole-phase-lazy-spacing",
+        "family": "neurology",
+        "baseline": {
+          "clauseCalls": 13,
+          "speculativeProbes": 9,
+          "lexicalCalls": 53,
+          "chartCalls": 13,
+          "chartTruncations": 0,
+          "chartSigns": 256,
+          "agendaItems": 331,
+          "combinationAttempts": 726,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 8,
+          "speculativeProbes": 4,
+          "lexicalCalls": 34,
+          "chartCalls": 8,
+          "chartTruncations": 0,
+          "chartSigns": 160,
+          "agendaItems": 206,
+          "combinationAttempts": 456,
+          "cacheHits": 2
+        }
+      },
+      {
+        "id": "two-clock-weekday-weekly-total-code-switch",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 4,
+          "lexicalCalls": 28,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 126,
+          "agendaItems": 155,
+          "combinationAttempts": 519,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 65,
+          "agendaItems": 84,
+          "combinationAttempts": 327,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-clock-weekday-weekly-total-thai-lexemes",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 4,
+          "lexicalCalls": 28,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 106,
+          "agendaItems": 127,
+          "combinationAttempts": 373,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 17,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 88,
+          "agendaItems": 109,
+          "combinationAttempts": 307,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-clock-weekday-weekly-total-lazy-spacing",
+        "family": "renal",
+        "baseline": {
+          "clauseCalls": 5,
+          "speculativeProbes": 4,
+          "lexicalCalls": 28,
+          "chartCalls": 5,
+          "chartTruncations": 0,
+          "chartSigns": 124,
+          "agendaItems": 153,
+          "combinationAttempts": 519,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 64,
+          "agendaItems": 83,
+          "combinationAttempts": 327,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-weeks-on-one-week-off-code-switch",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 43,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 53,
+          "agendaItems": 57,
+          "combinationAttempts": 83,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 28,
+          "combinationAttempts": 49,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-weeks-on-one-week-off-thai-lexemes",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 43,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 53,
+          "agendaItems": 57,
+          "combinationAttempts": 83,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 28,
+          "combinationAttempts": 49,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "two-weeks-on-one-week-off-lazy-spacing",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 1,
+          "lexicalCalls": 43,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 53,
+          "agendaItems": 57,
+          "combinationAttempts": 83,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 28,
+          "combinationAttempts": 49,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "quarter-tablet-finite-course-code-switch",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 12,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 49,
+          "agendaItems": 59,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 39,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "quarter-tablet-finite-course-thai-lexemes",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 12,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 51,
+          "agendaItems": 61,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "quarter-tablet-finite-course-lazy-spacing",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 12,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 57,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 4,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 30,
+          "agendaItems": 38,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fractional-liquid-finite-course-code-switch",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 49,
+          "agendaItems": 59,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 39,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fractional-liquid-finite-course-thai-lexemes",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 51,
+          "agendaItems": 61,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 32,
+          "agendaItems": 40,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "fractional-liquid-finite-course-lazy-spacing",
+        "family": "pediatrics",
+        "baseline": {
+          "clauseCalls": 3,
+          "speculativeProbes": 2,
+          "lexicalCalls": 18,
+          "chartCalls": 3,
+          "chartTruncations": 0,
+          "chartSigns": 47,
+          "agendaItems": 57,
+          "combinationAttempts": 113,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 30,
+          "agendaItems": 38,
+          "combinationAttempts": 85,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eight-hour-interval-code-switch",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 21,
+          "agendaItems": 21,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 21,
+          "agendaItems": 21,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eight-hour-interval-thai-lexemes",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 22,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 22,
+          "agendaItems": 22,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "eight-hour-interval-lazy-spacing",
+        "family": "infectious-diseases",
+        "baseline": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 8,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 20,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 20,
+          "agendaItems": 20,
+          "combinationAttempts": 48,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-phase-end-outweighs-last-dose-code-switch",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 116,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 92,
+          "agendaItems": 116,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-phase-end-outweighs-last-dose-thai-lexemes",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 82,
+          "agendaItems": 100,
+          "combinationAttempts": 214,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 82,
+          "agendaItems": 100,
+          "combinationAttempts": 214,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "explicit-phase-end-outweighs-last-dose-lazy-spacing",
+        "family": "cardiology",
+        "baseline": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 21,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 88,
+          "agendaItems": 112,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 4,
+          "speculativeProbes": 2,
+          "lexicalCalls": 20,
+          "chartCalls": 4,
+          "chartTruncations": 0,
+          "chartSigns": 88,
+          "agendaItems": 112,
+          "combinationAttempts": 252,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-named-month-anchor-code-switch",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 0,
+          "lexicalCalls": 24,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-named-month-anchor-thai-lexemes",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 0,
+          "lexicalCalls": 24,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      },
+      {
+        "id": "cycle-named-month-anchor-lazy-spacing",
+        "family": "oncology",
+        "baseline": {
+          "clauseCalls": 2,
+          "speculativeProbes": 0,
+          "lexicalCalls": 24,
+          "chartCalls": 2,
+          "chartTruncations": 0,
+          "chartSigns": 31,
+          "agendaItems": 34,
+          "combinationAttempts": 56,
+          "cacheHits": 0
+        },
+        "candidate": {
+          "clauseCalls": 1,
+          "speculativeProbes": 0,
+          "lexicalCalls": 7,
+          "chartCalls": 1,
+          "chartTruncations": 0,
+          "chartSigns": 16,
+          "agendaItems": 20,
+          "combinationAttempts": 40,
+          "cacheHits": 0
+        }
+      }
+    ]
   },
   "allMeasuredGatesPass": true,
   "productionActivated": false,
   "pushed": false,
-  "published": false,
-  "postValidationFormattingOnly": {
-    "path": "corpus.ts",
-    "change": "Removed one blank line at EOF after measured validation; no executable change. Recorded performance source fingerprint is the tested version."
-  }
+  "published": false
 }

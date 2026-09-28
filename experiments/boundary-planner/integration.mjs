@@ -18,8 +18,20 @@ export function candidateTransform(source, filename) {
       'composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);', 2);
     source = replace(source, 'propagateDateTransitionEventTiming(lintParseResults, segments, input, options);',
       'composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);');
+    source = replace(source,
+      '  const results = mergeParseResultList(rawResults, options);\n  propagateTrailingSharedSafety(results, options);',
+      '  let results = mergeParseResultList(rawResults, options);\n  propagateTrailingSharedSafety(results, options);\n  const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);\n  results = expandAdministrationTargets(results, options, formatSig);', 2);
+    source = replace(source,
+      '  const primary = resolvePrimaryParseResult(results, input, options);',
+      '  const primary = compatibilityPrimary;', 2);
+    source = replace(source,
+      '  const primary = resolvePrimaryLintResult(results, input, options);',
+      '  const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);\n  const primary = resolvePrimaryLintResult(expandedLintResults, input, options);');
+    source = replace(source, '    count: results.length,\n    items: results,\n    result: primary.result,',
+      '    count: expandedLintResults.length,\n    items: expandedLintResults,\n    result: primary.result,');
     return `import { createBoundaryPlan } from ${JSON.stringify(path.join(here, 'candidate-adapter.ts'))};\n` +
-      `import { composeRegimenPhases } from ${JSON.stringify(path.join(here, 'regimen.ts'))};\n` + source;
+      `import { composeRegimenPhases } from ${JSON.stringify(path.join(here, 'regimen.ts'))};\n` +
+      `import { expandAdministrationTargets, expandLintAdministrationTargets } from ${JSON.stringify(path.join(here, 'targets.ts'))};\n` + source;
   }
   if (file === path.join(root, 'src/lexer/locales/th.ts')) {
     return replace(source, '  "สัปดาห์ละครั้ง": "weekly",',
@@ -32,10 +44,12 @@ export function candidateTransform(source, filename) {
     return `import { normalizeAnchoredBounds, normalizeClockFrequency } from ${JSON.stringify(path.join(here, 'bounds.ts'))};\n` + source;
   }
   if (file === path.join(root, 'src/hpsg/clause-parser.ts')) {
-    source = replace(source, '      calendarDateListRule(),', '      cycleScheduleRule(),\n      calendarDateListRule(),');
+    source = replace(source, '      calendarDateListRule(),',
+      '      cycleScheduleRule(),\n      calendarDateListRule(),\n      openEndedBoundMarkerRule(),');
     source = replace(source, '      const conditions = getConditionFeatures(context);',
       "      if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];\n      const conditions = getConditionFeatures(context);");
-    return `import { cycleScheduleRule, insideCycle } from ${JSON.stringify(path.join(here, 'cycles.ts'))};\n` + source;
+    return `import { cycleScheduleRule, insideCycle } from ${JSON.stringify(path.join(here, 'cycles.ts'))};\n` +
+      `import { openEndedBoundMarkerRule } from ${JSON.stringify(path.join(here, 'open-ended.ts'))};\n` + source;
   }
   if (file === path.join(root, 'src/schedule.ts')) {
     source = replace(source,

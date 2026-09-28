@@ -23,7 +23,7 @@ const audit = process.argv.includes('--audit');
 await fs.mkdir(generated, { recursive: true });
 await fs.mkdir(results, { recursive: true });
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim();
-const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts', 'regimen.ts', 'integration.mjs', 'specialty-corpus.ts', 'cycles.ts', 'cycle-lexicon.ts', 'bounds.ts', 'admissibility.ts', 'acceptance.spec.ts', 'scheduler-primitives.ts'];
+const sourceFiles = ['types.ts', 'structures.ts', 'evidence.ts', 'grammar.ts', 'planner.ts', 'candidate-adapter.ts', 'entry.ts', 'stats.ts', 'corpus.ts', 'regimen.ts', 'integration.mjs', 'specialty-corpus.ts', 'cycles.ts', 'cycle-lexicon.ts', 'bounds.ts', 'admissibility.ts', 'acceptance.spec.ts', 'scheduler-primitives.ts', 'targets.ts', 'open-ended.ts'];
 const sourceHash = createHash('sha256');
 for (const file of sourceFiles) sourceHash.update(file).update(await fs.readFile(path.join(here, file)));
 const metadata = { experimentalSourceSha256: sourceHash.digest('hex'), base: git('rev-parse', 'HEAD'), createdAt: new Date().toISOString(),
@@ -106,6 +106,7 @@ function goldenErrors(actual, c) {
     const fhir = item.fhir, repeat = fhir.timing?.repeat;
     if (c.noLeftovers !== false) eq(`items[${index}].leftover`, item.meta.leftoverText ?? '', '');
     const expected = [
+      ['method', fhir.method?.text], ['site', fhir.site?.text], ['siteCode', fhir.site?.coding?.find(c => c.code)?.code],
       ['unit', fhir.doseAndRate?.[0]?.doseQuantity?.unit], ['period', repeat?.period], ['periodUnit',repeat?.periodUnit], ['frequency',repeat?.frequency], ['dose', fhir.doseAndRate?.[0]?.doseQuantity?.value], ['dates', fhir.timing?.event],
       ['clocks', repeat?.timeOfDay], ['when', repeat?.when], ['weekdays', repeat?.dayOfWeek],
       ['start', repeat?.boundsPeriod?.start], ['end', repeat?.boundsPeriod?.end],
@@ -191,13 +192,19 @@ let performancePassed = true;
 if (benchmark) {
   const torture = JSON.parse(await fs.readFile(path.join(root, 'test/real-world-torture-cases.json'), 'utf8'))
     .map(c => ({ id: c.name, input: c.input, options: { locale: c.locale, context: c.context, datePolicy: { referenceDate: '2026-09-27' } } }));
-  const composed = corpus.filter(c => c.partition === 'historical' || c.partition === 'challenge');
+  const legacyChallengeIds = new Set([
+    'oxford-date-list', 'clock-pair-comma-date-lists', 'thai-union-no-explicit-clock',
+    'same-date-different-doses', 'reverse-ordered-exact-phase'
+  ]);
+  const composed = corpus.filter(c => c.partition === 'historical' ||
+    c.partition === 'challenge' && legacyChallengeIds.has(c.id));
+  const newChallenges = corpus.filter(c => c.partition === 'challenge' && !legacyChallengeIds.has(c.id));
   const specialty = corpus.filter(c => c.partition === 'specialty');
   const pct = (array, p) => [...array].sort((a, b) => a - b)[Math.min(array.length - 1, Math.ceil(array.length * p) - 1)];
   const summarize = samples => ({ meanMs: samples.reduce((a, b) => a + b, 0) / samples.length,
     p50Ms: pct(samples, 0.5), p95Ms: pct(samples, 0.95), p99Ms: pct(samples, 0.99), parses: samples.length });
   const benches = [];
-  for (const [name, cases] of [['torture', torture], ['composed', composed], ['specialty', specialty]]) {
+  for (const [name, cases] of [['torture', torture], ['composed', composed], ['new-challenges', newChallenges], ['specialty', specialty]]) {
     for (let w = 0; w < 3; w++) for (const c of cases) { native.parseSig(c.input, c.options); candidate.parseSig(c.input, c.options); }
     const samples = { baseline: [], candidate: [] }, epochRatios = [];
     for (let r = 0; r < rounds; r++) {
@@ -217,8 +224,8 @@ if (benchmark) {
     benches.push({ name, cases: cases.length, baseline, candidate: shadow,
       meanRatio: shadow.meanMs / baseline.meanMs, p95Ratio: shadow.p95Ms / baseline.p95Ms,
       pairedRoundRatioMedian: pct(epochRatios, 0.5), pairedRoundRatios: epochRatios,
-      performanceGate: name === 'specialty' ? shadow.p95Ms <= 100 : shadow.meanMs <= baseline.meanMs * 1.05 && shadow.p95Ms <= baseline.p95Ms * 1.05,
-      gateBasis: name === 'specialty' ? 'p95 <= 100ms; old lane fails many new semantic cases, so ratio is descriptive only' : 'legacy corpus mean and p95 <= baseline * 1.05' });
+      performanceGate: name === 'specialty' || name === 'new-challenges' ? shadow.p95Ms <= 100 : shadow.meanMs <= baseline.meanMs * 1.05 && shadow.p95Ms <= baseline.p95Ms * 1.05,
+      gateBasis: name === 'specialty' || name === 'new-challenges' ? 'p95 <= 100ms; old lane is not an equal-correctness comparator for new semantics' : 'fixed legacy corpus mean and p95 <= baseline * 1.05' });
     console.log('BENCH', JSON.stringify(benches.at(-1)));
   }
   performancePassed = benches.every(b => b.performanceGate);

@@ -5,6 +5,7 @@ export interface BoundaryFacts {
   site: BoundarySite; left: ProbeSummary; right: ProbeSummary; inheritedAdministration: boolean;
   explicitRightUnit: boolean; rightHasProcedure: boolean; rightAfterFirstAdministration: boolean;
   leftDateSpan: boolean; rightDateSpan: boolean;
+  leftTargetCue: boolean; rightTargetCue: boolean;
 }
 interface Constraint { feature: string; satisfied: (facts: BoundaryFacts) => boolean }
 interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation'] }
@@ -18,6 +19,8 @@ const scheduleRight = [
   constraint('right.hasSchedule', f => f.right.hasSchedule),
   constraint('right.omitsHead', f => !f.right.hasHead)
 ];
+const targetSetsDiffer = (left: readonly string[], right: readonly string[]) =>
+  left.length !== right.length || left.some(value => right.indexOf(value) < 0);
 const clocksDiffer = (a: readonly string[], b: readonly string[]) => a.length !== b.length || a.some((v, i) => v !== b[i]);
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
@@ -29,6 +32,29 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
+  ] },
+  { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence', constraints: [
+    coordinationOrSequence,
+    constraint('left.targetCue', f => f.leftTargetCue),
+    constraint('right.targetCue', f => f.rightTargetCue),
+    constraint('neighbors.two-date-spans', f => f.leftDateSpan && f.rightDateSpan),
+    constraint('left.hasExactDate', f => f.left.hasDates),
+    constraint('left.notRecurring', f => !f.left.hasRecurringCadence),
+    constraint('right.hasExactAnchor', f => f.right.hasDates),
+    constraint('right.recurring', f => f.right.hasRecurringCadence),
+    constraint('left.hasTargets', f => f.left.hasTargets),
+    constraint('right.hasTargets', f => f.right.hasTargets),
+    constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets))
+  ] },
+  { id: 'regimen.target-change', priority: 755, relation: 'coordination', constraints: [
+    coordinationOrSequence,
+    constraint('left.targetCue', f => f.leftTargetCue),
+    constraint('right.targetCue', f => f.rightTargetCue),
+    constraint('left.hasSchedule', f => f.left.hasSchedule),
+    constraint('right.hasSchedule', f => f.right.hasSchedule),
+    constraint('left.hasTargets', f => f.left.hasTargets),
+    constraint('right.hasTargets', f => f.right.hasTargets),
+    constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets))
   ] },
   { id: 'regimen.distinct-date-clock-pairs', priority: 740, relation: 'coordination', constraints: [
     constraint('neighbors.two-date-spans', f => f.leftDateSpan && f.rightDateSpan),
@@ -60,11 +86,13 @@ export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstr
     { feature: 'left.hasDates', value: f.left.hasDates, range: f.left },
     { feature: 'left.hasRecurringCadence', value: f.left.hasRecurringCadence, range: f.left },
     { feature: 'left.clocks', value: f.left.clocks, range: f.left },
+    { feature: 'left.targets', value: f.left.targets, range: f.left },
     { feature: 'right.complete', value: f.right.complete, range: f.right },
     { feature: 'right.hasDose', value: f.right.hasDose, range: f.right },
     { feature: 'right.hasDates', value: f.right.hasDates, range: f.right },
     { feature: 'right.hasRecurringCadence', value: f.right.hasRecurringCadence, range: f.right },
     { feature: 'right.clocks', value: f.right.clocks, range: f.right },
+    { feature: 'right.targets', value: f.right.targets, range: f.right },
     { feature: 'inheritedAdministration', value: f.inheritedAdministration }
   ].map(e => e.range ? { ...e, range: { start: e.range.start, end: e.range.end } } : e);
   const proposals: Proposal[] = [];

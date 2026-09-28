@@ -3,7 +3,7 @@ import { annotateLexTokens, hasEventTimingMeaning } from '../../src/lexer/meanin
 import { LexKind } from '../../src/lexer/token-types';
 import { normalizeUnit } from '../../src/unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS } from '../../src/hpsg/lexical-classes';
+  HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS } from '../../src/hpsg/lexical-classes';
 import type { ParseOptions, AdviceFrame } from '../../src/types';
 import type { Token } from '../../src/parser-state';
 import type { HpsgSigSegment } from '../../src/hpsg/segmenter';
@@ -114,6 +114,16 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (procedural) proposals.push(keep('regimen.procedural-coordination', 900, 'actionFrames.bridge', true));
 
       if (!procedural && canProbe && rightStart < end) {
+        const targetCue = (from: number, to: number) => {
+          const ownedTarget = claims.some(claim => claim.kind === 'target-list' &&
+            claim.start < to && claim.end > from);
+          if (ownedTarget) return true;
+          const inRange = tokens.filter(token => token.sourceStart >= from && token.sourceEnd <= to);
+          if (inRange.some(token => SITE_ANCHORS.has(lexeme(token)))) return true;
+          const firstMeaningful = inRange.find(token => !/[.,;:!?]/u.test(token.original));
+          const firstLexeme = lexeme(firstMeaningful);
+          return LATERAL_MODIFIER_WORDS.has(firstLexeme) || SITE_MULTIPLICITY_WORDS.has(firstLexeme);
+        };
         // Lazy typed evidence lets each construction reject on cheap facts before running HPSG.
         // No negative vocabulary guess can suppress a licensed grammatical construction.
         let leftValue: ProbeSummary | undefined, rightValue: ProbeSummary | undefined;
@@ -123,6 +133,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           site, inheritedAdministration, explicitRightUnit: rightUnit,
           leftDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= start && c.end <= site.start),
           rightDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= rightStart && c.end <= end),
+          leftTargetCue: targetCue(start, site.start),
+          rightTargetCue: targetCue(rightStart, end),
           get left() { return leftValue ?? (leftValue = evidence.probe(start, site.start)); },
           get right() { return rightValue ?? (rightValue = evidence.probe(rightStart, end)); },
           get rightHasProcedure() { return rightActions().length > 0; },

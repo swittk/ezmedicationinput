@@ -2,12 +2,15 @@ import type { ParseOptions, NextDueDoseOptions } from '../../src/types';
 
 export interface GoldenItem {
   dose?: number;
+  method?: string;
   noDose?: boolean;
   unit?: string;
   period?: number;
   periodUnit?: string;
   frequency?: number;
   totalUnits?: number;
+  site?: string;
+  siteCode?: string;
   dates?: string[];
   clocks?: string[];
   when?: string[];
@@ -138,6 +141,100 @@ export const challengeCases: GoldenCase[] = [
     input: 'take 1 tab at 08:00 on 4/10 and at 20:00 on 28/9 then every Sunday at 09:30 until 30/11',
     items: [{ dose: 1, dates: ['2026-10-04'], clocks: ['08:00:00'] }, { dose: 1, dates: ['2026-09-28'], clocks: ['20:00:00'] },
       { dose: 1, weekdays: ['sun'], clocks: ['09:30:00'], start: '2026-10-05', end: '2026-11-30', due: sundayDays.map(d => iso(d, '09:30')) }] }
+,
+  { id: 'target-phase-expansion-onwards', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm on 21/09/2026 and right arm and right leg on 22/09/2026 onwards daily',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'target-change-explicit-then', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm on 21/09/2026 then apply to right leg daily from 22/09/2026',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'compound-target-lowers-to-singular-sites', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm and right leg daily from 22/09/2026',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'open-ended-bound-order-before-cadence', family: 'open-ended-bound', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm from 22/09/2026 onwards daily',
+    items: [{ noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }] },
+  { id: 'open-ended-bound-order-after-cadence', family: 'open-ended-bound', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm daily from 22/09/2026 onward',
+    items: [{ noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }] }
+,
+  { id: 'eye-target-sequence', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Instill 1 drop into right eye on 21/09/2026 then instill 1 drop into both eyes daily from 22/09/2026 onwards',
+    items: [
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'right eye', siteCode: '1290032005', dates: ['2026-09-21'] },
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'both eyes', siteCode: '40638003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'eye-target-compact-union', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Instill 1 drop into right eye on 21/09/2026 and both eyes on 22/09/2026 onwards daily',
+    items: [
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'right eye', siteCode: '1290032005', dates: ['2026-09-21'] },
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'both eyes', siteCode: '40638003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'wound-target-expansion', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Apply to wound on 21/09/2026 then apply to wound and scalp daily from 22/09/2026 onwards',
+    items: [
+      { noDose: true, site: 'wound', dates: ['2026-09-21'] },
+      { noDose: true, site: 'wound', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, site: 'scalp', siteCode: '41695006', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'target-reduction', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm and right leg on 21/09/2026 then apply to right arm daily from 22/09/2026 onwards',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'thai-target-expansion', family: 'administration-target-scope', partition: 'challenge', history: [],
+    options: { locale: 'th', datePolicy: { referenceDate: REFERENCE_DATE } },
+    input: 'ทาที่แขนขวา วันที่ 21/09/2026 จากนั้น ทาที่แขนขวาและขาขวา วันละครั้ง ตั้งแต่วันที่ 22/09/2026',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] },
+  { id: 'code-switch-target-expansion', family: 'administration-target-scope', partition: 'challenge', history: [],
+    options: { locale: 'th', datePolicy: { referenceDate: REFERENCE_DATE } },
+    input: 'ทาที่แขนขวา on 21/09/2026 then ทาที่แขนขวาและขาขวา daily from 22/09/2026 onwards',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] }
+
+  ,{ id: 'open-ended-bare-date-cadence-before-marker', family: 'open-ended-bound', partition: 'challenge', history: [], options: en,
+    input: 'Apply to right arm on 22/09/2026 daily onwards',
+    items: [{ noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003',
+      start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }] }
+  ,{ id: 'thai-open-ended-marker', family: 'open-ended-bound', partition: 'challenge', history: [],
+    options: { locale: 'th', datePolicy: { referenceDate: REFERENCE_DATE } },
+    input: 'ทาที่แขนขวา วันละครั้ง ตั้งแต่วันที่ 22/9/69 เป็นต้นไป',
+    items: [{ noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003',
+      start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }] }
+  ,{ id: 'thai-target-expansion-open-ended', family: 'administration-target-scope', partition: 'challenge', history: [],
+    options: { locale: 'th', datePolicy: { referenceDate: REFERENCE_DATE } },
+    input: 'ทาที่แขนขวา วันที่ 21/9/69 และ แขนขวา และ ขาขวา วันที่ 22/9/69 เป็นต้นไป วันละครั้ง',
+    items: [
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', dates: ['2026-09-21'] },
+      { noDose: true, method: 'Apply', site: 'right arm', siteCode: '368209003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { noDose: true, method: 'Apply', site: 'right leg', siteCode: '213289002', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] }
+  ,{ id: 'explicit-two-eye-targets-lower-separately', family: 'administration-target-scope', partition: 'challenge', history: [], options: en,
+    input: 'Instill 1 drop into right eye and left eye daily from 22/09/2026 onwards',
+    items: [
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'right eye', siteCode: '1290032005', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' },
+      { dose: 1, method: 'Instill', unit: 'drop', site: 'left eye', siteCode: '1290031003', start: '2026-09-22', frequency: 1, period: 1, periodUnit: 'd' }
+    ] }
+
 ];
 
 export const ORIGINAL_CORPUS = [...historicalCases, ...metamorphicCases(), ...challengeCases];

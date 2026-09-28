@@ -3,11 +3,12 @@ import { parseInstructionActions } from '../../src/instruction-graph';
 import { resolveMedicationInstructionAction } from '../../src/instruction-action-terminology';
 import { parseAdditionalInstructions } from '../../src/advice';
 import { AdviceForce } from '../../src/types';
-import { CLAUSE_LEAD_WORDS } from '../../src/hpsg/lexical-classes';
+import { ACTION_COORDINATION_CONNECTORS, CLAUSE_LEAD_WORDS } from '../../src/hpsg/lexical-classes';
 import type { AdviceFrame, ParseOptions } from '../../src/types';
 import type { Token } from '../../src/parser-state';
 import type { PlannerMetrics, ProbeSummary, Range } from './types';
 import { lexeme } from './structures';
+import { mayContainAdministrationTargetGroup, targetKeys } from './targets';
 
 /** Per-input cache: no global results, no mutation of parser state, no cross-option reuse. */
 export class EvidenceContext {
@@ -26,6 +27,16 @@ export class EvidenceContext {
     const state = parseClauseState(this.input.slice(start, end), this.options);
     this.metrics.clauseProbes++; this.metrics.probedTokens += state.tokens.length;
     const c = state.primaryClause, s = c.schedule;
+    const hasTargetCoordinator = state.tokens.some(token =>
+      token.original === ',' || ACTION_COORDINATION_CONNECTORS.has(lexeme(token)));
+    const directTarget = c.site?.text?.trim().toLowerCase().replace(/\s+/gu, ' ') ||
+      (c.site?.coding?.code ? 'code:' + c.site.coding.code : undefined);
+    const probeSource = this.input.slice(start, end);
+    const targets = (c.site?.text || c.site?.coding)
+      ? hasTargetCoordinator && mayContainAdministrationTargetGroup(probeSource, this.options, state.tokens)
+        ? targetKeys(probeSource, this.options)
+        : directTarget ? [directTarget] : []
+      : [];
     const summary: ProbeSummary = {
       start, end, clause: c,
       complete: findUnparsedTokenGroups(state).length === 0,
@@ -43,6 +54,8 @@ export class EvidenceContext {
       hasOffset: Boolean(s && (s.offset !== undefined || s.offsetMin !== undefined || s.offsetMax !== undefined ||
         s.activityTiming?.some(t => t.offset !== undefined || t.offsetMin !== undefined || t.offsetMax !== undefined))),
       prn: c.prn?.enabled === true,
+      targets,
+      hasTargets: targets.length > 0,
       conditionStarts: c.evidence.filter(e => e.rule === 'hpsg.lex.condition').flatMap(e => e.spans.map(r => r.start + start))
     };
     if (this.cacheEnabled) this.cache.set(key, summary);

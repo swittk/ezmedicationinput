@@ -2685,3 +2685,8 @@ constraints where that is clearer and safer.
 ## 2026-09-28 — green experimental regimen pipeline
 
 Branch `experiment/explainable-boundary-planner`, continuing `c9fe4fd`; production source remains untouched. Fixed retained whole-phase and totals failures, added typed finite cycle/day-range HPSG construction, shared scheduler primitives and calendar alignment, typed ownership conflict handling, FHIR anchored-bound lowering, and monthly Thai lexical round-trip coverage. Golden matrix 216/216; native and shadow source suites both 1210/1210; planner contracts 104/104; clinical/API/EN+TH round-trip/safety controls 324/324; dist 4/4; both experiment and actual transformed-candidate TypeScript pass. Final strict 30-round benchmark passes all gates. See `experiments/boundary-planner/REPORT.md` and retained JSON evidence. Initial red experiment retained under `results/initial-experiment/`. Not activated, pushed or published. Next authorized step is review/promotion, not another blind boundary exception.
+
+
+## 2026-09-28 — administration-target phase generalization
+
+Continued the explainable regimen experiment with typed administration-target evidence, target-list ownership, target-set phase transitions, singular FHIR site lowering, licensed method inheritance, and English/Thai open-ended markers. The original right-arm/right-leg case now lowers to one exact right-arm item plus two daily open-ended site items. Final native/shadow suites 1210/1210 each; planner 107/107; clinical/API/round-trip/safety 387/387; dist 4/4; integrated types pass. Final 30-round gates pass: torture +0.7% mean/+1.4% p95; fixed legacy composed ~10.3% mean/~12.1% p95 faster. Production src unchanged; no push/publish/merge.

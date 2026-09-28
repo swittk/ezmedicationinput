@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planBoundaries } from './planner';
 import { OwnershipIndex } from './structures';
+import { recognizeAdministrationTargetGroups } from './targets';
 import { arbitrate } from './grammar';
 import { EvidenceContext } from './evidence';
 import { lexInput } from '../../src/lexer/lex';
@@ -77,6 +78,39 @@ describe('experimental boundary planner structural contracts', () => {
     expect(decision.conflict).toBe(true);
     expect(decision.selected.rule).toBe('boundary.unresolved-conflict');
     expect(decision.selected.action).toBe('keep');
+  });
+
+  it('uses target ownership to split a changed-target phase but keeps an internal target list', () => {
+    const input = 'Apply to right arm on 21/09/2026 and right arm and right leg on 22/09/2026 onwards daily';
+    const options = { locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' } };
+    const plan = planBoundaries(input, options, { trace: true });
+    expect(plan.segments.map(segment => segment.text)).toEqual([
+      'Apply to right arm on 21/09/2026',
+      'right arm and right leg on 22/09/2026 onwards daily'
+    ]);
+    const first = plan.decisions.filter(decision => decision.site.surface.trim() === 'and');
+    expect(first).toHaveLength(2);
+    expect(first[0].selected.rule).toBe('regimen.target-phase-transition');
+    expect(first[0].selected.action).toBe('split');
+    expect(first[0].selected.relation).toBe('sequence');
+    expect(first[1].selected.rule).toBe('structure.no-external-split');
+    expect(plan.claims.some(claim => claim.kind === 'target-list' &&
+      input.slice(claim.start, claim.end) === 'right arm and right leg')).toBe(true);
+  });
+
+  it('distinguishes simultaneous target conjunction from alternative target choice', () => {
+    const andGroups = recognizeAdministrationTargetGroups('Apply to right arm and right leg daily');
+    expect(andGroups).toHaveLength(1);
+    expect(andGroups[0].coordination).toBe('conjunction');
+    const orGroups = recognizeAdministrationTargetGroups('Apply to right arm or right leg daily');
+    expect(orGroups).toHaveLength(1);
+    expect(orGroups[0].coordination).toBe('disjunction');
+  });
+
+  it('does not decompose a pre-coordinated coded site such as both eyes', () => {
+    expect(recognizeAdministrationTargetGroups('Instill 1 drop into both eyes daily')).toEqual([]);
+    const plan = planBoundaries('Instill 1 drop into both eyes daily', undefined, { trace: true });
+    expect(plan.segments).toHaveLength(1);
   });
 
   it('caches only inside an input/options scope and never infers numeric MDY from locale', () => {
