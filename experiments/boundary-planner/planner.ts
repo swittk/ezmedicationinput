@@ -63,12 +63,14 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const plan: BoundaryPlan = { experimental: true, segments: [], claims, decisions: [], relations: [], metrics };
   let start = 0, inheritedAdministration = false;
 
-  const segment = (end: number, inheritTrailingDurationFromNext = false) => {
+  const segment = (end: number, inheritTrailingDurationFromNext = false): boolean => {
     let a = start, b = end;
     while (a < b && /\s/u.test(input[a])) a++;
     while (b > a && /\s/u.test(input[b - 1])) b--;
-    if (b > a) plan.segments.push({ text: input.slice(a, b), start: a, end: b,
+    if (b <= a) return false;
+    plan.segments.push({ text: input.slice(a, b), start: a, end: b,
       inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined });
+    return true;
   };
   const probeEnd = (rightIndex: number, broad = false) => {
     const rightStart = tokens[rightIndex]?.sourceStart ?? input.length;
@@ -172,15 +174,21 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     const decision = arbitrate(site, proposals);
     if (experiment.trace) { decision.rejectedRules = rejected; plan.decisions.push(decision); }
     if (decision.selected.action === 'split') {
-      segment(site.start, decision.selected.relation === 'shared-duration');
-      plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
-        kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
-        range: { start: site.start, end: site.end } });
+      const hasPredecessor = segment(site.start, decision.selected.relation === 'shared-duration');
+      if (hasPredecessor) {
+        plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
+          kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
+          range: { start: site.start, end: site.end } });
+      }
       start = site.end;
-      inheritedAdministration = decision.selected.relation !== 'independent';
+      inheritedAdministration = hasPredecessor && decision.selected.relation !== 'independent';
     }
   }
   segment(input.length);
+  plan.relations = plan.relations.filter(relation =>
+    relation.from >= 0 && relation.from < plan.segments.length &&
+    relation.to >= 0 && relation.to < plan.segments.length
+  );
   return plan;
 }
 

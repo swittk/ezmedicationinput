@@ -320,8 +320,13 @@ export function expandLintAdministrationTargets(
   render: Render
 ): LintResult[] {
   return items.flatMap(entry => {
-    const targets = recognizeAdministrationTargets(entry.result.meta.canonical.clauses.map(clause => clause.rawText).join(' '), options);
-    return expandAdministrationTargets([entry.result], options, render).map(result => ({
+    const expanded = expandAdministrationTargets([entry.result], options, render);
+    if (expanded.length === 1 && expanded[0] === entry.result) return [entry];
+    const targets = recognizeAdministrationTargets(
+      entry.result.meta.canonical.clauses.map(clause => clause.rawText).join(' '),
+      options
+    );
+    return expanded.map(result => ({
       result,
       issues: entry.issues.filter(issue => !targetOwnsLeftover(issue.text, targets))
     }));

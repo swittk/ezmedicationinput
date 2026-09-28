@@ -2,6 +2,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
+
+/** Normalize Vite/esbuild module ids to one absolute slash form before comparison. */
+export function normalizeCandidateModulePath(filename, pathApi = path) {
+  return pathApi.resolve(filename.split('?')[0]).replace(/\\/gu, '/');
+}
+function candidateSourcePath(relative) {
+  return normalizeCandidateModulePath(path.join(root, relative));
+}
+
 function replace(source, anchor, replacement, count = 1) {
   if (source.split(anchor).length !== count + 1) throw new Error(`Candidate integration contract changed: ${anchor.slice(0, 100)}`);
   return source.split(anchor).join(replacement);
@@ -9,8 +18,8 @@ function replace(source, anchor, replacement, count = 1) {
 
 /** Build-only injection of real experimental components. No working-tree or published-source edits. */
 export function candidateTransform(source, filename) {
-  const file = filename.split('?')[0];
-  if (file === path.join(root, 'src/index.ts')) {
+  const file = normalizeCandidateModulePath(filename);
+  if (file === candidateSourcePath('src/index.ts')) {
     source = replace(source,
       'const segments = expandMealDashSegments(parseSigSegments(input, options), options);',
       'const boundaryPlan = createBoundaryPlan(input, options);\n  const segments = expandMealDashSegments(boundaryPlan.segments, options);', 3);
@@ -33,7 +42,7 @@ export function candidateTransform(source, filename) {
       `import { composeRegimenPhases } from ${JSON.stringify(path.join(here, 'regimen.ts'))};\n` +
       `import { expandAdministrationTargets, expandLintAdministrationTargets } from ${JSON.stringify(path.join(here, 'targets.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/date-interpretation.ts')) {
+  if (file === candidateSourcePath('src/date-interpretation.ts')) {
     source = replace(source,
       'const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\\bfrom\\b\\s+|\\bstarting(?:\\s+(?:on|from))?\\b\\s+|ตั้งแต่(?:วันที่)?\\s*)`;',
       'const DATE_START_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startInclusive;');
@@ -48,13 +57,13 @@ export function candidateTransform(source, filename) {
       'const DATE_END_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endExclusive;');
     return `import { TEMPORAL_DATE_RELATION_SOURCES } from ${JSON.stringify(path.join(here,'temporal-relation-vocabulary.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/hpsg/rules/site-rules.ts')) {
+  if (file === candidateSourcePath('src/hpsg/rules/site-rules.ts')) {
     source = replace(source,
       '      const candidateLower = normalizeTokenLower(candidate);',
       '      const candidateLower = normalizeTokenLower(candidate);\n      if (temporalRelationStarts(context, cursor) || coordinationLeadsToSchedule(context, cursor)) break;');
     return `import { temporalRelationStarts, coordinationLeadsToSchedule } from ${JSON.stringify(path.join(here,'temporal-site-boundary.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/lexer/locales/th.ts')) {
+  if (file === candidateSourcePath('src/lexer/locales/th.ts')) {
     source = replace(source, '  "สัปดาห์ละครั้ง": "weekly",',
       '  "สัปดาห์ละครั้ง": "weekly",\n  "เดือนละครั้ง": "monthly",');
     source = replace(source,
@@ -62,13 +71,13 @@ export function candidateTransform(source, filename) {
       '  const dateBounded = splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" });\n  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(dateBounded));');
     return `import { splitTokensAtRecognizedThaiDateBoundaries } from ${JSON.stringify(path.join(here,'thai-date-token-boundaries.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/fhir.ts')) {
+  if (file === candidateSourcePath('src/fhir.ts')) {
     source = replace(source, '  if (schedule?.frequencyMax !== undefined) {',
       '  normalizeAnchoredBounds(repeat, schedule);\n  if (schedule?.frequencyMax !== undefined) {');
     source = replace(source, '  if (hasRepeat) {', '  normalizeClockFrequency(repeat);\n  if (hasRepeat) {');
     return `import { normalizeAnchoredBounds, normalizeClockFrequency } from ${JSON.stringify(path.join(here, 'bounds.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/hpsg/clause-parser.ts')) {
+  if (file === candidateSourcePath('src/hpsg/clause-parser.ts')) {
     source = replace(source, '      calendarDateListRule(),',
       '      cycleScheduleRule(),\n      calendarDateListRule(),\n      openEndedBoundMarkerRule(),');
     source = replace(source, '      const conditions = getConditionFeatures(context);',
@@ -76,7 +85,7 @@ export function candidateTransform(source, filename) {
     return `import { cycleScheduleRule, insideCycle } from ${JSON.stringify(path.join(here, 'cycles.ts'))};\n` +
       `import { openEndedBoundMarkerRule, insideOpenEndedMarker } from ${JSON.stringify(path.join(here, 'open-ended.ts'))};\n` + source;
   }
-  if (file === path.join(root, 'src/schedule.ts')) {
+  if (file === candidateSourcePath('src/schedule.ts')) {
     source = replace(source,
       '  const lastDay = new Date(candidate.getTime());\n  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);\n  lastDay.setUTCDate(0);\n  const maxDay = getTimeParts(lastDay, timeZone).day;',
       '  const maxDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();');

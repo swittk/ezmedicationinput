@@ -3,13 +3,9 @@
     "name": "native",
     "command": [
       "npm",
-      "test",
-      "--",
-      "--reporter=json",
-      "--outputFile=experiments/boundary-planner/.generated/final-native.json"
+      "test"
     ],
     "exitCode": 0,
-    "seconds": 9.197,
     "numTotalTests": 1210,
     "numPassedTests": 1210,
     "numFailedTests": 0
@@ -22,20 +18,18 @@
       "test:dist"
     ],
     "exitCode": 0,
-    "seconds": 7.007
+    "numTotalTests": 4,
+    "numPassedTests": 4,
+    "numFailedTests": 0
   },
   {
     "name": "shadow",
     "command": [
       "npm",
       "run",
-      "test:shadow-boundaries",
-      "--",
-      "--reporter=json",
-      "--outputFile=experiments/boundary-planner/.generated/final-shadow.json"
+      "test:shadow-boundaries"
     ],
     "exitCode": 0,
-    "seconds": 9.611,
     "numTotalTests": 1210,
     "numPassedTests": 1210,
     "numFailedTests": 0
@@ -45,15 +39,11 @@
     "command": [
       "npm",
       "run",
-      "test:boundaries",
-      "--",
-      "--reporter=json",
-      "--outputFile=experiments/boundary-planner/.generated/final-contracts.json"
+      "test:boundaries"
     ],
     "exitCode": 0,
-    "seconds": 6.167,
-    "numTotalTests": 104,
-    "numPassedTests": 104,
+    "numTotalTests": 111,
+    "numPassedTests": 111,
     "numFailedTests": 0
   },
   {
@@ -61,15 +51,11 @@
     "command": [
       "npm",
       "run",
-      "test:boundary-clinical",
-      "--",
-      "--reporter=json",
-      "--outputFile=experiments/boundary-planner/.generated/final-clinical.json"
+      "test:boundary-clinical"
     ],
     "exitCode": 0,
-    "seconds": 11.747,
-    "numTotalTests": 324,
-    "numPassedTests": 324,
+    "numTotalTests": 477,
+    "numPassedTests": 477,
     "numFailedTests": 0
   },
   {
@@ -79,8 +65,7 @@
       "run",
       "typecheck:boundaries"
     ],
-    "exitCode": 0,
-    "seconds": 3.473
+    "exitCode": 0
   },
   {
     "name": "integration-types",
@@ -89,7 +74,29 @@
       "run",
       "typecheck:boundary-integration"
     ],
+    "exitCode": 0
+  },
+  {
+    "name": "strict-correctness",
+    "command": [
+      "node",
+      "experiments/boundary-planner/run.mjs",
+      "--audit",
+      "--strict"
+    ],
+    "exitCode": 0
+  },
+  {
+    "name": "strict-performance",
+    "command": [
+      "node",
+      "experiments/boundary-planner/run.mjs",
+      "--audit",
+      "--strict",
+      "--bench",
+      "--rounds=30"
+    ],
     "exitCode": 0,
-    "seconds": 3.584
+    "sourceFingerprint": "2c21b6c2b39e3e85e9025f35709f5df8a4c507f13cc6b668ec31d1d804bb577b"
   }
 ]

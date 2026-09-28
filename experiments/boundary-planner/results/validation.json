@@ -1,5 +1,5 @@
 {
-  "sourceFingerprint": "dcbfaf1da36c052b48c6d3a1930a5ba003b9464e6efbac4bf205d8857457273e",
+  "sourceFingerprint": "2c21b6c2b39e3e85e9025f35709f5df8a4c507f13cc6b668ec31d1d804bb577b",
   "nativeSourceSuite": {
     "numTotalTests": 1210,
     "numPassedTests": 1210,
@@ -11,8 +11,8 @@
     "numFailedTests": 0
   },
   "boundaryContracts": {
-    "numTotalTests": 107,
-    "numPassedTests": 107,
+    "numTotalTests": 111,
+    "numPassedTests": 111,
     "numFailedTests": 0
   },
   "clinicalAcceptance": {
@@ -55,59 +55,60 @@
     }
   },
   "lazyTemporalChecks": 88,
+  "reviewRegressionChecks": 4,
   "performance": [
     {
       "name": "torture",
       "cases": 50,
-      "baselineMeanMs": 8.394845779333307,
-      "candidateMeanMs": 8.654583458000063,
-      "baselineP95Ms": 23.607889999999315,
-      "candidateP95Ms": 24.076876999999513,
+      "baselineMeanMs": 8.479591194666662,
+      "candidateMeanMs": 8.648080759333306,
+      "baselineP95Ms": 24.20794599999863,
+      "candidateP95Ms": 24.510329000004276,
       "performanceGate": true,
       "gateBasis": "fixed legacy corpus mean and p95 <= baseline * 1.05"
     },
     {
       "name": "composed",
       "cases": 20,
-      "baselineMeanMs": 7.443439363333309,
-      "candidateMeanMs": 6.8276954300000705,
-      "baselineP95Ms": 14.79089699999895,
-      "candidateP95Ms": 13.153407999998308,
+      "baselineMeanMs": 7.194719116666638,
+      "candidateMeanMs": 6.570236641666755,
+      "baselineP95Ms": 14.727671000000555,
+      "candidateP95Ms": 12.700127999996766,
       "performanceGate": true,
       "gateBasis": "fixed legacy corpus mean and p95 <= baseline * 1.05"
     },
     {
       "name": "new-challenges",
       "cases": 15,
-      "baselineMeanMs": 7.409311926666851,
-      "candidateMeanMs": 9.173034228888865,
-      "baselineP95Ms": 12.188156999996863,
-      "candidateP95Ms": 16.017532999998366,
+      "baselineMeanMs": 7.1696403555554244,
+      "candidateMeanMs": 8.681451308888887,
+      "baselineP95Ms": 11.828813000000082,
+      "candidateP95Ms": 15.244336999996449,
       "performanceGate": true,
       "gateBasis": "p95 <= 100ms; old lane is not an equal-correctness comparator for new semantics"
     },
     {
       "name": "specialty",
       "cases": 112,
-      "baselineMeanMs": 9.99300704642851,
-      "candidateMeanMs": 8.640078957440503,
-      "baselineP95Ms": 24.546199999997043,
-      "candidateP95Ms": 20.25471700000344,
+      "baselineMeanMs": 10.075413874106973,
+      "candidateMeanMs": 8.597756008631132,
+      "baselineP95Ms": 24.211052999991807,
+      "candidateP95Ms": 20.774365000004764,
       "performanceGate": true,
       "gateBasis": "p95 <= 100ms; old lane is not an equal-correctness comparator for new semantics"
     }
   ],
   "promotionGates": {
     "metadata": {
-      "experimentalSourceSha256": "dcbfaf1da36c052b48c6d3a1930a5ba003b9464e6efbac4bf205d8857457273e",
-      "base": "62263c486799d80994863dbc612603439a00bfdf",
-      "createdAt": "2026-09-28T04:59:53.807Z",
+      "experimentalSourceSha256": "2c21b6c2b39e3e85e9025f35709f5df8a4c507f13cc6b668ec31d1d804bb577b",
+      "base": "7dc165910ba6892f75c43f6d5fc87e64250df327",
+      "createdAt": "2026-09-28T05:44:55.885Z",
       "node": "v24.14.1",
       "cpu": "Intel(R) Xeon(R) W-2195 CPU @ 2.30GHz",
       "loadAverage": [
-        4.26,
-        2.56,
-        2.11
+        4.21,
+        3.5,
+        3.22
       ],
       "rounds": 30,
       "experiment": "shadow boundary planner; production source unchanged"

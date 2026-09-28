@@ -4,7 +4,7 @@ Date: 28 September 2026 (Asia/Bangkok).
 Branch: `experiment/explainable-boundary-planner`.
 Baseline: production source at `e63ca7b` / version 0.1.66.
 Initial experiment: `c9fe4fd`.
-Implementation/corpus fingerprint: `dcbfaf1da36c052b48c6d3a1930a5ba003b9464e6efbac4bf205d8857457273e`.
+Implementation/corpus fingerprint: `2c21b6c2b39e3e85e9025f35709f5df8a4c507f13cc6b668ec31d1d804bb577b`.
 
 A final whitespace check removed one extra blank line at the end of `corpus.ts`;
 the fingerprint above identifies the measured version. No executable logic changed.
@@ -26,7 +26,7 @@ medical prose can be interpreted without ambiguity.
 |---|---:|
 | Existing suite on unchanged native parser | 1,210/1,210 |
 | Same existing suite on candidate pipeline | 1,210/1,210 |
-| Structural planner contracts | 107/107 |
+| Structural planner contracts | 111/111 |
 | Clinical/API/English-and-Thai round-trip/safety controls | 477/477 |
 | Distribution tests | 4/4 |
 | Production build/declarations | pass |
@@ -168,10 +168,10 @@ session ran concurrently; other host activity remains possible.
 
 | Corpus | Native mean ms | Candidate mean ms | Native p95 ms | Candidate p95 ms | Gate |
 |---|---:|---:|---:|---:|---|
-| torture (50 cases) | 8.395 | 8.655 | 23.608 | 24.077 | pass |
-| composed (20 cases) | 7.443 | 6.828 | 14.791 | 13.153 | pass |
-| new challenges (15 cases) | 7.409 | 9.173 | 12.188 | 16.018 | pass* |
-| specialty (112 cases) | 9.993 | 8.640 | 24.546 | 20.255 | pass* |
+| torture (50 cases) | 8.480 | 8.648 | 24.208 | 24.510 | pass |
+| composed (20 cases) | 7.195 | 6.570 | 14.728 | 12.700 | pass |
+| new challenges (15 cases) | 7.170 | 8.681 | 11.829 | 15.244 | pass* |
+| specialty (112 cases) | 10.075 | 8.598 | 24.211 | 20.774 | pass* |
 
 The ordinary-input result remains within the legacy tolerance (~3.1% slower mean / ~2.0% slower p95). The fixed
 20-case legacy composed corpus is faster (~8.3% mean / ~11.1% p95). New-challenge
@@ -188,6 +188,12 @@ asymptotic complexity proof.
 Both new-generation performance runs are retained, along with the original
 experiment's measurements. No claim of improved correctness is inferred from
 speed: independent oracles and execution checks establish the measured correctness.
+
+## Review-audit hardening
+
+The first full PR review produced four valid integration findings, all now covered by regression tests: Vite/esbuild module ids are normalized before cross-platform path comparison; boundary relations are emitted only for real segment identities and filtered after final segmentation; lint issues are filtered only when administration-target lowering actually expands a result; and the `validation-latest.json` artifact is regenerated from the post-review run rather than retaining an older checkpoint.
+
+The review-specific contract tests include a Windows-style module-id normalization simulation, a leading-slash empty-predecessor relation case, lint preservation for disjunctive/unexpanded target groups, and lint removal only for true conjunctive target expansion.
 
 ## Architecture and delivery boundary
 

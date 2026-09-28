@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { planBoundaries } from './planner';
 import { OwnershipIndex } from './structures';
-import { recognizeAdministrationTargetGroups } from './targets';
+import { expandLintAdministrationTargets, recognizeAdministrationTargetGroups } from './targets';
+import { normalizeCandidateModulePath } from './integration.mjs';
+import { formatSig, parseSig } from '../../src/index';
 import { arbitrate } from './grammar';
 import { EvidenceContext } from './evidence';
 import { lexInput } from '../../src/lexer/lex';
@@ -111,6 +113,66 @@ describe('experimental boundary planner structural contracts', () => {
     expect(recognizeAdministrationTargetGroups('Instill 1 drop into both eyes daily')).toEqual([]);
     const plan = planBoundaries('Instill 1 drop into both eyes daily', undefined, { trace: true });
     expect(plan.segments).toHaveLength(1);
+  });
+
+  it('normalizes Vite module ids across Windows separator styles before matching source files', () => {
+    const windowsPath = { resolve: (value: string) => value.replace(/\//gu, '\\') };
+    const forward = normalizeCandidateModulePath('C:/repo/src/index.ts?shadow=1', windowsPath);
+    const backward = normalizeCandidateModulePath('C:\\repo\\src\\index.ts?shadow=1', windowsPath);
+    expect(forward).toBe('C:/repo/src/index.ts');
+    expect(backward).toBe(forward);
+  });
+
+
+  it('never emits a relation whose segment endpoint does not exist', () => {
+    const leading = planBoundaries('/ take 1 tab daily', undefined, { trace: true });
+    expect(leading.segments.map(segment => segment.text)).toEqual(['take 1 tab daily']);
+    expect(leading.relations).toEqual([]);
+
+    for (const input of [
+      '/ take 1 tab daily',
+      'take 1 tab daily then take 2 tab daily',
+      'take 1 tab daily then then take 2 tab daily'
+    ]) {
+      const plan = planBoundaries(input, undefined, { trace: true });
+      for (const relation of plan.relations) {
+        expect(relation.from).toBeGreaterThanOrEqual(0);
+        expect(relation.to).toBeGreaterThanOrEqual(0);
+        expect(relation.from).toBeLessThan(plan.segments.length);
+        expect(relation.to).toBeLessThan(plan.segments.length);
+      }
+    }
+  });
+
+  it('preserves lint issues when alternative administration targets are deliberately not expanded', () => {
+    const input = 'Apply to right arm or right leg daily from 22/09/2026 onwards';
+    const options = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+    const result = parseSig(input, options);
+    const issue = {
+      message: 'synthetic unresolved target evidence',
+      text: 'right leg',
+      tokens: ['right', 'leg']
+    };
+    const entry = { result, issues: [issue] };
+    const unchanged = expandLintAdministrationTargets([entry], options, formatSig);
+    expect(unchanged).toHaveLength(1);
+    expect(unchanged[0]).toBe(entry);
+    expect(unchanged[0].issues).toEqual([issue]);
+  });
+
+  it('removes target-owned lint issues only when conjunction lowering actually expands the result', () => {
+    const input = 'Apply to right arm and right leg daily from 22/09/2026 onwards';
+    const options = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+    const result = parseSig(input, options);
+    const issue = {
+      message: 'synthetic target issue',
+      text: 'right leg',
+      tokens: ['right', 'leg']
+    };
+    const expanded = expandLintAdministrationTargets([{ result, issues: [issue] }], options, formatSig);
+    expect(expanded).toHaveLength(2);
+    expect(expanded.every(entry => entry.issues.length === 0)).toBe(true);
+    expect(expanded.map(entry => entry.result.fhir.site?.text)).toEqual(['right arm', 'right leg']);
   });
 
   it('caches only inside an input/options scope and never infers numeric MDY from locale', () => {
