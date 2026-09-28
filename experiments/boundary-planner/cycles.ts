@@ -37,12 +37,12 @@ export function recognizeCycles(input: string, options?: ParseOptions): CycleSch
       for (let d = first; d <= last; d++) if (!seen.has(d)) { seen.add(d); days.push(d); }
     }
     const cycles = count ? Number(count) : 1, periodDays = periodValue ? Number(periodValue) : undefined;
-    if (!days.length || cycles < 1 || cycles > 100 || cycles * days.length > 10000) error = 'invalid-cycle-size';
-    if (periodDays !== undefined && (periodDays < 1 || days.some(d => d > periodDays))) error = 'day-outside-cycle';
-    if (cycles > 1 && !periodDays) error = 'missing-cycle-length';
-    if (periodDays && !count) error = 'unbounded-cycle-count';
+    if (!days.length || cycles < 1 || cycles > 100 || cycles * days.length > 10000) error ??= 'invalid-cycle-size';
+    if (periodDays !== undefined && (periodDays < 1 || days.some(d => d > periodDays))) error ??= 'day-outside-cycle';
+    if (cycles > 1 && !periodDays) error ??= 'missing-cycle-length';
+    if (periodDays && !count) error ??= 'unbounded-cycle-count';
     const anchor = anchorMatch?.events.length === 1 && !anchorMatch.unresolved ? anchorMatch.events[0] : undefined;
-    if (!anchor) error = 'missing-or-unresolved-cycle-anchor';
+    if (!anchor) error ??= 'missing-or-unresolved-cycle-anchor';
     const events: CanonicalCalendarEventExpr[] = [];
     if (!error && anchor) for (let cycle = 0; cycle < cycles; cycle++) for (const day of days) {
       const date = new Date(`${anchor.isoDate}T00:00:00Z`);

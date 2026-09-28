@@ -42,8 +42,8 @@
       "test:boundaries"
     ],
     "exitCode": 0,
-    "numTotalTests": 111,
-    "numPassedTests": 111,
+    "numTotalTests": 113,
+    "numPassedTests": 113,
     "numFailedTests": 0
   },
   {
@@ -74,7 +74,8 @@
       "run",
       "typecheck:boundary-integration"
     ],
-    "exitCode": 0
+    "exitCode": 0,
+    "staleMirrorSentinelRemoved": true
   },
   {
     "name": "strict-correctness",
@@ -97,6 +98,6 @@
       "--rounds=30"
     ],
     "exitCode": 0,
-    "sourceFingerprint": "2c21b6c2b39e3e85e9025f35709f5df8a4c507f13cc6b668ec31d1d804bb577b"
+    "sourceFingerprint": "428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1"
   }
 ]

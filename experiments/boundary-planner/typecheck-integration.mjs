@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {candidateTransform} from './integration.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)), root=path.resolve(here,'../..');
 const mirror=path.join(here,'.generated','typecheck');
+await fs.rm(mirror,{recursive:true,force:true});
 await fs.mkdir(mirror,{recursive:true});
 await fs.cp(path.join(root,'src'),path.join(mirror,'src'),{recursive:true});
 const experimentMirror=path.join(mirror,'experiments/boundary-planner');

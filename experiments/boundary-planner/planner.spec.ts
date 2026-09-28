@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { planBoundaries } from './planner';
 import { OwnershipIndex } from './structures';
-import { expandLintAdministrationTargets, recognizeAdministrationTargetGroups } from './targets';
+import { expandAdministrationTargets, expandLintAdministrationTargets, recognizeAdministrationTargetGroups } from './targets';
+import { recognizeCycles } from './cycles';
 import { normalizeCandidateModulePath } from './integration.mjs';
 import { formatSig, parseSig } from '../../src/index';
 import { arbitrate } from './grammar';
@@ -173,6 +174,37 @@ describe('experimental boundary planner structural contracts', () => {
     expect(expanded).toHaveLength(2);
     expect(expanded.every(entry => entry.issues.length === 0)).toBe(true);
     expect(expanded.map(entry => entry.result.fhir.site?.text)).toEqual(['right arm', 'right leg']);
+  });
+
+  it('preserves the first specific finite-cycle validation error', () => {
+    const invalidDay = recognizeCycles(
+      'take 1 tab at 08:00 on days 0,8 every 28 days for 2 cycles',
+      { locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' } }
+    );
+    expect(invalidDay).toHaveLength(1);
+    expect(invalidDay[0].error).toBe('invalid-cycle-day-range');
+
+    const missingLength = recognizeCycles(
+      'take 1 tab at 08:00 on days 1,8 starting 22/09/2026 for 2 cycles',
+      { locale: 'en-GB', datePolicy: { referenceDate: '2026-09-20' } }
+    );
+    expect(missingLength).toHaveLength(1);
+    expect(missingLength[0].error).toBe('missing-cycle-length');
+  });
+
+  it('deduplicates alternative-target warnings across repeated non-expanding passes', () => {
+    const input = 'Apply to right arm or right leg daily from 22/09/2026 onwards';
+    const options = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
+    const result = parseSig(input, options);
+    const warning = 'Alternative administration targets retained as text; not expanded into simultaneous Dosage items.';
+    const first = expandAdministrationTargets([result], options, formatSig);
+    const second = expandAdministrationTargets(first, options, formatSig);
+    expect(second).toHaveLength(1);
+    expect(second[0]).toBe(result);
+    expect(second[0].warnings.filter(value => value === warning)).toHaveLength(1);
+    for (const clause of second[0].meta.canonical.clauses) {
+      expect((clause.warnings ?? []).filter(value => value === warning)).toHaveLength(1);
+    }
   });
 
   it('caches only inside an input/options scope and never infers numeric MDY from locale', () => {

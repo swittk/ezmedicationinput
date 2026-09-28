@@ -289,7 +289,9 @@ export function expandAdministrationTargets(
         const warning = 'Alternative administration targets retained as text; not expanded into simultaneous Dosage items.';
         if (result.warnings.indexOf(warning) < 0) result.warnings.push(warning);
         for (const clause of result.meta.canonical.clauses) {
-          clause.warnings = [...(clause.warnings ?? []), warning];
+          if ((clause.warnings ?? []).indexOf(warning) < 0) {
+            clause.warnings = [...(clause.warnings ?? []), warning];
+          }
         }
       }
       output.push(result);
