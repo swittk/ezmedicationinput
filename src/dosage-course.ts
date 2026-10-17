@@ -359,6 +359,18 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
       });
     }
   }
+  // A consumer may persist just the flat .fhir array and not its optional
+  // course metadata. Preserve the complete R6 step relationships on the
+  // first item as a modifier extension whenever R5 fields alone are
+  // insufficient. Strict R5 exporters already understand this same marker.
+  const retainedCourse = toFhirR5Dosages(details)[0]?.modifierExtension?.find(
+    extension => extension.url === DOSAGE_DETAILS_R5_URL
+  );
+  if (retainedCourse && dosages[0]) {
+    dosages[0].modifierExtension = [
+      ...(dosages[0].modifierExtension ?? []), retainedCourse
+    ];
+  }
   return {
     dosages,
     course: {

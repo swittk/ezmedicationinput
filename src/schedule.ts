@@ -1,4 +1,5 @@
 import { createTimingPrimitives } from "./regimen/scheduler-primitives";
+import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
 import { getDosageCondition, getDosageExcludedDates, getUnresolvedDosage, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
@@ -20,6 +21,7 @@ import {
   NextDueDoseConfig,
   NextDueDoseOptions,
   FhirR6DosageDetails,
+  FhirR6RelativeTime,
   ParseBatchResult,
   RegimenDueTimes,
   TotalUnitsOptions,
@@ -1239,6 +1241,109 @@ function withoutOccurrenceCap(dosage: FhirDosage): FhirDosage {
 }
 
 /**
+ * Resolve a FHIR R6 RelativeTime tied to the standard "treatment-start"
+ * event. Unlike Timing.repeat.startOffset, this is an offset from the
+ * beginning of the entire treatment. Unsupported anchors are not guessed.
+ */
+function treatmentRelativeInstant(
+  relative: FhirR6RelativeTime,
+  orderedAt: Date,
+  timeZone: string
+): Date {
+  const codes = relative.contextCode?.coding ?? [];
+  const knownAnchor = codes.some(coding =>
+    coding.system === TREATMENT_START_SYSTEM && coding.code === "treatment-start"
+  );
+  const duration = relative.offsetDuration;
+  const quantity = duration?.value;
+  const unit = duration?.code ?? duration?.unit;
+  if (!knownAnchor || relative.contextReference || relative.contextDefinition ||
+      relative.contextPath || relative.offsetRange ||
+      quantity === undefined || !Number.isInteger(quantity) || quantity < 0) {
+    throw new Error("Unsupported R6 step RelativeTime: requires an exact treatment-start offset");
+  }
+  switch (unit) {
+    case "d": case "wk": {
+      const days = unit === "wk" ? quantity * 7 : quantity;
+      const parts = getTimeParts(orderedAt, timeZone);
+      const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+      const result = makeZonedDate(timeZone, shifted.getUTCFullYear(),
+        shifted.getUTCMonth() + 1, shifted.getUTCDate(), parts.hour, parts.minute, parts.second);
+      if (!result) throw new Error("Invalid R6 treatment-day offset");
+      return result;
+    }
+    case "mo": case "a":
+      return addCalendarMonths(orderedAt, quantity * (unit === "a" ? 12 : 1), timeZone);
+    default:
+      throw new Error("Unsupported R6 treatment-start time unit");
+  }
+}
+
+/**
+ * Administer one global step at a time, while retaining its simultaneous
+ * site-specific components. All absolute boundaries derive from orderedAt;
+ * querying halfway through a treatment cannot reset the course clock.
+ */
+function scheduleTreatmentRelativeCourse(
+  course: FhirR6DosageDetails, options: NextDueDoseOptions
+): string[] {
+  if (options.orderedAt === undefined)
+    throw new Error("orderedAt is required for relative treatment-step scheduling");
+  if (options.priorCount !== undefined)
+    throw new Error("priorCount is ambiguous across concurrent treatment components");
+  const timeZone = options.timeZone ?? options.config?.timeZone;
+  if (!timeZone) throw new Error("timeZone is required for relative treatment-step scheduling");
+  const from = coerceDate(options.from, "from");
+  const anchor = coerceDate(options.orderedAt, "orderedAt");
+  const limit = Math.floor(options.limit ?? 10);
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  const flattened = toFhirR5Dosages(course);
+  const doses: string[] = [];
+  let previousEnd = anchor;
+  let componentIndex = 0;
+  for (let index = 0; index < course.step.length; index++) {
+    const step = course.step[index];
+    const start = step.start
+      ? treatmentRelativeInstant(step.start, anchor, timeZone)
+      : previousEnd;
+    const end = step.end
+      ? treatmentRelativeInstant(step.end, anchor, timeZone)
+      : undefined;
+    if (start.getTime() !== previousEnd.getTime() ||
+        end && end.getTime() <= start.getTime() ||
+        !end && index + 1 < course.step.length) {
+      throw new Error("R6 treatment steps must be ordered, contiguous and finitely ended before the final step");
+    }
+    for (const component of step.component) {
+      const original = flattened[componentIndex++];
+      if (!original) throw new Error("R6 course component projection is incomplete");
+      if (component.timing?.repeat?.boundsDuration ||
+          component.timing?.repeat?.boundsPeriod ||
+          component.timing?.repeat?.boundsRange) {
+        throw new Error("Unsupported overlapping R6 component and global step bounds");
+      }
+      const dosage = {
+        ...original,
+        modifierExtension: original.modifierExtension?.filter(ext =>
+          ext.url !== DOSAGE_DETAILS_R5_URL)
+      };
+      if (end && from >= end) continue;
+      const effectiveFrom = from > start ? from : start;
+      const candidateTimes = nextDueDoses(dosage, {
+        ...options, from: effectiveFrom, orderedAt: start, limit
+      });
+      for (const time of candidateTimes) {
+        if (end && Date.parse(time) >= end.getTime()) break;
+        doses.push(time);
+      }
+    }
+    if (end) previousEnd = end;
+  }
+  return doses.sort((left, right) => Date.parse(left) - Date.parse(right))
+    .slice(0, limit);
+}
+
+/**
  * Produces the next dose timestamps in ascending order according to the
  * provided configuration and dosage metadata.
  */
@@ -1254,16 +1359,26 @@ export function nextDueDoses(
     return nextDueDoses(result.fhirNext, options);
   }
   if (Array.isArray(dosage) || (dosage && "step" in dosage)) {
+    if (Array.isArray(dosage) && dosage.some((item: FhirDosage) =>
+      item.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL))) {
+      // This is a strict R5 projection of a course with extra semantics.
+      // Restore its original step boundaries rather than executing a flat
+      // representation that cannot express those relative starts.
+      return nextDueDoses(toDosageDetails(dosage), options);
+    }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
       ? dosage as FhirR6DosageDetails : undefined;
     if (r6Course && (
       r6Course.repeatCycle || r6Course.safety ||
-      r6Course.step.some(step => step.start || step.end ||
-        step.count !== undefined || step.safety ||
+      r6Course.step.some(step => step.count !== undefined || step.safety ||
         step.component.some(component =>
-          component.site?.reference || component.safety))
+          component.site?.reference || component.safety ||
+          component.doseAndRate?.some(value => value.doseExpression || value.rateExpression)))
     )) {
-      throw new Error("This R6 course contains scheduling/safety semantics not yet executable by nextDueDoses");
+      throw new Error("This R6 course has unsupported safety/cycle rules and requires an R6-aware scheduler");
+    }
+    if (r6Course && r6Course.step.some(step => step.start || step.end)) {
+      return scheduleTreatmentRelativeCourse(r6Course, options);
     }
     const items = Array.isArray(dosage) ? [...dosage] :
       toFhirR5Dosages(r6Course!).map(item => ({

@@ -98,6 +98,18 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         { feature: 'owner.producer', value: owner.producer }, { feature: 'owner.resolved', value: owner.resolved }
       ] });
     } else if (site.kind === 'punctuation') {
+      // A semicolon is an independent instruction boundary ONLY when the
+      // succeeding constituent is a complete, independently dosed
+      // administration. Keep punctuation inside a procedure or one dosage.
+      const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
+      if (site.surface === ';' && rightStart < input.length) {
+        const right = evidence.probe(rightStart, probeEnd(site.rightIndex));
+        if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
+          proposals.push({ action: 'split', rule: 'regimen.separate-administration',
+            priority: 720, relation: 'independent',
+            evidence: [{ feature: 'right.complete-dosed-administration', value: true }] });
+        }
+      }
       proposals.push(keep('boundary.punctuation-is-not-a-regimen', 0, 'punctuation', site.surface));
     } else if (site.kind === 'hard' || site.kind === 'slash') {
       const right = tokens[site.rightIndex];

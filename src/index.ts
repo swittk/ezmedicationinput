@@ -5,6 +5,8 @@ import {
 } from "./dosage-course";
 import { applyClinicalConstraints } from "./clinical-safety";
 import { quarantineSchedule } from "./regimen/admissibility";
+import { projectParallelRegimen } from "./regimen/parallel-course";
+import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan } from "./regimen/candidate-adapter";
 import { composeRegimenPhases } from "./regimen/regimen";
@@ -882,11 +884,12 @@ function buildWholeCourseResult(
   input: string,
   results: ParseResult[],
   primary: ParseResult,
-  segments: ReturnType<typeof parseSigSegments>
+  segments: ReturnType<typeof parseSigSegments>,
+  parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageDetails }
 ): ParseBatchResult {
   const dosageItems = results.map(item => item.fhir);
-  const fhir = toEzDosages(dosageItems);
-  const fhirNext = toDosageDetails(dosageItems, input);
+  const fhir = parallel?.dosages ?? toEzDosages(dosageItems);
+  const fhirNext = parallel?.details ?? toDosageDetails(dosageItems, input);
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -903,6 +906,7 @@ function buildWholeCourseResult(
     items: results,
     fhir,
     fhirNext,
+    ...(parallel ? { course: parallel.course } : {}),
     shortText: results.length === 1 ? primary.shortText : formatSig(fhirNext, "short"),
     longText: results.length === 1 ? primary.longText : formatSig(fhirNext, "long"),
     warnings: [...warnings],
@@ -959,6 +963,12 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   const rawResults: ParseResult[] = [];
 
   for (const segment of segments) {
+    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
+        boundaryPlan.segments[edge.to]?.start === segment.start)) {
+      // Explicit independent instructions must not inherit another track's
+      // dose, route, site or administration unit.
+      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
+    }
     const state = parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
@@ -980,9 +990,14 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   results = expandAdministrationTargets(results, options, formatSig);
   quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
+  const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
+  if (parallel.kind === "unresolved") {
+    for (const item of results) quarantineSchedule(item, input, parallel.reason);
+  }
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments);
+  return buildWholeCourseResult(input, results, primary, segments,
+    parallel.kind === "resolved" ? parallel : undefined);
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
@@ -992,6 +1007,12 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   const results: LintResult[] = [];
 
   for (const segment of segments) {
+    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
+        boundaryPlan.segments[edge.to]?.start === segment.start)) {
+      // Explicit independent instructions must not inherit another track's
+      // dose, route, site or administration unit.
+      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
+    }
     const state = parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
@@ -1041,9 +1062,14 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     }
   }
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
+  const lintDosages = expandedLintResults.map(entry => entry.result);
   quarantineMergedIndependentRegimens(
-    expandedLintResults.map(entry => entry.result), segments, boundaryPlan, input, options
+    lintDosages, segments, boundaryPlan, input, options
   );
+  const parallel = projectParallelRegimen(lintDosages, segments, boundaryPlan, input);
+  if (parallel.kind === "unresolved") {
+    for (const item of lintDosages) quarantineSchedule(item, input, parallel.reason);
+  }
   for (const entry of expandedLintResults) {
     for (const warning of entry.result.warnings) {
       if (!warning.startsWith("Unresolved schedule")) continue;
@@ -1091,6 +1117,12 @@ export async function parseSigAsync(
   const rawResults: ParseResult[] = [];
 
   for (const segment of segments) {
+    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
+        boundaryPlan.segments[edge.to]?.start === segment.start)) {
+      // Explicit independent instructions must not inherit another track's
+      // dose, route, site or administration unit.
+      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
+    }
     const state = parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     await applyPrnReasonCodingAsync(state, options);
@@ -1112,9 +1144,14 @@ export async function parseSigAsync(
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   results = expandAdministrationTargets(results, options, formatSig);
   quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
+  const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
+  if (parallel.kind === "unresolved") {
+    for (const item of results) quarantineSchedule(item, input, parallel.reason);
+  }
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments);
+  return buildWholeCourseResult(input, results, primary, segments,
+    parallel.kind === "resolved" ? parallel : undefined);
 }
 
 export function formatSig(

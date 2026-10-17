@@ -121,18 +121,23 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     expect(toDosageDetails(r5)).toEqual(course);
   });
 
-  it("refuses a falsely global sequence when two independent sites each taper", () => {
+  it("composes independent site tapers into concurrent, bounded global steps", () => {
     const input = "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
     const parsed = parseSig(input);
-    expect(parsed.warnings).toContainEqual(expect.stringContaining(
-      "independent-sequences-not-yet-resolved"
-    ));
-    expect(parsed.fhir.every(dose => !dose.timing)).toBe(true);
-    expect(() => nextDueDoses(parsed, {
-      from: "2026-10-19T08:00:00+07:00",
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.fhir.map(dose => dose.sequence)).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 2, 2]);
+    expect(parsed.fhirNext.step[0].end?.offsetDuration?.value).toBe(7);
+    expect(parsed.fhirNext.step[1].end?.offsetDuration?.code).toBe("mo");
+    expect(nextDueDoses(parsed, {
+      from: "2026-11-19T12:00:00+07:00",
       orderedAt: "2026-10-19T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow("unresolved");
+      timeZone: "Asia/Bangkok",
+      limit: 4
+    })).toEqual([
+      "2026-11-19T12:00:00+07:00", "2026-11-19T16:00:00+07:00",
+      "2026-11-19T20:00:00+07:00", "2026-11-19T20:00:00+07:00"
+    ]);
   });
 
   it("has the same R6 result shape through the asynchronous entry point", async () => {
