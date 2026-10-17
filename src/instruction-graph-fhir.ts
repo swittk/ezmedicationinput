@@ -15,7 +15,7 @@ import {
 } from "./types";
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-instruction-graph";
+  "https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph";
 
 function child(extension: FhirExtension, url: string): FhirExtension | undefined {
   return extension.extension?.find((entry) => entry.url === url);

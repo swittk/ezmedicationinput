@@ -21,6 +21,7 @@ import {
   NextDueDoseConfig,
   NextDueDoseOptions,
   FhirR6DosageDetails,
+  FhirR6Dosage,
   FhirR6RelativeTime,
   ParseBatchResult,
   RegimenDueTimes,
@@ -1221,6 +1222,134 @@ function applyOccurrenceCap(
   return accepted;
 }
 
+/** Maximum medication quantity per time window is not the same as a
+ * frequency cap: divide by the actual per-administration quantity first.
+ * Do not silently discard a limit when the dose unit cannot be compared. */
+function executableQuantityCaps(dosage: FhirDosage): CanonicalOccurrenceCapExpr[] {
+  const limits = dosage.maxDosePerPeriod ?? [];
+  if (!limits.length) return [];
+  const doseRates = dosage.doseAndRate ?? [];
+  const dose = doseRates.length === 1 ? doseRates[0].doseQuantity : undefined;
+  if (!dose || dose.comparator || !dose.value || !Number.isFinite(dose.value) ||
+      dose.value <= 0) {
+    throw new Error("A per-period maximum needs one known positive administered quantity");
+  }
+  const normalizeUnit = (unit: string) => {
+    const text = unit.trim().toLowerCase();
+    if (["tab", "tabs", "tablet", "tablets"].indexOf(text) >= 0) return "tab";
+    if (["cap", "caps", "capsule", "capsules"].indexOf(text) >= 0) return "cap";
+    if (["drop", "drops"].indexOf(text) >= 0) return "drop";
+    return text;
+  };
+  const caps: CanonicalOccurrenceCapExpr[] = [];
+  for (const ratio of limits) {
+    const numerator = ratio.numerator, denominator = ratio.denominator;
+    const maximum = numerator?.value;
+    const period = denominator?.value;
+    const periodUnit = denominator?.code ?? denominator?.unit;
+    if (numerator?.comparator || denominator?.comparator ||
+        maximum === undefined || !Number.isFinite(maximum) || maximum < 0 ||
+        period === undefined || !Number.isInteger(period) || period <= 0 ||
+        !periodUnit ||
+        ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(periodUnit) < 0) {
+      throw new Error("Unsupported dose maximum period; cannot safely enforce the quantity limit");
+    }
+    const actualUnit = dose.code ?? dose.unit ?? "";
+    const maximumUnit = numerator?.code ?? numerator?.unit ?? "";
+    const normalizedActual = normalizeUnit(actualUnit);
+    const normalizedMaximum = normalizeUnit(maximumUnit);
+    const equivalentDose = normalizedActual === normalizedMaximum
+      ? dose.value
+      : convertValue(dose.value, actualUnit, maximumUnit);
+    if (equivalentDose === null || !Number.isFinite(equivalentDose) ||
+        equivalentDose <= 0) {
+      throw new Error("Cannot enforce a dose maximum without compatible units or a medication strength");
+    }
+    caps.push({
+      max: Math.floor(maximum / equivalentDose + 1e-9),
+      period, periodUnit: periodUnit as FhirPeriodUnit
+    });
+  }
+  return caps;
+}
+
+function applyQuantityCaps(
+  candidates: string[],
+  caps: readonly CanonicalOccurrenceCapExpr[],
+  priorDoseTimes: Array<Date | string> | undefined,
+  zone: string,
+  limit: number
+): string[] {
+  if (!caps.length) return candidates.slice(0, Math.floor(limit));
+  // R5 Dosage.maxDosePerPeriod means a maximum QUANTITY in a duration.
+  // It is not a calendar-midnight reset: two 2-tablet administrations
+  // before midnight must not license another 4 tablets after midnight.
+  const prior = (priorDoseTimes ?? []).map(time => coerceDate(time, "priorDoseTimes").getTime())
+    .sort((a, b) => a - b);
+  const accepted: string[] = [];
+  const acceptedTimes: number[] = [];
+  const after = (sorted: readonly number[], boundary: number) => {
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid] <= boundary) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const windowStart = (at: Date, cap: CanonicalOccurrenceCapExpr): number => {
+    const quantity = cap.period;
+    switch (cap.periodUnit) {
+      case FhirPeriodUnit.Second: return at.getTime() - quantity * 1000;
+      case FhirPeriodUnit.Minute: return at.getTime() - quantity * 60_000;
+      case FhirPeriodUnit.Hour: return at.getTime() - quantity * 3_600_000;
+      case FhirPeriodUnit.Day: return at.getTime() - quantity * 86_400_000;
+      case FhirPeriodUnit.Week: return at.getTime() - quantity * 7 * 86_400_000;
+      case FhirPeriodUnit.Month: return addCalendarMonths(at, -quantity, zone).getTime();
+      case FhirPeriodUnit.Year: return addCalendarMonths(at, -quantity * 12, zone).getTime();
+      default: throw new Error("Unsupported maximum dose interval");
+    }
+  };
+  for (const iso of candidates) {
+    const at = new Date(iso);
+    const timestamp = at.getTime();
+    const fitsEveryCap = caps.every(cap => {
+      const first = windowStart(at, cap);
+      const existing = after(prior, timestamp) - after(prior, first);
+      const upcoming = after(acceptedTimes, timestamp) - after(acceptedTimes, first);
+      return existing + upcoming < cap.max;
+    });
+    if (!fitsEveryCap) continue;
+    accepted.push(iso);
+    acceptedTimes.push(timestamp);
+    if (accepted.length >= limit) break;
+  }
+  return accepted;
+}
+
+/** Maxima copied from an R5 dosage are executable when every R6 dose
+ * limit can be lowered to a standard quantity or ratio. Unknown clinical
+ * safety expressions still need a dedicated evaluator. */
+function executableR6Safety(component: FhirR6Dosage): boolean {
+  const safety = component.safety;
+  if (!safety) return true;
+  if (safety.ifExceeded || safety.modifierExtension?.length ||
+      safety.extension?.length) return false;
+  return (safety.doseLimit ?? []).every(limit => {
+    if (limit.extension?.length || limit.modifierExtension?.length ||
+        limit.valueQuantity?.comparator ||
+        limit.valueQuantity?.value === undefined) return false;
+    if (limit.scope === "administration") return true;
+    if (limit.scope === "period") {
+      return !!limit.period?.value && !limit.period.comparator &&
+        (limit.period.code !== undefined || limit.period.unit !== undefined);
+    }
+    // Lifetime and unqualified per-dosage expressions cannot be evaluated
+    // from future timestamps and partial administration history.
+    return false;
+  });
+}
+
 function withoutOccurrenceCap(dosage: FhirDosage): FhirDosage {
   const timing = dosage.timing;
   const repeat = timing?.repeat;
@@ -1372,8 +1501,7 @@ export function nextDueDoses(
       r6Course.repeatCycle || r6Course.safety ||
       r6Course.step.some(step => step.count !== undefined || step.safety ||
         step.component.some(component =>
-          component.site?.reference || component.safety ||
-          component.doseAndRate?.some(value => value.doseExpression || value.rateExpression)))
+          !executableR6Safety(component)))
     )) {
       throw new Error("This R6 course has unsupported safety/cycle rules and requires an R6-aware scheduler");
     }
@@ -1390,15 +1518,15 @@ export function nextDueDoses(
       }));
     const limit = options?.limit ?? 10;
     if (!Number.isFinite(limit) || limit <= 0) return [];
+    // Body-site references and dose expressions affect the administration
+    // target/amount, not the clock. They must not block timing enumeration.
+    // Quantity limits are checked by nextDueDosesSingle for each member.
     if (items.some(item => {
       const extended = item as EzDosage;
-      return extended.siteReference ||
-        extended.safety && !item.maxDosePerPeriod && !item.maxDosePerAdministration &&
-          !item.maxDosePerLifetime ||
-        extended.doseAndRate?.some(value =>
-          value.doseExpression || value.rateExpression);
+      return extended.safety && !item.maxDosePerPeriod &&
+        !item.maxDosePerAdministration && !item.maxDosePerLifetime;
     })) {
-      throw new Error("Cannot automatically schedule an R6 reference, dose expression, or unsupported safety limit");
+      throw new Error("An unsupported safety limit requires a dedicated evaluator");
     }
     const episodes = scheduleRegimen(items, { ...options, limit });
     return episodes.reduce<string[]>((all, episode) => {
@@ -1419,9 +1547,16 @@ export function nextDueDoses(
     }
     const timeZone = options?.timeZone ?? options?.config?.timeZone;
     if (!timeZone) throw new Error("A timeZone is required for exclusion-date scheduling");
+    // Native EzDosage mirrors conditional/date semantics as direct fields
+    // AND in R5 modifiers. Clear both representations before enumerating
+    // candidate times, otherwise recursively re-enter this very filter.
+    const { condition: _condition, excludedDates: _excludedDates, ...plainDosage } =
+      one as EzDosage;
+    const quantityCaps = executableQuantityCaps(one);
     const unconstrained: FhirDosage = {
-      ...one,
-      modifierExtension: one.modifierExtension?.filter(extension =>
+      ...plainDosage,
+      maxDosePerPeriod: undefined,
+      modifierExtension: plainDosage.modifierExtension?.filter(extension =>
         extension.url !== DOSAGE_CONDITION_R5_URL &&
         extension.url !== DOSAGE_EXCLUDED_DATES_R5_URL)
     };
@@ -1443,10 +1578,14 @@ export function nextDueDoses(
           if (!eligible) continue;
         }
         accepted.push(at);
-        if (accepted.length >= limit) break;
+        if (!quantityCaps.length && accepted.length >= limit) break;
       }
-      if (accepted.length >= limit || candidates.length < candidateLimit || candidateLimit === 10000) {
-        return accepted.slice(0, Math.floor(limit));
+      // A conditional occurrence that is not administered does not consume
+      // the quantity allowance. Apply the cap AFTER exclusions/predicates.
+      const capped = applyQuantityCaps(accepted, quantityCaps,
+        options.priorDoseTimes, timeZone, limit);
+      if (capped.length >= limit || candidates.length < candidateLimit || candidateLimit === 10000) {
+        return capped;
       }
       candidateLimit = Math.min(10000, candidateLimit * 2);
     }
@@ -1483,6 +1622,36 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
     throw new Error("Configuration with a valid timeZone is required");
+  }
+  if (dosage.maxDosePerLifetime)
+    throw new Error("Lifetime dose maximum requires complete historical dose data");
+  if (dosage.maxDosePerAdministration) {
+    const dose = dosage.doseAndRate?.length === 1
+      ? dosage.doseAndRate[0].doseQuantity : undefined;
+    const maximum = dosage.maxDosePerAdministration;
+    if (!dose?.value || !maximum.value || dose.value <= 0 ||
+        dose.comparator || maximum.comparator)
+      throw new Error("Cannot enforce per-administration maximum without an actual dose quantity");
+    const unit = dose.code ?? dose.unit ?? "";
+    const targetUnit = maximum.code ?? maximum.unit ?? "";
+    const actual = unit.toLowerCase() === targetUnit.toLowerCase()
+      ? dose.value : convertValue(dose.value, unit, targetUnit);
+    if (actual === null || actual > maximum.value + 1e-9)
+      throw new Error("Prescribed dose exceeds per-administration maximum or has incompatible units");
+  }
+  const quantityCaps = executableQuantityCaps(dosage);
+  if (quantityCaps.length) {
+    const requestLimit = Math.floor(limit);
+    let candidateLimit = Math.min(10000, Math.max(16, requestLimit * 4));
+    const unsafeguarded: FhirDosage = { ...dosage, maxDosePerPeriod: undefined };
+    while (true) {
+      const candidates = nextDueDoses(unsafeguarded, { ...options, limit: candidateLimit });
+      const accepted = applyQuantityCaps(candidates, quantityCaps,
+        options.priorDoseTimes, timeZone, requestLimit);
+      if (accepted.length >= requestLimit || candidates.length < candidateLimit ||
+          candidateLimit >= 10000) return accepted;
+      candidateLimit = Math.min(10000, candidateLimit * 2);
+    }
   }
   const occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
   if (occurrenceCap) {
@@ -2764,7 +2933,7 @@ function scheduleRegimen(
       restored.step.some(step => step.start || step.end ||
         step.count !== undefined || step.safety ||
         step.component.some(component =>
-          component.safety || component.site?.reference))) {
+          !executableR6Safety(component)))) {
       throw new Error("R6 course-specific safety or cycle semantics require an R6-aware scheduler");
     }
     dosages = dosages.map(item => ({

@@ -129,7 +129,7 @@ describe("OPD clinician dogfood grammar", () => {
     );
     expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        url: "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-activity-window"
+        url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window"
       })
     ]));
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);

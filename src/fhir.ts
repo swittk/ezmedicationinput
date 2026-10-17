@@ -56,14 +56,14 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
-export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-frequency-min";
-export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-min";
-export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-max";
-export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-exact";
-export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-activity-window";
-export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-occurrence-cap";
-export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-event-calendar-source";
-export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-prn-trigger-phase";
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
+export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
+export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
+export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
+export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
+export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";

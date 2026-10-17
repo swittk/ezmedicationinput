@@ -1252,6 +1252,24 @@ export function fromFhir(
     clauses.push(...item.meta.canonical.clauses);
     for (const warning of item.warnings) warnings.add(warning);
   }
+  // Importing structured R6 data must not depend on the presence of an
+  // optional human-readable instruction. If the renderer cannot faithfully
+  // express R6-only clinical semantics, preserve the full data and report
+  // that text generation needs an original renderedInstruction.
+  const safeFormat = (style: "short" | "long"): string => {
+    try {
+      return formatSig(dosageDetails, style, options);
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          !error.message.startsWith("Cannot safely generate text from R6-only course metadata")) {
+        throw error;
+      }
+      warnings.add("Cannot render advanced R6 dosage without renderedInstruction");
+      return "";
+    }
+  };
+  const shortText = safeFormat("short");
+  const longText = safeFormat("long");
   return {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
@@ -1259,8 +1277,8 @@ export function fromFhir(
     fhir: dosages,
     fhirNext: dosageDetails,
     course,
-    shortText: formatSig(dosageDetails, "short", options),
-    longText: formatSig(dosageDetails, "long", options),
+    shortText,
+    longText,
     warnings: [...warnings],
     meta: {
       ...primary.meta,

@@ -4,7 +4,7 @@ import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
 const SNOMED = "http://snomed.info/sct";
-const LOCAL_ACTION = "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-instruction-action";
+const LOCAL_ACTION = "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action";
 
 describe("Thai formatter human-review follow-up", () => {
   it("keeps mixed WHEN + negated IF safety scope out of PRN", () => {

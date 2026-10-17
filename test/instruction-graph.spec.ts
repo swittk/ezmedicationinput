@@ -239,7 +239,7 @@ describe("procedural instruction graph", () => {
     });
     expect(graph?.actions[2]?.args[0]?.codings).toContainEqual(
       expect.objectContaining({
-        system: "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-instruction-concept",
+        system: "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
         code: "water"
       })
     );
