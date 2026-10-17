@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, parseSig } from "../src/index";
+import { fromFhirDosage } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import {
   DEFAULT_ROUTE_SYNONYMS,
   DEFAULT_UNIT_BY_NORMALIZED_FORM,

@@ -1,21 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  fromFhirDosage,
-  formatSig,
-  getDoseUnitSemantics,
-  getBodySiteCode,
-  getBodySiteCodeAsync,
-  getBodySiteText,
-  getBodySiteTextAsync,
-  listSupportedBodySiteGrammar,
-  listSupportedBodySiteText,
-  lookupBodySite,
-  parseSig,
-  parseSigAsync,
-  listDoseUnitTerminology,
-  suggestBodySiteText,
-  suggestBodySites
-} from "../src/index";
+import { fromFhirDosage, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import {
@@ -1322,7 +1307,7 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q6H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("pain");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -1345,7 +1330,7 @@ describe("parseSig core scenarios", () => {
       periodMax: 8,
       periodUnit: "h"
     });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("constipation");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -1418,7 +1403,7 @@ describe("parseSig core scenarios", () => {
 
   it("stops PRN reason text at trailing additional instructions", () => {
     const result = parseSig("1x3 po prn vomiting; no alcohol", { context: TAB_CONTEXT });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("vomiting");
     expect(result.fhir.additionalInstruction?.[0]).toEqual({
       text: "Avoid alcoholic drinks",
@@ -3717,7 +3702,7 @@ describe("parseSig core scenarios", () => {
           }
         ]
       },
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [
         {
           text: "dryness",
@@ -3864,7 +3849,7 @@ describe("parseSig core scenarios", () => {
 
     for (const input of cases) {
       const result = parseSig(input, { context: TAB_CONTEXT });
-      expect(result.fhir.asNeededBoolean).toBe(true);
+      expect(result.fhir.asNeeded).toBe(true);
       expect(result.fhir.asNeededFor).toBeUndefined();
       expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418639000");
       expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("418639000");

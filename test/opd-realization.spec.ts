@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatSig, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig,
-  TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL
-} from "../src";
+import { formatSig, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD normalized realization and advanced schedule semantics", () => {
   it("keeps offsets scoped and carries ophthalmic state into step-down stages", () => {
@@ -317,11 +315,15 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("เล็งออกจากผนังกั้นจมูก");
   });
 
-  it("keeps multi-target topical text uncoded but bilingual instead of inventing one anatomy code", () => {
-    const parsed = parseSig("apply thin layer to groin and axilla bid");
-    expect(parsed.fhir.site?.coding).toBeUndefined();
-    expect(parsed.fhir.site?.text).toBe("groin and axilla");
-    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ขาหนีบและรักแร้");
+  it("keeps explicitly coordinated topical sites as separate, coded doses while preserving bilingual instructions", () => {
+    const parsed = parseCompleteSig("apply thin layer to groin and axilla bid");
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhir.map(dose => dose.site?.text)).toEqual(["groin", "axilla"]);
+    expect(parsed.fhir.every(dose => Boolean(dose.site?.coding?.[0]?.code))).toBe(true);
+    expect(parsed.fhir.map(dose => dose.timing?.repeat?.frequency)).toEqual([2, 2]);
+    const thai = formatSig(parsed.fhir, "long", { locale: "th" });
+    expect(thai).toContain("ขาหนีบ");
+    expect(thai).toContain("รักแร้");
 
     const warning = parseSig("apply to rash avoid face and eyes");
     expect(formatSig(warning.fhir, "long", { locale: "th" }))
@@ -342,7 +344,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     const reason = parsed.meta.canonical.clauses[0]?.prn?.reason;
     expect(reason).toMatchObject({ triggerPhase: "onset", coding: { code: "37796009" } });
     expect(parsed.fhir.asNeededFor?.[0]?.extension).toContainEqual(expect.objectContaining({
-      url: "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase",
+      url: "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-prn-trigger-phase",
       valueCode: "onset"
     }));
     expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.prn?.reason?.triggerPhase)

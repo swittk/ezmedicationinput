@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, parseSig } from "../src/index";
+import { AdviceArgumentRole, AdviceRelation, EventTiming, formatSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 
 function clause(input: string) {
   const parsed = parseSig(input);

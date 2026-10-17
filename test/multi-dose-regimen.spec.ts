@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig, parseSigAsync } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
 

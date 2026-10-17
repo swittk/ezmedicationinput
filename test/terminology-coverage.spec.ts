@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, listMedicationInstructionActions, parseSig } from "../src/index";
+import { formatSig, listMedicationInstructionActions } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
 

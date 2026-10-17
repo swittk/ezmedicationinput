@@ -17,8 +17,10 @@ for(const file of await fs.readdir(here)) {
 for(const file of ['index.ts','fhir.ts','schedule.ts','hpsg/clause-parser.ts','hpsg/rules/site-rules.ts','date-interpretation.ts','lexer/locales/th.ts']) {
   const original=path.join(root,'src',file);
   const code=candidateTransform(await fs.readFile(original,'utf8'),original);
-  if(code===undefined) throw new Error(`No transform for ${file}`);
-  await fs.writeFile(path.join(mirror,'src',file),code.split(here).join(experimentMirror));
+  // After production promotion the shadow transform intentionally becomes a no-op.
+  if(code!==undefined) {
+    await fs.writeFile(path.join(mirror,'src',file),code.split(here).join(experimentMirror));
+  }
 }
 await fs.writeFile(path.join(mirror,'tsconfig.json'),JSON.stringify({
   extends:path.join(here,'tsconfig.json'),compilerOptions:{rootDir:root,noEmit:true,allowImportingTsExtensions:true},

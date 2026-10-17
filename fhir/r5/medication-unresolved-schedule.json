@@ -1,0 +1,93 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "medication-unresolved-schedule",
+  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unresolved-schedule",
+  "version": "0.1.68-dev",
+  "name": "MedicationUnresolvedSchedule",
+  "title": "Unresolved schedule",
+  "status": "draft",
+  "experimental": true,
+  "date": "2026-10-16",
+  "publisher": "ezmedicationinput contributors",
+  "description": "The SIG contains important unresolved timing or condition information, and cannot be scheduled automatically.",
+  "fhirVersion": "5.0.0",
+  "kind": "complex-type",
+  "abstract": false,
+  "context": [
+    {
+      "type": "element",
+      "expression": "Dosage"
+    }
+  ],
+  "type": "Extension",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Extension",
+        "path": "Extension",
+        "short": "Unresolved schedule",
+        "definition": "The SIG contains important unresolved timing or condition information, and cannot be scheduled automatically.",
+        "min": 0,
+        "max": "1",
+        "isModifier": true,
+        "isModifierReason": "Ignoring an unresolved schedule can turn an incomplete SIG into an executable dose."
+      },
+      {
+        "id": "Extension.extension",
+        "path": "Extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:reason",
+        "path": "Extension.extension",
+        "sliceName": "reason",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:reason.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:reason.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "reason"
+      },
+      {
+        "id": "Extension.extension:reason.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unresolved-schedule"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
+      }
+    ]
+  }
+}

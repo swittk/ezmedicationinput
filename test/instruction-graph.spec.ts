@@ -1,19 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
-import {
-  buildMedicationInstructionActionCodeSystem,
-  buildMedicationInstructionConceptCodeSystem,
-  formatSig,
-  fromFhirDosage,
-  getMedicationInstructionAction,
-  getMedicationInstructionConcept,
-  listMedicationInstructionActions,
-  listMedicationInstructionConcepts,
-  parseInstructionActions,
-  parseSig,
-  parseSigAsync,
-  realizeInstructionGraph
-} from "../src/index";
+import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("procedural instruction graph", () => {
   it("preserves graph action order, relation indices, and coding translations through FHIR", () => {
@@ -251,7 +239,7 @@ describe("procedural instruction graph", () => {
     });
     expect(graph?.actions[2]?.args[0]?.codings).toContainEqual(
       expect.objectContaining({
-        system: "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+        system: "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-instruction-concept",
         code: "water"
       })
     );
@@ -354,7 +342,7 @@ describe("procedural instruction graph", () => {
 
   it("keeps classic medication conditional shorthand as PRN", () => {
     const parsed = parseSig("1 tab po if pain", { context: { dosageForm: "tablet" } });
-    expect(parsed.fhir.asNeededBoolean).toBe(true);
+    expect(parsed.fhir.asNeeded).toBe(true);
     expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
   });
 
@@ -529,7 +517,7 @@ describe("procedural instruction graph", () => {
     );
     const clause = parsed.meta.canonical.clauses[0];
     const graph = clause?.instructionGraph;
-    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
     expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["remove", "apply_patch"]);
     expect(graph?.actions[0]).toMatchObject({
       relation: "before",

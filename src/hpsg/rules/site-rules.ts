@@ -1,3 +1,4 @@
+import { temporalRelationStarts, coordinationLeadsToSchedule } from "../../regimen/temporal-site-boundary";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -334,6 +335,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         break;
       }
       const candidateLower = normalizeTokenLower(candidate);
+      if (temporalRelationStarts(context, cursor) || coordinationLeadsToSchedule(context, cursor)) break;
       if (candidate.kind === LexKind.Number) {
         break;
       }

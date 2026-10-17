@@ -18,6 +18,35 @@ export function parseStrength(strength: string, context?: MedicationContext): { 
 }
 
 /**
+ * Retain each ingredient's strength separately. The names of the ingredients
+ * must come from the medication/product record, not from unnamed SIG numbers.
+ *
+ * Use this when parsing combination products: summing 875 mg + 125 mg as one
+ * active-ingredient strength would be clinically misleading.
+ * Returns null if any component cannot be parsed, not a partial ingredient set.
+ */
+export function parseStrengthComponents(
+    strength: string,
+    context?: MedicationContext
+): Array<{ strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio }> | null {
+    const parts = strength.split("+").map(part => part.trim());
+    if (parts.some(part => part.length === 0)) return null;
+    const result: Array<{ strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio }> = [];
+    for (const part of parts) {
+        const ratio = parseSingleStrengthPart(part, context);
+        if (!ratio || !ratio.numerator || !Number.isFinite(ratio.numerator.value) ||
+            !ratio.numerator.value || ratio.numerator.value <= 0) return null;
+        if (ratio.denominator?.value === 1 &&
+            (ratio.denominator.unit === "unit" || !ratio.denominator.unit)) {
+            result.push({ strengthQuantity: ratio.numerator });
+        } else {
+            result.push({ strengthRatio: ratio });
+        }
+    }
+    return result.length ? result : null;
+}
+
+/**
  * Internal helper to parse a strength string into a FHIR Ratio.
  */
 export function parseStrengthIntoRatio(strength: string, context?: MedicationContext): FhirRatio | null {

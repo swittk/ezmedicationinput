@@ -1,0 +1,93 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "medication-conditional-dose",
+  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose",
+  "version": "0.1.68-dev",
+  "name": "MedicationConditionalDose",
+  "title": "Conditions governing administration",
+  "status": "draft",
+  "experimental": true,
+  "date": "2026-10-16",
+  "publisher": "ezmedicationinput contributors",
+  "description": "Predicate expression expressed as a JSON encoded, typed MedicationCondition. Consumers must evaluate this condition before permitting a dose.",
+  "fhirVersion": "5.0.0",
+  "kind": "complex-type",
+  "abstract": false,
+  "context": [
+    {
+      "type": "element",
+      "expression": "Dosage"
+    }
+  ],
+  "type": "Extension",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Extension",
+        "path": "Extension",
+        "short": "Conditions governing administration",
+        "definition": "Predicate expression expressed as a JSON encoded, typed MedicationCondition. Consumers must evaluate this condition before permitting a dose.",
+        "min": 0,
+        "max": "1",
+        "isModifier": true,
+        "isModifierReason": "Ignoring the predicate can cause a medication to be given when a condition is false."
+      },
+      {
+        "id": "Extension.extension",
+        "path": "Extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:predicate",
+        "path": "Extension.extension",
+        "sliceName": "predicate",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:predicate.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "predicate"
+      },
+      {
+        "id": "Extension.extension:predicate.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
+      }
+    ]
+  }
+}

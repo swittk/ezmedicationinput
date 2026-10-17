@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import {
   buildAdditionalInstructionFramesFromCoding,
   __test__ as adviceTest,

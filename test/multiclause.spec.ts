@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatParseBatch,
-  formatSigBatch,
-  lintSig,
-  parseSig,
-  parseSigAsync
-} from "../src/index";
+import { formatParseBatch, formatSigBatch, lintSig } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("multi-clause parsing", () => {
   it("returns batch shape and keeps first-item compatibility fields", () => {
@@ -71,7 +66,7 @@ describe("multi-clause parsing", () => {
     });
     expect(batch.items[0].fhir.asNeededFor?.[0]?.text).toBeFalsy();
     expect(batch.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
-    expect(batch.items[1].fhir.asNeededBoolean).toBe(true);
+    expect(batch.items[1].fhir.asNeeded).toBe(true);
     expect(batch.items[1].fhir.asNeededFor?.[0]?.text?.toLowerCase()).toContain("insomnia");
   });
 
@@ -226,7 +221,7 @@ describe("multi-clause parsing", () => {
       periodUnit: "d"
     });
     expect(batch.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
-    expect(batch.items[1].fhir.asNeededBoolean).toBe(true);
+    expect(batch.items[1].fhir.asNeeded).toBe(true);
     expect(batch.items[1].fhir.asNeededFor?.[0]?.text?.toLowerCase()).toContain("insomnia");
     expect(batch.items[1].fhir.timing?.repeat?.when).toEqual(["HS"]);
   });

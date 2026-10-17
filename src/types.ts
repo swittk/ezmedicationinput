@@ -21,6 +21,7 @@ export interface FhirExtension {
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
+  valueDate?: string;
   valueBoolean?: boolean;
   valueInteger?: number;
   valueDecimal?: number;
@@ -44,6 +45,8 @@ export interface FhirPrimitiveElement {
 
 export interface FhirQuantity {
   value?: number;
+  /** FHIR Quantity comparator; included for R6 RelativeTime/Duration fidelity. */
+  comparator?: "<" | "<=" | ">=" | ">";
   unit?: string;
   system?: string;
   code?: string;
@@ -368,6 +371,15 @@ export interface FhirTiming extends FhirElement {
   code?: FhirCodeableConcept;
 }
 
+/** FHIR Expression: enough structure to preserve external R6 dose/rate expressions. */
+export interface FhirExpression {
+  description?: string;
+  name?: string;
+  language: string;
+  expression?: string;
+  reference?: string;
+}
+
 export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;
   doseRange?: FhirRange;
@@ -377,7 +389,96 @@ export interface FhirDoseAndRate extends FhirBackboneElement {
   rateQuantity?: FhirQuantity;
 }
 
+/** R6 additions to the R5 DoseAndRate child object. */
+export interface EzDoseAndRate extends FhirDoseAndRate {
+  doseExpression?: FhirExpression;
+  rateExpression?: FhirExpression;
+}
+
+/**
+ * The meaning of a condition is independent of its wording.
+ * all/any/not are explicit: FHIR R6 condition[] alone is OR, not AND.
+ * Free-text predicates remain representable but need a caller evaluator.
+ */
+export type MedicationCondition =
+  | { kind: "measurement"; name: string; operation: "gt" | "ge" | "lt" | "le" | "eq" | "ne"; value: number; unit?: string; text: string }
+  | { kind: "state"; name: string; text: string; expected: boolean }
+  | { kind: "text"; text: string }
+  | { kind: "not"; condition: MedicationCondition }
+  | { kind: "all" | "any"; conditions: MedicationCondition[] };
+
+/** FHIR R6 draft DosageCondition compatible subset. */
+export interface FhirR6DosageCondition extends FhirBackboneElement {
+  code: FhirCodeableConcept;
+  details?: FhirCodeableConcept;
+  operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+  valueBoolean?: boolean;
+  valueQuantity?: FhirQuantity;
+  valueString?: string;
+  text?: string;
+}
+
+/** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
+export type FhirR6DoseLimit = FhirBackboneElement & {
+  scope: "dosage" | "period" | "administration" | "lifetime";
+  period?: FhirQuantity;
+  text?: string;
+} & (
+  | { valueQuantity: FhirQuantity; valueInteger?: never; valueExpression?: never }
+  | { valueInteger: number; valueQuantity?: never; valueExpression?: never }
+  | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never }
+);
+
+export interface FhirR6DosageSafety extends FhirBackboneElement {
+  doseLimit?: FhirR6DoseLimit[];
+  ifExceeded?: string;
+}
+
+/** FHIR R6 CodeableReference allows either a concept or resource reference. */
+export interface FhirCodeableReference {
+  concept?: FhirCodeableConcept;
+  reference?: { reference?: string; type?: string; display?: string };
+}
+
+/** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
+export interface FhirR6Dosage extends Omit<FhirDosage,
+  "sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
+  "maxDosePerLifetime" | "doseAndRate"> {
+  condition?: FhirR6DosageCondition[];
+  site?: FhirCodeableReference;
+  doseAndRate?: EzDoseAndRate[];
+  safety?: FhirR6DosageSafety;
+}
+
+export interface FhirR6RelativeTime extends FhirBackboneElement {
+  contextReference?: { reference?: string };
+  contextDefinition?: string;
+  contextPath?: string;
+  contextCode?: FhirCodeableConcept;
+  offsetDuration?: FhirQuantity;
+  offsetRange?: FhirRange;
+  text?: string;
+}
+
+export interface FhirR6DosageStep extends FhirBackboneElement {
+  start?: FhirR6RelativeTime;
+  end?: FhirR6RelativeTime;
+  count?: number;
+  component: FhirR6Dosage[];
+  safety?: FhirR6DosageSafety;
+}
+
+/** R6's step/component course representation. */
+export interface FhirR6DosageDetails extends FhirBackboneElement {
+  renderedInstruction?: string;
+  repeatCycle?: FhirQuantity;
+  step: FhirR6DosageStep[];
+  safety?: FhirR6DosageSafety;
+}
+
 export interface FhirDosage extends FhirBackboneElement {
+  /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */
+  sequence?: number;
   text?: string;
   patientInstruction?: string;
   timing?: FhirTiming;
@@ -385,9 +486,51 @@ export interface FhirDosage extends FhirBackboneElement {
   site?: FhirCodeableConcept;
   method?: FhirCodeableConcept;
   additionalInstruction?: FhirCodeableConcept[];
-  asNeededBoolean?: boolean;
+  /** FHIR R5 spelling. */
+  asNeeded?: boolean;
   asNeededFor?: FhirCodeableConcept[];
   doseAndRate?: FhirDoseAndRate[];
+  maxDosePerPeriod?: FhirRatio[];
+  maxDosePerAdministration?: FhirQuantity;
+  maxDosePerLifetime?: FhirQuantity;
+}
+
+/**
+ * EZMED's primary dose object. Retains the useful FHIR R5 Dosage shape and
+ * lifts a small number of actual R6 features into optional typed fields.
+ * This is NOT strict FHIR R5 JSON: call toFhirR5Dosages() for wire export.
+ */
+export interface EzDosage extends Omit<FhirDosage, "doseAndRate"> {
+  doseAndRate?: EzDoseAndRate[];
+  /** FHIR R6 Dosage.condition, including compound conditions when needed. */
+  condition?: FhirR6DosageCondition[];
+  /** FHIR R6 Dosage.safety, alongside the R5 maximum fields. */
+  safety?: FhirR6DosageSafety;
+  /** FHIR R6 Dosage.site.reference, while site remains R5 CodeableConcept. */
+  siteReference?: FhirCodeableReference["reference"];
+  /** EZMED-specific dates omitted from a repeating schedule; not an HL7 core field. */
+  excludedDates?: string[];
+}
+
+/**
+ * Small amount of course-level metadata that does not logically belong to an
+ * individual dosage. Each step row addresses the usual R5 Dosage.sequence.
+ * The fields under step come directly from FHIR R6 DosageDetails.step.
+ */
+export interface EzCourseStep extends FhirBackboneElement {
+  /** R5 global sequence corresponding to this R6 step. */
+  sequence: number;
+  start?: FhirR6RelativeTime;
+  end?: FhirR6RelativeTime;
+  count?: number;
+  safety?: FhirR6DosageSafety;
+}
+
+export interface EzCourseMetadata extends FhirBackboneElement {
+  renderedInstruction?: string;
+  repeatCycle?: FhirQuantity;
+  safety?: FhirR6DosageSafety;
+  step?: EzCourseStep[];
 }
 
 export type RouteCode = SNOMEDCTRouteCodes;
@@ -1463,21 +1606,15 @@ export interface ParseBatchSegmentMeta {
 export interface ParseBatchResult {
   input: string;
   count: number;
+  /** Per-clause parser diagnostics and intermediate R5-compatible dosage shapes. */
   items: ParseResult[];
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
-  fhir: FhirDosage;
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
+  /** Primary output: COMPLETE flat R5-like dosage array with additive R6 fields. */
+  fhir: EzDosage[];
+  /** Strict R6 snapshot projection of the same prescription. */
+  fhirNext: FhirR6DosageDetails;
+  /** Optional R6 step/course metadata not owned by a single dose. */
+  course?: EzCourseMetadata;
   shortText: string;
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
   longText: string;
   warnings: string[];
   meta: {
@@ -1566,8 +1703,12 @@ export interface NextDueDoseConfig {
 /**
  * Options bag for next-due dose generation.
  */
+export type MedicationConditionEvaluator = (condition: MedicationCondition, at: string) => boolean | undefined;
+
 export interface NextDueDoseOptions {
   from: Date | string;
+  /** Evaluate structured conditional instructions at each candidate occurrence. Required for conditional scheduling. */
+  evaluateCondition?: MedicationConditionEvaluator;
   orderedAt?: Date | string;
   limit?: number;
   priorCount?: number;
@@ -1578,6 +1719,14 @@ export interface NextDueDoseOptions {
   mealOffsets?: MealOffsetMap;
   frequencyDefaults?: FrequencyFallbackTimes;
   config?: NextDueDoseConfig;
+}
+
+/** Due times calculated with each ordered medication-instruction phase respected. */
+export interface RegimenDueTimes {
+  dosageIndex: number;
+  sequence: number;
+  phaseStart: string;
+  timestamps: string[];
 }
 
 export interface TotalUnitsResult {

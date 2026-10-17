@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits, parseSig } from "../src/index";
+import { calculateTotalUnits } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { EventTiming, FhirDosage, FhirPeriodUnit } from "../src/types";
 
 describe("calculateTotalUnits", () => {

@@ -1,3 +1,14 @@
+import {
+  toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  getDosageCondition, getDosageExcludedDates,
+  getDosageExcludedWeekdays, getUnresolvedDosage
+} from "./dosage-course";
+import { applyClinicalConstraints } from "./clinical-safety";
+import { quarantineSchedule } from "./regimen/admissibility";
+import type { BoundaryPlan } from "./regimen/types";
+import { createBoundaryPlan } from "./regimen/candidate-adapter";
+import { composeRegimenPhases } from "./regimen/regimen";
+import { expandAdministrationTargets, expandLintAdministrationTargets } from "./regimen/targets";
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
@@ -23,6 +34,9 @@ import {
 import {
   BodySiteCode,
   FhirDosage,
+  EzDosage,
+  EzDoseAndRate,
+  FhirR6DosageDetails,
   FhirTimingRepeat,
   FormatBatchOptions,
   FormatOptions,
@@ -151,7 +165,16 @@ export {
 } from "./instruction-graph-fhir";
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits } from "./schedule";
-export { parseStrength, parseStrengthIntoRatio } from "./utils/strength";
+export {
+  toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  getDosageCondition, setDosageCondition,
+  getDosageExcludedDates, setDosageExcludedDates,
+  getDosageExcludedWeekdays, setDosageExcludedWeekdays, getUnresolvedDosage,
+  DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
+  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, DOSAGE_UNRESOLVED_R5_URL, DOSAGE_DETAILS_R5_URL
+} from "./dosage-course";
+export { evaluateMedicationCondition } from "./medication-condition";
+export { parseStrength, parseStrengthIntoRatio, parseStrengthComponents } from "./utils/strength";
 export {
   getDoseUnitApproximation,
   getDoseUnitKind,
@@ -538,11 +561,12 @@ function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
   }
 
   return (
+    base.fhir.sequence === next.fhir.sequence &&
     deepEqual(base.fhir.doseAndRate, next.fhir.doseAndRate) &&
     deepEqual(base.fhir.route, next.fhir.route) &&
     deepEqual(base.fhir.site, next.fhir.site) &&
     deepEqual(base.fhir.additionalInstruction, next.fhir.additionalInstruction) &&
-    deepEqual(base.fhir.asNeededBoolean, next.fhir.asNeededBoolean) &&
+    deepEqual(base.fhir.asNeeded, next.fhir.asNeeded) &&
     deepEqual(base.fhir.asNeededFor, next.fhir.asNeededFor)
   );
 }
@@ -853,8 +877,84 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
   return clauses;
 }
 
+/** One whole-course public result, independent of the number of parsed clauses. */
+function buildWholeCourseResult(
+  input: string,
+  results: ParseResult[],
+  primary: ParseResult,
+  segments: ReturnType<typeof parseSigSegments>
+): ParseBatchResult {
+  const dosageItems = results.map(item => item.fhir);
+  const fhir = toEzDosages(dosageItems);
+  const fhirNext = toDosageDetails(dosageItems, input);
+  const warnings = new Set<string>();
+  const consumedTokens: string[] = [];
+  const leftovers: string[] = [];
+  for (const item of results) {
+    for (const warning of item.warnings) warnings.add(warning);
+    consumedTokens.push(...item.meta.consumedTokens);
+    if (item.meta.leftoverText && leftovers.indexOf(item.meta.leftoverText) < 0) {
+      leftovers.push(item.meta.leftoverText);
+    }
+  }
+  return {
+    input,
+    count: results.length,
+    items: results,
+    fhir,
+    fhirNext,
+    shortText: results.length === 1 ? primary.shortText : formatSig(fhirNext, "short"),
+    longText: results.length === 1 ? primary.longText : formatSig(fhirNext, "long"),
+    warnings: [...warnings],
+    meta: {
+      ...primary.meta,
+      consumedTokens,
+      leftoverText: leftovers.length ? leftovers.join(" ") : undefined,
+      canonical: {
+        clauses: results.length
+          ? collectCanonicalClauses(results)
+          : primary.meta.canonical.clauses
+      },
+      segments: toSegmentMeta(segments)
+    }
+  };
+}
+
+/**
+ * When a planned "then" spans a semicolon followed by a separately dosed
+ * instruction, it may have joined two independent regimen tracks. Until the
+ * grammar produces their true concurrent step structure, do not execute any
+ * partial or falsely sequential timetable.
+ *
+ * This check concerns syntax/ownership, not a particular drug or body site.
+ */
+function quarantineMergedIndependentRegimens(
+  results: ParseResult[],
+  segments: ReturnType<typeof parseSigSegments>,
+  plan: BoundaryPlan,
+  source: string,
+  options?: ParseOptions
+): void {
+  if (!plan.relations.some(edge => edge.kind === "sequence")) return;
+  for (const segment of segments) {
+    if (!segment.text.includes(";")) continue;
+    for (let offset = segment.text.indexOf(";"); offset >= 0;
+      offset = segment.text.indexOf(";", offset + 1)) {
+      const continuation = segment.text.slice(offset + 1).trim();
+      if (!continuation) continue;
+      const parsed = parseClauseState(continuation, options);
+      if (!parsed.primaryClause.dose) continue;
+      for (const result of results) {
+        quarantineSchedule(result, source, "independent-sequences-not-yet-resolved");
+      }
+      return;
+    }
+  }
+}
+
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
+  const boundaryPlan = createBoundaryPlan(input, options);
+  const segments = expandMealDashSegments(boundaryPlan.segments, options);
   const carry: SegmentCarry = {};
   const rawResults: ParseResult[] = [];
 
@@ -871,33 +971,23 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
-  propagateDateTransitionEventTiming(rawResults, segments, input, options);
-  const results = mergeParseResultList(rawResults, options);
+  composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
+  for (let index = 0; index < rawResults.length; index++) {
+    applyClinicalConstraints(rawResults[index], segments[index].text, options);
+  }
+  let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
-  const primary = resolvePrimaryParseResult(results, input, options);
+  const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
+  results = expandAdministrationTargets(results, options, formatSig);
+  quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
+  const primary = compatibilityPrimary;
 
-  return {
-    input,
-    count: results.length,
-    items: results,
-    fhir: primary.fhir,
-    shortText: primary.shortText,
-    longText: primary.longText,
-    warnings: primary.warnings,
-    meta: {
-      ...primary.meta,
-      canonical: {
-        clauses: results.length
-          ? collectCanonicalClauses(results)
-          : primary.meta.canonical.clauses
-      },
-      segments: toSegmentMeta(segments)
-    }
-  };
+  return buildWholeCourseResult(input, results, primary, segments);
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
-  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
+  const boundaryPlan = createBoundaryPlan(input, options);
+  const segments = expandMealDashSegments(boundaryPlan.segments, options);
   const carry: SegmentCarry = {};
   const results: LintResult[] = [];
 
@@ -933,15 +1023,58 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
 
   const lintParseResults = results.map((item) => item.result);
   propagateTrailingSharedDuration(lintParseResults, segments, options);
-  propagateDateTransitionEventTiming(lintParseResults, segments, input, options);
-  const primary = resolvePrimaryLintResult(results, input, options);
+  composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);
+  for (let index = 0; index < lintParseResults.length; index++) {
+    const parsed = applyClinicalConstraints(lintParseResults[index], segments[index].text, options);
+    results[index].issues = results[index].issues.filter(issue =>
+      !issue.range || !parsed.ownedRanges.some(range => range.start <= issue.range!.start && range.end >= issue.range!.end)
+    );
+    for (const warning of lintParseResults[index].warnings) {
+      if (!warning.startsWith("Unresolved schedule")) continue;
+      if (results[index].issues.some(issue => issue.message === warning)) continue;
+      results[index].issues.push({
+        message: warning,
+        text: segments[index].text,
+        tokens: [],
+        range: { start: segments[index].start, end: segments[index].end }
+      });
+    }
+  }
+  const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
+  quarantineMergedIndependentRegimens(
+    expandedLintResults.map(entry => entry.result), segments, boundaryPlan, input, options
+  );
+  for (const entry of expandedLintResults) {
+    for (const warning of entry.result.warnings) {
+      if (!warning.startsWith("Unresolved schedule")) continue;
+      if (entry.issues.some(issue => issue.message === warning)) continue;
+      entry.issues.push({
+        message: warning,
+        text: input,
+        tokens: [],
+        range: { start: 0, end: input.length }
+      });
+    }
+  }
+  const primary = resolvePrimaryLintResult(expandedLintResults, input, options);
+  const issues: LintIssue[] = [];
+  const seenIssues = new Set<string>();
+  for (const entry of expandedLintResults) {
+    for (const issue of entry.issues) {
+      const key = issue.message + ":" + (issue.range?.start ?? -1) +
+        ":" + (issue.range?.end ?? -1) + ":" + issue.text;
+      if (seenIssues.has(key)) continue;
+      seenIssues.add(key);
+      issues.push(issue);
+    }
+  }
 
   return {
     input,
-    count: results.length,
-    items: results,
+    count: expandedLintResults.length,
+    items: expandedLintResults,
     result: primary.result,
-    issues: primary.issues,
+    issues,
     meta: {
       segments: toSegmentMeta(segments)
     }
@@ -952,7 +1085,8 @@ export async function parseSigAsync(
   input: string,
   options?: ParseOptions
 ): Promise<ParseBatchResult> {
-  const segments = expandMealDashSegments(parseSigSegments(input, options), options);
+  const boundaryPlan = createBoundaryPlan(input, options);
+  const segments = expandMealDashSegments(boundaryPlan.segments, options);
   const carry: SegmentCarry = {};
   const rawResults: ParseResult[] = [];
 
@@ -969,36 +1103,64 @@ export async function parseSigAsync(
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
-  propagateDateTransitionEventTiming(rawResults, segments, input, options);
-  const results = mergeParseResultList(rawResults, options);
+  composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
+  for (let index = 0; index < rawResults.length; index++) {
+    applyClinicalConstraints(rawResults[index], segments[index].text, options);
+  }
+  let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
-  const primary = resolvePrimaryParseResult(results, input, options);
+  const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
+  results = expandAdministrationTargets(results, options, formatSig);
+  quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
+  const primary = compatibilityPrimary;
 
-  return {
-    input,
-    count: results.length,
-    items: results,
-    fhir: primary.fhir,
-    shortText: primary.shortText,
-    longText: primary.longText,
-    warnings: primary.warnings,
-    meta: {
-      ...primary.meta,
-      canonical: {
-        clauses: results.length
-          ? collectCanonicalClauses(results)
-          : primary.meta.canonical.clauses
-      },
-      segments: toSegmentMeta(segments)
-    }
-  };
+  return buildWholeCourseResult(input, results, primary, segments);
 }
 
 export function formatSig(
-  dosage: FhirDosage,
+  input: FhirDosage | FhirR6DosageDetails | readonly EzDosage[],
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
+  if (Array.isArray(input)) {
+    return formatSigBatch(input as EzDosage[], style, options);
+  }
+  const oneOrCourse = input as FhirDosage | FhirR6DosageDetails;
+  if ("step" in oneOrCourse) {
+    // R6's renderedInstruction is the whole-course instruction. Do not
+    // accidentally reduce a taper to a single component or discard its
+    // boolean conditions in an English/Thai realization attempt.
+    if (oneOrCourse.renderedInstruction) return oneOrCourse.renderedInstruction;
+    if (oneOrCourse.step.length === 0) return "";
+    if (oneOrCourse.step.some(step => step.start || step.end ||
+      step.count !== undefined || step.safety ||
+      step.component.some(component => component.condition?.length ||
+        component.safety || component.site?.reference)) || oneOrCourse.repeatCycle ||
+      oneOrCourse.safety) {
+      throw new Error("Cannot safely generate text from R6-only course metadata without renderedInstruction");
+    }
+    const flattened = toFhirR5Dosages(oneOrCourse);
+    let index = 0;
+    return oneOrCourse.step.map(step => step.component.map(() =>
+      formatSig(flattened[index++], style, options)
+    ).join("; ")).filter(Boolean).join(" then ");
+  }
+  const dosage = oneOrCourse as FhirDosage;
+  const quantity = dosage.doseAndRate?.[0];
+  // Until rich rate and relative-weight units have dedicated realizers, retain
+  // the prescriber's original statement instead of silently dropping semantics.
+  if (dosage.text && (
+    quantity?.rateQuantity || quantity?.rateRatio || quantity?.rateRange ||
+    (quantity as EzDoseAndRate | undefined)?.doseExpression ||
+    (quantity as EzDoseAndRate | undefined)?.rateExpression ||
+    (quantity?.doseQuantity?.unit !== undefined &&
+      quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
+    (dosage.maxDosePerPeriod?.length ?? 0) > 0 ||
+    getDosageCondition(dosage) !== undefined ||
+    getDosageExcludedDates(dosage).length > 0 ||
+    getDosageExcludedWeekdays(dosage).length > 0 ||
+    getUnresolvedDosage(dosage) !== undefined
+  )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   return formatCanonicalClause(clause, style, localization, options);
@@ -1031,14 +1193,59 @@ export function formatParseBatch(
   return texts.join(separator);
 }
 
+/**
+ * Load an R6 DosageDetails without reparsing a generated text instruction.
+ * R5 component lowerings exist solely for per-clause provenance and formatting;
+ * the original whole-course R6 object remains the primary FHIR output.
+ */
+export function fromFhir(
+  dosageDetails: FhirR6DosageDetails,
+  options?: FormatOptions
+): ParseBatchResult {
+  const { dosages, course } = fromDosageDetails(dosageDetails);
+  const items = toFhirR5Dosages(dosageDetails).map(dosage =>
+    fromFhirDosage(dosage, options)
+  );
+  const primary = items[0] ?? fromFhirDosage({
+    text: dosageDetails.renderedInstruction ?? ""
+  }, options);
+  const clauses: CanonicalSigClause[] = [];
+  const warnings = new Set<string>();
+  for (const item of items) {
+    clauses.push(...item.meta.canonical.clauses);
+    for (const warning of item.warnings) warnings.add(warning);
+  }
+  return {
+    input: dosageDetails.renderedInstruction ?? "",
+    count: items.length,
+    items,
+    fhir: dosages,
+    fhirNext: dosageDetails,
+    course,
+    shortText: formatSig(dosageDetails, "short", options),
+    longText: formatSig(dosageDetails, "long", options),
+    warnings: [...warnings],
+    meta: {
+      ...primary.meta,
+      canonical: { clauses },
+      // An imported FHIR object has no original per-clause character positions.
+      segments: []
+    }
+  };
+}
+
 export function fromFhirDosage(
   dosage: FhirDosage,
   options?: FormatOptions
 ): ParseResult {
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatCanonicalClause(clause, "short", localization, options);
-  const computedLong = formatCanonicalClause(clause, "long", localization, options);
+  const guarded = getDosageCondition(dosage) !== undefined ||
+    getDosageExcludedDates(dosage).length > 0 ||
+    getDosageExcludedWeekdays(dosage).length > 0 ||
+    getUnresolvedDosage(dosage) !== undefined;
+  const shortText = guarded && dosage.text ? dosage.text : formatCanonicalClause(clause, "short", localization, options);
+  const computedLong = guarded && dosage.text ? dosage.text : formatCanonicalClause(clause, "long", localization, options);
   const longText = computedLong || dosage.text || "";
   dosage.text = longText;
   return {

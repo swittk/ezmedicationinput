@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
 const SNOMED = "http://snomed.info/sct";
-const LOCAL_ACTION = "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action";
+const LOCAL_ACTION = "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-instruction-action";
 
 describe("Thai formatter human-review follow-up", () => {
   it("keeps mixed WHEN + negated IF safety scope out of PRN", () => {
     const parsed = parseSig("เมื่อนอนไม่หลับ ไม่ควรรับประทานหากมีอาการป่วย", { locale: "th" });
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
-    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
     expect(graph?.actions[0]).toMatchObject({ predicate: { lemma: "take" }, polarity: "negate", modality: "should" });
     expect(graph?.relations).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "when", text: "เมื่อนอนไม่หลับ" }),
@@ -211,7 +212,7 @@ describe("Thai formatter human-review follow-up", () => {
     const dosage: FhirDosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       route: { coding: [{ system: SNOMED, code: "26643006", display: "Oral route" }] },
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [{
         text: "ไข้สูง",
         coding: [{ system: SNOMED, code: "386661006", display: "Fever" }]

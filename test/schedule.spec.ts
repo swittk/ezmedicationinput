@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits, parseSig } from "../src/index";
+import { nextDueDoses, calculateTotalUnits } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 const EVENT_CLOCK = {
@@ -939,9 +940,9 @@ describe("calculateTotalUnits", () => {
     expect(res.totalUnits).toBe(10);
   });
 
-  it("handles PRN (asNeededBoolean)", () => {
+  it("handles PRN (asNeeded)", () => {
     const dosage: FhirDosage = {
-      asNeededBoolean: true,
+      asNeeded: true,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour } }
     };

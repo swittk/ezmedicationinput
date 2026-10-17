@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, nextDueDoses, parseSig, RouteCode } from "../src";
+import { formatSig, fromFhirDosage, nextDueDoses, RouteCode } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD clinician dogfood grammar", () => {
   it.each([
@@ -128,7 +129,7 @@ describe("OPD clinician dogfood grammar", () => {
     );
     expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window"
+        url: "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-activity-window"
       })
     ]));
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);

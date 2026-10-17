@@ -1,3 +1,5 @@
+import { createTimingPrimitives } from "./regimen/scheduler-primitives";
+import { getDosageCondition, getDosageExcludedDates, getUnresolvedDosage, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
 } from "./body-site-target";
@@ -5,6 +7,7 @@ import {
   EventTiming,
   EventClockMap,
   FhirDosage,
+  EzDosage,
   FhirPeriodUnit,
   FhirQuantity,
   FhirTiming,
@@ -16,6 +19,9 @@ import {
   MedicationContext,
   NextDueDoseConfig,
   NextDueDoseOptions,
+  FhirR6DosageDetails,
+  ParseBatchResult,
+  RegimenDueTimes,
   TotalUnitsOptions,
   TotalUnitsResult
 } from "./types";
@@ -1237,9 +1243,104 @@ function withoutOccurrenceCap(dosage: FhirDosage): FhirDosage {
  * provided configuration and dosage metadata.
  */
 export function nextDueDoses(
-  dosage: FhirDosage,
+  dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageDetails | ParseBatchResult,
   options: NextDueDoseOptions
 ): string[] {
+  // The most ergonomic call accepts parseSig() directly.
+  if (dosage && !Array.isArray(dosage) && "items" in dosage) {
+    const result = dosage as ParseBatchResult;
+    // Whole-course public result also carries a strict R6 projection.
+    // Use it so step-level rules cannot be lost by flattening the array.
+    return nextDueDoses(result.fhirNext, options);
+  }
+  if (Array.isArray(dosage) || (dosage && "step" in dosage)) {
+    const r6Course = !Array.isArray(dosage) && "step" in dosage
+      ? dosage as FhirR6DosageDetails : undefined;
+    if (r6Course && (
+      r6Course.repeatCycle || r6Course.safety ||
+      r6Course.step.some(step => step.start || step.end ||
+        step.count !== undefined || step.safety ||
+        step.component.some(component =>
+          component.site?.reference || component.safety))
+    )) {
+      throw new Error("This R6 course contains scheduling/safety semantics not yet executable by nextDueDoses");
+    }
+    const items = Array.isArray(dosage) ? [...dosage] :
+      toFhirR5Dosages(r6Course!).map(item => ({
+        ...item,
+        // The course retention marker is for downstream R5 consumers. We
+        // already hold the authoritative R6 object and have checked its
+        // unsupported execution semantics above.
+        modifierExtension: item.modifierExtension?.filter(ext => ext.url !== DOSAGE_DETAILS_R5_URL)
+      }));
+    const limit = options?.limit ?? 10;
+    if (!Number.isFinite(limit) || limit <= 0) return [];
+    if (items.some(item => {
+      const extended = item as EzDosage;
+      return extended.siteReference ||
+        extended.safety && !item.maxDosePerPeriod && !item.maxDosePerAdministration &&
+          !item.maxDosePerLifetime ||
+        extended.doseAndRate?.some(value =>
+          value.doseExpression || value.rateExpression);
+    })) {
+      throw new Error("Cannot automatically schedule an R6 reference, dose expression, or unsupported safety limit");
+    }
+    const episodes = scheduleRegimen(items, { ...options, limit });
+    return episodes.reduce<string[]>((all, episode) => {
+      all.push(...episode.timestamps);
+      return all;
+    }, []).sort((a, b) => Date.parse(a) - Date.parse(b)).slice(0, Math.floor(limit));
+  }
+  const one = dosage as FhirDosage;
+  const unresolved = getUnresolvedDosage(one);
+  if (unresolved) throw new Error(`Cannot schedule unresolved dosage: ${unresolved}`);
+  const guard = getDosageCondition(one);
+  const exclusions = getDosageExcludedDates(one);
+  if (guard || exclusions.length) {
+    const limit = options?.limit ?? 10;
+    if (!Number.isFinite(limit) || limit <= 0) return [];
+    if (guard && !options?.evaluateCondition) {
+      throw new Error("Conditional dosage requires evaluateCondition(at) for safe scheduling");
+    }
+    const timeZone = options?.timeZone ?? options?.config?.timeZone;
+    if (!timeZone) throw new Error("A timeZone is required for exclusion-date scheduling");
+    const unconstrained: FhirDosage = {
+      ...one,
+      modifierExtension: one.modifierExtension?.filter(extension =>
+        extension.url !== DOSAGE_CONDITION_R5_URL &&
+        extension.url !== DOSAGE_EXCLUDED_DATES_R5_URL)
+    };
+    let candidateLimit = Math.min(10000, Math.max(16, Math.floor(limit) * 2));
+    while (true) {
+      const candidates = nextDueDoses(unconstrained, { ...options, limit: candidateLimit });
+      const accepted: string[] = [];
+      for (const at of candidates) {
+        if (exclusions.length) {
+          const { year, month, day } = getTimeParts(new Date(at), timeZone);
+          const localDate = `${pad(year, 4)}-${pad(month)}-${pad(day)}`;
+          if (exclusions.indexOf(localDate) >= 0) continue;
+        }
+        if (guard) {
+          const eligible = options.evaluateCondition!(guard, at);
+          if (eligible === undefined) {
+            throw new Error("Conditional dosage evaluator returned unknown; cannot issue an unconditional dose");
+          }
+          if (!eligible) continue;
+        }
+        accepted.push(at);
+        if (accepted.length >= limit) break;
+      }
+      if (accepted.length >= limit || candidates.length < candidateLimit || candidateLimit === 10000) {
+        return accepted.slice(0, Math.floor(limit));
+      }
+      candidateLimit = Math.min(10000, candidateLimit * 2);
+    }
+  }
+
+  return nextDueDosesSingle(one, options);
+}
+
+function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): string[] {
   if (!options || typeof options !== "object") {
     throw new Error("Options argument is required for nextDueDoses");
   }
@@ -1319,7 +1420,7 @@ export function nextDueDoses(
   }
   const effectiveOrderedAt =
     orderedAt && boundsStart && boundsStart > orderedAt ? boundsStart : orderedAt;
-  const baseCandidate = effectiveOrderedAt ?? from;
+  const baseCandidate = effectiveOrderedAt ?? boundsStart ?? from;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd = timing && repeat
     ? earlierDate(
@@ -1402,25 +1503,8 @@ export function nextDueDoses(
   const whenCodes = repeat.when ?? [];
   const timeOfDayEntries = repeat.timeOfDay ?? [];
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const expanded = expandWhenCodes(whenCodes, config, repeat);
-    if (timeOfDayEntries.length > 0) {
-      for (const clock of timeOfDayEntries) {
-        expanded.push({ time: normalizeClock(clock), dayShift: 0 });
-      }
-      expanded.sort((a, b) => {
-        if (a.dayShift !== b.dayShift) {
-          return a.dayShift - b.dayShift;
-        }
-        return a.time.localeCompare(b.time);
-      });
-    }
-    if (
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      (enforceDayFilter || !repeat.frequency || !repeat.period || !repeat.periodUnit)
-    ) {
-      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
-    }
+    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
     const includesImmediate = arrayIncludes(whenCodes, EventTiming.Immediate);
     if (includesImmediate) {
       const immediateSource = orderedAt ?? from;
@@ -1455,7 +1539,7 @@ export function nextDueDoses(
         (!courseEnd || currentDay < courseEnd)
       ) {
         const weekday = getLocalWeekday(currentDay, timeZone);
-        if (!enforceDayFilter || dayFilter.has(weekday)) {
+        if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
               ? currentDay
@@ -1632,25 +1716,8 @@ function derivePriorCountFromHistory(
   const timeOfDayEntries = repeat.timeOfDay ?? [];
 
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const expanded = expandWhenCodes(whenCodes, config, repeat);
-    if (timeOfDayEntries.length > 0) {
-      for (const clock of timeOfDayEntries) {
-        expanded.push({ time: normalizeClock(clock), dayShift: 0 });
-      }
-      expanded.sort((a, b) => {
-        if (a.dayShift !== b.dayShift) {
-          return a.dayShift - b.dayShift;
-        }
-        return a.time.localeCompare(b.time);
-      });
-    }
-    if (
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
-    ) {
-      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
-    }
+    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
 
     if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
       if (recordCandidate(orderedAt) && normalizedCount !== undefined && seen.size >= normalizedCount) {
@@ -1675,7 +1742,7 @@ function derivePriorCountFromHistory(
       const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
       while (currentDay < from && iterations < maxIterations) {
         const weekday = getLocalWeekday(currentDay, timeZone);
-        if (!enforceDayFilter || dayFilter.has(weekday)) {
+        if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
               ? currentDay
@@ -1927,10 +1994,7 @@ function addCalendarMonths(date: Date, months: number, timeZone: string): Date {
   if (!candidate) {
     throw new Error("Unable to compute candidate month while scheduling");
   }
-  const lastDay = new Date(candidate.getTime());
-  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
-  lastDay.setUTCDate(0);
-  const maxDay = getTimeParts(lastDay, timeZone).day;
+  const maxDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
   const resolvedDay = Math.min(day, maxDay);
   const final = makeZonedDate(
     timeZone,
@@ -2164,23 +2228,8 @@ function countScheduleEvents(
   const timeOfDayEntries = repeat.timeOfDay ?? [];
 
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const expanded = expandWhenCodes(whenCodes, config, repeat);
-    if (timeOfDayEntries.length > 0) {
-      for (const clock of timeOfDayEntries) {
-        expanded.push({ time: normalizeClock(clock), dayShift: 0 });
-      }
-      expanded.sort((a, b) => {
-        if (a.dayShift !== b.dayShift) return a.dayShift - b.dayShift;
-        return a.time.localeCompare(b.time);
-      });
-    }
-    if (
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      (!repeat.frequency || !repeat.period || !repeat.periodUnit)
-    ) {
-      expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
-    }
+    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
 
     if (arrayIncludes(whenCodes, EventTiming.Immediate)) {
       const immediateSource = orderedAt ?? from;
@@ -2204,7 +2253,7 @@ function countScheduleEvents(
       const maxIterations = hardLimit * 31;
       while (count < countLimit && currentDay < to && iterations < maxIterations) {
         const weekday = getLocalWeekday(currentDay, timeZone);
-        if (!enforceDayFilter || dayFilter.has(weekday)) {
+        if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
               ? currentDay
@@ -2305,6 +2354,15 @@ function calculateTotalUnitsSingle(
   options: Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage }
 ): TotalUnitsResult {
   const { dosage, durationValue, durationUnit, roundToMultiple, context } = options;
+  if (getUnresolvedDosage(dosage) ||
+      getDosageCondition(dosage) ||
+      getDosageExcludedDates(dosage).length) {
+    throw new Error("Cannot calculate fixed medication totals from an unresolved, condition-dependent, or date-excluded Dosage");
+  }
+  if (dosage.doseAndRate?.some(rate => (rate.rateQuantity || rate.rateRatio || rate.rateRange) &&
+    !rate.doseQuantity && !rate.doseRange)) {
+    throw new Error("Infusion rate alone is not a discrete medication quantity; provide duration and a rate-aware quantity calculation");
+  }
   const from = coerceDate(options.from, "from");
   const orderedAtDate =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
@@ -2348,7 +2406,7 @@ function calculateTotalUnitsSingle(
   const countFrom = boundsStart && boundsStart > from ? boundsStart : from;
   const effectiveOrderedAt =
     orderedAtDate && boundsStart && boundsStart > orderedAtDate ? boundsStart : orderedAtDate;
-  const baseCandidate = effectiveOrderedAt ?? countFrom;
+  const baseCandidate = effectiveOrderedAt ?? boundsStart ?? countFrom;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   endDay = minDate(
     endDay,
@@ -2457,7 +2515,18 @@ function calculateTotalUnitsSingle(
 }
 
 export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
+  // Prevent JS callers from passing the primary R6 object to an R5-only
+  // calculator, which would otherwise return a misleading zero supply.
+  if (options.dosage && typeof options.dosage === "object" &&
+      !Array.isArray(options.dosage) &&
+      ("step" in options.dosage || "items" in options.dosage)) {
+    throw new Error("R6 whole-course quantity calculations are not yet supported; use explicit R5 single-dose calculations, not a taper-wide estimate");
+  }
   if (Array.isArray(options.dosage)) {
+    const sequences = new Set(options.dosage.map(dose => dose.sequence ?? 1));
+    if (sequences.size > 1) {
+      throw new Error("Cannot total sequential R5 taper stages independently over one window; a phase-aware supply calculator is required");
+    }
     const hasAnyDosage = options.dosage.length > 0;
     if (!hasAnyDosage) {
       return { totalUnits: 0 };
@@ -2547,4 +2616,110 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     };
   }
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
+}
+
+const { resolveExplicitClockEntries, clockCadenceEligible } = createTimingPrimitives({
+  expandWhenCodes, normalizeClock, inferWhenFallbackEntries, getLocalDayNumber, getLocalMonthIndex,
+  getTimeParts, addCalendarMonths, isDateAlignedToPeriodCycle
+});
+
+
+/**
+ * Generate due times for one whole medication regimen using R5 sequence / R6 steps.
+ * The public nextDueDoses accepts a single Dosage, an array, or DosageDetails.
+ *
+ * A phase boundary must be known (explicit date or finite duration). If not,
+ * reject rather than accidentally running later phases at the same time.
+ * "orderedAt" is required for relative multi-phase regimens, so a later
+ * "from" query does not shift the treatment's start date.
+ */
+function scheduleRegimen(
+  dosages: FhirDosage[],
+  options: NextDueDoseOptions
+): RegimenDueTimes[] {
+  if (dosages.length === 0) return [];
+  if (dosages.some(dosage => dosage.modifierExtension?.some(extension =>
+    extension.url === DOSAGE_DETAILS_R5_URL
+  ))) {
+    // Explicit R5 exports may carry the whole R6 source for lossless round
+    // trips. We recognize that modifier rather than treating it as an
+    // unknown extension; only unsupported R6-only execution rules are blocked.
+    const restored = toDosageDetails(dosages);
+    if (restored.repeatCycle || restored.safety ||
+      restored.step.some(step => step.start || step.end ||
+        step.count !== undefined || step.safety ||
+        step.component.some(component =>
+          component.safety || component.site?.reference))) {
+      throw new Error("R6 course-specific safety or cycle semantics require an R6-aware scheduler");
+    }
+    dosages = dosages.map(item => ({
+      ...item,
+      modifierExtension: item.modifierExtension?.filter(ext =>
+        ext.url !== DOSAGE_DETAILS_R5_URL)
+    }));
+  }
+  const zone = options.timeZone ?? options.config?.timeZone;
+  if (!zone) throw new Error("A timeZone is required for multi-phase scheduling");
+  const sequences = dosages.map(dosage => dosage.sequence ?? 1);
+  if (sequences.some(value => !Number.isInteger(value) || value < 1)) {
+    throw new Error("Invalid FHIR Dosage.sequence");
+  }
+  const distinct = Array.from(new Set(sequences)).sort((a, b) => a - b);
+  if (distinct.length > 1 && options.orderedAt === undefined) {
+    const everyPhaseAnchored = dosages.every(dosage => Boolean(dosage.timing?.repeat?.boundsPeriod?.start));
+    if (!everyPhaseAnchored) throw new Error("orderedAt is required to schedule relative sequential dosage phases");
+  }
+  const from = coerceDate(options.from, "from");
+  let cursor = options.orderedAt !== undefined ? coerceDate(options.orderedAt, "orderedAt") : from;
+  const output: RegimenDueTimes[] = [];
+  for (let phaseIndex = 0; phaseIndex < distinct.length; phaseIndex++) {
+    const sequence = distinct[phaseIndex];
+    const members = dosages.map((dosage, dosageIndex) => ({ dosage, dosageIndex }))
+      .filter((_, index) => sequences[index] === sequence);
+    const explicitStarts = members
+      .map(({ dosage }) => resolveRepeatBoundsStart(dosage.timing?.repeat, zone))
+      .filter((date): date is Date => Boolean(date));
+    if (explicitStarts.length > 0) {
+      const earliest = explicitStarts[0].getTime();
+      if (explicitStarts.some(date => date.getTime() !== earliest)) {
+        throw new Error("Concurrent dosage items in one phase have different start dates");
+      }
+      if (explicitStarts[0] < cursor && phaseIndex > 0) {
+        throw new Error("Sequential dosage phase starts before its predecessor has ended");
+      }
+      cursor = explicitStarts[0];
+    }
+    const phaseStart = cursor;
+    for (const member of members) {
+      const startWindow = from > phaseStart ? from : phaseStart;
+      output.push({
+        dosageIndex: member.dosageIndex,
+        sequence,
+        phaseStart: phaseStart.toISOString(),
+        timestamps: nextDueDoses(member.dosage, {
+          ...options,
+          from: startWindow,
+          orderedAt: phaseStart
+        })
+      });
+    }
+    if (phaseIndex + 1 >= distinct.length) continue;
+    const ends = members.map(({ dosage }) => {
+      const repeat = dosage.timing?.repeat;
+      if (!repeat) return null;
+      const start = resolveRepeatBoundsStart(repeat, zone) ?? phaseStart;
+      return earlierDate(
+        resolveRepeatDurationCapEnd(repeat, start, zone),
+        resolveRepeatBoundsEndExclusive(repeat, zone)
+      );
+    });
+    if (ends.some(date => !date)) {
+      throw new Error("Cannot schedule the next phase: predecessor has no finite duration or end date");
+    }
+    cursor = ends.reduce<Date>((latest, date) => date && date > latest ? date : latest, phaseStart);
+    if (cursor <= phaseStart) {
+      throw new Error("Cannot schedule the next phase: invalid or empty phase bounds");
+    }
+  }
+  return output.sort((a, b) => a.dosageIndex - b.dosageIndex);
 }

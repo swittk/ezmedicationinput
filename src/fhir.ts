@@ -1,3 +1,4 @@
+import { normalizeAnchoredBounds, normalizeClockFrequency } from "./regimen/bounds";
 import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
@@ -55,14 +56,14 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
-export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
-export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
-export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
-export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
-export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
-export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
-export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
-export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-frequency-min";
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-max";
+export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-offset-exact";
+export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-activity-window";
+export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-occurrence-cap";
+export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-timing-event-calendar-source";
+export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-prn-trigger-phase";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
@@ -755,6 +756,7 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
+  normalizeAnchoredBounds(repeat, schedule);
   if (schedule?.frequencyMax !== undefined) {
     repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;
@@ -820,6 +822,7 @@ export function canonicalToFhir(
     hasRepeat = true;
   }
 
+  normalizeClockFrequency(repeat);
   if (hasRepeat) {
     dosage.timing = {
       ...(dosage.timing ?? {}),
@@ -973,7 +976,7 @@ export function canonicalToFhir(
   }
 
   if (clause.prn?.enabled) {
-    dosage.asNeededBoolean = true;
+    dosage.asNeeded = true;
     const reasons = clause.prn.reasons?.length ? clause.prn.reasons : clause.prn.reason ? [clause.prn.reason] : [];
     if (reasons.length) {
       dosage.asNeededFor = [];
@@ -1212,9 +1215,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     })
     : undefined;
   const primaryReason = prnReasons?.[0];
-  if (dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code) {
+  if (dosage.asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
     clause.prn = {
-      enabled: Boolean(dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code),
+      enabled: Boolean(dosage.asNeeded || primaryReason?.text || primaryReason?.coding?.code),
       reason:
         prnReasons?.length === 1
           ? primaryReason
@@ -1311,7 +1314,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
-  state.asNeeded = dosage.asNeededBoolean;
+  state.asNeeded = dosage.asNeeded;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseSig, suggestSig } from "../src";
+import { suggestSig } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 import { RouteCode } from "../src/types";
 
 const TAB_CONTEXT = { context: { dosageForm: "tablet" } } as const;

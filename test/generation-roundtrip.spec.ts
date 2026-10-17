@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import cases from "./generation-roundtrip-cases.json";
 import thaiCases from "./generation-roundtrip-thai-cases.json";
 import crossLanguageCases from "./generation-cross-language-cases.json";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import type { AdviceArgument, AdviceFrame, CanonicalSigClause } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
@@ -157,7 +158,7 @@ function fingerprint(result: Result): unknown {
     site: key(result.fhir.site),
     dose: dose(result),
     schedule: schedule(clause),
-    prn: result.fhir.asNeededBoolean === true,
+    prn: result.fhir.asNeeded === true,
     reasons: (result.fhir.asNeededFor ?? []).map(key).sort(),
     additional: additional(result),
     graph: graph(result)
@@ -249,7 +250,7 @@ function crossFingerprint(result: Result): unknown {
     site: key(result.fhir.site),
     dose: dose(result),
     schedule: schedule(clause),
-    prn: result.fhir.asNeededBoolean === true,
+    prn: result.fhir.asNeeded === true,
     reasons: (result.fhir.asNeededFor ?? []).map(key).sort(),
     additional: additional(result),
     graph: crossGraph(result)

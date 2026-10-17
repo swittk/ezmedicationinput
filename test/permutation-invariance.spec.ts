@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import type { AdviceFrame, ParseOptions } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
@@ -49,7 +49,7 @@ function canonicalFingerprint(result: Result): unknown {
       dayOfWeek: [...(repeat.dayOfWeek ?? [])].sort(),
       timeOfDay: [...(repeat.timeOfDay ?? [])].sort()
     } : undefined,
-    prn: result.fhir.asNeededBoolean === true,
+    prn: result.fhir.asNeeded === true,
     reasons: [...(result.fhir.asNeededFor ?? [])].map(codeable).sort(),
     leftover: result.meta.leftoverText
   };

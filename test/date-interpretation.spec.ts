@@ -1,13 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  findMedicationDateListSpans,
-  formatSig,
-  listMedicationDateResolvers,
-  fromFhirDosage,
-  nextDueDoses,
-  parseSig,
-  registerMedicationDateResolver
-} from "../src/index";
+import { findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, registerMedicationDateResolver } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 
 const REFERENCE_DATE = "2026-09-27";
 
@@ -588,7 +581,7 @@ describe("calendar date interpretation", () => {
       expect(first?.fhir.timing?.event).toEqual(item.dates);
       if (item.when) expect(first?.fhir.timing?.repeat?.when).toEqual(item.when);
       if (item.site) expect(first?.fhir.site?.text).toBe(item.site);
-      if (item.prn) expect(first?.fhir.asNeededBoolean).toBe(true);
+      if (item.prn) expect(first?.fhir.asNeeded).toBe(true);
     }
   });
 

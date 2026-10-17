@@ -1,6 +1,7 @@
+import type { R5ParserTestResult } from "./helpers/r5-parser";
 import { describe, expect, it } from "vitest";
 import cases from "./real-world-torture-cases.json";
-import { parseSig, type ParseBatchResult } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 
 type DoseTuple = [number, string | null];
 type RangeTuple = [number, number, string | null];
@@ -20,18 +21,18 @@ interface TortureCase {
   forbiddenRoute?: string;
 }
 
-function items(result: ParseBatchResult) {
+function items(result: R5ParserTestResult) {
   return result.items;
 }
 
-function actions(result: ParseBatchResult): string[] {
+function actions(result: R5ParserTestResult): string[] {
   return result.meta.canonical.clauses.reduce<string[]>((all, clause) => {
     for (const action of clause.instructionGraph?.actions ?? []) all.push(action.predicate.lemma);
     return all;
   }, []);
 }
 
-function hasDose(result: ParseBatchResult, expected: DoseTuple): boolean {
+function hasDose(result: R5ParserTestResult, expected: DoseTuple): boolean {
   return items(result).some((item) =>
     item.fhir.doseAndRate?.some((entry) => {
       const dose = entry.doseQuantity;
@@ -40,7 +41,7 @@ function hasDose(result: ParseBatchResult, expected: DoseTuple): boolean {
   );
 }
 
-function hasRange(result: ParseBatchResult, expected: RangeTuple): boolean {
+function hasRange(result: R5ParserTestResult, expected: RangeTuple): boolean {
   return items(result).some((item) =>
     item.fhir.doseAndRate?.some((entry) => {
       const range = entry.doseRange;
@@ -51,7 +52,7 @@ function hasRange(result: ParseBatchResult, expected: RangeTuple): boolean {
   );
 }
 
-function field(result: ParseBatchResult, kind: "route" | "site" | "method", expected: string): boolean {
+function field(result: R5ParserTestResult, kind: "route" | "site" | "method", expected: string): boolean {
   const needle = expected.toLowerCase();
   return items(result).some((item) => {
     const concept = kind === "route" ? item.fhir.route : kind === "site" ? item.fhir.site : item.fhir.method;
@@ -66,13 +67,13 @@ function field(result: ParseBatchResult, kind: "route" | "site" | "method", expe
   });
 }
 
-function hasSiteCode(result: ParseBatchResult, code: string): boolean {
+function hasSiteCode(result: R5ParserTestResult, code: string): boolean {
   return items(result).some((item) =>
     item.fhir.site?.coding?.some((coding) => coding.code === code) ?? false
   );
 }
 
-function timing(result: ParseBatchResult, expected: string): boolean {
+function timing(result: R5ParserTestResult, expected: string): boolean {
   return items(result).some((item) => item.fhir.timing?.code?.text === expected);
 }
 

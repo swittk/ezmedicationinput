@@ -1,5 +1,5 @@
 {
-  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+  "system": "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-instruction-concept",
   "concepts": [
     {
       "code": "product",

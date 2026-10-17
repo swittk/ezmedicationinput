@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  AdviceArgumentRole,
-  AdviceRelation,
-  EventTiming,
-  formatSig,
-  fromFhirDosage,
-  parseSig
-} from "../src/index";
+import { AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, fromFhirDosage } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
 
 const CASES = [

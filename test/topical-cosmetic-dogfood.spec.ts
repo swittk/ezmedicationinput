@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseInstructionActions, parseSig } from "../src/index";
+import { formatSig, parseInstructionActions } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
 
 function clause(input: string) {

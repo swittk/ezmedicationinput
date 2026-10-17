@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatSig,
-  fromFhirDosage,
-  nextDueDoses,
-  parseSig,
-  TIMING_OFFSET_EXACT_EXTENSION_URL,
-  TIMING_OFFSET_MIN_EXTENSION_URL
-} from "../src";
+import { formatSig, fromFhirDosage, nextDueDoses, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("relative event-offset grammar", () => {
   it.each([

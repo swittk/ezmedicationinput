@@ -1,3 +1,4 @@
+import { TEMPORAL_DATE_RELATION_SOURCES } from "./regimen/temporal-relation-vocabulary";
 import { inferMedicationLocale } from "./locale-detection";
 import {
   CanonicalCalendarEventExpr,
@@ -38,10 +39,10 @@ const DATE_LIST_PART_SOURCE = String.raw`(?:${CALENDAR_DATE_SOURCE}|\d{1,2})`;
 const DATE_LIST_SOURCE = String.raw`${CALENDAR_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
-const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bfrom\b\s+|\bstarting(?:\s+(?:on|from))?\b\s+|ตั้งแต่(?:วันที่)?\s*)`;
-const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bafter\b\s+|หลัง(?:วันที่)?\s*)`;
-const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+|\btill\b\s+|(?:จน)?ถึง(?:วันที่)?\s*)`;
-const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
+const DATE_START_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startInclusive;
+const DATE_START_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startExclusive;
+const DATE_END_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endInclusive;
+const DATE_END_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endExclusive;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
 const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
 const TEXTUAL_ENGLISH_DMY_DATE_RE = new RegExp(
