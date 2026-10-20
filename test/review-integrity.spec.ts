@@ -213,6 +213,54 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(() => toDosageDetails(edited)).toThrow(/Update the R6 step start\/end metadata/);
   });
 
+  it("matches all unchanged components before positional edits when concurrent rows are swapped", () => {
+    const original: FhirR6DosageDetails = {
+      renderedInstruction: "One drop in each eye twice daily",
+      step: [{ component: [
+        {
+          id: "right-eye",
+          site: {
+            concept: { text: "right eye" },
+            reference: { reference: "BodyStructure/right-eye" }
+          },
+          timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+          doseAndRate: [{
+            doseQuantity: { value: 1, unit: "drop" },
+            doseExpression: { language: "text/fhirpath", expression: "one right-eye drop" }
+          }]
+        },
+        {
+          id: "left-eye",
+          site: { concept: { text: "left eye" } },
+          timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
+        }
+      ] }]
+    };
+    const exported = toFhirR5Dosages(original);
+    // Swapping and editing B must not cause A's advanced semantics to move
+    // onto B merely because B appears in A's previous array position.
+    const edited = [
+      JSON.parse(JSON.stringify(exported[1])) as FhirDosage,
+      JSON.parse(JSON.stringify(exported[0])) as FhirDosage
+    ];
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    edited[0].text = "two left-eye drops twice daily";
+    const restored = toDosageDetails(edited);
+    expect(restored.step[0].component).toHaveLength(2);
+    const left = restored.step[0].component[0];
+    const right = restored.step[0].component[1];
+    expect(left.site?.concept?.text).toBe("left eye");
+    expect(left.doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(left.doseAndRate?.[0].doseExpression).toBeUndefined();
+    expect(left.site?.reference).toBeUndefined();
+    expect(right.id).toBe("right-eye");
+    expect(right.site?.reference?.reference).toBe("BodyStructure/right-eye");
+    expect(right.doseAndRate?.[0].doseExpression?.expression).toBe("one right-eye drop");
+    expect(right.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
+  });
+
   it("retains R6 dose expressions through unrelated R5 edits, but never silently replaces conflicting expressions", () => {
     const full: FhirR6DosageDetails = {
       renderedInstruction: "Weight-adjusted dose twice daily",

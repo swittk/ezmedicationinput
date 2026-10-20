@@ -424,20 +424,38 @@ function reconcileRetainedCourse(
       }
     }
     const components: FhirR6Dosage[] = [];
+    // Match every unchanged R5 component BEFORE assigning an original
+    // position to a changed row. A swapped-and-edited dosage must not claim
+    // the original slot of an unedited dosage that appears later.
+    const originalProjections = step.component.map(component =>
+      JSON.parse(comparableLiveDosage(fromR6Dosage(component, i + 1))) as ProjectionValue);
+    const assigned: number[] = live.map(() => -1);
     const usedOriginalIndices = new Set<number>();
     for (let j = 0; j < live.length; j++) {
-      const dosage = live[j];
-      // Exact R5 matches can be reordered within a stage while retaining
-      // their original R6-only fields. On a shape change we use only exact
-      // source matches; positional fallback is unsafe after a deletion.
-      const matchIndex = step.component.findIndex((component, candidate) =>
+      const current = JSON.parse(comparableLiveDosage(live[j])) as ProjectionValue;
+      const exact = originalProjections.findIndex((projection, candidate) =>
         !usedOriginalIndices.has(candidate) &&
-        equivalentProjection(
-          JSON.parse(comparableLiveDosage(fromR6Dosage(component, i + 1))),
-          JSON.parse(comparableLiveDosage(dosage))));
-      const oldIndex = matchIndex >= 0 ? matchIndex :
-        !componentCountChanged && !usedOriginalIndices.has(j) ? j : -1;
-      if (oldIndex >= 0) usedOriginalIndices.add(oldIndex);
+        equivalentProjection(projection, current));
+      if (exact >= 0) {
+        assigned[j] = exact;
+        usedOriginalIndices.add(exact);
+      }
+    }
+    if (!componentCountChanged) {
+      // Same-shape edits can inherit advanced metadata from the remaining
+      // unused source positions. This runs only after exact matches reserve
+      // their true originals, avoiding R6 expression/site transplants.
+      const unclaimed = step.component.map((_, index) => index)
+        .filter(index => !usedOriginalIndices.has(index));
+      for (let j = 0; j < live.length; j++) {
+        if (assigned[j] >= 0) continue;
+        const next = unclaimed.shift();
+        if (next !== undefined) assigned[j] = next;
+      }
+    }
+    for (let j = 0; j < live.length; j++) {
+      const dosage = live[j];
+      const oldIndex = assigned[j];
       const old = oldIndex >= 0 ? step.component[oldIndex] : undefined;
       const baseline = old ? fromR6Dosage(old, i + 1) : undefined;
       const rawEqual = old !== undefined && baseline !== undefined &&
