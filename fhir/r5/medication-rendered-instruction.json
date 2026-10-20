@@ -9,7 +9,7 @@
   "experimental": true,
   "date": "2026-10-20",
   "publisher": "ezmedicationinput contributors",
-  "description": "Optional human-readable whole-course SIG retained without changing the safety or timing semantics of any dosage.",
+  "description": "Optional full original prescription text, with a fingerprint of the exact R5 dosage projection from which it was exported. Ignore the displayed instruction after any clinical edit that changes the source projection. This extension never changes medication timing or safety.",
   "fhirVersion": "5.0.0",
   "kind": "complex-type",
   "abstract": false,
@@ -30,12 +30,79 @@
         "min": 0,
         "max": "1",
         "isModifier": false,
-        "short": "Full original prescription wording"
+        "short": "Original full SIG with a projection fingerprint"
       },
       {
         "id": "Extension.extension",
         "path": "Extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 2,
+        "max": "2"
+      },
+      {
+        "id": "Extension.extension:instruction",
+        "path": "Extension.extension",
+        "sliceName": "instruction",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:instruction.extension",
+        "path": "Extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:instruction.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "instruction"
+      },
+      {
+        "id": "Extension.extension:instruction.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:projection",
+        "path": "Extension.extension",
+        "sliceName": "projection",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:projection.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:projection.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "projection"
+      },
+      {
+        "id": "Extension.extension:projection.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
       },
       {
         "id": "Extension.url",
@@ -45,13 +112,7 @@
       {
         "id": "Extension.value[x]",
         "path": "Extension.value[x]",
-        "min": 1,
-        "max": "1",
-        "type": [
-          {
-            "code": "string"
-          }
-        ]
+        "max": "0"
       }
     ]
   }

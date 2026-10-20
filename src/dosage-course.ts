@@ -400,25 +400,46 @@ function reconcileRetainedCourse(
       sequences.some((sequence, i) => sequence !== i + 1)) {
     throw new Error("Edited R5 dosage stages no longer match the retained relative R6 course. Update the R6 step start/end metadata when adding or removing stages.");
   }
-  const prior: FhirDosage[] = [];
-  for (let index = 0; index < retained.step.length; index++) {
-    for (const component of retained.step[index].component) {
-      prior.push(fromR6Dosage(component, index + 1));
-    }
-  }
-  const originalCount = prior.length;
+  const originalCount = retained.step.reduce(
+    (total, step) => total + step.component.length, 0);
   let unchanged = originalCount === dosages.length;
   const steps: FhirR6DosageDetails["step"] = [];
-  let componentIndex = 0;
   for (let i = 0; i < retained.step.length; i++) {
     const step = retained.step[i];
     const live = groups.get(i + 1)!;
+    const componentCountChanged = live.length !== step.component.length;
+    if (componentCountChanged) {
+      unchanged = false;
+      // When a stage contains R6-only properties, removing or adding a row
+      // makes the source-to-component association ambiguous. Requiring an
+      // updated R6 course is necessary to avoid transplanting its advanced
+      // details onto a different medication administration.
+      if (step.component.some(component =>
+        component.site?.reference ||
+        component.doseAndRate?.some(rate =>
+          rate.doseExpression || rate.rateExpression) ||
+        component.safety?.ifExceeded ||
+        component.safety?.doseLimit?.some(limit => limit.valueExpression))) {
+        throw new Error("An R6 treatment stage gained or lost components with R6-only expression, site or safety metadata. Update the R6 course component mapping to preserve those fields correctly.");
+      }
+    }
     const components: FhirR6Dosage[] = [];
+    const usedOriginalIndices = new Set<number>();
     for (let j = 0; j < live.length; j++) {
       const dosage = live[j];
-      const old = step.component[j];
-      const baseline = prior[componentIndex];
-      componentIndex++;
+      // Exact R5 matches can be reordered within a stage while retaining
+      // their original R6-only fields. On a shape change we use only exact
+      // source matches; positional fallback is unsafe after a deletion.
+      const matchIndex = step.component.findIndex((component, candidate) =>
+        !usedOriginalIndices.has(candidate) &&
+        equivalentProjection(
+          JSON.parse(comparableLiveDosage(fromR6Dosage(component, i + 1))),
+          JSON.parse(comparableLiveDosage(dosage))));
+      const oldIndex = matchIndex >= 0 ? matchIndex :
+        !componentCountChanged && !usedOriginalIndices.has(j) ? j : -1;
+      if (oldIndex >= 0) usedOriginalIndices.add(oldIndex);
+      const old = oldIndex >= 0 ? step.component[oldIndex] : undefined;
+      const baseline = old ? fromR6Dosage(old, i + 1) : undefined;
       const rawEqual = old !== undefined && baseline !== undefined &&
         equivalentProjection(JSON.parse(comparableLiveDosage(baseline)),
           JSON.parse(comparableLiveDosage(dosage)));
@@ -517,10 +538,52 @@ export function toDosageDetails(
   renderedInstruction?: string,
   course?: EzCourseMetadata
 ): FhirR6DosageDetails {
-  const original = dosages[0]?.modifierExtension?.find(value => value.url === DOSAGE_DETAILS_R5_URL)
-    ?.extension?.find(value => value.url === "dosageDetails")?.valueString;
-  const preservedInstruction = dosages[0]?.extension?.find(value =>
-    value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.valueString;
+  // Store the original course with every relative-stage dosage, not only
+  // the first. Removing the first row must not erase the remaining phases'
+  // essential start/end metadata from a persisted R5 dosage array.
+  const original = dosages.map(dosage => dosage.modifierExtension?.find(value =>
+    value.url === DOSAGE_DETAILS_R5_URL)?.extension
+      ?.find(value => value.url === "dosageDetails")?.valueString
+  ).find(value => value !== undefined);
+  const instructionMarker = dosages[0]?.extension?.find(value =>
+    value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+  const savedInstruction = instructionMarker?.extension?.find(value =>
+    value.url === "instruction")?.valueString;
+  const savedProjection = instructionMarker?.extension?.find(value =>
+    value.url === "projection")?.valueString;
+  let originalProjected: ProjectionValue[] | undefined;
+  if (savedProjection) {
+    try {
+      const parsed = JSON.parse(savedProjection) as ProjectionValue;
+      if (Array.isArray(parsed)) originalProjected = parsed;
+    } catch { /* Damaged display-only metadata is never authoritative. */ }
+  }
+  // Ordinary parseSig() calls have no persisted rendered-text fingerprint.
+  // Do not allocate or JSON-normalize any dosage on that hot path.
+  const instructionStillMatches = originalProjected !== undefined &&
+    equivalentProjection(originalProjected, dosages.map(dosage =>
+      JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue));
+  const preservedInstruction = instructionStillMatches ? savedInstruction : undefined;
+  // If an editor changes a dosage but leaves its old generated text intact,
+  // even Dosage.text is stale. Drop only that unchanged old text in the R6
+  // projection; downstream formatters can regenerate it from current fields.
+  const withoutText = (value: ProjectionValue | undefined): ProjectionValue | undefined => {
+    if (!value || Array.isArray(value) || typeof value !== "object") return value;
+    const { text: _ignored, ...rest } = value;
+    return rest;
+  };
+  const effectiveDosages = originalProjected && !instructionStillMatches
+    ? dosages.map((dosage, index) => {
+      const previous = originalProjected[index];
+      const prior = previous && !Array.isArray(previous) && typeof previous === "object"
+        ? previous : undefined;
+      const oldText = prior && "text" in prior ? prior.text : undefined;
+      const after = JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue;
+      return oldText !== undefined && oldText === dosage.text &&
+          !equivalentProjection(withoutText(prior), withoutText(after))
+        ? { ...dosage, text: undefined }
+        : dosage;
+    }) : dosages;
   if (original) {
     let retained: FhirR6DosageDetails | undefined;
     try {
@@ -531,12 +594,13 @@ export function toDosageDetails(
     // Reconstruction errors MUST propagate. Swallowing them would turn
     // inconsistent relative stages into an executable but false regimen.
     if (retained && Array.isArray(retained.step))
-      return reconcileRetainedCourse(retained, dosages, course?.renderedInstruction ?? renderedInstruction);
+      return reconcileRetainedCourse(retained, effectiveDosages,
+        course?.renderedInstruction ?? renderedInstruction);
   }
   // The common one-dose prescription needs neither a grouping Map nor
   // sequence sorting. Preserve identical R6 output with much less overhead.
-  if (dosages.length === 1 && !course?.step?.length) {
-    const dosage = dosages[0];
+  if (effectiveDosages.length === 1 && !course?.step?.length) {
+    const dosage = effectiveDosages[0];
     const sequence = dosage.sequence ?? 1;
     if (!Number.isInteger(sequence) || sequence < 1)
       throw new Error("Invalid Dosage.sequence");
@@ -557,7 +621,7 @@ export function toDosageDetails(
     };
   }
   const groups = new Map<number, (FhirDosage | EzDosage)[]>();
-  for (const dosage of dosages) {
+  for (const dosage of effectiveDosages) {
     const sequence = dosage.sequence ?? 1;
     if (!Number.isInteger(sequence) || sequence < 1) throw new Error("Invalid Dosage.sequence");
     if (!groups.has(sequence)) groups.set(sequence, []);
@@ -574,8 +638,8 @@ export function toDosageDetails(
         ? { renderedInstruction }
         : preservedInstruction !== undefined
           ? { renderedInstruction: preservedInstruction }
-          : dosages.length === 1 && dosages[0].text
-            ? { renderedInstruction: dosages[0].text } : {}),
+          : effectiveDosages.length === 1 && effectiveDosages[0].text
+            ? { renderedInstruction: effectiveDosages[0].text } : {}),
     ...(course?.id ? { id: course.id } : {}),
     ...(course?.extension?.length ? { extension: course.extension } : {}),
     ...(course?.modifierExtension?.length ? { modifierExtension: course.modifierExtension } : {}),
@@ -640,10 +704,14 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
   const retainedCourse = toFhirR5Dosages(details)[0]?.modifierExtension?.find(
     extension => extension.url === DOSAGE_DETAILS_R5_URL
   );
-  if (retainedCourse && dosages[0]) {
-    dosages[0].modifierExtension = [
-      ...(dosages[0].modifierExtension ?? []), retainedCourse
-    ];
+  if (retainedCourse) {
+    for (const dosage of dosages) {
+      dosage.modifierExtension = [
+        ...(dosage.modifierExtension ?? []).filter(extension =>
+          extension.url !== DOSAGE_DETAILS_R5_URL),
+        retainedCourse
+      ];
+    }
   }
   return {
     dosages,
@@ -677,12 +745,23 @@ export function toFhirR5Dosages(
   // The rendered whole-course instruction is display information, not
   // modifier semantics. Store it using a non-modifier extension; the core
   // R5 dosage text can remain a faithful per-dose realization.
-  if (result.length && details.renderedInstruction !== undefined &&
-      details.renderedInstruction !== result[0].text) {
+  if (result.length && details.renderedInstruction !== undefined) {
+    // Even when the original full instruction equals Dosage.text, editors
+    // can update the structured dose without regenerating either string.
+    // The fingerprint is needed to detect that stale text on re-import.
     result[0].extension = [
       ...(result[0].extension ?? []).filter(ext =>
         ext.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL),
-      { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, valueString: details.renderedInstruction }
+      {
+        url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+        extension: [
+          { url: "instruction", valueString: details.renderedInstruction },
+          // This is a display-text fingerprint only. When a clinician edits
+          // the live dosage, the stored instruction must not override it.
+          { url: "projection", valueString: JSON.stringify(result.map(dosage =>
+            JSON.parse(comparableLiveDosage(dosage)))) }
+        ]
+      }
     ];
   }
   // R5 cannot express complete conditional trees, relative step timing,
@@ -706,13 +785,20 @@ export function toFhirR5Dosages(
         component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)))
   );
   if (hasR6OnlyFields && result.length) {
-    result[0].modifierExtension = [
-      ...(result[0].modifierExtension ?? []),
-      {
-        url: DOSAGE_DETAILS_R5_URL,
-        extension: [{ url: "dosageDetails", valueString: JSON.stringify(details) }]
-      }
-    ];
+    const retainedCourse = {
+      url: DOSAGE_DETAILS_R5_URL,
+      extension: [{ url: "dosageDetails", valueString: JSON.stringify(details) }]
+    };
+    // Each R5 dosage is independently persistable/editable. Retain the
+    // complete step relationships on every component so deletion of any
+    // one row cannot silently turn a bounded course into an unbounded one.
+    for (const dosage of result) {
+      dosage.modifierExtension = [
+        ...(dosage.modifierExtension ?? []).filter(extension =>
+          extension.url !== DOSAGE_DETAILS_R5_URL),
+        retainedCourse
+      ];
+    }
   }
   return result;
 }

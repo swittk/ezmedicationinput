@@ -29,10 +29,39 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const strict = toFhirR5Dosages(details);
     expect(strict).toHaveLength(1);
     expect(strict[0].modifierExtension?.some(ext => ext.url === DOSAGE_DETAILS_R5_URL)).not.toBe(true);
-    expect(strict[0].extension?.find(ext =>
-      ext.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.valueString)
-      .toBe(details.renderedInstruction);
+    const displayExtension = strict[0].extension?.find(ext =>
+      ext.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    expect(displayExtension?.extension?.find(child =>
+      child.url === "instruction")?.valueString).toBe(details.renderedInstruction);
+    expect(JSON.parse(displayExtension?.extension?.find(child =>
+      child.url === "projection")?.valueString ?? "null")).toHaveLength(1);
     expect(toDosageDetails(strict)).toEqual(details);
+  });
+
+  it("never uses an outdated literal instruction after editing a strict R5 dose", () => {
+    const details = parseSig("1 tab PO BID").fhirNext;
+    const original = toFhirR5Dosages(details);
+    const untouched = toDosageDetails(JSON.parse(JSON.stringify(original)));
+    expect(untouched.renderedInstruction).toBe(details.renderedInstruction);
+
+    const edited = JSON.parse(JSON.stringify(original)) as FhirDosage[];
+    const previousText = edited[0].text;
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    // A structured dosage editor need not regenerate free text itself.
+    expect(edited[0].text).toBe(previousText);
+    const transformed = toDosageDetails(edited);
+    expect(transformed.renderedInstruction).not.toBe(details.renderedInstruction);
+    expect(transformed.step[0].component[0].text).not.toBe(previousText);
+    expect(transformed.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    const reExported = toFhirR5Dosages(transformed);
+    expect(reExported[0].extension?.some(value =>
+      value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)).not.toBe(true);
+    expect(calculateTotalUnits({ ...supply, dosage: transformed }).totalUnits).toBe(120);
+
+    edited[0].text = "2 tablets orally twice daily";
+    const withUpdatedText = toDosageDetails(edited);
+    expect(withUpdatedText.renderedInstruction).toBe("2 tablets orally twice daily");
+    expect(withUpdatedText.step[0].component[0].text).toBe(edited[0].text);
   });
 
   it("preserves both R5 and R6 conditional extension contracts without reusing their URLs", () => {
@@ -100,6 +129,48 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     }
     expect(toDosageDetails(saved)).toEqual(parsed.fhirNext);
     expect(calculateTotalUnits({ ...supply, dosage: saved }).totalUnits).toBe(296);
+  });
+
+  it("keeps later-stage components aligned when a prior stage loses a simple component", () => {
+    const original = parseSig(parallel);
+    const altered = JSON.parse(JSON.stringify(original.fhir)) as FhirDosage[];
+    altered.splice(0, 1); // Remove one administration from global step one.
+    const details = toDosageDetails(altered);
+    expect(details.step.map(step => step.component.length)).toEqual([1, 2, 2]);
+    expect(details.step[1].component.map(component =>
+      component.site?.concept?.text)).toEqual(["right eye", "left eye"]);
+    expect(details.step[1].component.map(component =>
+      component.timing?.repeat?.frequency)).toEqual([4, 4]);
+    expect(details.step[1].end?.offsetDuration?.code).toBe("mo");
+    expect(calculateTotalUnits({ ...supply, dosage: altered }).totalUnits).toBe(212);
+    const scheduled = nextDueDoses(altered, scheduler);
+    expect(scheduled[0]).toBe(beginning);
+  });
+
+  it("refuses ambiguous component removal when a stage contains R6-only dose expressions", () => {
+    const original = parseSig(parallel).fhirNext;
+    const edited: FhirR6DosageDetails = JSON.parse(JSON.stringify(original));
+    edited.step[0].component[0].doseAndRate![0].doseExpression = {
+      language: "text/fhirpath", expression: "%patient.weight * 0.5"
+    };
+    const exported = toFhirR5Dosages(edited);
+    exported.splice(0, 1);
+    expect(() => toDosageDetails(exported))
+      .toThrow(/Update the R6 course component mapping/);
+  });
+
+  it("does not show an obsolete whole-course SIG when an R5 stage dose changes without editing its text", () => {
+    const original = parseSig(parallel);
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(original.fhirNext))) as FhirDosage[];
+    const oldText = saved[3].text;
+    const oldInstruction = original.fhirNext.renderedInstruction;
+    saved[3].doseAndRate![0].doseQuantity!.value = 2;
+    expect(saved[3].text).toBe(oldText);
+    const updated = toDosageDetails(saved);
+    expect(updated.renderedInstruction).not.toBe(oldInstruction);
+    expect(updated.step[1].component[1].text).not.toBe(oldText);
+    expect(updated.step[1].component[1].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(calculateTotalUnits({ ...supply, dosage: updated }).totalUnits).toBe(388);
   });
 
   it("rejects a changed number of relative stages with a precise action instead of using stale metadata", () => {

@@ -236,8 +236,14 @@ export function projectParallelRegimen(
   const marker = toFhirR5Dosages(details)[0]?.modifierExtension?.find(
     extension => extension.url === DOSAGE_DETAILS_R5_URL
   );
-  if (marker && dosages[0]) {
-    dosages[0].modifierExtension = [...(dosages[0].modifierExtension ?? []), marker];
+  if (marker) {
+    for (const dosage of dosages) {
+      dosage.modifierExtension = [
+        ...(dosage.modifierExtension ?? []).filter(extension =>
+          extension.url !== DOSAGE_DETAILS_R5_URL),
+        marker
+      ];
+    }
   }
   return { kind: 'resolved', dosages, course, details };
 }
