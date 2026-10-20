@@ -9,7 +9,7 @@
   "experimental": true,
   "date": "2026-10-20",
   "publisher": "ezmedicationinput contributors",
-  "description": "Optional full original prescription text, with a fingerprint of the exact R5 dosage projection from which it was exported. Ignore the displayed instruction after any clinical edit that changes the source projection. This extension never changes medication timing or safety.",
+  "description": "Preserves the original whole-course wording together with a comparison projection of its R5 dosage rows. Consumers must discard the preserved wording when the live dosage content differs from the projection, rather than displaying stale instructions after clinical edits.",
   "fhirVersion": "5.0.0",
   "kind": "complex-type",
   "abstract": false,
@@ -30,7 +30,7 @@
         "min": 0,
         "max": "1",
         "isModifier": false,
-        "short": "Original full SIG with a projection fingerprint"
+        "short": "Original instruction with dosage-projection fingerprint"
       },
       {
         "id": "Extension.extension",
@@ -42,8 +42,7 @@
               "path": "url"
             }
           ],
-          "ordered": false,
-          "rules": "open"
+          "rules": "closed"
         },
         "min": 2,
         "max": "2"
@@ -54,11 +53,6 @@
         "sliceName": "instruction",
         "min": 1,
         "max": "1"
-      },
-      {
-        "id": "Extension.extension:instruction.extension",
-        "path": "Extension.extension.extension",
-        "max": "0"
       },
       {
         "id": "Extension.extension:instruction.url",
@@ -82,11 +76,6 @@
         "sliceName": "projection",
         "min": 1,
         "max": "1"
-      },
-      {
-        "id": "Extension.extension:projection.extension",
-        "path": "Extension.extension.extension",
-        "max": "0"
       },
       {
         "id": "Extension.extension:projection.url",

@@ -131,6 +131,39 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(calculateTotalUnits({ ...supply, dosage: saved }).totalUnits).toBe(296);
   });
 
+  it("never displays or re-exports stale complete SIG wording after edits to an ordinary dosage", () => {
+    const original = parseSig("1 tab PO BID").fhirNext;
+    const plain = toFhirR5Dosages(original);
+    const untouched = toDosageDetails(JSON.parse(JSON.stringify(plain)));
+    expect(untouched.renderedInstruction).toBe(original.renderedInstruction);
+
+    const updated = JSON.parse(JSON.stringify(plain)) as FhirDosage[];
+    updated[0].doseAndRate![0].doseQuantity!.value = 2;
+    updated[0].text = "2 tablets PO BID";
+    const after = toDosageDetails(updated);
+    expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
+    expect(after.renderedInstruction).toBe("2 tablets PO BID");
+    expect(formatSig(after)).toContain("2 tablets");
+    const resaved = toFhirR5Dosages(updated);
+    const liveInstruction = resaved[0].extension?.find(e =>
+      e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
+      ?.find(e => e.url === "instruction")?.valueString;
+    expect(liveInstruction).not.toBe(original.renderedInstruction);
+    expect(toDosageDetails(resaved).renderedInstruction).toBe("2 tablets PO BID");
+
+    const staleText = JSON.parse(JSON.stringify(plain)) as FhirDosage[];
+    staleText[0].doseAndRate![0].doseQuantity!.value = 2;
+    const corrected = toDosageDetails(staleText);
+    expect(corrected.renderedInstruction).not.toBe(original.renderedInstruction);
+    expect(corrected.step[0].component[0].text).not.toBe(plain[0].text);
+    expect(formatSig(corrected, "long").toLowerCase()).not.toContain("1 tablet");
+    const resavedStale = toFhirR5Dosages(staleText);
+    const staleMarker = resavedStale[0].extension?.find(e =>
+      e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
+      ?.find(e => e.url === "instruction")?.valueString;
+    expect(staleMarker).not.toBe(original.renderedInstruction);
+  });
+
   it("keeps later-stage components aligned when a prior stage loses a simple component", () => {
     const original = parseSig(parallel);
     const altered = JSON.parse(JSON.stringify(original.fhir)) as FhirDosage[];
