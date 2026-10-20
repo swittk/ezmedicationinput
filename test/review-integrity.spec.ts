@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
@@ -24,6 +25,20 @@ const supply = {
 const parallel = "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
 
 describe("external review: FHIR R5/R6 and medication correctness", () => {
+  it("declares the R6 predicate extension slice using a URL discriminator", () => {
+    const profile = JSON.parse(readFileSync(
+      new URL("../fhir/r6/medication-r6-condition-logic.json", import.meta.url), "utf8"
+    ));
+    const extension = profile.differential.element.find(
+      (element: { id: string }) => element.id === "Extension.extension"
+    );
+    expect(extension.slicing).toEqual({
+      discriminator: [{ type: "value", path: "url" }],
+      ordered: false, rules: "open"
+    });
+    expect(extension.max).toBe("1");
+  });
+
   it("does not mark ordinary R5 SIGs with an R6 modifier merely to carry raw text", () => {
     const details = parseSig("1 tab PO BID").fhirNext;
     const strict = toFhirR5Dosages(details);

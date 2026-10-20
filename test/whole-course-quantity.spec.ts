@@ -34,6 +34,20 @@ describe("whole-course numeric supply and API parity", () => {
     }
   });
 
+  it("rounds whole-course supply before counting containers, just like a single dosage", () => {
+    const dosage = parseSig("1 tab po daily").fhir[0];
+    const options = {
+      ...base, roundToMultiple: 14,
+      context: { dosageForm: "tablet", containerValue: 10, containerUnit: "tab" }
+    };
+    const single = calculateTotalUnits({ ...options, dosage });
+    const course = calculateTotalUnits({ ...options, dosage: [dosage] });
+    expect(single.totalUnits).toBe(42);
+    expect(course.totalUnits).toBe(single.totalUnits);
+    expect(course.totalContainers).toBe(single.totalContainers);
+    expect(course.totalContainerQuantity).toEqual(single.totalContainerQuantity);
+  });
+
   it("sums 30-day and 45-day site-specific transitions, never multiplying all phases by the full horizon", () => {
     const parsed = parseSig(eyeCourse);
     for (const dosage of [parsed, parsed.fhir, parsed.fhirNext,

@@ -21,6 +21,16 @@ describe("multi-clause parsing", () => {
     ]);
   });
 
+  it("renders short and long multi-clause instructions rather than echoing source shorthand", () => {
+    const source = "1 tab po bid + 1 tab po qid";
+    const batch = parseSig(source);
+    expect(batch.fhirNext.renderedInstruction).toBe(source);
+    expect(batch.shortText).not.toBe(source);
+    expect(batch.longText).toContain("orally twice daily");
+    expect(batch.longText).toContain("orally four times daily");
+    expect(batch.count).toBe(2);
+  });
+
   it("parses plus-separated ocular clauses into multiple items", () => {
     const batch = parseSig("1 drop to OD Q 2 H + 1 drop to OS QID");
 

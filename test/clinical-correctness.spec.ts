@@ -38,6 +38,25 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("handles Thai unless-conditions without fabricating a calendar exclusion", () => {
+    const result = parseSig("รับประทาน 1 เม็ด วันละ 2 ครั้ง ยกเว้นกรณีความดันต่ำกว่า 100");
+    expect(result.warnings.some(warning => warning.includes("unresolved-calendar-exclusion")))
+      .toBe(false);
+    expect(getDosageCondition(result.fhir)).toMatchObject({
+      kind: "not", condition: { kind: "measurement", operation: "lt", value: 100 }
+    });
+    expect(result.fhir.timing?.repeat?.frequency).toBe(2);
+  });
+
+  it.each(["mcg", "MCG", "µg", "μg"])(
+    "emits the UCUM ug code for infusion rate spelling %s", spelling => {
+      const parsed = parseSig("Infuse IV at 5 " + spelling + "/min for 1 hour");
+      expect(parsed.fhir.doseAndRate?.[0].rateQuantity).toMatchObject({
+        value: 5, system: "http://unitsofmeasure.org", code: "ug/min"
+      });
+    }
+  );
+
   it("preserves mg/kg dosing without inventing a fixed-dose milligram amount", () => {
     const result = parseSig("0.5 mg/kg PO BID");
     expect(result.fhir.doseAndRate?.[0].doseQuantity).toMatchObject({

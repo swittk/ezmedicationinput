@@ -19,7 +19,7 @@
     "build": "tsup && tsc -p tsconfig.types.json",
     "test": "vitest run --dir test",
     "bench:torture": "npm run build && node bench/real-world-torture.mjs",
-    "bench:r6-regression": "node bench/compare-r6.mjs",
+    "bench:r6-regression": "npm run build && node bench/compare-r6.mjs",
     "bench:adversarial": "npm run build && node bench/adversarial.mjs",
     "bench:roundtrip": "npm run build && node bench/roundtrip.mjs",
     "bench:suggest": "npm run build && node --expose-gc bench/suggest.mjs",

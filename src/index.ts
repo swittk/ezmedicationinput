@@ -880,6 +880,19 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
   return clauses;
 }
 
+/** Rich R6 course fields cannot be safely flattened to an R5 display sentence.
+ * Keep the exact same guard here and in formatSig, without exception handling
+ * in the normal parse path.
+ */
+function requiresR6CourseSourceForDisplay(course: FhirR6DosageDetails): boolean {
+  return Boolean(course.repeatCycle || course.safety ||
+    course.step.some(step => step.start || step.end ||
+      step.count !== undefined || step.safety ||
+      step.component.some(component => component.condition?.length ||
+        component.safety || component.site?.reference ||
+        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression))));
+}
+
 /** One whole-course public result, independent of the number of parsed clauses. */
 function buildWholeCourseResult(
   input: string,
@@ -901,6 +914,11 @@ function buildWholeCourseResult(
       leftovers.push(item.meta.leftoverText);
     }
   }
+  // Only ordinary R5-compatible multi-clause courses can be safely realized.
+  // A staged/conditional R6 course keeps the source wording; never drop a phase.
+  const displayCourse = results.length > 1 && !requiresR6CourseSourceForDisplay(fhirNext)
+    ? { ...fhirNext, renderedInstruction: undefined }
+    : fhirNext;
   return {
     input,
     count: results.length,
@@ -908,8 +926,8 @@ function buildWholeCourseResult(
     fhir,
     fhirNext,
     ...(parallel ? { course: parallel.course } : {}),
-    shortText: results.length === 1 ? primary.shortText : formatSig(fhirNext, "short"),
-    longText: results.length === 1 ? primary.longText : formatSig(fhirNext, "long"),
+    shortText: results.length === 1 ? primary.shortText : formatSig(displayCourse, "short"),
+    longText: results.length === 1 ? primary.longText : formatSig(displayCourse, "long"),
     warnings: [...warnings],
     meta: {
       ...primary.meta,
@@ -1213,13 +1231,7 @@ export function formatSig(
     // boolean conditions in an English/Thai realization attempt.
     if (oneOrCourse.renderedInstruction) return oneOrCourse.renderedInstruction;
     if (oneOrCourse.step.length === 0) return "";
-    if (oneOrCourse.step.some(step => step.start || step.end ||
-      step.count !== undefined || step.safety ||
-      step.component.some(component => component.condition?.length ||
-        component.safety || component.site?.reference ||
-        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression))) ||
-      oneOrCourse.repeatCycle ||
-      oneOrCourse.safety) {
+    if (requiresR6CourseSourceForDisplay(oneOrCourse)) {
       throw new Error("Cannot safely generate text from R6-only course metadata without renderedInstruction");
     }
     const flattened = toFhirR5Dosages(oneOrCourse);

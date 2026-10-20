@@ -2790,6 +2790,12 @@ function sumCourseUnits(
       ingredient = undefined; mixedIngredient = true;
     }
   }
+  // Apply package rounding to the whole course before calculating containers.
+  // Rounding individual stages overcounts; rounding afterward undercounts packs.
+  if (options.roundToMultiple && options.roundToMultiple > 0)
+    totalUnits = roundCalculatedUnits(
+      Math.ceil(totalUnits / options.roundToMultiple) * options.roundToMultiple
+    );
   const result: TotalUnitsResult = {
     totalUnits, ...(commonUnit ? { unit: commonUnit } : {}),
     quantityKind: maximum ? "maximum" : "scheduled",
@@ -3037,6 +3043,10 @@ function calculateTotalUnitsSingle(
           unit: containerUnit
         };
       }
+    } else if (containerUnit && doseUnit &&
+               containerUnit.trim().toLowerCase() === doseUnit.trim().toLowerCase()) {
+      // The prescription already counts in the container's exact unit.
+      result.totalContainerQuantity = { value: totalUnits, unit: containerUnit };
     } else if (containerUnit && doseUnit && containerUnit !== doseUnit) {
       const strength = resolveContextStrengthRatio(context);
       const converted = convertValue(totalUnits, doseUnit, containerUnit, strength as any);
@@ -3176,12 +3186,7 @@ function calculateCourseTotalUnits(
     }
     if (stepEnd) cursor = stepEnd;
   }
-  const combined = sumCourseUnits(entries, options);
-  if (options.roundToMultiple && options.roundToMultiple > 0)
-    combined.totalUnits = roundCalculatedUnits(
-      Math.ceil(combined.totalUnits / options.roundToMultiple) * options.roundToMultiple
-    );
-  return combined;
+  return sumCourseUnits(entries, options);
 }
 
 export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {

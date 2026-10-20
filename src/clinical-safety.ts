@@ -28,12 +28,13 @@ const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
   { day: FhirDayOfWeek.Sunday, en: /\bsun(?:day)?s?\b/giu, th: /(?:วัน)?อาทิตย์/gu }
 ];
 
-const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
+// ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
+const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
 const WEIGHT = /(\d+(?:\.\d+)?)\s*(mcg|μg|µg|mg|g|units?|iu)\s*\/\s*kg(?:\s*\/\s*(?:day|daily|d))?/iu;
 const WEIGHT_DAILY = /\/\s*kg\s*\/\s*(?:day|daily|d)\b/iu;
 const DOSE_DIVISION = /\bdivid(?:ed|e)\s+(?:into|in)\s+(\d+)\s+doses?\b/iu;
-const RATE = /\b(?:at|@)\s*(\d+(?:\.\d+)?)\s*(mL|L|mg|mcg|µg|g)\s*\/\s*(h|hr|hour|hours|min|minute|minutes)\b/iu;
+const RATE = /\b(?:at|@)\s*(\d+(?:\.\d+)?)\s*(mL|L|mg|mcg|µg|μg|g)\s*\/\s*(h|hr|hour|hours|min|minute|minutes)\b/iu;
 const INFUSE_OVER = /\b(?:infuse|infusion|administer|give)\b[\s\S]*?\b(\d+(?:\.\d+)?)\s*(mL|L)\s+over\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h(?:ou)?rs?)\b/iu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
@@ -317,7 +318,8 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   const over = rate ? undefined : INFUSE_OVER.exec(source);
   if (rate) {
     const value = Number(rate[1]);
-    const numer = rate[2] === "µg" ? "ug" : rate[2];
+    // UCUM uses ug, not the input spelling mcg or either Unicode mu.
+    const numer = /^(?:mcg|µg|μg)$/iu.test(rate[2]) ? "ug" : rate[2];
     const denom = /^h/iu.test(rate[3]) ? "h" : "min";
     const unit = numer + "/" + denom;
     if (Number.isFinite(value) && value > 0) {
