@@ -1188,21 +1188,27 @@ export function formatSig(
       formatSig(flattened[index++], style, options)
     ).join("; ")).filter(Boolean).join(" then ");
   }
-  const dosage = oneOrCourse as FhirDosage;
+  const dosage = oneOrCourse as EzDosage;
   const quantity = dosage.doseAndRate?.[0];
+  // Ordinary R5 dosages have no custom extensions. Avoid scanning unrelated
+  // extension types or allocating temporary arrays while rendering them.
+  const hasModifiers = Boolean(dosage.modifierExtension?.length);
   // Until rich rate and relative-weight units have dedicated realizers, retain
   // the prescriber's original statement instead of silently dropping semantics.
   if (dosage.text && (
     quantity?.rateQuantity || quantity?.rateRatio || quantity?.rateRange ||
-    (quantity as EzDoseAndRate | undefined)?.doseExpression ||
-    (quantity as EzDoseAndRate | undefined)?.rateExpression ||
+    quantity?.doseExpression || quantity?.rateExpression ||
     (quantity?.doseQuantity?.unit !== undefined &&
       quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
     (dosage.maxDosePerPeriod?.length ?? 0) > 0 ||
-    getDosageCondition(dosage) !== undefined ||
-    getDosageExcludedDates(dosage).length > 0 ||
-    getDosageExcludedWeekdays(dosage).length > 0 ||
-    getUnresolvedDosage(dosage) !== undefined
+    dosage.condition?.length || dosage.safety || dosage.siteReference ||
+    dosage.excludedDates?.length ||
+    (hasModifiers && (
+      getDosageCondition(dosage) !== undefined ||
+      getDosageExcludedDates(dosage).length > 0 ||
+      getUnresolvedDosage(dosage) !== undefined
+    )) ||
+    (dosage.extension?.length && getDosageExcludedWeekdays(dosage).length > 0)
   )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
