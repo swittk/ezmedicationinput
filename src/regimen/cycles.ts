@@ -27,6 +27,10 @@ export function recognizeCycles(input: string, options?: ParseOptions): CycleSch
     const countMatch = new RegExp(`^\\s+${W.repeatCount}`, 'iu').exec(input.slice(end));
     const count = countMatch?.[1];
     if (countMatch) end += countMatch[0].length;
+    // Ordinary "on day 3" / "on days 1-5" is not an explicit cycle.
+    // Require a cycle length, repeat count, or named start anchor before
+    // grammar suppression and quarantine may claim this text.
+    if (!periodValue && !countMatch && !lead) continue;
     const sourceText = input.slice(match.index, end);
     pattern.lastIndex = Math.max(pattern.lastIndex, end);
     const days: number[] = [], seen = new Set<number>();
@@ -64,7 +68,8 @@ function contextCycles(context: HpsgClauseContext): CycleSchedule[] {
 }
 export function insideCycle(context: HpsgClauseContext, tokenIndex: number): boolean {
   const token = context.tokens[tokenIndex];
-  return !!token && contextCycles(context).some(c => c.start <= token.sourceStart && token.sourceStart < c.end);
+  return !!token && contextCycles(context).some(c =>
+    !c.error && c.start <= token.sourceStart && token.sourceStart < c.end);
 }
 /** A bounded cycle is lowered to native exact FHIR events; no executable cycle rule is hidden in free text. */
 export function cycleScheduleRule() {

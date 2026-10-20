@@ -2834,6 +2834,29 @@ function calculateTotalUnitsSingle(
       `Cannot calculate supply because the instruction has an unresolved clinical schedule (${unresolved}). Clarify the missing/contradictory instruction before dispensing.`);
   }
   const dosage = prepareMeasuredDose(sourceDosage, options);
+  // These maxima apply regardless of whether a dose needs date/condition
+  // filtering. The schedule path already enforces them; supply must not
+  // silently bypass the check on the common arithmetic-count path.
+  if (dosage.maxDosePerLifetime)
+    throw new MedicationQuantityCalculationError("lifetime-dose-history-required",
+      "The prescription specifies a lifetime dose maximum. Provide complete prior administered-dose history and its unit before calculating remaining supply.");
+  if (dosage.maxDosePerAdministration) {
+    const dose = dosage.doseAndRate?.[0]?.doseQuantity;
+    const limit = dosage.maxDosePerAdministration;
+    if (!dose?.value || limit.value === undefined)
+      throw new MedicationQuantityCalculationError("administration-dose-unknown",
+        "The maximum per administration cannot be compared: provide the administered dose quantity and the maximum quantity.");
+    const fromUnit = dose.code ?? dose.unit ?? "";
+    const limitUnit = limit.code ?? limit.unit ?? "";
+    const actual = fromUnit.toLowerCase() === limitUnit.toLowerCase()
+      ? dose.value : convertValue(dose.value, fromUnit, limitUnit);
+    if (actual === null || !Number.isFinite(actual))
+      throw new MedicationQuantityCalculationError("administration-dose-units",
+        "The prescribed administration quantity and its maximum have incompatible units. Provide medication strength or an equivalent unit conversion.");
+    if (actual > limit.value + 1e-9)
+      throw new MedicationQuantityCalculationError("per-administration-maximum-exceeded",
+        "The prescribed amount per administration exceeds the specified maximum; revise the dose or safety limit before calculating supply.");
+  }
   const conditional = getDosageCondition(dosage);
   const excludedDates = getDosageExcludedDates(dosage);
   const useMaximalPlan = !!dosage.asNeeded ||
@@ -3044,6 +3067,10 @@ function calculateCourseTotalUnits(
   if (course.step.some(step => step.count !== undefined || step.safety))
     throw new MedicationQuantityCalculationError("step-level-r6-rule",
       "An R6 step has a separate repetition count or safety limit. Supply requires that rule to be resolved, not mistaken for a normal phase duration.");
+  if (course.step.some(step => step.component.some(component =>
+    !executableR6Safety(component))))
+    throw new MedicationQuantityCalculationError("unsupported-component-safety-rule",
+      "A dosage component contains a safety expression, lifetime limit or exceeded-action rule requiring clinical evaluation beyond calendar scheduling. Resolve that rule before calculating supply.");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
     throw new MedicationQuantityCalculationError("time-zone-required",

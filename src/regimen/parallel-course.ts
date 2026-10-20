@@ -113,7 +113,14 @@ export function projectParallelRegimen(
   if (!independentEdges.length) return { kind: 'not-parallel' };
   const graph = buildRegimenGraph(plan, segments);
   if (!graph.sequences.length) return { kind: 'not-parallel' };
-  const independents = new Set(independentEdges.map(edge => edge.to));
+  // Planner edges refer to the ORIGINAL boundary-plan segments, whereas
+  // phase.members refer to the EXPANDED sequence after meal-dash lowering.
+  // The extra segments can share the same source range; a raw segment only
+  // starts one independent track, regardless of its expansion multiplicity.
+  const independentStarts = new Set(independentEdges.map(edge => {
+    const target = plan.segments[edge.to];
+    return target ? target.start + ":" + target.end : "";
+  }).filter(Boolean));
   if (results.length !== segments.length || graph.phases.some(phase =>
     phase.members.some(index => !results[index]))) {
     return { kind: 'unresolved', reason: 'parallel-regimen-expansion-ambiguous' };
@@ -128,7 +135,10 @@ export function projectParallelRegimen(
   const tracks: Array<typeof graph.phases> = [];
   let current: typeof graph.phases = [];
   for (const phase of graph.phases) {
-    if (phase.members.some(index => independents.has(index)) && current.length) {
+    if (phase.members.some(index => {
+      const source = segments[index];
+      return !!source && independentStarts.has(source.start + ":" + source.end);
+    }) && current.length) {
       tracks.push(current);
       current = [];
     }

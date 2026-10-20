@@ -6,6 +6,7 @@ import {
 import { applyClinicalConstraints } from "./clinical-safety";
 import { quarantineSchedule } from "./regimen/admissibility";
 import { projectParallelRegimen } from "./regimen/parallel-course";
+import { recognizeCycles } from "./regimen/cycles";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
@@ -956,6 +957,31 @@ function quarantineMergedIndependentRegimens(
   }
 }
 
+/**
+ * Invalid but explicitly framed medication cycles must not contribute their
+ * day numbers as dose amounts. Keep original offsets intact by masking only
+ * the invalid cycle frame while parsing the preceding administered amount.
+ * The original source is still quarantined by composeRegimenPhases, including
+ * the precise cycle error and all unparsed clinical text.
+ *
+ * Ordinary "on day N" text is not a cycle frame; valid explicit cycles are
+ * parsed normally without this fallback.
+ */
+function parseCycleSafeClauseState(text: string, options?: ParseOptions) {
+  if (!/(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(text)) {
+    return parseClauseState(text, options);
+  }
+  const invalid = recognizeCycles(text, options).filter(frame => frame.error);
+  if (!invalid.length) return parseClauseState(text, options);
+  const chars = text.split("");
+  for (const frame of invalid) {
+    for (let index = frame.start; index < frame.end; index++) {
+      if (chars[index] !== "\n") chars[index] = " ";
+    }
+  }
+  return parseClauseState(chars.join(""), options);
+}
+
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const boundaryPlan = createBoundaryPlan(input, options);
   const segments = expandMealDashSegments(boundaryPlan.segments, options);
@@ -969,9 +995,13 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = (Object.keys(carry).length === 0
+    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
+      recognizeCycles(segment.text, options).some(frame => frame.error);
+    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
       ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? parseClauseState(segment.text, options);
+      : undefined) ?? (hasInvalidCycles
+        ? parseCycleSafeClauseState(segment.text, options)
+        : parseClauseState(segment.text, options));
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
@@ -1015,9 +1045,13 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = (Object.keys(carry).length === 0
+    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
+      recognizeCycles(segment.text, options).some(frame => frame.error);
+    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
       ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? parseClauseState(segment.text, options);
+      : undefined) ?? (hasInvalidCycles
+        ? parseCycleSafeClauseState(segment.text, options)
+        : parseClauseState(segment.text, options));
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
@@ -1127,9 +1161,13 @@ export async function parseSigAsync(
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = (Object.keys(carry).length === 0
+    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
+      recognizeCycles(segment.text, options).some(frame => frame.error);
+    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
       ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? parseClauseState(segment.text, options);
+      : undefined) ?? (hasInvalidCycles
+        ? parseCycleSafeClauseState(segment.text, options)
+        : parseClauseState(segment.text, options));
     applyCarryForward(state, carry);
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
@@ -1178,7 +1216,9 @@ export function formatSig(
     if (oneOrCourse.step.some(step => step.start || step.end ||
       step.count !== undefined || step.safety ||
       step.component.some(component => component.condition?.length ||
-        component.safety || component.site?.reference)) || oneOrCourse.repeatCycle ||
+        component.safety || component.site?.reference ||
+        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression))) ||
+      oneOrCourse.repeatCycle ||
       oneOrCourse.safety) {
       throw new Error("Cannot safely generate text from R6-only course metadata without renderedInstruction");
     }

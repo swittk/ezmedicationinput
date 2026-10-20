@@ -61,9 +61,10 @@ function metrics(times) {
   const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length;
   return {
     parses: sorted.length,
-    meanMs: Number(mean.toFixed(3)),
-    p50Ms: Number(sorted[Math.floor(sorted.length * 0.5)].toFixed(3)),
-    p95Ms: Number(sorted[Math.floor(sorted.length * 0.95)].toFixed(3))
+    // Retain native precision for delta math; round only report fields.
+    meanMs: mean,
+    p50Ms: sorted[Math.floor(sorted.length * 0.5)],
+    p95Ms: sorted[Math.floor(sorted.length * 0.95)]
   };
 }
 const result = Object.fromEntries(Object.entries(timings).map(([name, t]) => [name, metrics(t)]));
@@ -72,7 +73,13 @@ if (result.baseline && result.current) {
   result.p95DeltaPct = Number(((result.current.p95Ms / result.baseline.p95Ms - 1) * 100).toFixed(1));
 }
 console.log(JSON.stringify({
-  ...result,
+  ...Object.fromEntries(Object.entries(result).filter(([, value]) =>
+    value && typeof value === "object").map(([key, metric]) => [
+      key, Object.fromEntries(Object.entries(metric).map(([name, value]) =>
+        [name, name.endsWith("Ms") ? Number(value.toFixed(3)) : value]))
+    ])),
+  ...Object.fromEntries(Object.entries(result).filter(([, value]) =>
+    typeof value !== "object")),
   corpus: "real-world-torture",
   cases: cases.length,
   rounds,

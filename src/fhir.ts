@@ -1215,9 +1215,11 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     })
     : undefined;
   const primaryReason = prnReasons?.[0];
-  if (dosage.asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
+  const asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
+  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
     clause.prn = {
-      enabled: Boolean(dosage.asNeeded || primaryReason?.text || primaryReason?.coding?.code),
+      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
       reason:
         prnReasons?.length === 1
           ? primaryReason
@@ -1314,7 +1316,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
-  state.asNeeded = dosage.asNeeded;
+  state.asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);
