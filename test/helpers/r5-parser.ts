@@ -16,6 +16,8 @@ function forHistoricalAssertions(value: ParseBatchResult): R5ParserTestResult {
   const { fhir: _dosages, course: _course, ...rest } = value;
   return {
     ...rest,
+    // Historical fixtures intentionally expose only the FIRST clause here;
+    // multi-clause tests must use items[] or the shipping .fhir array.
     fhir: value.items[0]?.fhir ?? {},
     dosageDetails: value.fhirNext
   };
