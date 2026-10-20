@@ -2790,12 +2790,29 @@ function sumCourseUnits(
       ingredient = undefined; mixedIngredient = true;
     }
   }
-  // Apply package rounding to the whole course before calculating containers.
-  // Rounding individual stages overcounts; rounding afterward undercounts packs.
+  // Round only the combined supply, never each treatment stage separately.
+  const scheduledUnits = totalUnits;
   if (options.roundToMultiple && options.roundToMultiple > 0)
     totalUnits = roundCalculatedUnits(
       Math.ceil(totalUnits / options.roundToMultiple) * options.roundToMultiple
     );
+  if (scheduledUnits > 0 && totalUnits !== scheduledUnits) {
+    // Each per-stage approximation describes its unrounded supply. Estimate
+    // the extra dispensed units at the same combined per-unit rate; otherwise
+    // bottle counts and strength estimates disagree with totalUnits.
+    const roundedShare = totalUnits / scheduledUnits;
+    if (approximate?.value !== undefined) {
+      approximate.value = roundCalculatedUnits(approximate.value * roundedShare);
+      // Recompute ingredient amount from the rounded volume/weight and
+      // product strength, just like the single-dosage path.
+      ingredient = estimateIngredientQuantity(approximate, options.context) ??
+        (ingredient?.value !== undefined
+          ? { ...ingredient, value: roundCalculatedUnits(ingredient.value * roundedShare) }
+          : undefined);
+    } else if (ingredient?.value !== undefined) {
+      ingredient.value = roundCalculatedUnits(ingredient.value * roundedShare);
+    }
+  }
   const result: TotalUnitsResult = {
     totalUnits, ...(commonUnit ? { unit: commonUnit } : {}),
     quantityKind: maximum ? "maximum" : "scheduled",
@@ -2819,7 +2836,10 @@ function sumCourseUnits(
       const divisor = matchesPackage && !useEstimate ? 1 : context.containerValue;
       result.totalContainers = Math.ceil(effective / divisor);
       if (containerUnit) result.totalContainerQuantity = {
-        value: useEstimate ? estimateValue! : roundCalculatedUnits(result.totalContainers * context.containerValue),
+        // Quantity describes the prescribed amount, not the capacity of all
+        // dispensed packages. A half-bottle course requires 60 mL from a
+        // 120 mL bottle even though totalContainers is one.
+        value: useEstimate ? estimateValue! : roundCalculatedUnits(totalUnits * context.containerValue),
         unit: containerUnit
       };
     } else if (commonUnit && containerUnit && commonUnit.toLowerCase() === containerUnit.toLowerCase()) {

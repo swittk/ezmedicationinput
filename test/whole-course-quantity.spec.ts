@@ -48,6 +48,71 @@ describe("whole-course numeric supply and API parity", () => {
     expect(course.totalContainerQuantity).toEqual(single.totalContainerQuantity);
   });
 
+  it("keeps fractional package quantity separate from physical containers", () => {
+    const dosage = parseSig("apply half bottle once daily").fhir[0];
+    const options = {
+      ...base, durationValue: 1,
+      context: { packageUnit: "bottle", containerValue: 120, containerUnit: "mL" }
+    };
+    const single = calculateTotalUnits({ ...options, dosage });
+    const course = calculateTotalUnits({ ...options, dosage: [dosage] });
+    expect(single.totalUnits).toBe(0.5);
+    expect(single.totalContainers).toBe(1);
+    expect(single.totalContainerQuantity).toEqual({ value: 60, unit: "mL" });
+    expect(course.totalUnits).toBe(single.totalUnits);
+    expect(course.totalContainers).toBe(single.totalContainers);
+    expect(course.totalContainerQuantity).toEqual(single.totalContainerQuantity);
+  });
+
+  it("rounds eye-drop volume and ingredient mass before counting bottles", () => {
+    const sig = "1 drop OD qid";
+    const parsed = parseSig(sig);
+    const options = {
+      ...base, roundToMultiple: 300,
+      context: {
+        dosageForm: "eye drops", strength: "500 mcg / 100 mL",
+        containerValue: 5, containerUnit: "mL"
+      }
+    };
+    const single = calculateTotalUnits({ ...options, dosage: parsed.fhir[0] });
+    expect(single.totalUnits).toBe(300);
+    expect(single.totalApproximateQuantity).toMatchObject({ value: 15, unit: "mL" });
+    expect(single.totalApproximateIngredientQuantity).toMatchObject({
+      value: 75, unit: "mcg"
+    });
+    expect(single.totalContainers).toBe(3);
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext,
+      toFhirR5Dosages(parsed.fhirNext)]) {
+      const result = calculateTotalUnits({ ...options, dosage });
+      expect(result.totalUnits).toBe(single.totalUnits);
+      expect(result.totalApproximateQuantity).toEqual(single.totalApproximateQuantity);
+      expect(result.totalApproximateIngredientQuantity)
+        .toEqual(single.totalApproximateIngredientQuantity);
+      expect(result.totalContainerQuantity).toEqual(single.totalContainerQuantity);
+      expect(result.totalContainers).toBe(single.totalContainers);
+    }
+  });
+
+  it("rounds a combined parallel course once, including estimated volume", () => {
+    const parsed = parseSig("1 drop OD qid; 1 drop OS qid");
+    const options = {
+      ...base, roundToMultiple: 500,
+      context: { dosageForm: "eye drops", containerValue: 5, containerUnit: "mL" }
+    };
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext,
+      toFhirR5Dosages(parsed.fhirNext)]) {
+      const result = calculateTotalUnits({ ...options, dosage });
+      expect(result.totalUnits).toBe(500);
+      expect(result.totalApproximateQuantity).toMatchObject({
+        value: 25, unit: "mL"
+      });
+      expect(result.totalContainers).toBe(5);
+      expect(result.totalContainerQuantity).toMatchObject({
+        value: 25, unit: "mL"
+      });
+    }
+  });
+
   it("sums 30-day and 45-day site-specific transitions, never multiplying all phases by the full horizon", () => {
     const parsed = parseSig(eyeCourse);
     for (const dosage of [parsed, parsed.fhir, parsed.fhirNext,
