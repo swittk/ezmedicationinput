@@ -284,6 +284,27 @@ export function toDosageDetails(
       if (Array.isArray(retained.step)) return retained;
     } catch { /* Reconstruct using explicit R5 information. */ }
   }
+  // The common one-dose prescription needs neither a grouping Map nor
+  // sequence sorting. Preserve identical R6 output with much less overhead.
+  if (dosages.length === 1 && !course?.step?.length) {
+    const dosage = dosages[0];
+    const sequence = dosage.sequence ?? 1;
+    if (!Number.isInteger(sequence) || sequence < 1)
+      throw new Error("Invalid Dosage.sequence");
+    return {
+      ...(course?.renderedInstruction !== undefined
+        ? { renderedInstruction: course.renderedInstruction }
+        : renderedInstruction !== undefined
+          ? { renderedInstruction }
+          : dosage.text ? { renderedInstruction: dosage.text } : {}),
+      ...(course?.id ? { id: course.id } : {}),
+      ...(course?.extension?.length ? { extension: course.extension } : {}),
+      ...(course?.modifierExtension?.length ? { modifierExtension: course.modifierExtension } : {}),
+      ...(course?.repeatCycle ? { repeatCycle: course.repeatCycle } : {}),
+      ...(course?.safety ? { safety: course.safety } : {}),
+      step: [{ component: [toR6Dosage(dosage)] }]
+    };
+  }
   const groups = new Map<number, (FhirDosage | EzDosage)[]>();
   for (const dosage of dosages) {
     const sequence = dosage.sequence ?? 1;

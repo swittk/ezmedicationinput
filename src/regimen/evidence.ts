@@ -1,4 +1,5 @@
 import { parseClauseState, findUnparsedTokenGroups } from '../parser';
+import type { ParserState } from '../parser-state';
 import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { parseAdditionalInstructions } from '../advice';
@@ -13,6 +14,9 @@ import { mayContainAdministrationTargetGroup, targetKeys } from './targets';
 /** Per-input cache: no global results, no mutation of parser state, no cross-option reuse. */
 export class EvidenceContext {
   private readonly cache = new Map<string, ProbeSummary>();
+  /** Reuse completed HPSG probes when their entire input is the final segment.
+   * The caller may take a state only once, after boundary planning finishes. */
+  private readonly parsedStates = new Map<string, ParserState>();
   private readonly actionCache = new Map<string, AdviceFrame[]>();
   private allActions?: AdviceFrame[];
   constructor(readonly input: string, readonly tokens: Token[], readonly options: ParseOptions | undefined,
@@ -25,6 +29,7 @@ export class EvidenceContext {
     const cached = this.cacheEnabled ? this.cache.get(key) : undefined;
     if (cached) { this.metrics.probeCacheHits++; return cached; }
     const state = parseClauseState(this.input.slice(start, end), this.options);
+    if (this.cacheEnabled) this.parsedStates.set(key, state);
     this.metrics.clauseProbes++; this.metrics.probedTokens += state.tokens.length;
     const c = state.primaryClause, s = c.schedule;
     const hasTargetCoordinator = state.tokens.some(token =>
@@ -63,6 +68,14 @@ export class EvidenceContext {
     };
     if (this.cacheEnabled) this.cache.set(key, summary);
     return summary;
+  }
+
+  takeParsedState(start: number, end: number, text: string): ParserState | undefined {
+    const key = start + ":" + end;
+    const state = this.parsedStates.get(key);
+    if (!state || state.input !== text) return undefined;
+    this.parsedStates.delete(key);
+    return state;
   }
 
   actions(start: number, end: number): AdviceFrame[] {

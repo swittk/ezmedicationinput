@@ -37,6 +37,15 @@ const RATE = /\b(?:at|@)\s*(\d+(?:\.\d+)?)\s*(mL|L|mg|mcg|µg|g)\s*\/\s*(h|hr|ho
 const INFUSE_OVER = /\b(?:infuse|infusion|administer|give)\b[\s\S]*?\b(\d+(?:\.\d+)?)\s*(mL|L)\s+over\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h(?:ou)?rs?)\b/iu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
+/**
+ * A cheap lexical prerequisite for the post-grammar clinical resolver.
+ * Most routine directions contain no conditional, exception, maximum,
+ * weight-based or infusion constraint. Skip multiple full-text grammar
+ * searches in that overwhelmingly common case; positive candidates still
+ * go through the exact same conservative resolver.
+ */
+const CLINICAL_CONSTRAINT_SIGNAL =
+  /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
 
 const unitMap: Record<string, string> = {
   tab: "tab", tabs: "tab", tablet: "tab", tablets: "tab", เม็ด: "tab",
@@ -200,6 +209,7 @@ function matchedRange(source: string, match: RegExpExecArray, offset: number): T
  * All transformations are independent of drug names and clinical specialties.
  */
 export function applyClinicalConstraints(item: ParseResult, source: string, options?: ParseOptions): ConstraintApplication {
+  if (!CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
   const offset = item.meta.canonical.clauses[0]?.raw.start ?? 0;
   const ownedRanges: TextRange[] = [];
   const own = (range: TextRange) => { ownedRanges.push(range); };

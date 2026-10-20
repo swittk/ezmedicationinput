@@ -91,6 +91,11 @@ export function normalizeTemporalBoundArtifacts(
   source: string,
   options?: ParseOptions
 ): boolean {
+  const clause = item.meta.canonical.clauses[0];
+  // Ownership pruning only changes procedural instructions/graphs.
+  // A simple timing-only clause has nothing to prune, so avoid reparsing its
+  // entire date grammar just to discover an empty action graph.
+  if (!clause?.instructionGraph && !clause?.patientInstruction) return false;
   const ranges = findMedicationDateListSpans(source, options)
     .filter(span => !span.unresolved && span.relation !== 'event')
     .map(span => ({ start: span.start, end: span.end }));
@@ -106,6 +111,9 @@ export function quarantineAmbiguousTemporalBounds(
   source: string,
   options?: ParseOptions
 ): boolean {
+  // The only ambiguity this rule diagnoses is the English "up to DATE"
+  // construction. No lexical cue means no need for a calendar-grammar scan.
+  if (!/\bup\s+to\b/iu.test(source)) return false;
   for (const span of findMedicationDateListSpans(source, options)) {
     if (span.unresolved || span.relation !== 'event') continue;
     const prefix = source.slice(Math.max(0, span.start - 16), span.start);

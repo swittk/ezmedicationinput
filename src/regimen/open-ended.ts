@@ -112,6 +112,10 @@ export function normalizeOpenEndedSchedule(item: ParseResult, source: string, op
   const clause = item.meta.canonical.clauses[0];
   const schedule = clause?.schedule;
   if (!clause || !schedule) return false;
+  // Marker recognition only uses the declared open-ended words and the
+  // adjacent Thai two-word continuations. Skip a full lexical+date scan
+  // when there is no surface form that can possibly produce a marker.
+  if (!/\b(?:onwards?|forwards?)\b|ต่อไป|เป็นต้น\s*ไป|(?:^|[^ก-๙])ไป/u.test(source)) return false;
   const markers = findOpenEndedMarkers(source, options);
   if (!markers.length) return false;
   removeInstructionArtifactsOwnedByTemporalRanges(item, markers.map(marker => ({ start: marker.start, end: marker.end })));

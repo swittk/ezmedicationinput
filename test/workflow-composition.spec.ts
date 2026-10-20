@@ -99,10 +99,14 @@ describe("compositional workflow and regimen scope", () => {
     );
   });
 
-  it("preserves coordinated anatomy when and does not introduce an action", () => {
+  it("preserves concurrent coordinated anatomy without introducing procedural actions", () => {
     const parsed = parseSig("apply to scalp and forehead bid");
-    expect(parsed.fhir.site?.text).toBe("scalp and forehead");
-    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["scalp", "forehead"]);
+    for (const item of parsed.items) {
+      expect(item.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    }
+    expect(parsed.meta.canonical.clauses.every(clause =>
+      !clause.instructionGraph?.actions.length)).toBe(true);
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
 

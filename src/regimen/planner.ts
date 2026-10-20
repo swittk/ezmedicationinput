@@ -1,5 +1,5 @@
 import { lexInput } from '../lexer/lex';
-import { annotateLexTokens, hasEventTimingMeaning } from '../lexer/meaning';
+import { annotateLexTokens, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
@@ -51,6 +51,16 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
   return sites;
 }
 
+const contexts = new WeakMap<BoundaryPlan, EvidenceContext>();
+
+/** Reuse exact completed HPSG probes, but never a partial probe or an input
+ * requiring carry-forward inheritance. This is local to one parse operation. */
+export function takeBoundaryParsedState(
+  plan: BoundaryPlan, start: number, end: number, text: string
+) {
+  return contexts.get(plan)?.takeParsedState(start, end, text);
+}
+
 /** Experimental boundary grammar; deliberately not exported by the package or used by production. */
 export function planBoundaries(input: string, options?: ParseOptions, experiment: PlannerOptions = {}): BoundaryPlan {
   const tokens = annotateLexTokens(lexInput(input));
@@ -61,6 +71,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const sites = candidateSites(input, tokens, options);
   const evidence = new EvidenceContext(input, tokens, options, metrics, experiment.cache !== false);
   const plan: BoundaryPlan = { experimental: true, segments: [], claims, decisions: [], relations: [], metrics };
+  contexts.set(plan, evidence);
   let start = 0, inheritedAdministration = false;
 
   const segment = (end: number, inheritTrailingDurationFromNext = false): boolean => {
@@ -103,11 +114,26 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       // administration. Keep punctuation inside a procedure or one dosage.
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
       if (site.surface === ';' && rightStart < input.length) {
-        const right = evidence.probe(rightStart, probeEnd(site.rightIndex));
-        if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
+        const rightEnd = probeEnd(site.rightIndex);
+        // A separately dosed administration must have both dose and timing
+        // evidence. Pure procedure/precaution continuations may mention
+        // quantities ("re-prime with 2 sprays") without a repeat schedule;
+        // probing their entire HPSG clauses adds cost but cannot introduce a
+        // new dosage stage. Use typed lexical evidence first.
+        const rightHasTiming = tokens.some((token, index) =>
+          index >= site.rightIndex && token.sourceStart < rightEnd &&
+          (hasEventTimingMeaning(token) ||
+            hasTimingAbbreviationMeaning(token) ||
+            token.kind === LexKind.TimeLike ||
+            /^(?:daily|nightly|weekly|monthly|once|twice|thrice)$/iu.test(lexeme(token)))
+        );
+        if (rightHasTiming && hasUnit(site.rightIndex, rightEnd)) {
+          const right = evidence.probe(rightStart, rightEnd);
+          if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
           proposals.push({ action: 'split', rule: 'regimen.separate-administration',
             priority: 720, relation: 'independent',
             evidence: [{ feature: 'right.complete-dosed-administration', value: true }] });
+          }
         }
       }
       proposals.push(keep('boundary.punctuation-is-not-a-regimen', 0, 'punctuation', site.surface));

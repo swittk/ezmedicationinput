@@ -9,6 +9,7 @@ import {
   EventClockMap,
   FhirDosage,
   EzDosage,
+  EzDoseAndRate,
   FhirPeriodUnit,
   FhirQuantity,
   FhirTiming,
@@ -2634,19 +2635,210 @@ function countScheduleEvents(
   return count;
 }
 
+/** Supply math is deterministic only when the administered amount is known.
+ * Clinical conditions/PRN are represented as a maximum permitted supply,
+ * not as a claim that every available dose will actually be administered. */
+export class MedicationQuantityCalculationError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "MedicationQuantityCalculationError";
+  }
+}
+
+function calculationHorizon(options: TotalUnitsOptions, zone: string): Date {
+  if (!Number.isFinite(options.durationValue) || options.durationValue <= 0)
+    throw new MedicationQuantityCalculationError("invalid-horizon",
+      "Supply duration must be a positive number of supported calendar/time units.");
+  const advance = createIntervalStepper({
+    period: options.durationValue, periodUnit: options.durationUnit
+  }, zone);
+  if (!advance) throw new MedicationQuantityCalculationError("unsupported-horizon",
+    "The requested dispensing duration has no supported time unit; supply a duration in minutes, hours, days, weeks, months or years.");
+  const from = coerceDate(options.from, "from");
+  const end = advance(from);
+  if (!end || end <= from) throw new MedicationQuantityCalculationError("invalid-horizon",
+    "Dispensing duration does not produce a date after the start of the dispensing window.");
+  return end;
+}
+
+function prepareMeasuredDose(dosage: FhirDosage, options: TotalUnitsOptions): FhirDosage {
+  const values = dosage.doseAndRate ?? [];
+  if (values.some(entry => (entry as EzDoseAndRate).doseExpression ||
+      (entry as EzDoseAndRate).rateExpression)) {
+    throw new MedicationQuantityCalculationError("dose-expression-needs-evaluation",
+      "The prescription contains a calculated dose/rate expression. Provide the evaluated patient-specific dose before calculating medication supply.");
+  }
+  const first = values.length === 1 ? values[0] : undefined;
+  if (!first) throw new MedicationQuantityCalculationError("missing-dose",
+    "The prescribed quantity per administration is missing or contains alternative doses. Select the applicable dose before calculating supply.");
+  let quantity = first.doseQuantity;
+  // The usual known tablet/drop/capsule amount needs no object allocation,
+  // expression evaluation or rate conversion. This is also the dominant
+  // calculation path for pre-existing callers.
+  if (quantity && Number.isFinite(quantity.value) && quantity.value! > 0 &&
+      !quantity.comparator && !/\/kg$/i.test(quantity.code ?? quantity.unit ?? ""))
+    return dosage;
+  if (!quantity && (first.rateQuantity || first.rateRatio)) {
+    const repeat = dosage.timing?.repeat;
+    const duration = repeat?.duration;
+    const durationUnit = repeat?.durationUnit;
+    if (duration === undefined || !durationUnit || duration <= 0)
+      throw new MedicationQuantityCalculationError("infusion-duration-required",
+        "Infusion rate is specified, but duration per infusion is not. Supply the infusion duration before computing volume/amount.");
+    const timeSeconds: Record<string, number> = {
+      s: 1, min: 60, h: 3600, d: 86400, wk: 604800
+    };
+    let amount: number | undefined, unit: string | undefined;
+    if (first.rateQuantity?.value !== undefined && first.rateQuantity.unit) {
+      const match = first.rateQuantity.unit.match(/^(.+?)\/(s|min|h|d|wk)$/i);
+      if (match) {
+        const denominator = match[2].toLowerCase();
+        const divisor = timeSeconds[denominator];
+        const numerator = timeSeconds[durationUnit];
+        if (divisor && numerator) {
+          amount = first.rateQuantity.value * duration * numerator / divisor;
+          unit = match[1];
+        }
+      }
+    } else if (first.rateRatio?.numerator?.value !== undefined &&
+        first.rateRatio.denominator?.value !== undefined) {
+      const numerator = first.rateRatio.numerator;
+      const denominator = first.rateRatio.denominator;
+      const divisor = timeSeconds[denominator.code ?? denominator.unit ?? ""];
+      const seconds = timeSeconds[durationUnit];
+      if (divisor && seconds && denominator.value! > 0) {
+        amount = numerator.value! / denominator.value! * duration * seconds / divisor;
+        unit = numerator.unit ?? numerator.code;
+      }
+    }
+    if (amount === undefined || !Number.isFinite(amount) || amount <= 0)
+      throw new MedicationQuantityCalculationError("rate-units-unresolved",
+        "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity.");
+    quantity = { value: amount, unit };
+  }
+  if (!quantity && first.doseRange?.low && first.doseRange.high &&
+      first.doseRange.low.value === first.doseRange.high.value) {
+    quantity = first.doseRange.low;
+  }
+  if (!quantity || quantity.value === undefined || !Number.isFinite(quantity.value) ||
+      quantity.value <= 0 || quantity.comparator) {
+    throw new MedicationQuantityCalculationError("dose-amount-unresolved",
+      "The administered dose is not a single known positive quantity. Provide the applicable dose, range choice, or evaluated expression.");
+  }
+  const perKg = (quantity.code ?? quantity.unit ?? "").match(/^(.+?)\/kg$/i);
+  if (perKg) {
+    const weight = options.patientWeightKg;
+    if (weight === undefined || !Number.isFinite(weight) || weight <= 0)
+      throw new MedicationQuantityCalculationError("patient-weight-required",
+        "This dose is prescribed per kilogram. Provide patientWeightKg to calculate an actual medication quantity.");
+    quantity = {
+      ...quantity, value: roundCalculatedUnits(quantity.value * weight),
+      unit: perKg[1], code: quantity.code ? perKg[1] : undefined
+    };
+  }
+  return {
+    ...dosage,
+    doseAndRate: [{ ...first, doseQuantity: quantity }]
+  };
+}
+
+function sumCourseUnits(
+  entries: Array<{ total: TotalUnitsResult; unit: string | undefined }>,
+  options: TotalUnitsOptions
+): TotalUnitsResult {
+  let commonUnit: string | undefined;
+  let totalUnits = 0;
+  let approximate: TotalUnitsResult["totalApproximateQuantity"];
+  let ingredient: TotalUnitsResult["totalApproximateIngredientQuantity"];
+  let mixedApproximate = false, mixedIngredient = false;
+  let maximum = false;
+  const details: string[] = [];
+  for (const { total, unit } of entries) {
+    let quantity = total.totalUnits;
+    if (commonUnit !== undefined && unit !== undefined &&
+        commonUnit.toLowerCase() !== unit.toLowerCase()) {
+      const translated = convertValue(quantity, unit, commonUnit,
+        resolveContextStrengthRatio(options.context) as any);
+      if (translated === null)
+        throw new MedicationQuantityCalculationError("incompatible-dose-units",
+          `Cannot sum medication supply expressed in ${commonUnit} and ${unit}. Provide a product strength or equivalent conversion before combining the dosages.`);
+      quantity = translated;
+    } else if (commonUnit === undefined) {
+      commonUnit = unit;
+    }
+    totalUnits = roundCalculatedUnits(totalUnits + quantity);
+    if (total.quantityKind === "maximum") maximum = true;
+    if (total.explanation) details.push(total.explanation);
+    if (total.totalApproximateQuantity && !mixedApproximate) {
+      const q = total.totalApproximateQuantity;
+      if (!approximate) approximate = { ...q };
+      else if (approximate.unit === q.unit && approximate.confidence === q.confidence &&
+          approximate.basis === q.basis && approximate.source === q.source)
+        approximate.value = roundCalculatedUnits((approximate.value ?? 0) + (q.value ?? 0));
+      else { approximate = undefined; mixedApproximate = true; }
+    } else if (!total.totalApproximateQuantity && approximate) {
+      approximate = undefined; mixedApproximate = true;
+    }
+    if (total.totalApproximateIngredientQuantity && !mixedIngredient) {
+      const q = total.totalApproximateIngredientQuantity;
+      if (!ingredient) ingredient = { ...q };
+      else if (ingredient.unit === q.unit && ingredient.confidence === q.confidence &&
+          ingredient.basis === q.basis && ingredient.source === q.source)
+        ingredient.value = roundCalculatedUnits((ingredient.value ?? 0) + (q.value ?? 0));
+      else { ingredient = undefined; mixedIngredient = true; }
+    } else if (!total.totalApproximateIngredientQuantity && ingredient) {
+      ingredient = undefined; mixedIngredient = true;
+    }
+  }
+  const result: TotalUnitsResult = {
+    totalUnits, ...(commonUnit ? { unit: commonUnit } : {}),
+    quantityKind: maximum ? "maximum" : "scheduled",
+    ...(maximum ? { explanation: [...new Set(details)].join(" ") ||
+      "Maximum scheduled supply; PRN/conditional administrations may not all be used." } : {}),
+    ...(approximate ? { totalApproximateQuantity: approximate } : {}),
+    ...(ingredient ? { totalApproximateIngredientQuantity: ingredient } : {})
+  };
+  const context = options.context;
+  if (context?.containerValue && context.containerValue > 0) {
+    const containerUnit = context.containerUnit;
+    const packageUnit = context.packageUnit;
+    const estimateValue = approximate?.value;
+    const estimateUnit = approximate?.unit;
+    const useEstimate = estimateValue !== undefined && estimateUnit && containerUnit &&
+      estimateUnit.toLowerCase() === containerUnit.toLowerCase();
+    const matchesPackage = commonUnit && packageUnit &&
+      commonUnit.toLowerCase() === packageUnit.toLowerCase();
+    if (useEstimate || matchesPackage) {
+      const effective = useEstimate ? estimateValue! : totalUnits;
+      const divisor = matchesPackage && !useEstimate ? 1 : context.containerValue;
+      result.totalContainers = Math.ceil(effective / divisor);
+      if (containerUnit) result.totalContainerQuantity = {
+        value: useEstimate ? estimateValue! : roundCalculatedUnits(result.totalContainers * context.containerValue),
+        unit: containerUnit
+      };
+    } else if (commonUnit && containerUnit && commonUnit.toLowerCase() === containerUnit.toLowerCase()) {
+      result.totalContainers = Math.ceil(totalUnits / context.containerValue);
+      result.totalContainerQuantity = { value: totalUnits, unit: containerUnit };
+    }
+  }
+  return result;
+}
+
 function calculateTotalUnitsSingle(
   options: Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage }
 ): TotalUnitsResult {
-  const { dosage, durationValue, durationUnit, roundToMultiple, context } = options;
-  if (getUnresolvedDosage(dosage) ||
-      getDosageCondition(dosage) ||
-      getDosageExcludedDates(dosage).length) {
-    throw new Error("Cannot calculate fixed medication totals from an unresolved, condition-dependent, or date-excluded Dosage");
+  const { dosage: sourceDosage, durationValue, durationUnit, roundToMultiple, context } = options;
+  const unresolved = getUnresolvedDosage(sourceDosage);
+  if (unresolved) {
+    throw new MedicationQuantityCalculationError("unresolved-regimen",
+      `Cannot calculate supply because the instruction has an unresolved clinical schedule (${unresolved}). Clarify the missing/contradictory instruction before dispensing.`);
   }
-  if (dosage.doseAndRate?.some(rate => (rate.rateQuantity || rate.rateRatio || rate.rateRange) &&
-    !rate.doseQuantity && !rate.doseRange)) {
-    throw new Error("Infusion rate alone is not a discrete medication quantity; provide duration and a rate-aware quantity calculation");
-  }
+  const dosage = prepareMeasuredDose(sourceDosage, options);
+  const conditional = getDosageCondition(dosage);
+  const excludedDates = getDosageExcludedDates(dosage);
+  const useMaximalPlan = !!dosage.asNeeded ||
+    (!!conditional && !options.evaluateCondition);
+
   const from = coerceDate(options.from, "from");
   const orderedAtDate =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
@@ -2701,31 +2893,60 @@ function calculateTotalUnitsSingle(
     resolveRepeatBoundsEndExclusive(repeat, timeZone)
   );
 
-  const exactEvents = dosage.timing
-    ? exactTimingEventOccurrences(
-      dosage.timing,
-      repeat,
-      config,
-      countFrom,
-      effectiveOrderedAt,
-      endDay,
-      timeZone,
-      2000,
-      0,
-      Boolean(effectiveOrderedAt)
-    )
-    : undefined;
-  const count = exactEvents !== undefined
-    ? exactEvents.length
-    : countScheduleEvents(
-      dosage,
-      countFrom,
-      endDay,
-      config,
-      baseTime,
-      effectiveOrderedAt,
-      2000
-    );
+  const needsFilteredEnumeration = conditional || excludedDates.length ||
+    !!dosage.maxDosePerPeriod?.length || !!getTimingOccurrenceCap(repeat);
+  let count: number;
+  if (endDay <= countFrom) {
+    count = 0;
+  } else if (needsFilteredEnumeration) {
+    // A constrained course may exclude individual administration instants
+    // (dates, conditions or quantity limits); counting the raw cadence would
+    // silently inflate supply. Enumerate only within the requested window.
+    const endInclusive = new Date(endDay.getTime() - 1).toISOString();
+    const boundedRepeat: FhirTimingRepeat = {
+      ...(repeat ?? {}),
+      boundsPeriod: {
+        ...(repeat?.boundsPeriod?.start ? { start: repeat.boundsPeriod.start } : {}),
+        end: endInclusive
+      }
+    };
+    const bounded: FhirDosage = {
+      ...dosage,
+      timing: { ...(dosage.timing ?? {}), repeat: boundedRepeat }
+    };
+    const maximumCandidates = 10000;
+    const scheduled = nextDueDoses(bounded, {
+      ...options, from: countFrom, limit: maximumCandidates,
+      orderedAt: effectiveOrderedAt ?? options.orderedAt,
+      evaluateCondition: options.evaluateCondition ?? (() => true)
+    });
+    if (scheduled.length === maximumCandidates &&
+        Date.parse(scheduled[scheduled.length - 1]) < endDay.getTime()) {
+      throw new MedicationQuantityCalculationError("schedule-horizon-too-dense",
+        "More than 10,000 administrations could occur in the requested supply window. Use a shorter calculation window or a verified interval-count integration.");
+    }
+    count = scheduled.filter(date => Date.parse(date) < endDay.getTime()).length;
+  } else {
+    const exactEvents = dosage.timing
+      ? exactTimingEventOccurrences(
+        dosage.timing,
+        repeat,
+        config,
+        countFrom,
+        effectiveOrderedAt,
+        endDay,
+        timeZone,
+        100000,
+        0,
+        Boolean(effectiveOrderedAt)
+      )
+      : undefined;
+    count = exactEvents !== undefined
+      ? exactEvents.length
+      : countScheduleEvents(
+        dosage, countFrom, endDay, config, baseTime, effectiveOrderedAt, 100000
+      );
+  }
 
   const doseQuantity = dosage.doseAndRate?.[0]?.doseQuantity?.value ?? 0;
   const targetMultiplier = getAdministrationTargetMultiplier(dosage, context);
@@ -2735,7 +2956,15 @@ function calculateTotalUnitsSingle(
     totalUnits = roundCalculatedUnits(Math.ceil(totalUnits / roundToMultiple) * roundToMultiple);
   }
 
-  const result: TotalUnitsResult = { totalUnits };
+  const result: TotalUnitsResult = {
+    totalUnits,
+    ...(useMaximalPlan ? {
+      quantityKind: "maximum" as const,
+      explanation: conditional && !options.evaluateCondition
+        ? "Maximum possible supply: every scheduled clinical condition was assumed true. Supply an evaluateCondition callback to calculate a patient-specific conditional schedule."
+        : "Maximum possible supply: PRN doses may be used less frequently than the available scheduled opportunities."
+    } : {})
+  };
 
   // Handle containers
   const containerValue = context?.containerValue;
@@ -2798,14 +3027,147 @@ function calculateTotalUnitsSingle(
   return result;
 }
 
-export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
-  // Prevent JS callers from passing the primary R6 object to an R5-only
-  // calculator, which would otherwise return a misleading zero supply.
-  if (options.dosage && typeof options.dosage === "object" &&
-      !Array.isArray(options.dosage) &&
-      ("step" in options.dosage || "items" in options.dosage)) {
-    throw new Error("R6 whole-course quantity calculations are not yet supported; use explicit R5 single-dose calculations, not a taper-wide estimate");
+/**
+ * Calculate a complete sequential/parallel regimen with the same global R6
+ * step windows that the scheduler uses. Supply is summed per component,
+ * never by pretending that all stages run through the whole request window.
+ */
+function calculateCourseTotalUnits(
+  course: FhirR6DosageDetails, options: TotalUnitsOptions
+): TotalUnitsResult {
+  if (course.repeatCycle)
+    throw new MedicationQuantityCalculationError("course-repeat-cycle",
+      "A repeated whole-course cycle needs an explicit cycle count or stop rule; specify how many cycles are being dispensed.");
+  if (course.safety)
+    throw new MedicationQuantityCalculationError("course-wide-safety",
+      "Whole-course safety limits need to be evaluated across all treatment stages before calculating the permitted supply.");
+  if (course.step.some(step => step.count !== undefined || step.safety))
+    throw new MedicationQuantityCalculationError("step-level-r6-rule",
+      "An R6 step has a separate repetition count or safety limit. Supply requires that rule to be resolved, not mistaken for a normal phase duration.");
+  const zone = options.timeZone ?? options.config?.timeZone;
+  if (!zone)
+    throw new MedicationQuantityCalculationError("time-zone-required",
+      "Provide timeZone to calculate local administration times and calendar-month transitions.");
+  const queryStart = coerceDate(options.from, "from");
+  const queryEnd = calculationHorizon(options, zone);
+  if (!course.step.length) return { totalUnits: 0 };
+  const anchored = options.orderedAt !== undefined;
+  if (course.step.length > 1 && !anchored &&
+      !course.step.every(step => step.component.every(component =>
+        Boolean(component.timing?.repeat?.boundsPeriod?.start)))) {
+    throw new MedicationQuantityCalculationError("treatment-start-required",
+      "Provide orderedAt, the original treatment start date/time: sequential relative dosage phases cannot be positioned using the future supply-window start alone.");
   }
+  const treatmentStart = anchored ? coerceDate(options.orderedAt!, "orderedAt") : queryStart;
+  const flattened = toFhirR5Dosages(course);
+  const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
+  let cursor = treatmentStart, dosageIndex = 0;
+  for (let index = 0; index < course.step.length; index++) {
+    const step = course.step[index];
+    const start = step.start
+      ? treatmentRelativeInstant(step.start, treatmentStart, zone)
+      : cursor;
+    const dosages: FhirDosage[] = [];
+    const starts: Date[] = [];
+    const ends: Array<Date | null> = [];
+    for (const _component of step.component) {
+      const dosage = flattened[dosageIndex++];
+      if (!dosage) throw new MedicationQuantityCalculationError("invalid-course",
+        "The R6 treatment course contains a different number of components from its dosage projection.");
+      const unresolved = getUnresolvedDosage(dosage);
+      if (unresolved)
+        throw new MedicationQuantityCalculationError("unresolved-regimen",
+          "A dosage has an unresolved schedule (" + unresolved + "). Clarify its timing before requesting a numeric supply.");
+      dosages.push(dosage);
+      const repeat = dosage.timing?.repeat;
+      const individualStart = resolveRepeatBoundsStart(repeat, zone) ?? start;
+      if (individualStart < start)
+        throw new MedicationQuantityCalculationError("overlapping-course",
+          "A dosage begins before its enclosing global treatment stage; review its bounds.");
+      starts.push(individualStart);
+      ends.push(earlierDate(
+        resolveRepeatDurationCapEnd(repeat, individualStart, zone),
+        resolveRepeatBoundsEndExclusive(repeat, zone)
+      ));
+    }
+    const nextStep = course.step[index + 1];
+    let stepEnd = step.end
+      ? treatmentRelativeInstant(step.end, treatmentStart, zone) : undefined;
+    if (!stepEnd && nextStep?.start)
+      stepEnd = treatmentRelativeInstant(nextStep.start, treatmentStart, zone);
+    if (!stepEnd && nextStep) {
+      if (!ends.length || ends.some(value => !value))
+        throw new MedicationQuantityCalculationError("phase-duration-required",
+          "Stage " + (index + 1) + " has no finite stop rule before the next stage. Specify the phase duration (e.g. x7d), end date or the next stage start.");
+      stepEnd = ends.reduce<Date>((latest, value) =>
+        value && value > latest ? value : latest, start);
+    }
+    if (stepEnd && stepEnd <= start)
+      throw new MedicationQuantityCalculationError("invalid-stage-order",
+        "Stage " + (index + 1) + " ends at or before its start. Review the stage duration/date.");
+    if (index > 0 && start < cursor)
+      throw new MedicationQuantityCalculationError("overlapping-course",
+        "The prescribed treatment stages overlap despite sequential ordering. Correct the stage dates or represent independent concurrent tracks.");
+    for (let j = 0; j < dosages.length; j++) {
+      const dosage = dosages[j];
+      const begin = starts[j];
+      const ownEnd = ends[j];
+      const end = [queryEnd, ...(stepEnd ? [stepEnd] : []),
+        ...(ownEnd ? [ownEnd] : [])].reduce((earliest, candidate) =>
+        candidate < earliest ? candidate : earliest, queryEnd);
+      if (end <= begin || end <= queryStart) continue;
+      if (!dosage.timing?.repeat)
+        throw new MedicationQuantityCalculationError("timing-required",
+          "Stage " + (index + 1) + " has no executable frequency or dosing time for one component.");
+      const bounded: FhirDosage = {
+        ...dosage,
+        modifierExtension: dosage.modifierExtension?.filter(ext => ext.url !== DOSAGE_DETAILS_R5_URL),
+        timing: {
+          ...dosage.timing,
+          repeat: {
+            ...dosage.timing.repeat,
+            // Global stage cut has already applied any boundsDuration;
+            // never re-anchor it from the supply-window start.
+            boundsDuration: undefined,
+            boundsPeriod: {
+              start: begin.toISOString(),
+              end: new Date(end.getTime() - 1).toISOString()
+            }
+          }
+        }
+      };
+      const measured = prepareMeasuredDose(bounded, options);
+      const calculated = calculateTotalUnitsSingle({
+        ...options, dosage: bounded, orderedAt: begin,
+        roundToMultiple: undefined
+      });
+      entries.push({
+        total: calculated,
+        unit: measured.doseAndRate?.[0]?.doseQuantity?.unit ??
+          measured.doseAndRate?.[0]?.doseQuantity?.code
+      });
+    }
+    if (stepEnd) cursor = stepEnd;
+  }
+  const combined = sumCourseUnits(entries, options);
+  if (options.roundToMultiple && options.roundToMultiple > 0)
+    combined.totalUnits = roundCalculatedUnits(
+      Math.ceil(combined.totalUnits / options.roundToMultiple) * options.roundToMultiple
+    );
+  return combined;
+}
+
+export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResult {
+  if (!options || !options.dosage)
+    throw new MedicationQuantityCalculationError("missing-regimen",
+      "A medication dosage or complete treatment course is required for supply calculation.");
+  const input = options.dosage;
+  if (!Array.isArray(input) && "items" in input)
+    return calculateCourseTotalUnits((input as ParseBatchResult).fhirNext, options);
+  if (!Array.isArray(input) && "step" in input)
+    return calculateCourseTotalUnits(input as FhirR6DosageDetails, options);
+  if (Array.isArray(input))
+    return calculateCourseTotalUnits(toDosageDetails(input as FhirDosage[]), options);
   if (Array.isArray(options.dosage)) {
     const sequences = new Set(options.dosage.map(dose => dose.sequence ?? 1));
     if (sequences.size > 1) {

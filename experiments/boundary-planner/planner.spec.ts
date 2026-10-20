@@ -4,7 +4,8 @@ import { OwnershipIndex } from './structures';
 import { expandAdministrationTargets, expandLintAdministrationTargets, recognizeAdministrationTargetGroups } from './targets';
 import { recognizeCycles } from './cycles';
 import { normalizeCandidateModulePath } from './integration.mjs';
-import { formatSig, parseSig } from '../../src/index';
+import { formatSig } from '../../src/index';
+import { parseSig } from '../../test/helpers/r5-parser';
 import { arbitrate } from './grammar';
 import { EvidenceContext } from './evidence';
 import { lexInput } from '../../src/lexer/lex';
@@ -161,19 +162,25 @@ describe('experimental boundary planner structural contracts', () => {
     expect(unchanged[0].issues).toEqual([issue]);
   });
 
-  it('removes target-owned lint issues only when conjunction lowering actually expands the result', () => {
+  it('keeps already-expanded target dosages stable instead of expanding them twice', () => {
     const input = 'Apply to right arm and right leg daily from 22/09/2026 onwards';
     const options = { locale: 'en-GB' as const, datePolicy: { referenceDate: '2026-09-20' } };
-    const result = parseSig(input, options);
+    const parsed = parseSig(input, options);
+    // Production now performs target expansion as part of parseSig. The
+    // historical experiment must not duplicate dosages by expanding a result
+    // that is already scoped to one anatomical target.
+    expect(parsed.items.map(entry => entry.fhir.site?.text)).toEqual(['right arm', 'right leg']);
+    const first = parsed.items[0];
     const issue = {
       message: 'synthetic target issue',
       text: 'right leg',
       tokens: ['right', 'leg']
     };
-    const expanded = expandLintAdministrationTargets([{ result, issues: [issue] }], options, formatSig);
-    expect(expanded).toHaveLength(2);
-    expect(expanded.every(entry => entry.issues.length === 0)).toBe(true);
-    expect(expanded.map(entry => entry.result.fhir.site?.text)).toEqual(['right arm', 'right leg']);
+    const entry = { result: first, issues: [issue] };
+    const expanded = expandLintAdministrationTargets([entry], options, formatSig);
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0]).toBe(entry);
+    expect(expanded[0].issues).toEqual([issue]);
   });
 
   it('preserves the first specific finite-cycle validation error', () => {

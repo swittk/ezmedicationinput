@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits, formatSig, FhirPeriodUnit } from '../../src/index';
+import { lintSig, nextDueDoses, calculateTotalUnits, formatSig, FhirPeriodUnit } from '../../src/index';
+import { parseSig, parseSigAsync } from '../../test/helpers/r5-parser';
 import { canonicalFromFhir, canonicalToFhir } from '../../src/fhir';
 import { ORIGINAL_CORPUS, SCHEDULE_OPTIONS } from './corpus';
 import { SPECIALTY_CASES, SPECIALTY_SEEDS } from './specialty-corpus';
@@ -35,8 +36,15 @@ function checkClinical(c: GoldenCase) {
   c.items.forEach((wanted, index) => {
     const item = parsed.items[index], fhir = item.fhir, repeat = fhir.timing?.repeat;
     const due = nextDueDoses(fhir, scheduleOptions);
-    const total = calculateTotalUnits({ dosage: fhir, from: scheduleOptions.from, timeZone: scheduleOptions.timeZone,
-      durationValue: c.totalDays ?? 70, durationUnit: FhirPeriodUnit.Day, ...c.scheduleOptions }).totalUnits;
+    const totalOptions = { dosage: fhir, from: scheduleOptions.from, timeZone: scheduleOptions.timeZone,
+      durationValue: c.totalDays ?? 70, durationUnit: FhirPeriodUnit.Day, ...c.scheduleOptions };
+    let total: number | undefined;
+    if (wanted.noDose) {
+      // An unknown administered dose is not the same as exactly zero units.
+      expect(() => calculateTotalUnits(totalOptions)).toThrow(/dose|quantity|amount/i);
+    } else {
+      total = calculateTotalUnits(totalOptions).totalUnits;
+    }
     const actual = { method: fhir.method?.text, site: fhir.site?.text, siteCode: fhir.site?.coding?.find(code => code.code)?.code,
       dose: fhir.doseAndRate?.[0]?.doseQuantity?.value, unit: fhir.doseAndRate?.[0]?.doseQuantity?.unit,
       dates: fhir.timing?.event, clocks: repeat?.timeOfDay, when: repeat?.when, weekdays: repeat?.dayOfWeek,
@@ -44,6 +52,7 @@ function checkClinical(c: GoldenCase) {
       duration: item.meta.canonical.clauses[0]?.schedule?.duration ?? repeat?.boundsDuration?.value,
       period: repeat?.period, periodUnit: repeat?.periodUnit, frequency: repeat?.frequency, due, totalUnits: total };
     for (const key of Object.keys(actual) as Array<keyof typeof actual>) {
+      if (wanted.noDose && key === 'totalUnits') continue;
       if (key in wanted) expect(actual[key], `${c.id}:item${index}:${key}`).toEqual(wanted[key]);
     }
     if (wanted.noStart) expect(repeat?.boundsPeriod?.start).toBeUndefined();
@@ -159,21 +168,24 @@ describe('known-invalid input never becomes a fabricated executable regimen', ()
     expect(parsed.items).toHaveLength(1);
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(.5);
     expect(parsed.warnings.some(w=>w.indexOf('Unresolved schedule')>=0)).toBe(true);
-    expect(nextDueDoses(parsed.fhir,SCHEDULE_OPTIONS)).toEqual([]);
+    expect(() => nextDueDoses(parsed.fhir,SCHEDULE_OPTIONS))
+      .toThrow(/Cannot schedule unresolved dosage/);
     expect(parsed.longText).toContain(text);
   });
   it('refuses a contradictory explicit start without overwriting it to look valid', () => {
     const parsed=parseSig('take 1 tab at 08:00 on 4/10 then every Sunday at 09:00 from 28/9 until 30/11', {datePolicy:{referenceDate:'2026-09-27'}});
     expect(parsed.items).toHaveLength(2);
     expect(nextDueDoses(parsed.items[0].fhir,SCHEDULE_OPTIONS)).toEqual(['2026-10-04T08:00:00+07:00']);
-    expect(nextDueDoses(parsed.items[1].fhir,SCHEDULE_OPTIONS)).toEqual([]);
+    expect(() => nextDueDoses(parsed.items[1].fhir,SCHEDULE_OPTIONS))
+      .toThrow(/phase-start-precedes-predecessor-end/);
     expect(parsed.items[1].warnings.join(' ')).toContain('phase-start-precedes-predecessor-end');
   });
   it('does not silently choose a clock from heterogeneous predecessors', () => {
     const parsed=parseSig('take 1 tab at 08:00 on 4/10 and at 20:00 on 28/9 then every Sunday until 30/11', {datePolicy:{referenceDate:'2026-09-27'}});
     expect(parsed.items).toHaveLength(3);
     expect(parsed.items[2].warnings.join(' ')).toContain('ambiguous-inherited-clock');
-    expect(nextDueDoses(parsed.items[2].fhir,SCHEDULE_OPTIONS)).toEqual([]);
+    expect(() => nextDueDoses(parsed.items[2].fhir,SCHEDULE_OPTIONS))
+      .toThrow(/ambiguous-inherited-clock/);
   });
   it.each([
     'Apply to right arm or right leg daily from 22/09/2026 onwards',
@@ -198,7 +210,7 @@ describe('known-invalid input never becomes a fabricated executable regimen', ()
 
   it('does not silently turn a range or PRN into a precise fixed dose', () => {
     const parsed=parseSig('take 1-2 tablets every 6 hours as needed for pain');
-    expect(parsed.fhir.asNeededBoolean).toBe(true);
+    expect(parsed.fhir.asNeeded).toBe(true);
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
     expect(parsed.fhir.doseAndRate?.[0]?.doseRange).toMatchObject({low:{value:1},high:{value:2}});
   });

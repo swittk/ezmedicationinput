@@ -3373,12 +3373,14 @@ describe("parseSig core scenarios", () => {
     });
   });
 
-  it("preserves coordinated topical site phrases", () => {
+  it("preserves coordinated topical sites as concurrent, independently identified targets", () => {
     const result = parseSig("apply to scalp and forehead bid");
-    expect(result.fhir.site?.text).toBe("scalp and forehead");
-    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+    expect(result.items.map(item => item.fhir.site?.text)).toEqual(["scalp", "forehead"]);
+    expect(result.items.map(item => item.fhir.route?.coding?.[0]?.code)).toEqual([
+      SNOMEDCTRouteCodes["Topical route"],
       SNOMEDCTRouteCodes["Topical route"]
-    );
+    ]);
+    expect(result.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([2, 2]);
   });
 
   it("records probe requests for unresolved sites so UIs can prompt", () => {

@@ -1731,6 +1731,12 @@ export interface RegimenDueTimes {
 
 export interface TotalUnitsResult {
   totalUnits: number;
+  /** Unit of totalUnits, when known. */
+  unit?: string;
+  /** PRN and unresolved clinical observations yield the maximum planned supply, not actual consumption. */
+  quantityKind?: "scheduled" | "maximum";
+  /** Human-readable basis/assumptions suitable for displaying alongside a calculated quantity. */
+  explanation?: string;
   totalContainers?: number;
   totalContainerQuantity?: FhirQuantity;
   totalApproximateQuantity?: EstimatedQuantity;
@@ -1738,7 +1744,9 @@ export interface TotalUnitsResult {
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
-  dosage: FhirDosage | FhirDosage[];
+  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageDetails | ParseBatchResult;
+  /** Required to resolve per-kg administered doses into an actual quantity. */
+  patientWeightKg?: number;
   durationValue: number;
   durationUnit: FhirPeriodUnit;
   roundToMultiple?: number;

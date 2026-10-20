@@ -1,5 +1,5 @@
 import { matchCalendarExclusion } from "../clinical-safety";
-import { planBoundaries } from './planner';
+import { planBoundaries, takeBoundaryParsedState } from './planner';
 import { stats } from './stats';
 import type { ParseOptions } from '../types';
 export function createBoundaryPlan(input: string, options?: ParseOptions) {
@@ -38,3 +38,5 @@ export function createBoundaryPlan(input: string, options?: ParseOptions) {
 export function parseSigSegments(input: string, options?: ParseOptions) {
   return createBoundaryPlan(input, options).segments;
 }
+
+export { takeBoundaryParsedState };

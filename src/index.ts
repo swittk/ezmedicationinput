@@ -8,7 +8,7 @@ import { quarantineSchedule } from "./regimen/admissibility";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
-import { createBoundaryPlan } from "./regimen/candidate-adapter";
+import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
 import { composeRegimenPhases } from "./regimen/regimen";
 import { expandAdministrationTargets, expandLintAdministrationTargets } from "./regimen/targets";
 import { formatCanonicalClause } from "./format";
@@ -166,7 +166,7 @@ export {
   parseInstructionGraphExtension
 } from "./instruction-graph-fhir";
 export * from "./types";
-export { nextDueDoses, calculateTotalUnits } from "./schedule";
+export { nextDueDoses, calculateTotalUnits, MedicationQuantityCalculationError } from "./schedule";
 export {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getDosageCondition, setDosageCondition,
@@ -969,7 +969,9 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = parseClauseState(segment.text, options);
+    const state = (Object.keys(carry).length === 0
+      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
+      : undefined) ?? parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
@@ -1013,7 +1015,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = parseClauseState(segment.text, options);
+    const state = (Object.keys(carry).length === 0
+      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
+      : undefined) ?? parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
@@ -1123,7 +1127,9 @@ export async function parseSigAsync(
       // dose, route, site or administration unit.
       for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
     }
-    const state = parseClauseState(segment.text, options);
+    const state = (Object.keys(carry).length === 0
+      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
+      : undefined) ?? parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);

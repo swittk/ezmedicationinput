@@ -276,7 +276,9 @@ export function expandAdministrationTargets(
     const source = result.meta.canonical.clauses.map(clause => clause.rawText).join(' ');
     const needsCompoundAnalysis = result.meta.canonical.clauses.some(clause =>
       Boolean(clause.site) && (!clause.site?.coding || Boolean(clause.leftovers?.length)));
-    if (!needsCompoundAnalysis) {
+    if (!needsCompoundAnalysis ||
+        !/(?:\band\b|\bor\b|และ|หรือ|[,;&+])/iu.test(source) ||
+        !mayContainAdministrationTargetGroup(source, options)) {
       output.push(result);
       continue;
     }
