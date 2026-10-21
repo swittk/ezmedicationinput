@@ -63,6 +63,13 @@ const DEFAULT_FREQUENCY_DEFAULTS: Required<FrequencyFallbackTimes> = {
   }
 };
 
+/** Numeric meanings of common institution-clock codes. Reuse one map:
+ * this executes for every frequency-only schedule, including supply counts.
+ */
+const DAILY_FREQUENCY_BY_TIMING_CODE: Readonly<Record<string, number>> = {
+  QD: 1, AM: 1, PM: 1, BID: 2, TID: 3, QID: 4
+};
+
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_DAY = 24 * 60;
 const TOTAL_UNITS_PRECISION = 1_000_000_000_000;
@@ -1139,13 +1146,28 @@ function resolveFrequencyClocks(
   const collected = new Set<string>();
   const code = timing.code?.coding?.find((coding) => coding.code)?.code;
   const normalizedCode = code?.toUpperCase();
-  if (normalizedCode && defaults.byCode?.[normalizedCode]) {
-    for (const clock of defaults.byCode[normalizedCode]) {
+  const repeat = timing.repeat;
+  // R5 Timing.code fully represents its structured repeat. A stale code
+  // must not be UNIONED with edited frequency clocks: QID + 3/d is not five
+  // administrations. Reject the contradictory input rather than guessing.
+  const codedDailyFrequency = normalizedCode
+    ? DAILY_FREQUENCY_BY_TIMING_CODE[normalizedCode]
+    : undefined;
+  if (codedDailyFrequency !== undefined &&
+      repeat?.frequency && repeat.period === 1 && repeat.periodUnit === "d" &&
+      repeat.frequency !== codedDailyFrequency) {
+    throw new Error("Timing.code conflicts with Timing.repeat.frequency; update both before scheduling.");
+  }
+  const codeClocks = normalizedCode ? defaults.byCode?.[normalizedCode] : undefined;
+  if (codeClocks) {
+    for (const clock of codeClocks) {
       collected.add(normalizeClock(clock));
     }
   }
-  const repeat = timing.repeat;
-  if (repeat?.frequency && repeat.period && repeat.periodUnit) {
+  // A recognized code represents the SAME schedule, not another set of
+  // administrations. Use the frequency fallback only when the code has no
+  // configured institutional clock mapping.
+  if (!codeClocks && repeat?.frequency && repeat.period && repeat.periodUnit) {
     const key = `freq:${repeat.frequency}/${repeat.periodUnit}`;
     if (defaults.byFrequency?.[key]) {
       for (const clock of defaults.byFrequency[key]) {

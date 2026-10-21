@@ -131,6 +131,13 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const initial = calculateTotalUnits({ ...supply, dosage: edited });
     expect(initial.totalUnits).toBe(296);
     edited[3].timing!.repeat!.frequency = 3;
+    // The unchanged QID code would contradict a three-times-daily edit.
+    // It must not contribute four additional institution clock entries.
+    expect(() => calculateTotalUnits({ ...supply, dosage: edited }))
+      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
+    expect(() => nextDueDoses(edited, { ...scheduler, from: "2026-10-27T08:00:00+07:00" }))
+      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
+    delete edited[3].timing!.code;
     edited[3].text = "1 drop OS TID after day 7";
     const updated = toDosageDetails(edited);
     expect(updated.step[1].component[1].timing?.repeat?.frequency).toBe(3);
@@ -138,11 +145,42 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(updated.step[1].end?.offsetDuration?.code).toBe("mo");
     expect(updated.renderedInstruction).toContain("TID after day 7");
     const count = calculateTotalUnits({ ...supply, dosage: edited });
-    expect(count.totalUnits).toBe(319);
+    expect(count.totalUnits).toBe(273);
     expect(count.totalUnits).not.toBe(initial.totalUnits);
     const times = nextDueDoses(edited, { ...scheduler, from: "2026-10-27T08:00:00+07:00" });
     expect(times.length).toBeGreaterThan(0);
     expect(updated.step[1].component[1].text).toContain("TID");
+  });
+
+  it("does not union institution code clocks with structured frequency clocks", () => {
+    const base = parseSig("1 tab PO QID").fhir[0];
+    const options = {
+      from: "2026-10-21T00:00:00+07:00",
+      orderedAt: "2026-10-21T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 8
+    };
+    const source = nextDueDoses(base, options);
+    expect(source).toHaveLength(8);
+    // A facility can override both code and frequency clocks. When both
+    // describe the same QID pattern, they are alternatives, not a union.
+    const configured = nextDueDoses(base, {
+      ...options, limit: 4,
+      frequencyDefaults: {
+        byCode: { QID: ["06:00", "10:00", "14:00", "18:00"] },
+        byFrequency: { "freq:4/d": ["07:00", "11:00", "15:00", "19:00"] }
+      }
+    });
+    expect(configured.map(v => v.slice(11, 19)))
+      .toEqual(["06:00:00", "10:00:00", "14:00:00", "18:00:00"]);
+    const edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
+    edited.timing!.repeat!.frequency = 3;
+    expect(() => nextDueDoses(edited, options))
+      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
+    delete edited.timing!.code;
+    const changed = nextDueDoses(edited, options);
+    expect(changed).toHaveLength(8);
+    expect(changed.slice(0, 3).map(v => v.slice(11, 19)))
+      .toEqual(["08:00:00", "14:00:00", "20:00:00"]);
   });
 
   it("retains clinician wording when R5 validators only add canonical coding metadata or empty defaults", () => {

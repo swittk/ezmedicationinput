@@ -617,6 +617,50 @@ describe("calendar date interpretation", () => {
     }
   });
 
+  it("does not interpret explicit Buddhist-era YMD text as a distant Gregorian ISO bound", () => {
+    const examples = [
+      "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่2569-10-25",
+      "รับประทาน 1 เม็ด ทุกวัน ถึงวันที่2569-11-01",
+      "take 1 tab daily until 2569-11-01",
+      "take 1 tab daily from 2400-01-01"
+    ];
+    const options = { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } };
+    for (const input of examples) {
+      const parsed = parseSig(input, options);
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+      expect(parsed.fhir.timing).toBeUndefined();
+      expect(parsed.warnings).toContainEqual(
+        expect.stringContaining("invalid-or-ambiguous-calendar-bound")
+      );
+      expect(parsed.meta.leftoverText).toContain(input);
+      expect(parsed.fhir.text).toContain(input);
+      expect(() => nextDueDoses(parsed.fhir, {
+        from: "2026-10-19T08:00:00+07:00", timeZone: "Asia/Bangkok", limit: 6
+      })).toThrow(/unresolved/i);
+    }
+  });
+
+  it("preserves intentional calendar semantics: BE DMY converts, ISO stays explicit Gregorian", () => {
+    const options = { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } };
+    const be = parseSig("รับประทาน 1 เม็ด ทุกวัน ถึงวันที่25/10/2569", options);
+    expect(be.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-10-25");
+    expect(be.warnings).toEqual([]);
+
+    // The date-policy plausibleWindow applies only to inferred dates.
+    // An explicitly written Gregorian ISO year remains explicit even when
+    // outside the default inferred-year window.
+    const iso = findMedicationDateListSpans("take 1 tab on 2090-10-25", options);
+    expect(iso).toHaveLength(1);
+    expect(iso[0].unresolved).toBe(false);
+    expect(iso[0].events[0]?.isoDate).toBe("2090-10-25");
+
+    const unresolvedEvent = findMedicationDateListSpans(
+      "รับประทาน 1 เม็ด วันที่2569-10-25", options
+    );
+    expect(unresolvedEvent).toHaveLength(1);
+    expect(unresolvedEvent[0].unresolved).toBe(true);
+  });
+
   it("quarantines impossible ISO date bounds rather than executing them indefinitely", () => {
     for (const input of [
       "take 1 tab daily until 2026-02-30",

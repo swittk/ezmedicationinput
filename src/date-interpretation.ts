@@ -112,6 +112,12 @@ function referenceYear(context: MedicationDateResolverContext): number {
   return Number(context.referenceDate.slice(0, 4));
 }
 
+// The built-in Gregorian resolver accepts only these explicit year values.
+// YMD remains explicitly Gregorian in every locale; a Buddhist-era 2569
+// written as 2569-10-25 must not silently schedule Gregorian year 2569.
+const GREGORIAN_YEAR_MIN = 1600;
+const GREGORIAN_YEAR_MAX = 2399;
+
 function nearestCenturyYear(twoDigitYear: number, reference: number): number {
   const century = Math.floor(reference / 100) * 100;
   const candidates = [
@@ -141,7 +147,7 @@ registerMedicationDateResolver({
       const calendarYear = nearestCenturyYear(sourceYear, referenceYear(context));
       return { isoYear: calendarYear, calendarYear, inferredYear: true };
     }
-    if (sourceYear < 1600 || sourceYear > 2399) return undefined;
+    if (sourceYear < GREGORIAN_YEAR_MIN || sourceYear > GREGORIAN_YEAR_MAX) return undefined;
     return { isoYear: sourceYear, calendarYear: sourceYear, inferredYear: false };
   }
 });
@@ -371,7 +377,11 @@ function resolveDatePart(
 
   // ISO dates are unambiguous Gregorian YMD even in Thai or MDY inputs.
   if (part.isoYearFirst) {
+    // Unlike two-digit inferred years, explicit Gregorian years are not
+    // narrowed to the reference-date plausibility window. Use the same
+    // supported explicit-year range as the built-in Gregorian resolver.
     if (source.year === undefined ||
+        source.year < GREGORIAN_YEAR_MIN || source.year > GREGORIAN_YEAR_MAX ||
         !validGregorianDate(source.year, source.month, source.day)) return undefined;
     return {
       isoDate: isoDate(source.year, source.month, source.day),
