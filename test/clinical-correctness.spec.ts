@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
+import { parseMedicationGuard } from "../src/medication-condition";
 
 describe("clinical SIG correctness and boundary promotion", () => {
   it.each([
@@ -15,6 +16,14 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(result.meta.leftoverText).toBeUndefined();
     expect(lintSig(instruction).issues).toEqual([]);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("uses genuine word boundaries for an explicit excluded ISO date", () => {
+    const input = "1 tab daily except 2026-10-29";
+    const parsed = parseSig(input);
+    expect(getDosageExcludedDates(parsed.fhir)).toContain("2026-10-29");
+    expect(parsed.warnings.some(warning => warning.includes("unresolved-calendar-exclusion")))
+      .toBe(false);
   });
 
   it("rejects an unknown exception rather than silently scheduling daily administration", () => {
@@ -38,6 +47,48 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it.each(["PRN", "prn", "PrN", "as needed", "AS   NEEDED"])(
+    "keeps explicit %s status when an unless guard is present", marker => {
+      const input = "Take 1 tab q6h " + marker + " pain unless SBP < 90";
+      const parsed = parseSig(input);
+      expect(parsed.fhir.asNeeded).toBe(true);
+      expect(parsed.fhir.asNeededFor?.[0]?.text?.toLowerCase()).toContain("pain");
+      expect(getDosageCondition(parsed.fhir)).toMatchObject({
+        kind: "not", condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90 }
+      });
+      expect(parsed.fhirNext.step[0].component[0].asNeeded).toBe(true);
+    }
+  );
+
+  it("keeps a prefixed guard separate from its administration and trailing hold", () => {
+    const input = "Only if SBP > 100, take 2 tabs as directed, otherwise hold";
+    const guard = parseMedicationGuard(input)!;
+    expect(guard).toBeDefined();
+    expect(input.slice(guard.start, guard.end)).toContain("SBP > 100");
+    expect(input.slice(guard.start, guard.end)).not.toContain("as directed");
+    expect(input.slice(guard.otherwise!.start, guard.otherwise!.end))
+      .toContain("otherwise hold");
+    expect(guard.end).toBeLessThan(guard.otherwise!.start);
+    const parsed = parseSig(input);
+    expect(parsed.warnings).toContainEqual(
+      expect.stringContaining("unresolved-critical-constraint")
+    );
+    expect(parsed.fhir.text).toContain("as directed");
+  });
+
+  it.each([
+    "Only if SBP > 100, take 2 tabs BID, otherwise hold",
+    "  Only if SBP > 100, take 2 tabs BID, otherwise hold"
+  ])("recognizes a prefixed condition and hold without consuming its dose: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(1);
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "measurement", name: "sbp", operation: "gt", value: 100
+    });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
+  });
+
   it("handles Thai unless-conditions without fabricating a calendar exclusion", () => {
     const result = parseSig("รับประทาน 1 เม็ด วันละ 2 ครั้ง ยกเว้นกรณีความดันต่ำกว่า 100");
     expect(result.warnings.some(warning => warning.includes("unresolved-calendar-exclusion")))
@@ -54,6 +105,32 @@ describe("clinical SIG correctness and boundary promotion", () => {
       expect(parsed.fhir.doseAndRate?.[0].rateQuantity).toMatchObject({
         value: 5, system: "http://unitsofmeasure.org", code: "ug/min"
       });
+    }
+  );
+
+  it.each([
+    ["ML", "mL/h"], ["ml", "mL/h"], ["L", "L/h"],
+    ["MG", "mg/h"], ["mg", "mg/h"], ["MCG", "ug/h"],
+    ["G", "g/h"]
+  ])("normalizes infusion-rate unit %s as UCUM %s", (spelling, ucum) => {
+    const source = "Infuse IV at 100 " + spelling + "/HR for 1 hour";
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 100, unit: ucum, code: ucum, system: "http://unitsofmeasure.org"
+    });
+    expect(parsed.fhir.text).toContain(spelling + "/HR");
+  });
+
+  it.each(["ML", "ml", "mL"])(
+    "normalizes the infused volume %s for dose, ratio and canonical clause", spelling => {
+      const source = "Infuse 50 " + spelling + " over 30 MIN IV";
+      const parsed = parseSig(source);
+      expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+        doseQuantity: { value: 50, unit: "mL", code: "mL" },
+        rateRatio: { numerator: { value: 50, unit: "mL", code: "mL" } }
+      });
+      expect(parsed.meta.canonical.clauses[0].dose?.unit).toBe("mL");
+      expect(parsed.fhir.text).toContain(spelling);
     }
   );
 

@@ -70,6 +70,8 @@ export interface ParsedMedicationGuard {
   text: string;
   /** The specified alternative action is a no-dose (hold/skip). */
   otherwiseHold: boolean;
+  /** Distinct source span of an explicit otherwise-hold action. */
+  otherwise?: { start: number; end: number };
 }
 
 /**
@@ -85,18 +87,20 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
   const negated = /^(?:unless|เว้นแต่|ยกเว้นกรณี)/iu.test(lead[0]);
   let tail = source.slice(lead.index + lead[0].length);
   let end = source.length;
+  let otherwise: { start: number; end: number } | undefined;
   let otherwiseHold = false;
   const elseMatch = TRAILING_ELSE.exec(tail);
   if (elseMatch) {
     otherwiseHold = true;
     end -= elseMatch[0].length;
+    otherwise = { start: source.length - elseMatch[0].length, end: source.length };
     tail = tail.slice(0, elseMatch.index);
   } else if (/\b(?:otherwise|else)\b|มิฉะนั้น|ไม่เช่นนั้น/iu.test(tail)) {
     // A different alternate *dose* is not the same as withholding the dose.
     return undefined;
   }
   // Prefixed guards have an explicit boundary before the administration.
-  if (lead.index === 0) {
+  if (lead.index === source.search(/\S/u)) {
     const comma = tail.search(/[,;:]/u);
     const action = ACTION_LEAD.exec(tail);
     const cut = [comma >= 0 ? comma : tail.length, action?.index ?? tail.length]
@@ -110,9 +114,10 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
     ? { kind: "not", condition: expression }
     : expression;
   return {
-    condition, start: lead.index, end: otherwiseHold ? source.length : end,
-    text: source.slice(lead.index, otherwiseHold ? source.length : end),
-    otherwiseHold
+    condition, start: lead.index, end,
+    text: source.slice(lead.index, end),
+    otherwiseHold,
+    ...(otherwise ? { otherwise } : {})
   };
 }
 

@@ -53,6 +53,24 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(toDosageDetails(strict)).toEqual(details);
   });
 
+  it("preserves ordinary R5 component extensions without inventing a R6 course modifier", () => {
+    const simple: FhirR6DosageDetails = {
+      step: [{ component: [{
+        extension: [{ url: "urn:test:ordinary-metadata", valueString: "keep" }],
+        modifierExtension: [{ url: "urn:test:ordinary-modifier", valueBoolean: true }],
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }]
+    };
+    const r5 = toFhirR5Dosages(simple);
+    expect(r5).toHaveLength(1);
+    expect(r5[0].extension).toEqual(simple.step[0].component[0].extension);
+    expect(r5[0].modifierExtension).toEqual(simple.step[0].component[0].modifierExtension);
+    expect(r5[0].modifierExtension?.some(value => value.url === DOSAGE_DETAILS_R5_URL))
+      .not.toBe(true);
+    expect(toDosageDetails(r5).step[0].component[0].modifierExtension)
+      .toEqual(simple.step[0].component[0].modifierExtension);
+  });
+
   it("never uses an outdated literal instruction after editing a strict R5 dose", () => {
     const details = parseSig("1 tab PO BID").fhirNext;
     const original = toFhirR5Dosages(details);

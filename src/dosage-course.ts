@@ -826,8 +826,7 @@ export function toFhirR5Dosages(
       step.extension?.length || step.modifierExtension?.length ||
       step.component.some(component =>
         component.condition?.length || component.safety ||
-        component.site?.reference || component.extension?.length ||
-        component.modifierExtension?.length ||
+        component.site?.reference ||
         component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)))
   );
   if (hasR6OnlyFields && result.length) {

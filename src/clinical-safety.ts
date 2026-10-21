@@ -48,6 +48,15 @@ const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\
 const CLINICAL_CONSTRAINT_SIGNAL =
   /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
 
+/** RATE/INFUSE_OVER accept mixed case; UCUM codes are case-sensitive. */
+function ucumMassOrVolume(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (/^(?:mcg|µg|μg|ug)$/u.test(lower)) return "ug";
+  if (lower === "ml") return "mL";
+  if (lower === "l") return "L";
+  return lower; // Supported remainder is mg or g.
+}
+
 const unitMap: Record<string, string> = {
   tab: "tab", tabs: "tab", tablet: "tab", tablets: "tab", เม็ด: "tab",
   cap: "cap", caps: "cap", capsule: "cap", capsules: "cap",
@@ -131,7 +140,7 @@ export function matchCalendarExclusion(source: string, options?: ParseOptions): 
     }
   }
   // Explicit ISO dates are already normalized FHIR dates.
-  residual = residual.replace(/\d{4}-\d{2}-\d{2}/gu, (value) => {
+  residual = residual.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, (value) => {
     const date = new Date(value + "T00:00:00Z");
     if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value) {
       dates.push(value);
@@ -270,8 +279,9 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   if (guard) {
     setDosageCondition(item.fhir, guard.condition);
     own(span(source, offset, guard.start, guard.end));
+    if (guard.otherwise) own(span(source, offset, guard.otherwise.start, guard.otherwise.end));
     const originalReason = item.fhir.asNeededFor?.map(reason => reason.text ?? "").join(" ").toLowerCase();
-    const explicitPrn = /(?:prn|as needed)|เมื่อมีอาการ/u.test(source);
+    const explicitPrn = /\b(?:prn|as\s+needed)\b|เมื่อมีอาการ/iu.test(source);
     if (!explicitPrn && originalReason && source.toLowerCase().indexOf(originalReason) >= 0) {
       delete item.fhir.asNeeded;
       delete item.fhir.asNeededFor;
@@ -318,8 +328,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   const over = rate ? undefined : INFUSE_OVER.exec(source);
   if (rate) {
     const value = Number(rate[1]);
-    // UCUM uses ug, not the input spelling mcg or either Unicode mu.
-    const numer = /^(?:mcg|µg|μg)$/iu.test(rate[2]) ? "ug" : rate[2];
+    const numer = ucumMassOrVolume(rate[2]);
     const denom = /^h/iu.test(rate[3]) ? "h" : "min";
     const unit = numer + "/" + denom;
     if (Number.isFinite(value) && value > 0) {
@@ -356,7 +365,8 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   } else if (over) {
     const volume = Number(over[1]), duration = Number(over[3]);
     if (volume > 0 && duration > 0) {
-      const numerator = { value: volume, unit: over[2], system: UCUM, code: over[2] };
+      const volumeUnit = ucumMassOrVolume(over[2]);
+      const numerator = { value: volume, unit: volumeUnit, system: UCUM, code: volumeUnit };
       const durationUnit = /^h/iu.test(over[4]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
       item.fhir.doseAndRate = [{
         doseQuantity: numerator,
@@ -370,7 +380,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         durationUnit
       };
       for (const clause of item.meta.canonical.clauses) {
-        clause.dose = { value: volume, unit: over[2] };
+        clause.dose = { value: volume, unit: volumeUnit };
         clause.schedule = {
           ...(clause.schedule ?? {}),
           count: 1,
