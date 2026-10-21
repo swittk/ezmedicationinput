@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition } from "../src";
+import { formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
 
@@ -22,6 +22,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
     "1 tab BID QID",
     "1 tab once daily BID",
     "1 tab q6h q8h",
+    "1 tab BID q5min",
     "1 tab BID every 8 hours",
     "Apply 1 drop OD BID"
   ])("does not execute an order with an unconsumed competing cadence: %s", sig => {
@@ -282,6 +283,89 @@ describe("clinical SIG correctness and boundary promotion", () => {
     const parsed = parseSig("1 tab sl q5min prn chest pain max 3 doses");
     expect(parsed.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
     expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
+  });
+
+  it("treats 'up to 3 doses' as a total administration cap without absorbing the PRN reason", () => {
+    const parsed = parseSig("1 tab SL q5min PRN chest pain up to 3 doses");
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      count: 1,
+      countMax: 3,
+      period: 5,
+      periodUnit: "min"
+    });
+    expect(parsed.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("chest pain");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
+    const opts = { from: "2026-10-21T08:00:00+07:00", orderedAt: "2026-10-21T08:00:00+07:00", timeZone: "Asia/Bangkok", limit: 10, priorCount: 0 };
+    expect(nextDueDoses(parsed.fhir, opts)).toHaveLength(3);
+    expect(nextDueDoses(parsed.fhir, { ...opts, priorCount: 2 })).toHaveLength(1);
+  });
+
+  it("does not interpret an 'up to DATE' treatment boundary as a dose count", () => {
+    const parsed = parseSig("1 tab daily up to 30 Sep 2026");
+    expect(parsed.fhir.timing?.repeat?.countMax).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.countMax).toBeUndefined();
+  });
+
+  it.each([
+    "infuse 100 mL over 30 minutes every 8 hours",
+    "infuse IV at 100 mL/h for 30 minutes every 8 hours",
+    "infuse dopamine at 5 mcg/kg/min IV for 30 minutes every 8 hours"
+  ])("preserves recurring cadence and per-administration duration for infusion form: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      period: 8,
+      periodUnit: "h",
+      duration: 30,
+      durationUnit: "min"
+    });
+    expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      period: 8,
+      periodUnit: "h",
+      administrationDuration: 30,
+      administrationDurationUnit: "min"
+    });
+    expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
+  });
+
+  it("shares a sole trailing cadence across coordinated site-specific doses", () => {
+    const source = "instill 1 drop in left eye and 2 drops in right eye twice daily";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["left eye", "right eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat)).toEqual([
+      expect.objectContaining({ frequency: 2, period: 1, periodUnit: "d" }),
+      expect.objectContaining({ frequency: 2, period: 1, periodUnit: "d" })
+    ]);
+  });
+
+  it("does not propagate a trailing cadence when that component has a cadence conflict", () => {
+    const parsed = parseSig(
+      "instill 1 drop in left eye and 2 drops in right eye twice daily q8h"
+    );
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.every(item => item.fhir.timing === undefined)).toBe(true);
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-timing-conflict"));
+  });
+
+  it.each([
+    ["eye drops", RouteCode["Ocular route (qualifier value)"], "drop"],
+    ["transdermal patch", RouteCode["Transdermal route"], "patch"]
+  ] as const)("lets dosage-form context outrank generic apply for %s", (dosageForm, route, unit) => {
+    const parsed = parseSig("apply 1 daily", { context: { dosageForm } });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe(route);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit });
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("keeps an explicit route over conflicting dosage-form context and warns", () => {
+    const parsed = parseSig("apply 1 PO daily", {
+      context: { dosageForm: "eye drops" }
+    });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe(RouteCode["Oral route"]);
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("conflicts with dosage-form context"));
   });
 
   it("exports daily dose maximum and FHIR R5 PRN without serializing legacy asNeeded", () => {

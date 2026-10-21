@@ -68,6 +68,13 @@ export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/Str
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const FHIR_GTS_TIMING_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+// R5 preferred TimingAbbreviation expansion, not arbitrary local Q12H/Q24H.
+const FHIR_GTS_TIMING_CODES = new Set([
+  "BID", "TID", "QID", "AM", "PM", "QD", "QOD",
+  "Q1H", "Q2H", "Q3H", "Q4H", "Q6H", "Q8H",
+  "BED", "WK", "MO"
+]);
 
 function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
@@ -833,10 +840,13 @@ export function canonicalToFhir(
 
   if (schedule?.timingCode) {
     dosage.timing = dosage.timing ?? {};
-    dosage.timing.code = {
-      coding: [{ code: schedule.timingCode }],
-      text: schedule.timingCode
-    };
+    const normalizedCode = schedule.timingCode.toUpperCase();
+    // A CodeableConcept.text preserves supported local wording without
+    // falsely attaching an HL7 standard identity to non-standard codes.
+    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
+      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
+          text: schedule.timingCode }
+      : { text: schedule.timingCode };
   }
 
   if (clause.dose?.range) {

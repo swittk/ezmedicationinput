@@ -605,28 +605,6 @@ function parseBoundsDurationUnit(quantity: FhirQuantity | undefined): FhirPeriod
   }
 }
 
-function resolveRepeatBoundsDuration(
-  repeat: FhirTimingRepeat | undefined
-): { value?: number; max?: number; unit?: FhirPeriodUnit } {
-  if (!repeat) {
-    return {};
-  }
-  if (repeat.boundsDuration?.value !== undefined) {
-    return {
-      value: repeat.boundsDuration.value,
-      unit: parseBoundsDurationUnit(repeat.boundsDuration)
-    };
-  }
-  if (!repeat.boundsRange) {
-    return {};
-  }
-  return {
-    value: repeat.boundsRange.low?.value,
-    max: repeat.boundsRange.high?.value,
-    unit: parseBoundsDurationUnit(repeat.boundsRange.low) ?? parseBoundsDurationUnit(repeat.boundsRange.high)
-  };
-}
-
 function resolveRepeatBoundsStart(
   repeat: FhirTimingRepeat | undefined,
   timeZone: string
@@ -684,25 +662,82 @@ function resolveRepeatDurationCapEnd(
   anchor: Date,
   timeZone: string
 ): Date | null {
-  const bounds = resolveRepeatBoundsDuration(repeat);
-  const durationValue = bounds.max ?? bounds.value;
-  const durationUnit = bounds.unit;
-  if (
-    durationValue === undefined ||
-    !Number.isFinite(durationValue) ||
-    durationValue <= 0 ||
-    !durationUnit
-  ) {
-    return null;
+  if (!repeat) return null;
+  if (repeat.boundsDuration && repeat.boundsRange)
+    throw new Error("Timing.repeat cannot contain both boundsDuration and boundsRange");
+
+  const advance = (quantity: FhirQuantity | undefined, label: string): Date => {
+    const value = quantity?.value;
+    const unit = parseBoundsDurationUnit(quantity);
+    if (quantity?.comparator || value === undefined || !Number.isFinite(value) ||
+        value <= 0 || !unit) {
+      throw new Error(`${label} must be one known positive duration with a supported unit`);
+    }
+    const stepper = createIntervalStepper({ period: value, periodUnit: unit }, timeZone);
+    const result = stepper?.(anchor);
+    if (!result || result <= anchor)
+      throw new Error(`${label} does not produce a valid course end`);
+    return result;
+  };
+
+  if (repeat.boundsDuration) return advance(repeat.boundsDuration, "Timing.repeat.boundsDuration");
+  if (!repeat.boundsRange) return null;
+  const lowEnd = advance(repeat.boundsRange.low, "Timing.repeat.boundsRange.low");
+  const highEnd = advance(repeat.boundsRange.high, "Timing.repeat.boundsRange.high");
+  if (lowEnd.getTime() !== highEnd.getTime())
+    throw new Error("Timing.repeat.boundsRange is not an exact course duration; choose one duration before scheduling or calculating supply");
+  return lowEnd;
+}
+
+function validateRepeatBoundsPeriod(
+  repeat: FhirTimingRepeat | undefined,
+  timeZone: string
+): { start: Date | null; end: Date | null } {
+  const start = resolveRepeatBoundsStart(repeat, timeZone);
+  const end = resolveRepeatBoundsEndExclusive(repeat, timeZone);
+  if (repeat?.boundsPeriod?.start && !start)
+    throw new Error("Timing.repeat.boundsPeriod.start is invalid");
+  if (repeat?.boundsPeriod?.end && !end)
+    throw new Error("Timing.repeat.boundsPeriod.end is invalid");
+  if (start && end && end <= start)
+    throw new Error("Timing.repeat.boundsPeriod end must be after its start");
+  return { start, end };
+}
+
+function hasExactWeeklyFrequencyAnchors(
+  repeat: FhirTimingRepeat,
+  frequency: number
+): boolean {
+  const weekdays = repeat.dayOfWeek?.length ?? 0;
+  const clocks = repeat.timeOfDay?.length ?? 0;
+  return repeat.periodUnit === FhirPeriodUnit.Week && repeat.period === 1 &&
+    weekdays > 0 && clocks > 0 && weekdays * clocks === frequency;
+}
+
+function validateExecutableFrequency(repeat: FhirTimingRepeat | undefined): void {
+  if (!repeat) return;
+  const { frequency, frequencyMax, period, periodUnit } = repeat;
+  if (frequencyMax !== undefined) {
+    if (!Number.isInteger(frequencyMax) || frequencyMax <= 0 ||
+        frequency !== undefined && frequencyMax < frequency)
+      throw new Error("Timing.repeat.frequencyMax must be a positive integer no lower than frequency");
+    if (frequency === undefined || frequencyMax !== frequency)
+      throw new Error("Timing.repeat frequency range is not a deterministic administration schedule");
   }
-  const stepper = createIntervalStepper(
-    { period: durationValue, periodUnit: durationUnit },
-    timeZone
-  );
-  if (!stepper) {
-    return null;
+  if (frequency !== undefined && (!Number.isInteger(frequency) || frequency <= 0))
+    throw new Error("Timing.repeat.frequency must be a positive integer");
+  if (frequency !== undefined && frequency > 1 && period && periodUnit &&
+      periodUnit !== FhirPeriodUnit.Day &&
+      !hasExactWeeklyFrequencyAnchors(repeat, frequency)) {
+    throw new Error("Multiple administrations per non-daily period need explicit administration times; cadence cannot be inferred safely");
   }
-  return stepper(anchor) ?? null;
+}
+
+function calendarScanLimit(start: Date, end: Date | null | undefined, resultLimit: number): number {
+  const minimum = Math.max(366, Math.ceil(resultLimit) * 366);
+  if (!end) return minimum;
+  const spanDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
+  return Math.max(minimum, spanDays + 3);
 }
 
 function resolveDayFilteredSeriesRepeat(
@@ -1070,8 +1105,7 @@ function exactTimingEventOccurrences(
     previousTime = time;
     if (
       derivePriorCount &&
-      orderedAt &&
-      candidate >= orderedAt &&
+      (!orderedAt || candidate >= orderedAt) &&
       candidate < from &&
       (!courseEnd || candidate < courseEnd)
     ) {
@@ -1248,7 +1282,10 @@ function applyOccurrenceCap(
 /** Maximum medication quantity per time window is not the same as a
  * frequency cap: divide by the actual per-administration quantity first.
  * Do not silently discard a limit when the dose unit cannot be compared. */
-function executableQuantityCaps(dosage: FhirDosage): CanonicalOccurrenceCapExpr[] {
+function executableQuantityCaps(
+  dosage: FhirDosage,
+  context?: MedicationContext
+): CanonicalOccurrenceCapExpr[] {
   const limits = dosage.maxDosePerPeriod ?? [];
   if (!limits.length) return [];
   const doseRates = dosage.doseAndRate ?? [];
@@ -1281,13 +1318,14 @@ function executableQuantityCaps(dosage: FhirDosage): CanonicalOccurrenceCapExpr[
     const maximumUnit = numerator?.code ?? numerator?.unit ?? "";
     const normalizedActual = normalizeUnit(actualUnit);
     const normalizedMaximum = normalizeUnit(maximumUnit);
-    const equivalentDose = normalizedActual === normalizedMaximum
+    const perTargetDose = normalizedActual === normalizedMaximum
       ? dose.value
       : convertValue(dose.value, actualUnit, maximumUnit);
-    if (equivalentDose === null || !Number.isFinite(equivalentDose) ||
-        equivalentDose <= 0) {
+    if (perTargetDose === null || !Number.isFinite(perTargetDose) ||
+        perTargetDose <= 0) {
       throw new Error("Cannot enforce a dose maximum without compatible units or a medication strength");
     }
+    const equivalentDose = perTargetDose * getAdministrationTargetMultiplier(dosage, context);
     const max = Math.floor(maximum / equivalentDose + 1e-9);
     if (max < 1) {
       throw new Error("Prescribed dose exceeds the per-period maximum; no administration is permitted");
@@ -1658,13 +1696,29 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     }
   }
   let priorCount = priorCountInput !== undefined ? Math.floor(priorCountInput) : 0;
-  const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt;
+  // A PRN opportunity is not proof of administration. When a total PRN cap
+  // already started, a later query cannot safely assume there were zero
+  // actual doses. Require the observed history or an explicit count.
+  const prnCountCapped = !!dosage.asNeeded &&
+    (dosage.timing?.repeat?.count !== undefined ||
+      dosage.timing?.repeat?.countMax !== undefined);
+  if (prnCountCapped && orderedAt && from > orderedAt && priorCountInput === undefined) {
+    if (options.priorDoseTimes === undefined)
+      throw new Error("Capped PRN scheduling requires priorCount or priorDoseTimes after the order start.");
+    for (const stamp of options.priorDoseTimes) {
+      const actual = coerceDate(stamp, "priorDoseTimes");
+      if (actual >= orderedAt && actual < from) priorCount++;
+    }
+  }
+  const needsDerivedPriorCount =
+    priorCountInput === undefined && !!orderedAt && !dosage.asNeeded;
 
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
     throw new Error("Configuration with a valid timeZone is required");
   }
+  validateExecutableFrequency(dosage.timing?.repeat);
   if (dosage.maxDosePerLifetime)
     throw new Error("Lifetime dose maximum requires complete historical dose data");
   if (dosage.maxDosePerAdministration) {
@@ -1676,8 +1730,10 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       throw new Error("Cannot enforce per-administration maximum without an actual dose quantity");
     const unit = dose.code ?? dose.unit ?? "";
     const targetUnit = maximum.code ?? maximum.unit ?? "";
-    const actual = unit.toLowerCase() === targetUnit.toLowerCase()
+    const perTarget = unit.toLowerCase() === targetUnit.toLowerCase()
       ? dose.value : convertValue(dose.value, unit, targetUnit);
+    const actual = perTarget === null ? null :
+      perTarget * getAdministrationTargetMultiplier(dosage, undefined);
     if (actual === null || actual > maximum.value + 1e-9)
       throw new Error("Prescribed dose exceeds per-administration maximum or has incompatible units");
   }
@@ -1740,7 +1796,8 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   };
   const timing: FhirTiming | undefined = dosage.timing;
   const repeat: FhirTimingRepeat | undefined = timing?.repeat;
-  const boundsStart = resolveRepeatBoundsStart(repeat, timeZone);
+  const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
+  const boundsStart = boundsPeriod.start;
   if (boundsStart && boundsStart > from) {
     from = boundsStart;
   }
@@ -1751,7 +1808,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   const courseEnd = timing && repeat
     ? earlierDate(
       resolveRepeatDurationCapEnd(repeat, baseTime, timeZone),
-      resolveRepeatBoundsEndExclusive(repeat, timeZone)
+      boundsPeriod.end
     )
     : null;
 
@@ -1766,7 +1823,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       timeZone,
       Math.floor(limit),
       priorCount,
-      needsDerivedPriorCount
+      priorCountInput === undefined && !dosage.asNeeded
     );
     if (exactEvents !== undefined) {
       return exactEvents;
@@ -1862,7 +1919,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       }
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
-      const maxIterations = effectiveLimit * 31;
+      const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit);
       while (
         results.length < effectiveLimit &&
         iterations < maxIterations &&
@@ -1961,7 +2018,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     }
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = effectiveLimit * 31;
+    const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit);
     while (
       results.length < effectiveLimit &&
       iterations < maxIterations &&
@@ -2069,7 +2126,7 @@ function derivePriorCountFromHistory(
 
       let currentDay = startOfLocalDay(orderedAt, timeZone);
       let iterations = 0;
-      const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
+      const maxIterations = calendarScanLimit(currentDay, from, normalizedCount ?? 1);
       while (currentDay < from && iterations < maxIterations) {
         const weekday = getLocalWeekday(currentDay, timeZone);
         if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
@@ -2160,7 +2217,7 @@ function derivePriorCountFromHistory(
 
     let currentDay = startOfLocalDay(orderedAt, timeZone);
     let iterations = 0;
-    const maxIterations = normalizedCount !== undefined ? normalizedCount * 31 : 31 * 365;
+    const maxIterations = calendarScanLimit(currentDay, from, normalizedCount ?? 1);
     while (currentDay < from && iterations < maxIterations) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
@@ -2419,8 +2476,8 @@ function generateDayFilteredPeriodSeries(
   const startMs = currentDay.getTime();
   const estimatedDays = to
     ? Math.max(1, Math.ceil((to.getTime() - startMs) / (24 * 60 * 60 * 1000)))
-    : limit * 31;
-  const maxIterations = Math.max(limit * 31, estimatedDays + 31);
+    : limit * 366;
+  const maxIterations = Math.max(limit * 366, estimatedDays + 31);
 
   while (
     results.length < limit &&
@@ -2504,7 +2561,9 @@ function countScheduleEvents(
   config: NextDueDoseConfig,
   baseTime: Date,
   orderedAt: Date | null,
-  limit?: number
+  limit?: number,
+  explicitPriorCount = 0,
+  derivePriorCount = true
 ): number {
   const timing = dosage.timing;
   const repeat = timing?.repeat;
@@ -2521,10 +2580,10 @@ function countScheduleEvents(
   const seen = new Set<string>();
   let count = 0;
   const timeZone = config.timeZone!;
-  const priorCount =
+  const priorCount = derivePriorCount &&
     normalizedCount !== undefined && orderedAt && from > orderedAt
       ? derivePriorCountFromHistory(timing, repeat, config, orderedAt, from, timeZone)
-      : 0;
+      : explicitPriorCount;
   const countLimit = normalizedCount === undefined
     ? (limit ?? Number.POSITIVE_INFINITY)
     : Math.min(limit ?? normalizedCount, Math.max(0, normalizedCount - priorCount));
@@ -2580,7 +2639,7 @@ function countScheduleEvents(
 
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
-      const maxIterations = hardLimit * 31;
+      const maxIterations = calendarScanLimit(currentDay, to, hardLimit);
       while (count < countLimit && currentDay < to && iterations < maxIterations) {
         const weekday = getLocalWeekday(currentDay, timeZone);
         if ((!enforceDayFilter || dayFilter.has(weekday)) && clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
@@ -2646,7 +2705,7 @@ function countScheduleEvents(
 
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = hardLimit * 31;
+    const maxIterations = calendarScanLimit(currentDay, to, hardLimit);
     while (count < countLimit && currentDay < to && iterations < maxIterations) {
       const weekday = getLocalWeekday(currentDay, timeZone);
       if (!enforceDayFilter || dayFilter.has(weekday)) {
@@ -2704,6 +2763,72 @@ function calculationHorizon(options: TotalUnitsOptions, zone: string): Date {
   if (!end || end <= from) throw new MedicationQuantityCalculationError("invalid-horizon",
     "Dispensing duration does not produce a date after the start of the dispensing window.");
   return end;
+}
+
+function prepareMaximumSupplyTiming(dosage: FhirDosage): {
+  dosage: FhirDosage;
+  frequencyMaximum: boolean;
+  infusionDurationMaximum: boolean;
+} {
+  const repeat = dosage.timing?.repeat;
+  if (!repeat) return { dosage, frequencyMaximum: false, infusionDurationMaximum: false };
+  let nextRepeat = repeat;
+  let frequencyMaximum = false;
+  let infusionDurationMaximum = false;
+
+  if (repeat.frequencyMax !== undefined) {
+    if (repeat.frequency !== undefined &&
+        (!Number.isInteger(repeat.frequency) || repeat.frequency <= 0) ||
+        !Number.isInteger(repeat.frequencyMax) || repeat.frequencyMax <= 0 ||
+        repeat.frequency !== undefined && repeat.frequencyMax < repeat.frequency)
+      throw new MedicationQuantityCalculationError("invalid-frequency-range",
+        "Timing.repeat.frequencyMax must be a positive integer no lower than frequency.");
+    if (repeat.frequency === undefined || repeat.frequencyMax !== repeat.frequency) {
+      if (!repeat.period || !Number.isFinite(repeat.period) || repeat.period <= 0 ||
+          !repeat.periodUnit)
+        throw new MedicationQuantityCalculationError("frequency-range-period-required",
+          "A maximum frequency needs one known positive period before maximum supply can be calculated.");
+      if (repeat.frequencyMax > 1 && repeat.periodUnit !== FhirPeriodUnit.Day &&
+          !hasExactWeeklyFrequencyAnchors(repeat, repeat.frequencyMax))
+        throw new MedicationQuantityCalculationError("ambiguous-non-daily-frequency",
+          "Multiple administrations per non-daily period need explicit administration times; maximum supply cannot invent a cadence.");
+      nextRepeat = {
+        ...nextRepeat,
+        frequency: repeat.frequencyMax,
+        frequencyMax: undefined
+      };
+      frequencyMaximum = true;
+    }
+  }
+
+  const first = dosage.doseAndRate?.length === 1 ? dosage.doseAndRate[0] : undefined;
+  const isRateDose = !!first && !first.doseQuantity && !!(first.rateQuantity || first.rateRatio);
+  if (isRateDose && repeat.durationMax !== undefined) {
+    if (repeat.duration !== undefined &&
+        (!Number.isFinite(repeat.duration) || repeat.duration <= 0) ||
+        !Number.isFinite(repeat.durationMax) || repeat.durationMax <= 0 ||
+        repeat.duration !== undefined && repeat.durationMax < repeat.duration ||
+        !repeat.durationUnit)
+      throw new MedicationQuantityCalculationError("invalid-infusion-duration-range",
+        "Infusion durationMax must be a positive duration no lower than duration, with a supported duration unit.");
+    if (repeat.duration === undefined || repeat.durationMax !== repeat.duration) {
+      nextRepeat = { ...nextRepeat, duration: repeat.durationMax, durationMax: undefined };
+      infusionDurationMaximum = true;
+    }
+  }
+
+  return {
+    dosage: nextRepeat === repeat ? dosage : {
+      ...dosage,
+      timing: {
+        ...dosage.timing!,
+        ...(frequencyMaximum ? { code: undefined } : {}),
+        repeat: nextRepeat
+      }
+    },
+    frequencyMaximum,
+    infusionDurationMaximum
+  };
 }
 
 function prepareMeasuredDose(dosage: FhirDosage, options: TotalUnitsOptions): FhirDosage {
@@ -2898,13 +3023,26 @@ function sumCourseUnits(
 function calculateTotalUnitsSingle(
   options: Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage }
 ): TotalUnitsResult {
-  const { dosage: sourceDosage, durationValue, durationUnit, roundToMultiple, context } = options;
+  const { dosage: sourceDosage, roundToMultiple, context } = options;
   const unresolved = getUnresolvedDosage(sourceDosage);
   if (unresolved) {
     throw new MedicationQuantityCalculationError("unresolved-regimen",
       `Cannot calculate supply because the instruction has an unresolved clinical schedule (${unresolved}). Clarify the missing/contradictory instruction before dispensing.`);
   }
-  const dosage = prepareMeasuredDose(sourceDosage, options);
+  const providedConfig = options.config;
+  const timeZone = options.timeZone ?? providedConfig?.timeZone;
+  if (!timeZone) throw new Error("timeZone is required for calculateTotalUnits");
+  const from = coerceDate(options.from, "from");
+  if (options.priorCount !== undefined &&
+      (!Number.isFinite(options.priorCount) || options.priorCount < 0))
+    throw new MedicationQuantityCalculationError("invalid-prior-count",
+      "priorCount must be a non-negative finite number.");
+  // Validate single-dosage horizons exactly like whole-course horizons,
+  // before unrelated dose details can mask an invalid dispensing window.
+  let endDay = calculationHorizon(options, timeZone);
+
+  const maximalTiming = prepareMaximumSupplyTiming(sourceDosage);
+  const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
   // These maxima apply regardless of whether a dose needs date/condition
   // filtering. The schedule path already enforces them; supply must not
   // silently bypass the check on the common arithmetic-count path.
@@ -2919,11 +3057,12 @@ function calculateTotalUnitsSingle(
         "The maximum per administration cannot be compared: provide the administered dose quantity and the maximum quantity.");
     const fromUnit = dose.code ?? dose.unit ?? "";
     const limitUnit = limit.code ?? limit.unit ?? "";
-    const actual = fromUnit.toLowerCase() === limitUnit.toLowerCase()
+    const perTarget = fromUnit.toLowerCase() === limitUnit.toLowerCase()
       ? dose.value : convertValue(dose.value, fromUnit, limitUnit);
-    if (actual === null || !Number.isFinite(actual))
+    if (perTarget === null || !Number.isFinite(perTarget))
       throw new MedicationQuantityCalculationError("administration-dose-units",
         "The prescribed administration quantity and its maximum have incompatible units. Provide medication strength or an equivalent unit conversion.");
+    const actual = perTarget * getAdministrationTargetMultiplier(dosage, context);
     if (actual > limit.value + 1e-9)
       throw new MedicationQuantityCalculationError("per-administration-maximum-exceeded",
         "The prescribed amount per administration exceeds the specified maximum; revise the dose or safety limit before calculating supply.");
@@ -2931,16 +3070,12 @@ function calculateTotalUnitsSingle(
   const conditional = getDosageCondition(dosage);
   const excludedDates = getDosageExcludedDates(dosage);
   const useMaximalPlan = !!dosage.asNeeded ||
-    (!!conditional && !options.evaluateCondition);
+    (!!conditional && !options.evaluateCondition) ||
+    maximalTiming.frequencyMaximum || maximalTiming.infusionDurationMaximum;
 
-  const from = coerceDate(options.from, "from");
   const orderedAtDate =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
-  const providedConfig = options.config;
-  const timeZone = options.timeZone ?? providedConfig?.timeZone;
-  if (!timeZone) {
-    throw new Error("timeZone is required for calculateTotalUnits");
-  }
+  validateExecutableFrequency(dosage.timing?.repeat);
 
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),
@@ -2962,17 +3097,9 @@ function calculateTotalUnitsSingle(
     frequencyDefaults
   };
 
-  // Calculate end date based on duration
-  let endDay: Date;
-  const dummyRepeat: FhirTimingRepeat = { period: durationValue, periodUnit: durationUnit };
-  const stepper = createIntervalStepper(dummyRepeat, timeZone);
-  if (stepper) {
-    endDay = stepper(from) || from;
-  } else {
-    endDay = from;
-  }
   const repeat = dosage.timing?.repeat;
-  const boundsStart = resolveRepeatBoundsStart(repeat, timeZone);
+  const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
+  const boundsStart = boundsPeriod.start;
   const countFrom = boundsStart && boundsStart > from ? boundsStart : from;
   const effectiveOrderedAt =
     orderedAtDate && boundsStart && boundsStart > orderedAtDate ? boundsStart : orderedAtDate;
@@ -2984,7 +3111,7 @@ function calculateTotalUnitsSingle(
   );
   endDay = minDate(
     endDay,
-    resolveRepeatBoundsEndExclusive(repeat, timeZone)
+    boundsPeriod.end
   );
 
   const needsFilteredEnumeration = conditional || excludedDates.length ||
@@ -3031,14 +3158,16 @@ function calculateTotalUnitsSingle(
         endDay,
         timeZone,
         100000,
-        0,
-        Boolean(effectiveOrderedAt)
+        options.priorCount === undefined ? 0 : Math.floor(options.priorCount),
+        options.priorCount === undefined && !dosage.asNeeded
       )
       : undefined;
     count = exactEvents !== undefined
       ? exactEvents.length
       : countScheduleEvents(
-        dosage, countFrom, endDay, config, baseTime, effectiveOrderedAt, 100000
+        dosage, countFrom, endDay, config, baseTime, effectiveOrderedAt, 100000,
+        options.priorCount === undefined ? 0 : Math.floor(options.priorCount),
+        options.priorCount === undefined && !dosage.asNeeded
       );
   }
 
@@ -3052,11 +3181,20 @@ function calculateTotalUnitsSingle(
 
   const result: TotalUnitsResult = {
     totalUnits,
+    ...((dosage.doseAndRate?.[0]?.doseQuantity?.unit ??
+      dosage.doseAndRate?.[0]?.doseQuantity?.code) ? {
+        unit: dosage.doseAndRate?.[0]?.doseQuantity?.unit ??
+          dosage.doseAndRate?.[0]?.doseQuantity?.code
+      } : {}),
     ...(useMaximalPlan ? {
       quantityKind: "maximum" as const,
       explanation: conditional && !options.evaluateCondition
         ? "Maximum possible supply: every scheduled clinical condition was assumed true. Supply an evaluateCondition callback to calculate a patient-specific conditional schedule."
-        : "Maximum possible supply: PRN doses may be used less frequently than the available scheduled opportunities."
+        : dosage.asNeeded
+          ? "Maximum possible supply: PRN doses may be used less frequently than the available scheduled opportunities."
+          : maximalTiming.frequencyMaximum
+            ? "Maximum possible supply: the upper bound of the prescribed frequency range was used."
+            : "Maximum possible supply: the upper bound of the infusion-duration range was used."
     } : {})
   };
 

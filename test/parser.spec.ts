@@ -1998,7 +1998,9 @@ describe("parseSig core scenarios", () => {
 
   it("parses q12h", () => {
     const result = parseSig("q12h");
-    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q12H");
+    // Q12H is local shorthand, not an R5 GTSAbbreviation code.
+    expect(result.fhir.timing?.code?.coding).toBeUndefined();
+    expect(result.fhir.timing?.code?.text).toBe("Q12H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 12, periodUnit: "h" });
   });
 
@@ -2257,7 +2259,8 @@ describe("parseSig core scenarios", () => {
   it("parses separated q 2 mo", () => {
     const result = parseSig("q 2 mo");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "mo" });
-    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q2MO");
+    expect(result.fhir.timing?.code?.coding).toBeUndefined();
+    expect(result.fhir.timing?.code?.text).toBe("Q2MO");
   });
 
   it("parses monthly token", () => {
@@ -5520,12 +5523,16 @@ describe("time-based schedules", () => {
 
   it("formats multiple meals and times in English", () => {
     const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
-    expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
+    expect(result.longText).toBe("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
+    expect(result.fhir.timing).toBeUndefined();
+    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
   });
 
   it("formats generic 'with meals' and specific times in English", () => {
     const result = parseSig("1 tab with meals and @ 10:00");
-    expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
+    expect(result.longText).toBe("1 tab with meals and @ 10:00");
+    expect(result.fhir.timing).toBeUndefined();
+    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
   });
 
   it("formats complex mixed schedules in Thai", () => {
@@ -5544,9 +5551,11 @@ describe("time-based schedules", () => {
       }
     ];
 
-    for (const { input, expected } of cases) {
+    for (const { input } of cases) {
       const result = parseSig(input, { locale: "th" });
-      expect(result.longText).toBe(expected);
+      expect(result.longText).toBe(input);
+      expect(result.fhir.timing).toBeUndefined();
+      expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
     }
   });
 
@@ -5555,7 +5564,8 @@ describe("time-based schedules", () => {
     // Ensure "and" is not in additional instructions
     expect(result.fhir.additionalInstruction).toBeUndefined();
     expect(result.longText).not.toContain("and.");
-    expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
+    expect(result.longText).toBe("1 tab with meals and at 9:00");
+    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
   });
 });
 

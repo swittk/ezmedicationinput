@@ -1,6 +1,7 @@
 import {
   FhirDayOfWeek,
   FhirPeriodUnit,
+  FhirTimingRepeat,
   ParseResult,
   TextRange
 } from "./types";
@@ -54,7 +55,7 @@ const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\
 // successfully parsed order. Only inspect this when leftovers already exist,
 // keeping ordinary complete SIGs on the original fast path.
 const UNRESOLVED_TIMING_SIGNAL =
-  /\b(?:QD|QOD|BID|TID|QID|Q\d+(?:H|HR)|once\s+daily|twice\s+daily|every\s+\d+\s*(?:h|hr|hours?|minutes?|days?|weeks?)|\d+\s*(?:hours?|minutes?|days?|weeks?|hrs?|hr))\b/iu;
+  /\b(?:QD|QOD|BID|TID|QID|Q\s*\d+(?:\.\d+)?\s*(?:H|HR|HRS?|MIN(?:UTE)?S?|D(?:AYS?)?|WK|WEEKS?|MO|MONTHS?)|(?:once|twice|three|four)\s+(?:times?\s+)?daily|every\s+\d+(?:\.\d+)?\s*(?:h|hr|hours?|minutes?|days?|weeks?)|\d+(?:\.\d+)?\s*(?:hours?|minutes?|days?|weeks?|hrs?|hr))\b/iu;
 
 const CLINICAL_CONSTRAINT_SIGNAL =
   /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
@@ -234,22 +235,53 @@ function applyInfusionDuration(
   if (!Number.isFinite(duration) || duration <= 0) return;
   const durationUnit = /^h/iu.test(match[2]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
   item.fhir.timing = item.fhir.timing ?? {};
+  const repeat = item.fhir.timing.repeat ?? {};
+  const singleAdministration = !hasRecurringCadence(repeat) && repeat.count === undefined;
   item.fhir.timing.repeat = {
-    ...(item.fhir.timing.repeat ?? {}),
-    count: 1, duration, durationUnit
+    ...repeat,
+    ...(singleAdministration ? { count: 1 } : {}),
+    duration, durationUnit
   };
   // A duration of one infusion is not a bound on the entire treatment course.
   delete item.fhir.timing.repeat.boundsDuration;
   for (const clause of item.meta.canonical.clauses) {
     clause.schedule = {
       ...(clause.schedule ?? {}),
-      count: 1,
+      ...(!hasCanonicalRecurringCadence(clause.schedule) && clause.schedule?.count === undefined
+        ? { count: 1 }
+        : {}),
       administrationDuration: duration,
       administrationDurationUnit: durationUnit,
       duration: undefined
     };
   }
   own(matchedRange(source, match, offset));
+}
+
+function hasRecurringCadence(repeat: FhirTimingRepeat): boolean {
+  return Boolean(
+    repeat.frequency !== undefined ||
+    repeat.frequencyMax !== undefined ||
+    repeat.period !== undefined ||
+    repeat.periodMax !== undefined ||
+    repeat.dayOfWeek?.length ||
+    repeat.when?.length ||
+    repeat.timeOfDay?.length
+  );
+}
+
+function hasCanonicalRecurringCadence(
+  schedule: ParseResult["meta"]["canonical"]["clauses"][number]["schedule"]
+): boolean {
+  return Boolean(schedule && (
+    schedule.frequency !== undefined ||
+    schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined ||
+    schedule.periodMax !== undefined ||
+    schedule.dayOfWeek?.length ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
 }
 
 /**
@@ -414,9 +446,11 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         rateRatio: { numerator, denominator: { value: duration, unit: durationUnit, system: UCUM, code: durationUnit } }
       }];
       item.fhir.timing = item.fhir.timing ?? {};
+      const repeat = item.fhir.timing.repeat ?? {};
+      const singleAdministration = !hasRecurringCadence(repeat) && repeat.count === undefined;
       item.fhir.timing.repeat = {
-        ...(item.fhir.timing.repeat ?? {}),
-        count: 1,
+        ...repeat,
+        ...(singleAdministration ? { count: 1 } : {}),
         duration,
         durationUnit
       };
@@ -426,7 +460,9 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         clause.dose = { value: volume, unit: volumeUnit };
         clause.schedule = {
           ...(clause.schedule ?? {}),
-          count: 1,
+          ...(!hasCanonicalRecurringCadence(clause.schedule) && clause.schedule?.count === undefined
+            ? { count: 1 }
+            : {}),
           administrationDuration: duration,
           administrationDurationUnit: durationUnit,
           duration: undefined

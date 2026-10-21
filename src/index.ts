@@ -791,6 +791,112 @@ function propagateTrailingSharedDuration(
   }
 }
 
+function hasCanonicalCadence(
+  schedule: CanonicalSigClause["schedule"] | undefined
+): boolean {
+  return Boolean(schedule && (
+    schedule.timingCode ||
+    schedule.frequency !== undefined ||
+    schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined ||
+    schedule.periodMax !== undefined ||
+    schedule.dayOfWeek?.length ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+}
+
+function hasExplicitCanonicalDose(clause: CanonicalSigClause | undefined): boolean {
+  return Boolean(clause?.dose && clause.evidence.some(item =>
+    item.rule.startsWith("hpsg.lex.dose.")
+  ));
+}
+
+/**
+ * A cadence at the end of a coordinated heterogeneous administration applies
+ * to each sibling when segmentation proved that no earlier sibling supplied a
+ * schedule of its own. This runs after clinical safety checks, so a trailing
+ * clause with competing/unresolved cadence text cannot donate an executable
+ * schedule to an otherwise unscheduled sibling.
+ */
+function propagateTrailingSharedCadence(
+  results: ParseResult[],
+  segments: ReturnType<typeof parseSigSegments>,
+  source: string,
+  options?: ParseOptions
+): void {
+  for (let index = results.length - 2; index >= 0; index -= 1) {
+    const currentSegment = segments[index];
+    const nextSegment = segments[index + 1];
+    if (!currentSegment || !nextSegment) continue;
+    const coordinationGap = source.slice(currentSegment.end, nextSegment.start);
+    const sharesTrailingCadence = currentSegment.inheritTrailingCadenceFromNext ||
+      /^\s*,?\s*(?:and|or|และ|หรือ)\s*$/iu.test(coordinationGap);
+    if (!sharesTrailingCadence) continue;
+    const current = results[index];
+    const next = results[index + 1];
+    const currentClause = current.meta.canonical.clauses[0];
+    const nextClause = next.meta.canonical.clauses[0];
+    const nextSchedule = nextClause?.schedule;
+    const nextRepeat = next.fhir.timing?.repeat;
+    if (!currentClause || !nextSchedule || !nextRepeat ||
+        !hasExplicitCanonicalDose(currentClause) || !hasExplicitCanonicalDose(nextClause) ||
+        !currentClause.site || !nextClause?.site ||
+        hasCanonicalCadence(currentClause.schedule)) {
+      continue;
+    }
+    if (!hasCanonicalCadence(nextSchedule)) continue;
+
+    currentClause.schedule = {
+      ...(currentClause.schedule ?? {}),
+      timingCode: nextSchedule.timingCode,
+      frequency: nextSchedule.frequency,
+      frequencyMax: nextSchedule.frequencyMax,
+      period: nextSchedule.period,
+      periodMax: nextSchedule.periodMax,
+      periodUnit: nextSchedule.periodUnit,
+      dayOfWeek: nextSchedule.dayOfWeek ? [...nextSchedule.dayOfWeek] : undefined,
+      when: nextSchedule.when ? [...nextSchedule.when] : undefined,
+      timeOfDay: nextSchedule.timeOfDay ? [...nextSchedule.timeOfDay] : undefined
+    };
+    const sharedScheduleEvidence = nextClause.evidence.filter(item =>
+      item.rule.startsWith("hpsg.lex.schedule.")
+    );
+    for (const evidence of sharedScheduleEvidence) {
+      if (currentClause.evidence.some(item =>
+        item.rule === evidence.rule && deepEqual(item.spans, evidence.spans)
+      )) continue;
+      currentClause.evidence.push({
+        ...evidence,
+        spans: evidence.spans.map(span => ({ ...span }))
+      });
+    }
+    current.fhir.timing = {
+      ...(current.fhir.timing ?? {}),
+      code: next.fhir.timing?.code
+        ? {
+          ...next.fhir.timing.code,
+          coding: next.fhir.timing.code.coding?.map(coding => ({ ...coding }))
+        }
+        : undefined,
+      repeat: {
+        ...(current.fhir.timing?.repeat ?? {}),
+        frequency: nextRepeat.frequency,
+        frequencyMax: nextRepeat.frequencyMax,
+        period: nextRepeat.period,
+        periodMax: nextRepeat.periodMax,
+        periodUnit: nextRepeat.periodUnit,
+        dayOfWeek: nextRepeat.dayOfWeek ? [...nextRepeat.dayOfWeek] : undefined,
+        when: nextRepeat.when ? [...nextRepeat.when] : undefined,
+        timeOfDay: nextRepeat.timeOfDay ? [...nextRepeat.timeOfDay] : undefined
+      }
+    };
+    current.longText = formatSig(current.fhir, "long", options);
+    current.shortText = formatSig(current.fhir, "short", options);
+    current.fhir.text = current.longText;
+  }
+}
+
 function nextIsoCalendarDay(value: string): string | undefined {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
   if (!match) return undefined;
@@ -1035,6 +1141,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
+  propagateTrailingSharedCadence(rawResults, segments, input, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1117,6 +1224,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       });
     }
   }
+  propagateTrailingSharedCadence(lintParseResults, segments, input, options);
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
   const lintDosages = expandedLintResults.map(entry => entry.result);
   quarantineMergedIndependentRegimens(
@@ -1201,6 +1309,7 @@ export async function parseSigAsync(
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
+  propagateTrailingSharedCadence(rawResults, segments, input, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);

@@ -100,7 +100,8 @@ describe("SNOMED route coverage", () => {
       expect(fhir.route?.text).toBe(ROUTE_TEXT[synonym.code]);
 
       const timing = fhir.timing;
-      expect(timing?.code?.coding?.[0].code).toBe("Q12H");
+      expect(timing?.code?.coding).toBeUndefined();
+      expect(timing?.code?.text).toBe("Q12H");
       expect(timing?.repeat?.period).toBe(12);
       expect(timing?.repeat?.periodUnit).toBe("h");
 

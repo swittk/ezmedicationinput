@@ -67,6 +67,28 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
   return (left?.length ?? 0) === (right?.length ?? 0) && (left ?? []).every(v => (right?.indexOf(v) ?? -1) >= 0);
 }
 
+/** FHIR R5 tim-10 plus the clinically meaningful count/clock consistency
+ * FHIR intentionally leaves to implementers. Refuse a fabricated executable
+ * schedule while retaining the dose, text, and unresolved warning.
+ */
+function quarantineConflictingTiming(item: ParseResult, source: string): boolean {
+  const repeat = item.fhir.timing?.repeat;
+  if (!repeat) return false;
+  if (repeat.when?.length && repeat.timeOfDay?.length) {
+    quarantineSchedule(item, source, 'incompatible-event-and-clock');
+    return true;
+  }
+  if (repeat.frequency && repeat.period === 1 && repeat.periodUnit === 'd' &&
+      repeat.timeOfDay?.length) {
+    const distinctClocks = new Set(repeat.timeOfDay).size;
+    if (distinctClocks !== repeat.frequency) {
+      quarantineSchedule(item, source, 'frequency-clock-count-conflict');
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Compose a whole predecessor phase, preserving explicit values and refusing arbitrary anchor selection. */
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
@@ -82,6 +104,7 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
     }
     const invalid = recognizeCycles(source, options).find(c => c.error);
     if (invalid) quarantineSchedule(results[index], segments[index].text, invalid.error!);
+    quarantineConflictingTiming(results[index], source);
   }
   if (results.length < 2) return [];
   const graph = buildRegimenGraph(plan, segments), evidence: InheritanceEvidence[] = [];
@@ -154,6 +177,7 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
       normalizeAnchoredBounds(repeat, schedule);
       normalizeClockFrequency(repeat);
       item.fhir.timing.repeat = repeat;
+      if (quarantineConflictingTiming(item, segments[index].text)) continue;
       item.longText = render(item.fhir, 'long', options);
       item.shortText = render(item.fhir, 'short', options);
       item.fhir.text = item.longText;
