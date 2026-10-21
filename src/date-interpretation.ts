@@ -28,22 +28,24 @@ export interface MedicationDateListMatch {
 
 const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
 const YEARFUL_SLASH_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
+const ISO_DATE_SOURCE = String.raw`\d{4}-\d{2}-\d{2}`;
 const NUMERIC_DATE_SOURCE = String.raw`(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?)`;
 const ENGLISH_MONTH_NAME_SOURCE = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
 const TEXTUAL_ENGLISH_DMY_DATE_SOURCE = String.raw`\d{1,2}\s+${ENGLISH_MONTH_NAME_SOURCE}\s+\d{4}`;
 const TEXTUAL_ENGLISH_MDY_DATE_SOURCE = String.raw`${ENGLISH_MONTH_NAME_SOURCE}\s+\d{1,2}(?:,\s*|\s+)\d{4}`;
 const TEXTUAL_ENGLISH_DATE_SOURCE = String.raw`(?:${TEXTUAL_ENGLISH_DMY_DATE_SOURCE}|${TEXTUAL_ENGLISH_MDY_DATE_SOURCE})`;
-const CALENDAR_DATE_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
+const CALENDAR_DATE_SOURCE = String.raw`(?:${ISO_DATE_SOURCE}|${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
 const DATE_LIST_PART_SOURCE = String.raw`(?:${CALENDAR_DATE_SOURCE}|\d{1,2})`;
 const DATE_LIST_SOURCE = String.raw`${CALENDAR_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${ISO_DATE_SOURCE}|${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
 const DATE_START_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startInclusive;
 const DATE_START_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startExclusive;
 const DATE_END_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endInclusive;
 const DATE_END_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endExclusive;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
 const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
 const TEXTUAL_ENGLISH_DMY_DATE_RE = new RegExp(
   `^(\\d{1,2})\\s+(${ENGLISH_MONTH_NAME_SOURCE})\\s+(\\d{4})$`,
@@ -54,7 +56,7 @@ const TEXTUAL_ENGLISH_MDY_DATE_RE = new RegExp(
   "iu"
 );
 const DATE_COMPONENT_RE = new RegExp(
-  `${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE}|\\d{1,2}`,
+  `${ISO_DATE_SOURCE}|${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE}|\\d{1,2}`,
   "giu"
 );
 const ENGLISH_MONTH_TOKEN_RE = new RegExp(`\\b${ENGLISH_MONTH_NAME_SOURCE}\\b`, "iu");
@@ -251,6 +253,8 @@ interface NumericDatePart {
   year?: number;
   yearDigits?: number;
   yearWasExplicit?: boolean;
+  /** ISO YYYY-MM-DD uses Gregorian YMD in any locale. */
+  isoYearFirst?: boolean;
 }
 
 function parseStructuralParts(listText: string): { parts: NumericDatePart[]; effectiveEnd: number } {
@@ -258,7 +262,8 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
   DATE_COMPONENT_RE.lastIndex = 0;
   for (let match = DATE_COMPONENT_RE.exec(listText); match; match = DATE_COMPONENT_RE.exec(listText)) {
     const text = match[0];
-    const full = text.match(NUMERIC_DATE_RE);
+    const iso = text.match(ISO_DATE_RE);
+    const full = iso ? null : text.match(NUMERIC_DATE_RE);
     const textualDmy = text.match(TEXTUAL_ENGLISH_DMY_DATE_RE);
     const textualMdy = text.match(TEXTUAL_ENGLISH_MDY_DATE_RE);
     const textualMonth = textualDmy
@@ -270,7 +275,12 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
       sourceText: text,
       start: match.index,
       end: match.index + text.length,
-      ...(full
+      ...(iso
+        ? {
+            year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]),
+            yearDigits: 4, yearWasExplicit: true, isoYearFirst: true
+          }
+        : full
         ? {
             day: Number(full[1]),
             month: Number(full[3]),
@@ -358,6 +368,17 @@ function resolveDatePart(
     yearDigits: part.yearDigits ?? inherited?.yearDigits
   };
   if (source.day === undefined || source.month === undefined) return undefined;
+
+  // ISO dates are unambiguous Gregorian YMD even in Thai or MDY inputs.
+  if (part.isoYearFirst) {
+    if (source.year === undefined ||
+        !validGregorianDate(source.year, source.month, source.day)) return undefined;
+    return {
+      isoDate: isoDate(source.year, source.month, source.day),
+      calendar: "gregory", calendarYear: source.year,
+      month: source.month, day: source.day, sourceText: part.sourceText
+    };
+  }
 
   const textualEnglishDate =
     TEXTUAL_ENGLISH_DMY_DATE_RE.test(part.sourceText) ||

@@ -21,6 +21,25 @@ type ParallelProjection =
   | { kind: 'resolved'; dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageDetails };
 
 const ZERO: Position = { unit: 'd', value: 0 };
+/** Calendar tracks use explicit dates; not offsets from treatment start. */
+function precedingCalendarDay(value: string): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
+  const date = new Date(value + "T00:00:00Z");
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+    return undefined;
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Dates without times are inclusive local calendar days, never UTC timestamps. */
+function orderedCalendarBounds(earlier: string, later: string): boolean {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/u;
+  if (dateOnly.test(earlier) && dateOnly.test(later)) return earlier < later;
+  if (dateOnly.test(earlier) || dateOnly.test(later)) return false;
+  const left = Date.parse(earlier), right = Date.parse(later);
+  return Number.isFinite(left) && Number.isFinite(right) && left < right;
+}
+
 const TREATMENT_START_CODE = 'treatment-start';
 export const TREATMENT_START_SYSTEM = 'http://hl7.org/fhir/evidence-variable-event';
 
@@ -84,7 +103,7 @@ function dosageInStep(dosage: FhirDosage, sequence: number): EzDosage {
   const timing = dosage.timing;
   const repeat = timing?.repeat;
   const nextRepeat = repeat
-    ? (({ boundsDuration: _duration, boundsPeriod: _period, ...rest }) => rest)(repeat)
+    ? (({ boundsDuration: _duration, ...rest }) => rest)(repeat)
     : undefined;
   return {
     ...dosage,
@@ -148,9 +167,59 @@ export function projectParallelRegimen(
   if (tracks.length < 2) return { kind: 'not-parallel' };
 
   const windows: Phase[][] = [];
+  // Calendar-bounded independent tracks keep their own FHIR Timing bounds.
+  // They are present in each relative global step and are clipped by the
+  // scheduler/supply calculator at the actual local calendar dates.
+  const calendarTracks: FhirDosage[][] = [];
   const boundaries: Position[] = [ZERO];
 
   for (const track of tracks) {
+    const trackMembers: FhirDosage[] = [];
+    for (const phase of track) {
+      for (const index of phase.members) trackMembers.push(results[index].fhir);
+    }
+    const calendarBounded = trackMembers.some(item => !!item.timing?.repeat?.boundsPeriod);
+    if (calendarBounded) {
+      if (trackMembers.some(item => !item.timing?.repeat?.boundsPeriod ||
+        item.timing.repeat.boundsRange || item.timing.repeat.boundsDuration)) {
+        return { kind: 'unresolved', reason: 'parallel-regimen-mixed-track-bounds' };
+      }
+      // Each absolute phase remains its own date-bounded component, including
+      // when a relative step cut intersects it. Consecutive phases must not
+      // overlap; a second 'from DATE' implicitly closes the earlier phase.
+      const datedPhases = track.map(phase =>
+        phase.members.map(i => results[i].fhir));
+      for (let index = 0; index < datedPhases.length - 1; index++) {
+        const current = datedPhases[index];
+        const next = datedPhases[index + 1];
+        const nextStarts = next.map(item => item.timing?.repeat?.boundsPeriod?.start);
+        if (nextStarts.some(value => !value)) {
+          return { kind: 'unresolved', reason: 'parallel-regimen-next-calendar-start-required' };
+        }
+        const nextStart = nextStarts.reduce<string>((earliest, value) =>
+          value && value < earliest ? value : earliest, nextStarts[0]!);
+        const inferredEnd = precedingCalendarDay(nextStart);
+        const normalized: FhirDosage[] = [];
+        for (const item of current) {
+          const bounds = item.timing!.repeat!.boundsPeriod!;
+          const effectiveEnd = bounds.end ?? inferredEnd;
+          if (!effectiveEnd || !orderedCalendarBounds(effectiveEnd, nextStart) ||
+              bounds.start && orderedCalendarBounds(effectiveEnd, bounds.start)) {
+            return { kind: 'unresolved', reason: 'parallel-regimen-calendar-phase-overlap' };
+          }
+          normalized.push(bounds.end ? item : {
+            ...item,
+            timing: { ...item.timing, repeat: { ...item.timing!.repeat!,
+              boundsPeriod: { ...bounds, end: effectiveEnd } } }
+          });
+        }
+        datedPhases[index] = normalized;
+      }
+      const datedMembers: FhirDosage[] = [];
+      for (const phase of datedPhases) datedMembers.push(...phase);
+      calendarTracks.push(datedMembers);
+      continue;
+    }
     const phases: Phase[] = [];
     let at: Position = ZERO;
     for (let index = 0; index < track.length; index++) {
@@ -158,6 +227,11 @@ export function projectParallelRegimen(
       if (!members.length || members.some(item => !item.timing?.repeat ||
           item.modifierExtension?.some(ext => ext.url.endsWith('/medication-unresolved-schedule')))) {
         return { kind: 'unresolved', reason: 'parallel-regimen-incomplete-dose' };
+      }
+      // A true boundsRange is not an exact relative duration, so global
+      // treatment-start cuts cannot safely be derived from it.
+      if (members.some(item => item.timing?.repeat?.boundsRange)) {
+        return { kind: 'unresolved', reason: 'parallel-regimen-ambiguous-range' };
       }
       // A phase may have several simultaneous components. They must share
       // an end before a next step can be derived from a relative duration.
@@ -194,7 +268,10 @@ export function projectParallelRegimen(
     }
     ordered.splice(before, 0, position);
   }
-  if (ordered.length < 2) return { kind: 'unresolved', reason: 'parallel-regimen-no-phase-cut' };
+  // A single shared step is enough when only calendar bounds constrain
+  // independent components; real relative transitions add further cuts.
+  if (ordered.length < 2 && !calendarTracks.length)
+    return { kind: 'unresolved', reason: 'parallel-regimen-no-phase-cut' };
 
   const dosages: EzDosage[] = [];
   const stepMetadata: NonNullable<EzCourseMetadata['step']> = [];
@@ -209,6 +286,9 @@ export function projectParallelRegimen(
       );
       if (phase) members.push(...phase.members);
     }
+    // Calendar tracks are independent of treatment-relative cuts. Their own
+    // boundsPeriod (including inclusive end) is the source of truth.
+    for (const calendarTrack of calendarTracks) members.push(...calendarTrack);
     if (!members.length) {
       // If every track has terminated at the final cut, the entire course
       // ends there. A gap *before* another cut remains unresolved; never

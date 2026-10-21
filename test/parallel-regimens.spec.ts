@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, parseSigAsync, lintSig, nextDueDoses,
+  parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, fromFhir
 } from "../src";
+import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { projectParallelRegimen } from "../src/regimen/parallel-course";
 
 const twoSites =
   "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
@@ -142,6 +144,215 @@ describe("concurrent independent treatment sequences", () => {
     expect(parsed.fhirNext.step[1].end?.offsetDuration?.code).toBe("mo");
     expect(nextDueDoses(parsed, options("2026-11-19T12:00:00+07:00", 4)))
       .toEqual(nextDueDoses(parseSig(twoSites), options("2026-11-19T12:00:00+07:00", 4)));
+  });
+
+  it("intersects absolute start/end dates with relative track steps in every wire format", () => {
+    const cases = [
+      {
+        text: "1 drop OD QID x7d then BID; 1 drop OS QID until 2026-11-01",
+        count: 130, bounds: { end: "2026-11-01" }
+      },
+      {
+        text: "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 until 2026-11-01",
+        count: 106, bounds: { start: "2026-10-25", end: "2026-11-01" }
+      },
+      {
+        text: "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 for 7 days",
+        count: 102, bounds: { start: "2026-10-25", end: "2026-10-31" }
+      }
+    ];
+    const onlyRelative = parseSig("1 drop OD QID x7d then BID");
+    for (const { text, count, bounds } of cases) {
+      const parsed = parseSig(text);
+      expect(parsed.count).toBe(3);
+      expect(parsed.warnings).toEqual([]);
+      expect(lintSig(text).issues).toEqual([]);
+      expect(parsed.fhirNext.step).toHaveLength(2);
+      expect(parsed.fhirNext.step[0].end?.offsetDuration?.value).toBe(7);
+      // The SAME independently dated left-eye component survives each cut.
+      for (const step of parsed.fhirNext.step) {
+        const left = step.component.find(dosage => dosage.site?.concept?.text === "left eye");
+        expect(left?.timing?.repeat?.boundsPeriod).toEqual(bounds);
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(toDosageDetails(strict)).toEqual(parsed.fhirNext);
+      expect(toDosageDetails(parsed.fhir)).toEqual(parsed.fhirNext);
+      expect(fromFhir(JSON.parse(JSON.stringify(parsed.fhirNext))).fhirNext)
+        .toEqual(parsed.fhirNext);
+      for (const dosage of [parsed, parsed.fhir, parsed.fhirNext, strict]) {
+        const supply = calculateTotalUnits({
+          dosage, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+          durationValue: 30, durationUnit: "d"
+        });
+        expect(supply.totalUnits).toBe(count);
+        const after = nextDueDoses(dosage, options("2026-11-02T08:00:00+07:00", 12));
+        expect(after).toEqual(nextDueDoses(
+          onlyRelative, options("2026-11-02T08:00:00+07:00", 12)
+        ));
+      }
+    }
+  });
+
+  it("honors a calendar track starting before the relative treatment anchor", () => {
+    const source =
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-15 until 2026-10-25";
+    const parsed = parseSig(source);
+    expect(parsed.warnings).toEqual([]);
+    const start = "2026-10-15T08:00:00+07:00";
+    const expectedFirst = [
+      "2026-10-15T08:00:00+07:00",
+      "2026-10-15T12:00:00+07:00",
+      "2026-10-15T16:00:00+07:00",
+      "2026-10-15T20:00:00+07:00"
+    ];
+    const formats = [parsed, parsed.fhir, parsed.fhirNext,
+      toFhirR5Dosages(parsed.fhirNext)];
+    for (const dosage of formats) {
+      expect(nextDueDoses(dosage, {
+        from: start, orderedAt, timeZone: "Asia/Bangkok", limit: 4
+      })).toEqual(expectedFirst);
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 30, durationUnit: "d"
+      }).totalUnits).toBe(110);
+    }
+  });
+
+  it("rejects inverted absolute bounds on imported R6 and strict R5 courses", () => {
+    const parsed = parseSig(
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 until 2026-11-01"
+    );
+    const invalid = JSON.parse(JSON.stringify(parsed.fhirNext)) as typeof parsed.fhirNext;
+    for (const step of invalid.step) {
+      const left = step.component.find(c => c.site?.concept?.text === "left eye")!;
+      left.timing!.repeat!.boundsPeriod = {
+        start: "2026-11-05", end: "2026-11-01"
+      };
+    }
+    for (const dosage of [invalid, toFhirR5Dosages(invalid)]) {
+      expect(() => nextDueDoses(dosage, options(orderedAt)))
+        .toThrow(/calendar component end precedes its start/i);
+      expect(() => calculateTotalUnits({
+        dosage, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 30, durationUnit: "d"
+      })).toThrow(/ends before its stated start date/i);
+    }
+  });
+
+  it("keeps exact-dated calendar phases sequential across an independent taper", () => {
+    const inputVariants = [
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 until 2026-10-31 then BID from 2026-11-01",
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 then BID from 2026-11-01"
+    ];
+    for (const input of inputVariants) {
+      const parsed = parseSig(input);
+      expect(parsed.warnings).toEqual([]);
+      expect(parsed.fhirNext.step).toHaveLength(2);
+      for (const step of parsed.fhirNext.step) {
+        const left = step.component.filter(d => d.site?.concept?.text === "left eye");
+        expect(left).toHaveLength(2);
+        expect(left[0].timing?.repeat?.boundsPeriod)
+          .toEqual({ start: "2026-10-25", end: "2026-10-31" });
+        expect(left[1].timing?.repeat?.boundsPeriod)
+          .toEqual({ start: "2026-11-01" });
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(toDosageDetails(strict)).toEqual(parsed.fhirNext);
+      for (const dosage of [parsed, parsed.fhir, parsed.fhirNext, strict]) {
+        expect(calculateTotalUnits({
+          dosage, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+          durationValue: 30, durationUnit: "d"
+        }).totalUnits).toBe(136);
+      }
+    }
+  });
+
+  it("derives successive calendar phase dates from an anchored duration", () => {
+    const text =
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 for 7 days then BID x7d";
+    const parsed = parseSig(text);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    for (const step of parsed.fhirNext.step) {
+      const left = step.component.filter(c => c.site?.concept?.text === "left eye");
+      expect(left).toHaveLength(2);
+      expect(left[0].timing?.repeat?.boundsPeriod)
+        .toEqual({ start: "2026-10-25", end: "2026-10-31" });
+      expect(left[1].timing?.repeat?.boundsPeriod)
+        .toEqual({ start: "2026-11-01", end: "2026-11-07" });
+    }
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext,
+      toFhirR5Dosages(parsed.fhirNext)]) {
+      const result = calculateTotalUnits({
+        dosage, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 30, durationUnit: "d"
+      });
+      expect(result.totalUnits).toBe(116);
+      const due = nextDueDoses(dosage, options("2026-11-08T08:00:00+07:00", 8));
+      expect(due).toEqual(nextDueDoses(
+        parseSig("1 drop OD QID x7d then BID"),
+        options("2026-11-08T08:00:00+07:00", 8)
+      ));
+    }
+  });
+
+  it("keeps an interval-cadence origin across relative step boundaries", () => {
+    const parsed = parseSig(
+      "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 until 2026-11-05"
+    );
+    expect(parsed.warnings).toEqual([]);
+    // Model an exact every-second-day 08:00 schedule in both global steps.
+    for (const step of parsed.fhirNext.step) {
+      const left = step.component.find(d => d.site?.concept?.text === "left eye")!;
+      const repeat = left.timing!.repeat!;
+      repeat.frequency = 1;
+      repeat.period = 2;
+      repeat.periodUnit = "d";
+      repeat.timeOfDay = ["08:00:00"];
+      delete left.timing!.code;
+    }
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const request = options("2026-10-26T08:00:00+07:00", 10);
+    const expected = [
+      "2026-10-26T08:00:00+07:00", "2026-10-26T20:00:00+07:00",
+      "2026-10-27T08:00:00+07:00", "2026-10-27T08:00:00+07:00",
+      "2026-10-27T20:00:00+07:00",
+      "2026-10-28T08:00:00+07:00", "2026-10-28T20:00:00+07:00",
+      "2026-10-29T08:00:00+07:00", "2026-10-29T08:00:00+07:00",
+      "2026-10-29T20:00:00+07:00"
+    ];
+    expect(nextDueDoses(parsed.fhirNext, request)).toEqual(expected);
+    expect(nextDueDoses(strict, request)).toEqual(expected);
+    expect(calculateTotalUnits({
+      dosage: parsed.fhirNext, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+      durationValue: 30, durationUnit: "d"
+    }).totalUnits).toBe(80);
+    expect(calculateTotalUnits({
+      dosage: strict, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+      durationValue: 30, durationUnit: "d"
+    }).totalUnits).toBe(80);
+  });
+
+  it("preserves calendar-month clamping alongside an independent dated track", () => {
+    const start = "2027-01-31T08:00:00+07:00";
+    const input = "1 drop OD QID x1mo then BID; 1 drop OS QID from 2027-02-14 until 2027-03-08";
+    const parsed = parseSig(input);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.fhirNext.step[0].end?.offsetDuration)
+      .toMatchObject({ value: 1, code: "mo" });
+    const forms = [parsed, parsed.fhir, parsed.fhirNext,
+      toFhirR5Dosages(parsed.fhirNext)];
+    for (const dosage of forms) {
+      const mid = nextDueDoses(dosage, {
+        from: "2027-02-28T08:00:00+07:00", orderedAt: start,
+        timeZone: "Asia/Bangkok", limit: 8
+      });
+      expect(mid).toContain("2027-02-28T08:00:00+07:00");
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt: start, timeZone: "Asia/Bangkok",
+        durationValue: 45, durationUnit: "d"
+      }).totalUnits).toBe(238);
+    }
   });
 
   it("stops an entirely finite parallel course without creating an empty phantom stage", () => {

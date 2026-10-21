@@ -585,6 +585,59 @@ describe("calendar date interpretation", () => {
     }
   });
 
+  it("uses Gregorian ISO YMD dates in both Thai and US-MDY medication directions", () => {
+    const variants = [
+      { input: "take 1 tab daily from 2026-10-25 until 2026-11-01",
+        opts: { locale: "en-US", datePolicy: { dateOrder: "MDY" as const } } },
+      { input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่2026-10-25 ถึงวันที่2026-11-01",
+        opts: { locale: "th", datePolicy: { dateOrder: "DMY" as const } } }
+    ];
+    for (const { input, opts } of variants) {
+      const parsed = parseSig(input, opts);
+      expect(parsed.warnings).toEqual([]);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.fhir.timing?.repeat?.boundsPeriod)
+        .toEqual({ start: "2026-10-25", end: "2026-11-01" });
+    }
+  });
+
+  it("quarantines contradictory calendar intervals and ambiguous up-to dates", () => {
+    for (const input of [
+      "take 1 tab daily from 2026-11-01 until 2026-10-25",
+      "take 1 tab daily up to 30 Sep 2026"
+    ]) {
+      const parsed = parseSig(input);
+      expect(parsed.warnings).toContainEqual(
+        expect.stringContaining("Unresolved schedule")
+      );
+      expect(() => nextDueDoses(parsed.fhir, {
+        from: "2026-09-28T08:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 4
+      })).toThrow(/unresolved/i);
+    }
+  });
+
+  it("quarantines impossible ISO date bounds rather than executing them indefinitely", () => {
+    for (const input of [
+      "take 1 tab daily until 2026-02-30",
+      "take 1 tab daily from 2025-02-29",
+      "take 1 tab daily until 2026-11-31",
+      "take 1 tab daily until 2026-13-01",
+      "take 1 tab daily from 2026-00-15"
+    ]) {
+      const parsed = parseSig(input);
+      expect(parsed.warnings).toContainEqual(
+        expect.stringContaining("invalid-or-ambiguous-calendar-bound")
+      );
+      expect(parsed.meta.leftoverText).toContain(input);
+      expect(parsed.fhir.timing).toBeUndefined();
+      expect(() => nextDueDoses(parsed.fhir, {
+        from: "2026-10-19T08:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 6
+      })).toThrow(/unresolved/i);
+    }
+  });
+
   it("models relational calendar dates as native timing bounds instead of exact events", () => {
     const cases: Array<{
       input: string;

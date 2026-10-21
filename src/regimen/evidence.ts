@@ -1,4 +1,5 @@
 import { parseClauseState, findUnparsedTokenGroups } from '../parser';
+import { findMedicationDateListSpans } from '../date-interpretation';
 import type { ParserState } from '../parser-state';
 import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
@@ -37,6 +38,17 @@ export class EvidenceContext {
     const directTarget = c.site?.text?.trim().toLowerCase().replace(/\s+/gu, ' ') ||
       (c.site?.coding?.code ? 'code:' + c.site.coding.code : undefined);
     const probeSource = this.input.slice(start, end);
+    const leftoverGroups = findUnparsedTokenGroups(state);
+    // The HPSG probe runs before the calendar-bound resolver. Valid date
+    // ranges can appear as leftover lexical tokens at this point, even
+    // though the finished dosage has real boundsPeriod fields. They count
+    // as complete ONLY when the shared calendar parser owns every token.
+    const bounds = leftoverGroups.length && /[\/-]/u.test(probeSource)
+      ? findMedicationDateListSpans(probeSource, this.options).filter(span =>
+          !span.unresolved && span.relation !== 'event')
+      : [];
+    const complete = leftoverGroups.every(group => group.tokens.every(token =>
+      bounds.some(span => token.sourceStart >= span.start && token.sourceEnd <= span.end)));
     const targets = (c.site?.text || c.site?.coding)
       ? hasTargetCoordinator && mayContainAdministrationTargetGroup(probeSource, this.options, state.tokens)
         ? targetKeys(probeSource, this.options)
@@ -44,7 +56,7 @@ export class EvidenceContext {
       : [];
     const summary: ProbeSummary = {
       start, end, clause: c,
-      complete: findUnparsedTokenGroups(state).length === 0,
+      complete,
       hasHead: Boolean(c.method?.coding?.code || c.method?.text || c.dose?.value !== undefined || c.dose?.range ||
         c.site?.coding?.code || c.site?.text || c.patientInstruction || c.additionalInstructions?.length),
       hasDose: Boolean(c.dose),

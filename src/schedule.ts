@@ -1447,20 +1447,38 @@ function scheduleTreatmentRelativeCourse(
     for (const component of step.component) {
       const original = flattened[componentIndex++];
       if (!original) throw new Error("R6 course component projection is incomplete");
-      if (component.timing?.repeat?.boundsDuration ||
-          component.timing?.repeat?.boundsPeriod ||
-          component.timing?.repeat?.boundsRange) {
-        throw new Error("Unsupported overlapping R6 component and global step bounds");
+      // Relative duration/range bounds cannot be repeated inside global step
+      // cuts. Absolute date bounds CAN overlap a step: they delimit an
+      // independent track, and remain authoritative on every step copy.
+      const repeat = component.timing?.repeat;
+      if (repeat?.boundsDuration || repeat?.boundsRange) {
+        throw new Error("Unsupported overlapping relative R6 component and global step bounds");
       }
+      const absoluteStart = resolveRepeatBoundsStart(repeat, timeZone);
+      if (repeat?.boundsPeriod?.start && !absoluteStart)
+        throw new Error("Invalid absolute component start date in R6 course");
+      const absoluteEnd = resolveRepeatBoundsEndExclusive(repeat, timeZone);
+      if (repeat?.boundsPeriod?.end && !absoluteEnd)
+        throw new Error("Invalid absolute component end date in R6 course");
+      if (absoluteStart && absoluteEnd && absoluteEnd <= absoluteStart)
+        throw new Error("Absolute calendar component end precedes its start");
       const dosage = {
         ...original,
         modifierExtension: original.modifierExtension?.filter(ext =>
           ext.url !== DOSAGE_DETAILS_R5_URL)
       };
       if (end && from >= end) continue;
-      const effectiveFrom = from > start ? from : start;
+      // A calendar track may begin before the first relative treatment step:
+      // its absolute start is independent of orderedAt. Later global steps
+      // must still clip it at their own start to avoid duplicate doses.
+      const stageStart = index === 0 && repeat?.boundsPeriod ? from : start;
+      const effectiveFrom = from > stageStart ? from : stageStart;
+      // A calendar track keeps its own recurrence origin across global step
+      // cuts. Otherwise QOD / monthly cadence would restart at every taper.
+      const cadenceOrigin = repeat?.boundsPeriod
+        ? (absoluteStart ?? anchor) : start;
       const candidateTimes = nextDueDoses(dosage, {
-        ...options, from: effectiveFrom, orderedAt: start, limit
+        ...options, from: effectiveFrom, orderedAt: cadenceOrigin, limit
       });
       for (const time of candidateTimes) {
         if (end && Date.parse(time) >= end.getTime()) break;
@@ -3137,14 +3155,31 @@ function calculateCourseTotalUnits(
           "A dosage has an unresolved schedule (" + unresolved + "). Clarify its timing before requesting a numeric supply.");
       dosages.push(dosage);
       const repeat = dosage.timing?.repeat;
-      const individualStart = resolveRepeatBoundsStart(repeat, zone) ?? start;
-      if (individualStart < start)
-        throw new MedicationQuantityCalculationError("overlapping-course",
-          "A dosage begins before its enclosing global treatment stage; review its bounds.");
-      starts.push(individualStart);
+      const calendarStart = resolveRepeatBoundsStart(repeat, zone);
+      if (repeat?.boundsPeriod?.start && !calendarStart)
+        throw new MedicationQuantityCalculationError("invalid-calendar-bounds",
+          "A calendar-bound dosage has an invalid start date; correct the date before calculating supply.");
+      const calendarEnd = resolveRepeatBoundsEndExclusive(repeat, zone);
+      if (repeat?.boundsPeriod?.end && !calendarEnd)
+        throw new MedicationQuantityCalculationError("invalid-calendar-bounds",
+          "A calendar-bound dosage has an invalid end date; correct the date before calculating supply.");
+      if (calendarStart && calendarEnd && calendarEnd <= calendarStart)
+        throw new MedicationQuantityCalculationError("invalid-calendar-order",
+          "The calendar-bound dosage ends before its stated start date; correct the date interval.");
+      // This stage clips administration times, but absolute-bound members
+      // may have started BEFORE the stage cut. Keep their original cadence
+      // anchored to the stated date rather than resetting it each time.
+      const cadenceOrigin = repeat?.boundsPeriod
+        ? (calendarStart ?? treatmentStart) : start;
+      // Before the first global relative cut, an independent calendar member
+      // is allowed to start before orderedAt. Subsequent step cuts still
+      // intersect the calendar window with the global step.
+      const stageStart = index === 0 && repeat?.boundsPeriod
+        ? (calendarStart ?? start) : start;
+      starts.push(calendarStart && calendarStart > stageStart ? calendarStart : stageStart);
       ends.push(earlierDate(
-        resolveRepeatDurationCapEnd(repeat, individualStart, zone),
-        resolveRepeatBoundsEndExclusive(repeat, zone)
+        resolveRepeatDurationCapEnd(repeat, cadenceOrigin, zone),
+        calendarEnd
       ));
     }
     const nextStep = course.step[index + 1];
@@ -3169,6 +3204,9 @@ function calculateCourseTotalUnits(
       const dosage = dosages[j];
       const begin = starts[j];
       const ownEnd = ends[j];
+      const originalStart = resolveRepeatBoundsStart(dosage.timing?.repeat, zone);
+      const cadenceOrigin = dosage.timing?.repeat?.boundsPeriod
+        ? (originalStart ?? treatmentStart) : start;
       const end = [queryEnd, ...(stepEnd ? [stepEnd] : []),
         ...(ownEnd ? [ownEnd] : [])].reduce((earliest, candidate) =>
         candidate < earliest ? candidate : earliest, queryEnd);
@@ -3187,7 +3225,9 @@ function calculateCourseTotalUnits(
             // never re-anchor it from the supply-window start.
             boundsDuration: undefined,
             boundsPeriod: {
-              start: begin.toISOString(),
+              // Keep the true cadence origin while the supply-window `from`
+              // below applies the later step cut (without changing recurrence).
+              start: cadenceOrigin.toISOString(),
               end: new Date(end.getTime() - 1).toISOString()
             }
           }
@@ -3195,8 +3235,9 @@ function calculateCourseTotalUnits(
       };
       const measured = prepareMeasuredDose(bounded, options);
       const calculated = calculateTotalUnitsSingle({
-        ...options, dosage: bounded, orderedAt: begin,
-        roundToMultiple: undefined
+        ...options, dosage: bounded,
+        from: begin > queryStart ? begin : queryStart,
+        orderedAt: cadenceOrigin, roundToMultiple: undefined
       });
       entries.push({
         total: calculated,
