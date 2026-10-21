@@ -192,6 +192,47 @@ describe("whole-course numeric supply and API parity", () => {
     }
   });
 
+  it("computes recognized per-kg infusion rates using duration and weight, never as a bolus", () => {
+    const instruction = "Infuse dopamine at 5 mcg/kg/min IV for 4 hours";
+    for (const dosage of allFormats(instruction)) {
+      expect(() => calculateTotalUnits({ ...base, dosage, durationValue: 1 }))
+        .toThrow(/patientWeightKg/);
+      const measured = calculateTotalUnits({
+        ...base, dosage, durationValue: 1, patientWeightKg: 70
+      });
+      expect(measured.totalUnits).toBe(84000);
+      expect(measured.unit).toBe("ug");
+    }
+  });
+
+  it("rejects incompatible per-period maxima instead of returning zero supply or an empty schedule", () => {
+    const valid = parseSig("2 tablets BID").fhir[0];
+    const capped = {
+      ...valid,
+      maxDosePerPeriod: [{
+        numerator: { value: 1, unit: "tab" },
+        denominator: { value: 1, unit: "d", code: "d" }
+      }]
+    };
+    const opts = { from: begin, orderedAt: begin, timeZone: "Asia/Bangkok", limit: 10 };
+    for (const dosage of [capped, [capped]]) {
+      expect(() => nextDueDoses(dosage, opts))
+        .toThrow(/Prescribed dose exceeds the per-period maximum/);
+      expect(() => calculateTotalUnits({ ...base, dosage, durationValue: 3 }))
+        .toThrow(/Prescribed dose exceeds the per-period maximum/);
+    }
+    const acceptable = {
+      ...capped,
+      maxDosePerPeriod: [{
+        numerator: { value: 2, unit: "tab" },
+        denominator: { value: 1, unit: "d", code: "d" }
+      }]
+    };
+    expect(nextDueDoses(acceptable, { ...opts, limit: 3 })).toHaveLength(3);
+    expect(calculateTotalUnits({ ...base, dosage: acceptable, durationValue: 3 }).totalUnits)
+      .toBe(6);
+  });
+
   it("accepts all four representations after a FHIR R6 JSON import", () => {
     const p = parseSig(eyeCourse);
     const imported = fromFhir(JSON.parse(JSON.stringify(p.fhirNext)));

@@ -1266,10 +1266,11 @@ function executableQuantityCaps(dosage: FhirDosage): CanonicalOccurrenceCapExpr[
         equivalentDose <= 0) {
       throw new Error("Cannot enforce a dose maximum without compatible units or a medication strength");
     }
-    caps.push({
-      max: Math.floor(maximum / equivalentDose + 1e-9),
-      period, periodUnit: periodUnit as FhirPeriodUnit
-    });
+    const max = Math.floor(maximum / equivalentDose + 1e-9);
+    if (max < 1) {
+      throw new Error("Prescribed dose exceeds the per-period maximum; no administration is permitted");
+    }
+    caps.push({ max, period, periodUnit: periodUnit as FhirPeriodUnit });
   }
   return caps;
 }

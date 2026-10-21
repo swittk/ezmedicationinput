@@ -31,11 +31,15 @@ const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
 // ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
 const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
-const WEIGHT = /(\d+(?:\.\d+)?)\s*(mcg|μg|µg|mg|g|units?|iu)\s*\/\s*kg(?:\s*\/\s*(?:day|daily|d))?/iu;
+const WEIGHT = /(\d+(?:\.\d+)?)\s*(mcg|μg|µg|ug|mg|g|units?|iu)\s*\/\s*kg(?:\s*\/\s*(?:day|daily|d))?/iu;
 const WEIGHT_DAILY = /\/\s*kg\s*\/\s*(?:day|daily|d)\b/iu;
+// The weight-dose matcher intentionally stops at /kg (or /kg/day). A
+// following /min, /h, /week, or unknown suffix must not become a bolus.
+const WEIGHT_TRAILING_SUFFIX = /^\s*\/\s*([^\s,;.!?]+)/u;
 const DOSE_DIVISION = /\bdivid(?:ed|e)\s+(?:into|in)\s+(\d+)\s+doses?\b/iu;
 const RATE = /\b(?:at|@)\s*(\d+(?:\.\d+)?)\s*(mL|L|mg|mcg|µg|μg|g)\s*\/\s*(h|hr|hour|hours|min|minute|minutes)\b/iu;
-const INFUSE_OVER = /\b(?:infuse|infusion|administer|give)\b[\s\S]*?\b(\d+(?:\.\d+)?)\s*(mL|L)\s+over\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h(?:ou)?rs?)\b/iu;
+const INFUSE_OVER = /\b(?:infuse|infusion|administer|give)\b[\s\S]*?\b(\d+(?:\.\d+)?)\s*(mL|L)\s+over\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h|hr|hrs|hour|hours)\b/iu;
+const INFUSION_DURATION = /\bfor\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h|hr|hrs|hour|hours)\b/iu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
 /**
@@ -46,7 +50,7 @@ const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\
  * go through the exact same conservative resolver.
  */
 const CLINICAL_CONSTRAINT_SIGNAL =
-  /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
+  /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
 
 /** RATE/INFUSE_OVER accept mixed case; UCUM codes are case-sensitive. */
 function ucumMassOrVolume(raw: string): string {
@@ -213,6 +217,34 @@ function matchedRange(source: string, match: RegExpExecArray, offset: number): T
   return span(source, offset, match.index, match.index + match[0].length);
 }
 
+/** Common infusion duration handling for both fixed and weight-based rates. */
+function applyInfusionDuration(
+  item: ParseResult, source: string, offset: number, own: (range: TextRange) => void
+): void {
+  const match = INFUSION_DURATION.exec(source);
+  if (!match) return;
+  const duration = Number(match[1]);
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  const durationUnit = /^h/iu.test(match[2]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
+  item.fhir.timing = item.fhir.timing ?? {};
+  item.fhir.timing.repeat = {
+    ...(item.fhir.timing.repeat ?? {}),
+    count: 1, duration, durationUnit
+  };
+  // A duration of one infusion is not a bound on the entire treatment course.
+  delete item.fhir.timing.repeat.boundsDuration;
+  for (const clause of item.meta.canonical.clauses) {
+    clause.schedule = {
+      ...(clause.schedule ?? {}),
+      count: 1,
+      administrationDuration: duration,
+      administrationDurationUnit: durationUnit,
+      duration: undefined
+    };
+  }
+  own(matchedRange(source, match, offset));
+}
+
 /**
  * Conservative post-grammar handling of safety-critical medication constraints.
  * A failed interpretation may remove an executable schedule but never invent one.
@@ -291,13 +323,34 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   }
 
   const weight = WEIGHT.exec(source);
+  let handledWeightRate = false;
   if (weight) {
     const daily = WEIGHT_DAILY.test(weight[0]);
     const mass = weight[2].replace(/[μµ]/gu, "u").toLowerCase();
     const unit = mass === "iu" || mass === "unit" || mass === "units" ? "[iU]/kg" : mass === "mcg" || mass === "ug" ? "ug/kg" : mass + "/kg";
     const quantity = Number(weight[1]);
-    const division = DOSE_DIVISION.exec(source);
-    if (!Number.isFinite(quantity) || quantity <= 0 || (daily && (!division || Number(division[1]) < 1))) {
+    const suffix = WEIGHT_TRAILING_SUFFIX.exec(source.slice(weight.index + weight[0].length));
+    const perTime = suffix?.[1];
+    const rateUnit = perTime && /^(?:min(?:ute)?s?|h|hr|hrs|hour|hours)$/iu.test(perTime)
+      ? /^h/iu.test(perTime) ? "h" : "min"
+      : undefined;
+    const division = suffix ? undefined : DOSE_DIVISION.exec(source);
+    if (suffix && rateUnit && Number.isFinite(quantity) && quantity > 0) {
+      // FHIR R5 rateQuantity is a SimpleQuantity containing a UCUM rate.
+      // Weight remains symbolic; the actual pump rate still requires kg.
+      const code = unit + "/" + rateUnit;
+      item.fhir.doseAndRate = [{ rateQuantity: { value: quantity, unit: code, system: UCUM, code } }];
+      for (const clause of item.meta.canonical.clauses) delete clause.dose;
+      own(span(source, offset, weight.index,
+        weight.index + weight[0].length + suffix[0].length));
+      applyInfusionDuration(item, source, offset, own);
+      addWarning(item, "Weight-based infusion rate: patientWeightKg is required to calculate an absolute administration rate.");
+      keepOriginalText(item, source);
+      handledWeightRate = true;
+    } else if (suffix) {
+      // Never misrepresent unknown /kg/... expressions as a bolus.
+      preventIncorrectDose(item, source, "unsupported-weight-based-rate");
+    } else if (!Number.isFinite(quantity) || quantity <= 0 || (daily && (!division || Number(division[1]) < 1))) {
       preventIncorrectDose(item, source, "incomplete-weight-based-dose");
     } else {
       const perDose = daily ? quantity / Number(division![1]) : quantity;
@@ -320,7 +373,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
       addWarning(item, "Weight-based dose: patient weight is required to calculate the actual administered amount.");
       keepOriginalText(item, source);
     }
-  } else if (/\b(?:mg|mcg|g|iu|units?)\s*\/\s*kg\b/iu.test(source)) {
+  } else if (/\b(?:mg|mcg|ug|g|iu|units?)\s*\/\s*kg\b/iu.test(source)) {
     preventIncorrectDose(item, source, "unsupported-weight-based-dose");
   }
 
@@ -334,31 +387,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     if (Number.isFinite(value) && value > 0) {
       item.fhir.doseAndRate = [{ rateQuantity: { value, unit, system: UCUM, code: unit } }];
       for (const clause of item.meta.canonical.clauses) delete clause.dose;
-      const explicitDuration = /\bfor\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h(?:ou)?rs?)\b/iu.exec(source);
-      if (explicitDuration) {
-        const duration = Number(explicitDuration[1]);
-        if (duration > 0) {
-          const durationUnit = /^h/iu.test(explicitDuration[2]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
-          item.fhir.timing = item.fhir.timing ?? {};
-          item.fhir.timing.repeat = {
-            ...(item.fhir.timing.repeat ?? {}),
-            count: 1,
-            duration,
-            durationUnit
-          };
-          delete item.fhir.timing.repeat.boundsDuration;
-          for (const clause of item.meta.canonical.clauses) {
-            clause.schedule = {
-              ...(clause.schedule ?? {}),
-              count: 1,
-              administrationDuration: duration,
-              administrationDurationUnit: durationUnit,
-              duration: undefined
-            };
-          }
-          own(matchedRange(source, explicitDuration, offset));
-        }
-      }
+      applyInfusionDuration(item, source, offset, own);
       own(matchedRange(source, rate, offset));
       keepOriginalText(item, source);
     } else preventIncorrectDose(item, source, "invalid-infusion-rate");
@@ -379,19 +408,24 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         duration,
         durationUnit
       };
+      // An infusion's administration duration is not a treatment-course bound.
+      delete item.fhir.timing.repeat.boundsDuration;
       for (const clause of item.meta.canonical.clauses) {
         clause.dose = { value: volume, unit: volumeUnit };
         clause.schedule = {
           ...(clause.schedule ?? {}),
           count: 1,
           administrationDuration: duration,
-          administrationDurationUnit: durationUnit
+          administrationDurationUnit: durationUnit,
+          duration: undefined
         };
       }
       own(matchedRange(source, over, offset));
       keepOriginalText(item, source);
     } else preventIncorrectDose(item, source, "invalid-infusion-duration");
-  } else if (/\b(?:infus(?:e|ion)|drip)\b/iu.test(source) && /\b(?:\w+\s*\/\s*(?:h|hr|min)|over\s+\d)/iu.test(source) &&
+  } else if (!handledWeightRate &&
+    /\b(?:infus(?:e|ion)|drip)\b/iu.test(source) &&
+    /\b(?:\w+\s*\/\s*(?:h|hr|min)|over\s+\d)/iu.test(source) &&
     (item.meta.leftoverText?.trim() ?? "").length > 0) {
     preventIncorrectDose(item, source, "unresolved-infusion-instructions");
   }

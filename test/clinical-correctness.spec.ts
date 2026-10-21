@@ -134,6 +134,73 @@ describe("clinical SIG correctness and boundary promotion", () => {
     }
   );
 
+  it.each([
+    ["dopamine 5 mcg/kg/min IV", "ug/kg/min"],
+    ["dopamine 5 mcg/kg/hr IV", "ug/kg/h"],
+    ["5 MG/kg/HR IV", "mg/kg/h"],
+    ["5 µg/kg/min IV", "ug/kg/min"],
+    ["5 UG/kg/MIN IV", "ug/kg/min"],
+    ["5 units/kg/h IV", "[iU]/kg/h"]
+  ])("represents weight-based %s as a FHIR infusion rate, never a bolus", (sig, unit) => {
+    const parsed = parseSig(sig);
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      rateQuantity: { value: 5, unit, code: unit, system: "http://unitsofmeasure.org" }
+    });
+    expect(parsed.fhir.doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(parsed.fhir.text).toBe(sig);
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("patientWeightKg"));
+    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity?.code)
+      .toBe(unit);
+  });
+
+  it.each(["5 mcg/kg/24h IV", "5 mg/kg/week IV", "5 mcg/kg/bolus IV"])(
+    "quarantines an unknown weight-rate suffix instead of inventing a per-dose bolus: %s", sig => {
+      const parsed = parseSig(sig);
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+      expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toBeUndefined();
+      expect(parsed.warnings).toContainEqual(
+        expect.stringContaining("unsupported-weight-based-rate")
+      );
+      expect(parsed.fhir.text).toBe(sig);
+      expect(parsed.fhir.modifierExtension?.[0].extension?.[0].valueString)
+        .toBe("unsupported-weight-based-rate");
+    }
+  );
+
+  it("treats an explicitly timed per-kg infusion as one administration, not an entire-course bound", () => {
+    const parsed = parseSig("Infuse dopamine at 5 mcg/kg/min IV for 4 h");
+    expect(parsed.fhir.doseAndRate?.[0].rateQuantity?.code).toBe("ug/kg/min");
+    expect(parsed.fhir.doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      count: 1, duration: 4, durationUnit: "h"
+    });
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("patientWeightKg"));
+  });
+
+  it.each([
+    ["Give 500 mL over 2 hours", "h"],
+    ["Administer 500 ML over 2 h IV", "h"],
+    ["Infuse 500 mL over 2 hr IV", "h"],
+    ["Give 500 mL over 30 minutes", "min"]
+  ])("interprets fixed-volume %s as a single infusion with explicit rateRatio", (sig, periodUnit) => {
+    const parsed = parseSig(sig);
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: 500, code: "mL" },
+      rateRatio: {
+        numerator: { value: 500, code: "mL" },
+        denominator: { value: periodUnit === "h" ? 2 : 30, code: periodUnit }
+      }
+    });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      count: 1, duration: periodUnit === "h" ? 2 : 30, durationUnit: periodUnit
+    });
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule")))
+      .toBe(false);
+    expect(parsed.fhir.text).toBe(sig);
+  });
+
   it("preserves mg/kg dosing without inventing a fixed-dose milligram amount", () => {
     const result = parseSig("0.5 mg/kg PO BID");
     expect(result.fhir.doseAndRate?.[0].doseQuantity).toMatchObject({
