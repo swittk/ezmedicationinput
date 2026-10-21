@@ -330,6 +330,30 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
+/** Disjunction is alternative administration, never conjunctive dose sharing.
+ * The lexicon owns the connective meaning; regimen constructions consume the
+ * resulting typed distinction without rematching arbitrary instruction text.
+ */
+function coordinationSurfaceSet(canonical: string, defaults: readonly string[]): Set<string> {
+  const result = new Set(defaults);
+  const localized = ACTION_COORDINATION_CONNECTOR_I18N[canonical];
+  if (localized) {
+    for (const locale in localized) {
+      if (Object.prototype.hasOwnProperty.call(localized, locale))
+        result.add(localized[locale]);
+    }
+  }
+  return result;
+}
+const CONJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("and", ["and"]);
+const DISJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("or", ["or", "and/or"]);
+export function coordinationConnectorKind(surface: string):
+  "conjunction" | "disjunction" | "unknown" {
+  const normalized = surface.trim().replace(/^[,;]+|[,;]+$/gu, "").trim().toLowerCase();
+  if (DISJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "disjunction";
+  if (CONJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "conjunction";
+  return "unknown";
+}
 export const ACTION_SEQUENCE_RELATION_TOKENS = ACTION_SEQUENCE_RELATION_SURFACES;
 export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
   stringEntries(source.instructionDurationUnits)

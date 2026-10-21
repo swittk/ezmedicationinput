@@ -93,6 +93,7 @@ export interface BoundaryRelation {
 /** Typed facts consumed by cross-clause HPSG coordination constructions. */
 export interface CoordinationScopeFacts {
   relation: BoundaryRelation;
+  connectorKind: "conjunction" | "disjunction" | "unknown";
   adjacent: boolean;
   leftComplete: boolean;
   rightComplete: boolean;
@@ -109,7 +110,7 @@ export interface CoordinationScopeFacts {
   rightHasCadenceConflict: boolean;
 }
 
-export type RegimenSemanticOperation = 'share-trailing-cadence';
+export type RegimenSemanticOperation = 'share-trailing-cadence' | 'quarantine-disjunctive-dosages';
 
 export interface RegimenSemanticConstruction {
   id: string;

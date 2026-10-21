@@ -1047,9 +1047,9 @@ function scopeCoordinatedSegmentStates(
   boundaryPlan: BoundaryPlan,
   segments: ReturnType<typeof parseSigSegments>,
   input: string
-): void {
-  if (!boundaryPlan.relations.length) return;
-  applyCoordinatedCadenceScopes(
+): ReturnType<typeof applyCoordinatedCadenceScopes> {
+  if (!boundaryPlan.relations.length) return [];
+  return applyCoordinatedCadenceScopes(
     states.map((state, index) => ({
       state,
       start: segments[index].start,
@@ -1058,6 +1058,28 @@ function scopeCoordinatedSegmentStates(
     boundaryPlan,
     input
   );
+}
+
+/** A disjunction denotes alternative administrations, not simultaneous
+ * required doses. Typed HPSG constructions identify it; this additive safety
+ * gate only prevents unsafe execution without choosing an alternative.
+ */
+function quarantineDisjunctiveScopeChoices(
+  results: ParseResult[],
+  scopes: ReturnType<typeof applyCoordinatedCadenceScopes>,
+  input: string
+): void {
+  if (!scopes.length) return;
+  const targets = new Set<number>();
+  for (const scope of scopes) {
+    if (scope.rule !== 'hpsg.cx.coordination.disjunctive-dosage-choice') continue;
+    if (scope.from >= 0) targets.add(scope.from);
+    if (scope.to >= 0) targets.add(scope.to);
+  }
+  for (const index of targets) {
+    const result = results[index];
+    if (result) quarantineSchedule(result, input, 'disjunctive-dose-choice');
+  }
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
@@ -1070,7 +1092,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyInstructionSemanticResolvers(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1081,6 +1103,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     rawResults.push(result);
   }
 
+  quarantineDisjunctiveScopeChoices(rawResults, scopes, input);
   propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
@@ -1110,7 +1133,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     applySiteCoding(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1141,6 +1164,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
+  quarantineDisjunctiveScopeChoices(lintParseResults, scopes, input);
   propagateTrailingSharedDuration(lintParseResults, segments, options);
   composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
@@ -1218,7 +1242,7 @@ export async function parseSigAsync(
     await applyInstructionSemanticResolversAsync(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1229,6 +1253,7 @@ export async function parseSigAsync(
     rawResults.push(result);
   }
 
+  quarantineDisjunctiveScopeChoices(rawResults, scopes, input);
   propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {

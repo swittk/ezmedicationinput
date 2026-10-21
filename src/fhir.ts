@@ -1054,6 +1054,17 @@ export function toFhir(state: ParserState): FhirDosage {
   return canonicalToFhir(clause);
 }
 
+/** Recover local FHIR Timing.code.text only when it is a recognizable
+ * abbreviation, not arbitrary prose. Coding identities always take priority.
+ */
+const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
+function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
+  const coding = dosage.timing?.code?.coding?.find(value => value.code)?.code;
+  if (coding) return coding;
+  const raw = dosage.timing?.code?.text?.trim();
+  return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
+}
+
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
@@ -1117,6 +1128,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const repeat = dosage.timing?.repeat;
+  const timingCode = timingCodeFromFhir(dosage);
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
@@ -1130,7 +1142,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const activityTiming = parseActivityTimingExtensions(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   if (
-    dosage.timing?.code?.coding?.[0]?.code ||
+    timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
@@ -1158,7 +1170,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
-      timingCode: dosage.timing?.code?.coding?.[0]?.code,
+      timingCode,
       count: repeat?.count,
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
@@ -1294,7 +1306,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
   }
-  state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
+  state.timingCode = timingCodeFromFhir(dosage);
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;

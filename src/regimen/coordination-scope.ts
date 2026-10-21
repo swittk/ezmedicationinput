@@ -1,4 +1,5 @@
 import { selectHpsgCoordinationScopeConstruction } from '../hpsg/constructions';
+import { coordinationConnectorKind } from '../hpsg/lexical-classes';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
 import type {
@@ -107,7 +108,8 @@ function factsFor(
   relation: BoundaryRelation,
   left: CoordinatedClauseState,
   right: CoordinatedClauseState,
-  inheritedAdministration: boolean
+  inheritedAdministration: boolean,
+  source: string
 ): CoordinationScopeFacts {
   const leftClause = left.state.primaryClause;
   const rightClause = right.state.primaryClause;
@@ -115,6 +117,7 @@ function factsFor(
   const rightTarget = targetKey(rightClause);
   return {
     relation,
+    connectorKind: coordinationConnectorKind(source.slice(relation.range.start, relation.range.end)),
     adjacent: relation.to === relation.from + 1,
     leftComplete: findUnparsedTokenGroups(left.state).length === 0,
     rightComplete: findUnparsedTokenGroups(right.state).length === 0,
@@ -176,9 +179,22 @@ export function applyCoordinatedCadenceScopes(
       relation,
       left,
       right,
-      inheritedAdministrationSegments.has(relation.from)
+      inheritedAdministrationSegments.has(relation.from),
+      source
     ));
-    if (!selected || selected.semantic.construction.operation !== 'share-trailing-cadence') continue;
+    if (!selected) continue;
+    if (selected.semantic.construction.operation === 'quarantine-disjunctive-dosages') {
+      // The grammar identifies alternative administrations; the later safety
+      // gate prevents either alternative from being executed as if mandatory.
+      applications.push({
+        rule: selected.semantic.construction.id,
+        from: states.indexOf(left),
+        to: states.indexOf(right),
+        fields: []
+      });
+      continue;
+    }
+    if (selected.semantic.construction.operation !== 'share-trailing-cadence') continue;
     const donorSchedule = right.state.primaryClause.schedule;
     if (!donorSchedule) continue;
 

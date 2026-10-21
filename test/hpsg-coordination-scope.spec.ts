@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lintSig } from '../src/index';
+import { lintSig, nextDueDoses } from '../src/index';
 import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/regimen/types';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
@@ -15,6 +15,7 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
       rule: 'regimen.dose-continuation',
       range: { start: 32, end: 35 }
     },
+    connectorKind: 'conjunction',
     adjacent: true,
     leftComplete: true,
     rightComplete: true,
@@ -73,6 +74,41 @@ describe('HPSG coordination cadence scope', () => {
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ leftHasCadence: true }))).toBeUndefined();
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightComplete: false }))).toBeUndefined();
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightHasCadenceConflict: true }))).toBeUndefined();
+  });
+
+  it('classifies disjunction as alternative dosage, never distributive cadence', () => {
+    expect(selectHpsgCoordinationScopeConstruction(scopeFacts({
+      connectorKind: 'disjunction'
+    }))?.semantic.construction.operation).toBe('quarantine-disjunctive-dosages');
+  });
+
+  it.each([
+    'instill 1 drop in left eye or 2 drops in right eye twice daily',
+    'หยอดตาซ้าย 1 หยด หรือ ตาขวา 2 หยด วันละ 2 ครั้ง'
+  ])('retains but does not execute a disjunctive dosing choice: %s', async input => {
+    const sync = parseSig(input);
+    const asyncParsed = await parseSigAsync(input);
+    const linted = lintSig(input);
+    for (const items of [
+      sync.items,
+      asyncParsed.items,
+      linted.items.map(entry => entry.result)
+    ]) {
+      expect(items).toHaveLength(2);
+      for (const item of items) {
+        expect(item.fhir.timing).toBeUndefined();
+        expect(item.warnings).toContainEqual(
+          expect.stringContaining('disjunctive-dose-choice')
+        );
+        expect(item.fhir.text).toBe(input);
+      }
+    }
+    expect(() => nextDueDoses(sync.fhir, {
+      from: '2026-10-22T08:00:00+07:00',
+      orderedAt: '2026-10-22T08:00:00+07:00',
+      timeZone: 'Asia/Bangkok',
+      limit: 4
+    })).toThrow(/unresolved/i);
   });
 
   it('scopes a sole trailing cadence before FHIR lowering with source and construction evidence', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nextDueDoses, parseSig } from "../src";
+import { canonicalFromFhir, parserStateFromFhir } from "../src/fhir";
 
 const options = {
   from: "2026-10-21T00:00:00+07:00",
@@ -49,6 +50,19 @@ describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
       system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation",
       code: "BID"
     });
+  });
+
+  it("round-trips local text-only Q12H without inventing a coded terminology identity", () => {
+    const dosage = parseSig("1 tab PO Q12H").fhir[0];
+    expect(dosage.timing?.code?.coding).toBeUndefined();
+    expect(canonicalFromFhir(dosage).schedule?.timingCode).toBe("Q12H");
+    expect(parserStateFromFhir(dosage).timingCode).toBe("Q12H");
+  });
+
+  it("does not promote arbitrary FHIR timing prose to a lexical timing code", () => {
+    const dosage = { timing: { code: { text: "before breakfast when awake" } } };
+    expect(canonicalFromFhir(dosage).schedule?.timingCode).toBeUndefined();
+    expect(parserStateFromFhir(dosage).timingCode).toBeUndefined();
   });
 
   it("does not misrepresent local Q12H as a standard GTS abbreviation", () => {

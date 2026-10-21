@@ -50,11 +50,24 @@ const semanticConstraint = (
  * incomplete, conflicting, or already-timed daughter cannot participate.
  */
 export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] = [{
+  id: 'hpsg.cx.coordination.disjunctive-dosage-choice',
+  priority: 900,
+  operation: 'quarantine-disjunctive-dosages',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.disjunction', f => f.connectorKind === 'disjunction'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose)
+  ]
+}, {
   id: 'hpsg.cx.coordination.trailing-shared-cadence',
   priority: 800,
   operation: 'share-trailing-cadence',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.conjunction', f => f.connectorKind === 'conjunction'),
     semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
