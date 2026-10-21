@@ -39,17 +39,21 @@ export interface FhirBackboneElement extends FhirElement {
   modifierExtension?: FhirExtension[];
 }
 
-export interface FhirPrimitiveElement {
-  extension?: FhirExtension[];
-}
+/** FHIR primitive metadata can carry both Element.id and extensions. */
+export type FhirPrimitiveElement = FhirElement;
 
-export interface FhirQuantity {
+export interface FhirQuantity extends FhirElement {
   value?: number;
-  /** FHIR Quantity comparator; included for R6 RelativeTime/Duration fidelity. */
-  comparator?: "<" | "<=" | ">=" | ">";
+  /** FHIR R5 Quantity comparator. 'ad' was added in R5. */
+  comparator?: "<" | "<=" | ">=" | ">" | "ad";
   unit?: string;
   system?: string;
   code?: string;
+  /** Primitive Element metadata is valid on every FHIR Quantity specialization. */
+  _value?: FhirPrimitiveElement;
+  _unit?: FhirPrimitiveElement;
+  _system?: FhirPrimitiveElement;
+  _code?: FhirPrimitiveElement;
 }
 
 export type DoseUnitKind =
@@ -102,14 +106,24 @@ export interface EstimatedQuantity extends FhirQuantity {
   source?: string;
 }
 
-export interface FhirRange {
-  low?: FhirQuantity;
-  high?: FhirQuantity;
+/** FHIR SimpleQuantity: Quantity with the comparator constrained to absent. */
+export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator"> & {
+  comparator?: never;
+};
+
+/** FHIR R6 also supports the approximate (~) comparator in general Quantity. */
+export type FhirR6Quantity = Omit<FhirQuantity, "comparator"> & {
+  comparator?: FhirQuantity["comparator"] | "~";
+};
+
+export interface FhirRange extends FhirElement {
+  low?: FhirSimpleQuantity;
+  high?: FhirSimpleQuantity;
 }
 
-export interface FhirRatio {
+export interface FhirRatio extends FhirElement {
   numerator?: FhirQuantity;
-  denominator?: FhirQuantity;
+  denominator?: FhirSimpleQuantity;
 }
 
 /**
@@ -372,10 +386,11 @@ export interface FhirTiming extends FhirElement {
 }
 
 /** FHIR Expression: enough structure to preserve external R6 dose/rate expressions. */
-export interface FhirExpression {
+export interface FhirExpression extends FhirElement {
   description?: string;
   name?: string;
-  language: string;
+  /** FHIR R5/R6 Expression.language is optional (0..1). */
+  language?: string;
   expression?: string;
   reference?: string;
 }
@@ -383,10 +398,10 @@ export interface FhirExpression {
 export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;
   doseRange?: FhirRange;
-  doseQuantity?: FhirQuantity;
+  doseQuantity?: FhirSimpleQuantity;
   rateRatio?: FhirRatio;
   rateRange?: FhirRange;
-  rateQuantity?: FhirQuantity;
+  rateQuantity?: FhirSimpleQuantity;
 }
 
 /** R6 additions to the R5 DoseAndRate child object. */
@@ -413,7 +428,7 @@ export interface FhirR6DosageCondition extends FhirBackboneElement {
   details?: FhirCodeableConcept;
   operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
   valueBoolean?: boolean;
-  valueQuantity?: FhirQuantity;
+  valueQuantity?: FhirR6Quantity;
   valueString?: string;
   text?: string;
 }
@@ -424,7 +439,7 @@ export type FhirR6DoseLimit = FhirBackboneElement & {
   period?: FhirQuantity;
   text?: string;
 } & (
-  | { valueQuantity: FhirQuantity; valueInteger?: never; valueExpression?: never }
+  | { valueQuantity: FhirR6Quantity; valueInteger?: never; valueExpression?: never }
   | { valueInteger: number; valueQuantity?: never; valueExpression?: never }
   | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never }
 );
@@ -491,8 +506,8 @@ export interface FhirDosage extends FhirBackboneElement {
   asNeededFor?: FhirCodeableConcept[];
   doseAndRate?: FhirDoseAndRate[];
   maxDosePerPeriod?: FhirRatio[];
-  maxDosePerAdministration?: FhirQuantity;
-  maxDosePerLifetime?: FhirQuantity;
+  maxDosePerAdministration?: FhirSimpleQuantity;
+  maxDosePerLifetime?: FhirSimpleQuantity;
 }
 
 /**

@@ -48,6 +48,7 @@ import {
   FhirPeriodUnit,
   FhirPrimitiveElement,
   FhirQuantity,
+  FhirSimpleQuantity,
   FhirRange,
   FhirTimingRepeat,
   RouteCode,
@@ -539,7 +540,7 @@ function calendarEventFromFhir(
   };
 }
 
-function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirQuantity {
+function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirSimpleQuantity {
   return {
     value,
     unit: describeDurationUnit(unit, value),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, fromFhir, formatSig, nextDueDoses,
-  toDosageDetails, toFhirR5Dosages, fromDosageDetails,
+  toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   evaluateMedicationCondition,
   type FhirR6DosageDetails
 } from "../src/index";
@@ -87,6 +87,26 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     })).toThrow("R6 course");
   });
 
+  it("recovers a valid duplicate retained R6 course after a damaged first copy", () => {
+    const expected = parseSig(
+      "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid"
+    ).fhirNext;
+    const r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
+      ReturnType<typeof toFhirR5Dosages>;
+    expect(r5).toHaveLength(6);
+    const first = r5[0].modifierExtension?.find(ext => ext.url.includes("course-details"));
+    first!.extension![0].valueString = "{bad";
+    expect(toDosageDetails(r5)).toEqual(expected);
+
+    const conflicting = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
+      ReturnType<typeof toFhirR5Dosages>;
+    const second = conflicting[1].modifierExtension?.find(ext => ext.url.includes("course-details"));
+    const altered = JSON.parse(second!.extension![0].valueString!) as FhirR6DosageDetails;
+    altered.step[0].end!.offsetDuration!.value = 8;
+    second!.extension![0].valueString = JSON.stringify(altered);
+    expect(() => toDosageDetails(conflicting)).toThrow(/Conflicting retained R6/);
+  });
+
   it("keeps optional real R6 semantics on normal EZMED dosages", () => {
     const course: FhirR6DosageDetails = {
       renderedInstruction: "Dose guided by weight",
@@ -119,6 +139,46 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     expect(r5[0]).not.toHaveProperty("siteReference");
     expect(r5[0].doseAndRate?.[0]).not.toHaveProperty("doseExpression");
     expect(toDosageDetails(r5)).toEqual(course);
+  });
+
+  it("lifts missing R5 safety independently of existing R6 site metadata", () => {
+    const input = {
+      siteReference: { reference: "BodyStructure/example" },
+      maxDosePerAdministration: { value: 2, unit: "tab" },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const lifted = toEzDosages([input])[0];
+    expect(lifted.siteReference).toEqual(input.siteReference);
+    expect(lifted.safety?.doseLimit?.[0]).toMatchObject({
+      scope: "administration", valueQuantity: { value: 2, unit: "tab" }
+    });
+  });
+
+  it("retains R6-only approximate safety without illegally lowering it to R5 SimpleQuantity", () => {
+    const original: FhirR6DosageDetails = {
+      renderedInstruction: "Maximum is approximate and requires review",
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
+        safety: { doseLimit: [
+          { scope: "administration", valueQuantity: {
+            value: 5, unit: "mg", comparator: "~"
+          }},
+          { scope: "period", valueQuantity: {
+            value: 15, unit: "mg", comparator: "ad"
+          }, period: { value: 1, unit: "d" } }
+        ] }
+      }] }]
+    };
+    const r5 = toFhirR5Dosages(original);
+    expect(r5).toHaveLength(1);
+    expect(r5[0].maxDosePerAdministration).toBeUndefined();
+    expect(r5[0].maxDosePerPeriod?.[0]?.numerator.comparator).toBe("ad");
+    expect(toDosageDetails(r5)).toEqual(original);
+    // R5 representation retains non-representable R6 semantics as a
+    // modifier, not as falsely precise maxima.
+    expect(r5[0].modifierExtension).toContainEqual(expect.objectContaining({
+      url: expect.stringContaining("medication-r6-course-details")
+    }));
   });
 
   it("composes independent site tapers into concurrent, bounded global steps", () => {

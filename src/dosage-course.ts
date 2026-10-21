@@ -194,30 +194,25 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
 /** Lift real R6 concepts once into the familiar flat R5 dosage shape. */
 export function toEzDosages(dosages: readonly (FhirDosage | EzDosage)[]): EzDosage[] {
   return dosages.map(dosage => {
-    // Common BID/TID instructions need no new properties. Reuse the already
-    // parsed R5-shaped dosage object rather than allocating a duplicate.
-    // Advanced fields are added only when a real R6 semantic exists.
     const input = dosage as EzDosage;
-    if (input.condition || input.safety || input.siteReference ||
-        input.excludedDates || input.doseAndRate?.some(value =>
-          value.doseExpression || value.rateExpression)) {
-      return input;
-    }
-    if (!dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration &&
-        !dosage.maxDosePerLifetime &&
-        !dosage.modifierExtension?.some(value =>
-          value.url === DOSAGE_CONDITION_R5_URL ||
-          value.url === DOSAGE_EXCLUDED_DATES_R5_URL)) {
-      return input;
-    }
-    const predicate = getDosageCondition(dosage);
-    const safety = input.safety ?? toR6Safety(dosage);
-    const dates = getDosageExcludedDates(dosage);
+    // Lift each missing field independently. A preexisting siteReference or
+    // expression does not imply an unrelated R5 maximum/condition was lifted.
+    const needsCondition = !input.condition?.length &&
+      !!dosage.modifierExtension?.some(ext => ext.url === DOSAGE_CONDITION_R5_URL);
+    const needsSafety = !input.safety &&
+      (!!dosage.maxDosePerPeriod?.length ||
+        !!dosage.maxDosePerAdministration || !!dosage.maxDosePerLifetime);
+    const needsDates = input.excludedDates === undefined &&
+      !!dosage.modifierExtension?.some(ext => ext.url === DOSAGE_EXCLUDED_DATES_R5_URL);
+    if (!needsCondition && !needsSafety && !needsDates) return input;
+    const predicate = needsCondition ? getDosageCondition(dosage) : undefined;
+    const safety = needsSafety ? toR6Safety(dosage) : undefined;
+    const dates = needsDates ? getDosageExcludedDates(dosage) : undefined;
     return {
-      ...dosage,
+      ...input,
       ...(predicate ? { condition: [conditionToR6(predicate)] } : {}),
       ...(safety ? { safety } : {}),
-      ...(dates.length ? { excludedDates: dates } : {})
+      ...(dates?.length ? { excludedDates: dates } : {})
     };
   });
 }
@@ -268,17 +263,28 @@ function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage {
       rateExpression: _rateExpr, ...entry }) => entry) } : {})
   };
   for (const limit of safety?.doseLimit ?? []) {
-    if (limit.scope === "period" && limit.valueQuantity && limit.period) {
-      output.maxDosePerPeriod = [...(output.maxDosePerPeriod ?? []), {
-        numerator: { ...limit.valueQuantity },
-        denominator: { ...limit.period }
-      }];
+    // R5 maximum-dose fields are not as expressive as R6 safety limits.
+    // If an R6-only comparator cannot be expressed in the corresponding
+    // R5 Quantity/SimpleQuantity, leave it in the retained R6 modifier.
+    const quantity = limit.valueQuantity;
+    if (!quantity) continue;
+    const { comparator, ...simple } = quantity;
+    if (limit.scope === "period" && limit.period && comparator !== "~") {
+      const { comparator: periodComparator, ...period } = limit.period;
+      if (!periodComparator) {
+        output.maxDosePerPeriod = [...(output.maxDosePerPeriod ?? []), {
+          numerator: { ...simple, ...(comparator ? { comparator } : {}) },
+          denominator: period
+        }];
+      }
     }
-    if (limit.scope === "administration" && limit.valueQuantity) {
-      output.maxDosePerAdministration = { ...limit.valueQuantity };
+    // A general R6 Quantity comparator cannot be represented in R5 maxima.
+    if (comparator) continue;
+    if (limit.scope === "administration") {
+      output.maxDosePerAdministration = simple;
     }
-    if (limit.scope === "lifetime" && limit.valueQuantity) {
-      output.maxDosePerLifetime = { ...limit.valueQuantity };
+    if (limit.scope === "lifetime") {
+      output.maxDosePerLifetime = simple;
     }
   }
   if (condition?.length === 1) {
@@ -559,10 +565,39 @@ export function toDosageDetails(
   // Store the original course with every relative-stage dosage, not only
   // the first. Removing the first row must not erase the remaining phases'
   // essential start/end metadata from a persisted R5 dosage array.
-  const original = dosages.map(dosage => dosage.modifierExtension?.find(value =>
-    value.url === DOSAGE_DETAILS_R5_URL)?.extension
-      ?.find(value => value.url === "dosageDetails")?.valueString
-  ).find(value => value !== undefined);
+  // Every R5 course component carries the original R6 data. One truncated
+  // marker must not suppress a valid duplicate on the other component, and
+  // conflicting valid markers must never be silently treated as equivalent.
+  let original: string | undefined;
+  let retained: FhirR6DosageDetails | undefined;
+  let corrupt = false;
+  for (const dosage of dosages) {
+    const marker = dosage.modifierExtension?.find(value =>
+      value.url === DOSAGE_DETAILS_R5_URL)?.extension
+        ?.find(value => value.url === "dosageDetails")?.valueString;
+    if (marker === undefined || marker === original) continue;
+    let parsed: FhirR6DosageDetails | undefined;
+    try {
+      const value: unknown = JSON.parse(marker);
+      if (!value || typeof value !== "object" ||
+          !Array.isArray((value as FhirR6DosageDetails).step)) {
+        corrupt = true;
+        continue;
+      }
+      parsed = value as FhirR6DosageDetails;
+    } catch {
+      corrupt = true;
+      continue;
+    }
+    if (retained) {
+      // A different serialized R6 source can change phase boundaries.
+      throw new Error("Conflicting retained R6 course metadata; review the course before scheduling.");
+    }
+    retained = parsed;
+    original = marker;
+  }
+  if (corrupt && !retained)
+    throw new Error("Retained R6 course JSON is malformed. Restore valid course metadata before using relative-stage scheduling; plain R5 fields cannot recover those boundaries.");
   const instructionMarker = dosages[0]?.extension?.find(value =>
     value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
   const savedInstruction = instructionMarker?.extension?.find(value =>
@@ -602,18 +637,11 @@ export function toDosageDetails(
         ? { ...dosage, text: undefined }
         : dosage;
     }) : dosages;
-  if (original) {
-    let retained: FhirR6DosageDetails | undefined;
-    try {
-      retained = JSON.parse(original) as FhirR6DosageDetails;
-    } catch {
-      throw new Error("Retained R6 course JSON is malformed. Restore valid course metadata before using relative-stage scheduling; plain R5 fields cannot recover those boundaries.");
-    }
+  if (retained) {
     // Reconstruction errors MUST propagate. Swallowing them would turn
     // inconsistent relative stages into an executable but false regimen.
-    if (retained && Array.isArray(retained.step))
-      return reconcileRetainedCourse(retained, effectiveDosages,
-        course?.renderedInstruction ?? renderedInstruction);
+    return reconcileRetainedCourse(retained, effectiveDosages,
+      course?.renderedInstruction ?? renderedInstruction);
   }
   // The common one-dose prescription needs neither a grouping Map nor
   // sequence sorting. Preserve identical R6 output with much less overhead.
