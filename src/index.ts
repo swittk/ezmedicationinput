@@ -7,6 +7,7 @@ import { applyClinicalConstraints } from "./clinical-safety";
 import { quarantineSchedule } from "./regimen/admissibility";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
+import { applyCoordinatedCadenceScopes } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
@@ -791,112 +792,6 @@ function propagateTrailingSharedDuration(
   }
 }
 
-function hasCanonicalCadence(
-  schedule: CanonicalSigClause["schedule"] | undefined
-): boolean {
-  return Boolean(schedule && (
-    schedule.timingCode ||
-    schedule.frequency !== undefined ||
-    schedule.frequencyMax !== undefined ||
-    schedule.period !== undefined ||
-    schedule.periodMax !== undefined ||
-    schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
-    schedule.timeOfDay?.length
-  ));
-}
-
-function hasExplicitCanonicalDose(clause: CanonicalSigClause | undefined): boolean {
-  return Boolean(clause?.dose && clause.evidence.some(item =>
-    item.rule.startsWith("hpsg.lex.dose.")
-  ));
-}
-
-/**
- * A cadence at the end of a coordinated heterogeneous administration applies
- * to each sibling when segmentation proved that no earlier sibling supplied a
- * schedule of its own. This runs after clinical safety checks, so a trailing
- * clause with competing/unresolved cadence text cannot donate an executable
- * schedule to an otherwise unscheduled sibling.
- */
-function propagateTrailingSharedCadence(
-  results: ParseResult[],
-  segments: ReturnType<typeof parseSigSegments>,
-  source: string,
-  options?: ParseOptions
-): void {
-  for (let index = results.length - 2; index >= 0; index -= 1) {
-    const currentSegment = segments[index];
-    const nextSegment = segments[index + 1];
-    if (!currentSegment || !nextSegment) continue;
-    const coordinationGap = source.slice(currentSegment.end, nextSegment.start);
-    const sharesTrailingCadence = currentSegment.inheritTrailingCadenceFromNext ||
-      /^\s*,?\s*(?:and|or|และ|หรือ)\s*$/iu.test(coordinationGap);
-    if (!sharesTrailingCadence) continue;
-    const current = results[index];
-    const next = results[index + 1];
-    const currentClause = current.meta.canonical.clauses[0];
-    const nextClause = next.meta.canonical.clauses[0];
-    const nextSchedule = nextClause?.schedule;
-    const nextRepeat = next.fhir.timing?.repeat;
-    if (!currentClause || !nextSchedule || !nextRepeat ||
-        !hasExplicitCanonicalDose(currentClause) || !hasExplicitCanonicalDose(nextClause) ||
-        !currentClause.site || !nextClause?.site ||
-        hasCanonicalCadence(currentClause.schedule)) {
-      continue;
-    }
-    if (!hasCanonicalCadence(nextSchedule)) continue;
-
-    currentClause.schedule = {
-      ...(currentClause.schedule ?? {}),
-      timingCode: nextSchedule.timingCode,
-      frequency: nextSchedule.frequency,
-      frequencyMax: nextSchedule.frequencyMax,
-      period: nextSchedule.period,
-      periodMax: nextSchedule.periodMax,
-      periodUnit: nextSchedule.periodUnit,
-      dayOfWeek: nextSchedule.dayOfWeek ? [...nextSchedule.dayOfWeek] : undefined,
-      when: nextSchedule.when ? [...nextSchedule.when] : undefined,
-      timeOfDay: nextSchedule.timeOfDay ? [...nextSchedule.timeOfDay] : undefined
-    };
-    const sharedScheduleEvidence = nextClause.evidence.filter(item =>
-      item.rule.startsWith("hpsg.lex.schedule.")
-    );
-    for (const evidence of sharedScheduleEvidence) {
-      if (currentClause.evidence.some(item =>
-        item.rule === evidence.rule && deepEqual(item.spans, evidence.spans)
-      )) continue;
-      currentClause.evidence.push({
-        ...evidence,
-        spans: evidence.spans.map(span => ({ ...span }))
-      });
-    }
-    current.fhir.timing = {
-      ...(current.fhir.timing ?? {}),
-      code: next.fhir.timing?.code
-        ? {
-          ...next.fhir.timing.code,
-          coding: next.fhir.timing.code.coding?.map(coding => ({ ...coding }))
-        }
-        : undefined,
-      repeat: {
-        ...(current.fhir.timing?.repeat ?? {}),
-        frequency: nextRepeat.frequency,
-        frequencyMax: nextRepeat.frequencyMax,
-        period: nextRepeat.period,
-        periodMax: nextRepeat.periodMax,
-        periodUnit: nextRepeat.periodUnit,
-        dayOfWeek: nextRepeat.dayOfWeek ? [...nextRepeat.dayOfWeek] : undefined,
-        when: nextRepeat.when ? [...nextRepeat.when] : undefined,
-        timeOfDay: nextRepeat.timeOfDay ? [...nextRepeat.timeOfDay] : undefined
-      }
-    };
-    current.longText = formatSig(current.fhir, "long", options);
-    current.shortText = formatSig(current.fhir, "short", options);
-    current.fhir.text = current.longText;
-  }
-}
-
 function nextIsoCalendarDay(value: string): string | undefined {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
   if (!match) return undefined;
@@ -1106,34 +1001,84 @@ function parseCycleSafeClauseState(text: string, options?: ParseOptions) {
   return parseClauseState(chars.join(""), options);
 }
 
-export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const boundaryPlan = createBoundaryPlan(input, options);
-  const segments = expandMealDashSegments(boundaryPlan.segments, options);
-  const carry: SegmentCarry = {};
-  const rawResults: ParseResult[] = [];
+function hasSegmentCarry(carry: SegmentCarry): boolean {
+  return Boolean(
+    carry.routeCode || carry.routeText || carry.unit || carry.dose !== undefined ||
+    carry.siteText || carry.siteCoding
+  );
+}
 
-  for (const segment of segments) {
-    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
-        boundaryPlan.segments[edge.to]?.start === segment.start)) {
-      // Explicit independent instructions must not inherit another track's
-      // dose, route, site or administration unit.
-      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
+/** Yield a parsed clause before advancing carry, so synchronous or asynchronous
+ * semantic resolvers can complete before the next clause inherits route/site.
+ * Coordination is applied only after all daughters are resolved, and before
+ * any clause is lowered to FHIR.
+ */
+function* iterateCoordinatedSegmentStates(
+  options: ParseOptions | undefined,
+  boundaryPlan: BoundaryPlan,
+  segments: ReturnType<typeof parseSigSegments>
+): Generator<ParserState> {
+  const independentStarts = boundaryPlan.relations.length ? new Set<number>() : undefined;
+  if (independentStarts) {
+    for (const edge of boundaryPlan.relations) {
+      if (edge.kind !== "independent") continue;
+      const segment = boundaryPlan.segments[edge.to];
+      if (segment) independentStarts.add(segment.start);
     }
+  }
+  let carry: SegmentCarry = {};
+  for (const segment of segments) {
+    if (independentStarts?.has(segment.start)) carry = {};
     const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
       recognizeCycles(segment.text, options).some(frame => frame.error);
-    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
+    const state = (!hasSegmentCarry(carry) && !hasInvalidCycles
       ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
       : undefined) ?? (hasInvalidCycles
         ? parseCycleSafeClauseState(segment.text, options)
         : parseClauseState(segment.text, options));
     applyCarryForward(state, carry);
+    yield state;
+    updateCarryForward(carry, state);
+  }
+}
+
+function scopeCoordinatedSegmentStates(
+  states: ParserState[],
+  boundaryPlan: BoundaryPlan,
+  segments: ReturnType<typeof parseSigSegments>,
+  input: string
+): void {
+  if (!boundaryPlan.relations.length) return;
+  applyCoordinatedCadenceScopes(
+    states.map((state, index) => ({
+      state,
+      start: segments[index].start,
+      end: segments[index].end
+    })),
+    boundaryPlan,
+    input
+  );
+}
+
+export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
+  const boundaryPlan = createBoundaryPlan(input, options);
+  const segments = expandMealDashSegments(boundaryPlan.segments, options);
+  const states: ParserState[] = [];
+  for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
     applyInstructionSemanticResolvers(state, options);
+    states.push(state);
+  }
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const rawResults: ParseResult[] = [];
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const state = states[index];
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     rawResults.push(result);
-    updateCarryForward(carry, state);
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
@@ -1141,7 +1086,6 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
-  propagateTrailingSharedCadence(rawResults, segments, input, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1160,26 +1104,18 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
   const boundaryPlan = createBoundaryPlan(input, options);
   const segments = expandMealDashSegments(boundaryPlan.segments, options);
-  const carry: SegmentCarry = {};
-  const results: LintResult[] = [];
-
-  for (const segment of segments) {
-    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
-        boundaryPlan.segments[edge.to]?.start === segment.start)) {
-      // Explicit independent instructions must not inherit another track's
-      // dose, route, site or administration unit.
-      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
-    }
-    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
-      recognizeCycles(segment.text, options).some(frame => frame.error);
-    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
-      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? (hasInvalidCycles
-        ? parseCycleSafeClauseState(segment.text, options)
-        : parseClauseState(segment.text, options));
-    applyCarryForward(state, carry);
+  const states: ParserState[] = [];
+  for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
+    states.push(state);
+  }
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const results: LintResult[] = [];
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const state = states[index];
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     const groups = findUnparsedTokenGroups(state);
@@ -1202,7 +1138,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       })
     );
     results.push({ result, issues });
-    updateCarryForward(carry, state);
   }
 
   const lintParseResults = results.map((item) => item.result);
@@ -1224,7 +1159,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       });
     }
   }
-  propagateTrailingSharedCadence(lintParseResults, segments, input, options);
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
   const lintDosages = expandedLintResults.map(entry => entry.result);
   quarantineMergedIndependentRegimens(
@@ -1277,31 +1211,22 @@ export async function parseSigAsync(
 ): Promise<ParseBatchResult> {
   const boundaryPlan = createBoundaryPlan(input, options);
   const segments = expandMealDashSegments(boundaryPlan.segments, options);
-  const carry: SegmentCarry = {};
-  const rawResults: ParseResult[] = [];
-
-  for (const segment of segments) {
-    if (boundaryPlan.relations.some(edge => edge.kind === "independent" &&
-        boundaryPlan.segments[edge.to]?.start === segment.start)) {
-      // Explicit independent instructions must not inherit another track's
-      // dose, route, site or administration unit.
-      for (const key of Object.keys(carry) as Array<keyof SegmentCarry>) delete carry[key];
-    }
-    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
-      recognizeCycles(segment.text, options).some(frame => frame.error);
-    const state = (Object.keys(carry).length === 0 && !hasInvalidCycles
-      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? (hasInvalidCycles
-        ? parseCycleSafeClauseState(segment.text, options)
-        : parseClauseState(segment.text, options));
-    applyCarryForward(state, carry);
+  const states: ParserState[] = [];
+  for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
     await applyInstructionSemanticResolversAsync(state, options);
+    states.push(state);
+  }
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const rawResults: ParseResult[] = [];
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const state = states[index];
     const result = buildParseResult(state, options);
     rebaseParseResult(result, input, segment.start);
     rawResults.push(result);
-    updateCarryForward(carry, state);
   }
 
   propagateTrailingSharedDuration(rawResults, segments, options);
@@ -1309,7 +1234,6 @@ export async function parseSigAsync(
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
-  propagateTrailingSharedCadence(rawResults, segments, input, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);

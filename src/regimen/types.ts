@@ -89,3 +89,35 @@ export interface BoundaryRelation {
   rule: string;
   range: Range;
 }
+
+/** Typed facts consumed by cross-clause HPSG coordination constructions. */
+export interface CoordinationScopeFacts {
+  relation: BoundaryRelation;
+  adjacent: boolean;
+  leftComplete: boolean;
+  rightComplete: boolean;
+  leftExplicitDose: boolean;
+  rightExplicitDose: boolean;
+  leftExplicitHead: boolean;
+  leftAdministrationContext: boolean;
+  rightExplicitHead: boolean;
+  leftHasSite: boolean;
+  rightHasSite: boolean;
+  targetsDistinct: boolean;
+  leftHasCadence: boolean;
+  rightHasCadence: boolean;
+  rightHasCadenceConflict: boolean;
+}
+
+export type RegimenSemanticOperation = 'share-trailing-cadence';
+
+export interface RegimenSemanticConstruction {
+  id: string;
+  priority: number;
+  operation: RegimenSemanticOperation;
+}
+
+export interface RegimenSemanticSelection {
+  construction: RegimenSemanticConstruction;
+  evidence: Evidence[];
+}

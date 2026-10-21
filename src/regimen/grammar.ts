@@ -1,4 +1,13 @@
-import type { BoundaryDecision, BoundarySite, Evidence, Proposal, ProbeSummary } from './types';
+import type {
+  BoundaryDecision,
+  BoundarySite,
+  CoordinationScopeFacts,
+  Evidence,
+  Proposal,
+  ProbeSummary,
+  RegimenSemanticConstruction,
+  RegimenSemanticSelection
+} from './types';
 
 /** Typed boundary facts are a separate signature from the production clause grammar. */
 export interface BoundaryFacts {
@@ -9,6 +18,13 @@ export interface BoundaryFacts {
 }
 interface Constraint { feature: string; satisfied: (facts: BoundaryFacts) => boolean }
 interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation'] }
+interface SemanticConstraint {
+  feature: string;
+  satisfied: (facts: CoordinationScopeFacts) => boolean;
+}
+interface SemanticConstruction extends RegimenSemanticConstruction {
+  constraints: readonly SemanticConstraint[];
+}
 const constraint = (feature: string, satisfied: Constraint['satisfied']): Constraint => ({ feature, satisfied });
 const coordinationOrSequence = constraint('connector.coordination-or-sequence', f => f.site.kind === 'coordination' || f.site.kind === 'sequence');
 const usableLeft = constraint('left.head-or-inherited-complete-schedule', f => f.left.hasHead ||
@@ -23,12 +39,71 @@ const targetSetsDiffer = (left: readonly string[], right: readonly string[]) =>
   left.length !== right.length || left.some(value => right.indexOf(value) < 0);
 const clocksDiffer = (a: readonly string[], b: readonly string[]) => a.length !== b.length || a.some((v, i) => v !== b[i]);
 
+const semanticConstraint = (
+  feature: string,
+  satisfied: SemanticConstraint['satisfied']
+): SemanticConstraint => ({ feature, satisfied });
+
+/**
+ * Distributive cadence is licensed only for a coordinated dose continuation.
+ * The right daughter is the scoped cadence donor; an independently headed,
+ * incomplete, conflicting, or already-timed daughter cannot participate.
+ */
+export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] = [{
+  id: 'hpsg.cx.coordination.trailing-shared-cadence',
+  priority: 800,
+  operation: 'share-trailing-cadence',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.complete', f => f.leftComplete),
+    semanticConstraint('right.complete', f => f.rightComplete),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.explicit-or-inherited-administration-head', f => f.leftAdministrationContext),
+    semanticConstraint('right.omitsAdministrationHead', f => !f.rightExplicitHead),
+    semanticConstraint('left.hasSite', f => f.leftHasSite),
+    semanticConstraint('right.hasSite', f => f.rightHasSite),
+    semanticConstraint('targets.distinct', f => f.targetsDistinct),
+    semanticConstraint('left.omitsCadence', f => !f.leftHasCadence),
+    semanticConstraint('right.hasCadence', f => f.rightHasCadence),
+    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
+  ]
+}];
+
+export function grammaticalCoordinationScopes(
+  facts: CoordinationScopeFacts
+): RegimenSemanticSelection[] {
+  const selected: RegimenSemanticSelection[] = [];
+  for (const construction of COORDINATION_SCOPE_CONSTRUCTIONS) {
+    if (construction.constraints.some(item => !item.satisfied(facts))) continue;
+    selected.push({
+      construction: {
+        id: construction.id,
+        priority: construction.priority,
+        operation: construction.operation
+      },
+      evidence: [
+        { feature: 'relation.rule', value: facts.relation.rule, range: facts.relation.range },
+        { feature: 'relation.kind', value: facts.relation.kind, range: facts.relation.range },
+        { feature: 'right.hasCadence', value: facts.rightHasCadence },
+        { feature: 'targets.distinct', value: facts.targetsDistinct }
+      ]
+    });
+  }
+  return selected.sort((a, b) =>
+    b.construction.priority - a.construction.priority ||
+    a.construction.id.localeCompare(b.construction.id)
+  );
+}
+
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination', constraints: [
     coordinationOrSequence, constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
-    constraint('right.schedule-or-method', f => f.right.hasSchedule || f.right.method)
+    constraint('right.schedule-method-or-target', f => f.right.hasSchedule || f.right.method || f.right.hasTargets)
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft

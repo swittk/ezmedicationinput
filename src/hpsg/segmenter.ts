@@ -24,12 +24,6 @@ export interface HpsgSigSegment {
   end: number;
   /** A trailing duration on the next heterogeneous dose applies to this sibling too. */
   inheritTrailingDurationFromNext?: boolean;
-  /** A sole cadence after a coordinated heterogeneous dose applies to this sibling too. */
-  inheritTrailingCadenceFromNext?: boolean;
-}
-
-interface DoseContinuationDecision {
-  inheritTrailingCadenceFromNext: boolean;
 }
 
 function isBoundaryToken(token: Token): boolean {
@@ -387,7 +381,7 @@ function doseBearingAdministrationContinuation(
   connectorIndex: number,
   segmentStart: number,
   options?: ParseOptions
-): DoseContinuationDecision | undefined {
+): boolean | undefined {
   const connector = tokens[connectorIndex];
   const first = tokens[connectorIndex + 1];
   if (!connector || !first) return undefined;
@@ -428,13 +422,7 @@ function doseBearingAdministrationContinuation(
   if (!hasMeaningfulSchedule(continuation) && !clause.method?.text && !clause.method?.coding?.code) {
     return undefined;
   }
-  const connectorSurface = connector.original.trim().toLowerCase();
-  const coordinated = ACTION_COORDINATION_CONNECTORS.has(connectorSurface) &&
-    !ACTION_SEQUENCE_MARKERS.has(connectorSurface);
-  return {
-    inheritTrailingCadenceFromNext: coordinated &&
-      !hasMeaningfulSchedule(prefix) && hasRecurringCadence(continuation)
-  };
+  return true;
 }
 
 function isSlashClauseBoundary(tokens: Token[], index: number): boolean {
@@ -460,8 +448,7 @@ function pushSegment(
   input: string,
   start: number,
   end: number,
-  inheritTrailingDurationFromNext = false,
-  inheritTrailingCadenceFromNext = false
+  inheritTrailingDurationFromNext = false
 ): void {
   let trimmedStart = start;
   let trimmedEnd = end;
@@ -478,8 +465,7 @@ function pushSegment(
     text: input.slice(trimmedStart, trimmedEnd),
     start: trimmedStart,
     end: trimmedEnd,
-    inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined,
-    inheritTrailingCadenceFromNext: inheritTrailingCadenceFromNext || undefined
+    inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined
   });
 }
 
@@ -581,9 +567,7 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
           segments,
           input,
           start,
-          token.sourceStart,
-          false,
-          doseContinuation?.inheritTrailingCadenceFromNext
+          token.sourceStart
         );
         start = nextToken.sourceEnd;
         inheritedAdministrationContinuation = true;
@@ -603,9 +587,7 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
           segments,
           input,
           start,
-          token.sourceStart,
-          false,
-          doseContinuation?.inheritTrailingCadenceFromNext
+          token.sourceStart
         );
         start = token.sourceEnd;
         inheritedAdministrationContinuation = true;

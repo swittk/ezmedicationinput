@@ -1,7 +1,5 @@
 import {
   FhirDayOfWeek,
-  FhirPeriodUnit,
-  FhirTimingRepeat,
   ParseResult,
   TextRange
 } from "./types";
@@ -11,6 +9,7 @@ import { findMedicationDateListSpans, parseMedicationDateListAt } from "./date-i
 import { setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays } from "./dosage-course";
 import { parseMedicationGuard } from "./medication-condition";
 import { ParseOptions } from "./types";
+import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 
 const UCUM = "http://unitsofmeasure.org";
 const DAYS = [
@@ -32,23 +31,13 @@ const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
 // ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
 const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
-const WEIGHT = /(\d+(?:\.\d+)?)\s*(mcg|μg|µg|ug|mg|g|units?|iu)\s*\/\s*kg(?:\s*\/\s*(?:day|daily|d))?/iu;
-const WEIGHT_DAILY = /\/\s*kg\s*\/\s*(?:day|daily|d)\b/iu;
-// The weight-dose matcher intentionally stops at /kg (or /kg/day). A
-// following /min, /h, /week, or unknown suffix must not become a bolus.
-const WEIGHT_TRAILING_SUFFIX = /^\s*\/\s*([^\s,;.!?]+)/u;
-const DOSE_DIVISION = /\bdivid(?:ed|e)\s+(?:into|in)\s+(\d+)\s+doses?\b/iu;
-const RATE = /\b(?:at|@)\s*(\d+(?:\.\d+)?)\s*(mL|L|mg|mcg|µg|μg|g)\s*\/\s*(h|hr|hour|hours|min|minute|minutes)\b/iu;
-const INFUSE_OVER = /\b(?:infuse|infusion|administer|give)\b[\s\S]*?\b(\d+(?:\.\d+)?)\s*(mL|L)\s+over\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h|hr|hrs|hour|hours)\b/iu;
-const INFUSION_DURATION = /\bfor\s+(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|h|hr|hrs|hour|hours)\b/iu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
 /**
- * A cheap lexical prerequisite for the post-grammar clinical resolver.
- * Most routine directions contain no conditional, exception, maximum,
- * weight-based or infusion constraint. Skip multiple full-text grammar
- * searches in that overwhelmingly common case; positive candidates still
- * go through the exact same conservative resolver.
+ * A cheap prerequisite for post-grammar guardrails that still own calendar,
+ * condition and maximum-dose constraints. Typed HPSG clinical quantities
+ * bypass this source-text gate; unresolved weight/infusion text reaches it
+ * only for conservative quarantine.
  */
 // If a parsed dose still contains an unconsumed cadence, its timing is not
 // safe to execute: selecting BID while leaving QID/q8h in text is not a
@@ -59,15 +48,6 @@ const UNRESOLVED_TIMING_SIGNAL =
 
 const CLINICAL_CONSTRAINT_SIGNAL =
   /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
-
-/** RATE/INFUSE_OVER accept mixed case; UCUM codes are case-sensitive. */
-function ucumMassOrVolume(raw: string): string {
-  const lower = raw.toLowerCase();
-  if (/^(?:mcg|µg|μg|ug)$/u.test(lower)) return "ug";
-  if (lower === "ml") return "mL";
-  if (lower === "l") return "L";
-  return lower; // Supported remainder is mg or g.
-}
 
 const unitMap: Record<string, string> = {
   tab: "tab", tabs: "tab", tablet: "tab", tablets: "tab", เม็ด: "tab",
@@ -200,21 +180,6 @@ function keepOriginalText(item: ParseResult, source: string): void {
   item.fhir.text = source;
 }
 
-function addWarning(item: ParseResult, warning: string): void {
-  if (item.warnings.indexOf(warning) < 0) item.warnings.push(warning);
-  for (const clause of item.meta.canonical.clauses) {
-    clause.warnings = clause.warnings ?? [];
-    if (clause.warnings.indexOf(warning) < 0) clause.warnings.push(warning);
-  }
-}
-
-function markDose(item: ParseResult, value: number, unit: string): void {
-  item.fhir.doseAndRate = [{ doseQuantity: { value, unit, system: UCUM, code: unit } }];
-  for (const clause of item.meta.canonical.clauses) {
-    clause.dose = { value, unit };
-  }
-}
-
 function preventIncorrectDose(item: ParseResult, source: string, reason: string): void {
   quarantineSchedule(item, source, reason);
   delete item.fhir.doseAndRate;
@@ -223,65 +188,6 @@ function preventIncorrectDose(item: ParseResult, source: string, reason: string)
 
 function matchedRange(source: string, match: RegExpExecArray, offset: number): TextRange {
   return span(source, offset, match.index, match.index + match[0].length);
-}
-
-/** Common infusion duration handling for both fixed and weight-based rates. */
-function applyInfusionDuration(
-  item: ParseResult, source: string, offset: number, own: (range: TextRange) => void
-): void {
-  const match = INFUSION_DURATION.exec(source);
-  if (!match) return;
-  const duration = Number(match[1]);
-  if (!Number.isFinite(duration) || duration <= 0) return;
-  const durationUnit = /^h/iu.test(match[2]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
-  item.fhir.timing = item.fhir.timing ?? {};
-  const repeat = item.fhir.timing.repeat ?? {};
-  const singleAdministration = !hasRecurringCadence(repeat) && repeat.count === undefined;
-  item.fhir.timing.repeat = {
-    ...repeat,
-    ...(singleAdministration ? { count: 1 } : {}),
-    duration, durationUnit
-  };
-  // A duration of one infusion is not a bound on the entire treatment course.
-  delete item.fhir.timing.repeat.boundsDuration;
-  for (const clause of item.meta.canonical.clauses) {
-    clause.schedule = {
-      ...(clause.schedule ?? {}),
-      ...(!hasCanonicalRecurringCadence(clause.schedule) && clause.schedule?.count === undefined
-        ? { count: 1 }
-        : {}),
-      administrationDuration: duration,
-      administrationDurationUnit: durationUnit,
-      duration: undefined
-    };
-  }
-  own(matchedRange(source, match, offset));
-}
-
-function hasRecurringCadence(repeat: FhirTimingRepeat): boolean {
-  return Boolean(
-    repeat.frequency !== undefined ||
-    repeat.frequencyMax !== undefined ||
-    repeat.period !== undefined ||
-    repeat.periodMax !== undefined ||
-    repeat.dayOfWeek?.length ||
-    repeat.when?.length ||
-    repeat.timeOfDay?.length
-  );
-}
-
-function hasCanonicalRecurringCadence(
-  schedule: ParseResult["meta"]["canonical"]["clauses"][number]["schedule"]
-): boolean {
-  return Boolean(schedule && (
-    schedule.frequency !== undefined ||
-    schedule.frequencyMax !== undefined ||
-    schedule.period !== undefined ||
-    schedule.periodMax !== undefined ||
-    schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
-    schedule.timeOfDay?.length
-  ));
 }
 
 /**
@@ -295,7 +201,22 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     quarantineSchedule(item, source, "unresolved-timing-conflict");
     return { ownedRanges: [] };
   }
-  if (!CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
+  let clinicalQuantity: HpsgClinicalQuantityFeature | undefined;
+  for (const clause of item.meta.canonical.clauses) {
+    if (clause.clinicalQuantity === undefined) continue;
+    clinicalQuantity = clause.clinicalQuantity;
+    break;
+  }
+  if (!clinicalQuantity && !CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
+  if (clinicalQuantity) {
+    // HPSG quantity meaning is already lowered by canonicalToFhir. This
+    // layer only preserves source text or quarantines unsafe semantics.
+    if (clinicalQuantity.status !== "resolved")
+      preventIncorrectDose(item, source,
+        clinicalQuantity.quarantineReason ?? "unsupported-weight-based-dose");
+    else
+      keepOriginalText(item, source);
+  }
   const offset = item.meta.canonical.clauses[0]?.raw.start ?? 0;
   const ownedRanges: TextRange[] = [];
   const own = (range: TextRange) => { ownedRanges.push(range); };
@@ -366,112 +287,13 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     keepOriginalText(item, source);
   }
 
-  const weight = WEIGHT.exec(source);
-  let handledWeightRate = false;
-  if (weight) {
-    const daily = WEIGHT_DAILY.test(weight[0]);
-    const mass = weight[2].replace(/[μµ]/gu, "u").toLowerCase();
-    const unit = mass === "iu" || mass === "unit" || mass === "units" ? "[iU]/kg" : mass === "mcg" || mass === "ug" ? "ug/kg" : mass + "/kg";
-    const quantity = Number(weight[1]);
-    const suffix = WEIGHT_TRAILING_SUFFIX.exec(source.slice(weight.index + weight[0].length));
-    const perTime = suffix?.[1];
-    const rateUnit = perTime && /^(?:min(?:ute)?s?|h|hr|hrs|hour|hours)$/iu.test(perTime)
-      ? /^h/iu.test(perTime) ? "h" : "min"
-      : undefined;
-    const division = suffix ? undefined : DOSE_DIVISION.exec(source);
-    if (suffix && rateUnit && Number.isFinite(quantity) && quantity > 0) {
-      // FHIR R5 rateQuantity is a SimpleQuantity containing a UCUM rate.
-      // Weight remains symbolic; the actual pump rate still requires kg.
-      const code = unit + "/" + rateUnit;
-      item.fhir.doseAndRate = [{ rateQuantity: { value: quantity, unit: code, system: UCUM, code } }];
-      for (const clause of item.meta.canonical.clauses) delete clause.dose;
-      own(span(source, offset, weight.index,
-        weight.index + weight[0].length + suffix[0].length));
-      applyInfusionDuration(item, source, offset, own);
-      addWarning(item, "Weight-based infusion rate: patientWeightKg is required to calculate an absolute administration rate.");
-      keepOriginalText(item, source);
-      handledWeightRate = true;
-    } else if (suffix) {
-      // Never misrepresent unknown /kg/... expressions as a bolus.
-      preventIncorrectDose(item, source, "unsupported-weight-based-rate");
-    } else if (!Number.isFinite(quantity) || quantity <= 0 || (daily && (!division || Number(division[1]) < 1))) {
-      preventIncorrectDose(item, source, "incomplete-weight-based-dose");
-    } else {
-      const perDose = daily ? quantity / Number(division![1]) : quantity;
-      markDose(item, perDose, unit);
-      if (daily && division) {
-        item.fhir.timing = item.fhir.timing ?? {};
-        item.fhir.timing.repeat = {
-          ...(item.fhir.timing.repeat ?? {}),
-          frequency: Number(division[1]),
-          period: 1,
-          periodUnit: FhirPeriodUnit.Day
-        };
-        delete item.fhir.timing.code;
-        for (const clause of item.meta.canonical.clauses) {
-          clause.schedule = { ...(clause.schedule ?? {}), frequency: Number(division[1]), period: 1, periodUnit: FhirPeriodUnit.Day, timingCode: undefined };
-        }
-        own(matchedRange(source, division, offset));
-      }
-      own(matchedRange(source, weight, offset));
-      addWarning(item, "Weight-based dose: patient weight is required to calculate the actual administered amount.");
-      keepOriginalText(item, source);
-    }
-  } else if (/\b(?:mg|mcg|ug|g|iu|units?)\s*\/\s*kg\b/iu.test(source)) {
+  // Guardrail only: a weight expression without typed HPSG evidence is never
+  // allowed to survive as an ordinary scalar dose.
+  if (!clinicalQuantity && /\b(?:mg|mcg|ug|g|iu|units?)\s*\/\s*kg\b/iu.test(source)) {
     preventIncorrectDose(item, source, "unsupported-weight-based-dose");
   }
 
-  const rate = RATE.exec(source);
-  const over = rate ? undefined : INFUSE_OVER.exec(source);
-  if (rate) {
-    const value = Number(rate[1]);
-    const numer = ucumMassOrVolume(rate[2]);
-    const denom = /^h/iu.test(rate[3]) ? "h" : "min";
-    const unit = numer + "/" + denom;
-    if (Number.isFinite(value) && value > 0) {
-      item.fhir.doseAndRate = [{ rateQuantity: { value, unit, system: UCUM, code: unit } }];
-      for (const clause of item.meta.canonical.clauses) delete clause.dose;
-      applyInfusionDuration(item, source, offset, own);
-      own(matchedRange(source, rate, offset));
-      keepOriginalText(item, source);
-    } else preventIncorrectDose(item, source, "invalid-infusion-rate");
-  } else if (over) {
-    const volume = Number(over[1]), duration = Number(over[3]);
-    if (volume > 0 && duration > 0) {
-      const volumeUnit = ucumMassOrVolume(over[2]);
-      const numerator = { value: volume, unit: volumeUnit, system: UCUM, code: volumeUnit };
-      const durationUnit = /^h/iu.test(over[4]) ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
-      item.fhir.doseAndRate = [{
-        doseQuantity: numerator,
-        rateRatio: { numerator, denominator: { value: duration, unit: durationUnit, system: UCUM, code: durationUnit } }
-      }];
-      item.fhir.timing = item.fhir.timing ?? {};
-      const repeat = item.fhir.timing.repeat ?? {};
-      const singleAdministration = !hasRecurringCadence(repeat) && repeat.count === undefined;
-      item.fhir.timing.repeat = {
-        ...repeat,
-        ...(singleAdministration ? { count: 1 } : {}),
-        duration,
-        durationUnit
-      };
-      // An infusion's administration duration is not a treatment-course bound.
-      delete item.fhir.timing.repeat.boundsDuration;
-      for (const clause of item.meta.canonical.clauses) {
-        clause.dose = { value: volume, unit: volumeUnit };
-        clause.schedule = {
-          ...(clause.schedule ?? {}),
-          ...(!hasCanonicalRecurringCadence(clause.schedule) && clause.schedule?.count === undefined
-            ? { count: 1 }
-            : {}),
-          administrationDuration: duration,
-          administrationDurationUnit: durationUnit,
-          duration: undefined
-        };
-      }
-      own(matchedRange(source, over, offset));
-      keepOriginalText(item, source);
-    } else preventIncorrectDose(item, source, "invalid-infusion-duration");
-  } else if (!handledWeightRate &&
+  if (!clinicalQuantity &&
     /\b(?:infus(?:e|ion)|drip)\b/iu.test(source) &&
     /\b(?:\w+\s*\/\s*(?:h|hr|min)|over\s+\d)/iu.test(source) &&
     (item.meta.leftoverText?.trim() ?? "").length > 0) {

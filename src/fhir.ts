@@ -1,4 +1,5 @@
 import { normalizeAnchoredBounds, normalizeClockFrequency } from "./regimen/bounds";
+import { projectHpsgClinicalQuantityToFhir } from "./hpsg/clinical-quantity-fhir";
 import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
@@ -868,6 +869,11 @@ export function canonicalToFhir(
       }
     ];
   }
+
+  // HPSG produces the dimensional meaning; FHIR simply lowers that typed
+  // value. Safety checks must never reparse and overwrite clinical dosage.
+  if (clause.clinicalQuantity?.status === "resolved")
+    projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
 
   if (clause.route?.code || clause.route?.text) {
     const routeCode = clause.route?.code;

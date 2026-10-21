@@ -141,6 +141,53 @@ export interface HpsgDoseFeature {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  /**
+   * Dimensionally typed clinical quantity contributed by the grammar.  This
+   * remains distinct from `value`/`unit`: an infusion rate must never be
+   * projected through the ordinary doseQuantity path.
+   */
+  clinicalQuantity?: HpsgClinicalQuantityFeature;
+}
+
+export type HpsgClinicalQuantityDimension =
+  | "mass"
+  | "volume"
+  | "biologic-activity"
+  | "patient-mass"
+  | "time";
+
+export interface HpsgDimensionalQuantityTerm {
+  value: number;
+  unit: string;
+  dimension: HpsgClinicalQuantityDimension;
+}
+
+export interface HpsgClinicalQuantityFeature {
+  representation: "dose" | "rate-quantity" | "dose-with-rate-ratio";
+  status: "resolved" | "incomplete" | "unsupported";
+  numerator: HpsgDimensionalQuantityTerm;
+  denominators: HpsgDimensionalQuantityTerm[];
+  /** Per-administration value after an explicit daily total is divided. */
+  projectedDose?: { value: number; unit: string };
+  dailyTotal?: boolean;
+  dividedDoseCount?: number;
+  administrationDuration?: { value: number; unit: FhirPeriodUnit };
+  requiresPatientWeight?: true;
+  quarantineReason?:
+    | "incomplete-weight-based-dose"
+    | "unsupported-weight-based-rate";
+}
+
+/**
+ * The public canonical schema predates rate parsing.  Declaration merging
+ * exposes the typed grammar contribution without forcing it into the scalar
+ * CanonicalDoseExpr shape.  FHIR lowering can therefore distinguish a dose,
+ * a rateQuantity, and a dose/rateRatio without reparsing source text.
+ */
+declare module "../types" {
+  interface CanonicalSigClause {
+    clinicalQuantity?: HpsgClinicalQuantityFeature;
+  }
 }
 
 export interface HpsgScheduleFeature {

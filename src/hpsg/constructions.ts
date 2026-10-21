@@ -5,10 +5,16 @@ import type {
   HpsgSign,
   HpsgType
 } from "./signature";
+import { grammaticalCoordinationScopes } from "../regimen/grammar";
+import type { CoordinationScopeFacts, RegimenSemanticSelection } from "../regimen/types";
 
 export interface HpsgConstructionSelection {
   motherType: HpsgType;
   construction: HpsgConstruction;
+}
+
+export interface HpsgCoordinationScopeSelection extends HpsgConstructionSelection {
+  semantic: RegimenSemanticSelection;
 }
 
 type SignTrait =
@@ -310,4 +316,28 @@ export function selectHpsgConstruction(left: HpsgSign, right: HpsgSign): HpsgCon
     };
   }
   return undefined;
+}
+
+/**
+ * Select a construction over two already chart-parsed administration clauses.
+ * This is the cross-clause counterpart of `selectHpsgConstruction`: the chart
+ * daughters retain their own dose/site values while the right cadence scopes
+ * over the coordinated phrase.
+ */
+export function selectHpsgCoordinationScopeConstruction(
+  facts: CoordinationScopeFacts
+): HpsgCoordinationScopeSelection | undefined {
+  const semantic = grammaticalCoordinationScopes(facts)[0];
+  if (!semantic) return undefined;
+  return {
+    motherType: "coordination-phrase",
+    construction: {
+      kind: "coordination",
+      operation: "scope",
+      headSide: "right",
+      leftType: "administration-clause",
+      rightType: "administration-clause"
+    },
+    semantic
+  };
 }

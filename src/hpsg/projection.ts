@@ -1,7 +1,7 @@
 import { stableStructureKey } from "../stable-structure";
 import { ParserState, Token } from "../parser-state";
-import { EventTiming, FhirDayOfWeek, RouteCode } from "../types";
-import { HpsgScheduleFeature, HpsgSign } from "./signature";
+import { EventTiming, FhirDayOfWeek, FhirDosage, RouteCode } from "../types";
+import { HpsgClinicalQuantityFeature, HpsgScheduleFeature, HpsgSign } from "./signature";
 
 export interface HpsgProjectionDeps {
   addDayOfWeekList: (state: ParserState, days: FhirDayOfWeek[]) => void;
@@ -115,6 +115,30 @@ function findTokenByIndex(tokens: Token[], tokenIndex: number): Token | undefine
   return tokens.find((candidate) => candidate.index === tokenIndex);
 }
 
+function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinicalQuantityFeature {
+  return {
+    ...value,
+    numerator: { ...value.numerator },
+    denominators: value.denominators.map((term) => ({ ...term })),
+    projectedDose: value.projectedDose ? { ...value.projectedDose } : undefined,
+    administrationDuration: value.administrationDuration
+      ? { ...value.administrationDuration }
+      : undefined
+  };
+}
+
+function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolean {
+  return Boolean(schedule && (
+    schedule.frequency !== undefined ||
+    schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined ||
+    schedule.periodMax !== undefined ||
+    schedule.dayOfWeek?.length ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+}
+
 export function projectHpsgSignToState(
   sign: HpsgSign,
   state: ParserState,
@@ -217,20 +241,47 @@ export function projectHpsgSignToState(
 
   const dose = sign.synsem.head.dose;
   if (dose && dose.attachmentClass !== "procedure") {
-    if (dose.value !== undefined) {
-      state.dose = dose.value;
-    }
-    if (dose.range !== undefined) {
-      state.doseRange = dose.range;
-    }
-    if (dose.unit !== undefined) {
-      state.unit = dose.unit;
+    const clinical = dose.clinicalQuantity;
+    if (clinical) {
+      state.primaryClause.clinicalQuantity = cloneClinicalQuantity(clinical);
+      if (clinical.status === "resolved" && clinical.projectedDose) {
+        state.dose = clinical.projectedDose.value;
+        state.unit = clinical.projectedDose.unit;
+      } else {
+        // A rate or quarantined expression is not a scalar medication dose.
+        delete state.primaryClause.dose;
+      }
+    } else {
+      if (dose.value !== undefined) {
+        state.dose = dose.value;
+      }
+      if (dose.range !== undefined) {
+        state.doseRange = dose.range;
+      }
+      if (dose.unit !== undefined) {
+        state.unit = dose.unit;
+      }
     }
   }
 
   const schedule = sign.synsem.head.schedule;
   if (schedule && schedule.attachmentClass !== "procedure") {
     applySchedule(state, schedule, deps);
+  }
+
+  const clinicalDuration = dose?.attachmentClass !== "procedure"
+    ? dose?.clinicalQuantity?.administrationDuration
+    : undefined;
+  if (clinicalDuration) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.administrationDuration = clinicalDuration.value;
+    target.administrationDurationUnit = clinicalDuration.unit;
+    // Duration qualifies each infusion. It is never regimen boundsDuration;
+    // a single-occurrence count is only appropriate without a recurrence.
+    delete target.duration;
+    delete target.durationMax;
+    delete target.durationUnit;
+    if (!hasRecurringSchedule(schedule) && target.count === undefined) target.count = 1;
   }
 
   if (sign.warnings?.length) {

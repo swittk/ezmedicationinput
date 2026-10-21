@@ -45,6 +45,7 @@ import {
   routeLexicalRule
 } from "./rules/core-rules";
 import { HpsgClauseContext } from "./rule-context";
+import { clinicalQuantityLexicalRule } from "./rules/clinical-quantity-rules";
 
 function withScopeRequirements(
   rule: HpsgLexicalRule<HpsgClauseContext>
@@ -108,6 +109,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       methodLexicalRule(),
       routeLexicalRule(),
       productLexicalRule(),
+      clinicalQuantityLexicalRule(),
       multiplicativeDoseFrequencyRule(),
       perTargetCountDoseRule(),
       doseLexicalRule(),
