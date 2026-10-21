@@ -1813,8 +1813,12 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     if (hasUnresolvedRelationalInstruction(dosage)) {
       return [];
     }
-    const anchor = orderedAt ?? from;
-    if ((orderedAt && orderedAt < from) || (courseEnd && anchor >= courseEnd)) {
+    // A single future-dated administration is anchored to the later of
+    // the order instant and the explicit start, not to an earlier order.
+    // Without orderedAt, a boundsPeriod.start still anchors the one-time
+    // dose so later queries cannot execute it a second time.
+    const anchor = effectiveOrderedAt ?? boundsStart ?? from;
+    if (anchor < from || (courseEnd && anchor >= courseEnd)) {
       return [];
     }
     return [formatZonedIso(anchor, timeZone)].slice(0, effectiveLimit);

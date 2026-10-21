@@ -49,6 +49,13 @@ const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\
  * searches in that overwhelmingly common case; positive candidates still
  * go through the exact same conservative resolver.
  */
+// If a parsed dose still contains an unconsumed cadence, its timing is not
+// safe to execute: selecting BID while leaving QID/q8h in text is not a
+// successfully parsed order. Only inspect this when leftovers already exist,
+// keeping ordinary complete SIGs on the original fast path.
+const UNRESOLVED_TIMING_SIGNAL =
+  /\b(?:QD|QOD|BID|TID|QID|Q\d+(?:H|HR)|once\s+daily|twice\s+daily|every\s+\d+\s*(?:h|hr|hours?|minutes?|days?|weeks?)|\d+\s*(?:hours?|minutes?|days?|weeks?|hrs?|hr))\b/iu;
+
 const CLINICAL_CONSTRAINT_SIGNAL =
   /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
 
@@ -251,6 +258,11 @@ function applyInfusionDuration(
  * All transformations are independent of drug names and clinical specialties.
  */
 export function applyClinicalConstraints(item: ParseResult, source: string, options?: ParseOptions): ConstraintApplication {
+  if (item.fhir.timing && item.meta.leftoverText &&
+      UNRESOLVED_TIMING_SIGNAL.test(item.meta.leftoverText)) {
+    quarantineSchedule(item, source, "unresolved-timing-conflict");
+    return { ownedRanges: [] };
+  }
   if (!CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
   const offset = item.meta.canonical.clauses[0]?.raw.start ?? 0;
   const ownedRanges: TextRange[] = [];

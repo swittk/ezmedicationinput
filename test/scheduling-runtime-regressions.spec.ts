@@ -119,6 +119,33 @@ describe("dose scheduling runtime guarantees", () => {
     }
   });
 
+  it("schedules a future-dated one-time administration once and agrees with supply", () => {
+    const dosage = parseSig("1 tab once").fhir[0];
+    dosage.timing!.repeat!.boundsPeriod = { start: "2026-10-25" };
+    const options = {
+      ...base,
+      from: "2026-10-21T08:00:00+07:00",
+      orderedAt: "2026-10-21T08:00:00+07:00",
+      limit: 4
+    };
+    const expected = ["2026-10-25T00:00:00+07:00"];
+    for (const input of [dosage, [dosage], toFhirR5Dosages({
+      step: [{ component: [dosage] }]
+    })]) {
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(nextDueDoses(input, {
+        ...options, from: "2026-10-26T08:00:00+07:00"
+      })).toEqual([]);
+    }
+    // Even without orderedAt, the explicit single-dose bound remains the
+    // historical anchor, rather than moving whenever the query starts.
+    expect(nextDueDoses(dosage, { ...options, orderedAt: undefined }))
+      .toEqual(expected);
+    expect(nextDueDoses(dosage, {
+      ...options, orderedAt: undefined, from: "2026-10-26T08:00:00+07:00"
+    })).toEqual([]);
+  });
+
   it("refuses only safety maxima that genuinely require unavailable clinical data", () => {
     const source = parseSig("1 tab PO BID").fhir[0];
     expect(() => nextDueDoses({

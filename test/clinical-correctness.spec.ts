@@ -18,6 +18,30 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it.each([
+    "1 tab BID QID",
+    "1 tab once daily BID",
+    "1 tab q6h q8h",
+    "1 tab BID every 8 hours",
+    "Apply 1 drop OD BID"
+  ])("does not execute an order with an unconsumed competing cadence: %s", sig => {
+    const parsed = parseSig(sig);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir.timing).toBeUndefined();
+    expect(parsed.warnings).toContainEqual(
+      expect.stringContaining("unresolved-timing-conflict")
+    );
+    expect(parsed.fhir.text).toBe(sig);
+    expect(lintSig(sig).issues.some(issue =>
+      issue.message.includes("unresolved-timing-conflict"))).toBe(true);
+    expect(() => nextDueDoses(parsed.fhir, {
+      from: "2026-10-21T08:00:00+07:00",
+      orderedAt: "2026-10-21T08:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 5
+    })).toThrow(/unresolved/i);
+  });
+
   it("uses genuine word boundaries for an explicit excluded ISO date", () => {
     const input = "1 tab daily except 2026-10-29";
     const parsed = parseSig(input);
