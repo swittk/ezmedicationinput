@@ -1,5 +1,12 @@
 # HPSG Implementation Guide For `ezmedicationinput`
 
+## Product boundary (mandatory before interpreting the architecture)
+
+**Read [AGENTS.md](AGENTS.md) first.** EZMedInput is a **fast, best-effort clinical SIG parser/suggester for clinicians who review and edit the results**; it is **not** an autonomous prescribing or comprehensive medication-safety validator.
+
+Technical improvements here are accepted only if they help advertised or plausible clinical language **without** imposing extra cost on the common path, adding special-case refusal machinery for contrived phrases, or deleting partially understood/source/FHIR meaning. Wrong laterality, dosage, cadence, and course in ordinary inputs are real bugs; incomplete interpretation of nonsensical or highly unusual inputs does not justify bloating the grammar. Keep HPSG typed and FHIR downstream, not a second post-parse clinical interpreter. Human correction remains part of the product.
+
+
 Last updated: 2026-04-26
 
 ## Why this file exists

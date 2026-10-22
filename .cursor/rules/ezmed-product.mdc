@@ -1,0 +1,9 @@
+---
+description: EZMedInput mandatory clinician-suggester product contract
+alwaysApply: true
+---
+# Read first: AGENTS.md
+
+Read `AGENTS.md` at repository root as the **authoritative** EZMedInput product specification. For HPSG grammar work read `DIRECTIONALITY.md` and `HPSG_IMPLEMENTATION_GUIDE.md`.
+
+EZMedInput is a **fast HPSG SIG parser/suggester used by doctors who inspect and correct results**. It is **not** an autonomous prescribing validator. Prefer useful, permissive partial interpretations over blocking. Preserve original text and all structured information. Fix embarrassing errors in ordinary/advertised grammar; do not add special-case safety vetoes for contrived wording. Never trade mobile performance or data retention for pedantic corner-case completeness. Evaluate CodeRabbit recommendations against these rules and push back when they redefine the product.
