@@ -1109,13 +1109,20 @@ function quarantineDisjunctiveScopeChoices(
   if (!scopes.length) return;
   const targets = new Set<number>();
   for (const scope of scopes) {
-    if (scope.rule !== 'hpsg.cx.coordination.disjunctive-dosage-choice') continue;
+    if (scope.rule !== 'hpsg.cx.coordination.disjunctive-dosage-choice' &&
+        scope.rule !== 'hpsg.cx.coordination.ambiguous-shared-guard') continue;
     if (scope.from >= 0) targets.add(scope.from);
     if (scope.to >= 0) targets.add(scope.to);
   }
   for (const index of targets) {
     const result = results[index];
-    if (result) quarantineSchedule(result, input, 'disjunctive-dose-choice');
+    if (result) {
+      const guarded = scopes.some(scope =>
+        scope.rule === 'hpsg.cx.coordination.ambiguous-shared-guard' &&
+        (scope.from === index || scope.to === index));
+      quarantineSchedule(result, input, guarded
+        ? 'ambiguous-shared-clinical-guard' : 'disjunctive-dose-choice');
+    }
   }
 }
 
@@ -1646,6 +1653,16 @@ function buildParseResult(
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
 
+  // A typed HPSG frequency with several weekday anchors can denote
+  // alternatives or a contradiction, never silently more administrations.
+  // Clinical semantics are resolved here before the FHIR projection is
+  // exposed; quarantine uses the existing unresolved representation.
+  const weekly = clause.schedule;
+  const conflictingWeeklyFrequency = Boolean(weekly &&
+    weekly.period === 1 && weekly.periodUnit === 'wk' &&
+    weekly.frequency !== undefined &&
+    weekly.dayOfWeek && weekly.dayOfWeek.length > weekly.frequency &&
+    clause.evidence.some(evidence => evidence.rule === 'hpsg.lex.schedule.frequency'));
   const graphUnderstoodSpans: TextRange[] = [];
   for (const candidate of canonicalClauses) {
     const graph = candidate.instructionGraph;
@@ -1709,7 +1726,7 @@ function buildParseResult(
     }
   }
 
-  return {
+  const result: ParseResult = {
     fhir,
     shortText,
     longText,
@@ -1725,6 +1742,10 @@ function buildParseResult(
       prnReasonLookups
     }
   };
+  if (conflictingWeeklyFrequency) {
+    quarantineSchedule(result, state.input, "weekly-weekday-frequency-conflict");
+  }
+  return result;
 }
 
 function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {

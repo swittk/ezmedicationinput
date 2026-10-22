@@ -116,6 +116,8 @@ export interface CoordinationScopeFacts {
   leftHasFrontedPrn: boolean;
   rightHasTrailingSchedule: boolean;
   rightHasTrailingPrn: boolean;
+  /** A typed, exact trailing clinical predicate/exclusion whose mother scope is unresolved. */
+  rightHasTrailingSafetyGuard: boolean;
   rightHasCadenceConflict: boolean;
 }
 
@@ -123,7 +125,8 @@ export type RegimenSemanticOperation =
   | 'share-trailing-cadence'
   | 'share-trailing-adjuncts'
   | 'share-leading-adjuncts'
-  | 'quarantine-disjunctive-dosages';
+  | 'quarantine-disjunctive-dosages'
+  | 'quarantine-ambiguous-shared-guard';
 
 export interface RegimenSemanticConstruction {
   id: string;

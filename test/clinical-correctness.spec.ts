@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
+import { calculateTotalUnits, formatSig, getUnresolvedDosage, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
 
@@ -674,5 +674,49 @@ describe("HPSG count cardinal semantics", () => {
       low: { value: 7, unit: "days", code: "d", system: "http://unitsofmeasure.org" },
       high: { value: 14, unit: "days", code: "d", system: "http://unitsofmeasure.org" }
     });
+  });
+});
+
+describe("HPSG weekly cadence and exact weekday alternatives", () => {
+  it("never rewrites an explicitly prescribed once-weekly frequency to twice-weekly", () => {
+    const input = "take 1 tab once weekly on Monday and Thursday at 09:00";
+    const result = parseSig(input);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].fhir.timing).toBeUndefined();
+    expect(getUnresolvedDosage(result.items[0].fhir)).toBe("weekly-weekday-frequency-conflict");
+    expect(result.items[0].warnings.some(w => w.includes("weekly-weekday-frequency-conflict")))
+      .toBe(true);
+    expect(() => nextDueDoses(result.fhir, {
+      from: "2026-10-22T08:00:00+07:00",
+      orderedAt: "2026-10-22T08:00:00+07:00",
+      timeZone: "Asia/Bangkok"
+    })).toThrow(/unresolved/i);
+  });
+
+  it("rejects a mismatched external weekly frequency without guessing which day to omit", () => {
+    const dosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: "wk" as const,
+        dayOfWeek: ["mon", "thu"] as ["mon", "thu"],
+        timeOfDay: ["09:00"]
+      } }
+    };
+    const from = "2026-10-22T08:00:00+07:00";
+    expect(() => nextDueDoses(dosage, {
+      from, orderedAt: from, timeZone: "Asia/Bangkok"
+    })).toThrow(/frequency conflicts with multiple weekday anchors/);
+    expect(() => calculateTotalUnits({
+      dosage, from, orderedAt: from, timeZone: "Asia/Bangkok",
+      durationValue: 14, durationUnit: "d"
+    })).toThrow(/frequency conflicts with multiple weekday anchors/);
+  });
+
+  it("retains compatible explicit twice-weekly meaning", () => {
+    const p = parseSig("take 1 tab twice weekly on Monday and Thursday");
+    expect(p.items[0].fhir.timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "wk", dayOfWeek: ["mon", "thu"]
+    });
+    expect(getUnresolvedDosage(p.items[0].fhir)).toBeUndefined();
   });
 });

@@ -158,6 +158,37 @@ describe('HPSG coordination cadence scope', () => {
   });
 
   it.each([
+    'instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160',
+    'instill 1 drop in left eye once daily and 2 drops in right eye twice daily unless BP < 100',
+    'instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday',
+    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily only if BP > 160',
+    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily except Sunday'
+  ])('never executes a coordinated regimen when trailing guard/exclusion scope is ambiguous: %s', async input => {
+    const sync = parseSig(input);
+    const asyncParsed = await parseSigAsync(input);
+    const linted = lintSig(input);
+    const expectedItems = input.includes('and 1 drop in both eyes') ? 3 : 2;
+    for (const result of [sync, asyncParsed]) {
+      expect(result.items).toHaveLength(expectedItems);
+      for (const item of result.items) {
+        expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
+        expect(item.fhir.timing).toBeUndefined();
+        expect(item.warnings).toContainEqual(
+          expect.stringContaining('ambiguous-shared-clinical-guard')
+        );
+      }
+      expect(() => nextDueDoses(result, {
+        from: '2026-10-22T08:00:00+07:00',
+        orderedAt: '2026-10-22T08:00:00+07:00',
+        timeZone: 'Asia/Bangkok'
+      })).toThrow(/unresolved/i);
+    }
+    expect(linted.issues).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining('ambiguous-shared-clinical-guard')
+    }));
+  });
+
+  it.each([
     ['exact', '30 minutes before breakfast', 'offset', 30, 2],
     ['minimum', 'at least 30 minutes before breakfast', 'offsetMin', 30, 2],
     ['maximum', 'at most 30 minutes before breakfast', 'offsetMax', 30, 2],

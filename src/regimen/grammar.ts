@@ -65,6 +65,23 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('right.explicitDose', f => f.rightExplicitDose)
   ]
 }, {
+  id: 'hpsg.cx.coordination.ambiguous-shared-guard',
+  priority: 925,
+  operation: 'quarantine-ambiguous-shared-guard',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.adminContext', f => f.leftAdministrationContext),
+    semanticConstraint('right.omitsHead', f => !f.rightExplicitHead),
+    semanticConstraint('left.hasSite', f => f.leftHasSite),
+    semanticConstraint('right.hasSite', f => f.rightHasSite),
+    semanticConstraint('targets.distinct', f => f.targetsDistinct),
+    semanticConstraint('right.trailingSafetyGuard', f => f.rightHasTrailingSafetyGuard)
+  ]
+}, {
   id: 'hpsg.cx.coordination.trailing-shared-cadence',
   priority: 800,
   operation: 'share-trailing-cadence',

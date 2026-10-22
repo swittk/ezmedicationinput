@@ -1,3 +1,5 @@
+import { parseMedicationGuard } from '../medication-condition';
+import { matchCalendarExclusion } from '../clinical-safety';
 import { selectHpsgCoordinationScopeConstruction } from '../hpsg/constructions';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
@@ -105,8 +107,9 @@ function hasSemanticValue(value: unknown): boolean {
 }
 
 function scheduleHasSemantics(schedule: CanonicalScheduleExpr | undefined): boolean {
-  return Object.values(SCHEDULE_FEATURE_GROUPS).some(fields =>
-    fields.some(field => hasSemanticValue(scheduleFieldValue(schedule, field)))
+  return (Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[]).some(group =>
+    SCHEDULE_FEATURE_GROUPS[group].some(field =>
+      hasSemanticValue(scheduleFieldValue(schedule, field)))
   );
 }
 
@@ -158,7 +161,7 @@ function mergeScheduleFeatureGroups(
       writable[field] = cloneScheduleField(donor!, field);
       fields.push(field);
     }
-    if (fields.some(field => (groupFields as readonly string[]).includes(field))) {
+    if (fields.some(field => (groupFields as readonly string[]).indexOf(field) >= 0)) {
       groups.add(group);
     }
   }
@@ -250,14 +253,16 @@ function evidenceBounds(
   clause: CanonicalSigClause,
   prefix: string
 ): { start: number; end: number } | undefined {
-  const spans = clause.evidence
-    .filter(item => item.rule.startsWith(prefix))
-    .flatMap(item => item.spans);
-  if (!spans.length) return undefined;
-  return {
-    start: Math.min(...spans.map(span => span.start)),
-    end: Math.max(...spans.map(span => span.end))
-  };
+  let start = Infinity;
+  let end = -Infinity;
+  for (const evidence of clause.evidence) {
+    if (!evidence.rule.startsWith(prefix)) continue;
+    for (const span of evidence.spans) {
+      if (span.start < start) start = span.start;
+      if (span.end > end) end = span.end;
+    }
+  }
+  return start === Infinity ? undefined : { start, end };
 }
 
 function isFrontedEvidence(clause: CanonicalSigClause, prefix: string): boolean {
@@ -337,6 +342,12 @@ function factsFor(
     leftHasFrontedPrn: isFrontedEvidence(leftClause, 'hpsg.lex.prn'),
     rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'hpsg.lex.schedule.'),
     rightHasTrailingPrn: isTrailingEvidence(rightClause, 'hpsg.lex.prn'),
+    rightHasTrailingSafetyGuard: Boolean(
+      rightClause.warnings?.some(warning =>
+        warning.includes('ambiguous-shared-clinical-guard')) ||
+      parseMedicationGuard(right.state.input) ||
+      matchCalendarExclusion(right.state.input)
+    ),
     rightHasCadenceConflict: hasCadenceConflict(right.state)
   };
 }
@@ -397,21 +408,24 @@ export function applyCoordinatedCadenceScopes(
       inheritedAdministrationSegments.has(relation.from)
     ));
     if (!selected) continue;
-    if (selected.semantic.construction.operation === 'quarantine-disjunctive-dosages') {
+    if (selected.semantic.construction.operation === 'quarantine-disjunctive-dosages' ||
+        selected.semantic.construction.operation === 'quarantine-ambiguous-shared-guard') {
       if (pass.direction === 'leading') continue;
       // Alternative administrations are non-executable canonical daughters.
       // Remove their schedules before either daughter can be lowered to FHIR;
       // the downstream admissibility projection only serializes this already
       // typed decision as the standard unresolved marker.
-      const warning = `Unresolved schedule (disjunctive-dose-choice): ${source}`;
+      const reason = selected.semantic.construction.operation === 'quarantine-disjunctive-dosages'
+        ? 'disjunctive-dose-choice' : 'ambiguous-shared-clinical-guard';
+      const warning = `Unresolved schedule (${reason}): ${source}`;
       for (const item of [left, right]) {
         item.state.primaryClause.schedule = undefined;
-        if (!item.state.primaryClause.warnings?.includes(warning)) {
+        if (!item.state.primaryClause.warnings?.some(text => text === warning)) {
           item.state.primaryClause.warnings = [
             ...(item.state.primaryClause.warnings ?? []), warning
           ];
         }
-        if (!item.state.warnings.includes(warning)) item.state.warnings.push(warning);
+        if (item.state.warnings.indexOf(warning) < 0) item.state.warnings.push(warning);
       }
       applications.push({
         rule: selected.semantic.construction.id,

@@ -718,6 +718,13 @@ function validateExecutableFrequency(timing: FhirTiming | undefined): void {
   const repeat = timing?.repeat;
   if (!repeat) return;
   const { frequency, frequencyMax, period, periodMax, periodUnit } = repeat;
+  if (repeat.period === 1 && periodUnit === FhirPeriodUnit.Week &&
+      frequency !== undefined &&
+      (repeat.dayOfWeek?.length ?? 0) > frequency) {
+    throw new Error(
+      "An exact weekly frequency conflicts with multiple weekday anchors; clarify whether the days are alternatives."
+    );
+  }
   if ((repeat.dayOfWeek?.length ?? 0) > 0 &&
       (periodUnit === FhirPeriodUnit.Month || periodUnit === FhirPeriodUnit.Year) &&
       !(timing?.event?.length)) {

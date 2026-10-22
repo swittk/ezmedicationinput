@@ -242,17 +242,10 @@ function cleanupClause(state: ParserState): void {
   const clause = state.primaryClause;
   const schedule = clause.schedule;
   if (schedule) {
-    if (
-      schedule.dayOfWeek &&
-      schedule.dayOfWeek.length > 1 &&
-      schedule.frequency === 1 &&
-      schedule.period === 1 &&
-      schedule.periodUnit === "wk" &&
-      schedule.timingCode === undefined
-    ) {
-      schedule.frequency =
-        schedule.dayOfWeek.length * (schedule.timeOfDay?.length || 1);
-    }
+    // A clinician's explicitly stated weekly frequency is authoritative.
+    // Weekday filters cannot silently rewrite "once weekly" to twice weekly.
+    // Conflicting or alternative weekday attachments are left for the typed
+    // admissibility check, rather than inventing a new frequency.
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
