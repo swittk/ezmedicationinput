@@ -318,7 +318,11 @@ function scheduleOnlyAdministrationContinuation(
   if (!prefixText) return false;
   const prefix = parseClauseState(prefixText, options);
   if (!hasAdministrationHead(prefix)) {
-    if (!inheritedAdministrationHead) return false;
+    // Clinical shorthand commonly omits the administration verb entirely:
+    // "1 drop OS QID x1mo then BID". A typed dose + schedule is already an
+    // administration phase; do not require an inherited verb merely to split
+    // its following schedule-only continuation.
+    if (!inheritedAdministrationHead && !prefix.primaryClause.dose) return false;
     if (findUnparsedTokenGroups(prefix).length || !hasMeaningfulSchedule(prefix)) return false;
   }
   if (connectorLower === "then") return true;

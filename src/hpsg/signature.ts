@@ -169,6 +169,8 @@ export interface HpsgClinicalQuantityFeature {
   denominators: HpsgDimensionalQuantityTerm[];
   /** Per-administration value after an explicit daily total is divided. */
   projectedDose?: { value: number; unit: string };
+  /** Carrier amount used for an administration rate when it differs from the active drug dose. */
+  rateNumerator?: { value: number; unit: string };
   dailyTotal?: boolean;
   dividedDoseCount?: number;
   administrationDuration?: { value: number; unit: FhirPeriodUnit };

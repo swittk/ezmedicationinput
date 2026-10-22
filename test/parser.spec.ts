@@ -5521,18 +5521,19 @@ describe("time-based schedules", () => {
     expect(result.longText).toContain("at 9:00 am, 10:00 pm");
   });
 
-  it("formats multiple meals and times in English", () => {
+  it("formats multiple meals and exact times together in English", () => {
     const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
-    expect(result.longText).toBe("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
-    expect(result.fhir.timing).toBeUndefined();
-    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
+    expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["CM", "CD"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "17:00:00"]);
+    expect(result.warnings).toEqual([]);
   });
 
-  it("formats generic 'with meals' and specific times in English", () => {
+  it("formats generic 'with meals' and exact time together in English", () => {
     const result = parseSig("1 tab with meals and @ 10:00");
-    expect(result.longText).toBe("1 tab with meals and @ 10:00");
-    expect(result.fhir.timing).toBeUndefined();
-    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
+    expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["10:00:00"]);
   });
 
   it("formats complex mixed schedules in Thai", () => {
@@ -5551,21 +5552,22 @@ describe("time-based schedules", () => {
       }
     ];
 
-    for (const { input } of cases) {
+    for (const { input, expected } of cases) {
       const result = parseSig(input, { locale: "th" });
-      expect(result.longText).toBe(input);
-      expect(result.fhir.timing).toBeUndefined();
-      expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
+      expect(result.longText).toBe(expected);
+      expect(result.fhir.timing?.repeat?.when?.length).toBeGreaterThan(0);
+      expect(result.fhir.timing?.repeat?.timeOfDay?.length).toBeGreaterThan(0);
+      expect(result.warnings).toEqual([]);
     }
   });
 
   it("consumes 'and' connector between schedule blocks to prevent leakage", () => {
     const result = parseSig("1 tab with meals and at 9:00");
-    // Ensure "and" is not in additional instructions
     expect(result.fhir.additionalInstruction).toBeUndefined();
     expect(result.longText).not.toContain("and.");
-    expect(result.longText).toBe("1 tab with meals and at 9:00");
-    expect(result.warnings).toContainEqual(expect.stringContaining("incompatible-event-and-clock"));
+    expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
   });
 });
 

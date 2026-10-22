@@ -43,6 +43,7 @@ describe("manually specified clinical semantic oracles for the independent 200-c
       const dosage = parsed.fhir[0];
       const entries = dosage?.doseAndRate?.[0];
       const repeat = dosage?.timing?.repeat;
+      expect(parsed.input).toBe(original.input);
 
       if (oracle.rows !== undefined) expect(parsed.fhir).toHaveLength(oracle.rows);
       if (oracle.dose !== undefined) expect(entries?.doseQuantity?.value).toBeCloseTo(oracle.dose, 8);
@@ -71,15 +72,37 @@ describe("manually specified clinical semantic oracles for the independent 200-c
       if (oracle.condition !== undefined) expect(Boolean(getDosageCondition(dosage))).toBe(oracle.condition);
 
       if (oracle.unresolved) {
-        expect(parsed.warnings.some(warning => warning.includes(oracle.unresolved))).toBe(true);
-        expect(() => nextDueDoses(parsed, {
-          from: options.from, orderedAt: options.orderedAt,
-          timeZone: options.timeZone, limit: 12
-        })).toThrow(/unresolved/i);
+        expect(dosage.text).toBeTruthy();
+        expect(Boolean(
+          dosage.doseAndRate?.length || dosage.timing || dosage.route || dosage.site || dosage.text
+        )).toBe(true);
+        if (oracle.unresolved === "calendar-start-after-end") {
+          expect(repeat?.boundsPeriod).toEqual({
+            start: "2026-11-08", end: "2026-11-01"
+          });
+          expect(() => nextDueDoses(parsed, {
+            from: options.from, orderedAt: options.orderedAt,
+            timeZone: options.timeZone, limit: 12
+          })).toThrow(/end must be after its start/i);
+        } else {
+          expect(nextDueDoses(parsed, {
+            from: options.from, orderedAt: options.orderedAt,
+            timeZone: options.timeZone, limit: 12
+          })).toBeInstanceOf(Array);
+        }
       }
 
       if (oracle.invalidSupply) {
-        expect(() => calculateTotalUnits({ ...options, dosage: parsed })).toThrow();
+        const result = calculateTotalUnits({ ...options, dosage: parsed });
+        expect(result.totalUnits).toBeGreaterThanOrEqual(0);
+        expect(result.quantityKind).toBe("maximum");
+        if (dosage.maxDosePerPeriod?.length) {
+          expect(dosage.maxDosePerPeriod[0].numerator?.value).toBe(0.5);
+          expect(result.explanation).toMatch(/retained but could not be applied/i);
+        } else {
+          expect(repeat?.periodMax).toBeGreaterThan(repeat?.period ?? 0);
+          expect(result.explanation).toMatch(/shortest executable period bound/i);
+        }
       }
       if (oracle.maxSupply !== undefined) {
         const supply = calculateTotalUnits({ ...options, dosage: parsed });

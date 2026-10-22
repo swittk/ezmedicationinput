@@ -56,7 +56,7 @@ const semanticConstraint = (
 export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] = [{
   id: 'hpsg.cx.coordination.disjunctive-dosage-choice',
   priority: 900,
-  operation: 'quarantine-disjunctive-dosages',
+  operation: 'preserve-disjunctive-dosages',
   constraints: [
     semanticConstraint('relation.alternative', f => f.relation.kind === 'alternative'),
     semanticConstraint('relation.disjunction', f => f.relation.connectorKind === 'disjunction'),
@@ -67,7 +67,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
 }, {
   id: 'hpsg.cx.coordination.ambiguous-shared-guard',
   priority: 925,
-  operation: 'quarantine-ambiguous-shared-guard',
+  operation: 'preserve-ambiguous-shared-guard',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
     semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),

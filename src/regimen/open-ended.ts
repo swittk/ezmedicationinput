@@ -7,7 +7,6 @@ import type { HpsgClauseContext } from '../hpsg/rule-context';
 import type { Token } from '../parser-state';
 import type { ParseOptions, ParseResult } from '../types';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from '../hpsg/lexical-classes';
-import { quarantineSchedule } from './admissibility';
 import { removeInstructionArtifactsOwnedByTemporalRanges } from './temporal-artifact-ownership';
 import { OPEN_ENDED_WORDS } from './temporal-relation-vocabulary';
 
@@ -104,9 +103,9 @@ export function openEndedBoundMarkerRule() {
 }
 
 /**
- * Open continuation is semantically compatible with event/start bounds only.
- * End bounds followed by an open-continuation marker are contradictory and
- * deliberately become non-executable instead of being guessed.
+ * A continuation marker reclassifies a bare calendar event as a start bound.
+ * Dates that already have an explicit relation remain represented as parsed,
+ * including unusual combinations that the clinician may want to correct.
  */
 export function normalizeOpenEndedSchedule(item: ParseResult, source: string, options?: ParseOptions): boolean {
   const clause = item.meta.canonical.clauses[0];
@@ -118,34 +117,56 @@ export function normalizeOpenEndedSchedule(item: ParseResult, source: string, op
   if (!/\b(?:onwards?|forwards?)\b|ต่อไป|เป็นต้น\s*ไป|(?:^|[^ก-๙])ไป/u.test(source)) return false;
   const markers = findOpenEndedMarkers(source, options);
   if (!markers.length) return false;
-  removeInstructionArtifactsOwnedByTemporalRanges(item, markers.map(marker => ({ start: marker.start, end: marker.end })));
-
-  const recurring = Boolean(
-    schedule.frequency !== undefined || schedule.period !== undefined || schedule.dayOfWeek?.length || schedule.timingCode
+  let changed = removeInstructionArtifactsOwnedByTemporalRanges(
+    item,
+    markers.map(marker => ({ start: marker.start, end: marker.end }))
   );
-  if (!recurring) {
-    quarantineSchedule(item, source, 'open-ended-bound-without-cadence');
-    return false;
-  }
 
   for (const marker of markers) {
     const span = marker.date;
     if (span.events.length !== 1 || span.unresolved) continue;
-    if (span.relation === 'end-inclusive' || span.relation === 'end-exclusive') {
-      quarantineSchedule(item, source, 'open-ended-marker-after-end-bound');
-      return false;
-    }
     if (span.relation !== 'event') continue;
 
     const iso = span.events[0].isoDate;
-    schedule.boundsStart = schedule.boundsStart ?? iso;
-    schedule.calendarEvents = (schedule.calendarEvents ?? []).filter(event => event.isoDate !== iso);
-    if (!schedule.calendarEvents.length) delete schedule.calendarEvents;
-    if (item.fhir.timing?.event) {
-      item.fhir.timing.event = item.fhir.timing.event.filter(event => event.slice(0, 10) !== iso);
-      if (!item.fhir.timing.event.length) delete item.fhir.timing.event;
+    // Do not erase a distinct explicit start or the event that conflicts with
+    // it. Both remain useful source facts in a malformed-but-editable SIG.
+    if (schedule.boundsStart !== undefined && schedule.boundsStart !== iso) continue;
+    schedule.boundsStart = iso;
+    const calendarEvents = schedule.calendarEvents ?? [];
+    let eventIndex = calendarEvents.findIndex(event =>
+      event.isoDate === iso && event.sourceText === span.events[0].sourceText
+    );
+    if (eventIndex < 0) {
+      const matchingDates = calendarEvents
+        .map((event, index) => event.isoDate === iso ? index : -1)
+        .filter(index => index >= 0);
+      if (matchingDates.length === 1) eventIndex = matchingDates[0];
     }
-    if (item.fhir.timing?._event) delete item.fhir.timing._event;
+    if (eventIndex >= 0) {
+      schedule.calendarEvents = calendarEvents.filter((_, index) => index !== eventIndex);
+      if (!schedule.calendarEvents.length) delete schedule.calendarEvents;
+    }
+    if (item.fhir.timing?.event) {
+      const eventMetadata = item.fhir.timing._event;
+      const fhirEvents = item.fhir.timing.event;
+      let fhirIndex = eventIndex < fhirEvents.length && fhirEvents[eventIndex]?.slice(0, 10) === iso
+        ? eventIndex
+        : -1;
+      if (fhirIndex < 0) {
+        const matchingDates = fhirEvents
+          .map((value, index) => value.slice(0, 10) === iso ? index : -1)
+          .filter(index => index >= 0);
+        if (matchingDates.length === 1) fhirIndex = matchingDates[0];
+      }
+      if (fhirIndex >= 0) {
+        item.fhir.timing.event = fhirEvents.filter((_, index) => index !== fhirIndex);
+        if (!item.fhir.timing.event.length) delete item.fhir.timing.event;
+        if (eventMetadata) {
+          item.fhir.timing._event = eventMetadata.filter((_, index) => index !== fhirIndex);
+          if (!item.fhir.timing._event.length) delete item.fhir.timing._event;
+        }
+      }
+    }
     item.fhir.timing = item.fhir.timing ?? {};
     item.fhir.timing.repeat = {
       ...(item.fhir.timing.repeat ?? {}),
@@ -154,6 +175,7 @@ export function normalizeOpenEndedSchedule(item: ParseResult, source: string, op
         start: schedule.boundsStart
       }
     };
+    changed = true;
   }
-  return true;
+  return changed;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits, formatSig, getUnresolvedDosage, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
+import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
 
@@ -19,10 +19,17 @@ describe("clinical SIG correctness and boundary promotion", () => {
       const opts = { from: "2026-10-22T08:00:00+07:00",
         orderedAt: "2026-10-22T08:00:00+07:00",
         timeZone: "Asia/Bangkok", limit: 3 };
+      const opportunities = nextDueDoses(dosage, opts);
       if (expected[index]) {
-        expect(() => nextDueDoses(dosage, opts)).toThrow(/evaluateCondition/);
+        expect(opportunities).toHaveLength(3);
+        expect(nextDueDoses(dosage, {
+          ...opts, evaluateCondition: () => false
+        })).toEqual([]);
+        expect(nextDueDoses(dosage, {
+          ...opts, evaluateCondition: () => true
+        })).toEqual(opportunities);
       } else {
-        expect(nextDueDoses(dosage, opts).length).toBeGreaterThan(0);
+        expect(opportunities.length).toBeGreaterThan(0);
       }
     }
   });
@@ -50,28 +57,27 @@ describe("clinical SIG correctness and boundary promotion", () => {
   });
 
   it.each([
-    "1 tab BID QID",
-    "1 tab once daily BID",
-    "1 tab q6h q8h",
-    "1 tab BID q5min",
-    "1 tab BID every 8 hours",
-    "Apply 1 drop OD BID"
-  ])("does not execute an order with an unconsumed competing cadence: %s", sig => {
+    ["1 tab BID QID", { frequency: 2, period: 1, periodUnit: "d" }, true],
+    ["1 tab once daily BID", { frequency: 1, period: 1, periodUnit: "d" }, true],
+    ["1 tab q6h q8h", { period: 6, periodUnit: "h" }, true],
+    ["1 tab BID q5min", { frequency: 2, period: 1, periodUnit: "d" }, true],
+    ["1 tab BID every 8 hours", { frequency: 2, period: 1, periodUnit: "d" }, true],
+    ["Apply 1 drop OD BID", { frequency: 2, period: 1, periodUnit: "d" }, false]
+  ] as const)("keeps the best supported cadence and source for editable conflicts: %s", (sig, cadence, conflict) => {
     const parsed = parseSig(sig);
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
-    expect(parsed.fhir.timing).toBeUndefined();
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("unresolved-timing-conflict")
-    );
-    expect(parsed.fhir.text).toBe(sig);
-    expect(lintSig(sig).issues.some(issue =>
-      issue.message.includes("unresolved-timing-conflict"))).toBe(true);
-    expect(() => nextDueDoses(parsed.fhir, {
+    expect(parsed.fhir.timing?.repeat).toMatchObject(cadence);
+    expect(parsed.input).toBe(sig);
+    expect(parsed.fhir.text).toBeTruthy();
+    expect(parsed.warnings.some(warning =>
+      warning.includes("unresolved-timing-conflict"))).toBe(conflict);
+    if (sig.includes("OD")) expect(parsed.fhir.site?.text).toBe("right eye");
+    expect(nextDueDoses(parsed.fhir, {
       from: "2026-10-21T08:00:00+07:00",
       orderedAt: "2026-10-21T08:00:00+07:00",
       timeZone: "Asia/Bangkok",
       limit: 5
-    })).toThrow(/unresolved/i);
+    })).toHaveLength(5);
   });
 
   it("uses genuine word boundaries for an explicit excluded ISO date", () => {
@@ -82,11 +88,14 @@ describe("clinical SIG correctness and boundary promotion", () => {
       .toBe(false);
   });
 
-  it("rejects an unknown exception rather than silently scheduling daily administration", () => {
+  it("keeps an unknown exception recoverable beside the daily suggestion", () => {
     const result = parseSig("1 tab daily except public holidays");
-    expect(result.fhir.timing).toBeUndefined();
+    expect(result.fhir.timing?.repeat).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d"
+    });
     expect(result.warnings).toContainEqual(expect.stringContaining("unresolved-calendar-exclusion"));
     expect(result.fhir.text).toContain("except public holidays");
+    expect(result.meta.leftoverText).toContain("except public holidays");
   });
 
   it("models only-if as a condition rather than a pseudo-PRN", () => {
@@ -209,17 +218,27 @@ describe("clinical SIG correctness and boundary promotion", () => {
       .toBe(unit);
   });
 
-  it.each(["5 mcg/kg/24h IV", "5 mg/kg/week IV", "5 mcg/kg/bolus IV"])(
-    "quarantines an unknown weight-rate suffix instead of inventing a per-dose bolus: %s", sig => {
+  it.each([
+    ["5 mcg/kg/24h IV", undefined, "unsupported-weight-based-rate"],
+    ["5 mg/kg/week IV", "mg/kg/wk", "patientWeightKg"],
+    ["5 mcg/kg/bolus IV", undefined, "unsupported-weight-based-rate"]
+  ] as const)(
+    "keeps a weight-rate suffix and recognized route recoverable: %s", (sig, rateUnit, warning) => {
       const parsed = parseSig(sig);
       expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
-      expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toBeUndefined();
+      if (rateUnit) {
+        expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
+          value: 5, unit: rateUnit, code: rateUnit
+        });
+      } else {
+        expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toBeUndefined();
+      }
       expect(parsed.warnings).toContainEqual(
-        expect.stringContaining("unsupported-weight-based-rate")
+        expect.stringContaining(warning)
       );
       expect(parsed.fhir.text).toBe(sig);
-      expect(parsed.fhir.modifierExtension?.[0].extension?.[0].valueString)
-        .toBe("unsupported-weight-based-rate");
+      expect(parsed.fhir.route?.text).toBe("intravenous");
+      if (!rateUnit) expect(parsed.meta.leftoverText).toContain(sig);
     }
   );
 
@@ -276,11 +295,11 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(formatSig(result.fhir)).toBe("10 mg/kg/day divided into 3 doses");
   });
 
-  it("refuses a daily weight-based total with no per-dose schedule", () => {
+  it("keeps an incomplete daily weight-based total available for correction", () => {
     const result = parseSig("10 mg/kg/day");
-    expect(result.fhir.doseAndRate).toBeUndefined();
-    expect(result.fhir.timing).toBeUndefined();
     expect(result.warnings).toContainEqual(expect.stringContaining("incomplete-weight-based-dose"));
+    expect(result.fhir.text).toBe("10 mg/kg/day");
+    expect(result.meta.leftoverText).toContain("10 mg/kg/day");
   });
 
   it("exports a continuous IV rate instead of pretending it is a 2-unit bolus", () => {
@@ -372,12 +391,17 @@ describe("clinical SIG correctness and boundary promotion", () => {
     ]);
   });
 
-  it("does not propagate a trailing cadence when that component has a cadence conflict", () => {
+  it("keeps both site doses and the best supported local cadence when one component conflicts", () => {
     const parsed = parseSig(
       "instill 1 drop in left eye and 2 drops in right eye twice daily q8h"
     );
     expect(parsed.items).toHaveLength(2);
-    expect(parsed.items.every(item => item.fhir.timing === undefined)).toBe(true);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["left eye", "right eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 2]);
+    expect(parsed.items[1].fhir.timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "d"
+    });
     expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-timing-conflict"));
   });
 
@@ -438,10 +462,14 @@ describe("clinical SIG correctness and boundary promotion", () => {
       orderedAt: "2026-10-19T08:00:00+07:00",
       timeZone: "Asia/Bangkok", limit: 1
     })).toEqual(["2026-11-02T08:00:00+07:00"]);
-    expect(() => nextDueDoses(r5, {
+    expect(nextDueDoses(r5, {
       from: "2026-10-19T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow("orderedAt");
+      timeZone: "Asia/Bangkok",
+      limit: 2
+    })).toEqual([
+      "2026-10-19T08:00:00+07:00",
+      "2026-10-19T10:00:00+07:00"
+    ]);
   });
 
   it("keeps the sync and async constrained parses equivalent", async () => {
@@ -497,14 +525,22 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(formatSig(parsed.fhir)).toBe(original);
   });
 
-  it("refuses to schedule and preserves the original text when an exclusion is unknown", () => {
+  it("schedules the understood cadence while retaining an unknown exclusion", () => {
     const parsed = parseSig("1 tab daily except public holidays");
-    expect(formatSig(parsed.fhir)).toBe(parsed.input);
-    expect(() => nextDueDoses(parsed, {
+    expect(parsed.fhir.text).toBe(parsed.input);
+    expect(formatSig(parsed.fhir)).toContain("1 tab");
+    expect(parsed.warnings).toContainEqual(
+      expect.stringContaining("unresolved-calendar-exclusion")
+    );
+    expect(nextDueDoses(parsed, {
       from: "2026-10-19T08:00:00+07:00",
       orderedAt: "2026-10-19T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow("unresolved");
+      timeZone: "Asia/Bangkok", limit: 3
+    })).toEqual([
+      "2026-10-19T09:00:00+07:00",
+      "2026-10-20T09:00:00+07:00",
+      "2026-10-21T09:00:00+07:00"
+    ]);
   });
 
   it("omits explicit dates from emitted administrations but retains ordinary days", () => {
@@ -527,7 +563,9 @@ describe("clinical SIG correctness and boundary promotion", () => {
       timeZone: "Asia/Bangkok", limit: 2
     };
     const bp = parseSig("take 1 tab BID only if BP >160, otherwise hold");
-    expect(() => nextDueDoses(bp.dosageDetails!, options)).toThrow("evaluateCondition");
+    expect(nextDueDoses(bp.dosageDetails!, options)).toEqual([
+      "2026-10-19T08:00:00+07:00", "2026-10-19T20:00:00+07:00"
+    ]);
     expect(nextDueDoses(bp.dosageDetails!, {
       ...options, evaluateCondition: expr => evaluateMedicationCondition(expr, { bp: 160 })
     })).toEqual([]);
@@ -559,15 +597,18 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(getDosageCondition(toFhirR5Dosages(result.dosageDetails!)[0])).toEqual(condition);
   });
 
-  it("round trips advanced R6-only metadata in R5 without falsely scheduling it", () => {
+  it("round trips and schedules retained R6 repeat-cycle metadata", () => {
     const course = parseSig("1 tab daily").dosageDetails!;
     const enriched = { ...course, repeatCycle: { value: 28, unit: "d" } };
     const flattened = toFhirR5Dosages(enriched);
     expect(toDosageDetails(flattened)).toEqual(enriched);
-    expect(() => nextDueDoses(flattened, {
+    expect(nextDueDoses(flattened, {
       from: "2026-10-19T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow("R6-aware scheduler");
+      timeZone: "Asia/Bangkok", limit: 2
+    })).toEqual([
+      "2026-10-19T09:00:00+07:00",
+      "2026-10-20T09:00:00+07:00"
+    ]);
   });
 });
 
@@ -636,22 +677,44 @@ describe("HPSG count cardinal semantics", () => {
   it.each([
     "1 tab q6h for 3-5 doses",
     "1 tab q6h total 3-5 doses"
-  ])("rejects a range where an exact total count is required: %s", source => {
+  ])("keeps the q6h suggestion and recoverable range instead of inventing an exact count: %s", source => {
     const parsed = parseSig(source);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
     expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
     expect(parsed.fhir.timing?.repeat?.countMax).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(parsed.fhir.text).toContain("3-5 doses");
     expect(parsed.meta.leftoverText).toContain("3-5 doses");
     expect(lintSig(source).issues).toContainEqual(expect.objectContaining({
       message: "Unrecognized text",
       text: expect.stringContaining("3-5 doses")
     }));
+    expect(nextDueDoses(parsed, {
+      from: "2026-10-22T08:00:00+07:00",
+      orderedAt: "2026-10-22T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 3
+    })).toEqual([
+      "2026-10-22T08:00:00+07:00",
+      "2026-10-22T14:00:00+07:00",
+      "2026-10-22T20:00:00+07:00"
+    ]);
   });
 
-  it("keeps an explicit maximum range unresolved instead of flattening it", () => {
+  it("keeps an explicit maximum range recoverable beside the q6h suggestion", () => {
     const parsed = parseSig("1 tab q6h max 3-5 doses");
-    expect(parsed.fhir.timing).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
     expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-critical-constraint"));
+    expect(parsed.fhir.text).toContain("max 3-5 doses");
+    expect(parsed.meta.leftoverText).toContain("max 3-5 doses");
+    expect(nextDueDoses(parsed, {
+      from: "2026-10-22T08:00:00+07:00",
+      orderedAt: "2026-10-22T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 3
+    })).toEqual([
+      "2026-10-22T08:00:00+07:00",
+      "2026-10-22T14:00:00+07:00",
+      "2026-10-22T20:00:00+07:00"
+    ]);
   });
 
   it("uses a spelled cadence-first count as frequency, not total administrations", () => {
@@ -682,23 +745,22 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
     const input = "take 1 tab once weekly on Monday and Thursday at 09:00";
     const result = parseSig(input);
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].fhir.timing).toBeUndefined();
-    // Keep the parsed exact weekly frequency and both alternative weekday
-    // anchors for clinical review, rather than losing them or returning zero.
-    expect(result.items[0].meta.canonical.clauses[0].provisionalSchedule)
+    expect(result.items[0].fhir.timing?.repeat)
       .toMatchObject({ frequency: 1, period: 1, periodUnit: "wk", dayOfWeek: ["mon", "thu"] });
     expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
-    expect(getUnresolvedDosage(result.items[0].fhir)).toBe("weekly-weekday-frequency-conflict");
-    expect(result.items[0].warnings.some(w => w.includes("weekly-weekday-frequency-conflict")))
-      .toBe(true);
-    expect(() => nextDueDoses(result.fhir, {
+    expect(result.items[0].fhir.text).toContain("Monday and Thursday");
+    expect(nextDueDoses(result.fhir, {
       from: "2026-10-22T08:00:00+07:00",
       orderedAt: "2026-10-22T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow(/unresolved/i);
+      timeZone: "Asia/Bangkok", limit: 3
+    })).toEqual([
+      "2026-10-22T09:00:00+07:00",
+      "2026-10-26T09:00:00+07:00",
+      "2026-10-29T09:00:00+07:00"
+    ]);
   });
 
-  it("rejects a mismatched external weekly frequency without guessing which day to omit", () => {
+  it("uses exact external weekday anchors without deleting the stated frequency", () => {
     const dosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: {
@@ -708,13 +770,20 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
       } }
     };
     const from = "2026-10-22T08:00:00+07:00";
-    expect(() => nextDueDoses(dosage, {
-      from, orderedAt: from, timeZone: "Asia/Bangkok"
-    })).toThrow(/frequency conflicts with multiple weekday anchors/);
-    expect(() => calculateTotalUnits({
+    expect(dosage.timing.repeat).toMatchObject({
+      frequency: 1, dayOfWeek: ["mon", "thu"], timeOfDay: ["09:00"]
+    });
+    expect(nextDueDoses(dosage, {
+      from, orderedAt: from, timeZone: "Asia/Bangkok", limit: 3
+    })).toEqual([
+      "2026-10-22T09:00:00+07:00",
+      "2026-10-26T09:00:00+07:00",
+      "2026-10-29T09:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({
       dosage, from, orderedAt: from, timeZone: "Asia/Bangkok",
       durationValue: 14, durationUnit: "d"
-    })).toThrow(/frequency conflicts with multiple weekday anchors/);
+    })).toMatchObject({ totalUnits: 4, unit: "tab" });
   });
 
   it("retains compatible explicit twice-weekly meaning", () => {
@@ -722,6 +791,6 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
     expect(p.items[0].fhir.timing?.repeat).toMatchObject({
       frequency: 2, period: 1, periodUnit: "wk", dayOfWeek: ["mon", "thu"]
     });
-    expect(getUnresolvedDosage(p.items[0].fhir)).toBeUndefined();
+    expect(p.items[0].fhir.text).toContain("Monday and Thursday");
   });
 });

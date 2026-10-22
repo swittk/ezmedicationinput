@@ -132,26 +132,38 @@ describe("HPSG clinical quantity grammar", () => {
     });
   });
 
-  it.each(["5 mcg/kg/24h IV", "5 mg/kg/week IV", "5 mcg/kg/bolus IV"])(
-    "emits typed quarantine evidence for unsupported suffixes: %s",
-    source => {
+  it("keeps unsupported weight-rate suffixes visible without erasing the typed quantity", () => {
+    for (const source of ["5 mcg/kg/24h IV", "5 mcg/kg/bolus IV"]) {
       const parsed = parseSig(source);
       expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
         status: "unsupported",
-        quarantineReason: "unsupported-weight-based-rate"
+        quarantineReason: "unsupported-weight-based-rate",
+        requiresPatientWeight: true
       });
-      expect(parsed.fhir.doseAndRate).toBeUndefined();
+      expect(parsed.fhir.text).toBe(source);
       expect(parsed.warnings).toContainEqual(expect.stringContaining("unsupported-weight-based-rate"));
     }
-  );
+  });
 
-  it("quarantines an undivided daily total rather than projecting a bolus", () => {
+  it("represents a supported weekly weight-based rate directly", () => {
+    const parsed = parseSig("5 mg/kg/week IV");
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      status: "resolved", requiresPatientWeight: true
+    });
+    expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 5, code: "mg/kg/wk"
+    });
+  });
+
+  it("preserves an undivided daily total as a rate quantity instead of pretending it is a bolus", () => {
     const parsed = parseSig("10 mg/kg/day");
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
       status: "incomplete",
       dailyTotal: true,
       quarantineReason: "incomplete-weight-based-dose"
     });
-    expect(parsed.fhir.doseAndRate).toBeUndefined();
+    expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 10, code: "mg/kg/d"
+    });
   });
 });

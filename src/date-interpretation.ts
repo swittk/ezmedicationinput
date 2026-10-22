@@ -377,13 +377,22 @@ function resolveDatePart(
   };
   if (source.day === undefined || source.month === undefined) return undefined;
 
-  // ISO dates are unambiguous Gregorian YMD even in Thai or MDY inputs.
+  // YYYY-MM-DD is structurally YMD. In Thai clinical text an explicit year
+  // in the Buddhist range is still a Buddhist year; interpreting 2569 as
+  // Gregorian would be far less plausible than preserving the clinician's
+  // calendar convention.
   if (part.isoYearFirst) {
-    // Unlike two-digit inferred years, explicit Gregorian years are not
-    // narrowed to the reference-date plausibility window. Use the same
-    // supported explicit-year range as the built-in Gregorian resolver.
-    if (source.year === undefined ||
-        source.year < GREGORIAN_YEAR_MIN || source.year > GREGORIAN_YEAR_MAX ||
+    if (source.year === undefined) return undefined;
+    if (locale.toLowerCase().startsWith("th") && source.year >= 2400 && source.year <= 2999) {
+      const gregorianYear = source.year - 543;
+      if (!validGregorianDate(gregorianYear, source.month, source.day)) return undefined;
+      return {
+        isoDate: isoDate(gregorianYear, source.month, source.day),
+        calendar: "buddhist", calendarYear: source.year,
+        month: source.month, day: source.day, sourceText: part.sourceText
+      };
+    }
+    if (source.year < GREGORIAN_YEAR_MIN || source.year > GREGORIAN_YEAR_MAX ||
         !validGregorianDate(source.year, source.month, source.day)) return undefined;
     return {
       isoDate: isoDate(source.year, source.month, source.day),

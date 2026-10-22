@@ -4,7 +4,7 @@ import {
   ParseResult,
   TextRange
 } from "./types";
-import { quarantineSchedule } from "./regimen/admissibility";
+import { preserveSuggestionWarning } from "./regimen/admissibility";
 import { removeInstructionArtifactsOwnedByTemporalRanges } from "./regimen/temporal-artifact-ownership";
 import { findMedicationDateListSpans, parseMedicationDateListAt } from "./date-interpretation";
 import { setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays } from "./dosage-course";
@@ -31,19 +31,19 @@ const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
 
 // ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
 const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
-const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|up\s+to|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
+const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
 /**
- * A cheap prerequisite for post-grammar guardrails that still own calendar,
+ * A cheap prerequisite for post-grammar handling that still owns calendar,
  * condition and maximum-dose constraints. Typed HPSG clinical quantities
  * bypass this source-text gate; unresolved weight/infusion text reaches it
- * only for conservative quarantine.
+ * so the suggestion can retain a warning.
  */
-// If a parsed dose still contains an unconsumed cadence, its timing is not
-// safe to execute: selecting BID while leaving QID/q8h in text is not a
-// successfully parsed order. Only inspect this when leftovers already exist,
-// keeping ordinary complete SIGs on the original fast path.
+// If a parsed dose still contains an unconsumed cadence, surface the conflict
+// for clinician review without discarding the cadence the grammar recognized.
+// Only inspect this when leftovers already exist, keeping ordinary complete
+// SIGs on the original fast path.
 const UNRESOLVED_TIMING_SIGNAL =
   /\b(?:QD|QOD|BID|TID|QID|Q\s*\d+(?:\.\d+)?\s*(?:H|HR|HRS?|MIN(?:UTE)?S?|D(?:AYS?)?|WK|WEEKS?|MO|MONTHS?)|(?:once|twice|three|four)\s+(?:times?\s+)?daily|every\s+\d+(?:\.\d+)?\s*(?:h|hr|hours?|minutes?|days?|weeks?)|\d+(?:\.\d+)?\s*(?:hours?|minutes?|days?|weeks?|hrs?|hr))\b/iu;
 
@@ -181,26 +181,21 @@ function keepOriginalText(item: ParseResult, source: string): void {
   item.fhir.text = source;
 }
 
-function preventIncorrectDose(item: ParseResult, source: string, reason: string): void {
-  quarantineSchedule(item, source, reason);
-  delete item.fhir.doseAndRate;
-  for (const clause of item.meta.canonical.clauses) delete clause.dose;
-}
-
 function matchedRange(source: string, match: RegExpExecArray, offset: number): TextRange {
   return span(source, offset, match.index, match.index + match[0].length);
 }
 
 /**
- * Conservative post-grammar handling of safety-critical medication constraints.
- * A failed interpretation may remove an executable schedule but never invent one.
+ * Best-effort post-grammar handling of clinical medication constraints.
+ * Incomplete fragments retain the grammar's editable suggestion and raw source,
+ * with warnings for clinician review.
  * All transformations are independent of drug names and clinical specialties.
  */
 export function applyClinicalConstraints(item: ParseResult, source: string, options?: ParseOptions): ConstraintApplication {
-  if (item.fhir.timing && item.meta.leftoverText &&
-      UNRESOLVED_TIMING_SIGNAL.test(item.meta.leftoverText)) {
-    quarantineSchedule(item, source, "unresolved-timing-conflict");
-    return { ownedRanges: [] };
+  const unresolvedText = item.meta.leftoverText;
+  if (item.fhir.timing && unresolvedText &&
+      UNRESOLVED_TIMING_SIGNAL.test(unresolvedText)) {
+    preserveSuggestionWarning(item, source, "unresolved-timing-conflict");
   }
   let clinicalQuantity: HpsgClinicalQuantityFeature | undefined;
   for (const clause of item.meta.canonical.clauses) {
@@ -209,24 +204,13 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     break;
   }
   if (!clinicalQuantity && !CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
-  // Explicit temporal dependencies that lack a resolved calendar anchor or
-  // a repeated on/off cycle must not silently execute from the order date.
-  // These are additive safety vetoes, not replacement interpretations.
+  // Keep explicit but unresolved temporal dependencies visible alongside the
+  // best supported schedule instead of turning them into parser-level vetoes.
   if (/\b(?:starting|beginning)(?:\s+on)?\s+(?:tomorrow|(?:the\s+)?date\s+of\s+discharge)\b/iu.test(source)) {
-    quarantineSchedule(item, source, "unresolved-relative-course-start");
-    return { ownedRanges: [] };
+    preserveSuggestionWarning(item, source, "unresolved-relative-course-start");
   }
-  if (/\b(?:first|second|third|fourth|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+of\s+(?:each|every)\s+month\b/iu.test(source)) {
-    quarantineSchedule(item, source, "unresolved-monthly-weekday-ordinal");
-    return { ownedRanges: [] };
-  }
-  if (/\bstop\s+for\s+\d+(?:\.\d+)?\s*(?:days?|weeks?|months?)\s+repeat\b/iu.test(source)) {
-    quarantineSchedule(item, source, "unresolved-recurring-on-off-cycle");
-    return { ownedRanges: [] };
-  }
-  // A second unconditional stop duration must not override the infusion
-  // duration without clinician clarification. This is a safety veto, not a
-  // second semantic parser or a rewrite of the HPSG quantity.
+  // A second unconditional stop duration remains visible as a warning without
+  // overriding or deleting the infusion quantity recognized by HPSG.
   if (clinicalQuantity?.administrationDuration) {
     const stop = /\band\s+stop\s+after\s+(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?|h)\b/iu.exec(source);
     if (stop) {
@@ -236,28 +220,25 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         (clinicalQuantity.administrationDuration.unit === FhirPeriodUnit.Hour ? 60 : 1);
       if (Number.isFinite(stopMinutes) && stopMinutes > 0 &&
           Math.abs(stopMinutes - durationMinutes) > 1e-9) {
-        quarantineSchedule(item, source, "conflicting-infusion-stop-duration");
-        return { ownedRanges: [] };
+        preserveSuggestionWarning(item, source, "conflicting-infusion-stop-duration");
       }
     }
   }
   // A recognized carrier-volume rate must not silently discard a separate
   // active-drug amount. For instance "1 g in 100 mL IV over 30 minutes" is
-  // clinically different from 100 mL of an unspecified infusion. Keep the
-  // structured interpretation but refuse execution until the missing
-  // composition has been modeled or confirmed.
+  // clinically different from 100 mL of an unspecified infusion. Keep both
+  // the structured interpretation and a warning about the unresolved amount.
   if (clinicalQuantity?.representation === "dose-with-rate-ratio" &&
-      item.meta.leftoverText &&
-      /(?:^|\s)\d+(?:\.\d+)?\s*(?:mcg|ug|µg|μg|mg|g|iu|units?)\b/iu.test(item.meta.leftoverText)) {
-    quarantineSchedule(item, source, "unresolved-infusion-instructions");
-    return { ownedRanges: [] };
+      unresolvedText &&
+      /(?:^|\s)\d+(?:\.\d+)?\s*(?:mcg|ug|µg|μg|mg|g|iu|units?)\b/iu.test(unresolvedText)) {
+    preserveSuggestionWarning(item, source, "unresolved-infusion-instructions");
   }
 
   if (clinicalQuantity) {
     // HPSG quantity meaning is already lowered by canonicalToFhir. This
-    // layer only preserves source text or quarantines unsafe semantics.
+    // layer preserves it and adds a warning when part of it is unresolved.
     if (clinicalQuantity.status !== "resolved")
-      preventIncorrectDose(item, source,
+      preserveSuggestionWarning(item, source,
         clinicalQuantity.quarantineReason ?? "unsupported-weight-based-dose");
     else
       keepOriginalText(item, source);
@@ -275,7 +256,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         const excluded = new Set(exclusion.excluded);
         const allowed = (exclusion.included.length ? exclusion.included : [...DAYS]).filter(day => !excluded.has(day));
         if (!allowed.length) {
-          quarantineSchedule(item, source, "weekdays-all-excluded");
+          preserveSuggestionWarning(item, source, "weekdays-all-excluded");
         } else {
           repeat.dayOfWeek = allowed;
           setDosageExcludedWeekdays(item.fhir, exclusion.excluded);
@@ -310,7 +291,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
       own(span(source, offset, exclusion.start, exclusion.end));
       keepOriginalText(item, source);
     } else {
-      quarantineSchedule(item, source, "unresolved-calendar-exclusion");
+      preserveSuggestionWarning(item, source, "unresolved-calendar-exclusion");
     }
   }
 
@@ -342,17 +323,17 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     keepOriginalText(item, source);
   }
 
-  // Guardrail only: a weight expression without typed HPSG evidence is never
-  // allowed to survive as an ordinary scalar dose.
+  // Retain a scalar suggestion when HPSG has no typed weight evidence, but make
+  // the unresolved weight expression explicit for clinician review.
   if (!clinicalQuantity && /\b(?:mg|mcg|ug|g|iu|units?)\s*\/\s*kg\b/iu.test(source)) {
-    preventIncorrectDose(item, source, "unsupported-weight-based-dose");
+    preserveSuggestionWarning(item, source, "unsupported-weight-based-dose");
   }
 
   if (!clinicalQuantity &&
     /\b(?:infus(?:e|ion)|drip)\b/iu.test(source) &&
     /\b(?:\w+\s*\/\s*(?:h|hr|min)|over\s+\d)/iu.test(source) &&
-    (item.meta.leftoverText?.trim() ?? "").length > 0) {
-    preventIncorrectDose(item, source, "unresolved-infusion-instructions");
+    (unresolvedText?.trim() ?? "").length > 0) {
+    preserveSuggestionWarning(item, source, "unresolved-infusion-instructions");
   }
 
   const maximum = MAXIMUM.exec(source);
@@ -374,10 +355,10 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
         prescribedDose.unit === unit && (item.fhir.timing?.repeat?.period ?? 1) === 1 &&
         (item.fhir.timing?.repeat?.periodUnit ?? "d") === "d" && prescribedDose.value * freq > amount &&
         !item.fhir.asNeeded) {
-        quarantineSchedule(item, source, "daily-dose-exceeds-explicit-maximum");
+        preserveSuggestionWarning(item, source, "daily-dose-exceeds-explicit-maximum");
       }
     } else {
-      quarantineSchedule(item, source, "unsupported-dose-maximum");
+      preserveSuggestionWarning(item, source, "unsupported-dose-maximum");
     }
   }
 
@@ -385,7 +366,10 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   CRITICAL_CUE.lastIndex = 0;
   let cue: RegExpExecArray | null;
   while ((cue = CRITICAL_CUE.exec(source)) !== null) {
-    if (item.warnings.some(warning => warning.startsWith("Unresolved schedule"))) break;
+    if (item.warnings.some(warning =>
+      warning.startsWith("Unresolved interpretation (") ||
+      warning.startsWith("Unresolved schedule (")
+    )) break;
     if (ownedText(cue.index, cue[0].length)) continue;
     const knownSafetyAdvice = /^(?:do\s+not\s+exceed|max(?:imum)?|no\s+more\s+than|ไม่เกิน)$/iu.test(cue[0]) && Boolean(max);
     if (knownSafetyAdvice) continue;
@@ -408,11 +392,11 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
       )
     );
     if (recognizedCountCap) continue;
-    quarantineSchedule(item, source, "unresolved-critical-constraint");
+    preserveSuggestionWarning(item, source, "unresolved-critical-constraint");
     break;
   }
   const mergedRanges = mergeOwnedRanges(ownedRanges, source, offset);
-  if (mergedRanges.length && !item.warnings.some(warning => warning.startsWith("Unresolved schedule"))) {
+  if (mergedRanges.length) {
     markOwned(item, mergedRanges);
     // The HPSG graph must no longer claim recognized safety/quantity terms are opaque.
     removeInstructionArtifactsOwnedByTemporalRanges(item, mergedRanges.map(range => ({

@@ -28,20 +28,28 @@ function dailyDose(overrides: Partial<FhirDosage> = {}): FhirDosage {
 }
 
 describe("schedule/supply audit regressions", () => {
-  it("enforces administration and period maxima against the aggregate bilateral dose", () => {
+  it("schedules the bilateral suggestion while supply enforces aggregate maxima", () => {
     const bilateral = dailyDose({
       site: { text: "both eyes" },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
       timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } }
     });
-    expect(() => nextDueDoses({
+    expect(nextDueDoses({
       ...bilateral,
       maxDosePerAdministration: { value: 1, unit: "drop" }
-    }, due)).toThrow(/per-administration maximum/);
-    expect(() => calculateTotalUnits({
+    }, { ...due, limit: 2 })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T20:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
       ...supply,
       dosage: { ...bilateral, maxDosePerAdministration: { value: 1, unit: "drop" } }
-    })).toThrow(/maximum/);
+    })).toMatchObject({
+      totalUnits: 8,
+      unit: "drop",
+      quantityKind: "maximum",
+      explanation: expect.stringContaining("unevaluable maximum-dose constraint")
+    });
 
     const periodCapped = {
       ...bilateral,
@@ -60,7 +68,7 @@ describe("schedule/supply audit regressions", () => {
       timing: { repeat: { count: 3, frequency: 1, period: 1, periodUnit: "d" } }
     });
     const later = { ...due, from: "2024-01-05T00:00:00Z", limit: 5 };
-    expect(() => nextDueDoses(prn, later)).toThrow(/priorCount or priorDoseTimes/);
+    expect(nextDueDoses(prn, later)).toHaveLength(3);
     expect(nextDueDoses(prn, { ...later, priorCount: 0 })).toHaveLength(3);
     expect(nextDueDoses(prn, { ...later, priorCount: 2 })).toHaveLength(1);
     expect(nextDueDoses(prn, {
@@ -77,7 +85,7 @@ describe("schedule/supply audit regressions", () => {
     expect(calculateTotalUnits({ ...laterSupply, priorCount: 2 }).totalUnits).toBe(1);
   });
 
-  it("requires timestamped PRN history only when a periodic cap intersects elapsed treatment", () => {
+  it("returns maximum PRN opportunities and applies supplied periodic-cap history", () => {
     const parsedOccurrenceCapped = parseSig(
       "take 1 tab q4h prn pain max 3 doses daily"
     );
@@ -95,11 +103,17 @@ describe("schedule/supply audit regressions", () => {
       occurrenceCapped,
       parsedOccurrenceCapped.fhirNext
     ]) {
-      expect(() => nextDueDoses(representation, midday))
-        .toThrow(/timestamped priorDoseTimes/);
+      expect(nextDueDoses(representation, midday)).toEqual([
+        "2024-01-01T12:00:00+00:00",
+        "2024-01-01T16:00:00+00:00",
+        "2024-01-01T20:00:00+00:00"
+      ]);
     }
-    expect(() => nextDueDoses(occurrenceCapped, { ...midday, priorCount: 0 }))
-      .toThrow(/timestamped priorDoseTimes/);
+    expect(nextDueDoses(occurrenceCapped, { ...midday, priorCount: 0 })).toEqual([
+      "2024-01-01T12:00:00+00:00",
+      "2024-01-01T16:00:00+00:00",
+      "2024-01-01T20:00:00+00:00"
+    ]);
     expect(nextDueDoses(occurrenceCapped, {
       ...midday,
       priorDoseTimes: []
@@ -132,12 +146,19 @@ describe("schedule/supply audit regressions", () => {
       "2024-01-01T04:00:00+00:00",
       "2024-01-01T08:00:00+00:00"
     ]);
-    expect(() => nextDueDoses(rollingQuantityCapped, midday))
-      .toThrow(/timestamped priorDoseTimes/);
-    expect(() => nextDueDoses(rollingQuantityCapped, {
+    expect(nextDueDoses(rollingQuantityCapped, midday)).toEqual([
+      "2024-01-01T12:00:00+00:00",
+      "2024-01-01T16:00:00+00:00",
+      "2024-01-01T20:00:00+00:00"
+    ]);
+    expect(nextDueDoses(rollingQuantityCapped, {
       ...firstWindow,
       from: "2024-01-02T00:00:00Z"
-    })).toThrow(/timestamped priorDoseTimes/);
+    })).toEqual([
+      "2024-01-02T00:00:00+00:00",
+      "2024-01-02T04:00:00+00:00",
+      "2024-01-02T08:00:00+00:00"
+    ]);
 
     const middaySupply = {
       ...supply,
@@ -151,8 +172,11 @@ describe("schedule/supply audit regressions", () => {
       occurrenceCapped,
       parsedOccurrenceCapped.fhirNext
     ]) {
-      expect(() => calculateTotalUnits({ ...middaySupply, dosage }))
-        .toThrow(/timestamped priorDoseTimes/);
+      expect(calculateTotalUnits({ ...middaySupply, dosage })).toMatchObject({
+        totalUnits: 3,
+        quantityKind: "maximum",
+        explanation: expect.stringMatching(/PRN doses/i)
+      });
     }
     expect(calculateTotalUnits({ ...middaySupply, priorDoseTimes: [] }).totalUnits)
       .toBe(3);
@@ -195,14 +219,18 @@ describe("schedule/supply audit regressions", () => {
     }
   });
 
-  it("uses the upper frequency bound only for explicitly labelled maximum supply", () => {
+  it("uses the concrete cadence for scheduling and the upper range for maximum supply", () => {
     const ranged = dailyDose({
       timing: {
         code: { coding: [{ code: "QD" }] },
         repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: "d" }
       }
     });
-    expect(() => nextDueDoses(ranged, due)).toThrow(/frequency range/);
+    expect(nextDueDoses(ranged, { ...due, limit: 3 })).toEqual([
+      "2024-01-01T09:00:00+00:00",
+      "2024-01-02T09:00:00+00:00",
+      "2024-01-03T09:00:00+00:00"
+    ]);
     expect(calculateTotalUnits({ ...supply, dosage: ranged })).toMatchObject({
       totalUnits: 4,
       unit: "tab",
@@ -211,7 +239,7 @@ describe("schedule/supply audit regressions", () => {
     });
   });
 
-  it("does not let one explicit clock collapse a daily maximum frequency", () => {
+  it("keeps one explicit clock while using the daily upper bound for maximum supply", () => {
     const ranged = parseSig("1 tab PO once or twice daily at 08:00");
     expect(ranged.fhir[0].timing?.repeat).toMatchObject({
       frequency: 1,
@@ -220,7 +248,11 @@ describe("schedule/supply audit regressions", () => {
       periodUnit: "d",
       timeOfDay: ["08:00:00"]
     });
-    expect(() => nextDueDoses(ranged, due)).toThrow(/frequency range/);
+    expect(nextDueDoses(ranged, { ...due, limit: 3 })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-02T08:00:00+00:00",
+      "2024-01-03T08:00:00+00:00"
+    ]);
     expect(calculateTotalUnits({ ...supply, dosage: ranged })).toMatchObject({
       totalUnits: 4,
       unit: "tab",
@@ -229,7 +261,7 @@ describe("schedule/supply audit regressions", () => {
     });
   });
 
-  it("rejects monthly weekdays whose ordinal occurrence is unspecified", () => {
+  it("anchors an unspecified monthly weekday ordinal without losing the weekday", () => {
     const imported = dailyDose({
       timing: { repeat: {
         frequency: 1,
@@ -245,14 +277,18 @@ describe("schedule/supply audit regressions", () => {
       imported
     ];
     for (const dosage of cases) {
-      expect(() => nextDueDoses(dosage, due))
-        .toThrow(/monthly.*weekday.*ordinal.*exact date/i);
-      expect(() => calculateTotalUnits({ ...supply, dosage }))
-        .toThrow(/monthly.*weekday.*ordinal.*exact date/i);
+      expect(nextDueDoses(dosage, { ...due, limit: 3 })).toEqual([
+        "2024-01-01T09:00:00+00:00",
+        "2024-02-05T09:00:00+00:00",
+        "2024-03-04T09:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...supply, dosage })).toMatchObject({
+        totalUnits: 1, unit: "tab"
+      });
     }
   });
 
-  it("rejects scalar priorCount allocation across concurrent capped components", () => {
+  it("applies scalar priorCount independently to concurrent editable components", () => {
     const capped = (site: string): FhirDosage => dailyDose({
       sequence: 1,
       site: { text: site },
@@ -267,23 +303,31 @@ describe("schedule/supply audit regressions", () => {
       priorCount: 2
     };
     for (const dosage of [concurrent, course]) {
-      expect(() => nextDueDoses(dosage, later))
-        .toThrow(/priorCount.*ambiguous.*concurrent/i);
-      expect(() => calculateTotalUnits({ ...supply, ...later, dosage }))
-        .toThrow(/priorCount.*ambiguous.*concurrent/i);
+      expect(nextDueDoses(dosage, later)).toEqual([
+        "2024-01-05T09:00:00+00:00",
+        "2024-01-05T09:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...supply, ...later, dosage })).toMatchObject({
+        totalUnits: 2, unit: "tab", quantityKind: "maximum"
+      });
     }
   });
 
-  it("rejects an unanchored twice-weekly frequency instead of scheduling weekly", () => {
+  it("returns an anchored best-effort twice-weekly series", () => {
     const ambiguous = dailyDose({
       timing: { repeat: { frequency: 2, period: 1, periodUnit: "wk" } }
     });
-    expect(() => nextDueDoses(ambiguous, due)).toThrow(/non-daily period/);
-    expect(() => calculateTotalUnits({ ...supply, dosage: ambiguous }))
-      .toThrow(/non-daily period/);
+    expect(nextDueDoses(ambiguous, { ...due, limit: 4 })).toEqual([
+      "2024-01-01T00:00:00+00:00",
+      "2024-01-04T00:00:00+00:00",
+      "2024-01-08T00:00:00+00:00",
+      "2024-01-11T00:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({ ...supply, dosage: ambiguous }))
+      .toMatchObject({ totalUnits: 1, unit: "tab" });
   });
 
-  it("rejects non-degenerate duration ranges but compares each endpoint in its own unit", () => {
+  it("uses the upper duration range as the best-effort course horizon", () => {
     const ambiguous = dailyDose({
       timing: { repeat: {
         frequency: 1, period: 1, periodUnit: "d",
@@ -293,13 +337,13 @@ describe("schedule/supply audit regressions", () => {
         }
       } }
     });
-    expect(() => nextDueDoses(ambiguous, due)).toThrow(/not an exact course duration/);
-    expect(() => nextDueDoses([
+    expect(nextDueDoses(ambiguous, due)).toHaveLength(10);
+    expect(nextDueDoses([
       { ...ambiguous, sequence: 1 },
       { ...dailyDose(), sequence: 2 }
-    ], due)).toThrow(/not an exact course duration/);
-    expect(() => calculateTotalUnits({ ...supply, dosage: ambiguous, durationValue: 30 }))
-      .toThrow(/not an exact course duration/);
+    ], due)).toHaveLength(10);
+    expect(calculateTotalUnits({ ...supply, dosage: ambiguous, durationValue: 30 }))
+      .toMatchObject({ totalUnits: 14, unit: "tab" });
 
     const equivalent = dailyDose({
       timing: { repeat: {

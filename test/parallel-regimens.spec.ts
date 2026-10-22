@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
-  toDosageDetails, toFhirR5Dosages, fromFhir
+  toDosageDetails, toFhirR5Dosages, fromFhir, getDosageCondition
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
 import { projectParallelRegimen } from "../src/regimen/parallel-course";
@@ -393,38 +393,90 @@ describe("concurrent independent treatment sequences", () => {
       .toEqual([]);
   });
 
-  it("refuses ambiguous calendar order or an unbounded first phase instead of fabricating a timetable", () => {
-    for (const input of [
-      "1 drop OD q2h x4wk then QID; 1 drop OS QID x1mo then BID",
-      "1 drop OD q2h then QID; 1 drop OS QID x1mo then BID"
-    ]) {
-      const parsed = parseSig(input);
-      expect(parsed.warnings.some(message => message.includes("Unresolved schedule"))).toBe(true);
-      expect(() => nextDueDoses(parsed, options(orderedAt))).toThrow("unresolved");
-      expect(lintSig(input).issues.some(issue => issue.message.includes("Unresolved schedule"))).toBe(true);
-    }
+  it("keeps both finite tracks when their month and week transitions do not coincide", () => {
+    const input = "1 drop OD q2h x4wk then QID; 1 drop OS QID x1mo then BID";
+    const parsed = parseSig(input);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(["right eye", "right eye", "left eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1, 1, 1]);
+    expect(parsed.items.map(item => item.fhir.timing?.code?.text))
+      .toEqual(["Q2H", "QID", "QID", "BID"]);
+    expect(parsed.items[0].fhir.timing?.repeat?.boundsDuration)
+      .toMatchObject({ value: 4, code: "wk" });
+    expect(parsed.items[2].fhir.timing?.repeat?.boundsDuration)
+      .toMatchObject({ value: 1, code: "mo" });
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 2]);
+    expect(lintSig(input).issues).toEqual([]);
   });
 
-  it("never executes a partial course with an unparsed conditional transition", () => {
+  it("preserves an unbounded transition for editing and schedules only the known prefix", () => {
+    const input = "1 drop OD q2h then QID; 1 drop OS QID x1mo then BID";
+    const parsed = parseSig(input);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(["right eye", "right eye", "left eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.timing?.code?.text))
+      .toEqual(["Q2H", "QID", "QID", "BID"]);
+    expect(lintSig(input).issues).toEqual([]);
+    expect(nextDueDoses(parsed, options(orderedAt))).toEqual([
+      "2026-10-19T08:00:00+07:00",
+      "2026-10-19T08:00:00+07:00",
+      "2026-10-19T10:00:00+07:00",
+      "2026-10-19T12:00:00+07:00",
+      "2026-10-19T12:00:00+07:00",
+      "2026-10-19T14:00:00+07:00",
+      "2026-10-19T16:00:00+07:00",
+      "2026-10-19T16:00:00+07:00"
+    ]);
+  });
+
+  it("keeps the parsed conditional phase editable when a later transition is incomplete", () => {
     const input =
       "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid only if BP >160";
     const parsed = parseSig(input);
-    expect(parsed.warnings).toContainEqual(expect.stringContaining(
-      "parallel-regimen-unparsed-clause"
-    ));
-    expect(parsed.meta.leftoverText).toContain("then");
-    expect(() => nextDueDoses(parsed, options("2026-11-19T08:00:00+07:00")))
-      .toThrow("unresolved");
+    expect(parsed.count).toBe(3);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(["right eye", "right eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1, 1]);
+    expect(parsed.items.map(item => item.fhir.timing?.code?.text))
+      .toEqual(["Q2H", "QID", "QID"]);
+    expect(getDosageCondition(parsed.items[2].fhir)).toMatchObject({
+      kind: "measurement", name: "bp", operation: "gt", value: 160
+    });
+    expect(parsed.items[2].fhir.text).toContain("then bid only if BP >160");
+    expect(parsed.warnings).toContainEqual(
+      expect.stringContaining("unresolved-timing-conflict")
+    );
+    expect(parsed.meta.leftoverText).toContain("bid only");
+    const leftComponent = parsed.fhirNext.step
+      .flatMap(step => step.component)
+      .find(component => component.site?.concept?.text === "left eye");
+    expect(leftComponent?.condition?.[0]).toMatchObject({
+      operation: "gt", valueQuantity: { value: 160 }
+    });
     expect(lintSig(input).issues).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining("parallel-regimen-unparsed-clause")
+      message: "Unrecognized text",
+      text: expect.stringContaining("bid only")
     }));
   });
 
-  it("refuses to shift an unanchored relative regimen to the time of a later query", () => {
+  it("uses the query start as a provisional anchor when the original treatment start is unavailable", () => {
     const parsed = parseSig(twoSites);
-    expect(() => nextDueDoses(parsed, {
-      from: "2026-11-19T08:00:00+07:00", timeZone: "Asia/Bangkok"
-    })).toThrow("orderedAt");
+    expect(nextDueDoses(parsed, {
+      from: "2026-11-19T08:00:00+07:00", timeZone: "Asia/Bangkok", limit: 6
+    })).toEqual([
+      "2026-11-19T08:00:00+07:00",
+      "2026-11-19T08:00:00+07:00",
+      "2026-11-19T10:00:00+07:00",
+      "2026-11-19T12:00:00+07:00",
+      "2026-11-19T12:00:00+07:00",
+      "2026-11-19T14:00:00+07:00"
+    ]);
   });
 
   it("does not split procedural instructions or ordinary concurrent dosing into invented steps", () => {

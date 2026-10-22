@@ -86,6 +86,134 @@ function timingCodeForDailyFrequency(value: number): string | undefined {
   }
 }
 
+const MONTHLY_WEEKDAY_ORDINALS: Readonly<Record<string, 1 | 2 | 3 | 4 | -1>> = {
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  last: -1
+};
+
+const UTC_DAY_BY_FHIR_WEEKDAY: Readonly<Record<FhirDayOfWeek, number>> = {
+  [FhirDayOfWeek.Monday]: 1,
+  [FhirDayOfWeek.Tuesday]: 2,
+  [FhirDayOfWeek.Wednesday]: 3,
+  [FhirDayOfWeek.Thursday]: 4,
+  [FhirDayOfWeek.Friday]: 5,
+  [FhirDayOfWeek.Saturday]: 6,
+  [FhirDayOfWeek.Sunday]: 0
+};
+
+function validReferenceDate(value: string | undefined): Date | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+    ? date : undefined;
+}
+
+function monthlyOrdinalWeekdayDate(
+  year: number,
+  month: number,
+  weekday: FhirDayOfWeek,
+  ordinal: 1 | 2 | 3 | 4 | -1
+): Date {
+  const targetDay = UTC_DAY_BY_FHIR_WEEKDAY[weekday];
+  if (ordinal === -1) {
+    const last = new Date(Date.UTC(year, month + 1, 0));
+    last.setUTCDate(last.getUTCDate() - ((last.getUTCDay() - targetDay + 7) % 7));
+    return last;
+  }
+  const first = new Date(Date.UTC(year, month, 1));
+  first.setUTCDate(1 + ((targetDay - first.getUTCDay() + 7) % 7) + (ordinal - 1) * 7);
+  return first;
+}
+
+/** Resolve the next occurrence so the ordinary monthly recurrence has a
+ * typed calendar anchor. The rare construction allocates only after its full
+ * lexical shape has matched; ordinary timing tokens stay on the cheap path. */
+function nextMonthlyOrdinalWeekday(
+  context: HpsgClauseContext,
+  weekday: FhirDayOfWeek,
+  ordinal: 1 | 2 | 3 | 4 | -1
+): string {
+  const reference = validReferenceDate(context.options?.datePolicy?.referenceDate) ??
+    new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  let year = reference.getUTCFullYear();
+  let month = reference.getUTCMonth();
+  let occurrence = monthlyOrdinalWeekdayDate(year, month, weekday, ordinal);
+  if (occurrence < reference) {
+    month += 1;
+    if (month === 12) {
+      year += 1;
+      month = 0;
+    }
+    occurrence = monthlyOrdinalWeekdayDate(year, month, weekday, ordinal);
+  }
+  return occurrence.toISOString().slice(0, 10);
+}
+
+function monthlyOrdinalWeekdaySign(
+  context: HpsgClauseContext,
+  start: number
+): HpsgSign | undefined {
+  let cursor = start;
+  const members: Token[] = [];
+  const take = (expected?: string): Token | undefined => {
+    const token = context.tokens[cursor];
+    if (!token || context.state.consumed.has(token.index)) return undefined;
+    if (expected !== undefined && normalizeTokenLower(token) !== expected) return undefined;
+    members.push(token);
+    cursor += 1;
+    return token;
+  };
+
+  const firstLower = normalizeTokenLower(context.tokens[cursor]);
+  if (firstLower === "on") take("on");
+  const articleLower = normalizeTokenLower(context.tokens[cursor]);
+  if (articleLower === "the") take("the");
+
+  const ordinalToken = context.tokens[cursor];
+  const ordinal = ordinalToken
+    ? MONTHLY_WEEKDAY_ORDINALS[normalizeTokenLower(ordinalToken)]
+    : undefined;
+  if (ordinal === undefined || !take()) return undefined;
+
+  const weekdayToken = context.tokens[cursor];
+  const weekdays = weekdayToken ? getDayOfWeekMeaning(weekdayToken) : undefined;
+  if (!weekdays || weekdays.length !== 1 || !take()) return undefined;
+  if (!take("of")) return undefined;
+
+  const recurrenceToken = context.tokens[cursor];
+  const recurrence = recurrenceToken ? normalizeTokenLower(recurrenceToken) : "";
+  if ((recurrence !== "each" && recurrence !== "every") || !take()) return undefined;
+  const monthToken = context.tokens[cursor];
+  if (!monthToken || !/^months?$/u.test(normalizeTokenLower(monthToken)) || !take()) {
+    return undefined;
+  }
+
+  const weekday = weekdays[0];
+  return lexicalSign({
+    type: "schedule-sign",
+    rule: `hpsg.lex.schedule.monthlyOrdinalWeekday.${ordinal === -1 ? "last" : ordinal}`,
+    tokens: members,
+    synsem: {
+      head: {
+        schedule: {
+          timingCode: "MO",
+          frequency: 1,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Month,
+          dayOfWeek: [weekday],
+          boundsStart: nextMonthlyOrdinalWeekday(context, weekday, ordinal)
+        }
+      },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 48 + members.length
+  });
+}
+
 export function multiplicativeDoseFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.doseFrequency.multiplicative", (context, start) => {
     const first = tokensAvailable(context, start, 1)?.[0];
@@ -1028,6 +1156,8 @@ export function calendarDateListRule(): HpsgLexicalRule<HpsgClauseContext> {
 
 export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.timing", (context, start) => {
+    const monthlyOrdinal = monthlyOrdinalWeekdaySign(context, start);
+    if (monthlyOrdinal) return [monthlyOrdinal];
     const token = tokensAvailable(context, start, 1)?.[0];
     if (!token) {
       return [];
@@ -2199,6 +2329,7 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return false;
   }
   const lower = normalizeTokenLower(token);
+  if (monthlyOrdinalWeekdaySign(context, index)) return true;
   if (token.kind === LexKind.Number && token.value !== undefined) {
     const unitToken = context.tokens[index + 1];
     const unit = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) : undefined;

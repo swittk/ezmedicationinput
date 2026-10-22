@@ -122,13 +122,9 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
-    // Mixing coded meal times with explicit clocks in one R5 repeat breaks
-    // tim-10. Retain the full instruction and the parsed dose but make it
-    // non-executable instead of serializing an invalid repeat.
-    expect(result.items[1].fhir.timing).toBeUndefined();
-    expect(result.items[1].warnings).toContainEqual(
-      expect.stringContaining("incompatible-event-and-clock")
-    );
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();
   });
@@ -142,13 +138,9 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
-    // Mixing coded meal times with explicit clocks in one R5 repeat breaks
-    // tim-10. Retain the full instruction and the parsed dose but make it
-    // non-executable instead of serializing an invalid repeat.
-    expect(result.items[1].fhir.timing).toBeUndefined();
-    expect(result.items[1].warnings).toContainEqual(
-      expect.stringContaining("incompatible-event-and-clock")
-    );
+    expect(repeat(result, 1)?.when).toEqual(["CV"]);
+    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();
   });

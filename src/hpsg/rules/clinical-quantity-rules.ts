@@ -1,6 +1,7 @@
-import { LexKind } from "../../lexer/token-types";
+import { LexKind, type LexToken } from "../../lexer/token-types";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
+import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   HpsgClinicalQuantityFeature,
   HpsgDimensionalQuantityTerm,
@@ -11,7 +12,7 @@ import {
 const WEIGHT_WARNING =
   "Weight-based dose: patient weight is required to calculate the actual administered amount.";
 const WEIGHT_RATE_WARNING =
-  "Weight-based infusion rate: patientWeightKg is required to calculate an absolute administration rate.";
+  "Weight-based rate: patientWeightKg is required to calculate the absolute medication amount.";
 
 interface UnitExpression {
   compact: string;
@@ -76,6 +77,13 @@ function timeUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | un
   return undefined;
 }
 
+function weightRatePeriodUnit(
+  raw: string
+): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | undefined {
+  return timeUnit(raw) ??
+    (/^(?:wk|wks|week|weeks)$/u.test(raw) ? FhirPeriodUnit.Week : undefined);
+}
+
 function hasAdministrationCue(context: HpsgClauseContext, before: number): boolean {
   const first = Math.max(0, before - 8);
   for (let index = before - 1; index >= first; index -= 1) {
@@ -134,6 +142,61 @@ function clinicalSign(
     warnings: warning ? [warning] : undefined,
     score: 60
   });
+}
+
+function activeDoseInCarrierOverTime(
+  context: HpsgClauseContext,
+  start: number,
+  value: number
+) {
+  const activeUnitToken = context.tokens[start + 1];
+  const inToken = context.tokens[start + 2];
+  const carrierValueToken = context.tokens[start + 3];
+  const carrierUnitToken = context.tokens[start + 4];
+  if (!activeUnitToken || !inToken || !carrierValueToken || !carrierUnitToken ||
+      !available(context, start + 4) ||
+      normalizeTokenLower(inToken) !== "in" ||
+      carrierValueToken.kind !== LexKind.Number ||
+      carrierValueToken.value === undefined || carrierValueToken.value <= 0) return undefined;
+  const activeDose = massTerm(value, normalizeTokenLower(activeUnitToken));
+  const carrier = volumeOrMassTerm(carrierValueToken.value, normalizeTokenLower(carrierUnitToken));
+  if (!activeDose || !carrier || carrier.dimension !== "volume" ||
+      !hasAdministrationCue(context, start)) return undefined;
+
+  const routeToken = context.tokens[start + 5];
+  const markedIV = Boolean(routeToken && available(context, start + 5) &&
+    /^(?:iv|intravenously)$/u.test(normalizeTokenLower(routeToken)));
+  const shift = markedIV ? 1 : 0;
+  const overToken = context.tokens[start + 5 + shift];
+  const durationToken = context.tokens[start + 6 + shift];
+  const durationUnitToken = context.tokens[start + 7 + shift];
+  if (!overToken || !durationToken || !durationUnitToken ||
+      !available(context, start + 7 + shift) ||
+      normalizeTokenLower(overToken) !== "over" ||
+      durationToken.kind !== LexKind.Number || durationToken.value === undefined ||
+      durationToken.value <= 0) return undefined;
+  const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
+  if (!durationUnit) return undefined;
+
+  const clinicalQuantity: HpsgClinicalQuantityFeature = {
+    representation: "dose-with-rate-ratio",
+    status: "resolved",
+    numerator: carrier,
+    denominators: [{ value: durationToken.value, unit: durationUnit, dimension: "time" }],
+    projectedDose: { value, unit: activeDose.unit },
+    rateNumerator: { value: carrier.value, unit: carrier.unit },
+    administrationDuration: { value: durationToken.value, unit: durationUnit }
+  };
+  return clinicalSign(
+    context,
+    "hpsg.lex.clinicalQuantity.activeDoseInCarrierOverTime",
+    Array.from({ length: 8 + shift }, (_, offset) => start + offset),
+    clinicalQuantity,
+    clinicalQuantity.projectedDose,
+    undefined,
+    undefined,
+    markedIV ? RouteCode["Intravenous route"] : undefined
+  );
 }
 
 function fixedVolumeOverTime(
@@ -198,7 +261,7 @@ function weightQuantity(
   };
   const suffix = parts[2];
   const perDose = suffix === "dose";
-  if (parts.length > 3 || (suffix && !perDose && suffix !== "day" && suffix !== "daily" && suffix !== "d" && !timeUnit(suffix))) {
+  if (parts.length > 3 || (suffix && !perDose && suffix !== "day" && suffix !== "daily" && suffix !== "d" && !weightRatePeriodUnit(suffix))) {
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weight.unsupported", indices, {
       representation: "rate-quantity",
       status: "unsupported",
@@ -209,7 +272,7 @@ function weightQuantity(
     });
   }
 
-  const rateTime = suffix ? timeUnit(suffix) : undefined;
+  const rateTime = suffix ? weightRatePeriodUnit(suffix) : undefined;
   if (rateTime) {
     const duration = durationAfter(context, expression.end);
     if (duration) indices.push(...duration.indices);
@@ -241,17 +304,32 @@ function weightQuantity(
     }, { value, unit: doseUnit }, undefined, WEIGHT_WARNING);
   }
 
-  const divided = context.tokens[expression.end];
-  const into = context.tokens[expression.end + 1];
-  const count = context.tokens[expression.end + 2];
-  const doses = context.tokens[expression.end + 3];
-  if (divided && into && count && doses && available(context, expression.end + 3) &&
-      /^(?:divided|divide)$/u.test(normalizeTokenLower(divided)) &&
-      /^(?:into|in)$/u.test(normalizeTokenLower(into)) &&
-      count.kind === LexKind.Number && count.value !== undefined && Number.isInteger(count.value) && count.value > 0 &&
-      /^(?:dose|doses)$/u.test(normalizeTokenLower(doses))) {
-    indices.push(expression.end, expression.end + 1, expression.end + 2, expression.end + 3);
-    const projectedDose = { value: value / count.value, unit: doseUnit };
+  const tail = context.tokens.slice(expression.end, expression.end + 5);
+  let countToken: LexToken | undefined;
+  let dosesToken: LexToken | undefined;
+  let tailLength = 0;
+  const firstTail = tail[0] ? normalizeTokenLower(tail[0]) : "";
+  if (/^(?:divided|divide)$/u.test(firstTail) && /^(?:into|in)$/u.test(tail[1] ? normalizeTokenLower(tail[1]) : "")) {
+    countToken = tail[2];
+    const maybeEqual = tail[3] && normalizeTokenLower(tail[3]) === "equal";
+    dosesToken = tail[maybeEqual ? 4 : 3];
+    tailLength = maybeEqual ? 5 : 4;
+  } else if (/^(?:into|in)$/u.test(firstTail)) {
+    countToken = tail[1];
+    const maybeEqual = tail[2] && normalizeTokenLower(tail[2]) === "equal";
+    dosesToken = tail[maybeEqual ? 3 : 2];
+    tailLength = maybeEqual ? 4 : 3;
+  }
+  const dividedDoseCount = countToken
+    ? countToken.kind === LexKind.Number && countToken.value !== undefined
+      ? countToken.value
+      : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(countToken)]
+    : undefined;
+  if (countToken && dosesToken && available(context, expression.end + tailLength - 1) &&
+      dividedDoseCount !== undefined && Number.isInteger(dividedDoseCount) && dividedDoseCount > 0 &&
+      /^(?:dose|doses)$/u.test(normalizeTokenLower(dosesToken))) {
+    for (let index = 0; index < tailLength; index++) indices.push(expression.end + index);
+    const projectedDose = { value: value / dividedDoseCount, unit: doseUnit };
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightDailyDivided", indices, {
       representation: "dose",
       status: "resolved",
@@ -259,10 +337,10 @@ function weightQuantity(
       denominators: [bodyMass, { value: 1, unit: FhirPeriodUnit.Day, dimension: "time" }],
       projectedDose,
       dailyTotal: true,
-      dividedDoseCount: count.value,
+      dividedDoseCount,
       requiresPatientWeight: true
     }, projectedDose, {
-      frequency: count.value,
+      frequency: dividedDoseCount,
       period: 1,
       periodUnit: FhirPeriodUnit.Day
     }, WEIGHT_WARNING);
@@ -314,7 +392,7 @@ function fixedRate(
 /**
  * Bounded lexical/construction contribution for safety-critical medication
  * quantities. It never searches the full clause and only accepts explicit
- * dimensional forms; unsupported weight suffixes become typed quarantine
+ * dimensional forms; unsupported weight suffixes remain typed unresolved
  * evidence instead of an ordinary dose.
  */
 export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -322,6 +400,9 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     const valueToken = context.tokens[start];
     if (!valueToken || valueToken.kind !== LexKind.Number || valueToken.value === undefined ||
         valueToken.value <= 0 || !available(context, start + 1)) return [];
+
+    const activeInCarrier = activeDoseInCarrierOverTime(context, start, valueToken.value);
+    if (activeInCarrier) return [activeInCarrier];
 
     const over = fixedVolumeOverTime(context, start, valueToken.value);
     if (over) return [over];

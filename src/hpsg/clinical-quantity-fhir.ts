@@ -12,7 +12,22 @@ export function projectHpsgClinicalQuantityToFhir(
   dosage: FhirDosage,
   quantity: HpsgClinicalQuantityFeature
 ): void {
-  if (quantity.status !== "resolved") return;
+  if (quantity.status !== "resolved") {
+    // Preserve a recognized daily total even when no per-administration split
+    // was stated. It is a rate, not an invented dose, and remains editable.
+    if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
+      const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
+      dosage.doseAndRate = [{
+        rateQuantity: {
+          value: quantity.numerator.value,
+          unit,
+          system: UCUM,
+          code: unit
+        }
+      }];
+    }
+    return;
+  }
   if (quantity.representation === "dose") {
     const dose = dosage.doseAndRate?.[0]?.doseQuantity;
     if (dose && quantity.projectedDose) {
@@ -36,16 +51,23 @@ export function projectHpsgClinicalQuantityToFhir(
   const duration = quantity.administrationDuration;
   const dose = quantity.projectedDose;
   if (!duration || !dose) return;
-  const numerator = {
+  const doseQuantity = {
     value: dose.value,
     unit: dose.unit,
     system: UCUM,
     code: dose.unit
   };
+  const rate = quantity.rateNumerator ?? dose;
+  const rateNumerator = {
+    value: rate.value,
+    unit: rate.unit,
+    system: UCUM,
+    code: rate.unit
+  };
   dosage.doseAndRate = [{
-    doseQuantity: { ...numerator },
+    doseQuantity,
     rateRatio: {
-      numerator,
+      numerator: rateNumerator,
       denominator: {
         value: duration.value,
         unit: duration.unit,

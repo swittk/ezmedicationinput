@@ -1,7 +1,6 @@
-import { findMedicationDateListSpans } from '../date-interpretation';
+import { findMedicationDateListSpans, type MedicationDateListMatch } from '../date-interpretation';
 import { buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from '../instruction-graph-fhir';
 import type { ParseOptions, ParseResult } from '../types';
-import { quarantineSchedule } from './admissibility';
 
 export interface RelativeTemporalRange { start: number; end: number }
 
@@ -85,7 +84,70 @@ export function removeInstructionArtifactsOwnedByTemporalRanges(
   return changed;
 }
 
-/** Non-event calendar bounds own their entire source span. */
+function inclusiveUpToRange(source: string, span: MedicationDateListMatch): RelativeTemporalRange | undefined {
+  if (span.unresolved || span.relation !== 'event' || span.events.length !== 1) return undefined;
+  const windowStart = Math.max(0, span.start - 32);
+  const prefix = source.slice(windowStart, span.start);
+  const lead = prefix.match(/\bup\s+to\s*$/iu);
+  if (!lead || lead.index === undefined) return undefined;
+  return { start: windowStart + lead.index, end: span.end };
+}
+
+/** Move only the event owned by `up to DATE` to an inclusive end bound. */
+function normalizeInclusiveUpToBound(item: ParseResult, span: MedicationDateListMatch): boolean {
+  const clause = item.meta.canonical.clauses[0];
+  const schedule = clause?.schedule;
+  const event = span.events[0];
+  if (!schedule || !event || (schedule.boundsEnd && schedule.boundsEnd !== event.isoDate)) return false;
+
+  const calendarEvents = schedule.calendarEvents ?? [];
+  let eventIndex = calendarEvents.findIndex(candidate =>
+    candidate.isoDate === event.isoDate && candidate.sourceText === event.sourceText
+  );
+  if (eventIndex < 0) {
+    const matchingDates = calendarEvents
+      .map((candidate, index) => candidate.isoDate === event.isoDate ? index : -1)
+      .filter(index => index >= 0);
+    if (matchingDates.length !== 1) return false;
+    eventIndex = matchingDates[0];
+  }
+
+  schedule.boundsEnd = event.isoDate;
+  schedule.calendarEvents = calendarEvents.filter((_, index) => index !== eventIndex);
+  if (!schedule.calendarEvents.length) delete schedule.calendarEvents;
+
+  const timing = item.fhir.timing;
+  if (timing) {
+    const fhirEvents = timing.event ?? [];
+    let fhirIndex = eventIndex < fhirEvents.length && fhirEvents[eventIndex].slice(0, 10) === event.isoDate
+      ? eventIndex
+      : -1;
+    if (fhirIndex < 0) {
+      const matchingDates = fhirEvents
+        .map((value, index) => value.slice(0, 10) === event.isoDate ? index : -1)
+        .filter(index => index >= 0);
+      if (matchingDates.length === 1) fhirIndex = matchingDates[0];
+    }
+    if (fhirIndex >= 0) {
+      timing.event = fhirEvents.filter((_, index) => index !== fhirIndex);
+      if (!timing.event.length) delete timing.event;
+      if (timing._event) {
+        timing._event = timing._event.filter((_, index) => index !== fhirIndex);
+        if (!timing._event.length) delete timing._event;
+      }
+    }
+    timing.repeat = {
+      ...(timing.repeat ?? {}),
+      boundsPeriod: {
+        ...(timing.repeat?.boundsPeriod ?? {}),
+        end: event.isoDate
+      }
+    };
+  }
+  return true;
+}
+
+/** Resolved calendar bounds own their source spans; `up to DATE` is inclusive. */
 export function normalizeTemporalBoundArtifacts(
   item: ParseResult,
   source: string,
@@ -94,53 +156,21 @@ export function normalizeTemporalBoundArtifacts(
   const clause = item.meta.canonical.clauses[0];
   // Ownership pruning only changes procedural instructions/graphs.
   // A simple timing-only clause has nothing to prune, so avoid reparsing its
-  // entire date grammar just to discover an empty action graph.
-  if (!clause?.instructionGraph && !clause?.patientInstruction) return false;
-  const ranges = findMedicationDateListSpans(source, options)
-    .filter(span => !span.unresolved && span.relation !== 'event')
-    .map(span => ({ start: span.start, end: span.end }));
-  return removeInstructionArtifactsOwnedByTemporalRanges(item, ranges);
-}
-
-/**
- * "Up to DATE" has inconsistent inclusive/exclusive usage. Preserve it visibly
- * instead of choosing an end bound and executing a guessed schedule.
- */
-export function quarantineAmbiguousTemporalBounds(
-  item: ParseResult,
-  source: string,
-  options?: ParseOptions
-): boolean {
-  // Use the shared lexical/date-resolver result instead of maintaining a
-  // second surface-word list here. This keeps attached Thai relation forms
-  // (for example ถึง2569-11-01) under the same typed calendar ownership as
-  // spaced English bounds and explicit event-date lists.
+  // entire date grammar unless there is an inclusive "up to" bound to normalize.
+  const hasUpTo = /\bup\s+to\b/iu.test(source);
+  if (!clause?.instructionGraph && !clause?.patientInstruction && !hasUpTo) return false;
   const spans = findMedicationDateListSpans(source, options);
   if (!spans.length) return false;
-  const period = item.fhir.timing?.repeat?.boundsPeriod;
-  if (period?.start && period.end) {
-    const start = Date.parse(period.start), end = Date.parse(period.end);
-    if (Number.isFinite(start) && Number.isFinite(end) && start > end) {
-      quarantineSchedule(item, source, 'calendar-start-after-end');
-      return true;
-    }
-  }
+
+  const ranges: RelativeTemporalRange[] = spans
+    .filter(span => !span.unresolved && span.relation !== 'event')
+    .map(span => ({ start: span.start, end: span.end }));
+  let changed = false;
   for (const span of spans) {
-    // An unresolved unanchored year-like fragment may be an identifier, but
-    // an explicit medication-date constituent is timing evidence. Never
-    // let that evidence disappear into leftovers while a schedule executes.
-    if (span.unresolved && (span.relation !== 'event' || span.explicitLead)) {
-      quarantineSchedule(item, source, span.relation === 'event'
-        ? 'invalid-or-ambiguous-calendar-date'
-        : 'invalid-or-ambiguous-calendar-bound');
-      return true;
-    }
-    if (span.unresolved || span.relation !== 'event') continue;
-    const prefix = source.slice(Math.max(0, span.start - 16), span.start);
-    if (/\bup\s+to\s*$/iu.test(prefix)) {
-      quarantineSchedule(item, source, 'ambiguous-up-to-date-bound');
-      return true;
-    }
+    const range = inclusiveUpToRange(source, span);
+    if (!range || !normalizeInclusiveUpToBound(item, span)) continue;
+    ranges.push(range);
+    changed = true;
   }
-  return false;
+  return removeInstructionArtifactsOwnedByTemporalRanges(item, ranges) || changed;
 }

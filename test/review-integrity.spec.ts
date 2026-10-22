@@ -8,7 +8,8 @@ import {
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
   DOSAGE_DETAILS_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_UNRESOLVED_R5_URL
+  DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+  DOSAGE_UNRESOLVED_R5_URL
 } from "../src/dosage-course";
 import { recognizeCycles } from "../src/regimen/cycles";
 import { projectParallelRegimen } from "../src/regimen/parallel-course";
@@ -71,7 +72,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toEqual(simple.step[0].component[0].modifierExtension);
   });
 
-  it("rejects unknown and malformed modifier extensions before scheduling or supply", () => {
+  it("keeps unknown and malformed modifiers while using independent live dose data", () => {
     const base = parseSig("1 tab PO BID").fhir[0];
     const candidates: FhirDosage[] = [
       {
@@ -108,8 +109,12 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       }
     ];
     for (const dosage of candidates) {
-      expect(() => nextDueDoses(dosage, scheduler)).toThrow(/modifierExtension/i);
-      expect(() => calculateTotalUnits({ ...supply, dosage })).toThrow(/modifierExtension/i);
+      const originalModifiers = JSON.parse(JSON.stringify(dosage.modifierExtension));
+      expect(nextDueDoses(dosage, scheduler)).toHaveLength(14);
+      expect(calculateTotalUnits({ ...supply, dosage })).toMatchObject({
+        totalUnits: 60, unit: "tab"
+      });
+      expect(dosage.modifierExtension).toEqual(originalModifiers);
     }
   });
 
@@ -134,7 +139,10 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(getDosageCondition(copy)).toEqual(valid);
       const lowered = toFhirR5Dosages({ step: [{ component: [copy] }] });
       expect(getDosageCondition(lowered[0])).toEqual(valid);
-      expect(() => nextDueDoses(lowered, scheduler)).toThrow(/evaluateCondition/);
+      expect(nextDueDoses(lowered, scheduler)).toHaveLength(14);
+      expect(nextDueDoses(lowered, {
+        ...scheduler, evaluateCondition: () => false
+      })).toEqual([]);
     }
 
     const expression = JSON.parse(JSON.stringify(component)) as EzDosage;
@@ -149,7 +157,10 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       kind: "text", text: "unresolved clinical predicate"
     });
     const lowered = toFhirR5Dosages({ step: [{ component: [expression] }] });
-    expect(() => nextDueDoses(lowered, scheduler)).toThrow(/evaluateCondition/);
+    expect(nextDueDoses(lowered, scheduler)).toHaveLength(14);
+    expect(nextDueDoses(lowered, {
+      ...scheduler, evaluateCondition: () => false
+    })).toEqual([]);
   });
 
   it("keeps unfamiliar or malformed modifiers fully recoverable in read-only imports", () => {
@@ -168,28 +179,25 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       };
       const unchanged = JSON.parse(JSON.stringify(original));
       const imported = fromFhirDosage(original);
-      expect(imported.fhir).toEqual(unchanged);
-      expect(original).toEqual(unchanged);
-      expect(imported.longText).toContain("INCOMPLETE");
-      expect(imported.longText).toContain(text);
-      expect(imported.warnings).toContainEqual(
-        expect.stringContaining("original FHIR retained")
-      );
+      expect(original.modifierExtension).toEqual(unchanged.modifierExtension);
+      expect(imported.fhir.doseAndRate).toEqual(original.doseAndRate);
+      expect(imported.fhir.timing).toEqual(original.timing);
+      expect(imported.fhir.modifierExtension).toEqual([modifier]);
+      expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
+      expect(imported.longText).toContain("1 tablet");
       const course: FhirR6DosageDetails = {
         step: [{ component: [{ ...original }] }]
       };
       const preservedCourse = JSON.parse(JSON.stringify(course));
       const whole = fromFhir(course);
       expect(course).toEqual(preservedCourse);
-      expect(whole.fhirNext).toEqual(preservedCourse);
-      expect(whole.longText).toContain("INCOMPLETE");
-      expect(whole.longText).toContain(text);
-      expect(whole.warnings).toContainEqual(
-        expect.stringContaining("original FHIR retained")
-      );
-      expect(() => nextDueDoses(original, scheduler)).toThrow(/modifierExtension/);
-      expect(() => calculateTotalUnits({ ...supply, dosage: original }))
-        .toThrow(/modifierExtension/);
+      expect(whole.fhirNext.step[0].component[0].modifierExtension).toEqual([modifier]);
+      expect(whole.fhirNext.step[0].component[0].doseAndRate).toEqual(original.doseAndRate);
+      expect(whole.fhirNext.step[0].component[0].timing).toEqual(original.timing);
+      expect(nextDueDoses(original, scheduler)).toHaveLength(14);
+      expect(calculateTotalUnits({ ...supply, dosage: original })).toMatchObject({
+        totalUnits: 60, unit: "tab"
+      });
     }
   });
 
@@ -211,7 +219,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       kind: "measurement", name: "bp", value: 170
     });
     modifier!.extension![0].valueString = "{bad";
-    expect(() => getDosageCondition(dosage)).toThrow(/modifierExtension/);
+    expect(getDosageCondition(dosage)).toBeUndefined();
+    expect(dosage.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(dosage.timing?.repeat?.frequency).toBe(2);
     // Invalid edits remain present for correction; they are never deleted.
     expect(modifier!.extension![0].valueString).toBe("{bad");
   });
@@ -276,19 +286,26 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const initial = calculateTotalUnits({ ...supply, dosage: edited });
     expect(initial.totalUnits).toBe(296);
     edited[3].timing!.repeat!.frequency = 3;
-    // The unchanged QID code would contradict a three-times-daily edit.
-    // It must not contribute four additional institution clock entries.
-    expect(() => calculateTotalUnits({ ...supply, dosage: edited }))
-      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
-    expect(() => nextDueDoses(edited, { ...scheduler, from: "2026-10-27T08:00:00+07:00" }))
-      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
+    // The edited repeat is live data. The older QID code remains recoverable,
+    // but must not contribute four institution clock entries.
+    const reconciled = toDosageDetails(edited);
+    expect(reconciled.step[1].component[1].timing?.repeat?.frequency).toBe(3);
+    expect(reconciled.step[1].component[1].timing?.code?.coding?.[0]?.code).toBe("QID");
+    expect(reconciled.renderedInstruction).toBeUndefined();
+    expect(reconciled.extension).toContainEqual(expect.objectContaining({
+      url: DOSAGE_RECONCILIATION_WARNING_URL
+    }));
+    expect(calculateTotalUnits({ ...supply, dosage: edited }).totalUnits).toBe(296);
+    expect(nextDueDoses(edited, {
+      ...scheduler, from: "2026-10-27T08:00:00+07:00"
+    }).length).toBeGreaterThan(0);
     delete edited[3].timing!.code;
     edited[3].text = "1 drop OS TID after day 7";
     const updated = toDosageDetails(edited);
     expect(updated.step[1].component[1].timing?.repeat?.frequency).toBe(3);
     expect(updated.step[0].end?.offsetDuration?.value).toBe(7);
     expect(updated.step[1].end?.offsetDuration?.code).toBe("mo");
-    expect(updated.renderedInstruction).toContain("TID after day 7");
+    expect(updated.renderedInstruction).toBeUndefined();
     const count = calculateTotalUnits({ ...supply, dosage: edited });
     expect(count.totalUnits).toBe(273);
     expect(count.totalUnits).not.toBe(initial.totalUnits);
@@ -319,8 +336,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toEqual(["06:00:00", "10:00:00", "14:00:00", "18:00:00"]);
     const edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
     edited.timing!.repeat!.frequency = 3;
-    expect(() => nextDueDoses(edited, options))
-      .toThrow(/Timing.code conflicts with Timing.repeat.frequency/);
+    const changedWithRetainedCode = nextDueDoses(edited, options);
+    expect(changedWithRetainedCode).toHaveLength(8);
+    expect(changedWithRetainedCode.slice(0, 3).map(v => v.slice(11, 19)))
+      .toEqual(["08:00:00", "12:00:00", "16:00:00"]);
+    expect(edited.timing?.code?.coding?.[0]?.code).toBe("QID");
     delete edited.timing!.code;
     const changed = nextDueDoses(edited, options);
     expect(changed).toHaveLength(8);
@@ -396,7 +416,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(scheduled[0]).toBe(beginning);
   });
 
-  it("refuses ambiguous component removal when a stage contains R6-only dose expressions", () => {
+  it("removes the live component while retaining its R6-only expression as provenance", () => {
     const original = parseSig(parallel).fhirNext;
     const edited: FhirR6DosageDetails = JSON.parse(JSON.stringify(original));
     edited.step[0].component[0].doseAndRate![0].doseExpression = {
@@ -404,8 +424,16 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     };
     const exported = toFhirR5Dosages(edited);
     exported.splice(0, 1);
-    expect(() => toDosageDetails(exported))
-      .toThrow(/Update the R6 course component mapping/);
+    const restored = toDosageDetails(exported);
+    expect(restored.step.map(step => step.component.length)).toEqual([1, 2, 2]);
+    expect(restored.step.flatMap(step => step.component)
+      .some(component => component.doseAndRate?.some(rate => rate.doseExpression)))
+      .toBe(false);
+    expect(JSON.stringify(restored)).toContain("%patient.weight * 0.5");
+    expect(restored.renderedInstruction).toBeUndefined();
+    expect(restored.extension).toContainEqual(expect.objectContaining({
+      url: DOSAGE_RECONCILIATION_WARNING_URL
+    }));
   });
 
   it("does not show an obsolete whole-course SIG when an R5 stage dose changes without editing its text", () => {
@@ -422,11 +450,20 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(calculateTotalUnits({ ...supply, dosage: updated }).totalUnits).toBe(388);
   });
 
-  it("rejects a changed number of relative stages with a precise action instead of using stale metadata", () => {
+  it("projects a changed relative stage while retaining the old course as provenance", () => {
     const original = parseSig(parallel);
     const edited = JSON.parse(JSON.stringify(original.fhir)) as FhirDosage[];
     edited[0].sequence = 4;
-    expect(() => toDosageDetails(edited)).toThrow(/Update the R6 step start\/end metadata/);
+    const restored = toDosageDetails(edited);
+    expect(restored.step.map(step => step.component.length)).toEqual([1, 2, 2, 1]);
+    expect(restored.step[3].component[0].site?.concept?.text).toBe("right eye");
+    expect(restored.step[3].component[0].timing?.repeat?.period).toBe(2);
+    expect(restored.renderedInstruction).toBeUndefined();
+    expect(restored.extension).toContainEqual(expect.objectContaining({
+      url: DOSAGE_RECONCILIATION_WARNING_URL
+    }));
+    expect(restored.extension?.some(extension =>
+      extension.url.endsWith("medication-course-reconciliation-source"))).toBe(true);
   });
 
   it("matches all unchanged components before positional edits when concurrent rows are swapped", () => {
@@ -477,7 +514,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
   });
 
-  it("retains R6 dose expressions through unrelated R5 edits, but never silently replaces conflicting expressions", () => {
+  it("retains R6 dose expressions as provenance beside conflicting live R5 doses", () => {
     const full: FhirR6DosageDetails = {
       renderedInstruction: "Weight-adjusted dose twice daily",
       step: [{ component: [{
@@ -493,7 +530,20 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(toDosageDetails(flat).step[0].component[0].doseAndRate?.[0].doseExpression?.expression)
       .toBe("%patient.weight * 0.5");
     flat[0].doseAndRate![0].doseQuantity = { value: 2, unit: "mg" };
-    expect(() => toDosageDetails(flat)).toThrow(/Update the R6 dose expression explicitly/);
+    const reconciled = toDosageDetails(flat);
+    expect(reconciled.step[0].component[0].doseAndRate).toEqual([
+      expect.objectContaining({ doseQuantity: { value: 2, unit: "mg" } }),
+      expect.objectContaining({
+        doseExpression: {
+          language: "text/fhirpath", expression: "%patient.weight * 0.5"
+        }
+      })
+    ]);
+    expect(reconciled.renderedInstruction).toBeUndefined();
+    expect(reconciled.extension).toContainEqual(expect.objectContaining({
+      url: DOSAGE_RECONCILIATION_WARNING_URL,
+      valueString: expect.stringMatching(/expressions.*edited R5 dose/i)
+    }));
   });
 
   it("preserves exact R6 safety and coded conditions through unrelated R5 edits", () => {
@@ -612,11 +662,10 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
         } }]
       }] }]
     };
-    expect(() => formatSig(details, "long")).toThrow(/Cannot safely generate text/);
+    expect(formatSig(details, "long")).toBe(
+      "Take the medication orally twice daily; unevaluated dose expression: %patient.weight * 0.5"
+    );
     const imported = fromFhir(details);
-    expect(imported.warnings).toContainEqual(expect.stringContaining(
-      "Cannot render advanced R6 dosage"));
-    expect(imported.longText).toContain("INCOMPLETE R6 course");
     expect(imported.longText).toContain(
       "unevaluated dose expression: %patient.weight * 0.5"
     );
@@ -632,19 +681,37 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       maxDosePerAdministration: { value: 1, unit: "tab" }
     };
     for (const candidate of [excessive, toDosageDetails([excessive])]) {
-      expect(() => calculateTotalUnits({ ...supply, dosage: candidate }))
-        .toThrow(/exceeds the specified maximum/);
+      expect(calculateTotalUnits({ ...supply, dosage: candidate })).toMatchObject({
+        unit: "tab",
+        quantityKind: "maximum",
+        explanation: expect.stringContaining("unevaluable maximum-dose constraint")
+      });
     }
     const lifetime: FhirDosage = {
       ...dosage, maxDosePerLifetime: { value: 10, unit: "tab" }
     };
-    expect(() => calculateTotalUnits({ ...supply, dosage: lifetime }))
-      .toThrow(/complete prior administered-dose history/);
-    expect(() => calculateTotalUnits({ ...supply, dosage: toDosageDetails([lifetime]) }))
-      .toThrow(/lifetime|clinical evaluation/i);
+    expect(calculateTotalUnits({ ...supply, dosage: lifetime })).toMatchObject({
+      totalUnits: 10, unit: "tab", quantityKind: "maximum",
+      explanation: expect.stringMatching(/full lifetime maximum.*no prior administrations/i)
+    });
+    expect(calculateTotalUnits({
+      ...supply, dosage: lifetime,
+      priorDoseTimes: [
+        "2026-10-18T08:00:00+07:00", "2026-10-18T20:00:00+07:00"
+      ]
+    })).toMatchObject({
+      totalUnits: 6, unit: "tab", quantityKind: "maximum",
+      explanation: expect.stringMatching(/reduced by.*prior administrations/i)
+    });
+    expect(calculateTotalUnits({
+      ...supply, dosage: toDosageDetails([lifetime])
+    })).toMatchObject({
+      totalUnits: 10, unit: "tab", quantityKind: "maximum",
+      explanation: expect.stringMatching(/R6 safety details.*retained/i)
+    });
   });
 
-  it("retains the prescribed half-tablet dose in invalid explicit cycles, but does not schedule them", () => {
+  it("retains the prescribed half-tablet, clock, and source for invalid explicit cycles", () => {
     const cases = [
       "on days 1,8,15 every 28 days for 2 cycles",
       "on days 1,8,15 every 28 days starting 28/9/2026",
@@ -654,10 +721,15 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     for (const suffix of cases) {
       const input = "take .5 tab at 08:00 " + suffix;
       const parsed = parseSig(input);
+      expect(parsed.input).toBe(input);
       expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(0.5);
-      expect(parsed.warnings).toContainEqual(expect.stringContaining("Unresolved schedule"));
-      expect(parsed.meta.leftoverText).toContain(suffix);
-      expect(() => nextDueDoses(parsed, scheduler)).toThrow(/unresolved/i);
+      expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+      expect(parsed.fhir[0].route?.text).toBe("by mouth");
+      expect(nextDueDoses(parsed, { ...scheduler, limit: 3 })).toEqual([
+        "2026-10-19T08:00:00+07:00",
+        "2026-10-20T08:00:00+07:00",
+        "2026-10-21T08:00:00+07:00"
+      ]);
     }
   });
 
@@ -677,7 +749,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(fromFhirDosage(disabled).meta.canonical.clauses[0].prn?.enabled).toBeUndefined();
   });
 
-  it("ordinary day offsets are not claimed and quarantined as malformed cycle schedules", () => {
+  it("ordinary day offsets are not misclassified as malformed cycle schedules", () => {
     expect(recognizeCycles("take 1 tablet on day 3")).toEqual([]);
     expect(recognizeCycles("take 1 tablet on days 1-5")).toEqual([]);
     expect(recognizeCycles("take 1 tablet on days 1,8 every 28 days starting 28/9/2026 for 2 cycles")

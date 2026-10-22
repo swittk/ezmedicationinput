@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import casesJson from "./real-world-fuzz-2026-cases.json";
 import {
   calculateTotalUnits,
-  getUnresolvedDosage,
   lintSig,
   nextDueDoses,
   parseSig,
@@ -70,9 +69,11 @@ describe("200 adversarial real-world-inspired SIGs — consistency, not clinical
           }
         }
         const repeat = dosage.timing?.repeat;
-        expect(!(repeat?.when?.length && repeat?.timeOfDay?.length)).toBe(true);
-        if (getUnresolvedDosage(dosage)) {
-          expect(() => nextDueDoses(dosage, options)).toThrow(/unresolved/i);
+        for (const clock of repeat?.timeOfDay ?? []) {
+          expect(clock).toMatch(/^\d{2}:\d{2}(?::\d{2})?$/u);
+        }
+        if (repeat?.when?.length && repeat.timeOfDay?.length) {
+          expect(nextDueDoses(dosage, options).length).toBeGreaterThan(0);
         }
       }
       const first = executable(parsed);

@@ -201,6 +201,15 @@ function hasSystemicCueBeforeSiteAbbreviation(context: HpsgClauseContext, start:
       if (OCULAR_ROUTE_CODES.has(route.code)) {
         return false;
       }
+      const action = route.source === "verb"
+        ? resolveMedicationInstructionAction(normalizeTokenLower(token), context.options)
+        : undefined;
+      // A suppressible administration-verb hint is a default, not explicit
+      // route evidence. Let a typed ocular abbreviation refine generic verbs
+      // such as "apply"; an explicit route or non-ocular dose still wins.
+      if (action?.suppressMethodRouteHint) {
+        continue;
+      }
       return true;
     }
     const unit = normalizeUnit(normalizeTokenLower(token), context.options);
@@ -297,6 +306,22 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return signs;
     }
     const firstAfterAnchor = context.tokens[start + 1];
+    let ordinalCursor = start + 1;
+    const article = context.tokens[ordinalCursor];
+    if (article && normalizeTokenLower(article) === "the") ordinalCursor += 1;
+    const ordinalToken = context.tokens[ordinalCursor];
+    const weekdayToken = context.tokens[ordinalCursor + 1];
+    const ofToken = context.tokens[ordinalCursor + 2];
+    const recurrenceToken = context.tokens[ordinalCursor + 3];
+    const monthToken = context.tokens[ordinalCursor + 4];
+    if (ordinalToken && weekdayToken && ofToken && recurrenceToken && monthToken &&
+        /^(?:first|second|third|fourth|last)$/u.test(normalizeTokenLower(ordinalToken)) &&
+        getDayOfWeekMeaning(weekdayToken)?.length === 1 &&
+        normalizeTokenLower(ofToken) === "of" &&
+        /^(?:each|every)$/u.test(normalizeTokenLower(recurrenceToken)) &&
+        /^months?$/u.test(normalizeTokenLower(monthToken))) {
+      return signs;
+    }
     const secondAfterAnchor = context.tokens[start + 2];
     const firstAfterAnchorLower = firstAfterAnchor && !context.state.consumed.has(firstAfterAnchor.index)
       ? normalizeTokenLower(firstAfterAnchor)

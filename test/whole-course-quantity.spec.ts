@@ -180,8 +180,8 @@ describe("whole-course numeric supply and API parity", () => {
       });
       expect(result.totalUnits).toBe(455);
       expect(result.unit).toBe("mg");
-      expect(() => calculateTotalUnits({ ...base, dosage, durationValue: 7 }))
-        .toThrow(/patientWeightKg/);
+      expect(calculateTotalUnits({ ...base, dosage, durationValue: 7 }))
+        .toMatchObject({ totalUnits: 7, unit: "mg/kg", quantityKind: "scheduled" });
     }
   });
 
@@ -195,8 +195,8 @@ describe("whole-course numeric supply and API parity", () => {
   it("computes recognized per-kg infusion rates using duration and weight, never as a bolus", () => {
     const instruction = "Infuse dopamine at 5 mcg/kg/min IV for 4 hours";
     for (const dosage of allFormats(instruction)) {
-      expect(() => calculateTotalUnits({ ...base, dosage, durationValue: 1 }))
-        .toThrow(/patientWeightKg/);
+      expect(calculateTotalUnits({ ...base, dosage, durationValue: 1 }))
+        .toMatchObject({ totalUnits: 1200, unit: "ug/kg", quantityKind: "scheduled" });
       const measured = calculateTotalUnits({
         ...base, dosage, durationValue: 1, patientWeightKg: 70
       });
@@ -205,7 +205,7 @@ describe("whole-course numeric supply and API parity", () => {
     }
   });
 
-  it("rejects incompatible per-period maxima instead of returning zero supply or an empty schedule", () => {
+  it("keeps the schedule visible when a period maximum conflicts, and labels supply as best-effort", () => {
     const valid = parseSig("2 tablets BID").fhir[0];
     const capped = {
       ...valid,
@@ -216,10 +216,9 @@ describe("whole-course numeric supply and API parity", () => {
     };
     const opts = { from: begin, orderedAt: begin, timeZone: "Asia/Bangkok", limit: 10 };
     for (const dosage of [capped, [capped]]) {
-      expect(() => nextDueDoses(dosage, opts))
-        .toThrow(/Prescribed dose exceeds the per-period maximum/);
-      expect(() => calculateTotalUnits({ ...base, dosage, durationValue: 3 }))
-        .toThrow(/Prescribed dose exceeds the per-period maximum/);
+      expect(nextDueDoses(dosage, opts)).toHaveLength(10);
+      expect(calculateTotalUnits({ ...base, dosage, durationValue: 3 }))
+        .toMatchObject({ totalUnits: 12, quantityKind: "maximum" });
     }
     const acceptable = {
       ...capped,
@@ -240,26 +239,33 @@ describe("whole-course numeric supply and API parity", () => {
     expect(calculateTotalUnits({ ...base, dosage: imported.fhir }).totalUnits).toBe(296);
   });
 
-  it("provides specific actionable reasons when a genuinely necessary fact is absent", () => {
-    const cases = [
-      ["0.5 mg/kg PO BID", "patientWeightKg"],
-      [eyeCourse, "orderedAt"],
-      ["1 drop OD q2h x4wk then qid; 1 drop OS qid x1mo then bid", "unresolved"],
-      ["1 tab QID then BID", "duration"]
-    ] as const;
-    for (const [sig, keyword] of cases) {
-      const parsed = parseSig(sig);
-      const args = { ...base, dosage: parsed };
-      if (keyword === "orderedAt") delete (args as Partial<typeof args>).orderedAt;
-      if (keyword === "patientWeightKg") {
-        expect(() => calculateTotalUnits(args)).toThrow(MedicationQuantityCalculationError);
-        expect(() => calculateTotalUnits(args)).toThrow(/patientWeightKg/);
-      } else {
-        expect(() => calculateTotalUnits(args)).toThrow(
-          keyword === "orderedAt" ? /orderedAt/ : keyword === "unresolved" ? /unresolved/ : /duration/
-        );
-      }
-    }
+  it("requires only facts that are mathematically necessary, while keeping resolvable courses usable", () => {
+    const weightBased = parseSig("0.5 mg/kg PO BID");
+    expect(calculateTotalUnits({ ...base, dosage: weightBased }))
+      .toMatchObject({ totalUnits: 30, unit: "mg/kg", quantityKind: "scheduled" });
+
+    const relative = parseSig(eyeCourse);
+    const withoutStart = { ...base, dosage: relative };
+    delete (withoutStart as Partial<typeof withoutStart>).orderedAt;
+    expect(calculateTotalUnits(withoutStart)).toMatchObject({
+      totalUnits: 296,
+      unit: "drop",
+      quantityKind: "scheduled",
+      explanation: expect.stringContaining("assumed")
+    });
+
+    const overlappingText = parseSig(
+      "1 drop OD q2h x4wk then qid; 1 drop OS qid x1mo then bid"
+    );
+    expect(calculateTotalUnits({ ...base, dosage: overlappingText }).totalUnits).toBeGreaterThan(0);
+
+    const missingPhaseBound = parseSig("1 tab QID then BID");
+    expect(calculateTotalUnits({ ...base, dosage: missingPhaseBound })).toMatchObject({
+      totalUnits: 120,
+      unit: "tab",
+      quantityKind: "scheduled",
+      explanation: expect.stringContaining("without a stated cutover")
+    });
   });
 
   it("keeps sync, async, suggestions and schedule consumers aligned on the same dosage meaning", async () => {

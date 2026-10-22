@@ -4,7 +4,6 @@ import {
   getDosageExcludedWeekdays, getUnresolvedDosage
 } from "./dosage-course";
 import { applyClinicalConstraints } from "./clinical-safety";
-import { quarantineSchedule } from "./regimen/admissibility";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import { applyCoordinatedCadenceScopes } from "./regimen/coordination-scope";
@@ -895,11 +894,8 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
   return clauses;
 }
 
-/** Rich R6 course fields cannot be safely flattened to an R5 display sentence.
- * Keep the exact same guard here and in formatSig, without exception handling
- * in the normal parse path.
- */
-function requiresR6CourseSourceForDisplay(course: FhirR6DosageDetails): boolean {
+/** Prefer exact source wording for rich R6 course fields when it is available. */
+function prefersR6CourseSourceForDisplay(course: FhirR6DosageDetails): boolean {
   return Boolean(course.repeatCycle || course.safety ||
     course.step.some(step => step.start || step.end ||
       step.count !== undefined || step.safety ||
@@ -914,14 +910,6 @@ function hasMaximumDoseForDisplay(dosage: FhirDosage): boolean {
     dosage.maxDosePerPeriod?.length ||
     dosage.maxDosePerAdministration ||
     dosage.maxDosePerLifetime
-  );
-}
-
-function exactMaximumDoseSourceForDisplay(dosage: FhirDosage): string | undefined {
-  if (!hasMaximumDoseForDisplay(dosage)) return undefined;
-  if (typeof dosage.text === "string" && dosage.text.trim().length > 0) return dosage.text;
-  throw new Error(
-    "Cannot safely generate text from FHIR maximum-dose fields without Dosage.text"
   );
 }
 
@@ -943,6 +931,11 @@ function buildWholeCourseResult(
   const dosageItems = results.map(item => item.fhir);
   const fhir = parallel?.dosages ?? toEzDosages(dosageItems);
   const fhirNext = parallel?.details ?? toDosageDetails(dosageItems, input);
+  const recurringCycle = recognizeCycles(input, options).find(frame =>
+    frame.kind === "recurring-on-off" && !frame.error && frame.repeatCycle);
+  if (recurringCycle?.repeatCycle && !fhirNext.repeatCycle) {
+    fhirNext.repeatCycle = { ...recurringCycle.repeatCycle };
+  }
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -953,9 +946,9 @@ function buildWholeCourseResult(
       leftovers.push(item.meta.leftoverText);
     }
   }
-  // Only ordinary R5-compatible multi-clause courses can be safely realized.
-  // A staged/conditional R6 course keeps the source wording; never drop a phase.
-  const displayCourse = results.length > 1 && !requiresR6CourseSourceForDisplay(fhirNext)
+  // Realize ordinary multi-clause courses afresh. Rich R6 courses prefer the
+  // exact source wording when available, while their structured data remains primary.
+  const displayCourse = results.length > 1 && !prefersR6CourseSourceForDisplay(fhirNext)
     ? { ...fhirNext, renderedInstruction: undefined }
     : fhirNext;
   return {
@@ -983,43 +976,11 @@ function buildWholeCourseResult(
 }
 
 /**
- * When a planned "then" spans a semicolon followed by a separately dosed
- * instruction, it may have joined two independent regimen tracks. Until the
- * grammar produces their true concurrent step structure, do not execute any
- * partial or falsely sequential timetable.
- *
- * This check concerns syntax/ownership, not a particular drug or body site.
- */
-function quarantineMergedIndependentRegimens(
-  results: ParseResult[],
-  segments: ReturnType<typeof parseSigSegments>,
-  plan: BoundaryPlan,
-  source: string,
-  options?: ParseOptions
-): void {
-  if (!plan.relations.some(edge => edge.kind === "sequence")) return;
-  for (const segment of segments) {
-    if (!segment.text.includes(";")) continue;
-    for (let offset = segment.text.indexOf(";"); offset >= 0;
-      offset = segment.text.indexOf(";", offset + 1)) {
-      const continuation = segment.text.slice(offset + 1).trim();
-      if (!continuation) continue;
-      const parsed = parseClauseState(continuation, options);
-      if (!parsed.primaryClause.dose) continue;
-      for (const result of results) {
-        quarantineSchedule(result, source, "independent-sequences-not-yet-resolved");
-      }
-      return;
-    }
-  }
-}
-
-/**
  * Invalid but explicitly framed medication cycles must not contribute their
  * day numbers as dose amounts. Keep original offsets intact by masking only
  * the invalid cycle frame while parsing the preceding administered amount.
- * The original source is still quarantined by composeRegimenPhases, including
- * the precise cycle error and all unparsed clinical text.
+ * composeRegimenPhases still retains the original source, the precise cycle
+ * error, and all unparsed clinical text.
  *
  * Ordinary "on day N" text is not a cycle frame; valid explicit cycles are
  * parsed normally without this fallback.
@@ -1085,9 +1046,9 @@ function scopeCoordinatedSegmentStates(
   boundaryPlan: BoundaryPlan,
   segments: ReturnType<typeof parseSigSegments>,
   input: string
-): ReturnType<typeof applyCoordinatedCadenceScopes> {
-  if (!boundaryPlan.relations.length) return [];
-  return applyCoordinatedCadenceScopes(
+): void {
+  if (!boundaryPlan.relations.length) return;
+  applyCoordinatedCadenceScopes(
     states.map((state, index) => ({
       state,
       start: segments[index].start,
@@ -1096,35 +1057,6 @@ function scopeCoordinatedSegmentStates(
     boundaryPlan,
     input
   );
-}
-
-/** A disjunction denotes alternative administrations, not simultaneous
- * required doses. Typed HPSG constructions identify it; this additive safety
- * gate only prevents unsafe execution without choosing an alternative.
- */
-function quarantineDisjunctiveScopeChoices(
-  results: ParseResult[],
-  scopes: ReturnType<typeof applyCoordinatedCadenceScopes>,
-  input: string
-): void {
-  if (!scopes.length) return;
-  const targets = new Set<number>();
-  for (const scope of scopes) {
-    if (scope.rule !== 'hpsg.cx.coordination.disjunctive-dosage-choice' &&
-        scope.rule !== 'hpsg.cx.coordination.ambiguous-shared-guard') continue;
-    if (scope.from >= 0) targets.add(scope.from);
-    if (scope.to >= 0) targets.add(scope.to);
-  }
-  for (const index of targets) {
-    const result = results[index];
-    if (result) {
-      const guarded = scopes.some(scope =>
-        scope.rule === 'hpsg.cx.coordination.ambiguous-shared-guard' &&
-        (scope.from === index || scope.to === index));
-      quarantineSchedule(result, input, guarded
-        ? 'ambiguous-shared-clinical-guard' : 'disjunctive-dose-choice');
-    }
-  }
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
@@ -1137,7 +1069,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyInstructionSemanticResolvers(state, options);
     states.push(state);
   }
-  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1148,7 +1080,6 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     rawResults.push(result);
   }
 
-  quarantineDisjunctiveScopeChoices(rawResults, scopes, input);
   propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
@@ -1158,11 +1089,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   results = expandAdministrationTargets(results, options, formatSig);
-  quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
   const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
-  if (parallel.kind === "unresolved") {
-    for (const item of results) quarantineSchedule(item, input, parallel.reason);
-  }
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -1178,7 +1105,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     applySiteCoding(state, options);
     states.push(state);
   }
-  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1209,7 +1136,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  quarantineDisjunctiveScopeChoices(lintParseResults, scopes, input);
   propagateTrailingSharedDuration(lintParseResults, segments, options);
   composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
@@ -1229,14 +1155,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     }
   }
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
-  const lintDosages = expandedLintResults.map(entry => entry.result);
-  quarantineMergedIndependentRegimens(
-    lintDosages, segments, boundaryPlan, input, options
-  );
-  const parallel = projectParallelRegimen(lintDosages, segments, boundaryPlan, input);
-  if (parallel.kind === "unresolved") {
-    for (const item of lintDosages) quarantineSchedule(item, input, parallel.reason);
-  }
   for (const entry of expandedLintResults) {
     for (const warning of entry.result.warnings) {
       if (!warning.startsWith("Unresolved schedule")) continue;
@@ -1287,7 +1205,7 @@ export async function parseSigAsync(
     await applyInstructionSemanticResolversAsync(state, options);
     states.push(state);
   }
-  const scopes = scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1298,7 +1216,6 @@ export async function parseSigAsync(
     rawResults.push(result);
   }
 
-  quarantineDisjunctiveScopeChoices(rawResults, scopes, input);
   propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
@@ -1308,11 +1225,7 @@ export async function parseSigAsync(
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   results = expandAdministrationTargets(results, options, formatSig);
-  quarantineMergedIndependentRegimens(results, segments, boundaryPlan, input, options);
   const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
-  if (parallel.kind === "unresolved") {
-    for (const item of results) quarantineSchedule(item, input, parallel.reason);
-  }
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -1334,32 +1247,60 @@ export function formatSig(
     // boolean conditions in an English/Thai realization attempt. For an
     // ordinary R5-compatible course, explicit format options request a fresh
     // realization instead of the potentially stale saved display string.
-    const requiresCourseSource = requiresR6CourseSourceForDisplay(oneOrCourse);
+    const prefersCourseSource = prefersR6CourseSourceForDisplay(oneOrCourse);
     if (oneOrCourse.renderedInstruction &&
         (options === undefined || options.realizationMode === "roundtrip" ||
-         oneOrCourse.step.length === 0 || requiresCourseSource)) {
+         oneOrCourse.step.length === 0 || prefersCourseSource)) {
       // An explicitly requested round trip preserves the *original* source
       // surface, not a normalized paraphrase. Edited R5 inputs have their
       // stale source invalidated by the R5->R6 reconciliation first.
       return oneOrCourse.renderedInstruction;
     }
     if (oneOrCourse.step.length === 0) return "";
-    if (requiresCourseSource) {
-      throw new Error("Cannot safely generate text from R6-only course metadata without renderedInstruction");
-    }
     const flattened = toFhirR5Dosages(oneOrCourse);
     let index = 0;
-    return oneOrCourse.step.map(step => joinGeneratedClauses(step.component.map(() =>
-      formatSig(flattened[index++], style, options)
-    ))).filter(Boolean).join(" then ");
+    return oneOrCourse.step.map(step => joinGeneratedClauses(step.component.map(component => {
+      const recognized = formatSig(flattened[index++], style, options);
+      const expressions: string[] = [];
+      for (const amount of component.doseAndRate ?? []) {
+        if (amount.doseExpression?.expression) {
+          expressions.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
+        }
+        if (amount.rateExpression?.expression) {
+          expressions.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
+        }
+      }
+      return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+    }))).filter(Boolean).join(" then ");
   }
   const dosage = oneOrCourse as EzDosage;
-  const maximumDoseSource = exactMaximumDoseSourceForDisplay(dosage);
-  if (maximumDoseSource !== undefined) return maximumDoseSource;
-  const quantity = dosage.doseAndRate?.[0];
-  // Ordinary R5 dosages have no custom extensions. Avoid scanning unrelated
-  // extension types or allocating temporary arrays while rendering them.
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
+  let hasDisplayRelevantModifier = false;
+  if (hasModifiers) {
+    try {
+      hasDisplayRelevantModifier = getDosageCondition(dosage) !== undefined ||
+        getDosageExcludedDates(dosage).length > 0 ||
+        getUnresolvedDosage(dosage) !== undefined;
+    } catch (error) {
+      if (!isUninterpretableModifier(error)) throw error;
+      // Formatting is a read path. Preserve literal wording when present and
+      // otherwise expose the independently understood fields for correction;
+      // unknown modifier data stays attached for downstream consumers and clinician correction.
+      if (dosage.text?.trim()) return dosage.text;
+      const clause = canonicalFromFhir(dosage);
+      const localization = resolveSigLocalization(options?.locale, options?.i18n);
+      return provisionalFhirDisplay(dosage, clause, style, localization, options);
+    }
+  }
+  if (hasMaximumDoseForDisplay(dosage)) {
+    if (typeof dosage.text === "string" && dosage.text.trim().length > 0) {
+      return dosage.text;
+    }
+    const clause = canonicalFromFhir(dosage);
+    const localization = resolveSigLocalization(options?.locale, options?.i18n);
+    return provisionalFhirDisplay(dosage, clause, style, localization, options, false);
+  }
+  const quantity = dosage.doseAndRate?.[0];
   // Until rich rate and relative-weight units have dedicated realizers, retain
   // the prescriber's original statement instead of silently dropping semantics.
   if (dosage.text && (
@@ -1369,11 +1310,7 @@ export function formatSig(
       quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
     dosage.condition?.length || dosage.safety || dosage.siteReference ||
     dosage.excludedDates?.length ||
-    (hasModifiers && (
-      getDosageCondition(dosage) !== undefined ||
-      getDosageExcludedDates(dosage).length > 0 ||
-      getUnresolvedDosage(dosage) !== undefined
-    )) ||
+    hasDisplayRelevantModifier ||
     (dosage.extension?.length && getDosageExcludedWeekdays(dosage).length > 0)
   )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
@@ -1419,7 +1356,7 @@ export function fromFhir(
 ): ParseBatchResult {
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
-    fromFhirDosageInternal(dosage, options, true)
+    fromFhirDosageInternal(dosage, options)
   );
   const primary = items[0] ?? fromFhirDosage({
     text: dosageDetails.renderedInstruction ?? ""
@@ -1430,35 +1367,20 @@ export function fromFhir(
     clauses.push(...item.meta.canonical.clauses);
     for (const warning of item.warnings) warnings.add(warning);
   }
-  // Importing structured R6 data must not depend on the presence of an
-  // optional human-readable instruction. If the renderer cannot faithfully
-  // express R6-only clinical semantics, preserve the full data and report
-  // that text generation needs an original renderedInstruction.
+  // Importing structured R6 data must not depend on an optional display string.
+  // Preserve the original object while realizing every supported component.
   const safeFormat = (style: "short" | "long"): string => {
     try {
       return formatSig(dosageDetails, style, options);
     } catch (error) {
-      if (!(error instanceof Error) ||
-          !(error.message.startsWith("Cannot safely generate text from R6-only course metadata") ||
-            isUninterpretableModifier(error))) {
-        throw error;
-      }
-      if (isUninterpretableModifier(error)) {
-        warnings.add(`Non-executable imported modifier; original FHIR retained: ${error.message}`);
-      } else {
-        warnings.add("Cannot render advanced R6 dosage without renderedInstruction");
-      }
-      const modifierImportError = isUninterpretableModifier(error);
+      if (!isUninterpretableModifier(error)) throw error;
+      warnings.add(`Non-executable imported modifier; original FHIR retained: ${error.message}`);
       const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
-        ? modifierImportError
-          ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบ modifier ที่ไม่รู้จัก"
-          : "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบข้อจำกัด R6 ที่ยังไม่แสดง"
-        : modifierImportError
-          ? "INCOMPLETE R6 course — unrecognized modifier requires review"
-          : "INCOMPLETE R6 course — advanced safety/phase rules require review";
+        ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบ modifier ที่ไม่รู้จัก"
+        : "INCOMPLETE R6 course — unrecognized modifier requires review";
       const localization = resolveSigLocalization(options?.locale, options?.i18n);
       const recognized = joinGeneratedClauses(items.map(item =>
-        modifierImportError && item.fhir.text?.trim()
+        item.fhir.text?.trim()
           ? item.fhir.text
           : provisionalFhirDisplay(
             item.fhir,
@@ -1553,7 +1475,7 @@ function provisionalFhirDisplay(
       maximums.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
     }
   }
-  const body = [recognized, ...maximums].filter(Boolean).join("; ");
+  const body = joinGeneratedClauses([recognized, ...maximums].filter(Boolean));
   if (!showIncompleteLabel) return body || "Structured FHIR data is retained";
   return body ? `${prefix}: ${body}` : `${prefix}. Structured FHIR data is retained.`;
 }
@@ -1566,14 +1488,13 @@ function isUninterpretableModifier(error: unknown): error is Error {
 
 function fromFhirDosageInternal(
   dosage: FhirDosage,
-  options: FormatOptions | undefined,
-  allowMissingMaximumSource: boolean
+  options: FormatOptions | undefined
 ): ParseResult {
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
-  const maximumDoseSource = allowMissingMaximumSource && hasMaximumDose &&
-      !(typeof dosage.text === "string" && dosage.text.trim().length > 0)
-    ? undefined
-    : exactMaximumDoseSourceForDisplay(dosage);
+  const maximumDoseSource = hasMaximumDose &&
+      typeof dosage.text === "string" && dosage.text.trim().length > 0
+    ? dosage.text
+    : undefined;
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
@@ -1591,7 +1512,7 @@ function fromFhirDosageInternal(
   const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
   // Never alter an imported FHIR resource when its modifier is unknown. The
   // original text and extension remain recoverable for correction or remap;
-  // the executable scheduler still rejects the very same modifier.
+  // the original modifier remains attached so downstream consumers can interpret or edit it.
   const label = String(options?.locale ?? "").toLowerCase().startsWith("th")
     ? "ข้อมูลบางส่วน — มีข้อจำกัดการใช้ยาที่ต้องตรวจสอบ"
     : "INCOMPLETE medication interpretation — unrecognized safety restriction";
@@ -1600,18 +1521,15 @@ function fromFhirDosageInternal(
     : provisionalFhirDisplay(dosage, clause, style, localization, options);
   const shortText = unresolvedModifier ? partial("short")
     : suppressMaximumDisplay
-      ? provisionalFhirDisplay(dosage, clause, "short", localization, options)
+      ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
       : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
   const computedLong = unresolvedModifier ? partial("long")
     : suppressMaximumDisplay
-      ? provisionalFhirDisplay(dosage, clause, "long", localization, options)
+      ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
       : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
   const longText = computedLong || dosage.text || "";
   if (!suppressMaximumDisplay && !unresolvedModifier) dosage.text = longText;
   const warnings = [...(clause.warnings ?? [])];
-  if (suppressMaximumDisplay) {
-    warnings.push("Cannot render FHIR maximum-dose fields without Dosage.text");
-  }
   if (unresolvedModifier) {
     warnings.push(`Non-executable imported modifier; original FHIR retained: ${unresolvedModifier}`);
   }
@@ -1634,9 +1552,9 @@ export function fromFhirDosage(
   dosage: FhirDosage,
   options?: FormatOptions
 ): ParseResult {
-  // Importers expose a visibly incomplete interpretation rather than a
-  // blank display; full SIG generation remains strict in formatSig().
-  return fromFhirDosageInternal(dosage, options, true);
+  // Keep source-less structured imports useful without overwriting the fact
+  // that no original Dosage.text was supplied.
+  return fromFhirDosageInternal(dosage, options);
 }
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
@@ -1779,16 +1697,6 @@ function buildParseResult(
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
 
-  // A typed HPSG frequency with several weekday anchors can denote
-  // alternatives or a contradiction, never silently more administrations.
-  // Clinical semantics are resolved here before the FHIR projection is
-  // exposed; quarantine uses the existing unresolved representation.
-  const weekly = clause.schedule;
-  const conflictingWeeklyFrequency = Boolean(weekly &&
-    weekly.period === 1 && weekly.periodUnit === 'wk' &&
-    weekly.frequency !== undefined &&
-    weekly.dayOfWeek && weekly.dayOfWeek.length > weekly.frequency &&
-    clause.evidence.some(evidence => evidence.rule === 'hpsg.lex.schedule.frequency'));
   const graphUnderstoodSpans: TextRange[] = [];
   for (const candidate of canonicalClauses) {
     const graph = candidate.instructionGraph;
@@ -1852,7 +1760,7 @@ function buildParseResult(
     }
   }
 
-  const result: ParseResult = {
+  return {
     fhir,
     shortText,
     longText,
@@ -1868,10 +1776,6 @@ function buildParseResult(
       prnReasonLookups
     }
   };
-  if (conflictingWeeklyFrequency) {
-    quarantineSchedule(result, state.input, "weekly-weekday-frequency-conflict");
-  }
-  return result;
 }
 
 function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {

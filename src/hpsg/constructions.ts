@@ -336,7 +336,7 @@ export function selectHpsgCoordinationScopeConstruction(
     construction: {
       kind: "coordination",
       operation: "scope",
-      headSide: operation === "quarantine-disjunctive-dosages"
+      headSide: operation === "preserve-disjunctive-dosages"
         ? undefined
         : operation === "share-leading-adjuncts" ? "left" : "right",
       leftType: "administration-clause",

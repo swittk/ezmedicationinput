@@ -248,7 +248,7 @@ export function projectHpsgSignToState(
         state.dose = clinical.projectedDose.value;
         state.unit = clinical.projectedDose.unit;
       } else {
-        // A rate or quarantined expression is not a scalar medication dose.
+        // A rate or unresolved expression is not a scalar medication dose.
         delete state.primaryClause.dose;
       }
     } else {

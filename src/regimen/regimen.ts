@@ -1,7 +1,5 @@
 import { normalizeOpenEndedSchedule } from './open-ended';
-import { normalizeTemporalBoundArtifacts, quarantineAmbiguousTemporalBounds } from './temporal-artifact-ownership';
-import { recognizeCycles } from './cycles';
-import { quarantineSchedule } from './admissibility';
+import { normalizeTemporalBoundArtifacts } from './temporal-artifact-ownership';
 import { normalizeAnchoredBounds, normalizeClockFrequency } from './bounds';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -67,45 +65,11 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
   return (left?.length ?? 0) === (right?.length ?? 0) && (left ?? []).every(v => (right?.indexOf(v) ?? -1) >= 0);
 }
 
-/** FHIR R5 tim-10 plus the clinically meaningful count/clock consistency
- * FHIR intentionally leaves to implementers. Refuse a fabricated executable
- * schedule while retaining the dose, text, and unresolved warning.
- */
-function quarantineConflictingTiming(item: ParseResult, source: string): boolean {
-  const repeat = item.fhir.timing?.repeat;
-  if (!repeat) return false;
-  if (repeat.when?.length && repeat.timeOfDay?.length) {
-    quarantineSchedule(item, source, 'incompatible-event-and-clock');
-    return true;
-  }
-  if (repeat.timeOfDay?.length && repeat.periodUnit === 'h' &&
-      repeat.period !== undefined && repeat.period > 0 &&
-      Number.isInteger(24 / repeat.period)) {
-    // A complete explicit daily clock list must agree with the interval.
-    // q8h at 08:00 and 20:00 is two clocks/day but requires three.
-    // Do not silently replace the q8h prescription by BID.
-    if (new Set(repeat.timeOfDay).size !== 24 / repeat.period) {
-      quarantineSchedule(item, source, 'interval-clock-count-conflict');
-      return true;
-    }
-  }
-  if (repeat.frequency && repeat.period === 1 && repeat.periodUnit === 'd' &&
-      repeat.timeOfDay?.length) {
-    const distinctClocks = new Set(repeat.timeOfDay).size;
-    if (distinctClocks !== repeat.frequency) {
-      quarantineSchedule(item, source, 'frequency-clock-count-conflict');
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Compose a whole predecessor phase, preserving explicit values and refusing arbitrary anchor selection. */
+/** Compose a whole predecessor phase, preserving explicit values without inventing an arbitrary anchor. */
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
     const source = segments[index]?.text ?? '';
-    if (quarantineAmbiguousTemporalBounds(results[index], source, options)) continue;
     const temporalChanged = normalizeTemporalBoundArtifacts(results[index], source, options);
     const openEndedChanged = normalizeOpenEndedSchedule(results[index], source, options);
     if (temporalChanged || openEndedChanged) {
@@ -113,9 +77,6 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
       results[index].shortText = render(results[index].fhir, 'short', options);
       results[index].fhir.text = results[index].longText;
     }
-    const invalid = recognizeCycles(source, options).find(c => c.error);
-    if (invalid) quarantineSchedule(results[index], segments[index].text, invalid.error!);
-    quarantineConflictingTiming(results[index], source);
   }
   if (results.length < 2) return [];
   const graph = buildRegimenGraph(plan, segments), evidence: InheritanceEvidence[] = [];
@@ -160,15 +121,6 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
         }
       }
       if (!schedule.dayOfWeek?.length && schedule.frequency === undefined && schedule.period === undefined && !schedule.timingCode && !schedule.when?.length && !schedule.timeOfDay?.length) continue;
-      if (start && schedule.boundsStart && schedule.boundsStart < start) {
-        quarantineSchedule(item, segments[index].text, 'phase-start-precedes-predecessor-end');
-        continue;
-      }
-      if (!schedule.when?.length && !schedule.timeOfDay?.length && !sharedAnchors &&
-          schedules.some(s => s?.when?.length || s?.timeOfDay?.length)) {
-        quarantineSchedule(item, segments[index].text, 'ambiguous-inherited-clock');
-        continue;
-      }
       const fields: string[] = [];
       if (!schedule.boundsStart && start) { schedule.boundsStart = start; fields.push('boundsStart'); }
       // A clock explicitly supplied by this phase overrides inherited meal/clock anchors together.
@@ -188,7 +140,6 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
       normalizeAnchoredBounds(repeat, schedule);
       normalizeClockFrequency(repeat);
       item.fhir.timing.repeat = repeat;
-      if (quarantineConflictingTiming(item, segments[index].text)) continue;
       item.longText = render(item.fhir, 'long', options);
       item.shortText = render(item.fhir, 'short', options);
       item.fhir.text = item.longText;

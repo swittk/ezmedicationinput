@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { calculateTotalUnits, lintSig, nextDueDoses } from '../src/index';
+import {
+  calculateTotalUnits, getDosageCondition, getDosageExcludedWeekdays,
+  lintSig, nextDueDoses
+} from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import { parseClauseState } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
@@ -89,7 +92,7 @@ describe('HPSG coordination cadence scope', () => {
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightHasCadenceConflict: true }))).toBeUndefined();
   });
 
-  it('classifies disjunction as alternative dosage, never distributive cadence', () => {
+  it('classifies disjunction as an alternative dosage construction', () => {
     const selected = selectHpsgCoordinationScopeConstruction(scopeFacts({
       relation: {
         ...scopeFacts().relation,
@@ -98,7 +101,13 @@ describe('HPSG coordination cadence scope', () => {
         rule: 'regimen.disjunctive-dosage-choice'
       }
     }));
-    expect(selected?.semantic.construction.operation).toBe('quarantine-disjunctive-dosages');
+    expect(selected?.semantic.construction.id)
+      .toBe('hpsg.cx.coordination.disjunctive-dosage-choice');
+    expect(selected?.construction).toMatchObject({
+      kind: 'coordination',
+      leftType: 'administration-clause',
+      rightType: 'administration-clause'
+    });
     expect(selected?.construction.headSide).toBeUndefined();
   });
 
@@ -116,12 +125,14 @@ describe('HPSG coordination cadence scope', () => {
   });
 
   it.each([
-    'instill 1 drop in left eye or 2 drops in right eye twice daily',
-    'instill 1 drop in left eye once daily or 2 drops in right eye twice daily',
-    'instill 1 drop in left eye at 08:00 or 2 drops in right eye at 20:00',
-    'หยอดตาซ้าย 1 หยด วันละครั้ง หรือ ตาขวา 2 หยด วันละ 2 ครั้ง',
-    'หยอดตาซ้าย 1 หยด เวลา 08:00 หรือ ตาขวา 2 หยด เวลา 20:00'
-  ])('retains but does not execute a disjunctive dosing choice: %s', async input => {
+    ['instill 1 drop in left eye or 2 drops in right eye twice daily', [2, 2], [undefined, undefined]],
+    ['instill 1 drop in left eye once daily or 2 drops in right eye twice daily', [1, 2], [undefined, undefined]],
+    ['instill 1 drop in left eye at 08:00 or 2 drops in right eye at 20:00', [undefined, undefined], [['08:00:00'], ['20:00:00']]],
+    ['หยอดตาซ้าย 1 หยด วันละครั้ง หรือ ตาขวา 2 หยด วันละ 2 ครั้ง', [1, 2], [undefined, undefined]],
+    ['หยอดตาซ้าย 1 หยด เวลา 08:00 หรือ ตาขวา 2 หยด เวลา 20:00', [undefined, undefined], [['08:00:00'], ['20:00:00']]]
+  ] as const)('keeps both editable disjunctive dosage suggestions: %s', async (
+    input, expectedFrequencies, expectedTimes
+  ) => {
     const plan = createBoundaryPlan(input);
     expect(plan.relations).toContainEqual(expect.objectContaining({
       kind: 'alternative',
@@ -137,55 +148,72 @@ describe('HPSG coordination cadence scope', () => {
       linted.items.map(entry => entry.result)
     ]) {
       expect(items).toHaveLength(2);
-      for (const item of items) {
-        expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
-        expect(item.fhir.timing).toBeUndefined();
-        expect(item.warnings).toContainEqual(
-          expect.stringContaining('disjunctive-dose-choice')
-        );
-        expect(item.fhir.text).toBe(input);
-      }
+      expect(items.map(item => item.fhir.site?.text)).toEqual(['left eye', 'right eye']);
+      expect(items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+        .toEqual([1, 2]);
+      expect(items.map(item => item.meta.canonical.clauses[0].schedule?.frequency))
+        .toEqual(expectedFrequencies);
+      expect(items.map(item => item.fhir.timing?.repeat?.frequency))
+        .toEqual(expectedFrequencies);
+      expect(items.map(item => item.fhir.timing?.repeat?.timeOfDay))
+        .toEqual(expectedTimes);
+      expect(items.every(item => item.warnings.length === 0)).toBe(true);
     }
-    expect(linted.issues).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining('disjunctive-dose-choice')
-    }));
-    expect(() => nextDueDoses(sync.fhir, {
-      from: '2026-10-22T08:00:00+07:00',
-      orderedAt: '2026-10-22T08:00:00+07:00',
-      timeZone: 'Asia/Bangkok',
-      limit: 4
-    })).toThrow(/unresolved/i);
+    expect(linted.issues).toEqual([]);
   });
 
   it.each([
-    'instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160',
-    'instill 1 drop in left eye once daily and 2 drops in right eye twice daily unless BP < 100',
-    'instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday',
-    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily only if BP > 160',
-    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily except Sunday'
-  ])('never executes a coordinated regimen when trailing guard/exclusion scope is ambiguous: %s', async input => {
+    ['instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160',
+      [undefined, 2], 'condition', 'gt', 160],
+    ['instill 1 drop in left eye once daily and 2 drops in right eye twice daily unless BP < 100',
+      [1, 2], 'condition', 'lt', 100],
+    ['instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday',
+      [undefined, 2], 'exclusion', undefined, undefined],
+    ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily only if BP > 160',
+      [undefined, undefined, 2], 'condition', 'gt', 160],
+    ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily except Sunday',
+      [undefined, undefined, 2], 'exclusion', undefined, undefined]
+  ] as const)('keeps locally parsed cadence and an editable trailing guard/exclusion: %s', async (
+    input, expectedFrequencies, guardKind, operation, value
+  ) => {
     const sync = parseSig(input);
     const asyncParsed = await parseSigAsync(input);
     const linted = lintSig(input);
     const expectedItems = input.includes('and 1 drop in both eyes') ? 3 : 2;
     for (const result of [sync, asyncParsed]) {
       expect(result.items).toHaveLength(expectedItems);
-      for (const item of result.items) {
-        expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
-        expect(item.fhir.timing).toBeUndefined();
-        expect(item.warnings).toContainEqual(
-          expect.stringContaining('ambiguous-shared-clinical-guard')
-        );
+      expect(result.items.map(item => item.fhir.site?.text)).toEqual(
+        expectedItems === 3
+          ? ['left eye', 'right eye', 'both eyes']
+          : ['left eye', 'right eye']
+      );
+      expect(result.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+        .toEqual(expectedItems === 3 ? [1, 2, 1] : [1, 2]);
+      expect(result.items.map(item => item.fhir.timing?.repeat?.frequency))
+        .toEqual(expectedFrequencies);
+      const guarded = result.items.at(-1)!;
+      if (guardKind === 'condition') {
+        const condition = getDosageCondition(guarded.fhir);
+        if (input.includes('unless')) {
+          expect(condition).toMatchObject({
+            kind: 'not',
+            condition: { kind: 'measurement', name: 'bp', operation, value }
+          });
+        } else {
+          expect(condition).toMatchObject({
+            kind: 'measurement', name: 'bp', operation, value
+          });
+        }
+        expect(guarded.fhir.text).toMatch(/(?:only if|unless) BP/u);
+      } else {
+        expect(getDosageExcludedWeekdays(guarded.fhir)).toEqual(['sun']);
+        expect(guarded.fhir.timing?.repeat?.dayOfWeek)
+          .toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+        expect(guarded.fhir.text).toContain('except Sunday');
       }
-      expect(() => nextDueDoses(result, {
-        from: '2026-10-22T08:00:00+07:00',
-        orderedAt: '2026-10-22T08:00:00+07:00',
-        timeZone: 'Asia/Bangkok'
-      })).toThrow(/unresolved/i);
+      expect(result.items.every(item => item.warnings.length === 0)).toBe(true);
     }
-    expect(linted.issues).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining('ambiguous-shared-clinical-guard')
-    }));
+    expect(linted.issues).toEqual([]);
   });
 
   it.each([
@@ -383,32 +411,21 @@ describe('HPSG coordination cadence scope', () => {
     )).toBe(true);
   });
 
-  it('keeps independently recognized alternative cadences visible but non-executable', () => {
+  it('keeps independently recognized alternative cadences in editable suggestions', () => {
     const input = 'instill 1 drop in left eye once daily or 2 drops in right eye twice daily';
     const parsed = parseSig(input);
     expect(parsed.items).toHaveLength(2);
-    expect(parsed.items.map(item => item.meta.canonical.clauses[0].provisionalSchedule?.frequency))
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.frequency))
       .toEqual([1, 2]);
     expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['left eye', 'right eye']);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
       .toEqual([1, 2]);
-    for (const item of parsed.items) {
-      expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
-      expect(item.fhir.timing).toBeUndefined();
-      expect(item.fhir.text).toBe(input);
-      expect(item.warnings).toContainEqual(expect.stringContaining('disjunctive-dose-choice'));
-    }
-    expect(() => nextDueDoses(parsed.fhir, {
-      from: '2026-10-22T08:00:00+07:00',
-      orderedAt: '2026-10-22T08:00:00+07:00',
-      timeZone: 'Asia/Bangkok', limit: 4
-    })).toThrow(/unresolved/i);
-    expect(() => calculateTotalUnits({
-      dosage: parsed.fhir,
-      from: '2026-10-22T08:00:00+07:00',
-      orderedAt: '2026-10-22T08:00:00+07:00',
-      timeZone: 'Asia/Bangkok', durationValue: 7, durationUnit: 'd'
-    })).toThrow(/unresolved/i);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([1, 2]);
+    expect(parsed.items.map(item => item.longText)).toEqual([
+      'Instill 1 drop once daily in the left eye.',
+      'Instill 2 drops twice daily in the right eye.'
+    ]);
+    expect(parsed.items.every(item => item.warnings.length === 0)).toBe(true);
   });
 
   it('scopes trailing course bounds over the coordination phrase while retaining local bounds', () => {
@@ -590,12 +607,20 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([1, 2]);
   });
 
-  it('rejects a conflicting cadence donor before either daughter is lowered', () => {
+  it('keeps the supported local cadence when an additional cadence is unresolved', () => {
     const parsed = parseSig(
       'instill 1 drop in left eye and 2 drops in right eye twice daily q8h'
     );
     expect(parsed.items).toHaveLength(2);
-    expect(parsed.items.every(item => item.fhir.timing === undefined)).toBe(true);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['left eye', 'right eye']);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency))
+      .toEqual([undefined, 2]);
+    expect(parsed.items[1].meta.leftoverText).toContain('q8h');
+    expect(parsed.items[1].warnings).toContainEqual(
+      expect.stringContaining('unresolved-timing-conflict')
+    );
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(false);

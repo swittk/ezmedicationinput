@@ -52,7 +52,10 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
       timeZone: "Asia/Bangkok",
       limit: 2
     };
-    expect(() => nextDueDoses(result, options)).toThrow("evaluateCondition");
+    expect(nextDueDoses(result, options)).toEqual([
+      "2026-10-19T08:00:00+07:00",
+      "2026-10-19T20:00:00+07:00"
+    ]);
     expect(nextDueDoses(result, {
       ...options,
       evaluateCondition: condition => evaluateMedicationCondition(condition, { bp: 160 })
@@ -77,26 +80,53 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     expect(nextDueDoses(toFhirR5Dosages(result.fhirNext), options)).toEqual(nextR6);
   });
 
-  it("preserves unsupported R6 course features without pretending to execute them", () => {
+  it("preserves and best-effort schedules an R6 whole-course repeat cycle", () => {
     const base = parseSig("1 tab daily").fhirNext;
     const course = { ...base, repeatCycle: { value: 28, unit: "d" } };
     expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
-    expect(() => nextDueDoses(course, {
+    expect(nextDueDoses(course, {
       from: "2026-10-19T08:00:00+07:00",
-      timeZone: "Asia/Bangkok"
-    })).toThrow("R6 course");
+      orderedAt: "2026-10-19T08:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 4
+    })).toEqual([
+      "2026-10-19T09:00:00+07:00",
+      "2026-10-20T09:00:00+07:00",
+      "2026-10-21T09:00:00+07:00",
+      "2026-10-22T09:00:00+07:00"
+    ]);
   });
 
-  it("recovers a valid duplicate retained R6 course after a damaged first copy", () => {
+  it("recovers retained R6 meaning while preserving malformed and conflicting provenance", () => {
     const expected = parseSig(
       "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid"
     ).fhirNext;
+    const semantics = (course: FhirR6DosageDetails) => course.step.map(step => ({
+      start: step.start?.offsetDuration,
+      end: step.end?.offsetDuration,
+      component: step.component.map(component => ({
+        site: component.site?.concept?.text,
+        timingCode: component.timing?.code?.text,
+        dose: component.doseAndRate?.[0]?.doseQuantity
+      }))
+    }));
     const r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
       ReturnType<typeof toFhirR5Dosages>;
     expect(r5).toHaveLength(6);
     const first = r5[0].modifierExtension?.find(ext => ext.url.includes("course-details"));
     first!.extension![0].valueString = "{bad";
-    expect(toDosageDetails(r5)).toEqual(expected);
+    const recovered = toDosageDetails(r5);
+    expect(recovered.renderedInstruction).toBe(expected.renderedInstruction);
+    expect(semantics(recovered)).toEqual(semantics(expected));
+    expect(recovered.extension).toContainEqual(expect.objectContaining({
+      url: expect.stringContaining("medication-course-reconciliation-warning"),
+      valueString: expect.stringContaining("Malformed retained R6 course metadata")
+    }));
+    const recoveredSources = recovered.extension?.filter(extension =>
+      extension.url.includes("medication-course-reconciliation-source")
+    ) ?? [];
+    expect(recoveredSources).toHaveLength(2);
+    expect(recoveredSources.some(extension => extension.valueString?.includes("{bad"))).toBe(true);
 
     const conflicting = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
       ReturnType<typeof toFhirR5Dosages>;
@@ -104,7 +134,17 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     const altered = JSON.parse(second!.extension![0].valueString!) as FhirR6DosageDetails;
     altered.step[0].end!.offsetDuration!.value = 8;
     second!.extension![0].valueString = JSON.stringify(altered);
-    expect(() => toDosageDetails(conflicting)).toThrow(/Conflicting retained R6/);
+    const reconciled = toDosageDetails(conflicting);
+    expect(semantics(reconciled)).toEqual(semantics(expected));
+    expect(reconciled.extension).toContainEqual(expect.objectContaining({
+      url: expect.stringContaining("medication-course-reconciliation-warning"),
+      valueString: expect.stringContaining("snapshots differ")
+    }));
+    const conflictingSources = reconciled.extension?.filter(extension =>
+      extension.url.includes("medication-course-reconciliation-source")
+    ) ?? [];
+    expect(conflictingSources).toHaveLength(2);
+    expect(new Set(conflictingSources.map(extension => extension.valueString)).size).toBe(2);
   });
 
   it("keeps optional real R6 semantics on normal EZMED dosages", () => {

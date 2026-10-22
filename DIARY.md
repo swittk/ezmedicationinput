@@ -2731,3 +2731,25 @@ Verified three new CodeRabbit findings and fixed all three. Finite-cycle validat
 - Verified the new review issue: whole-course roundToMultiple updated totalUnits before container math but left estimated volume and active-ingredient amount at the unrounded stage totals. This undercounted bottles and was inconsistent with the single-dosage path. Course rounding now scales estimated usage to the rounded dispensed supply and derives the ingredient quantity from the updated estimate and product strength. Existing dosage stages/schedule remain untouched; there is no repeated parser call.
 - Found and fixed adjacent fractional-package parity bug: one half-bottle dosage returned 60 mL requested from a 120 mL package, but the same dosage as a one-item course returned 120 mL despite the same single physical container. Course totalContainerQuantity now reflects requested amount, not full package capacity, matching the single-dose path.
 - Added regressions for eye drops crossing bottle boundaries (with ingredient strength), parallel-course rounding, all four supported course representations and fractional package units. Full 1308/1308 source tests across 41 files pass; dist tests 4/4, CJS+ESM builds pass. No version/publish/merge.
+
+
+## 2026-10-23 — 0.2 permissiveness reset: parser/suggester, not gatekeeper
+
+Owner rejected the 0.2 quarantine/refusal direction. The parser is clinician-reviewed best effort: partial understanding must preserve useful dose, route, site, timing, source, FHIR metadata and editability instead of deleting fields or refusing the suggestion. Exact scheduling/supply may label assumptions or maximum/relative quantities when facts are incomplete, but parser uncertainty is not grounds for blanking the interpretation.
+
+Emergency rewrite completed:
+- destructive parser-level schedule/dose quarantine removed; unresolved fragments are warnings/source evidence only
+- event timing and exact clock timing may coexist
+- cadence/clock conflicts retain the best parsed suggestion for clinician correction
+- disjunctive alternatives retain typed daughters and shared trailing cadence rather than losing timing
+- OD in ophthalmic context (including generic verbs such as Apply) resolves as right eye without suppressing BID/QID cadence
+- inclusive "up to/through DATE" bounds retained; Thai Buddhist attached date forms resolve correctly
+- monthly ordinal weekday schedules are implemented rather than rejected
+- recurring on/off courses are represented and scheduled rather than quarantined
+- frequency/period ranges and incomplete numeric constraints produce useful best-effort or labelled maximum quantities where calculable
+- weight-based quantities remain relative (e.g. mg/kg, ug/kg) without patient weight and become absolute when weight is supplied
+- unknown/malformed R5/R6 metadata remains attached and editable; live edited fields beat stale rendered text while original snapshots remain provenance
+- unbounded sequential transitions schedule only the known prefix; they do not run later phases concurrently
+- old tests whose sole oracle was "throw", "timing undefined", or "quarantine" were replaced with clinical meaning/data-preservation oracles
+
+Validation on the combined rewrite: build/type declarations pass; 1848/1848 source tests and 4/4 dist tests pass. A 353-case old-vs-new corpus inspection found apparent shape losses were corrections of old misparses (e.g. interval represented as frequency, infusion rates represented as scalar doses, dates interpreted as body sites, OD/BID interpreted as topical once-daily). Interleaved 353-case throughput benchmark is effectively flat vs old master (~0.99x new/old median time); ordinary simple and PRN paths are flat/slightly faster, multi-eye taper materially faster. A mixed event+clock case is slower only because old master aborted/quarantined it while current code actually parses and realizes both meanings.

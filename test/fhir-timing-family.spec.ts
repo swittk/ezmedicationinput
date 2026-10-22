@@ -10,28 +10,27 @@ const options = {
 };
 
 describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
-  it("never emits both when and timeOfDay in a single executable dosage", () => {
+  it("preserves event timing and exact clocks together for clinician review", () => {
     const text = "1 tab po before breakfast and at 08:00";
     const parsed = parseSig(text);
-    for (const dosage of parsed.fhir) {
-      const repeat = dosage.timing?.repeat;
-      expect(!(repeat?.when?.length && repeat.timeOfDay?.length)).toBe(true);
-    }
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("incompatible-event-and-clock")
-    );
-    expect(parsed.fhir[0].text).toBe(text);
-    expect(() => nextDueDoses(parsed.fhir, options)).toThrow(/unresolved/i);
+    const repeat = parsed.fhir[0].timing?.repeat;
+    expect(repeat?.when).toEqual(["ACM"]);
+    expect(repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.warnings).toEqual([]);
+    expect(nextDueDoses(parsed.fhir, options).length).toBeGreaterThan(0);
   });
 
-  it("rejects a frequency/clock contradiction instead of scheduling two 'daily' doses", () => {
+  it("keeps a daily cadence plus two explicit clocks instead of erasing timing", () => {
     const text = "1 tab po daily at 08:00 and 20:00";
     const parsed = parseSig(text);
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("frequency-clock-count-conflict")
-    );
-    expect(parsed.fhir[0].timing).toBeUndefined();
-    expect(parsed.fhir[0].text).toBe(text);
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      timeOfDay: ["08:00:00", "20:00:00"]
+    });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
   });
 
   it("permits two explicit BID clocks without inventing an extra dose", () => {

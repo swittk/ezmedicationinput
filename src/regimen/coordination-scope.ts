@@ -1,5 +1,3 @@
-import { parseMedicationGuard } from '../medication-condition';
-import { matchCalendarExclusion } from '../clinical-safety';
 import { selectHpsgCoordinationScopeConstruction } from '../hpsg/constructions';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
@@ -342,12 +340,7 @@ function factsFor(
     leftHasFrontedPrn: isFrontedEvidence(leftClause, 'hpsg.lex.prn'),
     rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'hpsg.lex.schedule.'),
     rightHasTrailingPrn: isTrailingEvidence(rightClause, 'hpsg.lex.prn'),
-    rightHasTrailingSafetyGuard: Boolean(
-      rightClause.warnings?.some(warning =>
-        warning.includes('ambiguous-shared-clinical-guard')) ||
-      parseMedicationGuard(right.state.input) ||
-      matchCalendarExclusion(right.state.input)
-    ),
+    rightHasTrailingSafetyGuard: false,
     rightHasCadenceConflict: hasCadenceConflict(right.state)
   };
 }
@@ -408,39 +401,11 @@ export function applyCoordinatedCadenceScopes(
       inheritedAdministrationSegments.has(relation.from)
     ));
     if (!selected) continue;
-    if (selected.semantic.construction.operation === 'quarantine-disjunctive-dosages' ||
-        selected.semantic.construction.operation === 'quarantine-ambiguous-shared-guard') {
-      if (pass.direction === 'leading') continue;
-      // Alternative administrations are non-executable canonical daughters.
-      // Remove their schedules before either daughter can be lowered to FHIR;
-      // the downstream admissibility projection only serializes this already
-      // typed decision as the standard unresolved marker.
-      const reason = selected.semantic.construction.operation === 'quarantine-disjunctive-dosages'
-        ? 'disjunctive-dose-choice' : 'ambiguous-shared-clinical-guard';
-      const warning = `Unresolved schedule (${reason}): ${source}`;
-      for (const item of [left, right]) {
-        // Retain each alternative's actual parsed cadence for review, while
-        // ensuring neither choice can be emitted as a mandatory administration.
-        const clause = item.state.primaryClause;
-        if (clause.schedule) clause.provisionalSchedule = clause.provisionalSchedule ?? clause.schedule;
-        clause.schedule = undefined;
-        if (!item.state.primaryClause.warnings?.some(text => text === warning)) {
-          item.state.primaryClause.warnings = [
-            ...(item.state.primaryClause.warnings ?? []), warning
-          ];
-        }
-        if (item.state.warnings.indexOf(warning) < 0) item.state.warnings.push(warning);
-      }
-      applications.push({
-        rule: selected.semantic.construction.id,
-        from: states.indexOf(left),
-        to: states.indexOf(right),
-        fields: []
-      });
-      continue;
-    }
+    const alternative = selected.semantic.construction.operation ===
+      'preserve-disjunctive-dosages';
     const leading = selected.semantic.construction.operation === 'share-leading-adjuncts';
-    const trailing = selected.semantic.construction.operation === 'share-trailing-cadence' ||
+    const trailing = alternative ||
+      selected.semantic.construction.operation === 'share-trailing-cadence' ||
       selected.semantic.construction.operation === 'share-trailing-adjuncts';
     if (!leading && !trailing) continue;
     if (leading !== (pass.direction === 'leading')) continue;
@@ -473,7 +438,9 @@ export function applyCoordinatedCadenceScopes(
         end: relation.range.end - recipient.start,
         text: source.slice(relation.range.start, relation.range.end)
       }],
-      note: `Scoped by ${relation.rule}; adjunct daughter is the ${leading ? 'left' : 'right'} administration clause.`
+      note: alternative
+        ? `Scoped by ${relation.rule}; the right adjunct scopes over both alternative administration clauses.`
+        : `Scoped by ${relation.rule}; adjunct daughter is the ${leading ? 'left' : 'right'} administration clause.`
     };
     if (scheduleMerge.fields.length && scheduleMerge.schedule) {
       scheduleMerge.schedule.evidence = [...(targetClause.schedule?.evidence ?? [])];

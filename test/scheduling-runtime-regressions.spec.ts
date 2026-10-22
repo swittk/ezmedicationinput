@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSig, nextDueDoses, toFhirR5Dosages, fromFhir } from "../src";
+import { parseSig, nextDueDoses, calculateTotalUnits, toFhirR5Dosages, fromFhir } from "../src";
 import type { FhirR6DosageDetails } from "../src";
 
 const base = {
@@ -146,23 +146,41 @@ describe("dose scheduling runtime guarantees", () => {
     })).toEqual([]);
   });
 
-  it("refuses only safety maxima that genuinely require unavailable clinical data", () => {
+  it("keeps ordinary schedule opportunities visible when maxima need extra clinical context", () => {
     const source = parseSig("1 tab PO BID").fhir[0];
-    expect(() => nextDueDoses({
+    const period = {
       ...source,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       maxDosePerPeriod: [{
         numerator: { value: 20, unit: "mg" },
         denominator: { value: 1, unit: "d" }
       }]
-    }, base)).toThrow("compatible units or a medication strength");
+    };
+    expect(nextDueDoses(period, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: period, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({ quantityKind: "maximum", totalUnits: 6 });
 
-    expect(() => nextDueDoses({
-      ...source, maxDosePerLifetime: { value: 4, unit: "tab" }
-    }, base)).toThrow("Lifetime dose maximum");
+    const lifetime = { ...source, maxDosePerLifetime: { value: 4, unit: "tab" } };
+    expect(nextDueDoses(lifetime, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: lifetime, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({ quantityKind: "maximum", totalUnits: 4 });
 
-    expect(() => nextDueDoses({
+    const perAdministration = {
       ...source, maxDosePerAdministration: { value: 0.5, unit: "tab" }
-    }, base)).toThrow("exceeds per-administration maximum");
+    };
+    expect(nextDueDoses(perAdministration, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: perAdministration, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({
+      totalUnits: 6,
+      unit: "tab",
+      quantityKind: "maximum",
+      explanation: expect.stringContaining("unevaluable maximum-dose constraint")
+    });
   });
 });

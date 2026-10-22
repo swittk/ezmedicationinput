@@ -125,8 +125,8 @@ export type RegimenSemanticOperation =
   | 'share-trailing-cadence'
   | 'share-trailing-adjuncts'
   | 'share-leading-adjuncts'
-  | 'quarantine-disjunctive-dosages'
-  | 'quarantine-ambiguous-shared-guard';
+  | 'preserve-disjunctive-dosages'
+  | 'preserve-ambiguous-shared-guard';
 
 export interface RegimenSemanticConstruction {
   id: string;

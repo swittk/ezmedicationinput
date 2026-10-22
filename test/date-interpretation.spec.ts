@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { calculateTotalUnits, findMedicationDateListSpans, formatSig, getUnresolvedDosage, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
+import { calculateTotalUnits, findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
 import { lexInput } from "../src/lexer/lex";
 import { parseSig } from "./helpers/r5-parser";
 
@@ -616,56 +616,63 @@ describe("calendar date interpretation", () => {
     }
   });
 
-  it("quarantines unresolved Thai attached ISO bounds and event lists", () => {
+  it("resolves attached Buddhist YMD dates in Thai medication context", () => {
+    const options = { locale: "th", datePolicy: { referenceDate: "2026-10-22" } };
+    const bounded = parseSig("รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01", options);
+    expect(bounded.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(bounded.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-01" }, frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(bounded.meta.canonical.clauses[0]?.schedule?.boundsEnd).toBe("2026-11-01");
+    expect(bounded.meta.leftoverText).toBeUndefined();
+    expect(bounded.warnings).toEqual([]);
+    expect(bounded.longText).toContain("1/11/2569");
+
+    const dated = parseSig("รับประทาน 1 เม็ด วันที่2569-10-25และ2569-11-01", options);
+    expect(dated.fhir.timing?.event).toEqual(["2026-10-25", "2026-11-01"]);
+    expect(dated.meta.canonical.clauses[0]?.schedule?.calendarEvents).toEqual([
+      expect.objectContaining({
+        isoDate: "2026-10-25", calendar: "buddhist", calendarYear: 2569
+      }),
+      expect.objectContaining({
+        isoDate: "2026-11-01", calendar: "buddhist", calendarYear: 2569
+      })
+    ]);
+    expect(dated.meta.leftoverText).toBeUndefined();
+    expect(dated.warnings).toEqual([]);
+  });
+
+  it("keeps the known daily suggestion and raw text for invalid or ambiguous attached dates", () => {
     const cases = [
       {
-        input: "รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01",
-        reason: "invalid-or-ambiguous-calendar-bound",
-        evidence: "ถึง2569-11-01"
-      },
-      {
-        input: "รับประทาน 1 เม็ด วันที่2569-10-25และ2569-11-01",
-        reason: "invalid-or-ambiguous-calendar-date",
-        evidence: "วันที่2569-10-25และ2569-11-01"
-      },
-      {
         input: "รับประทาน 1 เม็ด ทุกวัน ถึง31/02/2569",
-        reason: "invalid-or-ambiguous-calendar-bound",
-        evidence: "ถึง31/02/2569"
+        evidence: "ถึง31/02/2569",
+        options: { locale: "th", datePolicy: { referenceDate: "2026-10-22" } }
       },
       {
         input: "take 1 tab daily until 2026-10-25 and 2026-11-01",
-        reason: "invalid-or-ambiguous-calendar-bound",
-        evidence: "until 2026-10-25 and 2026-11-01"
+        evidence: "until 2026-10-25 and 2026-11-01",
+        options: { locale: "en-GB", datePolicy: { referenceDate: "2026-10-22" } }
       }
     ];
-    const options = { locale: "th", datePolicy: { referenceDate: "2026-10-22" } };
     for (const item of cases) {
-      const parsed = parseSig(item.input, options);
-      const batch = parseBatch(item.input, options);
-      expect(parsed.fhir.timing).toBeUndefined();
-      expect(parsed.warnings).toContainEqual(expect.stringContaining(item.reason));
-      expect(getUnresolvedDosage(parsed.fhir)).toBe(item.reason);
-      expect(parsed.fhir.text).toBe(item.input);
+      const parsed = parseSig(item.input, item.options);
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        frequency: 1, period: 1, periodUnit: "d"
+      });
+      expect(parsed.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
+      expect(parsed.fhir.timing?.event).toBeUndefined();
+      expect(parsed.fhir.text?.toLocaleLowerCase())
+        .toContain(item.evidence.toLocaleLowerCase());
       expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans)
         .toContainEqual(expect.objectContaining({ text: item.evidence }));
-      expect(() => nextDueDoses(batch, {
-        from: "2026-10-22T08:00:00+07:00",
-        timeZone: "Asia/Bangkok",
-        limit: 6
-      })).toThrow(/unresolved/i);
-      expect(() => calculateTotalUnits({
-        dosage: batch,
-        orderedAt: "2026-10-22T08:00:00+07:00",
-        from: "2026-10-22T08:00:00+07:00",
-        timeZone: "Asia/Bangkok",
-        durationValue: 30,
-        durationUnit: "d"
-      })).toThrow(/unresolved/i);
+      expect(findMedicationDateListSpans(item.input, item.options))
+        .toContainEqual(expect.objectContaining({ unresolved: true }));
     }
   });
 
-  it("keeps complete attached Thai ISO lexeme boundaries without guessing Buddhist-era semantics", () => {
+  it("keeps complete attached Thai ISO lexeme boundaries with calendar-aware YMD semantics", () => {
     const cases = [
       {
         input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่2026-10-25 ถึง2026-11-01",
@@ -673,11 +680,11 @@ describe("calendar date interpretation", () => {
       },
       {
         input: "รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01",
-        unresolved: [true]
+        unresolved: [false]
       },
       {
         input: "รับประทาน 1 เม็ด วันที่2569-10-25และ2569-11-01",
-        unresolved: [true],
+        unresolved: [false],
         separator: "และ"
       },
       ...["และ", "and", ","].map((separator) => ({
@@ -709,46 +716,54 @@ describe("calendar date interpretation", () => {
     }
   });
 
-  it("quarantines contradictory calendar intervals and ambiguous up-to dates", () => {
-    for (const input of [
-      "take 1 tab daily from 2026-11-01 until 2026-10-25",
-      "take 1 tab daily up to 30 Sep 2026"
-    ]) {
-      const parsed = parseSig(input);
-      expect(parsed.warnings).toContainEqual(
-        expect.stringContaining("Unresolved schedule")
-      );
-      expect(() => nextDueDoses(parsed.fhir, {
-        from: "2026-09-28T08:00:00+07:00",
-        timeZone: "Asia/Bangkok", limit: 4
-      })).toThrow(/unresolved/i);
-    }
+  it("retains contradictory bounds for correction while execution rejects the inverted interval", () => {
+    const parsed = parseSig("take 1 tab daily from 2026-11-01 until 2026-10-25");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { start: "2026-11-01", end: "2026-10-25" },
+      frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(parsed.warnings).toEqual([]);
+    expect(() => nextDueDoses(parsed.fhir, {
+      from: "2026-09-28T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 4
+    })).toThrow(/end must be after its start/i);
   });
 
-  it("does not interpret explicit Buddhist-era YMD text as a distant Gregorian ISO bound", () => {
-    const examples = [
-      "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่2569-10-25",
-      "รับประทาน 1 เม็ด ทุกวัน ถึงวันที่2569-11-01",
+  it("treats up to DATE as an inclusive end bound", () => {
+    const parsed = parseSig("take 1 tab daily up to 30 Sep 2026", {
+      locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-09-30" }, frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(nextDueDoses(parsed.fhir, {
+      from: "2026-09-28T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 10
+    }).map(value => value.slice(0, 10))).toEqual([
+      "2026-09-28", "2026-09-29", "2026-09-30"
+    ]);
+  });
+
+  it("keeps distant YMD text editable outside a Thai Buddhist context", () => {
+    const options = { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } };
+    for (const input of [
       "take 1 tab daily until 2569-11-01",
       "take 1 tab daily from 2400-01-01"
-    ];
-    const options = { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } };
-    for (const input of examples) {
+    ]) {
       const parsed = parseSig(input, options);
       expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
-      expect(parsed.fhir.timing).toBeUndefined();
-      expect(parsed.warnings).toContainEqual(
-        expect.stringContaining("invalid-or-ambiguous-calendar-bound")
-      );
-      expect(parsed.meta.leftoverText).toContain(input);
-      expect(parsed.fhir.text).toContain(input);
-      expect(() => nextDueDoses(parsed.fhir, {
-        from: "2026-10-19T08:00:00+07:00", timeZone: "Asia/Bangkok", limit: 6
-      })).toThrow(/unresolved/i);
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        frequency: 1, period: 1, periodUnit: "d"
+      });
+      expect(parsed.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
+      expect(parsed.fhir.text).toContain(input.match(/\d{4}-\d{2}-\d{2}/u)![0]);
+      expect(findMedicationDateListSpans(input, options))
+        .toContainEqual(expect.objectContaining({ unresolved: true }));
     }
   });
 
-  it("preserves intentional calendar semantics: BE DMY converts, ISO stays explicit Gregorian", () => {
+  it("preserves intentional Gregorian and Buddhist calendar semantics", () => {
     const options = { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } };
     const be = parseSig("รับประทาน 1 เม็ด ทุกวัน ถึงวันที่25/10/2569", options);
     expect(be.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-10-25");
@@ -762,14 +777,17 @@ describe("calendar date interpretation", () => {
     expect(iso[0].unresolved).toBe(false);
     expect(iso[0].events[0]?.isoDate).toBe("2090-10-25");
 
-    const unresolvedEvent = findMedicationDateListSpans(
+    const buddhistEvent = findMedicationDateListSpans(
       "รับประทาน 1 เม็ด วันที่2569-10-25", options
     );
-    expect(unresolvedEvent).toHaveLength(1);
-    expect(unresolvedEvent[0].unresolved).toBe(true);
+    expect(buddhistEvent).toHaveLength(1);
+    expect(buddhistEvent[0].unresolved).toBe(false);
+    expect(buddhistEvent[0].events[0]).toMatchObject({
+      isoDate: "2026-10-25", calendar: "buddhist", calendarYear: 2569
+    });
   });
 
-  it("quarantines impossible ISO date bounds rather than executing them indefinitely", () => {
+  it("keeps dose and cadence while leaving impossible ISO bounds editable", () => {
     for (const input of [
       "take 1 tab daily until 2026-02-30",
       "take 1 tab daily from 2025-02-29",
@@ -778,15 +796,17 @@ describe("calendar date interpretation", () => {
       "take 1 tab daily from 2026-00-15"
     ]) {
       const parsed = parseSig(input);
-      expect(parsed.warnings).toContainEqual(
-        expect.stringContaining("invalid-or-ambiguous-calendar-bound")
-      );
-      expect(parsed.meta.leftoverText).toContain(input);
-      expect(parsed.fhir.timing).toBeUndefined();
-      expect(() => nextDueDoses(parsed.fhir, {
-        from: "2026-10-19T08:00:00+07:00",
-        timeZone: "Asia/Bangkok", limit: 6
-      })).toThrow(/unresolved/i);
+      const dateText = input.match(/\d{4}-\d{2}-\d{2}/u)![0];
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        frequency: 1, period: 1, periodUnit: "d"
+      });
+      expect(parsed.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
+      expect(parsed.fhir.text).toContain(dateText);
+      expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans)
+        .toContainEqual(expect.objectContaining({ text: expect.stringContaining(dateText) }));
+      expect(findMedicationDateListSpans(input, { locale: "en-GB" }))
+        .toContainEqual(expect.objectContaining({ unresolved: true }));
     }
   });
 
