@@ -1551,7 +1551,15 @@ export interface CanonicalSigClause {
   route?: CanonicalRouteExpr;
   site?: CanonicalSiteExpr;
   method?: CanonicalMethodExpr;
+  /** Only the executable schedule. Undefined when scheduling is unresolved. */
   schedule?: CanonicalScheduleExpr;
+  /**
+   * Recognized but NON-EXECUTABLE schedule features retained for review/UI.
+   * An unresolved medication can still have trustworthy dose, route, site,
+   * clocks and bounds. Never schedule or calculate supply from this field;
+   * execution requires a resolved schedule and the dosage safety checks.
+   */
+  provisionalSchedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
   patientInstruction?: string;
   instructionGraph?: CanonicalInstructionGraph;

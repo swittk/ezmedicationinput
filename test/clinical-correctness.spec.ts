@@ -683,6 +683,11 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
     const result = parseSig(input);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].fhir.timing).toBeUndefined();
+    // Keep the parsed exact weekly frequency and both alternative weekday
+    // anchors for clinical review, rather than losing them or returning zero.
+    expect(result.items[0].meta.canonical.clauses[0].provisionalSchedule)
+      .toMatchObject({ frequency: 1, period: 1, periodUnit: "wk", dayOfWeek: ["mon", "thu"] });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
     expect(getUnresolvedDosage(result.items[0].fhir)).toBe("weekly-weekday-frequency-conflict");
     expect(result.items[0].warnings.some(w => w.includes("weekly-weekday-frequency-conflict")))
       .toBe(true);

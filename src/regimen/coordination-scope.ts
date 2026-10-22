@@ -419,7 +419,11 @@ export function applyCoordinatedCadenceScopes(
         ? 'disjunctive-dose-choice' : 'ambiguous-shared-clinical-guard';
       const warning = `Unresolved schedule (${reason}): ${source}`;
       for (const item of [left, right]) {
-        item.state.primaryClause.schedule = undefined;
+        // Retain each alternative's actual parsed cadence for review, while
+        // ensuring neither choice can be emitted as a mandatory administration.
+        const clause = item.state.primaryClause;
+        if (clause.schedule) clause.provisionalSchedule = clause.provisionalSchedule ?? clause.schedule;
+        clause.schedule = undefined;
         if (!item.state.primaryClause.warnings?.some(text => text === warning)) {
           item.state.primaryClause.warnings = [
             ...(item.state.primaryClause.warnings ?? []), warning

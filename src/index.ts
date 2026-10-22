@@ -1335,7 +1335,11 @@ export function formatSig(
     // realization instead of the potentially stale saved display string.
     const requiresCourseSource = requiresR6CourseSourceForDisplay(oneOrCourse);
     if (oneOrCourse.renderedInstruction &&
-        (options === undefined || oneOrCourse.step.length === 0 || requiresCourseSource)) {
+        (options === undefined || options.realizationMode === "roundtrip" ||
+         oneOrCourse.step.length === 0 || requiresCourseSource)) {
+      // An explicitly requested round trip preserves the *original* source
+      // surface, not a normalized paraphrase. Edited R5 inputs have their
+      // stale source invalidated by the R5->R6 reconciliation first.
       return oneOrCourse.renderedInstruction;
     }
     if (oneOrCourse.step.length === 0) return "";

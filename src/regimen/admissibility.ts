@@ -6,8 +6,14 @@ export function quarantineSchedule(item: ParseResult, text: string, reason: stri
   const warning = `Unresolved schedule (${reason}): ${text}`;
   if (item.warnings.indexOf(warning) < 0) item.warnings.push(warning);
   for (const clause of item.meta.canonical.clauses) {
+    // Retain known parsed schedule facts separately from executable timing.
+    // An unrecognized restriction must not erase what the grammar understood,
+    // but this candidate must never be lowered as an executable FHIR Timing.
+    if (clause.schedule) clause.provisionalSchedule = clause.provisionalSchedule ?? clause.schedule;
     clause.schedule = undefined;
-    clause.warnings = [...(clause.warnings ?? []), warning];
+    if (!clause.warnings?.some(value => value === warning)) {
+      clause.warnings = [...(clause.warnings ?? []), warning];
+    }
   }
   delete item.fhir.timing;
   setUnresolvedDosage(item.fhir, reason);

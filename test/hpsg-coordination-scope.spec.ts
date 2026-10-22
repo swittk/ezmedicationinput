@@ -383,6 +383,34 @@ describe('HPSG coordination cadence scope', () => {
     )).toBe(true);
   });
 
+  it('keeps independently recognized alternative cadences visible but non-executable', () => {
+    const input = 'instill 1 drop in left eye once daily or 2 drops in right eye twice daily';
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].provisionalSchedule?.frequency))
+      .toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['left eye', 'right eye']);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 2]);
+    for (const item of parsed.items) {
+      expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
+      expect(item.fhir.timing).toBeUndefined();
+      expect(item.fhir.text).toBe(input);
+      expect(item.warnings).toContainEqual(expect.stringContaining('disjunctive-dose-choice'));
+    }
+    expect(() => nextDueDoses(parsed.fhir, {
+      from: '2026-10-22T08:00:00+07:00',
+      orderedAt: '2026-10-22T08:00:00+07:00',
+      timeZone: 'Asia/Bangkok', limit: 4
+    })).toThrow(/unresolved/i);
+    expect(() => calculateTotalUnits({
+      dosage: parsed.fhir,
+      from: '2026-10-22T08:00:00+07:00',
+      orderedAt: '2026-10-22T08:00:00+07:00',
+      timeZone: 'Asia/Bangkok', durationValue: 7, durationUnit: 'd'
+    })).toThrow(/unresolved/i);
+  });
+
   it('scopes trailing course bounds over the coordination phrase while retaining local bounds', () => {
     const duration = parseSig(
       'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily for 3 days'

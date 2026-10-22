@@ -242,10 +242,22 @@ function cleanupClause(state: ParserState): void {
   const clause = state.primaryClause;
   const schedule = clause.schedule;
   if (schedule) {
-    // A clinician's explicitly stated weekly frequency is authoritative.
-    // Weekday filters cannot silently rewrite "once weekly" to twice weekly.
-    // Conflicting or alternative weekday attachments are left for the typed
-    // admissibility check, rather than inventing a new frequency.
+    // A weekday-recursion sign (`every Monday`) contributes one recurrence
+    // for its own weekday. A coordination of such signs licenses the summed
+    // weekday/clock slots, but an explicitly stated once-weekly frequency
+    // has independent evidence and must NEVER be silently promoted to twice.
+    const derivedWeekdayRecurrence = clause.evidence.some(item =>
+      item.rule === "hpsg.lex.schedule.weekdayRecurrence");
+    const explicitFrequency = clause.evidence.some(item =>
+      item.rule === "hpsg.lex.schedule.frequency" ||
+      item.rule === "hpsg.lex.schedule.cadenceFirstFrequency");
+    if (derivedWeekdayRecurrence && !explicitFrequency &&
+        schedule.dayOfWeek && schedule.dayOfWeek.length > 1 &&
+        schedule.frequency === 1 && schedule.period === 1 &&
+        schedule.periodUnit === "wk" && schedule.timingCode === undefined) {
+      schedule.frequency = schedule.dayOfWeek.length *
+        (schedule.timeOfDay?.length ?? 1);
+    }
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
