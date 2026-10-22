@@ -321,20 +321,24 @@ export function selectHpsgConstruction(left: HpsgSign, right: HpsgSign): HpsgCon
 /**
  * Select a construction over two already chart-parsed administration clauses.
  * This is the cross-clause counterpart of `selectHpsgConstruction`: the chart
- * daughters retain their own dose/site values while the right cadence scopes
- * over the coordinated phrase.
+ * daughters retain their own dose/site values while the licensed adjunct
+ * daughter scopes over the coordinated phrase. An alternative has no head:
+ * neither daughter is privileged as the executable administration.
  */
 export function selectHpsgCoordinationScopeConstruction(
   facts: CoordinationScopeFacts
 ): HpsgCoordinationScopeSelection | undefined {
   const semantic = grammaticalCoordinationScopes(facts)[0];
   if (!semantic) return undefined;
+  const operation = semantic.construction.operation;
   return {
     motherType: "coordination-phrase",
     construction: {
       kind: "coordination",
       operation: "scope",
-      headSide: "right",
+      headSide: operation === "quarantine-disjunctive-dosages"
+        ? undefined
+        : operation === "share-leading-adjuncts" ? "left" : "right",
       leftType: "administration-clause",
       rightType: "administration-clause"
     },

@@ -3,7 +3,8 @@ import { annotateLexTokens, hasEventTimingMeaning, hasTimingAbbreviationMeaning 
 import { LexKind } from '../lexer/token-types';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS } from '../hpsg/lexical-classes';
+  HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
+  coordinationConnectorKind } from '../hpsg/lexical-classes';
 import type { ParseOptions, AdviceFrame } from '../types';
 import type { Token } from '../parser-state';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -170,7 +171,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         let actionValue: AdviceFrame[] | undefined;
         const rightActions = () => actionValue ?? (actionValue = evidence.actions(rightStart, end));
         proposals.push(...grammaticalProposals({
-          site, inheritedAdministration, explicitRightUnit: rightUnit,
+          site,
+          connectorKind: site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown',
+          inheritedAdministration, explicitRightUnit: rightUnit,
           leftDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= start && c.end <= site.start),
           rightDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= rightStart && c.end <= end),
           leftTargetCue: targetCue(start, site.start),
@@ -216,6 +219,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (hasPredecessor) {
         plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
           kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
+          connectorKind: site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown',
           range: { start: site.start, end: site.end } });
       }
       start = site.end;

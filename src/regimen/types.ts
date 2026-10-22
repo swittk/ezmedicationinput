@@ -12,7 +12,8 @@ export interface StructuralClaim extends Range {
   resolved: boolean;
 }
 export type BoundaryKind = 'coordination' | 'sequence' | 'comma' | 'hard' | 'slash' | 'adjacent-dose' | 'punctuation';
-export type RegimenRelation = 'sequence' | 'coordination' | 'shared-duration' | 'independent';
+export type CoordinationConnectorKind = 'conjunction' | 'disjunction' | 'unknown';
+export type RegimenRelation = 'sequence' | 'coordination' | 'alternative' | 'shared-duration' | 'independent';
 export interface BoundarySite extends Range {
   tokenIndex: number;
   lastTokenIndex: number;
@@ -86,6 +87,7 @@ export interface BoundaryRelation {
   from: number;
   to: number;
   kind: RegimenRelation;
+  connectorKind: CoordinationConnectorKind;
   rule: string;
   range: Range;
 }
@@ -93,7 +95,6 @@ export interface BoundaryRelation {
 /** Typed facts consumed by cross-clause HPSG coordination constructions. */
 export interface CoordinationScopeFacts {
   relation: BoundaryRelation;
-  connectorKind: "conjunction" | "disjunction" | "unknown";
   adjacent: boolean;
   leftComplete: boolean;
   rightComplete: boolean;
@@ -105,12 +106,24 @@ export interface CoordinationScopeFacts {
   leftHasSite: boolean;
   rightHasSite: boolean;
   targetsDistinct: boolean;
+  leftHasSchedule: boolean;
+  rightHasSchedule: boolean;
   leftHasCadence: boolean;
   rightHasCadence: boolean;
+  leftHasPrn: boolean;
+  rightHasPrn: boolean;
+  leftHasFrontedSchedule: boolean;
+  leftHasFrontedPrn: boolean;
+  rightHasTrailingSchedule: boolean;
+  rightHasTrailingPrn: boolean;
   rightHasCadenceConflict: boolean;
 }
 
-export type RegimenSemanticOperation = 'share-trailing-cadence' | 'quarantine-disjunctive-dosages';
+export type RegimenSemanticOperation =
+  | 'share-trailing-cadence'
+  | 'share-trailing-adjuncts'
+  | 'share-leading-adjuncts'
+  | 'quarantine-disjunctive-dosages';
 
 export interface RegimenSemanticConstruction {
   id: string;

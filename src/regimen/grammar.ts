@@ -1,6 +1,7 @@
 import type {
   BoundaryDecision,
   BoundarySite,
+  CoordinationConnectorKind,
   CoordinationScopeFacts,
   Evidence,
   Proposal,
@@ -12,6 +13,7 @@ import type {
 /** Typed boundary facts are a separate signature from the production clause grammar. */
 export interface BoundaryFacts {
   site: BoundarySite; left: ProbeSummary; right: ProbeSummary; inheritedAdministration: boolean;
+  connectorKind: CoordinationConnectorKind;
   explicitRightUnit: boolean; rightHasProcedure: boolean; rightAfterFirstAdministration: boolean;
   leftDateSpan: boolean; rightDateSpan: boolean;
   leftTargetCue: boolean; rightTargetCue: boolean;
@@ -27,6 +29,8 @@ interface SemanticConstruction extends RegimenSemanticConstruction {
 }
 const constraint = (feature: string, satisfied: Constraint['satisfied']): Constraint => ({ feature, satisfied });
 const coordinationOrSequence = constraint('connector.coordination-or-sequence', f => f.site.kind === 'coordination' || f.site.kind === 'sequence');
+const conjunctionOrSequence = constraint('connector.conjunction-or-sequence', f =>
+  f.site.kind === 'sequence' || f.connectorKind !== 'disjunction');
 const usableLeft = constraint('left.head-or-inherited-complete-schedule', f => f.left.hasHead ||
   f.inheritedAdministration && f.left.complete && f.left.hasSchedule);
 const scheduleRight = [
@@ -54,9 +58,8 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   priority: 900,
   operation: 'quarantine-disjunctive-dosages',
   constraints: [
-    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
-    semanticConstraint('relation.disjunction', f => f.connectorKind === 'disjunction'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('relation.alternative', f => f.relation.kind === 'alternative'),
+    semanticConstraint('relation.disjunction', f => f.relation.connectorKind === 'disjunction'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
     semanticConstraint('right.explicitDose', f => f.rightExplicitDose)
@@ -67,7 +70,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   operation: 'share-trailing-cadence',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
-    semanticConstraint('relation.conjunction', f => f.connectorKind === 'conjunction'),
+    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
     semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
@@ -81,6 +84,55 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('targets.distinct', f => f.targetsDistinct),
     semanticConstraint('left.omitsCadence', f => !f.leftHasCadence),
     semanticConstraint('right.hasCadence', f => f.rightHasCadence),
+    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
+  ]
+}, {
+  id: 'hpsg.cx.coordination.trailing-shared-adjuncts',
+  priority: 790,
+  operation: 'share-trailing-adjuncts',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.complete', f => f.leftComplete),
+    semanticConstraint('right.complete', f => f.rightComplete),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.explicit-or-inherited-administration-head', f => f.leftAdministrationContext),
+    semanticConstraint('right.omitsAdministrationHead', f => !f.rightExplicitHead),
+    semanticConstraint('left.hasSite', f => f.leftHasSite),
+    semanticConstraint('right.hasSite', f => f.rightHasSite),
+    semanticConstraint('targets.distinct', f => f.targetsDistinct),
+    semanticConstraint('right.omitsCadence', f => !f.rightHasCadence),
+    semanticConstraint('right.hasTrailingAdjunct', f =>
+      f.rightHasTrailingSchedule || f.rightHasTrailingPrn),
+    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
+  ]
+}, {
+  id: 'hpsg.cx.coordination.leading-shared-adjuncts',
+  priority: 780,
+  operation: 'share-leading-adjuncts',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.complete', f => f.leftComplete),
+    semanticConstraint('right.complete', f => f.rightComplete),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.explicit-or-inherited-administration-head', f => f.leftAdministrationContext),
+    semanticConstraint('right.omitsAdministrationHead', f => !f.rightExplicitHead),
+    semanticConstraint('left.hasSite', f => f.leftHasSite),
+    semanticConstraint('right.hasSite', f => f.rightHasSite),
+    semanticConstraint('targets.distinct', f => f.targetsDistinct),
+    semanticConstraint('left.hasFrontedAdjunct', f =>
+      f.leftHasFrontedSchedule || f.leftHasFrontedPrn),
+    semanticConstraint('right.omitsSharedSchedule', f =>
+      !f.leftHasFrontedSchedule || !f.rightHasSchedule),
+    semanticConstraint('right.omitsSharedPrn', f =>
+      !f.leftHasFrontedPrn || !f.rightHasPrn),
     semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
   ]
 }];
@@ -113,8 +165,19 @@ export function grammaticalCoordinationScopes(
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
+  { id: 'regimen.disjunctive-dosage-choice', priority: 900, relation: 'alternative', constraints: [
+    constraint('connector.coordination', f => f.site.kind === 'coordination'),
+    constraint('connector.disjunction', f => f.connectorKind === 'disjunction'),
+    constraint('left.complete', f => f.left.complete),
+    constraint('right.complete', f => f.right.complete),
+    constraint('left.hasDose', f => f.left.hasDose),
+    constraint('right.hasDose', f => f.right.hasDose),
+    constraint('right.explicitUnit', f => f.explicitRightUnit),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
+  ] },
   { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination', constraints: [
-    coordinationOrSequence, constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
+    coordinationOrSequence, conjunctionOrSequence,
+    constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
     constraint('right.schedule-method-or-target', f => f.right.hasSchedule || f.right.method || f.right.hasTargets)
   ] },
@@ -122,7 +185,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
   ] },
   { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence', constraints: [
-    coordinationOrSequence,
+    coordinationOrSequence, conjunctionOrSequence,
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
     constraint('neighbors.two-date-spans', f => f.leftDateSpan && f.rightDateSpan),
@@ -135,11 +198,13 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets))
   ] },
   { id: 'regimen.target-change', priority: 755, relation: 'coordination', constraints: [
-    coordinationOrSequence,
+    coordinationOrSequence, conjunctionOrSequence,
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
-    constraint('left.hasSchedule', f => f.left.hasSchedule),
-    constraint('right.hasSchedule', f => f.right.hasSchedule),
+    constraint('left.hasIndependentCadence', f =>
+      f.left.hasRecurringCadence || f.left.hasClocks || f.left.hasOffset),
+    constraint('right.hasIndependentCadence', f =>
+      f.right.hasRecurringCadence || f.right.hasClocks || f.right.hasOffset),
     constraint('left.hasTargets', f => f.left.hasTargets),
     constraint('right.hasTargets', f => f.right.hasTargets),
     constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets))
@@ -170,6 +235,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
 export interface RejectedConstruction { rule: string; failedConstraints: string[] }
 export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstruction[]): Proposal[] {
   const describe = (): Evidence[] => [
+    { feature: 'connector.kind', value: f.connectorKind, range: f.site },
     { feature: 'left.hasDose', value: f.left.hasDose, range: f.left },
     { feature: 'left.hasDates', value: f.left.hasDates, range: f.left },
     { feature: 'left.hasRecurringCadence', value: f.left.hasRecurringCadence, range: f.left },

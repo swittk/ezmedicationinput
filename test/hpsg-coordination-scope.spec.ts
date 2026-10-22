@@ -3,6 +3,7 @@ import { calculateTotalUnits, lintSig, nextDueDoses } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import { parseClauseState } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
+import { createBoundaryPlan } from '../src/regimen/candidate-adapter';
 import type { BoundaryPlan } from '../src/regimen/types';
 import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/regimen/types';
@@ -16,10 +17,10 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
       from: 0,
       to: 1,
       kind: 'coordination',
+      connectorKind: 'conjunction',
       rule: 'regimen.dose-continuation',
       range: { start: 32, end: 35 }
     },
-    connectorKind: 'conjunction',
     adjacent: true,
     leftComplete: true,
     rightComplete: true,
@@ -31,8 +32,16 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
     leftHasSite: true,
     rightHasSite: true,
     targetsDistinct: true,
+    leftHasSchedule: false,
+    rightHasSchedule: true,
     leftHasCadence: false,
     rightHasCadence: true,
+    leftHasPrn: false,
+    rightHasPrn: false,
+    leftHasFrontedSchedule: false,
+    leftHasFrontedPrn: false,
+    rightHasTrailingSchedule: true,
+    rightHasTrailingPrn: false,
     rightHasCadenceConflict: false,
     ...overrides
   };
@@ -81,15 +90,44 @@ describe('HPSG coordination cadence scope', () => {
   });
 
   it('classifies disjunction as alternative dosage, never distributive cadence', () => {
-    expect(selectHpsgCoordinationScopeConstruction(scopeFacts({
-      connectorKind: 'disjunction'
-    }))?.semantic.construction.operation).toBe('quarantine-disjunctive-dosages');
+    const selected = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      relation: {
+        ...scopeFacts().relation,
+        kind: 'alternative',
+        connectorKind: 'disjunction',
+        rule: 'regimen.disjunctive-dosage-choice'
+      }
+    }));
+    expect(selected?.semantic.construction.operation).toBe('quarantine-disjunctive-dosages');
+    expect(selected?.construction.headSide).toBeUndefined();
+  });
+
+  it('selects the typed adjunct daughter as the coordination head', () => {
+    const selected = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      leftHasSchedule: true,
+      rightHasSchedule: false,
+      leftHasCadence: true,
+      rightHasCadence: false,
+      leftHasFrontedSchedule: true,
+      rightHasTrailingSchedule: false
+    }));
+    expect(selected?.semantic.construction.operation).toBe('share-leading-adjuncts');
+    expect(selected?.construction.headSide).toBe('left');
   });
 
   it.each([
     'instill 1 drop in left eye or 2 drops in right eye twice daily',
-    'หยอดตาซ้าย 1 หยด หรือ ตาขวา 2 หยด วันละ 2 ครั้ง'
+    'instill 1 drop in left eye once daily or 2 drops in right eye twice daily',
+    'instill 1 drop in left eye at 08:00 or 2 drops in right eye at 20:00',
+    'หยอดตาซ้าย 1 หยด วันละครั้ง หรือ ตาขวา 2 หยด วันละ 2 ครั้ง',
+    'หยอดตาซ้าย 1 หยด เวลา 08:00 หรือ ตาขวา 2 หยด เวลา 20:00'
   ])('retains but does not execute a disjunctive dosing choice: %s', async input => {
+    const plan = createBoundaryPlan(input);
+    expect(plan.relations).toContainEqual(expect.objectContaining({
+      kind: 'alternative',
+      connectorKind: 'disjunction',
+      rule: 'regimen.disjunctive-dosage-choice'
+    }));
     const sync = parseSig(input);
     const asyncParsed = await parseSigAsync(input);
     const linted = lintSig(input);
@@ -100,6 +138,7 @@ describe('HPSG coordination cadence scope', () => {
     ]) {
       expect(items).toHaveLength(2);
       for (const item of items) {
+        expect(item.meta.canonical.clauses[0].schedule).toBeUndefined();
         expect(item.fhir.timing).toBeUndefined();
         expect(item.warnings).toContainEqual(
           expect.stringContaining('disjunctive-dose-choice')
@@ -107,12 +146,108 @@ describe('HPSG coordination cadence scope', () => {
         expect(item.fhir.text).toBe(input);
       }
     }
+    expect(linted.issues).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining('disjunctive-dose-choice')
+    }));
     expect(() => nextDueDoses(sync.fhir, {
       from: '2026-10-22T08:00:00+07:00',
       orderedAt: '2026-10-22T08:00:00+07:00',
       timeZone: 'Asia/Bangkok',
       limit: 4
     })).toThrow(/unresolved/i);
+  });
+
+  it.each([
+    ['exact', '30 minutes before breakfast', 'offset', 30, 2],
+    ['minimum', 'at least 30 minutes before breakfast', 'offsetMin', 30, 2],
+    ['maximum', 'at most 30 minutes before breakfast', 'offsetMax', 30, 2],
+    ['exact three-way', '30 minutes before breakfast', 'offset', 30, 3],
+    ['minimum three-way', 'at least 30 minutes before breakfast', 'offsetMin', 30, 3],
+    ['maximum three-way', 'at most 30 minutes before breakfast', 'offsetMax', 30, 3]
+  ] as const)('keeps the event anchor and %s offset atomic', (
+    _label, phrase, field, value, daughterCount
+  ) => {
+    const daughters = daughterCount === 2
+      ? 'instill 1 drop in left eye and 2 drops in right eye'
+      : 'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes';
+    const parsed = parseSig(`${daughters} ${phrase}`);
+    expect(parsed.items).toHaveLength(daughterCount);
+    for (const item of parsed.items) {
+      const schedule = item.meta.canonical.clauses[0].schedule!;
+      expect(schedule.when).toEqual(['ACM']);
+      expect(schedule[field]).toBe(value);
+      if (field === 'offset') {
+        expect(item.fhir.timing?.repeat?.offset).toBe(value);
+      } else {
+        expect(item.fhir.timing?.repeat?.extension).toContainEqual(
+          expect.objectContaining({
+            url: expect.stringContaining(field === 'offsetMin' ? 'offset-min' : 'offset-max'),
+            valueInteger: value
+          })
+        );
+      }
+      expect(item.longText.toLowerCase()).toContain(phrase);
+    }
+    if (field === 'offset') {
+      for (const item of parsed.items) {
+        expect(nextDueDoses(item.fhir, {
+          from: '2026-10-22T00:00:00+07:00',
+          orderedAt: '2026-10-22T00:00:00+07:00',
+          timeZone: 'Asia/Bangkok',
+          eventClock: { CM: '08:00' },
+          limit: 1
+        })).toEqual(['2026-10-22T07:30:00+07:00']);
+      }
+    }
+  });
+
+  it.each([
+    'instill 1 drop in left eye and 2 drops in right eye every 5 minutes up to 3 doses',
+    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes every 5 minutes up to 3 doses'
+  ])('keeps recurrence and its total cap atomic: %s', input => {
+    const parsed = parseSig(input);
+    for (const item of parsed.items) {
+      expect(item.meta.canonical.clauses[0].schedule).toMatchObject({
+        count: 1, countMax: 3, period: 5, periodUnit: 'min'
+      });
+      expect(item.fhir.timing?.repeat).toMatchObject({
+        count: 1, countMax: 3, period: 5, periodUnit: 'min'
+      });
+      expect(item.longText).toContain('for up to 3 doses');
+      expect(nextDueDoses(item.fhir, {
+        from: '2026-10-22T00:00:00Z',
+        orderedAt: '2026-10-22T00:00:00Z',
+        timeZone: 'UTC', limit: 8, priorCount: 0
+      })).toHaveLength(3);
+    }
+  });
+
+  it.each([
+    'instill 1 drop in left eye and 2 drops in right eye every 4 hours max 3 doses daily',
+    'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes every 4 hours max 3 doses daily'
+  ])('keeps recurrence and its per-period cap atomic: %s', input => {
+    const parsed = parseSig(input);
+    for (const item of parsed.items) {
+      expect(item.meta.canonical.clauses[0].schedule).toMatchObject({
+        period: 4,
+        periodUnit: 'h',
+        occurrenceCap: { max: 3, period: 1, periodUnit: 'd' }
+      });
+      expect(item.fhir.timing?.repeat?.extension).toContainEqual(
+        expect.objectContaining({ url: expect.stringContaining('timing-occurrence-cap') })
+      );
+      expect(item.longText).toContain('maximum 3 doses per day');
+      expect(nextDueDoses(item.fhir, {
+        from: '2026-10-22T00:00:00Z',
+        orderedAt: '2026-10-22T00:00:00Z',
+        timeZone: 'UTC', limit: 4
+      })).toEqual([
+        '2026-10-22T00:00:00+00:00',
+        '2026-10-22T04:00:00+00:00',
+        '2026-10-22T08:00:00+00:00',
+        '2026-10-23T00:00:00+00:00'
+      ]);
+    }
   });
 
   it('scopes a sole trailing cadence before FHIR lowering with source and construction evidence', () => {
@@ -155,7 +290,8 @@ describe('HPSG coordination cadence scope', () => {
         { text: rightText, start: rightStart, end: source.length }
       ],
       relations: [{
-        from: 0, to: 1, kind: 'coordination', rule: 'regimen.dose-continuation',
+        from: 0, to: 1, kind: 'coordination', connectorKind: 'conjunction',
+        rule: 'regimen.dose-continuation',
         range: { start: leftText.length + 1, end: rightStart - 1 }
       }]
     } as BoundaryPlan;
@@ -214,6 +350,105 @@ describe('HPSG coordination cadence scope', () => {
         evidence.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
       )
     )).toBe(true);
+  });
+
+  it('scopes trailing course bounds over the coordination phrase while retaining local bounds', () => {
+    const duration = parseSig(
+      'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily for 3 days'
+    );
+    expect(duration.items).toHaveLength(3);
+    for (const item of duration.items) {
+      expect(item.meta.canonical.clauses[0].schedule).toMatchObject({
+        frequency: 2, duration: 3, durationUnit: 'd'
+      });
+      expect(item.fhir.timing?.repeat?.boundsDuration?.value).toBe(3);
+      expect(item.longText).toContain('for 3 days');
+    }
+
+    const end = parseSig(
+      'instill 1 drop in left eye and 2 drops in right eye twice daily until 2026-10-24'
+    );
+    expect(end.items.map(item => item.meta.canonical.clauses[0].schedule?.boundsEnd))
+      .toEqual(['2026-10-24', '2026-10-24']);
+    expect(end.items.map(item => item.fhir.timing?.repeat?.boundsPeriod?.end))
+      .toEqual(['2026-10-24', '2026-10-24']);
+
+    const local = parseSig(
+      'instill 1 drop in left eye for 5 days and 2 drops in right eye twice daily for 3 days'
+    );
+    expect(local.items[0].meta.canonical.clauses[0].schedule).toMatchObject({
+      frequency: 2, duration: 5, durationUnit: 'd'
+    });
+    expect(local.items[1].meta.canonical.clauses[0].schedule).toMatchObject({
+      frequency: 2, duration: 3, durationUnit: 'd'
+    });
+  });
+
+  it.each([
+    ['instill 1 drop in left eye and 2 drops in right eye twice daily as needed for eye irritation', 'eye irritation'],
+    ['หยอดตาซ้าย 1 หยด และ ตาขวา 2 หยด วันละ 2 ครั้ง เมื่อมีอาการระคายเคือง', 'มีอาการระคายเคือง']
+  ])('scopes a trailing exact PRN adjunct without recoding it: %s', (input, reason) => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    for (const item of parsed.items) {
+      expect(item.meta.canonical.clauses[0].prn).toMatchObject({
+        enabled: true,
+        reason: { text: reason }
+      });
+      expect(item.fhir.asNeeded).toBe(true);
+      expect(item.fhir.asNeededFor?.[0]?.text).toBe(reason);
+    }
+    expect(parsed.items[0].meta.canonical.clauses[0].prn?.reason?.coding?.code)
+      .toBe(parsed.items[1].meta.canonical.clauses[0].prn?.reason?.coding?.code);
+  });
+
+  it('scopes licensed leading schedule and PRN adjuncts left-to-right', () => {
+    const cadence = parseSig(
+      'twice daily instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes'
+    );
+    expect(cadence.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([2, 2, 2]);
+    expect(cadence.items.slice(1).every(item =>
+      item.meta.canonical.clauses[0].evidence.some(evidence =>
+        evidence.rule === 'hpsg.cx.coordination.leading-shared-adjuncts'
+      )
+    )).toBe(true);
+
+    const duration = parseSig(
+      'for 3 days instill 1 drop in left eye and 2 drops in right eye'
+    );
+    expect(duration.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([3, 3]);
+
+    const prn = parseSig(
+      'as needed for eye irritation instill 1 drop in left eye and 2 drops in right eye'
+    );
+    expect(prn.items.map(item => item.fhir.asNeeded)).toEqual([true, true]);
+    expect(prn.items.map(item => item.fhir.asNeededFor?.[0]?.text))
+      .toEqual(['eye irritation', 'eye irritation']);
+  });
+
+  it('uses the public planner path when a local left bound inherits right cadence', () => {
+    const duration = parseSig(
+      'instill 1 drop in left eye for 3 days and 2 drops in right eye twice daily'
+    );
+    expect(duration.items[0].meta.canonical.clauses[0].schedule).toMatchObject({
+      duration: 3, durationUnit: 'd', frequency: 2, period: 1, periodUnit: 'd'
+    });
+    expect(duration.items[0].fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      boundsDuration: { value: 3, code: 'd' }
+    });
+    expect(duration.items[1].meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+
+    const start = parseSig(
+      'instill 1 drop in left eye starting 2026-11-01 and 2 drops in right eye twice daily',
+      { datePolicy: { referenceDate: '2026-10-22' } }
+    );
+    expect(start.items[0].meta.canonical.clauses[0].schedule).toMatchObject({
+      boundsStart: '2026-11-01', frequency: 2, period: 1, periodUnit: 'd'
+    });
+    expect(start.items[0].fhir.timing?.repeat?.boundsPeriod?.start).toBe('2026-11-01');
+
   });
 
   it('keeps sync, async, and lint lowering in parity from the scoped canonical schedule', async () => {
