@@ -913,6 +913,7 @@ function buildWholeCourseResult(
   results: ParseResult[],
   primary: ParseResult,
   segments: ReturnType<typeof parseSigSegments>,
+  options?: ParseOptions,
   parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageDetails }
 ): ParseBatchResult {
   const dosageItems = results.map(item => item.fhir);
@@ -940,8 +941,8 @@ function buildWholeCourseResult(
     fhir,
     fhirNext,
     ...(parallel ? { course: parallel.course } : {}),
-    shortText: results.length === 1 ? primary.shortText : formatSig(displayCourse, "short"),
-    longText: results.length === 1 ? primary.longText : formatSig(displayCourse, "long"),
+    shortText: results.length === 1 ? primary.shortText : formatSig(displayCourse, "short", options),
+    longText: results.length === 1 ? primary.longText : formatSig(displayCourse, "long", options),
     warnings: [...warnings],
     meta: {
       ...primary.meta,
@@ -1133,7 +1134,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments,
+  return buildWholeCourseResult(input, results, primary, segments, options,
     parallel.kind === "resolved" ? parallel : undefined);
 }
 
@@ -1283,7 +1284,7 @@ export async function parseSigAsync(
   }
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments,
+  return buildWholeCourseResult(input, results, primary, segments, options,
     parallel.kind === "resolved" ? parallel : undefined);
 }
 
@@ -1299,10 +1300,16 @@ export function formatSig(
   if ("step" in oneOrCourse) {
     // R6's renderedInstruction is the whole-course instruction. Do not
     // accidentally reduce a taper to a single component or discard its
-    // boolean conditions in an English/Thai realization attempt.
-    if (oneOrCourse.renderedInstruction) return oneOrCourse.renderedInstruction;
+    // boolean conditions in an English/Thai realization attempt. For an
+    // ordinary R5-compatible course, explicit format options request a fresh
+    // realization instead of the potentially stale saved display string.
+    const requiresCourseSource = requiresR6CourseSourceForDisplay(oneOrCourse);
+    if (oneOrCourse.renderedInstruction &&
+        (options === undefined || oneOrCourse.step.length === 0 || requiresCourseSource)) {
+      return oneOrCourse.renderedInstruction;
+    }
     if (oneOrCourse.step.length === 0) return "";
-    if (requiresR6CourseSourceForDisplay(oneOrCourse)) {
+    if (requiresCourseSource) {
       throw new Error("Cannot safely generate text from R6-only course metadata without renderedInstruction");
     }
     const flattened = toFhirR5Dosages(oneOrCourse);

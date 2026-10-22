@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatParseBatch, formatSigBatch, lintSig } from "../src/index";
+import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("multi-clause parsing", () => {
@@ -29,6 +29,69 @@ describe("multi-clause parsing", () => {
     expect(batch.longText).toContain("orally twice daily");
     expect(batch.longText).toContain("orally four times daily");
     expect(batch.count).toBe(2);
+  });
+
+  it("forwards English realization flags to whole-course multi-clause text", () => {
+    const batch = parseSig(
+      "1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner",
+      {
+        locale: "en",
+        groupMealTimingsByRelation: true,
+        includeTimesPerDaySummary: true
+      }
+    );
+
+    expect(batch.longText).toContain(
+      "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
+    );
+    expect(batch.longText).toContain(
+      "Take 2 tablets orally three times daily after breakfast, lunch and dinner."
+    );
+  });
+
+  it("forwards Thai locale and realization flags through the async whole-course path", async () => {
+    const batch = await parseSigAsync(
+      "1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner",
+      {
+        locale: "th",
+        groupMealTimingsByRelation: true,
+        includeTimesPerDaySummary: true
+      }
+    );
+
+    expect(batch.longText).toContain(
+      "รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
+    );
+    expect(batch.longText).toContain(
+      "รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
+    );
+    expect(batch.longText).not.toContain("Take");
+  });
+
+  it("re-realizes ordinary saved courses when explicit format options make their text stale", () => {
+    const details = parseSig(
+      "1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner"
+    ).dosageDetails;
+    details.renderedInstruction = "stale saved instruction";
+    const options = {
+      locale: "th",
+      groupMealTimingsByRelation: true,
+      includeTimesPerDaySummary: true
+    } as const;
+
+    expect(formatSig(details, "long")).toBe("stale saved instruction");
+    const formatted = formatSig(details, "long", options);
+    expect(formatted).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง");
+    expect(formatted).not.toContain("stale saved instruction");
+
+    const imported = fromFhir(details, options);
+    expect(imported.longText).toBe(formatted);
+    expect(imported.longText).not.toContain("stale saved instruction");
+    expect(imported.fhirNext.renderedInstruction).toBe("stale saved instruction");
+
+    const advanced = { ...details, repeatCycle: { value: 28, unit: "d" } };
+    expect(formatSig(advanced, "long", options)).toBe("stale saved instruction");
+    expect(fromFhir(advanced, options).longText).toBe("stale saved instruction");
   });
 
   it("parses plus-separated ocular clauses into multiple items", () => {
