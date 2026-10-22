@@ -65,7 +65,10 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { productRouteHint } from "./product-route";
-import { tokenBelongsToContextualPrnReasonLead } from "./prn-rules";
+import {
+  startsMaximumCountLead,
+  tokenBelongsToContextualPrnReasonLead
+} from "./prn-rules";
 
 const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
 
@@ -335,7 +338,11 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         break;
       }
       const candidateLower = normalizeTokenLower(candidate);
-      if (temporalRelationStarts(context, cursor) || coordinationLeadsToSchedule(context, cursor)) break;
+      if (
+        temporalRelationStarts(context, cursor) ||
+        coordinationLeadsToSchedule(context, cursor) ||
+        startsMaximumCountLead(context, cursor)
+      ) break;
       if (candidate.kind === LexKind.Number) {
         break;
       }

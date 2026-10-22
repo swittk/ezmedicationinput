@@ -573,6 +573,37 @@ describe("clinical SIG correctness and boundary promotion", () => {
 
 describe("HPSG count cardinal semantics", () => {
   it.each([
+    ["left eye", "1290031003"],
+    ["right eye", "1290032005"],
+    ["both eyes", "40638003"]
+  ])("keeps the exact coded %s site before a typed maximum-count constituent", (site, code) => {
+    const parsed = parseSig(`instill 1 drop in ${site} at most three times`);
+    expect(parsed.fhir.site).toMatchObject({
+      text: site,
+      coding: [{ system: "http://snomed.info/sct", code }]
+    });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
+    expect(parsed.meta.canonical.clauses[0]?.site?.text).toBe(site);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each(["at most", "up to", "max", "maximum"])(
+    "preserves the typed %s count cap after a PRN reason without absorbing either constituent",
+    lead => {
+      const parsed = parseSig(`1 tab q4h prn pain ${lead} three times`);
+      expect(parsed.fhir.asNeeded).toBe(true);
+      expect(parsed.fhir.asNeededFor?.[0]?.text).toBe("pain");
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        count: 1,
+        countMax: 3,
+        period: 4,
+        periodUnit: "h"
+      });
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    }
+  );
+
+  it.each([
     "1 tab q6h for 3 doses",
     "1 tab q6h for three doses",
     "1 tab q6h three doses total",

@@ -630,6 +630,10 @@
   ],
   "maximumCountLeadSequences": [
     [
+      "at",
+      "most"
+    ],
+    [
       "up",
       "to"
     ],
