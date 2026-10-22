@@ -77,6 +77,95 @@ describe("schedule/supply audit regressions", () => {
     expect(calculateTotalUnits({ ...laterSupply, priorCount: 2 }).totalUnits).toBe(1);
   });
 
+  it("requires timestamped PRN history only when a periodic cap intersects elapsed treatment", () => {
+    const parsedOccurrenceCapped = parseSig(
+      "take 1 tab q4h prn pain max 3 doses daily"
+    );
+    const occurrenceCapped = parsedOccurrenceCapped.fhir;
+    const firstWindow = { ...due, limit: 3 };
+    expect(nextDueDoses(occurrenceCapped, firstWindow)).toEqual([
+      "2024-01-01T00:00:00+00:00",
+      "2024-01-01T04:00:00+00:00",
+      "2024-01-01T08:00:00+00:00"
+    ]);
+
+    const midday = { ...firstWindow, from: "2024-01-01T12:00:00Z" };
+    for (const representation of [
+      parsedOccurrenceCapped,
+      occurrenceCapped,
+      parsedOccurrenceCapped.fhirNext
+    ]) {
+      expect(() => nextDueDoses(representation, midday))
+        .toThrow(/timestamped priorDoseTimes/);
+    }
+    expect(() => nextDueDoses(occurrenceCapped, { ...midday, priorCount: 0 }))
+      .toThrow(/timestamped priorDoseTimes/);
+    expect(nextDueDoses(occurrenceCapped, {
+      ...midday,
+      priorDoseTimes: []
+    })).toEqual([
+      "2024-01-01T12:00:00+00:00",
+      "2024-01-01T16:00:00+00:00",
+      "2024-01-01T20:00:00+00:00"
+    ]);
+
+    // Calendar occurrence caps have an independently safe next bucket.
+    expect(nextDueDoses(occurrenceCapped, {
+      ...firstWindow,
+      from: "2024-01-02T00:00:00Z"
+    })).toEqual([
+      "2024-01-02T00:00:00+00:00",
+      "2024-01-02T04:00:00+00:00",
+      "2024-01-02T08:00:00+00:00"
+    ]);
+
+    const rollingQuantityCapped = dailyDose({
+      asNeeded: true,
+      timing: { repeat: { frequency: 1, period: 4, periodUnit: "h" } },
+      maxDosePerPeriod: [{
+        numerator: { value: 3, unit: "tab" },
+        denominator: { value: 1, unit: "d", code: "d" }
+      }]
+    });
+    expect(nextDueDoses(rollingQuantityCapped, firstWindow)).toEqual([
+      "2024-01-01T00:00:00+00:00",
+      "2024-01-01T04:00:00+00:00",
+      "2024-01-01T08:00:00+00:00"
+    ]);
+    expect(() => nextDueDoses(rollingQuantityCapped, midday))
+      .toThrow(/timestamped priorDoseTimes/);
+    expect(() => nextDueDoses(rollingQuantityCapped, {
+      ...firstWindow,
+      from: "2024-01-02T00:00:00Z"
+    })).toThrow(/timestamped priorDoseTimes/);
+
+    const middaySupply = {
+      ...supply,
+      from: midday.from,
+      durationValue: 12,
+      durationUnit: "h" as FhirPeriodUnit,
+      dosage: occurrenceCapped
+    };
+    for (const dosage of [
+      parsedOccurrenceCapped,
+      occurrenceCapped,
+      parsedOccurrenceCapped.fhirNext
+    ]) {
+      expect(() => calculateTotalUnits({ ...middaySupply, dosage }))
+        .toThrow(/timestamped priorDoseTimes/);
+    }
+    expect(calculateTotalUnits({ ...middaySupply, priorDoseTimes: [] }).totalUnits)
+      .toBe(3);
+    expect(calculateTotalUnits({
+      ...middaySupply,
+      priorDoseTimes: [
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T04:00:00Z",
+        "2024-01-01T08:00:00Z"
+      ]
+    }).totalUnits).toBe(0);
+  });
+
   it("uses the upper frequency bound only for explicitly labelled maximum supply", () => {
     const ranged = dailyDose({
       timing: {

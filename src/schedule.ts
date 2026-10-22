@@ -1271,13 +1271,60 @@ function occurrenceCapBucketKey(
   }
 }
 
+interface UnknownPrnPeriodHistory {
+  from: Date;
+}
+
+function unknownPrnPeriodHistory(
+  dosage: FhirDosage,
+  options: NextDueDoseOptions,
+  timeZone: string
+): UnknownPrnPeriodHistory | undefined {
+  if (!dosage.asNeeded || options.priorDoseTimes !== undefined) return undefined;
+  const from = coerceDate(options.from, "from");
+  const orderedAt = options.orderedAt === undefined
+    ? null : coerceDate(options.orderedAt, "orderedAt");
+  const boundsStart = resolveRepeatBoundsStart(dosage.timing?.repeat, timeZone);
+  const startedAt = orderedAt && boundsStart
+    ? (orderedAt > boundsStart ? orderedAt : boundsStart)
+    : orderedAt ?? boundsStart;
+  return startedAt && startedAt < from ? { from } : undefined;
+}
+
+function assertOccurrenceCapHistoryKnown(
+  candidates: readonly string[],
+  cap: CanonicalOccurrenceCapExpr,
+  priorDoseTimes: Array<Date | string> | undefined,
+  timeZone: string,
+  unknownHistory: UnknownPrnPeriodHistory | undefined
+): void {
+  if (priorDoseTimes !== undefined || !unknownHistory || !candidates.length) return;
+  // A calendar/fixed bucket that starts at `from` is independently safe: an
+  // older administration cannot consume its allowance. Only a candidate in
+  // the bucket immediately before the query boundary can intersect unknown
+  // elapsed treatment history.
+  const beforeFrom = new Date(unknownHistory.from.getTime() - 1);
+  const intersectedBucket = occurrenceCapBucketKey(beforeFrom, cap, timeZone);
+  if (candidates.some(value =>
+    occurrenceCapBucketKey(coerceDate(value, "candidate"), cap, timeZone) === intersectedBucket
+  )) {
+    throw new Error(
+      "Capped PRN scheduling requires timestamped priorDoseTimes when the query intersects an active occurrence-cap period."
+    );
+  }
+}
+
 function applyOccurrenceCap(
   candidates: string[],
   cap: CanonicalOccurrenceCapExpr,
   priorDoseTimes: Array<Date | string> | undefined,
   timeZone: string,
-  limit: number
+  limit: number,
+  unknownHistory?: UnknownPrnPeriodHistory
 ): string[] {
+  assertOccurrenceCapHistoryKnown(
+    candidates, cap, priorDoseTimes, timeZone, unknownHistory
+  );
   const priorCounts = new Map<string, number>();
   for (const value of priorDoseTimes ?? []) {
     const date = coerceDate(value, "priorDoseTimes");
@@ -1359,7 +1406,8 @@ function applyQuantityCaps(
   caps: readonly CanonicalOccurrenceCapExpr[],
   priorDoseTimes: Array<Date | string> | undefined,
   zone: string,
-  limit: number
+  limit: number,
+  unknownHistory?: UnknownPrnPeriodHistory
 ): string[] {
   if (!caps.length) return candidates.slice(0, Math.floor(limit));
   // R5 Dosage.maxDosePerPeriod means a maximum QUANTITY in a duration.
@@ -1391,6 +1439,14 @@ function applyQuantityCaps(
       default: throw new Error("Unsupported maximum dose interval");
     }
   };
+  if (priorDoseTimes === undefined && unknownHistory && candidates.some(iso => {
+    const at = coerceDate(iso, "candidate");
+    return caps.some(cap => windowStart(at, cap) < unknownHistory.from.getTime());
+  })) {
+    throw new Error(
+      "Capped PRN scheduling requires timestamped priorDoseTimes when the query intersects an active maximum-dose period."
+    );
+  }
   for (const iso of candidates) {
     const at = new Date(iso);
     const timestamp = at.getTime();
@@ -1712,6 +1768,7 @@ export function nextDueDoses(
         extension.url !== DOSAGE_CONDITION_R5_URL &&
         extension.url !== DOSAGE_EXCLUDED_DATES_R5_URL)
     };
+    const unknownPeriodHistory = unknownPrnPeriodHistory(one, options, timeZone);
     let candidateLimit = Math.min(10000, Math.max(16, Math.floor(limit) * 2));
     while (true) {
       const candidates = nextDueDoses(unconstrained, { ...options, limit: candidateLimit });
@@ -1735,7 +1792,8 @@ export function nextDueDoses(
       // A conditional occurrence that is not administered does not consume
       // the quantity allowance. Apply the cap AFTER exclusions/predicates.
       const capped = applyQuantityCaps(accepted, quantityCaps,
-        options.priorDoseTimes, timeZone, limit);
+        options.priorDoseTimes, timeZone, limit,
+        unknownPeriodHistory);
       if (capped.length >= limit || candidates.length < candidateLimit || candidateLimit === 10000) {
         return capped;
       }
@@ -1814,10 +1872,12 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     const requestLimit = Math.floor(limit);
     let candidateLimit = Math.min(10000, Math.max(16, requestLimit * 4));
     const unsafeguarded: FhirDosage = { ...dosage, maxDosePerPeriod: undefined };
+    const unknownPeriodHistory = unknownPrnPeriodHistory(dosage, options, timeZone);
     while (true) {
       const candidates = nextDueDoses(unsafeguarded, { ...options, limit: candidateLimit });
       const accepted = applyQuantityCaps(candidates, quantityCaps,
-        options.priorDoseTimes, timeZone, requestLimit);
+        options.priorDoseTimes, timeZone, requestLimit,
+        unknownPeriodHistory);
       if (accepted.length >= requestLimit || candidates.length < candidateLimit ||
           candidateLimit >= 10000) return accepted;
       candidateLimit = Math.min(10000, candidateLimit * 2);
@@ -1827,6 +1887,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   if (occurrenceCap) {
     const requestedLimit = Math.floor(limit);
     let candidateLimit = Math.min(10000, Math.max(16, requestedLimit * 4));
+    const unknownPeriodHistory = unknownPrnPeriodHistory(dosage, options, timeZone);
     while (true) {
       const uncapped = nextDueDoses(withoutOccurrenceCap(dosage), {
         ...options,
@@ -1838,7 +1899,8 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
         occurrenceCap,
         options.priorDoseTimes,
         timeZone,
-        requestedLimit
+        requestedLimit,
+        unknownPeriodHistory
       );
       if (
         capped.length >= requestedLimit ||
