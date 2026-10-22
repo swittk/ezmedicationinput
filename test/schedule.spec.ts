@@ -1082,7 +1082,7 @@ describe("calculateTotalUnits", () => {
         }
       },
       {
-        name: "monthly monday",
+        name: "monthly anchored cadence",
         from: "2024-01-01T08:00:00Z",
         durationValue: 6,
         durationUnit: FhirPeriodUnit.Month,
@@ -1092,8 +1092,7 @@ describe("calculateTotalUnits", () => {
           timing: {
             repeat: {
               period: 1,
-              periodUnit: FhirPeriodUnit.Month,
-              dayOfWeek: [FhirDayOfWeek.Monday]
+              periodUnit: FhirPeriodUnit.Month
             }
           }
         }
@@ -1172,6 +1171,23 @@ describe("calculateTotalUnits", () => {
       });
       expect(actual.totalUnits / scenario.doseValue, scenario.name).toBe(expectedCount);
     }
+  });
+
+  it("rejects monthly weekday timing without an ordinal for scheduling and supply", () => {
+    const ambiguous: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: [FhirDayOfWeek.Monday]
+      } }
+    };
+    expect(() => nextDueDoses(ambiguous, {
+      ...BASE_OPTIONS, from: "2024-01-01T08:00:00Z", orderedAt: "2024-01-01T08:00:00Z"
+    })).toThrow(/ordinal weekday or exact date/);
+    expect(() => calculateTotalUnits({
+      dosage: ambiguous, from: "2024-01-01T08:00:00Z",
+      durationValue: 2, durationUnit: FhirPeriodUnit.Month, ...BASE_OPTIONS
+    })).toThrow(/ordinal weekday or exact date/);
   });
 
   it("calculates liquid containers for monthly cadence with strength conversion", () => {
