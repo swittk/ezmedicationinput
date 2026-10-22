@@ -1,6 +1,6 @@
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirR6Dosage, FhirR6DosageCondition,
-  FhirR6DosageDetails, FhirR6DosageSafety, MedicationCondition,
+  FhirR6DosageDetails, FhirR6DosageSafety, FhirR6DoseLimit, MedicationCondition,
   EzDosage, EzCourseMetadata
 } from "./types";
 
@@ -34,21 +34,167 @@ function replacementExtensions(
   dosage.modifierExtension = result.length ? result : undefined;
 }
 
-export function getDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+function hasOnlyKeys(candidate: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(candidate).every(key => allowed.includes(key));
+}
+
+function isMedicationCondition(value: unknown, depth = 0): value is MedicationCondition {
+  if (depth > 64 || !value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  switch (candidate.kind) {
+    case "measurement":
+      return hasOnlyKeys(candidate, ["kind", "name", "operation", "value", "unit", "text"]) &&
+        typeof candidate.name === "string" && candidate.name.length > 0 &&
+        ["gt", "ge", "lt", "le", "eq", "ne"].includes(candidate.operation as string) &&
+        typeof candidate.value === "number" && Number.isFinite(candidate.value) &&
+        (candidate.unit === undefined || typeof candidate.unit === "string") &&
+        typeof candidate.text === "string" && candidate.text.length > 0;
+    case "state":
+      return hasOnlyKeys(candidate, ["kind", "name", "text", "expected"]) &&
+        typeof candidate.name === "string" && candidate.name.length > 0 &&
+        typeof candidate.text === "string" && candidate.text.length > 0 &&
+        typeof candidate.expected === "boolean";
+    case "text":
+      return hasOnlyKeys(candidate, ["kind", "text"]) &&
+        typeof candidate.text === "string" && candidate.text.length > 0;
+    case "not":
+      return hasOnlyKeys(candidate, ["kind", "condition"]) &&
+        isMedicationCondition(candidate.condition, depth + 1);
+    case "all": case "any":
+      return hasOnlyKeys(candidate, ["kind", "conditions"]) &&
+        Array.isArray(candidate.conditions) && candidate.conditions.length > 0 &&
+        candidate.conditions.every(part => isMedicationCondition(part, depth + 1));
+    default:
+      return false;
+  }
+}
+
+function valueKeys(extension: FhirExtension): string[] {
+  return Object.keys(extension).filter(key => key.startsWith("value") &&
+    (extension as unknown as Record<string, unknown>)[key] !== undefined);
+}
+
+function hasOnlyPrimitiveValue(extension: FhirExtension, key: string): boolean {
+  const keys = valueKeys(extension);
+  return keys.length === 1 && keys[0] === key && extension.extension === undefined;
+}
+
+function isIsoCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1];
+}
+
+function parseConditionModifier(extension: FhirExtension): MedicationCondition {
+  const predicates = extension.extension?.filter(value => value.url === "predicate") ?? [];
+  if (valueKeys(extension).length || predicates.length !== 1 ||
+      extension.extension?.length !== 1 ||
+      typeof predicates[0].valueString !== "string" ||
+      !hasOnlyPrimitiveValue(predicates[0], "valueString")) {
+    throw new Error("Malformed conditional-dose modifierExtension: expected exactly one predicate JSON string.");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(predicates[0].valueString);
+  } catch {
+    throw new Error("Malformed conditional-dose modifierExtension: predicate JSON is invalid.");
+  }
+  if (!isMedicationCondition(value)) {
+    throw new Error("Malformed conditional-dose modifierExtension: predicate does not match the medication-condition contract.");
+  }
+  return value;
+}
+
+function validateExcludedDatesModifier(extension: FhirExtension): void {
+  if (valueKeys(extension).length || !extension.extension?.length ||
+      extension.extension.some(child =>
+    child.url !== "date" || typeof child.valueDate !== "string" ||
+    !isIsoCalendarDate(child.valueDate) ||
+    !hasOnlyPrimitiveValue(child, "valueDate"))) {
+    throw new Error("Malformed excluded-dates modifierExtension: expected one or more ISO calendar dates.");
+  }
+}
+
+function validateUnresolvedModifier(extension: FhirExtension): void {
+  const reasons = extension.extension?.filter(value => value.url === "reason") ?? [];
+  if (valueKeys(extension).length || reasons.length !== 1 ||
+      extension.extension?.length !== 1 ||
+      typeof reasons[0].valueString !== "string" || !reasons[0].valueString.length ||
+      !hasOnlyPrimitiveValue(reasons[0], "valueString")) {
+    throw new Error("Malformed unresolved-schedule modifierExtension: expected exactly one non-empty reason.");
+  }
+}
+
+function validateRetainedCourseModifier(extension: FhirExtension): void {
+  const values = extension.extension?.filter(value => value.url === "dosageDetails") ?? [];
+  if (valueKeys(extension).length || values.length !== 1 ||
+      extension.extension?.length !== 1 ||
+      typeof values[0].valueString !== "string" ||
+      !hasOnlyPrimitiveValue(values[0], "valueString")) {
+    throw new Error("Malformed retained R6 course modifierExtension: expected exactly one DosageDetails JSON string.");
+  }
+  try {
+    const details: unknown = JSON.parse(values[0].valueString);
+    if (!details || typeof details !== "object" ||
+        !Array.isArray((details as FhirR6DosageDetails).step) ||
+        (details as FhirR6DosageDetails).step.some(step =>
+          !step || typeof step !== "object" || !Array.isArray(step.component))) {
+      throw new Error("invalid shape");
+    }
+  } catch {
+    throw new Error("Malformed retained R6 course modifierExtension: DosageDetails JSON is invalid.");
+  }
+}
+
+/**
+ * FHIR modifierExtension means that ignoring the extension can invert the
+ * resource's meaning. Validate every known contract and reject every unknown
+ * one before execution. A valid retained-course marker is understood here;
+ * the schedule dispatcher must restore the complete array before execution.
+ */
+export function assertUnderstoodDosageModifiers(dosage: FhirDosage | EzDosage): void {
+  const seen = new Set<string>();
+  for (const extension of dosage.modifierExtension ?? []) {
+    if (seen.has(extension.url)) {
+      throw new Error(`Duplicate Dosage.modifierExtension cannot be executed safely: ${extension.url}`);
+    }
+    seen.add(extension.url);
+    switch (extension.url) {
+      case DOSAGE_CONDITION_R5_URL:
+        parseConditionModifier(extension);
+        break;
+      case DOSAGE_EXCLUDED_DATES_R5_URL:
+        validateExcludedDatesModifier(extension);
+        break;
+      case DOSAGE_UNRESOLVED_R5_URL:
+        validateUnresolvedModifier(extension);
+        break;
+      case DOSAGE_DETAILS_R5_URL:
+        validateRetainedCourseModifier(extension);
+        break;
+      default:
+        throw new Error(`Unsupported Dosage.modifierExtension cannot be ignored for execution: ${extension.url}`);
+    }
+  }
+}
+
+function parseDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
   const expanded = dosage as EzDosage;
   if (expanded.condition?.length === 1) return conditionFromR6(expanded.condition[0]);
   if (expanded.condition?.length) {
     return { kind: "any", conditions: expanded.condition.map(conditionFromR6) };
   }
   const extension = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
-  const raw = extension?.extension?.find(value => value.url === "predicate")?.valueString;
-  if (!raw) return undefined;
-  try {
-    const value = JSON.parse(raw) as MedicationCondition;
-    return value && typeof value === "object" && typeof value.kind === "string" ? value : undefined;
-  } catch {
-    return undefined;
-  }
+  return extension ? parseConditionModifier(extension) : undefined;
+}
+
+export function getDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+  assertUnderstoodDosageModifiers(dosage);
+  return parseDosageCondition(dosage);
 }
 
 export function setDosageCondition(dosage: FhirDosage, condition: MedicationCondition | undefined): void {
@@ -90,8 +236,11 @@ export function setDosageExcludedWeekdays(dosage: FhirDosage, days: FhirDayOfWee
 }
 
 export function getUnresolvedDosage(dosage: FhirDosage): string | undefined {
-  return dosage.modifierExtension?.find(value => value.url === DOSAGE_UNRESOLVED_R5_URL)
-    ?.extension?.find(value => value.url === "reason")?.valueString;
+  const unresolved = dosage.modifierExtension?.find(value =>
+    value.url === DOSAGE_UNRESOLVED_R5_URL);
+  if (!unresolved) return undefined;
+  validateUnresolvedModifier(unresolved);
+  return unresolved.extension![0].valueString;
 }
 
 export function setUnresolvedDosage(dosage: FhirDosage, reason: string | undefined): void {
@@ -191,6 +340,51 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
   return doseLimit.length ? { doseLimit } : undefined;
 }
 
+function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
+  const quantity = limit.valueQuantity;
+  if (!quantity) return false;
+  if (limit.scope === "period") {
+    return Boolean(limit.period) && quantity.comparator !== "~" &&
+      limit.period?.comparator === undefined;
+  }
+  return (limit.scope === "administration" || limit.scope === "lifetime") &&
+    quantity.comparator === undefined;
+}
+
+/**
+ * Apply edits made through R5 maximum-dose fields without discarding safety
+ * semantics that R5 cannot carry. Existing backbone metadata stays attached
+ * to the corresponding representable scope; expression/integer limits and
+ * the safety-level exceeded action remain byte-for-byte authoritative.
+ */
+function reconcileR5SafetyEdits(
+  retained: FhirR6DosageSafety,
+  projected: FhirR6DosageSafety | undefined
+): FhirR6DosageSafety | undefined {
+  const replacements = [...(projected?.doseLimit ?? [])];
+  const doseLimit: FhirR6DoseLimit[] = [];
+  for (const original of retained.doseLimit ?? []) {
+    if (!isR5RepresentableSafetyLimit(original)) {
+      doseLimit.push(original);
+      continue;
+    }
+    const replacementIndex = replacements.findIndex(candidate =>
+      candidate.scope === original.scope);
+    if (replacementIndex < 0) continue;
+    const [replacement] = replacements.splice(replacementIndex, 1);
+    const {
+      scope: _scope, period: _period,
+      valueQuantity: _quantity, valueInteger: _integer,
+      valueExpression: _expression, ...metadata
+    } = original;
+    doseLimit.push({ ...metadata, ...replacement } as FhirR6DoseLimit);
+  }
+  doseLimit.push(...replacements);
+  const { doseLimit: _retainedLimits, ...retainedSafety } = retained;
+  if (doseLimit.length) return { ...retainedSafety, doseLimit };
+  return Object.keys(retainedSafety).length ? retainedSafety : undefined;
+}
+
 /** Lift real R6 concepts once into the familiar flat R5 dosage shape. */
 export function toEzDosages(dosages: readonly (FhirDosage | EzDosage)[]): EzDosage[] {
   return dosages.map(dosage => {
@@ -205,7 +399,7 @@ export function toEzDosages(dosages: readonly (FhirDosage | EzDosage)[]): EzDosa
     const needsDates = input.excludedDates === undefined &&
       !!dosage.modifierExtension?.some(ext => ext.url === DOSAGE_EXCLUDED_DATES_R5_URL);
     if (!needsCondition && !needsSafety && !needsDates) return input;
-    const predicate = needsCondition ? getDosageCondition(dosage) : undefined;
+    const predicate = needsCondition ? parseDosageCondition(dosage) : undefined;
     const safety = needsSafety ? toR6Safety(dosage) : undefined;
     const dates = needsDates ? getDosageExcludedDates(dosage) : undefined;
     return {
@@ -226,7 +420,7 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     siteReference, excludedDates,
     modifierExtension, extension, ...rest
   } = dosage as EzDosage;
-  const predicate = ownConditions?.length ? undefined : getDosageCondition(dosage);
+  const predicate = ownConditions?.length ? undefined : parseDosageCondition(dosage);
   const safety = ownSafety ?? toR6Safety(dosage);
   // A caller may edit the public excludedDates field directly, without
   // updating the older R5 modifier. Rebuild that modifier from the live
@@ -528,10 +722,15 @@ function reconcileRetainedCourse(
             maxDosePerAdministration: dosage.maxDosePerAdministration,
             maxDosePerLifetime: dosage.maxDosePerLifetime
           })));
-        if (maximaUnchanged && old.safety && !fresh.safety) fresh.safety = old.safety;
-        if (old.condition?.length && !fresh.condition?.length &&
-            JSON.stringify(getDosageCondition(dosage)) ===
-            JSON.stringify(getDosageCondition(baseline)))
+        if (old.safety && expanded.safety === undefined) {
+          fresh.safety = maximaUnchanged
+            ? old.safety
+            : reconcileR5SafetyEdits(old.safety, fresh.safety);
+        }
+        if (old.condition?.length && expanded.condition === undefined &&
+            equivalentProjection(
+              comparableJson(parseDosageCondition(dosage)),
+              comparableJson(parseDosageCondition(baseline))))
           fresh.condition = old.condition;
       }
       components.push(fresh);

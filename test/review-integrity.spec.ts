@@ -8,7 +8,7 @@ import {
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
   DOSAGE_DETAILS_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_RENDERED_INSTRUCTION_R5_URL
+  DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_UNRESOLVED_R5_URL
 } from "../src/dosage-course";
 import { recognizeCycles } from "../src/regimen/cycles";
 import { projectParallelRegimen } from "../src/regimen/parallel-course";
@@ -69,6 +69,48 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .not.toBe(true);
     expect(toDosageDetails(r5).step[0].component[0].modifierExtension)
       .toEqual(simple.step[0].component[0].modifierExtension);
+  });
+
+  it("rejects unknown and malformed modifier extensions before scheduling or supply", () => {
+    const base = parseSig("1 tab PO BID").fhir[0];
+    const candidates: FhirDosage[] = [
+      {
+        ...base,
+        modifierExtension: [{ url: "urn:test:do-not-administer", valueBoolean: true }]
+      },
+      {
+        ...base,
+        modifierExtension: [{
+          url: DOSAGE_CONDITION_R5_URL,
+          extension: [{ url: "predicate", valueString: "{truncated" }]
+        }]
+      },
+      {
+        ...base,
+        modifierExtension: [{
+          url: DOSAGE_EXCLUDED_DATES_R5_URL,
+          extension: [{ url: "date", valueDate: "not-a-date" }]
+        }]
+      },
+      {
+        ...base,
+        modifierExtension: [{
+          url: DOSAGE_UNRESOLVED_R5_URL,
+          extension: []
+        }]
+      },
+      {
+        ...base,
+        modifierExtension: [{
+          url: DOSAGE_DETAILS_R5_URL,
+          extension: [{ url: "dosageDetails", valueString: "{truncated" }]
+        }]
+      }
+    ];
+    for (const dosage of candidates) {
+      expect(() => nextDueDoses(dosage, scheduler)).toThrow(/modifierExtension/i);
+      expect(() => calculateTotalUnits({ ...supply, dosage })).toThrow(/modifierExtension/i);
+    }
   });
 
   it("never uses an outdated literal instruction after editing a strict R5 dose", () => {
@@ -349,6 +391,111 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toBe("%patient.weight * 0.5");
     flat[0].doseAndRate![0].doseQuantity = { value: 2, unit: "mg" };
     expect(() => toDosageDetails(flat)).toThrow(/Update the R6 dose expression explicitly/);
+  });
+
+  it("preserves exact R6 safety and coded conditions through unrelated R5 edits", () => {
+    const original: FhirR6DosageDetails = {
+      step: [{ component: [{
+        id: "component-id",
+        route: { text: "oral" },
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        condition: [
+          {
+            id: "condition-a",
+            code: { coding: [{
+              system: "http://snomed.info/sct", code: "404684003",
+              display: "Clinical finding"
+            }], text: "Clinical finding A" },
+            details: { coding: [{
+              system: "http://snomed.info/sct", code: "64572001",
+              display: "Disease"
+            }] },
+            text: "Only for exact condition A"
+          },
+          {
+            id: "condition-b",
+            code: { coding: [{
+              system: "http://snomed.info/sct", code: "248152002",
+              display: "Female"
+            }], text: "Clinical finding B" },
+            text: "Or exact condition B"
+          }
+        ],
+        safety: {
+          id: "safety-id",
+          ifExceeded: "hold-and-contact-prescriber",
+          doseLimit: [
+            {
+              id: "administration-limit-id",
+              scope: "administration",
+              valueQuantity: { value: 2, unit: "tab" }
+            },
+            {
+              id: "lifetime-expression-id",
+              scope: "lifetime",
+              valueExpression: {
+                language: "text/fhirpath",
+                expression: "%resource.extension.where(url='urn:lifetime-total').value"
+              }
+            }
+          ]
+        }
+      }] }]
+    };
+    const edited = JSON.parse(JSON.stringify(toFhirR5Dosages(original))) as FhirDosage[];
+    edited[0].route = { text: "sublingual" };
+    const restored = toDosageDetails(edited).step[0].component[0];
+    expect(restored.route).toEqual({ text: "sublingual" });
+    expect(restored.condition).toEqual(original.step[0].component[0].condition);
+    expect(restored.safety).toEqual(original.step[0].component[0].safety);
+  });
+
+  it("reconciles edited R5 maxima without deleting R6-only safety semantics", () => {
+    const original: FhirR6DosageDetails = {
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        safety: {
+          id: "safety-id",
+          ifExceeded: "hold-and-contact-prescriber",
+          doseLimit: [
+            {
+              id: "administration-limit-id",
+              extension: [{ url: "urn:test:limit-provenance", valueString: "preserve" }],
+              scope: "administration",
+              valueQuantity: { value: 2, unit: "tab" }
+            },
+            {
+              id: "lifetime-expression-id",
+              scope: "lifetime",
+              valueExpression: {
+                language: "text/fhirpath",
+                expression: "%resource.extension.where(url='urn:lifetime-total').value"
+              }
+            }
+          ]
+        }
+      }] }]
+    };
+    const edited = JSON.parse(JSON.stringify(toFhirR5Dosages(original))) as FhirDosage[];
+    edited[0].maxDosePerAdministration = { value: 3, unit: "tab" };
+    const safety = toDosageDetails(edited).step[0].component[0].safety;
+    expect(safety?.id).toBe("safety-id");
+    expect(safety?.ifExceeded).toBe("hold-and-contact-prescriber");
+    expect(safety?.doseLimit).toContainEqual(expect.objectContaining({
+      id: "administration-limit-id",
+      extension: [{ url: "urn:test:limit-provenance", valueString: "preserve" }],
+      scope: "administration",
+      valueQuantity: { value: 3, unit: "tab" }
+    }));
+    expect(safety?.doseLimit).toContainEqual(expect.objectContaining({
+      id: "lifetime-expression-id",
+      scope: "lifetime",
+      valueExpression: expect.objectContaining({
+        language: "text/fhirpath",
+        expression: "%resource.extension.where(url='urn:lifetime-total').value"
+      })
+    }));
   });
 
   it("does not invent a dose when only an unevaluated R6 expression exists", () => {
