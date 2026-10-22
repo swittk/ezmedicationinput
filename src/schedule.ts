@@ -1,5 +1,8 @@
 import { createTimingPrimitives } from "./regimen/scheduler-primitives";
-import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
+import {
+  PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+  TREATMENT_START_SYSTEM
+} from "./regimen/parallel-course";
 import { getDosageCondition, getDosageExcludedDates, getUnresolvedDosage, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
@@ -714,9 +717,17 @@ function hasExactWeeklyFrequencyAnchors(
     weekdays > 0 && clocks > 0 && weekdays * clocks === frequency;
 }
 
-function validateExecutableFrequency(repeat: FhirTimingRepeat | undefined): void {
+function validateExecutableFrequency(timing: FhirTiming | undefined): void {
+  const repeat = timing?.repeat;
   if (!repeat) return;
   const { frequency, frequencyMax, period, periodMax, periodUnit } = repeat;
+  if ((repeat.dayOfWeek?.length ?? 0) > 0 &&
+      (periodUnit === FhirPeriodUnit.Month || periodUnit === FhirPeriodUnit.Year) &&
+      !(timing?.event?.length)) {
+    throw new Error(
+      "Monthly or yearly weekday timing requires an ordinal weekday or exact date; an unspecified weekday occurrence is not executable."
+    );
+  }
   if (periodMax !== undefined) {
     if (!Number.isFinite(periodMax) || periodMax <= 0 ||
         period === undefined || !Number.isFinite(period) || period <= 0 ||
@@ -1478,6 +1489,46 @@ function treatmentRelativeInstant(
   }
 }
 
+function parallelComponentCadenceOrigin(
+  dosage: FhirDosage,
+  treatmentStart: Date,
+  timeZone: string,
+  fallback: Date
+): Date {
+  const markers = dosage.modifierExtension?.filter(extension =>
+    extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL) ?? [];
+  if (!markers.length) return fallback;
+  if (markers.length !== 1 || !markers[0].valueQuantity) {
+    throw new Error("Parallel component phase origin is malformed or conflicting");
+  }
+  return treatmentRelativeInstant({
+    contextCode: {
+      coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start" }]
+    },
+    offsetDuration: markers[0].valueQuantity
+  }, treatmentStart, timeZone);
+}
+
+function hasConcurrentCountCaps(course: FhirR6DosageDetails): boolean {
+  return course.step.some(step => step.component.filter(component =>
+    component.timing?.repeat?.count !== undefined ||
+    component.timing?.repeat?.countMax !== undefined
+  ).length > 1);
+}
+
+function hasConcurrentCountCapsInDosages(dosages: readonly FhirDosage[]): boolean {
+  const cappedBySequence = new Map<number, number>();
+  for (const dosage of dosages) {
+    const repeat = dosage.timing?.repeat;
+    if (repeat?.count === undefined && repeat?.countMax === undefined) continue;
+    const sequence = dosage.sequence ?? 1;
+    const capped = (cappedBySequence.get(sequence) ?? 0) + 1;
+    if (capped > 1) return true;
+    cappedBySequence.set(sequence, capped);
+  }
+  return false;
+}
+
 /**
  * Administer one global step at a time, while retaining its simultaneous
  * site-specific components. All absolute boundaries derive from orderedAt;
@@ -1545,7 +1596,8 @@ function scheduleTreatmentRelativeCourse(
       // A calendar track keeps its own recurrence origin across global step
       // cuts. Otherwise QOD / monthly cadence would restart at every taper.
       const cadenceOrigin = repeat?.boundsPeriod
-        ? (absoluteStart ?? anchor) : start;
+        ? (absoluteStart ?? anchor)
+        : parallelComponentCadenceOrigin(dosage, anchor, timeZone, start);
       const candidateTimes = nextDueDoses(dosage, {
         ...options, from: effectiveFrom, orderedAt: cadenceOrigin, limit
       });
@@ -1593,6 +1645,12 @@ export function nextDueDoses(
     )) {
       throw new Error("This R6 course has unsupported safety/cycle rules and requires an R6-aware scheduler");
     }
+    if (r6Course && options.priorCount !== undefined &&
+        hasConcurrentCountCaps(r6Course)) {
+      throw new Error(
+        "priorCount is ambiguous across concurrent count-capped treatment components"
+      );
+    }
     if (r6Course && r6Course.step.some(step => step.start || step.end)) {
       return scheduleTreatmentRelativeCourse(r6Course, options);
     }
@@ -1604,6 +1662,12 @@ export function nextDueDoses(
         // unsupported execution semantics above.
         modifierExtension: item.modifierExtension?.filter(ext => ext.url !== DOSAGE_DETAILS_R5_URL)
       }));
+    if (options.priorCount !== undefined &&
+        hasConcurrentCountCapsInDosages(items)) {
+      throw new Error(
+        "priorCount is ambiguous across concurrent count-capped treatment components"
+      );
+    }
     const limit = options?.limit ?? 10;
     if (!Number.isFinite(limit) || limit <= 0) return [];
     // Body-site references and dose expressions affect the administration
@@ -1726,7 +1790,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   if (!timeZone) {
     throw new Error("Configuration with a valid timeZone is required");
   }
-  validateExecutableFrequency(dosage.timing?.repeat);
+  validateExecutableFrequency(dosage.timing);
   if (dosage.maxDosePerLifetime)
     throw new Error("Lifetime dose maximum requires complete historical dose data");
   if (dosage.maxDosePerAdministration) {
@@ -2803,7 +2867,16 @@ function prepareMaximumSupplyTiming(dosage: FhirDosage): {
       nextRepeat = {
         ...nextRepeat,
         frequency: repeat.frequencyMax,
-        frequencyMax: undefined
+        frequencyMax: undefined,
+        // A single stated clock identifies one valid administration but does
+        // not reduce the prescribed maximum frequency. Maximum supply uses
+        // the configured clocks for the upper daily frequency; executable
+        // scheduling still rejects the unresolved frequency range above.
+        ...(repeat.period === 1 && repeat.periodUnit === FhirPeriodUnit.Day &&
+          (repeat.timeOfDay?.length ?? 0) > 0 &&
+          (repeat.timeOfDay?.length ?? 0) < repeat.frequencyMax
+          ? { timeOfDay: undefined }
+          : {})
       };
       frequencyMaximum = true;
     }
@@ -3083,7 +3156,7 @@ function calculateTotalUnitsSingle(
 
   const orderedAtDate =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
-  validateExecutableFrequency(dosage.timing?.repeat);
+  validateExecutableFrequency(dosage.timing);
 
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),
@@ -3292,6 +3365,9 @@ function calculateCourseTotalUnits(
     !executableR6Safety(component))))
     throw new MedicationQuantityCalculationError("unsupported-component-safety-rule",
       "A dosage component contains a safety expression, lifetime limit or exceeded-action rule requiring clinical evaluation beyond calendar scheduling. Resolve that rule before calculating supply.");
+  if (options.priorCount !== undefined && hasConcurrentCountCaps(course))
+    throw new MedicationQuantityCalculationError("ambiguous-prior-count",
+      "priorCount is ambiguous across concurrent count-capped treatment components; provide component-specific administration history.");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
     throw new MedicationQuantityCalculationError("time-zone-required",
@@ -3318,6 +3394,7 @@ function calculateCourseTotalUnits(
     const dosages: FhirDosage[] = [];
     const starts: Date[] = [];
     const ends: Array<Date | null> = [];
+    const cadenceOrigins: Date[] = [];
     for (const _component of step.component) {
       const dosage = flattened[dosageIndex++];
       if (!dosage) throw new MedicationQuantityCalculationError("invalid-course",
@@ -3343,7 +3420,9 @@ function calculateCourseTotalUnits(
       // may have started BEFORE the stage cut. Keep their original cadence
       // anchored to the stated date rather than resetting it each time.
       const cadenceOrigin = repeat?.boundsPeriod
-        ? (calendarStart ?? treatmentStart) : start;
+        ? (calendarStart ?? treatmentStart)
+        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, start);
+      cadenceOrigins.push(cadenceOrigin);
       // Before the first global relative cut, an independent calendar member
       // is allowed to start before orderedAt. Subsequent step cuts still
       // intersect the calendar window with the global step.
@@ -3377,9 +3456,7 @@ function calculateCourseTotalUnits(
       const dosage = dosages[j];
       const begin = starts[j];
       const ownEnd = ends[j];
-      const originalStart = resolveRepeatBoundsStart(dosage.timing?.repeat, zone);
-      const cadenceOrigin = dosage.timing?.repeat?.boundsPeriod
-        ? (originalStart ?? treatmentStart) : start;
+      const cadenceOrigin = cadenceOrigins[j];
       const end = [queryEnd, ...(stepEnd ? [stepEnd] : []),
         ...(ownEnd ? [ownEnd] : [])].reduce((earliest, candidate) =>
         candidate < earliest ? candidate : earliest, queryEnd);

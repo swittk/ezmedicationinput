@@ -42,6 +42,8 @@ function orderedCalendarBounds(earlier: string, later: string): boolean {
 
 const TREATMENT_START_CODE = 'treatment-start';
 export const TREATMENT_START_SYSTEM = 'http://hl7.org/fhir/evidence-variable-event';
+export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
+  'https://solublelabs.com/fhir/StructureDefinition/medication-parallel-component-phase-origin';
 
 function durationPosition(dosage: FhirDosage): Position | undefined {
   const repeat = dosage.timing?.repeat;
@@ -99,15 +101,40 @@ function relativeTime(position: Position) {
 
 /** The enclosing step owns its start/end. A copied component must not retain
  * a previous duration measured from the wrong step's start. */
-function dosageInStep(dosage: FhirDosage, sequence: number): EzDosage {
+function dosageInStep(
+  dosage: FhirDosage,
+  sequence: number,
+  phaseOrigin?: Position
+): EzDosage {
   const timing = dosage.timing;
   const repeat = timing?.repeat;
   const nextRepeat = repeat
     ? (({ boundsDuration: _duration, ...rest }) => rest)(repeat)
     : undefined;
+  // A component from one independent phase can be copied into several global
+  // steps created by another track. Preserve its original treatment-relative
+  // cadence origin so interval alignment and total count caps do not restart
+  // at each unrelated cut. This modifier is required execution semantics and
+  // therefore survives both the R6 course and strict R5 projection.
+  const phaseOriginMarker = phaseOrigin ? {
+    url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+    valueQuantity: {
+      value: phaseOrigin.value,
+      unit: phaseOrigin.unit,
+      system: 'http://unitsofmeasure.org',
+      code: phaseOrigin.unit
+    }
+  } : undefined;
   return {
     ...dosage,
     sequence,
+    ...(phaseOriginMarker ? {
+      modifierExtension: [
+        ...(dosage.modifierExtension ?? []).filter(extension =>
+          extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL),
+        phaseOriginMarker
+      ]
+    } : {}),
     ...(timing && repeat ? { timing: { ...timing, repeat: nextRepeat } } : {})
   };
 }
@@ -278,17 +305,22 @@ export function projectParallelRegimen(
   for (let index = 0; index < ordered.length; index++) {
     const start = ordered[index];
     const end = ordered[index + 1];
-    const members: FhirDosage[] = [];
+    const members: Array<{ dosage: FhirDosage; phaseOrigin?: Position }> = [];
     for (const phases of windows) {
       const phase = phases.find(value =>
         (comparePositions(value.start, start) === -1 || comparePositions(value.start, start) === 0) &&
         (!value.end || comparePositions(start, value.end) === -1)
       );
-      if (phase) members.push(...phase.members);
+      if (phase) members.push(...phase.members.map(dosage => ({
+        dosage,
+        phaseOrigin: phase.start
+      })));
     }
     // Calendar tracks are independent of treatment-relative cuts. Their own
     // boundsPeriod (including inclusive end) is the source of truth.
-    for (const calendarTrack of calendarTracks) members.push(...calendarTrack);
+    for (const calendarTrack of calendarTracks) {
+      members.push(...calendarTrack.map(dosage => ({ dosage })));
+    }
     if (!members.length) {
       // If every track has terminated at the final cut, the entire course
       // ends there. A gap *before* another cut remains unresolved; never
@@ -296,7 +328,9 @@ export function projectParallelRegimen(
       if (index === ordered.length - 1) break;
       return { kind: 'unresolved', reason: 'parallel-regimen-empty-step' };
     }
-    for (const item of members) dosages.push(dosageInStep(item, index + 1));
+    for (const item of members) {
+      dosages.push(dosageInStep(item.dosage, index + 1, item.phaseOrigin));
+    }
     stepMetadata.push({
       sequence: index + 1,
       ...(index ? { start: relativeTime(start) } : {}),

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits, nextDueDoses } from "../src";
+import {
+  calculateTotalUnits, nextDueDoses, parseSig, toDosageDetails
+} from "../src";
 import type { FhirDosage, FhirPeriodUnit } from "../src";
 
 const start = "2024-01-01T00:00:00Z";
@@ -89,6 +91,69 @@ describe("schedule/supply audit regressions", () => {
       quantityKind: "maximum",
       explanation: expect.stringMatching(/upper bound.*frequency range/i)
     });
+  });
+
+  it("does not let one explicit clock collapse a daily maximum frequency", () => {
+    const ranged = parseSig("1 tab PO once or twice daily at 08:00");
+    expect(ranged.fhir[0].timing?.repeat).toMatchObject({
+      frequency: 1,
+      frequencyMax: 2,
+      period: 1,
+      periodUnit: "d",
+      timeOfDay: ["08:00:00"]
+    });
+    expect(() => nextDueDoses(ranged, due)).toThrow(/frequency range/);
+    expect(calculateTotalUnits({ ...supply, dosage: ranged })).toMatchObject({
+      totalUnits: 4,
+      unit: "tab",
+      quantityKind: "maximum",
+      explanation: expect.stringMatching(/upper bound.*frequency range/i)
+    });
+  });
+
+  it("rejects monthly weekdays whose ordinal occurrence is unspecified", () => {
+    const imported = dailyDose({
+      timing: { repeat: {
+        frequency: 1,
+        period: 1,
+        periodUnit: "mo",
+        dayOfWeek: ["mon"],
+        timeOfDay: ["09:00:00"]
+      } }
+    });
+    const cases = [
+      parseSig("1 tab PO once monthly on Monday at 09:00"),
+      parseSig("รับประทาน 1 เม็ด เดือนละครั้ง วันจันทร์ เวลา 09:00"),
+      imported
+    ];
+    for (const dosage of cases) {
+      expect(() => nextDueDoses(dosage, due))
+        .toThrow(/monthly.*weekday.*ordinal.*exact date/i);
+      expect(() => calculateTotalUnits({ ...supply, dosage }))
+        .toThrow(/monthly.*weekday.*ordinal.*exact date/i);
+    }
+  });
+
+  it("rejects scalar priorCount allocation across concurrent capped components", () => {
+    const capped = (site: string): FhirDosage => dailyDose({
+      sequence: 1,
+      site: { text: site },
+      asNeeded: true,
+      timing: { repeat: { count: 3, frequency: 1, period: 1, periodUnit: "d" } }
+    });
+    const concurrent = [capped("left"), capped("right")];
+    const course = toDosageDetails(concurrent);
+    const later = {
+      ...due,
+      from: "2024-01-05T00:00:00Z",
+      priorCount: 2
+    };
+    for (const dosage of [concurrent, course]) {
+      expect(() => nextDueDoses(dosage, later))
+        .toThrow(/priorCount.*ambiguous.*concurrent/i);
+      expect(() => calculateTotalUnits({ ...supply, ...later, dosage }))
+        .toThrow(/priorCount.*ambiguous.*concurrent/i);
+    }
   });
 
   it("rejects an unanchored twice-weekly frequency instead of scheduling weekly", () => {

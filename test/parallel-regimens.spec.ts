@@ -333,6 +333,31 @@ describe("concurrent independent treatment sequences", () => {
     }).totalUnits).toBe(80);
   });
 
+  it("keeps a total countMax cap across unrelated parallel step boundaries", () => {
+    const parsed = parseSig(
+      "1 drop OD QID x7d then BID x7d then QD; 1 drop OS QID x7d then q5min max 3 doses"
+    );
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("QD"));
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const forms = [parsed, parsed.fhir, parsed.fhirNext, strict];
+    const expected = [
+      "2026-11-01T20:00:00+07:00",
+      "2026-11-02T09:00:00+07:00",
+      "2026-11-03T09:00:00+07:00",
+      "2026-11-04T09:00:00+07:00",
+      "2026-11-05T09:00:00+07:00",
+      "2026-11-06T09:00:00+07:00"
+    ];
+    for (const dosage of forms) {
+      expect(nextDueDoses(dosage,
+        options("2026-11-01T20:00:00+07:00", 6))).toEqual(expected);
+      expect(calculateTotalUnits({
+        dosage, from: orderedAt, orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 21, durationUnit: "d"
+      }).totalUnits).toBe(80);
+    }
+  });
+
   it("preserves calendar-month clamping alongside an independent dated track", () => {
     const start = "2027-01-31T08:00:00+07:00";
     const input = "1 drop OD QID x1mo then BID; 1 drop OS QID from 2027-02-14 until 2027-03-08";
