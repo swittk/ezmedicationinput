@@ -323,7 +323,12 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     value.extension?.find(extension =>
       extension.url === DOSAGE_CONDITION_R5_URL)?.valueString;
   if (raw) {
-    try { return JSON.parse(raw) as MedicationCondition; } catch { /* use faithful original text */ }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (isMedicationCondition(parsed)) return parsed;
+    } catch { /* Invalid JSON falls back to the original structured condition. */ }
+    // An invalid extension cannot become an executable Boolean tree. Keep
+    // the R6 structured fields (or unresolved text) as the source of truth.
   }
   const name = value.details?.text ?? value.code?.text ?? value.code?.coding?.[0]?.display;
   if (value.code?.coding?.[0]?.code === "problem-presents" && name && value.valueBoolean !== undefined) {

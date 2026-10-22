@@ -166,6 +166,35 @@ describe("schedule/supply audit regressions", () => {
     }).totalUnits).toBe(0);
   });
 
+  it("only spends occurrence-cap allowances on clinically eligible administrations", () => {
+    const parsed = parseSig(
+      "take 1 tab q4h prn pain max three doses daily only if BP > 160"
+    );
+    const filtered = {
+      from: "2026-10-22T00:00:00+07:00",
+      orderedAt: "2026-10-22T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 5,
+      priorDoseTimes: [],
+      evaluateCondition: (_condition: unknown, at: string) =>
+        !at.includes("T00:00:00") && !at.includes("T04:00:00")
+    };
+    const expected = [
+      "2026-10-22T08:00:00+07:00",
+      "2026-10-22T12:00:00+07:00",
+      "2026-10-22T16:00:00+07:00",
+      "2026-10-23T08:00:00+07:00",
+      "2026-10-23T12:00:00+07:00"
+    ];
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(dosage, filtered)).toEqual(expected);
+      expect(calculateTotalUnits({
+        ...filtered, dosage,
+        durationValue: 2, durationUnit: "d"
+      }).totalUnits).toBe(6);
+    }
+  });
+
   it("uses the upper frequency bound only for explicitly labelled maximum supply", () => {
     const ranged = dailyDose({
       timing: {

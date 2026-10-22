@@ -1775,13 +1775,17 @@ export function nextDueDoses(
     const { condition: _condition, excludedDates: _excludedDates, ...plainDosage } =
       one as EzDosage;
     const quantityCaps = executableQuantityCaps(one);
-    const unconstrained: FhirDosage = {
+    const occurrenceCap = getTimingOccurrenceCap(one.timing?.repeat);
+    // The cap is an allowance for *administered* doses, not for candidate
+    // opportunities. Remove it while evaluating exclusions and conditions,
+    // then apply it to the accepted administrations below.
+    const unconstrained: FhirDosage = withoutOccurrenceCap({
       ...plainDosage,
       maxDosePerPeriod: undefined,
       modifierExtension: plainDosage.modifierExtension?.filter(extension =>
         extension.url !== DOSAGE_CONDITION_R5_URL &&
         extension.url !== DOSAGE_EXCLUDED_DATES_R5_URL)
-    };
+    });
     const unknownPeriodHistory = unknownPrnPeriodHistory(one, options, timeZone);
     let candidateLimit = Math.min(10000, Math.max(16, Math.floor(limit) * 2));
     while (true) {
@@ -1801,11 +1805,16 @@ export function nextDueDoses(
           if (!eligible) continue;
         }
         accepted.push(at);
-        if (!quantityCaps.length && accepted.length >= limit) break;
+        if (!quantityCaps.length && !occurrenceCap && accepted.length >= limit) break;
       }
-      // A conditional occurrence that is not administered does not consume
-      // the quantity allowance. Apply the cap AFTER exclusions/predicates.
-      const capped = applyQuantityCaps(accepted, quantityCaps,
+      // A conditionally withheld/excluded dose does not consume either cap.
+      // The periodic cap must see ALL accepted opportunities before quantity
+      // caps determine which can actually be given within the rolling limit.
+      const periodicallyCapped = occurrenceCap
+        ? applyOccurrenceCap(accepted, occurrenceCap, options.priorDoseTimes,
+          timeZone, Number.MAX_SAFE_INTEGER, unknownPeriodHistory)
+        : accepted;
+      const capped = applyQuantityCaps(periodicallyCapped, quantityCaps,
         options.priorDoseTimes, timeZone, limit,
         unknownPeriodHistory);
       if (capped.length >= limit || candidates.length < candidateLimit || candidateLimit === 10000) {

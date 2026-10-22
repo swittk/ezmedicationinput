@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
-  calculateTotalUnits, nextDueDoses, formatSig,
-  type FhirDosage, type FhirR6DosageDetails
+  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
+  type FhirDosage, type FhirR6DosageDetails, type EzDosage
 } from "../src";
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
@@ -111,6 +111,45 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(() => nextDueDoses(dosage, scheduler)).toThrow(/modifierExtension/i);
       expect(() => calculateTotalUnits({ ...supply, dosage })).toThrow(/modifierExtension/i);
     }
+  });
+
+  it("validates imported R6 predicate trees before accepting their Boolean meaning", () => {
+    const imported = parseSig("1 tab PO BID only if BP > 160").fhirNext;
+    const component = imported.step[0].component[0];
+    const original = component.condition?.[0];
+    expect(original?.valueQuantity?.value).toBe(160);
+    const valid = getDosageCondition(component as EzDosage);
+    expect(valid).toMatchObject({ kind: "measurement", name: "bp", operation: "gt", value: 160 });
+    for (const invalid of [
+      '{"kind":"all"}',
+      '{"kind":"any","conditions":[]}',
+      '{"kind":"measurement","name":"bp","operation":"gt","value":"abc","text":"BP"}',
+      '{broken-json'
+    ]) {
+      const copy = JSON.parse(JSON.stringify(component)) as EzDosage;
+      const condition = copy.condition?.[0];
+      expect(condition?.extension?.[0].extension?.[0].url).toBe("predicate");
+      condition!.extension![0].extension![0].valueString = invalid;
+      // Ignore the malformed JSON, not the real structured BP constraint.
+      expect(getDosageCondition(copy)).toEqual(valid);
+      const lowered = toFhirR5Dosages({ step: [{ component: [copy] }] });
+      expect(getDosageCondition(lowered[0])).toEqual(valid);
+      expect(() => nextDueDoses(lowered, scheduler)).toThrow(/evaluateCondition/);
+    }
+
+    const expression = JSON.parse(JSON.stringify(component)) as EzDosage;
+    expression.condition = [{
+      text: "unresolved clinical predicate",
+      extension: [{
+        url: DOSAGE_CONDITION_R6_LOGIC_URL,
+        extension: [{ url: "predicate", valueString: '{"kind":"all"}' }]
+      }]
+    }];
+    expect(getDosageCondition(expression)).toEqual({
+      kind: "text", text: "unresolved clinical predicate"
+    });
+    const lowered = toFhirR5Dosages({ step: [{ component: [expression] }] });
+    expect(() => nextDueDoses(lowered, scheduler)).toThrow(/evaluateCondition/);
   });
 
   it("never uses an outdated literal instruction after editing a strict R5 dose", () => {
