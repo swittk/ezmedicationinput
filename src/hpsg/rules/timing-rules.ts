@@ -465,6 +465,17 @@ function frequencyCardinalValue(token: Token | undefined): number | undefined {
   return value !== undefined && value >= 0 ? value : undefined;
 }
 
+/** Counts are exact positive integers; unlike durations and frequencies they cannot be ranges. */
+function exactCountCardinalValue(token: Token | undefined): number | undefined {
+  if (!token || token.kind === LexKind.NumberRange) return undefined;
+  const value = token.kind === LexKind.Number
+    ? token.value
+    : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(token)];
+  return value !== undefined && Number.isFinite(value) && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
 function frequencyRangeConnector(token: Token | undefined): boolean {
   if (!token) return false;
   const lower = normalizeTokenLower(token);
@@ -690,7 +701,8 @@ export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> 
         })
       ];
     }
-    if (count.kind !== LexKind.Number || count.value === undefined || count.value <= 0) {
+    const countValue = exactCountCardinalValue(count);
+    if (countValue === undefined) {
       return [];
     }
     return [
@@ -701,12 +713,12 @@ export function cadenceFirstFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> 
         synsem: {
           head: {
             schedule: {
-              frequency: count.value,
+              frequency: countValue,
               period: normalizedPeriod.value,
               periodUnit: normalizedPeriod.unit,
               timingCode:
                 normalizedPeriod.value === 1 && normalizedPeriod.unit === FhirPeriodUnit.Day
-                  ? timingCodeForDailyFrequency(count.value)
+                  ? timingCodeForDailyFrequency(countValue)
                   : undefined
             }
           },
@@ -1027,8 +1039,7 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const followingTimes = context.tokens[start + 2];
     const beginsCadenceFirstFrequency = Boolean(
       mapFrequencyAdverb(lower) &&
-      followingCount?.kind === LexKind.Number &&
-      followingCount.value !== undefined &&
+      exactCountCardinalValue(followingCount) !== undefined &&
       followingTimes &&
       FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(followingTimes))
     );
@@ -1851,10 +1862,10 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       const valueIndex = start + maximumLead.length;
       const valueToken = context.tokens.slice(valueIndex, valueIndex + 1).shift();
       const occurrenceToken = context.tokens.slice(valueIndex + 1, valueIndex + 2).shift();
+      const countValue = exactCountCardinalValue(valueToken);
       if (
         valueToken && !context.state.consumed.has(valueToken.index) &&
-        valueToken.kind === LexKind.Number && valueToken.value !== undefined && valueToken.value >= 1 &&
-        Number.isInteger(valueToken.value) &&
+        countValue !== undefined &&
         occurrenceToken && !context.state.consumed.has(occurrenceToken.index) &&
         OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(occurrenceToken))
       ) {
@@ -1869,7 +1880,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
               head: {
                 schedule: {
                   occurrenceCap: {
-                    max: valueToken.value,
+                    max: countValue,
                     period: period.period,
                     periodUnit: period.periodUnit
                   }
@@ -1888,7 +1899,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           rule: "hpsg.lex.schedule.count.maximum",
           tokens: matched,
           synsem: {
-            head: { schedule: { count: 1, countMax: valueToken.value } },
+            head: { schedule: { count: 1, countMax: countValue } },
             valence: {},
             cont: { clauseKind: "administration" }
           },
@@ -1896,6 +1907,29 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         }));
         return signs;
       }
+    }
+    const trailingOccurrenceToken = context.tokens[start + 1];
+    const trailingTotalToken = context.tokens[start + 2];
+    const trailingCountValue = exactCountCardinalValue(token);
+    if (
+      trailingCountValue !== undefined &&
+      trailingOccurrenceToken && !context.state.consumed.has(trailingOccurrenceToken.index) &&
+      OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(trailingOccurrenceToken)) &&
+      trailingTotalToken && !context.state.consumed.has(trailingTotalToken.index) &&
+      normalizeTokenLower(trailingTotalToken) === "total"
+    ) {
+      const matched = [token, trailingOccurrenceToken, trailingTotalToken];
+      return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.count.trailingTotal",
+        tokens: matched,
+        synsem: {
+          head: { schedule: { count: trailingCountValue } },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 18 + matched.length
+      })];
     }
     if (token.kind === LexKind.Number && token.value !== undefined) {
       const unitToken = context.tokens[start + 1];
@@ -1985,13 +2019,19 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     if (COUNT_MARKER_TOKENS.has(lower)) {
       const valueToken = context.tokens[start + 1];
-      if (valueToken && !context.state.consumed.has(valueToken.index) && valueToken.kind === LexKind.Number && valueToken.value !== undefined) {
+      const value = valueToken?.kind === LexKind.Number
+        ? valueToken.value
+        : valueToken
+          ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)]
+          : undefined;
+      if (valueToken && !context.state.consumed.has(valueToken.index) &&
+          value !== undefined && Number.isFinite(value) && value > 0) {
         const unitToken = context.tokens[start + 2];
         const unit = unitToken && !context.state.consumed.has(unitToken.index)
           ? mapIntervalUnit(normalizeTokenLower(unitToken))
           : undefined;
         const occurrenceToken = !unit && unitToken && !context.state.consumed.has(unitToken.index) &&
-          FREQUENCY_TIMES_WORDS.has(normalizeTokenLower(unitToken))
+          OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(unitToken))
           ? unitToken
           : undefined;
         const tokens = unit
@@ -2003,8 +2043,10 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           return signs;
         }
         const schedule = unit
-          ? buildDurationScheduleFeature(valueToken.value, unit)
-          : { count: valueToken.value };
+          ? buildDurationScheduleFeature(value, unit)
+          : Number.isInteger(value)
+            ? { count: value }
+            : undefined;
         if (schedule) {
           signs.push(
             lexicalSign({
@@ -2059,7 +2101,8 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           }
         } else if (
           Array.isArray(unitToken.annotations?.wordClasses) &&
-          unitToken.annotations.wordClasses.indexOf(TokenWordClass.CountKeyword) !== -1
+          unitToken.annotations.wordClasses.indexOf(TokenWordClass.CountKeyword) !== -1 &&
+          !durationRange && Number.isInteger(durationValue)
         ) {
           signs.push(
             lexicalSign({
@@ -2067,7 +2110,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
               rule: "hpsg.lex.schedule.count.for",
               tokens: [token, valueToken, unitToken],
               synsem: {
-                head: { schedule: { count: valueToken.value } },
+                head: { schedule: { count: durationValue } },
                 valence: {},
                 cont: { clauseKind: "administration" }
               },
