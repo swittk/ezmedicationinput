@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, registerMedicationDateResolver } from "../src/index";
+import { lexInput } from "../src/lexer/lex";
 import { parseSig } from "./helpers/r5-parser";
 
 const REFERENCE_DATE = "2026-09-27";
@@ -598,6 +599,50 @@ describe("calendar date interpretation", () => {
       expect(parsed.meta.leftoverText).toBeUndefined();
       expect(parsed.fhir.timing?.repeat?.boundsPeriod)
         .toEqual({ start: "2026-10-25", end: "2026-11-01" });
+    }
+  });
+
+  it("keeps complete attached Thai ISO lexeme boundaries without guessing Buddhist-era semantics", () => {
+    const cases = [
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่2026-10-25 ถึง2026-11-01",
+        unresolved: [false, false]
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01",
+        unresolved: [true]
+      },
+      {
+        input: "รับประทาน 1 เม็ด วันที่2569-10-25และ2569-11-01",
+        unresolved: [true],
+        separator: "และ"
+      },
+      ...["และ", "and", ","].map((separator) => ({
+        input: `รับประทาน 1 เม็ด วันที่2026-10-25${separator}2026-11-01`,
+        unresolved: [false],
+        separator
+      }))
+    ];
+
+    for (const item of cases) {
+      const tokens = lexInput(item.input);
+      const dateMatches = [...item.input.matchAll(/\d{4}-\d{2}-\d{2}/gu)];
+      for (const match of dateMatches) {
+        expect(tokens.some((token) => token.sourceStart === match.index)).toBe(true);
+        expect(tokens.some((token) => token.sourceEnd === match.index! + match[0].length)).toBe(true);
+      }
+      expect(tokens.filter((token) =>
+        /[\u0E00-\u0E7F]/u.test(token.original) && /\d/u.test(token.original)
+      )).toEqual([]);
+      if (item.separator) {
+        expect(tokens.some((token) => token.original === item.separator)).toBe(true);
+      }
+
+      const spans = findMedicationDateListSpans(item.input, {
+        locale: "th",
+        datePolicy: { referenceDate: REFERENCE_DATE }
+      });
+      expect(spans.map((span) => span.unresolved)).toEqual(item.unresolved);
     }
   });
 

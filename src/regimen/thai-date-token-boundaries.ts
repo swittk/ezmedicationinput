@@ -2,7 +2,9 @@ import { findMedicationDateListSpans } from '../date-interpretation';
 import { LexKind, LexToken } from '../lexer/token-types';
 import type { ParseOptions } from '../types';
 
-const NUMERIC_DATE = /\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?/gu;
+// Keep ISO first: the shorter numeric alternative would otherwise match the
+// `26-11-01` suffix of `2026-11-01` and leave the leading `20` attached.
+const NUMERIC_DATE_LEXEME = /\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?/gu;
 
 function fragmentToken(token: LexToken, input: string, start: number, end: number): LexToken {
   const original = input.slice(start, end);
@@ -35,9 +37,14 @@ export function splitTokensAtRecognizedThaiDateBoundaries(
 ): LexToken[] {
   const cuts = new Set<number>();
   for (const span of findMedicationDateListSpans(input, options)) {
-    if (span.unresolved) continue;
-    NUMERIC_DATE.lastIndex = 0;
-    for (let match = NUMERIC_DATE.exec(span.sourceText); match; match = NUMERIC_DATE.exec(span.sourceText)) {
+    // An unresolved span is still structurally date-shaped. Splitting its
+    // lexical boundary does not resolve it or assign calendar semantics.
+    NUMERIC_DATE_LEXEME.lastIndex = 0;
+    for (
+      let match = NUMERIC_DATE_LEXEME.exec(span.sourceText);
+      match;
+      match = NUMERIC_DATE_LEXEME.exec(span.sourceText)
+    ) {
       const start = span.start + match.index;
       cuts.add(start);
       cuts.add(start + match[0].length);
