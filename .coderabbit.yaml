@@ -1,0 +1,7 @@
+# Keep production code, clinical tests, and FHIR definitions in CodeRabbit reviews.
+# Exclude only diary, standalone benchmark, and historical experimental harness.
+reviews:
+  path_filters:
+    - "!DIARY.md"
+    - "!bench/compare-r6.mjs"
+    - "!experiments/boundary-planner/**"
