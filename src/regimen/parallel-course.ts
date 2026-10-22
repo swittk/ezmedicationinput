@@ -1,4 +1,4 @@
-import { toDosageDetails, toFhirR5Dosages, DOSAGE_DETAILS_R5_URL } from '../dosage-course';
+import { toDosageDetails, toFhirR5Dosages, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from '../dosage-course';
 import { buildRegimenGraph } from './regimen';
 import type { BoundaryPlan } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -42,8 +42,6 @@ function orderedCalendarBounds(earlier: string, later: string): boolean {
 
 const TREATMENT_START_CODE = 'treatment-start';
 export const TREATMENT_START_SYSTEM = 'http://hl7.org/fhir/evidence-variable-event';
-export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
-  'https://solublelabs.com/fhir/StructureDefinition/medication-parallel-component-phase-origin';
 
 function durationPosition(dosage: FhirDosage): Position | undefined {
   const repeat = dosage.timing?.repeat;

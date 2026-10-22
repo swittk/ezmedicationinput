@@ -23,6 +23,9 @@ export const DOSAGE_EXCLUDED_WEEKDAYS_R5_URL =
   "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-weekdays";
 export const DOSAGE_UNRESOLVED_R5_URL =
   "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unresolved-schedule";
+/** Treatment-relative phase origin for an independent parallel component. */
+export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
+  "https://solublelabs.com/fhir/StructureDefinition/medication-parallel-component-phase-origin";
 const CONDITION_CODE_SYSTEM = "http://hl7.org/fhir/CodeSystem/dosage-condition-code";
 const INTERNAL_CONDITION_CODE_SYSTEM = "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-condition";
 
@@ -35,7 +38,7 @@ function replacementExtensions(
 }
 
 function hasOnlyKeys(candidate: Record<string, unknown>, allowed: readonly string[]): boolean {
-  return Object.keys(candidate).every(key => allowed.includes(key));
+  return Object.keys(candidate).every(key => allowed.indexOf(key) >= 0);
 }
 
 function isMedicationCondition(value: unknown, depth = 0): value is MedicationCondition {
@@ -45,7 +48,7 @@ function isMedicationCondition(value: unknown, depth = 0): value is MedicationCo
     case "measurement":
       return hasOnlyKeys(candidate, ["kind", "name", "operation", "value", "unit", "text"]) &&
         typeof candidate.name === "string" && candidate.name.length > 0 &&
-        ["gt", "ge", "lt", "le", "eq", "ne"].includes(candidate.operation as string) &&
+        ["gt", "ge", "lt", "le", "eq", "ne"].indexOf(candidate.operation as string) >= 0 &&
         typeof candidate.value === "number" && Number.isFinite(candidate.value) &&
         (candidate.unit === undefined || typeof candidate.unit === "string") &&
         typeof candidate.text === "string" && candidate.text.length > 0;
@@ -129,6 +132,17 @@ function validateUnresolvedModifier(extension: FhirExtension): void {
   }
 }
 
+function validateParallelPhaseOriginModifier(extension: FhirExtension): void {
+  const quantity = extension.valueQuantity;
+  if (!hasOnlyPrimitiveValue(extension, "valueQuantity") ||
+      !quantity || typeof quantity.value !== "number" || !Number.isInteger(quantity.value) || quantity.value < 0 ||
+      (quantity.code !== "d" && quantity.code !== "mo") ||
+      quantity.unit !== quantity.code ||
+      quantity.system !== "http://unitsofmeasure.org") {
+    throw new Error("Malformed parallel-component phase-origin modifierExtension");
+  }
+}
+
 function validateRetainedCourseModifier(extension: FhirExtension): void {
   const values = extension.extension?.filter(value => value.url === "dosageDetails") ?? [];
   if (valueKeys(extension).length || values.length !== 1 ||
@@ -175,6 +189,9 @@ export function assertUnderstoodDosageModifiers(dosage: FhirDosage | EzDosage): 
         break;
       case DOSAGE_DETAILS_R5_URL:
         validateRetainedCourseModifier(extension);
+        break;
+      case PARALLEL_COMPONENT_PHASE_ORIGIN_URL:
+        validateParallelPhaseOriginModifier(extension);
         break;
       default:
         throw new Error(`Unsupported Dosage.modifierExtension cannot be ignored for execution: ${extension.url}`);

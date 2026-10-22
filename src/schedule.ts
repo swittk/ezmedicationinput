@@ -1,9 +1,6 @@
 import { createTimingPrimitives } from "./regimen/scheduler-primitives";
-import {
-  PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
-  TREATMENT_START_SYSTEM
-} from "./regimen/parallel-course";
-import { getDosageCondition, getDosageExcludedDates, getUnresolvedDosage, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL } from "./dosage-course";
+import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
+import { assertUnderstoodDosageModifiers, getDosageCondition, getDosageExcludedDates, getUnresolvedDosage, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
 } from "./body-site-target";
@@ -1654,7 +1651,11 @@ function scheduleTreatmentRelativeCourse(
       const cadenceOrigin = repeat?.boundsPeriod
         ? (absoluteStart ?? anchor)
         : parallelComponentCadenceOrigin(dosage, anchor, timeZone, start);
-      const candidateTimes = nextDueDoses(dosage, {
+      const candidateTimes = nextDueDoses({
+        ...dosage,
+        modifierExtension: dosage.modifierExtension?.filter(ext =>
+          ext.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL)
+      }, {
         ...options, from: effectiveFrom, orderedAt: cadenceOrigin, limit
       });
       for (const time of candidateTimes) {
@@ -1743,6 +1744,12 @@ export function nextDueDoses(
     }, []).sort((a, b) => Date.parse(a) - Date.parse(b)).slice(0, Math.floor(limit));
   }
   const one = dosage as FhirDosage;
+  assertUnderstoodDosageModifiers(one);
+  if (one.modifierExtension?.some(extension =>
+      extension.url === DOSAGE_DETAILS_R5_URL ||
+      extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)) {
+    throw new Error("A standalone treatment-course component cannot execute without its complete course");
+  }
   const unresolved = getUnresolvedDosage(one);
   if (unresolved) throw new Error(`Cannot schedule unresolved dosage: ${unresolved}`);
   const guard = getDosageCondition(one);
@@ -3528,7 +3535,9 @@ function calculateCourseTotalUnits(
           "Stage " + (index + 1) + " has no executable frequency or dosing time for one component.");
       const bounded: FhirDosage = {
         ...dosage,
-        modifierExtension: dosage.modifierExtension?.filter(ext => ext.url !== DOSAGE_DETAILS_R5_URL),
+        modifierExtension: dosage.modifierExtension?.filter(ext =>
+          ext.url !== DOSAGE_DETAILS_R5_URL &&
+          ext.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL),
         timing: {
           ...dosage.timing,
           repeat: {
@@ -3573,6 +3582,13 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     return calculateCourseTotalUnits(input as FhirR6DosageDetails, options);
   if (Array.isArray(input))
     return calculateCourseTotalUnits(toDosageDetails(input as FhirDosage[]), options);
+  assertUnderstoodDosageModifiers(input as FhirDosage);
+  if ((input as FhirDosage).modifierExtension?.some(extension =>
+      extension.url === DOSAGE_DETAILS_R5_URL ||
+      extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)) {
+    throw new MedicationQuantityCalculationError("incomplete-treatment-course",
+      "A standalone treatment-course component requires the complete persisted regimen.");
+  }
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
 }
 
