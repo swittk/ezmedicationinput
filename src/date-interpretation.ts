@@ -21,6 +21,8 @@ export interface MedicationDateListMatch {
   start: number;
   end: number;
   sourceText: string;
+  /** True when medication syntax explicitly introduced the date relation (for example `until` or `วันที่`). */
+  explicitLead?: boolean;
   relation: MedicationDateRelation;
   events: CanonicalCalendarEventExpr[];
   unresolved: boolean;
@@ -494,6 +496,7 @@ function parseMatchedDateList(
         start,
         end: start + lead.length + structural.effectiveEnd,
         sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
+        explicitLead: lead.length > 0,
         relation: lead.relation,
         events: [],
         unresolved: true
@@ -506,6 +509,7 @@ function parseMatchedDateList(
     start,
     end: start + lead.length + structural.effectiveEnd,
     sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
+    explicitLead: lead.length > 0,
     relation: lead.relation,
     events: lead.relation === "event" || events.length === 1 ? events : [],
     unresolved: lead.relation !== "event" && events.length !== 1

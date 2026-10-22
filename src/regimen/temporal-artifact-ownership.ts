@@ -111,12 +111,12 @@ export function quarantineAmbiguousTemporalBounds(
   source: string,
   options?: ParseOptions
 ): boolean {
-  // A date-shaped "until/from" that fails calendar validation (for example
-  // 2026-02-30) must not silently become an unlimited daily prescription.
-  // The cheap cue keeps ordinary dosing instructions off the date scan path.
-  const hasCalendarCue = /\b(?:from|since|until|through|till|before|after|prior|starting|beginning|up\s+to)\b|(?:ตั้งแต่|นับจาก|หลังจาก|ก่อน|จนถึง|ถึงวันที่)/iu.test(source);
-  if (!hasCalendarCue || !(/[/-]/u.test(source) || /\bup\s+to\b/iu.test(source)))
-    return false;
+  // Use the shared lexical/date-resolver result instead of maintaining a
+  // second surface-word list here. This keeps attached Thai relation forms
+  // (for example ถึง2569-11-01) under the same typed calendar ownership as
+  // spaced English bounds and explicit event-date lists.
+  const spans = findMedicationDateListSpans(source, options);
+  if (!spans.length) return false;
   const period = item.fhir.timing?.repeat?.boundsPeriod;
   if (period?.start && period.end) {
     const start = Date.parse(period.start), end = Date.parse(period.end);
@@ -125,9 +125,14 @@ export function quarantineAmbiguousTemporalBounds(
       return true;
     }
   }
-  for (const span of findMedicationDateListSpans(source, options)) {
-    if (span.relation !== 'event' && span.unresolved) {
-      quarantineSchedule(item, source, 'invalid-or-ambiguous-calendar-bound');
+  for (const span of spans) {
+    // An unresolved unanchored year-like fragment may be an identifier, but
+    // an explicit medication-date constituent is timing evidence. Never
+    // let that evidence disappear into leftovers while a schedule executes.
+    if (span.unresolved && (span.relation !== 'event' || span.explicitLead)) {
+      quarantineSchedule(item, source, span.relation === 'event'
+        ? 'invalid-or-ambiguous-calendar-date'
+        : 'invalid-or-ambiguous-calendar-bound');
       return true;
     }
     if (span.unresolved || span.relation !== 'event') continue;

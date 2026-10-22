@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, registerMedicationDateResolver } from "../src/index";
+import { calculateTotalUnits, findMedicationDateListSpans, formatSig, getUnresolvedDosage, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
 import { lexInput } from "../src/lexer/lex";
 import { parseSig } from "./helpers/r5-parser";
 
@@ -595,10 +595,73 @@ describe("calendar date interpretation", () => {
     ];
     for (const { input, opts } of variants) {
       const parsed = parseSig(input, opts);
+      const batch = parseBatch(input, opts);
       expect(parsed.warnings).toEqual([]);
       expect(parsed.meta.leftoverText).toBeUndefined();
       expect(parsed.fhir.timing?.repeat?.boundsPeriod)
         .toEqual({ start: "2026-10-25", end: "2026-11-01" });
+      expect(nextDueDoses(batch, {
+        from: "2026-10-22T08:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: 20
+      })).toHaveLength(8);
+      expect(calculateTotalUnits({
+        dosage: batch,
+        orderedAt: "2026-10-22T08:00:00+07:00",
+        from: "2026-10-22T08:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        durationValue: 30,
+        durationUnit: "d"
+      }).totalUnits).toBe(8);
+    }
+  });
+
+  it("quarantines unresolved Thai attached ISO bounds and event lists", () => {
+    const cases = [
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01",
+        reason: "invalid-or-ambiguous-calendar-bound",
+        evidence: "ถึง2569-11-01"
+      },
+      {
+        input: "รับประทาน 1 เม็ด วันที่2569-10-25และ2569-11-01",
+        reason: "invalid-or-ambiguous-calendar-date",
+        evidence: "วันที่2569-10-25และ2569-11-01"
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ถึง31/02/2569",
+        reason: "invalid-or-ambiguous-calendar-bound",
+        evidence: "ถึง31/02/2569"
+      },
+      {
+        input: "take 1 tab daily until 2026-10-25 and 2026-11-01",
+        reason: "invalid-or-ambiguous-calendar-bound",
+        evidence: "until 2026-10-25 and 2026-11-01"
+      }
+    ];
+    const options = { locale: "th", datePolicy: { referenceDate: "2026-10-22" } };
+    for (const item of cases) {
+      const parsed = parseSig(item.input, options);
+      const batch = parseBatch(item.input, options);
+      expect(parsed.fhir.timing).toBeUndefined();
+      expect(parsed.warnings).toContainEqual(expect.stringContaining(item.reason));
+      expect(getUnresolvedDosage(parsed.fhir)).toBe(item.reason);
+      expect(parsed.fhir.text).toBe(item.input);
+      expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans)
+        .toContainEqual(expect.objectContaining({ text: item.evidence }));
+      expect(() => nextDueDoses(batch, {
+        from: "2026-10-22T08:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: 6
+      })).toThrow(/unresolved/i);
+      expect(() => calculateTotalUnits({
+        dosage: batch,
+        orderedAt: "2026-10-22T08:00:00+07:00",
+        from: "2026-10-22T08:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        durationValue: 30,
+        durationUnit: "d"
+      })).toThrow(/unresolved/i);
     }
   });
 
