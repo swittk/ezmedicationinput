@@ -513,7 +513,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const imported = fromFhir(details);
     expect(imported.warnings).toContainEqual(expect.stringContaining(
       "Cannot render advanced R6 dosage"));
-    expect(imported.longText).toBe("");
+    expect(imported.longText).toContain("INCOMPLETE R6 course");
+    expect(imported.longText).toContain(
+      "unevaluated dose expression: %patient.weight * 0.5"
+    );
+    expect(imported.longText).not.toContain("0.5 tablets");
     expect(imported.fhirNext.step[0].component[0].doseAndRate?.[0].doseExpression?.expression)
       .toBe("%patient.weight * 0.5");
   });

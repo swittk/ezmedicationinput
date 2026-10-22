@@ -36,12 +36,20 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       const withoutSource: FhirDosage = { ...base, ...maximum };
       expect(() => formatSig(withoutSource, "long"))
         .toThrow(/Cannot safely generate text from FHIR maximum-dose fields without Dosage\.text/);
-      expect(() => fromFhirDosage({ ...withoutSource }))
-        .toThrow(/Cannot safely generate text from FHIR maximum-dose fields without Dosage\.text/);
+      const partial = fromFhirDosage({ ...withoutSource });
+      expect(partial.longText).toContain("INCOMPLETE medication interpretation");
+      expect(partial.longText).toContain("1 tablet twice daily");
+      expect(partial.longText).toContain(
+        maximum.maxDosePerAdministration ? "max per administration: 1 tab" : "max lifetime: 10 tab"
+      );
+      expect(partial.warnings).toContainEqual(
+        expect.stringContaining("Cannot render FHIR maximum-dose fields")
+      );
+      expect(partial.fhir.text).toBeUndefined();
     }
   });
 
-  it("keeps a source-less R6 safety course import data-preserving and non-textual", () => {
+  it("keeps a source-less R6 safety course data-preserving with explicitly incomplete display", () => {
     const details: FhirR6DosageDetails = {
       step: [{ component: [{
         timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
@@ -53,8 +61,11 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     };
 
     const imported = fromFhir(details);
-    expect(imported.longText).toBe("");
-    expect(imported.items[0]?.longText).toBe("");
+    expect(imported.longText).toContain("INCOMPLETE R6 course");
+    expect(imported.longText).toContain("Use 1 tablet twice daily");
+    expect(imported.longText).toContain("max per administration: 1 tab");
+    expect(imported.items[0]?.longText).toContain("INCOMPLETE medication interpretation");
+    expect(imported.items[0]?.fhir.text).toBeUndefined();
     expect(imported.warnings).toContainEqual(expect.stringContaining(
       "Cannot render advanced R6 dosage"
     ));

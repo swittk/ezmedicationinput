@@ -38,6 +38,7 @@ import {
 import {
   BodySiteCode,
   FhirDosage,
+  FhirQuantity,
   EzDosage,
   EzDoseAndRate,
   FhirR6DosageDetails,
@@ -1442,7 +1443,41 @@ export function fromFhir(
         throw error;
       }
       warnings.add("Cannot render advanced R6 dosage without renderedInstruction");
-      return "";
+      const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
+        ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบข้อจำกัด R6 ที่ยังไม่แสดง"
+        : "INCOMPLETE R6 course — advanced safety/phase rules require review";
+      const localization = resolveSigLocalization(options?.locale, options?.i18n);
+      const recognized = joinGeneratedClauses(items.map(item =>
+        provisionalFhirDisplay(
+          item.fhir,
+          item.meta.canonical.clauses[0],
+          style,
+          localization,
+          options,
+          false
+        )
+      ).filter(Boolean));
+      // R6-only expressions cannot become dose quantities until evaluated.
+      // Show their literal typed expressions as non-executable evidence, never
+      // reinterpret them as a dose or silently hide them from the user.
+      const unevaluatedExpressions: string[] = [];
+      for (const step of dosageDetails.step) {
+        for (const component of step.component) {
+          for (const rate of component.doseAndRate ?? []) {
+            if (rate.doseExpression?.expression) {
+              unevaluatedExpressions.push(
+                `unevaluated dose expression: ${rate.doseExpression.expression}`);
+            }
+            if (rate.rateExpression?.expression) {
+              unevaluatedExpressions.push(
+                `unevaluated rate expression: ${rate.rateExpression.expression}`);
+            }
+          }
+        }
+      }
+      const visible = [recognized, ...unevaluatedExpressions].filter(Boolean).join("; ");
+      return visible ? `${prefix}: ${visible}` :
+        `${prefix}. Structured FHIR dosage data is retained.`;
     }
   };
   const shortText = safeFormat("short");
@@ -1466,6 +1501,51 @@ export function fromFhir(
   };
 }
 
+/**
+ * An import can display facts it understands even when no safe *complete*
+ * SIG can be generated. The label is deliberately non-prescriptive and is
+ * never written into FHIR Dosage.text: unrendered safety still requires review.
+ */
+function provisionalFhirDisplay(
+  dosage: FhirDosage,
+  clause: CanonicalSigClause,
+  style: "short" | "long",
+  localization: ReturnType<typeof resolveSigLocalization>,
+  options?: FormatOptions,
+  showIncompleteLabel = true
+): string {
+  const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
+    ? "ข้อมูลบางส่วนเท่านั้น — ต้องตรวจสอบข้อจำกัดการใช้ยา"
+    : "INCOMPLETE medication interpretation — safety restrictions require review";
+  const recognized = formatCanonicalClause(clause, style, localization, options).trim();
+  const maximums: string[] = [];
+  const readableQuantity = (quantity: FhirQuantity | undefined): string | undefined => {
+    if (quantity?.value === undefined || !Number.isFinite(quantity.value)) return undefined;
+    const unit = quantity.unit ?? quantity.code;
+    return `${quantity.comparator ?? ""}${quantity.value}${unit ? " " + unit : ""}`;
+  };
+  const perAdministration = readableQuantity(dosage.maxDosePerAdministration);
+  const lifetime = readableQuantity(dosage.maxDosePerLifetime);
+  if (perAdministration) maximums.push(`max per administration: ${perAdministration}`);
+  if (lifetime) maximums.push(`max lifetime: ${lifetime}`);
+  for (const period of dosage.maxDosePerPeriod ?? []) {
+    const numerator = readableQuantity(period.numerator);
+    const denominator = readableQuantity(period.denominator);
+    if (numerator && denominator) maximums.push(`max per period: ${numerator} / ${denominator}`);
+  }
+  for (const amount of (dosage as EzDosage).doseAndRate ?? []) {
+    if (amount.doseExpression?.expression) {
+      maximums.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
+    }
+    if (amount.rateExpression?.expression) {
+      maximums.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
+    }
+  }
+  const body = [recognized, ...maximums].filter(Boolean).join("; ");
+  if (!showIncompleteLabel) return body || "Structured FHIR data is retained";
+  return body ? `${prefix}: ${body}` : `${prefix}. Structured FHIR data is retained.`;
+}
+
 function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined,
@@ -1485,12 +1565,12 @@ function fromFhirDosageInternal(
     getUnresolvedDosage(dosage) !== undefined;
   const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
   const shortText = suppressMaximumDisplay
-    ? ""
+    ? provisionalFhirDisplay(dosage, clause, "short", localization, options)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
   const computedLong = suppressMaximumDisplay
-    ? ""
+    ? provisionalFhirDisplay(dosage, clause, "long", localization, options)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
-  const longText = suppressMaximumDisplay ? "" : computedLong || dosage.text || "";
+  const longText = computedLong || dosage.text || "";
   if (!suppressMaximumDisplay) dosage.text = longText;
   return {
     fhir: dosage,
@@ -1514,7 +1594,9 @@ export function fromFhirDosage(
   dosage: FhirDosage,
   options?: FormatOptions
 ): ParseResult {
-  return fromFhirDosageInternal(dosage, options, false);
+  // Importers expose a visibly incomplete interpretation rather than a
+  // blank display; full SIG generation remains strict in formatSig().
+  return fromFhirDosageInternal(dosage, options, true);
 }
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
