@@ -907,6 +907,29 @@ function requiresR6CourseSourceForDisplay(course: FhirR6DosageDetails): boolean 
         component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression))));
 }
 
+/** R5 maximum-dose fields have no lossless canonical text realizer yet. */
+function hasMaximumDoseForDisplay(dosage: FhirDosage): boolean {
+  return Boolean(
+    dosage.maxDosePerPeriod?.length ||
+    dosage.maxDosePerAdministration ||
+    dosage.maxDosePerLifetime
+  );
+}
+
+function exactMaximumDoseSourceForDisplay(dosage: FhirDosage): string | undefined {
+  if (!hasMaximumDoseForDisplay(dosage)) return undefined;
+  if (typeof dosage.text === "string" && dosage.text.trim().length > 0) return dosage.text;
+  throw new Error(
+    "Cannot safely generate text from FHIR maximum-dose fields without Dosage.text"
+  );
+}
+
+function joinGeneratedClauses(clauses: string[]): string {
+  return clauses.map((clause, index) =>
+    index < clauses.length - 1 ? clause.replace(/\.\s*$/u, "") : clause
+  ).join("; ");
+}
+
 /** One whole-course public result, independent of the number of parsed clauses. */
 function buildWholeCourseResult(
   input: string,
@@ -1314,11 +1337,13 @@ export function formatSig(
     }
     const flattened = toFhirR5Dosages(oneOrCourse);
     let index = 0;
-    return oneOrCourse.step.map(step => step.component.map(() =>
+    return oneOrCourse.step.map(step => joinGeneratedClauses(step.component.map(() =>
       formatSig(flattened[index++], style, options)
-    ).join("; ")).filter(Boolean).join(" then ");
+    ))).filter(Boolean).join(" then ");
   }
   const dosage = oneOrCourse as EzDosage;
+  const maximumDoseSource = exactMaximumDoseSourceForDisplay(dosage);
+  if (maximumDoseSource !== undefined) return maximumDoseSource;
   const quantity = dosage.doseAndRate?.[0];
   // Ordinary R5 dosages have no custom extensions. Avoid scanning unrelated
   // extension types or allocating temporary arrays while rendering them.
@@ -1330,7 +1355,6 @@ export function formatSig(
     quantity?.doseExpression || quantity?.rateExpression ||
     (quantity?.doseQuantity?.unit !== undefined &&
       quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
-    (dosage.maxDosePerPeriod?.length ?? 0) > 0 ||
     dosage.condition?.length || dosage.safety || dosage.siteReference ||
     dosage.excludedDates?.length ||
     (hasModifiers && (
@@ -1383,7 +1407,7 @@ export function fromFhir(
 ): ParseBatchResult {
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
-    fromFhirDosage(dosage, options)
+    fromFhirDosageInternal(dosage, options, true)
   );
   const primary = items[0] ?? fromFhirDosage({
     text: dosageDetails.renderedInstruction ?? ""
@@ -1431,25 +1455,40 @@ export function fromFhir(
   };
 }
 
-export function fromFhirDosage(
+function fromFhirDosageInternal(
   dosage: FhirDosage,
-  options?: FormatOptions
+  options: FormatOptions | undefined,
+  allowMissingMaximumSource: boolean
 ): ParseResult {
+  const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
+  const maximumDoseSource = allowMissingMaximumSource && hasMaximumDose &&
+      !(typeof dosage.text === "string" && dosage.text.trim().length > 0)
+    ? undefined
+    : exactMaximumDoseSourceForDisplay(dosage);
+  const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0 ||
     getUnresolvedDosage(dosage) !== undefined;
-  const shortText = guarded && dosage.text ? dosage.text : formatCanonicalClause(clause, "short", localization, options);
-  const computedLong = guarded && dosage.text ? dosage.text : formatCanonicalClause(clause, "long", localization, options);
-  const longText = computedLong || dosage.text || "";
-  dosage.text = longText;
+  const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
+  const shortText = suppressMaximumDisplay
+    ? ""
+    : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
+  const computedLong = suppressMaximumDisplay
+    ? ""
+    : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
+  const longText = suppressMaximumDisplay ? "" : computedLong || dosage.text || "";
+  if (!suppressMaximumDisplay) dosage.text = longText;
   return {
     fhir: dosage,
     shortText,
     longText,
-    warnings: clause.warnings ?? [],
+    warnings: suppressMaximumDisplay
+      ? [...(clause.warnings ?? []),
+        "Cannot render FHIR maximum-dose fields without Dosage.text"]
+      : clause.warnings ?? [],
     meta: {
       consumedTokens: [],
       normalized: buildNormalizedMetaFromClause(clause, dosage, options),
@@ -1458,6 +1497,13 @@ export function fromFhirDosage(
       }
     }
   };
+}
+
+export function fromFhirDosage(
+  dosage: FhirDosage,
+  options?: FormatOptions
+): ParseResult {
+  return fromFhirDosageInternal(dosage, options, false);
 }
 
 function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {

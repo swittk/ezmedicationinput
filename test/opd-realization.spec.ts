@@ -1,8 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
+import { formatSig, fromFhir, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
+import type { FhirDosage, FhirR6DosageDetails } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD normalized realization and advanced schedule semantics", () => {
+  it("preserves exact source text for administration and lifetime maxima or fails closed", () => {
+    const base: FhirDosage = {
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const cases: Array<{
+      maximum: Partial<Pick<FhirDosage, "maxDosePerAdministration" | "maxDosePerLifetime">>;
+      source: string;
+    }> = [
+      {
+        maximum: { maxDosePerAdministration: { value: 1, unit: "tab" } },
+        source: "Take 1 tablet twice daily; maximum 1 tablet per administration"
+      },
+      {
+        maximum: { maxDosePerLifetime: { value: 10, unit: "tab" } },
+        source: "Take 1 tablet twice daily; maximum 10 tablets over the lifetime course"
+      }
+    ];
+
+    for (const { maximum, source } of cases) {
+      const dosage: FhirDosage = { ...base, ...maximum, text: source };
+      expect(formatSig(dosage, "short", { locale: "th" })).toBe(source);
+      expect(formatSig(dosage, "long", { locale: "th" })).toBe(source);
+
+      const imported = fromFhirDosage({ ...dosage }, { locale: "th" });
+      expect(imported.shortText).toBe(source);
+      expect(imported.longText).toBe(source);
+      expect(imported.fhir.text).toBe(source);
+
+      const withoutSource: FhirDosage = { ...base, ...maximum };
+      expect(() => formatSig(withoutSource, "long"))
+        .toThrow(/Cannot safely generate text from FHIR maximum-dose fields without Dosage\.text/);
+      expect(() => fromFhirDosage({ ...withoutSource }))
+        .toThrow(/Cannot safely generate text from FHIR maximum-dose fields without Dosage\.text/);
+    }
+  });
+
+  it("keeps a source-less R6 safety course import data-preserving and non-textual", () => {
+    const details: FhirR6DosageDetails = {
+      step: [{ component: [{
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        safety: { doseLimit: [{
+          scope: "administration", valueQuantity: { value: 1, unit: "tab" }
+        }] }
+      }] }]
+    };
+
+    const imported = fromFhir(details);
+    expect(imported.longText).toBe("");
+    expect(imported.items[0]?.longText).toBe("");
+    expect(imported.warnings).toContainEqual(expect.stringContaining(
+      "Cannot render advanced R6 dosage"
+    ));
+    expect(imported.fhirNext).toEqual(details);
+  });
+
   it("keeps offsets scoped and carries ophthalmic state into step-down stages", () => {
     const mixed = parseSig("take 1 tab 30 min before meals and at bedtime");
     expect(mixed.count).toBe(2);

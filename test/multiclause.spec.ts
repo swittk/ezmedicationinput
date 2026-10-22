@@ -31,6 +31,19 @@ describe("multi-clause parsing", () => {
     expect(batch.count).toBe(2);
   });
 
+  it.each([
+    ["en", "Instill 1 drop twice daily in the left eye; Instill 2 drops twice daily in the right eye."],
+    ["th", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 2 ครั้ง; หยอดตาขวา ครั้งละ 2 หยด วันละ 2 ครั้ง."]
+  ] as const)("joins generated %s clauses without duplicated punctuation", (locale, expected) => {
+    const batch = parseSig(
+      "instill 1 drop in left eye and 2 drops in right eye twice daily",
+      { locale }
+    );
+
+    expect(batch.longText).toBe(expected);
+    expect(batch.longText).not.toContain(".;");
+  });
+
   it("forwards English realization flags to whole-course multi-clause text", () => {
     const batch = parseSig(
       "1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner",
@@ -42,7 +55,7 @@ describe("multi-clause parsing", () => {
     );
 
     expect(batch.longText).toContain(
-      "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
+      "Take 1 tablet orally three times daily after breakfast, lunch and dinner;"
     );
     expect(batch.longText).toContain(
       "Take 2 tablets orally three times daily after breakfast, lunch and dinner."
@@ -60,7 +73,7 @@ describe("multi-clause parsing", () => {
     );
 
     expect(batch.longText).toContain(
-      "รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
+      "รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น;"
     );
     expect(batch.longText).toContain(
       "รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น."
