@@ -212,10 +212,17 @@ export function applyCoordinatedCadenceScopes(
       }],
       note: `Scoped by ${relation.rule}; cadence daughter is the right administration clause.`
     };
-    inherited.evidence = [];
-    for (const item of inheritedEvidence) appendEvidence(inherited.evidence, item);
-    appendEvidence(inherited.evidence, connectorEvidence);
-    targetClause.schedule = inherited;
+    // The left daughter may already constrain the course (count, duration,
+    // calendar bounds, offsets, etc.) without having its own cadence. Share
+    // only the donor's cadence, retaining those independently parsed facts.
+    const scopedSchedule: CanonicalScheduleExpr = {
+      ...(targetClause.schedule ?? {}),
+      ...inherited,
+      evidence: [...(targetClause.schedule?.evidence ?? [])]
+    };
+    for (const item of inheritedEvidence) appendEvidence(scopedSchedule.evidence!, item);
+    appendEvidence(scopedSchedule.evidence!, connectorEvidence);
+    targetClause.schedule = scopedSchedule;
     for (const item of inheritedEvidence) appendEvidence(targetClause.evidence, item);
     appendEvidence(targetClause.evidence, connectorEvidence);
     applications.push({
