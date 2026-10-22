@@ -152,6 +152,70 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(() => nextDueDoses(lowered, scheduler)).toThrow(/evaluateCondition/);
   });
 
+  it("keeps unfamiliar or malformed modifiers fully recoverable in read-only imports", () => {
+    const dosage = parseSig("1 tablet twice daily").fhir[0];
+    const text = "Take one tablet twice daily; external safety instruction requires review";
+    const modifiers = [
+      { url: "urn:example:external-hold", valueBoolean: true },
+      { url: DOSAGE_CONDITION_R5_URL,
+        extension: [{ url: "predicate", valueString: "{malformed" }] }
+    ];
+    for (const modifier of modifiers) {
+      const original: FhirDosage = {
+        ...dosage,
+        text,
+        modifierExtension: [modifier]
+      };
+      const unchanged = JSON.parse(JSON.stringify(original));
+      const imported = fromFhirDosage(original);
+      expect(imported.fhir).toEqual(unchanged);
+      expect(original).toEqual(unchanged);
+      expect(imported.longText).toContain("INCOMPLETE");
+      expect(imported.longText).toContain(text);
+      expect(imported.warnings).toContainEqual(
+        expect.stringContaining("original FHIR retained")
+      );
+      const course: FhirR6DosageDetails = {
+        step: [{ component: [{ ...original }] }]
+      };
+      const preservedCourse = JSON.parse(JSON.stringify(course));
+      const whole = fromFhir(course);
+      expect(course).toEqual(preservedCourse);
+      expect(whole.fhirNext).toEqual(preservedCourse);
+      expect(whole.longText).toContain("INCOMPLETE");
+      expect(whole.longText).toContain(text);
+      expect(whole.warnings).toContainEqual(
+        expect.stringContaining("original FHIR retained")
+      );
+      expect(() => nextDueDoses(original, scheduler)).toThrow(/modifierExtension/);
+      expect(() => calculateTotalUnits({ ...supply, dosage: original }))
+        .toThrow(/modifierExtension/);
+    }
+  });
+
+  it("revalidates edited R5 condition modifiers instead of caching stale predicates", () => {
+    // Strict R5 has one predicate representation. A native EZ dosage may also
+    // carry an independently authoritative R6 condition; do not conflate the
+    // two editing contracts in this mutation/regression test.
+    const { condition: _r6Condition, ...dosage } =
+      parseSig("1 tablet twice daily only if BP > 160").fhir[0];
+    const modifier = dosage.modifierExtension?.find(value =>
+      value.url === DOSAGE_CONDITION_R5_URL);
+    expect(modifier?.extension?.[0]?.valueString).toContain("160");
+    expect(getDosageCondition(dosage)).toMatchObject({ value: 160 });
+    modifier!.extension![0].valueString = JSON.stringify({
+      kind: "measurement", name: "bp", operation: "gt",
+      value: 170, text: "BP > 170"
+    });
+    expect(getDosageCondition(dosage)).toMatchObject({
+      kind: "measurement", name: "bp", value: 170
+    });
+    modifier!.extension![0].valueString = "{bad";
+    expect(() => getDosageCondition(dosage)).toThrow(/modifierExtension/);
+    // Invalid edits remain present for correction; they are never deleted.
+    expect(modifier!.extension![0].valueString).toBe("{bad");
+  });
+
   it("never uses an outdated literal instruction after editing a strict R5 dose", () => {
     const details = parseSig("1 tab PO BID").fhirNext;
     const original = toFhirR5Dosages(details);

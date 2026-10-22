@@ -170,16 +170,23 @@ function validateRetainedCourseModifier(extension: FhirExtension): void {
  * one before execution. A valid retained-course marker is understood here;
  * the schedule dispatcher must restore the complete array before execution.
  */
-export function assertUnderstoodDosageModifiers(dosage: FhirDosage | EzDosage): void {
-  const seen = new Set<string>();
-  for (const extension of dosage.modifierExtension ?? []) {
-    if (seen.has(extension.url)) {
+/** Validate once per read, returning an already-parsed R5 predicate. Never
+ * cache mutable FHIR objects: an editor can change modifier contents in place. */
+function validatedModifierCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+  const modifiers = dosage.modifierExtension;
+  if (!modifiers?.length) return undefined;
+  // A single extension cannot contain duplicate URLs. Avoid allocating a Set
+  // on the common single-modifier conditional dosing path.
+  const seen = modifiers.length > 1 ? new Set<string>() : undefined;
+  let condition: MedicationCondition | undefined;
+  for (const extension of modifiers) {
+    if (seen?.has(extension.url)) {
       throw new Error(`Duplicate Dosage.modifierExtension cannot be executed safely: ${extension.url}`);
     }
-    seen.add(extension.url);
+    seen?.add(extension.url);
     switch (extension.url) {
       case DOSAGE_CONDITION_R5_URL:
-        parseConditionModifier(extension);
+        condition = parseConditionModifier(extension);
         break;
       case DOSAGE_EXCLUDED_DATES_R5_URL:
         validateExcludedDatesModifier(extension);
@@ -197,6 +204,11 @@ export function assertUnderstoodDosageModifiers(dosage: FhirDosage | EzDosage): 
         throw new Error(`Unsupported Dosage.modifierExtension cannot be ignored for execution: ${extension.url}`);
     }
   }
+  return condition;
+}
+
+export function assertUnderstoodDosageModifiers(dosage: FhirDosage | EzDosage): void {
+  validatedModifierCondition(dosage);
 }
 
 function parseDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
@@ -210,8 +222,12 @@ function parseDosageCondition(dosage: FhirDosage | EzDosage): MedicationConditio
 }
 
 export function getDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
-  assertUnderstoodDosageModifiers(dosage);
-  return parseDosageCondition(dosage);
+  // Reuse the predicate validated in the same pass, rather than parsing and
+  // recursively validating its JSON twice for every scheduler/renderer call.
+  const fromModifier = validatedModifierCondition(dosage);
+  return (dosage as EzDosage).condition?.length
+    ? parseDosageCondition(dosage)
+    : fromModifier;
 }
 
 export function setDosageCondition(dosage: FhirDosage, condition: MedicationCondition | undefined): void {

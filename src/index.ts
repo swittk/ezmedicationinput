@@ -1439,23 +1439,35 @@ export function fromFhir(
       return formatSig(dosageDetails, style, options);
     } catch (error) {
       if (!(error instanceof Error) ||
-          !error.message.startsWith("Cannot safely generate text from R6-only course metadata")) {
+          !(error.message.startsWith("Cannot safely generate text from R6-only course metadata") ||
+            isUninterpretableModifier(error))) {
         throw error;
       }
-      warnings.add("Cannot render advanced R6 dosage without renderedInstruction");
+      if (isUninterpretableModifier(error)) {
+        warnings.add(`Non-executable imported modifier; original FHIR retained: ${error.message}`);
+      } else {
+        warnings.add("Cannot render advanced R6 dosage without renderedInstruction");
+      }
+      const modifierImportError = isUninterpretableModifier(error);
       const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
-        ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบข้อจำกัด R6 ที่ยังไม่แสดง"
-        : "INCOMPLETE R6 course — advanced safety/phase rules require review";
+        ? modifierImportError
+          ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบ modifier ที่ไม่รู้จัก"
+          : "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบข้อจำกัด R6 ที่ยังไม่แสดง"
+        : modifierImportError
+          ? "INCOMPLETE R6 course — unrecognized modifier requires review"
+          : "INCOMPLETE R6 course — advanced safety/phase rules require review";
       const localization = resolveSigLocalization(options?.locale, options?.i18n);
       const recognized = joinGeneratedClauses(items.map(item =>
-        provisionalFhirDisplay(
-          item.fhir,
-          item.meta.canonical.clauses[0],
-          style,
-          localization,
-          options,
-          false
-        )
+        modifierImportError && item.fhir.text?.trim()
+          ? item.fhir.text
+          : provisionalFhirDisplay(
+            item.fhir,
+            item.meta.canonical.clauses[0],
+            style,
+            localization,
+            options,
+            false
+          )
       ).filter(Boolean));
       // R6-only expressions cannot become dose quantities until evaluated.
       // Show their literal typed expressions as non-executable evidence, never
@@ -1546,6 +1558,12 @@ function provisionalFhirDisplay(
   return body ? `${prefix}: ${body}` : `${prefix}. Structured FHIR data is retained.`;
 }
 
+/** Unknown/invalid modifiers block execution, but never block read-only import
+ * of the original resource for correction. Other programming errors still throw. */
+function isUninterpretableModifier(error: unknown): error is Error {
+  return error instanceof Error && error.message.indexOf("modifierExtension") >= 0;
+}
+
 function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined,
@@ -1559,27 +1577,49 @@ function fromFhirDosageInternal(
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const guarded = getDosageCondition(dosage) !== undefined ||
-    getDosageExcludedDates(dosage).length > 0 ||
-    getDosageExcludedWeekdays(dosage).length > 0 ||
-    getUnresolvedDosage(dosage) !== undefined;
+  let guarded = false;
+  let unresolvedModifier: string | undefined;
+  try {
+    guarded = getDosageCondition(dosage) !== undefined ||
+      getDosageExcludedDates(dosage).length > 0 ||
+      getDosageExcludedWeekdays(dosage).length > 0 ||
+      getUnresolvedDosage(dosage) !== undefined;
+  } catch (error) {
+    if (!isUninterpretableModifier(error)) throw error;
+    unresolvedModifier = error.message;
+  }
   const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
-  const shortText = suppressMaximumDisplay
-    ? provisionalFhirDisplay(dosage, clause, "short", localization, options)
-    : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
-  const computedLong = suppressMaximumDisplay
-    ? provisionalFhirDisplay(dosage, clause, "long", localization, options)
-    : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
+  // Never alter an imported FHIR resource when its modifier is unknown. The
+  // original text and extension remain recoverable for correction or remap;
+  // the executable scheduler still rejects the very same modifier.
+  const label = String(options?.locale ?? "").toLowerCase().startsWith("th")
+    ? "ข้อมูลบางส่วน — มีข้อจำกัดการใช้ยาที่ต้องตรวจสอบ"
+    : "INCOMPLETE medication interpretation — unrecognized safety restriction";
+  const partial = (style: "short" | "long") => dosage.text?.trim()
+    ? `${label}: ${dosage.text}`
+    : provisionalFhirDisplay(dosage, clause, style, localization, options);
+  const shortText = unresolvedModifier ? partial("short")
+    : suppressMaximumDisplay
+      ? provisionalFhirDisplay(dosage, clause, "short", localization, options)
+      : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
+  const computedLong = unresolvedModifier ? partial("long")
+    : suppressMaximumDisplay
+      ? provisionalFhirDisplay(dosage, clause, "long", localization, options)
+      : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
   const longText = computedLong || dosage.text || "";
-  if (!suppressMaximumDisplay) dosage.text = longText;
+  if (!suppressMaximumDisplay && !unresolvedModifier) dosage.text = longText;
+  const warnings = [...(clause.warnings ?? [])];
+  if (suppressMaximumDisplay) {
+    warnings.push("Cannot render FHIR maximum-dose fields without Dosage.text");
+  }
+  if (unresolvedModifier) {
+    warnings.push(`Non-executable imported modifier; original FHIR retained: ${unresolvedModifier}`);
+  }
   return {
     fhir: dosage,
     shortText,
     longText,
-    warnings: suppressMaximumDisplay
-      ? [...(clause.warnings ?? []),
-        "Cannot render FHIR maximum-dose fields without Dosage.text"]
-      : clause.warnings ?? [],
+    warnings,
     meta: {
       consumedTokens: [],
       normalized: buildNormalizedMetaFromClause(clause, dosage, options),
