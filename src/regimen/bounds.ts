@@ -20,8 +20,13 @@ export function normalizeAnchoredBounds(repeat: FhirTimingRepeat, schedule?: Can
 /** Make an implicit multi-clock cadence explicit without overriding a stated frequency. */
 export function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
   if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit || (repeat.timeOfDay?.length ?? 0) < 2) return;
-  if (repeat.periodUnit !== 'd' && repeat.periodUnit !== 'wk' && repeat.periodUnit !== 'mo' && repeat.periodUnit !== 'a') return;
   const clocks = new Set(repeat.timeOfDay).size;
-  const weekdays = repeat.periodUnit === 'wk' ? Math.max(1,new Set(repeat.dayOfWeek ?? []).size) : 1;
-  repeat.frequency = clocks * weekdays;
+  if (repeat.periodUnit === 'd') {
+    repeat.frequency = clocks;
+    return;
+  }
+  const weekdays = new Set(repeat.dayOfWeek ?? []).size;
+  if (repeat.periodUnit === 'wk' && repeat.period === 1 && weekdays > 0) {
+    repeat.frequency = clocks * weekdays;
+  }
 }
