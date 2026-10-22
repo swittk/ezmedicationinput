@@ -2,6 +2,8 @@
 # Exclude only diary, standalone benchmark, and historical experimental harness.
 reviews:
   path_filters:
+    # The review configuration itself is not a clinical code/test artifact.
+    - "!.coderabbit.yaml"
     - "!DIARY.md"
     - "!bench/compare-r6.mjs"
     - "!experiments/boundary-planner/**"
