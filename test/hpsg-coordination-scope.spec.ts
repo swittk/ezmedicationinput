@@ -196,7 +196,8 @@ describe('HPSG coordination cadence scope', () => {
         timeZone: 'Asia/Bangkok', limit: 4
       }).every(instant => instant >= '2026-11-01')).toBe(true);
     } else {
-      expect(fhir.timing?.repeat?.count).toBe(expected);
+      expect(fhir.timing?.repeat?.count).toBe(1);
+      expect(fhir.timing?.repeat?.countMax).toBe(expected);
     }
   });
 
