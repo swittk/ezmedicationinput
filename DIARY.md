@@ -1,5 +1,8 @@
 # DIARY
 
+> **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
+
+
 ## 2026-04-21
 
 ### Immediate Goal

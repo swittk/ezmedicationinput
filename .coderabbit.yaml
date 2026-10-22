@@ -1,9 +1,70 @@
-# Keep production code, clinical tests, and FHIR definitions in CodeRabbit reviews.
-# Exclude only diary, standalone benchmark, and historical experimental harness.
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# EZMedInput is a clinician-reviewed SIG suggester, NOT a prescribing safety gate.
+# Keep all production source, tests, FHIR definitions and package metadata reviewable.
 reviews:
+  profile: "chill"
+  request_changes_workflow: false
   path_filters:
-    # The review configuration itself is not a clinical code/test artifact.
+    # These are instruction/documentation entry points, not clinical code.
+    # Keep the existing PR under the 100-file CodeRabbit review limit.
     - "!.coderabbit.yaml"
+    - "!AGENTS.md"
+    - "!CLAUDE.md"
+    - "!.github/copilot-instructions.md"
+    - "!.github/pull_request_template.md"
+    - "!.cursor/rules/ezmed-product.mdc"
+    - "!DIRECTIONALITY.md"
+    - "!HPSG_IMPLEMENTATION_GUIDE.md"
     - "!DIARY.md"
     - "!bench/compare-r6.mjs"
     - "!experiments/boundary-planner/**"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        MANDATORY PRODUCT CONTRACT: This is a fast, permissive, clinician-reviewed
+        clinical medication SIG parser/SUGGESTER; doctors inspect, edit and approve
+        results. It is NOT an autonomous prescriber, an exhaustive drug safety
+        authority, or a validator that must reject all imperfect language.
+        Read AGENTS.md, DIRECTIONALITY.md, HPSG_IMPLEMENTATION_GUIDE.md as product
+        context. Judge changes by ordinary clinical usefulness, fidelity to
+        advertised HPSG semantics, retaining all recoverable source/FHIR meaning,
+        and low mobile runtime cost.
+        Do NOT request hard blocks, new safety vetoes, redundant validations,
+        guessed zero/empty values, or custom grammar for contrived pathological
+        adversarial prose just because a test can be invented for it.
+        Find real wrong-dose, wrong-eye, wrong-cadence, wrong-stage, wrong-FHIR
+        bugs for competent realistic SIGs and advertised features. Partially
+        understood inputs must remain useful and editable; no data deletion.
+        Reviewer must classify a finding as supported/realistic or out of scope
+        before proposing code. Reject/push back on suggestions that change the product.
+    - path: "src/**"
+      instructions: |
+        Grammar is typed HPSG, not regex rescue or FHIR post-processing;
+        terminology maps exact clinical meaning; typed regimens own dependencies.
+        FHIR R5/R6 conversion must preserve supplied structured data and original
+        text. Suggestions do not require proof of perfect interpretation. Avoid
+        redundant parsing/validation and hot-path allocations; protect phone speed.
+        Scheduling utility restrictions are not blanket parser/preview rejections.
+    - path: "test/**"
+      instructions: |
+        Clinical correctness means a precise, independent oracle for realistic
+        or explicitly supported instructions (laterality, dose, timing, taper,
+        conditions, caps, FHIR). Unsupported bizarre adversarial strings are
+        diagnostic probes, NOT requirements or acceptance tests. Do not reward
+        an empty result, quarantine, rejection, or zero supply as a universal
+        success; ensure best-effort meaning and source data survive. Require
+        performance comparison before adding runtime checks for rare cases.
+    - path: "fhir/**"
+      instructions: |
+        FHIR is a downstream meaning-preserving projection, not the grammar.
+        Do not drop safety/unknown extensions, original text, or R6 details;
+        do not invent zero/empty values. Keep ordinary imports displayable
+        and editable; distinguish read-only suggestions from executable
+        scheduling/supply.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "DIRECTIONALITY.md"
+      - "HPSG_IMPLEMENTATION_GUIDE.md"
