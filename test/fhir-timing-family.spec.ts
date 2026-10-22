@@ -39,9 +39,9 @@ describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
     const parsed = parseSig(text);
     expect(parsed.warnings.some(w => w.includes("frequency-clock-count-conflict")))
       .toBe(false);
-    if (parsed.fhir[0].timing?.repeat?.timeOfDay?.length === 2) {
-      expect(parsed.fhir[0].timing?.repeat?.frequency).toBe(2);
-    }
+    expect(parsed.fhir[0].timing?.repeat?.timeOfDay)
+      .toEqual(["08:00:00", "20:00:00"]);
+    expect(parsed.fhir[0].timing?.repeat?.frequency).toBe(2);
   });
 
   it("identifies standard HL7 timing abbreviations with the official coding system", () => {

@@ -5,6 +5,37 @@ import { parseMedicationGuard } from "../src/medication-condition";
 
 describe("clinical SIG correctness and boundary promotion", () => {
   it.each([
+    ["second", "1 tab at 08:00, 1 tab at 20:00 only if BP > 160", [false, true]],
+    ["first", "1 tab at 08:00 only if BP > 160, 1 tab at 20:00", [true, false]]
+  ] as const)("keeps the %s clock conditioned instead of merging away a guard", (_label, sig, expected) => {
+    const parsed = parseSig(sig);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => Boolean(getDosageCondition(item.fhir)))).toEqual([...expected]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.timeOfDay)).toEqual([
+      ["08:00:00"], ["20:00:00"]
+    ]);
+    for (let index = 0; index < 2; index++) {
+      const dosage = parsed.items[index].fhir;
+      const opts = { from: "2026-10-22T08:00:00+07:00",
+        orderedAt: "2026-10-22T08:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 3 };
+      if (expected[index]) {
+        expect(() => nextDueDoses(dosage, opts)).toThrow(/evaluateCondition/);
+      } else {
+        expect(nextDueDoses(dosage, opts).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("preserves trailing maximum-dose constraints rather than merging them away", () => {
+    const parsed = parseSig("1 tab at 08:00, 1 tab at 20:00 max 1 tab/day");
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items[0].fhir.maxDosePerPeriod).toBeUndefined();
+    expect(parsed.items[1].fhir.maxDosePerPeriod?.[0]?.numerator?.value).toBe(1);
+  });
+
+
+  it.each([
     "1 tab daily except Sundays",
     "กินยา 1 เม็ด ทุกวันยกเว้นวันอาทิตย์"
   ])("excludes Sunday instead of administering on Sunday: %s", instruction => {

@@ -569,9 +569,19 @@ function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
     deepEqual(base.fhir.doseAndRate, next.fhir.doseAndRate) &&
     deepEqual(base.fhir.route, next.fhir.route) &&
     deepEqual(base.fhir.site, next.fhir.site) &&
+    // A missing administration verb in a continuation inherits its neighbor;
+    // two explicitly different methods must never be merged.
+    (base.fhir.method === undefined || next.fhir.method === undefined ||
+      deepEqual(base.fhir.method, next.fhir.method)) &&
+    deepEqual(base.fhir.patientInstruction, next.fhir.patientInstruction) &&
     deepEqual(base.fhir.additionalInstruction, next.fhir.additionalInstruction) &&
     deepEqual(base.fhir.asNeeded, next.fhir.asNeeded) &&
-    deepEqual(base.fhir.asNeededFor, next.fhir.asNeededFor)
+    deepEqual(base.fhir.asNeededFor, next.fhir.asNeededFor) &&
+    deepEqual(base.fhir.modifierExtension, next.fhir.modifierExtension) &&
+    deepEqual(base.fhir.extension, next.fhir.extension) &&
+    deepEqual(base.fhir.maxDosePerPeriod, next.fhir.maxDosePerPeriod) &&
+    deepEqual(base.fhir.maxDosePerAdministration, next.fhir.maxDosePerAdministration) &&
+    deepEqual(base.fhir.maxDosePerLifetime, next.fhir.maxDosePerLifetime)
   );
 }
 
@@ -614,6 +624,9 @@ function mergeParseResults(base: ParseResult, next: ParseResult, options?: Parse
   };
   const mergedFhir: FhirDosage = {
     ...base.fhir,
+    ...(base.fhir.method === undefined && next.fhir.method
+      ? { method: next.fhir.method }
+      : {}),
     timing: {
       ...(base.fhir.timing ?? {}),
       repeat: mergedRepeat
