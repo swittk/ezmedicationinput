@@ -19,10 +19,42 @@ describe("procedural instruction graph", () => {
     };
 
     const extension = buildInstructionGraphExtension(graph)!;
+    const argumentCoding = extension.extension?.find(item => item.url === "action")
+      ?.extension?.find(item => item.url === "argument")
+      ?.extension?.find(item => item.url === "coding")?.valueCoding;
+    expect(argumentCoding?.i18n).toBeUndefined();
+    expect(argumentCoding?._display?.extension).toContainEqual(
+      expect.objectContaining({
+        url: "http://hl7.org/fhir/StructureDefinition/translation"
+      })
+    );
+    expect(Object.entries(argumentCoding ?? {}).every(([, value]) => value !== undefined)).toBe(true);
     const restored = parseInstructionGraphExtension([extension])!;
     expect(restored.actions.map((action) => action.predicate.lemma)).toEqual(["wash", "wait"]);
     expect(restored.relations?.[0]).toMatchObject({ fromActionIndex: 0, toActionIndex: 1 });
     expect(restored.actions[0].args[0].coding?.i18n).toEqual({ th: "มือ" });
+  });
+
+  it.each([
+    "Wait five minutes between eye drops",
+    "Take 1 tab each evening; do not crush",
+    "Gargle 10 mL for 30 seconds then spit twice daily"
+  ])("emits nested FHIR-standard Coding with no undefined or inline i18n fields: %s", source => {
+    const graph = parseSig(source).meta.canonical.clauses[0]?.instructionGraph;
+    const extension = buildInstructionGraphExtension(graph);
+    expect(extension).toBeDefined();
+    let observedCodings = 0;
+    const visit = (part: NonNullable<typeof extension>): void => {
+      const coding = part.valueCoding;
+      if (coding) {
+        observedCodings += 1;
+        expect(coding.i18n).toBeUndefined();
+        expect(Object.values(coding).some(value => value === undefined)).toBe(false);
+      }
+      for (const child of part.extension ?? []) visit(child);
+    };
+    visit(extension!);
+    expect(observedCodings).toBeGreaterThan(0);
   });
 
   it("rebases primary administration spans with the rest of a later batch segment", () => {

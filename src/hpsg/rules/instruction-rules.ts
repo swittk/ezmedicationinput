@@ -38,6 +38,7 @@ import {
   INSTRUCTION_START_WORDS,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
+  MAXIMUM_COUNT_LEAD_SEQUENCES,
   SITE_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS,
   WORKFLOW_ACTION_RELATION_LEADS,
@@ -649,6 +650,17 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
     }
+    // A separator before "up to 3 doses" is not a license to swallow a
+    // clinically meaningful maximum count as unstructured advice.
+    // Leave the marker for the typed timing-limit construction; the
+    // connector itself can still join the resulting chart daughters.
+    if (consumed.length > 0 && MAXIMUM_COUNT_LEAD_SEQUENCES.some(parts =>
+      parts.every((part, offset) => {
+        const token = context.tokens[cursor + offset];
+        return token && !context.state.consumed.has(token.index) &&
+          normalizeTokenLower(token) === part;
+      })
+    )) return [];
     if (consumed.length > 0 && startsEventTimingPhrase(context, cursor)) return [];
     const firstBodyToken = context.tokens[cursor];
     const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";

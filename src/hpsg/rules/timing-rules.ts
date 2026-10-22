@@ -433,7 +433,10 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
-    if (!unit || !/^[0-9]+(?:\.[0-9]+)?$/.test(quantityLower)) {
+    const cardinal = quantity.kind === LexKind.Number
+      ? quantity.value
+      : FREQUENCY_NUMBER_WORDS[quantityLower];
+    if (!unit || cardinal === undefined || !Number.isFinite(cardinal) || cardinal <= 0) {
       return [];
     }
     return [
@@ -442,7 +445,7 @@ export function separatedIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
         rule: "hpsg.lex.schedule.separatedInterval",
         tokens: [lead, quantity, unitToken],
         synsem: {
-          head: { schedule: buildPeriodScheduleFeature(parseFloat(quantity.original), unit) },
+          head: { schedule: buildPeriodScheduleFeature(cardinal, unit) },
           valence: {},
           cont: { clauseKind: "administration" }
         },
@@ -752,6 +755,15 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
+    // "Every four hours" is one occurrence per four-hour interval, not
+    // four occurrences each hour. Only the interval construction may own it.
+    const previous = context.tokens[start - 1];
+    const following = context.tokens[start + 1];
+    if (previous && EVERY_INTERVAL_TOKENS.has(normalizeTokenLower(previous)) &&
+        following && mapIntervalUnit(normalizeTokenLower(following)) &&
+        (FREQUENCY_NUMBER_WORDS[lower] !== undefined || token.kind === LexKind.Number)) {
+      return [];
+    }
     const frequencyRange = token.kind === LexKind.NumberRange ? parseNumericRange(lower) : undefined;
     const value =
       FREQUENCY_SIMPLE_WORDS[lower] ??
@@ -2016,13 +2028,24 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         unitToken &&
         !context.state.consumed.has(valueToken.index) &&
         !context.state.consumed.has(unitToken.index) &&
-        valueToken.kind === LexKind.Number &&
-        valueToken.value !== undefined
+        (valueToken.kind === LexKind.Number ||
+          valueToken.kind === LexKind.NumberRange ||
+          FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] !== undefined)
       ) {
+        const durationRange = valueToken.kind === LexKind.NumberRange
+          ? parseNumericRange(normalizeTokenLower(valueToken)) : undefined;
+        const durationValue = durationRange?.low ??
+          (valueToken.kind === LexKind.Number
+            ? valueToken.value
+            : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)]);
+        if (durationValue === undefined || !Number.isFinite(durationValue) || durationValue <= 0)
+          return signs;
         const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
         if (unit) {
           if (timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken.sourceEnd)) return signs;
-          const schedule = buildDurationScheduleFeature(valueToken.value, unit);
+          const schedule = durationRange && durationRange.high >= durationRange.low
+            ? { duration: durationRange.low, durationMax: durationRange.high, durationUnit: unit }
+            : buildDurationScheduleFeature(durationValue, unit);
           if (schedule) {
             signs.push(
               lexicalSign({

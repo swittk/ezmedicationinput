@@ -1,5 +1,5 @@
 import { LexKind } from "../../lexer/token-types";
-import { FhirPeriodUnit } from "../../types";
+import { FhirPeriodUnit, RouteCode } from "../../types";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import {
   HpsgClinicalQuantityFeature,
@@ -80,7 +80,7 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
   const first = Math.max(0, before - 8);
   for (let index = before - 1; index >= first; index -= 1) {
     const lower = normalizeTokenLower(context.tokens[index]);
-    if (/^(?:infuse|infusion|administer|give)$/u.test(lower)) return true;
+    if (/^(?:infuse|infusion|administer|give|run)$/u.test(lower)) return true;
   }
   return false;
 }
@@ -113,7 +113,8 @@ function clinicalSign(
   clinicalQuantity: HpsgClinicalQuantityFeature,
   dose?: { value: number; unit: string },
   schedule?: { frequency: number; period: number; periodUnit: FhirPeriodUnit },
-  warning?: string
+  warning?: string,
+  explicitRoute?: RouteCode
 ) {
   const tokens = tokensAt(context, indices);
   return lexicalSign({
@@ -124,7 +125,8 @@ function clinicalSign(
     synsem: {
       head: {
         dose: { ...dose, clinicalQuantity },
-        schedule
+        schedule,
+        ...(explicitRoute !== undefined ? { route: { code: explicitRoute, text: "intravenous" } } : {})
       },
       valence: {},
       cont: { clauseKind: "administration" }
@@ -140,11 +142,18 @@ function fixedVolumeOverTime(
   value: number
 ) {
   const unitToken = context.tokens[start + 1];
-  const overToken = context.tokens[start + 2];
-  const durationToken = context.tokens[start + 3];
-  const durationUnitToken = context.tokens[start + 4];
+  // IV may be written between a volume and its administration duration:
+  // "Infuse 500 mL IV over 2 hours". License that exact route phrase as a
+  // typed lexical contribution; don't reinterpret arbitrary intervening text.
+  const possibleRouteToken = context.tokens[start + 2];
+  const markedIV = Boolean(possibleRouteToken && available(context, start + 2) &&
+    /^(?:iv|intravenously)$/u.test(normalizeTokenLower(possibleRouteToken)));
+  const shift = markedIV ? 1 : 0;
+  const overToken = context.tokens[start + 2 + shift];
+  const durationToken = context.tokens[start + 3 + shift];
+  const durationUnitToken = context.tokens[start + 4 + shift];
   if (!unitToken || !overToken || !durationToken || !durationUnitToken ||
-      !available(context, start + 4) || normalizeTokenLower(overToken) !== "over" ||
+      !available(context, start + 4 + shift) || normalizeTokenLower(overToken) !== "over" ||
       durationToken.kind !== LexKind.Number || durationToken.value === undefined ||
       durationToken.value <= 0) return undefined;
   const numerator = volumeOrMassTerm(value, normalizeTokenLower(unitToken));
@@ -162,9 +171,12 @@ function fixedVolumeOverTime(
   return clinicalSign(
     context,
     "hpsg.lex.clinicalQuantity.fixedVolumeOverTime",
-    [start, start + 1, start + 2, start + 3, start + 4],
+    Array.from({ length: 5 + shift }, (_, offset) => start + offset),
     clinicalQuantity,
-    clinicalQuantity.projectedDose
+    clinicalQuantity.projectedDose,
+    undefined,
+    undefined,
+    markedIV ? RouteCode["Intravenous route"] : undefined
   );
 }
 
@@ -185,7 +197,8 @@ function weightQuantity(
     dimension: "patient-mass"
   };
   const suffix = parts[2];
-  if (parts.length > 3 || (suffix && suffix !== "day" && suffix !== "daily" && suffix !== "d" && !timeUnit(suffix))) {
+  const perDose = suffix === "dose";
+  if (parts.length > 3 || (suffix && !perDose && suffix !== "day" && suffix !== "daily" && suffix !== "d" && !timeUnit(suffix))) {
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weight.unsupported", indices, {
       representation: "rate-quantity",
       status: "unsupported",
@@ -215,8 +228,10 @@ function weightQuantity(
 
   const doseUnit = `${numerator.unit}/kg`;
   const daily = Boolean(suffix);
-  if (!daily) {
-    return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightDose", indices, {
+  if (!daily || perDose) {
+    return clinicalSign(context,
+      perDose ? "hpsg.lex.clinicalQuantity.weightPerDose" : "hpsg.lex.clinicalQuantity.weightDose",
+      indices, {
       representation: "dose",
       status: "resolved",
       numerator,
@@ -275,12 +290,17 @@ function fixedRate(
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
   const cue = context.tokens[start - 1];
-  if (!numerator || !denominatorUnit || !cue || !available(context, start - 1) ||
-      !/^(?:at|@)$/u.test(normalizeTokenLower(cue))) return undefined;
+  const hasRateMarker = Boolean(cue && available(context, start - 1) &&
+    /^(?:at|@)$/u.test(normalizeTokenLower(cue)));
+  // An unmarked rate is valid only inside an explicit infusion/run
+  // construction; standalone numeric rates must never be inferred as doses.
+  if (!numerator || !denominatorUnit ||
+      (!hasRateMarker && !hasAdministrationCue(context, start))) return undefined;
   const duration = durationAfter(context, expression.end);
-  const indices = [start - 1, ...Array.from(
-    { length: expression.end - start }, (_, offset) => start + offset
-  )];
+  const indices = [
+    ...(hasRateMarker ? [start - 1] : []),
+    ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
+  ];
   if (duration) indices.push(...duration.indices);
   return clinicalSign(context, "hpsg.lex.clinicalQuantity.fixedRate", indices, {
     representation: "rate-quantity",

@@ -1,5 +1,6 @@
 import {
   FhirDayOfWeek,
+  FhirPeriodUnit,
   ParseResult,
   TextRange
 } from "./types";
@@ -30,7 +31,7 @@ const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
 
 // ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
 const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
-const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
+const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|up\s+to|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
 /**
@@ -47,7 +48,7 @@ const UNRESOLVED_TIMING_SIGNAL =
   /\b(?:QD|QOD|BID|TID|QID|Q\s*\d+(?:\.\d+)?\s*(?:H|HR|HRS?|MIN(?:UTE)?S?|D(?:AYS?)?|WK|WEEKS?|MO|MONTHS?)|(?:once|twice|three|four)\s+(?:times?\s+)?daily|every\s+\d+(?:\.\d+)?\s*(?:h|hr|hours?|minutes?|days?|weeks?)|\d+(?:\.\d+)?\s*(?:hours?|minutes?|days?|weeks?|hrs?|hr))\b/iu;
 
 const CLINICAL_CONSTRAINT_SIGNAL =
-  /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
+  /\b(?:except|excluding|unless|otherwise|only\s+if|if|up\s+to|starting|beginning|first|second|third|fourth|last|stop\s+for|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?|infus(?:e|ion)|drip)\b|\b(?:mL|L)\s+over\s+\d|\/(?:\s*kg|\s*(?:h|hr|min|hour|minute)s?\b)|ยกเว้น|เว้นวัน|เว้นแต่|เฉพาะ(?:เมื่อ|หาก)|ไม่เกิน|มิฉะนั้น|ไม่เช่นนั้น/iu;
 
 const unitMap: Record<string, string> = {
   tab: "tab", tabs: "tab", tablet: "tab", tablets: "tab", เม็ด: "tab",
@@ -208,6 +209,50 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     break;
   }
   if (!clinicalQuantity && !CLINICAL_CONSTRAINT_SIGNAL.test(source)) return { ownedRanges: [] };
+  // Explicit temporal dependencies that lack a resolved calendar anchor or
+  // a repeated on/off cycle must not silently execute from the order date.
+  // These are additive safety vetoes, not replacement interpretations.
+  if (/\b(?:starting|beginning)(?:\s+on)?\s+(?:tomorrow|(?:the\s+)?date\s+of\s+discharge)\b/iu.test(source)) {
+    quarantineSchedule(item, source, "unresolved-relative-course-start");
+    return { ownedRanges: [] };
+  }
+  if (/\b(?:first|second|third|fourth|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+of\s+(?:each|every)\s+month\b/iu.test(source)) {
+    quarantineSchedule(item, source, "unresolved-monthly-weekday-ordinal");
+    return { ownedRanges: [] };
+  }
+  if (/\bstop\s+for\s+\d+(?:\.\d+)?\s*(?:days?|weeks?|months?)\s+repeat\b/iu.test(source)) {
+    quarantineSchedule(item, source, "unresolved-recurring-on-off-cycle");
+    return { ownedRanges: [] };
+  }
+  // A second unconditional stop duration must not override the infusion
+  // duration without clinician clarification. This is a safety veto, not a
+  // second semantic parser or a rewrite of the HPSG quantity.
+  if (clinicalQuantity?.administrationDuration) {
+    const stop = /\band\s+stop\s+after\s+(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?|h)\b/iu.exec(source);
+    if (stop) {
+      const stopMinutes = Number(stop[1]) *
+        (/^h/iu.test(stop[2]) ? 60 : 1);
+      const durationMinutes = clinicalQuantity.administrationDuration.value *
+        (clinicalQuantity.administrationDuration.unit === FhirPeriodUnit.Hour ? 60 : 1);
+      if (Number.isFinite(stopMinutes) && stopMinutes > 0 &&
+          Math.abs(stopMinutes - durationMinutes) > 1e-9) {
+        quarantineSchedule(item, source, "conflicting-infusion-stop-duration");
+        return { ownedRanges: [] };
+      }
+    }
+  }
+  // A recognized carrier-volume rate must not silently discard a separate
+  // active-drug amount. For instance "1 g in 100 mL IV over 30 minutes" is
+  // clinically different from 100 mL of an unspecified infusion. Keep the
+  // structured interpretation but refuse execution until the missing
+  // composition has been modeled or confirmed.
+  if (clinicalQuantity?.representation === "dose-with-rate-ratio" &&
+      item.meta.leftoverText &&
+      /(?:^|\s)\d+(?:\.\d+)?\s*(?:mcg|ug|µg|μg|mg|g|iu|units?)\b/iu.test(item.meta.leftoverText)) {
+    quarantineSchedule(item, source, "unresolved-infusion-instructions");
+    return { ownedRanges: [] };
+  }
+
   if (clinicalQuantity) {
     // HPSG quantity meaning is already lowered by canonicalToFhir. This
     // layer only preserves source text or quarantines unsafe semantics.
@@ -272,14 +317,24 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   // Conditions are real predicates on the administration, not an ad-hoc PRN
   // reason and not an unconditional schedule. The predicate remains available
   // for evaluation at each candidate administration time.
-  const guard = parseMedicationGuard(source);
+  // A procedural workflow (for example inhaler priming if unused for
+  // seven days) is not an executable medication administration. Do not
+  // attach its condition to a dosage or remove its instruction-graph action.
+  const hasAdministration = Boolean(item.fhir.doseAndRate?.length ||
+    item.fhir.timing || item.fhir.asNeeded);
+  const guard = hasAdministration ? parseMedicationGuard(source) : undefined;
   if (guard) {
     setDosageCondition(item.fhir, guard.condition);
     own(span(source, offset, guard.start, guard.end));
     if (guard.otherwise) own(span(source, offset, guard.otherwise.start, guard.otherwise.end));
     const originalReason = item.fhir.asNeededFor?.map(reason => reason.text ?? "").join(" ").toLowerCase();
     const explicitPrn = /\b(?:prn|as\s+needed)\b|เมื่อมีอาการ/iu.test(source);
-    if (!explicitPrn && originalReason && source.toLowerCase().indexOf(originalReason) >= 0) {
+    // A recognized measurement/state guard is not itself an as-needed order.
+    // PRN requires an independently explicit PRN/as-needed cue; multiple
+    // measurements joined by "and" must not remain a pseudo-PRN reason.
+    if (!explicitPrn && item.fhir.asNeeded &&
+        (!originalReason || source.toLowerCase().indexOf(originalReason) >= 0 ||
+          guard.condition.kind === "all" || guard.condition.kind === "any")) {
       delete item.fhir.asNeeded;
       delete item.fhir.asNeededFor;
       for (const clause of item.meta.canonical.clauses) delete clause.prn;

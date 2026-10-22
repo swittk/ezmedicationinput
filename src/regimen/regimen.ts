@@ -78,6 +78,17 @@ function quarantineConflictingTiming(item: ParseResult, source: string): boolean
     quarantineSchedule(item, source, 'incompatible-event-and-clock');
     return true;
   }
+  if (repeat.timeOfDay?.length && repeat.periodUnit === 'h' &&
+      repeat.period !== undefined && repeat.period > 0 &&
+      Number.isInteger(24 / repeat.period)) {
+    // A complete explicit daily clock list must agree with the interval.
+    // q8h at 08:00 and 20:00 is two clocks/day but requires three.
+    // Do not silently replace the q8h prescription by BID.
+    if (new Set(repeat.timeOfDay).size !== 24 / repeat.period) {
+      quarantineSchedule(item, source, 'interval-clock-count-conflict');
+      return true;
+    }
+  }
   if (repeat.frequency && repeat.period === 1 && repeat.periodUnit === 'd' &&
       repeat.timeOfDay?.length) {
     const distinctClocks = new Set(repeat.timeOfDay).size;

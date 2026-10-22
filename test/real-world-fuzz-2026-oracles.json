@@ -1,0 +1,758 @@
+{
+  "oral-basic-001": {
+    "dose": 0.5,
+    "unit": "tab"
+  },
+  "oral-basic-002": {
+    "dose": 0.5,
+    "unit": "tab"
+  },
+  "oral-basic-003": {
+    "dose": 1.5,
+    "unit": "tab"
+  },
+  "oral-basic-004": {
+    "dose": 2,
+    "unit": "tab",
+    "period": 2,
+    "periodUnit": "d"
+  },
+  "oral-basic-006": {
+    "dose": 0.25,
+    "unit": "tab",
+    "frequency": 1,
+    "duration": 7
+  },
+  "oral-basic-007": {
+    "dose": 1,
+    "unit": "cap",
+    "frequency": 1
+  },
+  "oral-basic-009": {
+    "dose": 2,
+    "unit": "cap",
+    "period": 12,
+    "periodUnit": "h",
+    "duration": 5
+  },
+  "oral-basic-010": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 48,
+    "periodUnit": "h"
+  },
+  "oral-basic-011": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 3
+  },
+  "oral-basic-013": {
+    "dose": 2,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "oral-basic-014": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "duration": 10
+  },
+  "oral-basic-019": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 3,
+    "periodUnit": "d"
+  },
+  "oral-basic-020": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 2,
+    "periodUnit": "wk"
+  },
+  "ophthalmic-021": {
+    "dose": 1,
+    "unit": "drop",
+    "period": 2,
+    "periodUnit": "h",
+    "site": "right eye"
+  },
+  "ophthalmic-022": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 4,
+    "site": "both eyes",
+    "duration": 7
+  },
+  "ophthalmic-023": {
+    "dose": 2,
+    "unit": "drop",
+    "frequency": 3,
+    "site": "left eye"
+  },
+  "ophthalmic-024": {
+    "dose": 1,
+    "unit": "drop",
+    "site": "both eyes"
+  },
+  "ophthalmic-025": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 4,
+    "site": "right eye",
+    "rows": 2
+  },
+  "ophthalmic-026": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 4,
+    "site": "left eye",
+    "rows": 2
+  },
+  "ophthalmic-029": {
+    "dose": 1,
+    "unit": "drop",
+    "site": "left eye",
+    "rows": 2
+  },
+  "ophthalmic-030": {
+    "dose": 1,
+    "unit": "drop",
+    "site": "left eye",
+    "frequency": 2,
+    "rows": 2
+  },
+  "ophthalmic-031": {
+    "dose": 1,
+    "unit": "drop",
+    "unresolved": "disjunctive-dose-choice"
+  },
+  "ophthalmic-032": {
+    "dose": 1,
+    "unit": "drop",
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "ophthalmic-035": {
+    "dose": 1,
+    "unit": "drop",
+    "period": 6,
+    "periodUnit": "h"
+  },
+  "ophthalmic-037": {
+    "dose": 1,
+    "unit": "drop",
+    "unresolved": "frequency-clock-count-conflict"
+  },
+  "ophthalmic-038": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 1,
+    "frequencyMax": 2,
+    "maxSupply": 12
+  },
+  "ophthalmic-039": {
+    "dose": 1,
+    "unit": "drop",
+    "condition": true
+  },
+  "ophthalmic-040": {
+    "dose": 1,
+    "unit": "drop",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "topical-other-041": {
+    "dose": 1,
+    "unit": "g",
+    "frequency": 2
+  },
+  "topical-other-045": {
+    "dose": 1,
+    "unit": "patch",
+    "period": 72,
+    "periodUnit": "h"
+  },
+  "topical-other-046": {
+    "dose": 1,
+    "unit": "patch",
+    "period": 1,
+    "periodUnit": "wk",
+    "route": "transdermal"
+  },
+  "topical-other-048": {
+    "dose": 3,
+    "unit": "drop",
+    "frequency": 2,
+    "site": "affected ear"
+  },
+  "topical-other-050": {
+    "dose": 2,
+    "unit": "spray",
+    "frequency": 1,
+    "site": "both nostrils"
+  },
+  "topical-other-051": {
+    "dose": 1,
+    "unit": "spray",
+    "period": 12,
+    "periodUnit": "h"
+  },
+  "topical-other-052": {
+    "dose": 1,
+    "unit": "suppository",
+    "route": "rectal"
+  },
+  "topical-other-054": {
+    "dose": 1,
+    "unit": "application",
+    "frequency": 1,
+    "route": "vaginal"
+  },
+  "topical-other-055": {
+    "dose": 2,
+    "unit": "puff",
+    "period": 4,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "topical-other-057": {
+    "dose": 1,
+    "unit": "puff",
+    "route": "inhalation"
+  },
+  "topical-other-059": {
+    "dose": 10,
+    "unit": "mL",
+    "frequency": 2
+  },
+  "pediatric-weight-061": {
+    "dose": 15,
+    "unit": "mg/kg",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "pediatric-weight-062": {
+    "dose": 10,
+    "unit": "mg/kg",
+    "period": 8,
+    "periodUnit": "h",
+    "duration": 5
+  },
+  "pediatric-weight-063": {
+    "dose": 10,
+    "unit": "mg/kg",
+    "frequency": 3
+  },
+  "pediatric-weight-064": {
+    "dose": 20,
+    "unit": "mg/kg",
+    "frequency": 2,
+    "duration": 7
+  },
+  "pediatric-weight-065": {
+    "unresolved": "unsupported-weight-based-rate"
+  },
+  "pediatric-weight-066": {
+    "unresolved": "incomplete-weight-based-dose"
+  },
+  "pediatric-weight-068": {
+    "dose": 7.5,
+    "unit": "mg/kg",
+    "frequency": 2
+  },
+  "pediatric-weight-069": {
+    "dose": 2,
+    "unit": "mg/kg",
+    "route": "intravenous"
+  },
+  "pediatric-weight-070": {
+    "dose": 0.25,
+    "unit": "mg/kg",
+    "period": 12,
+    "periodUnit": "h"
+  },
+  "pediatric-weight-071": {
+    "rate": 5,
+    "rateUnit": "ug/kg/min",
+    "route": "intravenous"
+  },
+  "pediatric-weight-072": {
+    "rate": 0.1,
+    "rateUnit": "ug/kg/min",
+    "route": "intravenous"
+  },
+  "pediatric-weight-074": {
+    "rate": 5,
+    "rateUnit": "mg/kg/h"
+  },
+  "pediatric-weight-075": {
+    "dose": 1,
+    "unit": "mL",
+    "frequency": 3
+  },
+  "pediatric-weight-076": {
+    "dose": 2.5,
+    "unit": "mL",
+    "period": 8,
+    "periodUnit": "h",
+    "duration": 5,
+    "prn": false
+  },
+  "pediatric-weight-078": {
+    "dose": 100,
+    "unit": "[iU]/kg"
+  },
+  "pediatric-weight-079": {
+    "rate": 10,
+    "rateUnit": "[iU]/kg/h"
+  },
+  "pediatric-weight-080": {
+    "unresolved": "unsupported-weight-based-dose"
+  },
+  "infusion-081": {
+    "dose": 500,
+    "unit": "mL",
+    "duration": 2,
+    "administrationDuration": true,
+    "route": "intravenous"
+  },
+  "infusion-082": {
+    "dose": 250,
+    "unit": "mL",
+    "period": 8,
+    "periodUnit": "h",
+    "administrationDuration": true
+  },
+  "infusion-083": {
+    "dose": 100,
+    "unit": "mL",
+    "period": 12,
+    "periodUnit": "h",
+    "administrationDuration": true
+  },
+  "infusion-084": {
+    "dose": 1,
+    "unit": "L",
+    "administrationDuration": true
+  },
+  "infusion-085": {
+    "rate": 100,
+    "rateUnit": "mL/h",
+    "administrationDuration": true
+  },
+  "infusion-086": {
+    "rate": 80,
+    "rateUnit": "mL/min",
+    "administrationDuration": true
+  },
+  "infusion-087": {
+    "rate": 5,
+    "rateUnit": "mg/h",
+    "administrationDuration": true
+  },
+  "infusion-088": {
+    "rate": 2,
+    "rateUnit": "ug/min",
+    "administrationDuration": true
+  },
+  "infusion-089": {
+    "rate": 0.5,
+    "rateUnit": "L/h",
+    "administrationDuration": true
+  },
+  "infusion-091": {
+    "dose": 200,
+    "unit": "mL",
+    "period": 6,
+    "periodUnit": "h",
+    "administrationDuration": true
+  },
+  "infusion-092": {
+    "dose": 100,
+    "unit": "mL",
+    "prn": true,
+    "administrationDuration": true
+  },
+  "infusion-093": {
+    "rate": 0.5,
+    "rateUnit": "mg/kg/min",
+    "period": 4,
+    "periodUnit": "h"
+  },
+  "infusion-094": {
+    "dose": 500,
+    "unit": "mL",
+    "frequency": 2
+  },
+  "infusion-096": {
+    "unresolved": "unresolved-infusion-instructions"
+  },
+  "infusion-097": {
+    "rate": 125,
+    "rateUnit": "mL/h"
+  },
+  "infusion-100": {
+    "dose": 200,
+    "unit": "mL",
+    "period": 8,
+    "periodUnit": "h",
+    "administrationDuration": true
+  },
+  "prn-safety-101": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 5,
+    "periodUnit": "min",
+    "prn": true,
+    "countMax": 3
+  },
+  "prn-safety-102": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 5,
+    "periodUnit": "min",
+    "prn": true,
+    "countMax": 3
+  },
+  "prn-safety-103": {
+    "dose": 2,
+    "unit": "tab",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "prn-safety-104": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 4,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "prn-safety-105": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "prn-safety-106": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "condition": true,
+    "prn": false
+  },
+  "prn-safety-108": {
+    "unresolved": "daily-dose-exceeds-explicit-maximum"
+  },
+  "prn-safety-109": {
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "prn-safety-110": {
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "prn-safety-111": {
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "prn-safety-112": {
+    "unresolved": "unresolved-calendar-exclusion"
+  },
+  "prn-safety-113": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "prn-safety-114": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "prn-safety-115": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "condition": true,
+    "prn": false
+  },
+  "prn-safety-117": {
+    "unresolved": "unresolved-critical-constraint"
+  },
+  "prn-safety-118": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "prn-safety-119": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1,
+    "prn": false
+  },
+  "temporal-121": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "temporal-122": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "temporal-126": {
+    "dose": 1,
+    "unit": "tab"
+  },
+  "temporal-129": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "temporal-130": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 8,
+    "periodUnit": "h",
+    "duration": 10
+  },
+  "temporal-131": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "durationLow": 7,
+    "durationHigh": 14,
+    "prn": false
+  },
+  "temporal-132": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1,
+    "rows": 2
+  },
+  "temporal-137": {
+    "dose": 1,
+    "unit": "tab",
+    "unresolved": "unresolved-critical-constraint"
+  },
+  "thai-141": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2
+  },
+  "thai-142": {
+    "dose": 2,
+    "unit": "tab",
+    "frequency": 3,
+    "duration": 5
+  },
+  "thai-143": {
+    "dose": 0.5,
+    "unit": "tab"
+  },
+  "thai-144": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "thai-145": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 4,
+    "site": "right eye",
+    "duration": 7
+  },
+  "thai-146": {
+    "dose": 1,
+    "unit": "drop",
+    "site": "left eye"
+  },
+  "thai-147": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 2,
+    "site": "both eyes"
+  },
+  "thai-148": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 2,
+    "site": "left eye",
+    "rows": 2
+  },
+  "thai-149": {
+    "unresolved": "disjunctive-dose-choice"
+  },
+  "thai-150": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1
+  },
+  "thai-152": {
+    "unresolved": "invalid-or-ambiguous-calendar-bound"
+  },
+  "thai-153": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1,
+    "condition": true
+  },
+  "thai-154": {
+    "dose": 1,
+    "unit": "drop",
+    "period": 2,
+    "periodUnit": "h"
+  },
+  "thai-155": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "thai-159": {
+    "dose": 1,
+    "unit": "g",
+    "frequency": 2,
+    "rows": 2
+  },
+  "thai-160": {
+    "dose": 2,
+    "unit": "puff",
+    "period": 4,
+    "periodUnit": "h",
+    "prn": true
+  },
+  "procedures-161": {
+    "dose": 1,
+    "unit": "drop",
+    "site": "both eyes"
+  },
+  "procedures-165": {
+    "dose": 1,
+    "unit": "g",
+    "frequency": 2
+  },
+  "procedures-169": {
+    "dose": 5,
+    "unit": "mL",
+    "frequency": 2
+  },
+  "procedures-170": {
+    "dose": 2.5,
+    "unit": "mL",
+    "frequency": 2
+  },
+  "procedures-173": {
+    "dose": 2,
+    "unit": "puff",
+    "frequency": 2
+  },
+  "procedures-178": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 1,
+    "rows": 2
+  },
+  "tricky-conflicts-181": {
+    "dose": 1,
+    "unit": "drop",
+    "frequency": 4
+  },
+  "tricky-conflicts-182": {
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "tricky-conflicts-183": {
+    "unresolved": "unresolved-timing-conflict"
+  },
+  "tricky-conflicts-184": {
+    "dose": 2,
+    "unit": "tab",
+    "frequency": 2,
+    "rows": 2
+  },
+  "tricky-conflicts-185": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "rows": 2
+  },
+  "tricky-conflicts-186": {
+    "unresolved": "interval-clock-count-conflict"
+  },
+  "tricky-conflicts-187": {
+    "unresolved": "incompatible-event-and-clock"
+  },
+  "tricky-conflicts-188": {
+    "unresolved": "conflicting-infusion-stop-duration"
+  },
+  "tricky-conflicts-189": {
+    "unresolved": "disjunctive-dose-choice"
+  },
+  "tricky-conflicts-190": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 6,
+    "periodUnit": "h",
+    "prn": true,
+    "invalidSupply": true
+  },
+  "tricky-conflicts-191": {
+    "unresolved": "unresolved-calendar-exclusion"
+  },
+  "tricky-conflicts-192": {
+    "unresolved": "calendar-start-after-end"
+  },
+  "tricky-conflicts-195": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "condition": true,
+    "prn": false
+  },
+  "tricky-conflicts-196": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 2,
+    "threeDaySupply": 6
+  },
+  "tricky-conflicts-197": {
+    "dose": 1,
+    "unit": "tab",
+    "period": 3,
+    "periodUnit": "d",
+    "periodMax": 4,
+    "invalidSupply": true
+  },
+  "tricky-conflicts-198": {
+    "unresolved": "incomplete-weight-based-dose"
+  },
+  "tricky-conflicts-200": {
+    "dose": 1,
+    "unit": "tab",
+    "frequency": 1,
+    "condition": true,
+    "prn": false
+  },
+  "temporal-124": {
+    "dose": 1,
+    "unit": "tab",
+    "unresolved": "unresolved-monthly-weekday-ordinal"
+  },
+  "temporal-125": {
+    "dose": 1,
+    "unit": "tab",
+    "unresolved": "unresolved-relative-course-start"
+  },
+  "temporal-140": {
+    "dose": 1,
+    "unit": "tab",
+    "unresolved": "unresolved-relative-course-start"
+  },
+  "tricky-conflicts-193": {
+    "dose": 1,
+    "unit": "tab",
+    "unresolved": "unresolved-recurring-on-off-cycle"
+  }
+}

@@ -716,7 +716,15 @@ function hasExactWeeklyFrequencyAnchors(
 
 function validateExecutableFrequency(repeat: FhirTimingRepeat | undefined): void {
   if (!repeat) return;
-  const { frequency, frequencyMax, period, periodUnit } = repeat;
+  const { frequency, frequencyMax, period, periodMax, periodUnit } = repeat;
+  if (periodMax !== undefined) {
+    if (!Number.isFinite(periodMax) || periodMax <= 0 ||
+        period === undefined || !Number.isFinite(period) || period <= 0 ||
+        periodMax < period)
+      throw new Error("Timing.repeat.periodMax must be a positive upper bound of a known period");
+    if (periodMax !== period)
+      throw new Error("Timing.repeat period range is not a deterministic administration schedule");
+  }
   if (frequencyMax !== undefined) {
     if (!Number.isInteger(frequencyMax) || frequencyMax <= 0 ||
         frequency !== undefined && frequencyMax < frequency)

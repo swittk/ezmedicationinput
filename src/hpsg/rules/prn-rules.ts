@@ -17,6 +17,7 @@ import { AdvicePolarity, PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
+  FREQUENCY_NUMBER_WORDS,
   mapFrequencyAdverb,
   mapIntervalUnit
 } from "../timing-lexicon";
@@ -762,7 +763,16 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const nextLower = next && !context.state.consumed.has(next.index)
         ? normalizeTokenLower(next)
         : undefined;
-      if (!nextLower || next?.kind === LexKind.Number || prnReasonBoundary(nextLower, context)) {
+      // A spelled duration ("for five days") is not a PRN reason.
+      // The timing construction owns both the cardinal and its time unit.
+      const durationUnitToken = context.tokens[start + 2];
+      if (leadLower === "for" &&
+          (next?.kind === LexKind.Number || next?.kind === LexKind.NumberRange ||
+            FREQUENCY_NUMBER_WORDS[nextLower ?? ""] !== undefined) &&
+          durationUnitToken &&
+          mapIntervalUnit(normalizeTokenLower(durationUnitToken))) return [];
+      if (!nextLower || next?.kind === LexKind.Number || next?.kind === LexKind.NumberRange ||
+          prnReasonBoundary(nextLower, context)) {
         return [];
       }
       cursor = start + 1;

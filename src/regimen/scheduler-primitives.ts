@@ -17,6 +17,18 @@ export function createTimingPrimitives(p: TimingPrimitives) {
   function resolveExplicitClockEntries(repeat: FhirTimingRepeat, config: NextDueDoseConfig, dayFiltered: boolean): ClockEntry[] {
     const when = repeat.when ?? [], clocks = repeat.timeOfDay ?? [];
     const entries = p.expandWhenCodes(when, config, repeat);
+    // "BID with food" specifies TWO administrations chosen from the meal
+    // context, not every breakfast/lunch/dinner. An exclusion weekday used
+    // to force enumeration of three C/AC/PC meal clocks and thereby inflate
+    // the prescribed BID dose count. Fall back to the exact frequency's
+    // configured clocks when an unspecific meal window has more candidates
+    // than the explicitly prescribed daily frequency.
+    if (when.length === 1 && clocks.length === 0 &&
+        (when[0] === "C" || when[0] === "AC" || when[0] === "PC") &&
+        repeat.period === 1 && repeat.periodUnit === "d" &&
+        repeat.frequency !== undefined && entries.length !== repeat.frequency) {
+      return [];
+    }
     for (const clock of clocks) entries.push({ time: p.normalizeClock(clock), dayShift: 0 });
     if (clocks.length) entries.sort((a,b)=>a.dayShift-b.dayShift || a.time.localeCompare(b.time));
     if (!entries.length && !clocks.length && (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit))

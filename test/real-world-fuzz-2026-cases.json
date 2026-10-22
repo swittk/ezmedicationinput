@@ -1,0 +1,1002 @@
+[
+  {
+    "id": "oral-basic-001",
+    "category": "oral-basic",
+    "input": "Take half a tablet PO every morning with breakfast"
+  },
+  {
+    "id": "oral-basic-002",
+    "category": "oral-basic",
+    "input": "Take 1/2 tablet by mouth every evening"
+  },
+  {
+    "id": "oral-basic-003",
+    "category": "oral-basic",
+    "input": "Take 1.5 tablets PO at bedtime"
+  },
+  {
+    "id": "oral-basic-004",
+    "category": "oral-basic",
+    "input": "Take 2 tablets PO every other morning"
+  },
+  {
+    "id": "oral-basic-005",
+    "category": "oral-basic",
+    "input": "Take one tablet each Monday, Wednesday and Friday"
+  },
+  {
+    "id": "oral-basic-006",
+    "category": "oral-basic",
+    "input": "Take 0.25 tablet PO once daily for seven days"
+  },
+  {
+    "id": "oral-basic-007",
+    "category": "oral-basic",
+    "input": "Take one capsule PO at 6 PM daily"
+  },
+  {
+    "id": "oral-basic-008",
+    "category": "oral-basic",
+    "input": "Take 1 tab PO QD for 3 months"
+  },
+  {
+    "id": "oral-basic-009",
+    "category": "oral-basic",
+    "input": "Take 2 caps PO q12h for 5 days"
+  },
+  {
+    "id": "oral-basic-010",
+    "category": "oral-basic",
+    "input": "Take 1 tab orally every 48 hours for 2 weeks"
+  },
+  {
+    "id": "oral-basic-011",
+    "category": "oral-basic",
+    "input": "Take 1 tablet before meals three times a day"
+  },
+  {
+    "id": "oral-basic-012",
+    "category": "oral-basic",
+    "input": "Take 1 tab after breakfast and dinner"
+  },
+  {
+    "id": "oral-basic-013",
+    "category": "oral-basic",
+    "input": "Take 2 tabs PO at 06:30 daily"
+  },
+  {
+    "id": "oral-basic-014",
+    "category": "oral-basic",
+    "input": "Take 1 tab twice a day with food for 10 days"
+  },
+  {
+    "id": "oral-basic-015",
+    "category": "oral-basic",
+    "input": "Take 1 tab each evening; do not crush"
+  },
+  {
+    "id": "oral-basic-016",
+    "category": "oral-basic",
+    "input": "Chew one tablet slowly before swallowing"
+  },
+  {
+    "id": "oral-basic-017",
+    "category": "oral-basic",
+    "input": "Crush 1 tablet, mix with water, take orally once daily"
+  },
+  {
+    "id": "oral-basic-018",
+    "category": "oral-basic",
+    "input": "Take 1 tablet with a full glass of water every morning"
+  },
+  {
+    "id": "oral-basic-019",
+    "category": "oral-basic",
+    "input": "Take 1 tablet every 3 days at 9 AM"
+  },
+  {
+    "id": "oral-basic-020",
+    "category": "oral-basic",
+    "input": "Take 1 tab every 2 weeks on Monday at 08:00"
+  },
+  {
+    "id": "ophthalmic-021",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop in right eye every 2 hours while awake"
+  },
+  {
+    "id": "ophthalmic-022",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OU four times a day for seven days"
+  },
+  {
+    "id": "ophthalmic-023",
+    "category": "ophthalmic",
+    "input": "Instill 2 drops in left eye three times daily"
+  },
+  {
+    "id": "ophthalmic-024",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop in each eye at bedtime"
+  },
+  {
+    "id": "ophthalmic-025",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OD QID x 1 week then BID x 1 week"
+  },
+  {
+    "id": "ophthalmic-026",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OS four times daily for 5 days, then twice daily for 3 days"
+  },
+  {
+    "id": "ophthalmic-027",
+    "category": "ophthalmic",
+    "input": "Put 1 drop right eye every hour for first day then every 4 hours"
+  },
+  {
+    "id": "ophthalmic-028",
+    "category": "ophthalmic",
+    "input": "Use 1 drop OU before sleeping for 14 nights"
+  },
+  {
+    "id": "ophthalmic-029",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop left eye at 8 AM and 1 drop right eye at 8 PM"
+  },
+  {
+    "id": "ophthalmic-030",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop left eye and 2 drops right eye twice daily"
+  },
+  {
+    "id": "ophthalmic-031",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop left eye or 2 drops right eye twice daily"
+  },
+  {
+    "id": "ophthalmic-032",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OD BID QID"
+  },
+  {
+    "id": "ophthalmic-033",
+    "category": "ophthalmic",
+    "input": "Apply thin ribbon of ointment to left eye at bedtime"
+  },
+  {
+    "id": "ophthalmic-034",
+    "category": "ophthalmic",
+    "input": "Place 1 drop OU every morning, wait 5 minutes before next eye drop"
+  },
+  {
+    "id": "ophthalmic-035",
+    "category": "ophthalmic",
+    "input": "Put 1 drop in the affected eye every six hours"
+  },
+  {
+    "id": "ophthalmic-036",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OU at 08:00 and 20:00"
+  },
+  {
+    "id": "ophthalmic-037",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop right eye daily at 08:00 and 20:00"
+  },
+  {
+    "id": "ophthalmic-038",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop both eyes 1-2 times daily"
+  },
+  {
+    "id": "ophthalmic-039",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop right eye only if IOP > 25"
+  },
+  {
+    "id": "ophthalmic-040",
+    "category": "ophthalmic",
+    "input": "Instill 1 drop OU q6h PRN itching"
+  },
+  {
+    "id": "topical-other-041",
+    "category": "topical-other",
+    "input": "Apply 1 g to left forearm twice daily"
+  },
+  {
+    "id": "topical-other-042",
+    "category": "topical-other",
+    "input": "Apply 2 g to right arm and 1 g to left leg daily"
+  },
+  {
+    "id": "topical-other-043",
+    "category": "topical-other",
+    "input": "Apply cream to rash once nightly for 7 days"
+  },
+  {
+    "id": "topical-other-044",
+    "category": "topical-other",
+    "input": "Apply a thin layer to affected area three times daily"
+  },
+  {
+    "id": "topical-other-045",
+    "category": "topical-other",
+    "input": "Apply 1 patch to intact skin every 72 hours"
+  },
+  {
+    "id": "topical-other-046",
+    "category": "topical-other",
+    "input": "Apply 1 transdermal patch every Monday"
+  },
+  {
+    "id": "topical-other-047",
+    "category": "topical-other",
+    "input": "Remove the old patch before applying the new one"
+  },
+  {
+    "id": "topical-other-048",
+    "category": "topical-other",
+    "input": "Instill 3 drops in affected ear twice daily for 5 days"
+  },
+  {
+    "id": "topical-other-049",
+    "category": "topical-other",
+    "input": "Apply 2 drops to the right ear every morning"
+  },
+  {
+    "id": "topical-other-050",
+    "category": "topical-other",
+    "input": "Spray 2 sprays into each nostril once daily"
+  },
+  {
+    "id": "topical-other-051",
+    "category": "topical-other",
+    "input": "Use 1 spray each nostril every 12 hours"
+  },
+  {
+    "id": "topical-other-052",
+    "category": "topical-other",
+    "input": "Insert 1 suppository rectally at bedtime"
+  },
+  {
+    "id": "topical-other-053",
+    "category": "topical-other",
+    "input": "Insert one pessary vaginally every night for 6 nights"
+  },
+  {
+    "id": "topical-other-054",
+    "category": "topical-other",
+    "input": "Use 1 application of cream per vagina daily for 7 days"
+  },
+  {
+    "id": "topical-other-055",
+    "category": "topical-other",
+    "input": "Inhale two puffs every four hours as needed for wheezing"
+  },
+  {
+    "id": "topical-other-056",
+    "category": "topical-other",
+    "input": "Rinse mouth after inhaling 2 puffs twice daily"
+  },
+  {
+    "id": "topical-other-057",
+    "category": "topical-other",
+    "input": "Inhale 1 puff before exercise"
+  },
+  {
+    "id": "topical-other-058",
+    "category": "topical-other",
+    "input": "Nebulize 2.5 mg every 6 hours PRN dyspnea"
+  },
+  {
+    "id": "topical-other-059",
+    "category": "topical-other",
+    "input": "Gargle 10 mL for 30 seconds then spit twice daily"
+  },
+  {
+    "id": "topical-other-060",
+    "category": "topical-other",
+    "input": "Swish 5 mL in mouth and spit four times a day"
+  },
+  {
+    "id": "pediatric-weight-061",
+    "category": "pediatric-weight",
+    "input": "Give 15 mg/kg PO every 6 hours as needed for fever"
+  },
+  {
+    "id": "pediatric-weight-062",
+    "category": "pediatric-weight",
+    "input": "Give 10 mg/kg/dose PO q8h x 5 days"
+  },
+  {
+    "id": "pediatric-weight-063",
+    "category": "pediatric-weight",
+    "input": "Give 30 mg/kg/day divided into 3 doses by mouth"
+  },
+  {
+    "id": "pediatric-weight-064",
+    "category": "pediatric-weight",
+    "input": "Give 40 mg/kg/day divided into 2 doses PO for 7 days"
+  },
+  {
+    "id": "pediatric-weight-065",
+    "category": "pediatric-weight",
+    "input": "Give 5 mg/kg/week orally"
+  },
+  {
+    "id": "pediatric-weight-066",
+    "category": "pediatric-weight",
+    "input": "Give 10 mg/kg/day PO"
+  },
+  {
+    "id": "pediatric-weight-067",
+    "category": "pediatric-weight",
+    "input": "Give 0.1 mg/kg orally as a single dose"
+  },
+  {
+    "id": "pediatric-weight-068",
+    "category": "pediatric-weight",
+    "input": "Give 7.5 mg/kg PO BID for 5 days"
+  },
+  {
+    "id": "pediatric-weight-069",
+    "category": "pediatric-weight",
+    "input": "Give 2 mg/kg IV once now"
+  },
+  {
+    "id": "pediatric-weight-070",
+    "category": "pediatric-weight",
+    "input": "Administer 0.25 mg/kg IV q12h"
+  },
+  {
+    "id": "pediatric-weight-071",
+    "category": "pediatric-weight",
+    "input": "Infuse dopamine at 5 mcg/kg/min IV"
+  },
+  {
+    "id": "pediatric-weight-072",
+    "category": "pediatric-weight",
+    "input": "Infuse epinephrine at 0.1 mcg/kg/min IV"
+  },
+  {
+    "id": "pediatric-weight-073",
+    "category": "pediatric-weight",
+    "input": "Infuse 20 mg/kg over 30 minutes IV once"
+  },
+  {
+    "id": "pediatric-weight-074",
+    "category": "pediatric-weight",
+    "input": "Infuse 5 mg/kg/h IV for 1 hour"
+  },
+  {
+    "id": "pediatric-weight-075",
+    "category": "pediatric-weight",
+    "input": "Give 1 mL orally three times a day for 7 days"
+  },
+  {
+    "id": "pediatric-weight-076",
+    "category": "pediatric-weight",
+    "input": "Take 2.5 mL by mouth every 8 hours for five days"
+  },
+  {
+    "id": "pediatric-weight-077",
+    "category": "pediatric-weight",
+    "input": "Give 0.4 mL PO once daily"
+  },
+  {
+    "id": "pediatric-weight-078",
+    "category": "pediatric-weight",
+    "input": "Administer 100 IU/kg IV"
+  },
+  {
+    "id": "pediatric-weight-079",
+    "category": "pediatric-weight",
+    "input": "Administer 10 units/kg/hour IV"
+  },
+  {
+    "id": "pediatric-weight-080",
+    "category": "pediatric-weight",
+    "input": "Give 10 mg/kg/24h PO divided into 2 doses"
+  },
+  {
+    "id": "infusion-081",
+    "category": "infusion",
+    "input": "Infuse 500 mL IV over 2 hours"
+  },
+  {
+    "id": "infusion-082",
+    "category": "infusion",
+    "input": "Infuse 250 mL over 30 minutes every 8 hours"
+  },
+  {
+    "id": "infusion-083",
+    "category": "infusion",
+    "input": "Administer 100 mL over 1 hour IV every 12 hours"
+  },
+  {
+    "id": "infusion-084",
+    "category": "infusion",
+    "input": "Give 1 L over 4 hours once"
+  },
+  {
+    "id": "infusion-085",
+    "category": "infusion",
+    "input": "Infuse at 100 mL/hr IV for 2 hours"
+  },
+  {
+    "id": "infusion-086",
+    "category": "infusion",
+    "input": "Infuse at 80 mL/min for 30 minutes"
+  },
+  {
+    "id": "infusion-087",
+    "category": "infusion",
+    "input": "Infuse at 5 mg/h IV for 4 hours"
+  },
+  {
+    "id": "infusion-088",
+    "category": "infusion",
+    "input": "Infuse at 2 mcg/min IV for 15 minutes"
+  },
+  {
+    "id": "infusion-089",
+    "category": "infusion",
+    "input": "Infuse IV at 0.5 L/h for 3 hours"
+  },
+  {
+    "id": "infusion-090",
+    "category": "infusion",
+    "input": "Infuse 100 mL over 30 minutes IV at 9 AM and 9 PM"
+  },
+  {
+    "id": "infusion-091",
+    "category": "infusion",
+    "input": "Infuse 200 mL over 60 minutes IV every 6 hours"
+  },
+  {
+    "id": "infusion-092",
+    "category": "infusion",
+    "input": "Infuse 100 mL over 30 minutes IV as needed"
+  },
+  {
+    "id": "infusion-093",
+    "category": "infusion",
+    "input": "Infuse 0.5 mg/kg/min IV for 20 minutes every 4 hours"
+  },
+  {
+    "id": "infusion-094",
+    "category": "infusion",
+    "input": "Give 500 mL over 2 hours, repeat twice daily"
+  },
+  {
+    "id": "infusion-095",
+    "category": "infusion",
+    "input": "Administer bolus 2 mg IV once now"
+  },
+  {
+    "id": "infusion-096",
+    "category": "infusion",
+    "input": "Infuse 1 g in 100 mL IV over 30 minutes"
+  },
+  {
+    "id": "infusion-097",
+    "category": "infusion",
+    "input": "Run IV fluids 125 ml/hr continuously"
+  },
+  {
+    "id": "infusion-098",
+    "category": "infusion",
+    "input": "Infuse 3 mcg/kg/min for 4 hours, then 5 mcg/kg/min"
+  },
+  {
+    "id": "infusion-099",
+    "category": "infusion",
+    "input": "Administer 500 mL IV at 50 mL/hr"
+  },
+  {
+    "id": "infusion-100",
+    "category": "infusion",
+    "input": "Infuse 200 mL over 2 hours every 8 hours for 3 days"
+  },
+  {
+    "id": "prn-safety-101",
+    "category": "prn-safety",
+    "input": "Take 1 tab q5min PRN chest pain, up to 3 doses"
+  },
+  {
+    "id": "prn-safety-102",
+    "category": "prn-safety",
+    "input": "Take 1 tab q5min PRN chest pain max 3 doses"
+  },
+  {
+    "id": "prn-safety-103",
+    "category": "prn-safety",
+    "input": "Take 2 tabs PO q6h PRN severe pain max 8 tablets/day"
+  },
+  {
+    "id": "prn-safety-104",
+    "category": "prn-safety",
+    "input": "Take 1 tab PO Q4H PRN pain, max 3 tablets/day"
+  },
+  {
+    "id": "prn-safety-105",
+    "category": "prn-safety",
+    "input": "Take 1 tab every 6 hours if needed for headache"
+  },
+  {
+    "id": "prn-safety-106",
+    "category": "prn-safety",
+    "input": "Take 1 tablet BID only if systolic BP > 140, otherwise hold"
+  },
+  {
+    "id": "prn-safety-107",
+    "category": "prn-safety",
+    "input": "Take 1 tablet QD unless SBP < 100"
+  },
+  {
+    "id": "prn-safety-108",
+    "category": "prn-safety",
+    "input": "Take 2 tabs QID max 2 tabs/day"
+  },
+  {
+    "id": "prn-safety-109",
+    "category": "prn-safety",
+    "input": "Take 1 tab BID QID"
+  },
+  {
+    "id": "prn-safety-110",
+    "category": "prn-safety",
+    "input": "Take 1 tab q6h q8h"
+  },
+  {
+    "id": "prn-safety-111",
+    "category": "prn-safety",
+    "input": "Take 1 tab once daily BID"
+  },
+  {
+    "id": "prn-safety-112",
+    "category": "prn-safety",
+    "input": "Take one tablet daily except public holidays"
+  },
+  {
+    "id": "prn-safety-113",
+    "category": "prn-safety",
+    "input": "Take 1 tab daily except Sundays"
+  },
+  {
+    "id": "prn-safety-114",
+    "category": "prn-safety",
+    "input": "Take 1 tab daily except 2026-11-12"
+  },
+  {
+    "id": "prn-safety-115",
+    "category": "prn-safety",
+    "input": "Take 1 tab PO BID if blood sugar >200"
+  },
+  {
+    "id": "prn-safety-116",
+    "category": "prn-safety",
+    "input": "Give 2 units SC if blood glucose > 180, otherwise hold"
+  },
+  {
+    "id": "prn-safety-117",
+    "category": "prn-safety",
+    "input": "Take 1 tab PO BID as directed"
+  },
+  {
+    "id": "prn-safety-118",
+    "category": "prn-safety",
+    "input": "Take 1 tab PO q6h PRN nausea, no more than 4 tablets/day"
+  },
+  {
+    "id": "prn-safety-119",
+    "category": "prn-safety",
+    "input": "Take 1 tab PO once daily, maximum 2 tablets/day"
+  },
+  {
+    "id": "prn-safety-120",
+    "category": "prn-safety",
+    "input": "Take 1 tab q5min PRN chest pain up to 3 doses then call emergency services"
+  },
+  {
+    "id": "temporal-121",
+    "category": "temporal",
+    "input": "Take 1 tab PO from 2026-11-01 until 2026-11-08 daily"
+  },
+  {
+    "id": "temporal-122",
+    "category": "temporal",
+    "input": "Take 1 tab daily starting November 1 2026"
+  },
+  {
+    "id": "temporal-123",
+    "category": "temporal",
+    "input": "Take 1 tab daily on 2026-11-01 and 2026-11-03"
+  },
+  {
+    "id": "temporal-124",
+    "category": "temporal",
+    "input": "Take 1 tab on the first Monday of each month"
+  },
+  {
+    "id": "temporal-125",
+    "category": "temporal",
+    "input": "Take 1 tab every other day starting tomorrow"
+  },
+  {
+    "id": "temporal-126",
+    "category": "temporal",
+    "input": "Take 1 tab every Tuesday and Thursday"
+  },
+  {
+    "id": "temporal-127",
+    "category": "temporal",
+    "input": "Take 1 tab PO 2 times per week"
+  },
+  {
+    "id": "temporal-128",
+    "category": "temporal",
+    "input": "Take 1 tab PO weekly on Monday and Friday"
+  },
+  {
+    "id": "temporal-129",
+    "category": "temporal",
+    "input": "Take 1 tab daily except Wednesday and Sunday"
+  },
+  {
+    "id": "temporal-130",
+    "category": "temporal",
+    "input": "Take 1 tab every 8 hours for 10 days"
+  },
+  {
+    "id": "temporal-131",
+    "category": "temporal",
+    "input": "Take 1 tab twice daily for 7-14 days"
+  },
+  {
+    "id": "temporal-132",
+    "category": "temporal",
+    "input": "Take 1 tab daily for 7 days then 1 tab QOD for 7 days"
+  },
+  {
+    "id": "temporal-133",
+    "category": "temporal",
+    "input": "Take 1 tab q4h for 24 hours, then q8h for 3 days"
+  },
+  {
+    "id": "temporal-134",
+    "category": "temporal",
+    "input": "Take 1 tab PO QID x 7d then BID x 14d then QD"
+  },
+  {
+    "id": "temporal-135",
+    "category": "temporal",
+    "input": "Take 1 tab PO Monday-Wednesday-Friday at 10 AM"
+  },
+  {
+    "id": "temporal-136",
+    "category": "temporal",
+    "input": "Take 1 tab once at 08:00 2026-11-02"
+  },
+  {
+    "id": "temporal-137",
+    "category": "temporal",
+    "input": "Take 1 tab daily up to 2569-11-01"
+  },
+  {
+    "id": "temporal-138",
+    "category": "temporal",
+    "input": "Take 1 tab daily until 25/11/2569"
+  },
+  {
+    "id": "temporal-139",
+    "category": "temporal",
+    "input": "Take 1 tab daily for 2 weeks after surgery"
+  },
+  {
+    "id": "temporal-140",
+    "category": "temporal",
+    "input": "Take one tablet daily beginning on the date of discharge"
+  },
+  {
+    "id": "thai-141",
+    "category": "thai",
+    "input": "กินยาครั้งละ 1 เม็ด วันละ 2 ครั้ง เช้าเย็น หลังอาหาร"
+  },
+  {
+    "id": "thai-142",
+    "category": "thai",
+    "input": "รับประทานยา 2 เม็ด วันละ 3 ครั้ง หลังอาหาร เป็นเวลา 5 วัน"
+  },
+  {
+    "id": "thai-143",
+    "category": "thai",
+    "input": "รับประทาน 1/2 เม็ด ก่อนนอน ทุกวัน"
+  },
+  {
+    "id": "thai-144",
+    "category": "thai",
+    "input": "รับประทานยา 1 เม็ด ทุกวัน ยกเว้นวันเสาร์อาทิตย์"
+  },
+  {
+    "id": "thai-145",
+    "category": "thai",
+    "input": "หยอดตาขวา 1 หยด วันละ 4 ครั้ง เป็นเวลา 7 วัน"
+  },
+  {
+    "id": "thai-146",
+    "category": "thai",
+    "input": "หยอดตาซ้าย 1 หยด เช้าเย็น"
+  },
+  {
+    "id": "thai-147",
+    "category": "thai",
+    "input": "หยอดตาทั้งสองข้าง ข้างละ 1 หยด วันละ 2 ครั้ง"
+  },
+  {
+    "id": "thai-148",
+    "category": "thai",
+    "input": "หยอดตาซ้าย 1 หยด และ ตาขวา 2 หยด วันละ 2 ครั้ง"
+  },
+  {
+    "id": "thai-149",
+    "category": "thai",
+    "input": "หยอดตาซ้าย 1 หยด หรือ ตาขวา 2 หยด วันละ 2 ครั้ง"
+  },
+  {
+    "id": "thai-150",
+    "category": "thai",
+    "input": "รับประทาน 1 เม็ด วันละครั้ง ทุกวันยกเว้นวันอาทิตย์"
+  },
+  {
+    "id": "thai-151",
+    "category": "thai",
+    "input": "รับประทาน 1 เม็ด ทุกวัน ถึงวันที่25/10/2569"
+  },
+  {
+    "id": "thai-152",
+    "category": "thai",
+    "input": "รับประทาน 1 เม็ด ทุกวัน ถึงวันที่2569-11-01"
+  },
+  {
+    "id": "thai-153",
+    "category": "thai",
+    "input": "รับประทาน 1 เม็ด ทุกวัน เฉพาะเมื่อความดันสูงกว่า 160"
+  },
+  {
+    "id": "thai-154",
+    "category": "thai",
+    "input": "หยอดยา 1 หยด ทุก 2 ชั่วโมง ขณะตื่น"
+  },
+  {
+    "id": "thai-155",
+    "category": "thai",
+    "input": "รับประทานยา 1 เม็ด ทุก 6 ชั่วโมง เมื่อมีอาการปวด"
+  },
+  {
+    "id": "thai-156",
+    "category": "thai",
+    "input": "ทาน 2 เม็ด ก่อนอาหารเช้า และ 1 เม็ด ก่อนอาหารเย็น"
+  },
+  {
+    "id": "thai-157",
+    "category": "thai",
+    "input": "ทานครั้งละ 1 เม็ด ทุกวันจันทร์ พุธ ศุกร์"
+  },
+  {
+    "id": "thai-158",
+    "category": "thai",
+    "input": "ทานยา 1 เม็ด วันละ 2 ครั้ง เป็นเวลา 7 วัน จากนั้นวันละครั้ง"
+  },
+  {
+    "id": "thai-159",
+    "category": "thai",
+    "input": "ทา 1 กรัมที่แขนซ้าย และ 2 กรัมที่แขนขวา วันละ 2 ครั้ง"
+  },
+  {
+    "id": "thai-160",
+    "category": "thai",
+    "input": "สูดยา 2 พัฟ ทุก 4 ชั่วโมงเมื่อหอบ"
+  },
+  {
+    "id": "procedures-161",
+    "category": "procedures",
+    "input": "Instill one drop OU every morning and press nasolacrimal duct for one minute"
+  },
+  {
+    "id": "procedures-162",
+    "category": "procedures",
+    "input": "Wait five minutes between eye drops"
+  },
+  {
+    "id": "procedures-163",
+    "category": "procedures",
+    "input": "Use a clean cotton bud to apply a thin film nightly"
+  },
+  {
+    "id": "procedures-164",
+    "category": "procedures",
+    "input": "Apply 1 g of cream and cover with dressing daily"
+  },
+  {
+    "id": "procedures-165",
+    "category": "procedures",
+    "input": "Wash and dry area then apply 1 g of cream twice daily"
+  },
+  {
+    "id": "procedures-166",
+    "category": "procedures",
+    "input": "Insert one vaginal tablet and lie down for 15 minutes"
+  },
+  {
+    "id": "procedures-167",
+    "category": "procedures",
+    "input": "Place 1 tab under tongue and let dissolve, do not swallow"
+  },
+  {
+    "id": "procedures-168",
+    "category": "procedures",
+    "input": "Use 1 spray in nose and blow nose gently after 5 minutes"
+  },
+  {
+    "id": "procedures-169",
+    "category": "procedures",
+    "input": "Shake bottle well then give 5 mL orally twice daily"
+  },
+  {
+    "id": "procedures-170",
+    "category": "procedures",
+    "input": "Measure 2.5 mL, mix with juice and drink twice daily"
+  },
+  {
+    "id": "procedures-171",
+    "category": "procedures",
+    "input": "Rinse mouth with 10 mL for 1 minute then spit after meals"
+  },
+  {
+    "id": "procedures-172",
+    "category": "procedures",
+    "input": "Open capsule and sprinkle contents on food once daily"
+  },
+  {
+    "id": "procedures-173",
+    "category": "procedures",
+    "input": "Inhale 2 puffs BID and rinse mouth afterwards"
+  },
+  {
+    "id": "procedures-174",
+    "category": "procedures",
+    "input": "Clean wound, apply 1 g thinly and cover with sterile gauze"
+  },
+  {
+    "id": "procedures-175",
+    "category": "procedures",
+    "input": "Remove patch after 12 hours and replace with new patch"
+  },
+  {
+    "id": "procedures-176",
+    "category": "procedures",
+    "input": "Wait 10 minutes after drops before applying eye ointment"
+  },
+  {
+    "id": "procedures-177",
+    "category": "procedures",
+    "input": "Apply 1 drop right eye at 08:00, wait 5 minutes, then left eye"
+  },
+  {
+    "id": "procedures-178",
+    "category": "procedures",
+    "input": "Apply 1 drop left eye and 2 drops right eye daily before bedtime"
+  },
+  {
+    "id": "procedures-179",
+    "category": "procedures",
+    "input": "Give 10 mL by mouth once and observe for 30 minutes"
+  },
+  {
+    "id": "procedures-180",
+    "category": "procedures",
+    "input": "Do not administer if patient is not alert"
+  },
+  {
+    "id": "tricky-conflicts-181",
+    "category": "tricky-conflicts",
+    "input": "1 drop OD QID OD"
+  },
+  {
+    "id": "tricky-conflicts-182",
+    "category": "tricky-conflicts",
+    "input": "1 tab OD BID"
+  },
+  {
+    "id": "tricky-conflicts-183",
+    "category": "tricky-conflicts",
+    "input": "Apply 1 drop OD BID"
+  },
+  {
+    "id": "tricky-conflicts-184",
+    "category": "tricky-conflicts",
+    "input": "Take 2 tabs BID and 1 tab nightly"
+  },
+  {
+    "id": "tricky-conflicts-185",
+    "category": "tricky-conflicts",
+    "input": "Take 1 tab BID and 2 tabs QID"
+  },
+  {
+    "id": "tricky-conflicts-186",
+    "category": "tricky-conflicts",
+    "input": "1 tab every 8 hours at 8 AM and 8 PM"
+  },
+  {
+    "id": "tricky-conflicts-187",
+    "category": "tricky-conflicts",
+    "input": "1 tab every morning at 9 AM and 9 PM"
+  },
+  {
+    "id": "tricky-conflicts-188",
+    "category": "tricky-conflicts",
+    "input": "Infuse 100 mL over 2 hours and stop after 60 minutes"
+  },
+  {
+    "id": "tricky-conflicts-189",
+    "category": "tricky-conflicts",
+    "input": "Take 1 tab if fever or 2 tabs if severe pain q6h"
+  },
+  {
+    "id": "tricky-conflicts-190",
+    "category": "tricky-conflicts",
+    "input": "1 tab PO q6h PRN pain, maximum 0.5 tab/day"
+  },
+  {
+    "id": "tricky-conflicts-191",
+    "category": "tricky-conflicts",
+    "input": "1 tab daily except all days"
+  },
+  {
+    "id": "tricky-conflicts-192",
+    "category": "tricky-conflicts",
+    "input": "1 tab daily from 2026-11-08 until 2026-11-01"
+  },
+  {
+    "id": "tricky-conflicts-193",
+    "category": "tricky-conflicts",
+    "input": "1 tab daily for 7 days then stop for 7 days repeat"
+  },
+  {
+    "id": "tricky-conflicts-194",
+    "category": "tricky-conflicts",
+    "input": "1 tab on Mon or Wed"
+  },
+  {
+    "id": "tricky-conflicts-195",
+    "category": "tricky-conflicts",
+    "input": "1 tab BID only if BP above 140 and pulse above 55"
+  },
+  {
+    "id": "tricky-conflicts-196",
+    "category": "tricky-conflicts",
+    "input": "1 tablet twice daily with food except on Mondays"
+  },
+  {
+    "id": "tricky-conflicts-197",
+    "category": "tricky-conflicts",
+    "input": "Take 1 tablet every 3-4 days"
+  },
+  {
+    "id": "tricky-conflicts-198",
+    "category": "tricky-conflicts",
+    "input": "Give 15 mg/kg/day in two equal doses PO"
+  },
+  {
+    "id": "tricky-conflicts-199",
+    "category": "tricky-conflicts",
+    "input": "Instill 1 drop OD q2h while awake for 48 hours then QID"
+  },
+  {
+    "id": "tricky-conflicts-200",
+    "category": "tricky-conflicts",
+    "input": "Take 1 tab daily if potassium < 3.5, otherwise hold"
+  }
+]

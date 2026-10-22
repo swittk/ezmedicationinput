@@ -1,5 +1,8 @@
 import { MedicationCondition } from "./types";
 
+// Bare "if" is a guard when its clause contains an explicit numeric
+// measurement comparison. Bare "if pain" retains the existing PRN grammar.
+const NUMERIC_IF_GUARD = /\bif\b(?=\s+[^,;]*?(?:>=|<=|>|<|\b(?:above|below|greater\s+than|less\s+than|at\s+least|at\s+most)\b)\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+))/iu;
 const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี(?:ที่)?/iu;
 const TRAILING_ELSE = /(?:,\s*|\s+)\b(?:otherwise|else)\s+(hold|do\s+not\s+take|skip)\s*\.?$|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?\s*$/iu;
 const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
@@ -82,7 +85,7 @@ export interface ParsedMedicationGuard {
  * A free-text guard is NOT ignored: scheduling requires a caller evaluator.
  */
 export function parseMedicationGuard(source: string): ParsedMedicationGuard | undefined {
-  const lead = GUARD_LEAD.exec(source);
+  const lead = GUARD_LEAD.exec(source) ?? NUMERIC_IF_GUARD.exec(source);
   if (!lead) return undefined;
   const negated = /^(?:unless|เว้นแต่|ยกเว้นกรณี)/iu.test(lead[0]);
   let tail = source.slice(lead.index + lead[0].length);
