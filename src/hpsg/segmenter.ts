@@ -208,9 +208,17 @@ function commaContinuesFrontedHpsgClause(
   const full = parseClauseState(fullText, options);
   if (findUnparsedTokenGroups(full).length || !hasAdministrationHead(full)) return false;
   const commaOffset = comma.sourceStart - segmentStart;
-  const frontedCondition = full.primaryClause.evidence.some((item) =>
-    item.rule === "hpsg.lex.condition" &&
-    item.spans.some((span) => span.start < commaOffset)
+  // A typed IF/UNLESS relation (or typed clinical adjunct) licenses a
+  // fronted condition. Never infer grammatical scope from a rule's name:
+  // production identifiers are provenance, not semantic authority.
+  const clause = full.primaryClause;
+  const frontedCondition = Boolean(
+    clause.instructionGraph?.relations?.some(relation =>
+      (relation.kind === "if" || relation.kind === "unless") &&
+      relation.span !== undefined && relation.span.start < commaOffset
+    ) ||
+    (clause.clinicalAdjuncts?.condition &&
+      clause.clinicalAdjuncts.localRanges?.some(range => range.start < commaOffset))
   );
   return frontedAdjunct || frontedCondition;
 }

@@ -52,10 +52,15 @@ type SignTrait =
   | "complement"
   | "adjunct"
   | "clinical-adjunct"
+  | "dose"
   | "site"
+  | "site-head"
   | "procedure"
   | "scope-target"
-  | "marked";
+  | "marked"
+  | "site-relative-marker"
+  | "site-predicate"
+  | "site-relative";
 
 type HeadSource = "left" | "right" | "administration-head" | "method-specialization" | "scope-target" | "non-marker" | "none";
 
@@ -75,13 +80,24 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
   const traits = new Set<SignTrait>(["any"]);
   if (sign.synsem.cont.condition && !sign.synsem.cont.scopeClosed) traits.add("condition");
   if (sign.type === "connector-sign") traits.add("marker");
+  if (sign.synsem.cont.siteRelativeMarker) traits.add("site-relative-marker");
+  if (sign.synsem.cont.sitePredicate) {
+    traits.add("site-predicate");
+  }
+  if (sign.synsem.cont.siteRestriction) {
+    traits.add("site-relative");
+  }
   if (sign.synsem.head.method) {
     traits.add("administration-head");
     if (sign.synsem.head.method.text) traits.add("method-specialization");
     if (sign.synsem.head.method.headClass === "procedure") traits.add("procedure");
   }
   if (sign.synsem.head.route || sign.synsem.head.dose || sign.synsem.valence.site) traits.add("complement");
+  if (sign.synsem.head.dose) traits.add("dose");
   if (sign.synsem.valence.site) traits.add("site");
+  if (sign.type === "site-sign" || sign.type === "restricted-site-phrase") {
+    traits.add("site-head");
+  }
   if (
     sign.synsem.head.schedule ||
     sign.synsem.valence.prn ||
@@ -98,11 +114,29 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
   if (sign.synsem.valence.patientInstruction || sign.synsem.valence.instructions?.length) {
     traits.add("scope-target");
   }
-  if (sign.construction?.kind === "head-marker") traits.add("marked");
+  if (sign.construction?.kind === "head-marker" && sign.type !== "site-relative-clause") {
+    traits.add("marked");
+  }
   return traits;
 }
 
 const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
+  {
+    motherType: "site-relative-clause",
+    kind: "head-marker",
+    left: ["site-relative-marker"],
+    right: ["site-predicate"],
+    headFrom: "right",
+    operation: "form-site-relative"
+  },
+  {
+    motherType: "restricted-site-phrase",
+    kind: "head-adjunct",
+    left: ["site-head"],
+    right: ["site-relative"],
+    headFrom: "left",
+    operation: "restrict-site"
+  },
   {
     motherType: "conditional-instruction-phrase",
     kind: "conditional-instruction",
@@ -118,7 +152,9 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     left: ["marker"],
     right: ["any"],
     symmetric: true,
-    headFrom: "non-marker"
+    headFrom: "non-marker",
+    forbidLeft: ["site-relative-marker", "site-predicate", "site-relative"],
+    forbidRight: ["site-relative-marker", "site-predicate", "site-relative"]
   },
   {
     motherType: "procedure-sequence-phrase",
@@ -166,8 +202,8 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     right: ["site"],
     symmetric: true,
     headFrom: "none",
-    forbidLeft: ["condition"],
-    forbidRight: ["condition"]
+    forbidLeft: ["condition", "administration-head", "dose", "adjunct", "procedure"],
+    forbidRight: ["condition", "administration-head", "dose", "adjunct", "procedure"]
   },
   {
     motherType: "coordination-phrase",
@@ -176,8 +212,8 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     right: ["any"],
     symmetric: true,
     headFrom: "administration-head",
-    forbidLeft: ["condition"],
-    forbidRight: ["condition"]
+    forbidLeft: ["condition", "site-relative-marker", "site-predicate", "site-relative"],
+    forbidRight: ["condition", "site-relative-marker", "site-predicate", "site-relative"]
   },
   {
     motherType: "administration-clause",
@@ -186,8 +222,8 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     right: ["any"],
     symmetric: true,
     headFrom: "administration-head",
-    forbidLeft: ["condition"],
-    forbidRight: ["condition"]
+    forbidLeft: ["condition", "site-relative-marker", "site-predicate", "site-relative"],
+    forbidRight: ["condition", "site-relative-marker", "site-predicate", "site-relative"]
   },
   {
     motherType: "clause-sign",
@@ -195,8 +231,8 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     left: ["any"],
     right: ["any"],
     headFrom: "none",
-    forbidLeft: ["condition"],
-    forbidRight: ["condition"]
+    forbidLeft: ["condition", "site-relative-marker", "site-predicate", "site-relative"],
+    forbidRight: ["condition", "site-relative-marker", "site-predicate", "site-relative"]
   }
 ];
 

@@ -25,8 +25,12 @@ function tokenSpanLength(sign: HpsgSign): number {
   return Math.max(0, sign.span.end - sign.span.start);
 }
 
-function hasOwnedScheduleSource(sign: HpsgSign): boolean {
-  return Boolean(sign.synsem.head.schedule?.sourceRanges?.length);
+function ownedScheduleSourceLength(sign: HpsgSign): number {
+  let length = 0;
+  for (const range of sign.synsem.head.schedule?.sourceRanges ?? []) {
+    length += Math.max(0, range.end - range.start);
+  }
+  return length;
 }
 
 function countSynsemFeatures(sign: HpsgSign): number {
@@ -65,10 +69,10 @@ function isBetterSign(candidate: HpsgSign, best: HpsgSign | undefined): boolean 
   }
   // Equal-span constructions that retain typed schedule ownership are more
   // specific than decompositions that cover the same tokens generically.
-  const candidateOwnsScheduleSource = hasOwnedScheduleSource(candidate);
-  const bestOwnsScheduleSource = hasOwnedScheduleSource(best);
-  if (candidateOwnsScheduleSource !== bestOwnsScheduleSource) {
-    return candidateOwnsScheduleSource;
+  const candidateOwnedSource = ownedScheduleSourceLength(candidate);
+  const bestOwnedSource = ownedScheduleSourceLength(best);
+  if (candidateOwnedSource !== bestOwnedSource) {
+    return candidateOwnedSource > bestOwnedSource;
   }
   const candidateFeatures = countSynsemFeatures(candidate);
   const bestFeatures = countSynsemFeatures(best);

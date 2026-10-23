@@ -1,6 +1,7 @@
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { CanonicalSigClause, ParseOptions } from '../types';
 import type { Token } from '../parser-state';
+import type { MedicationDateListMatch } from '../date-interpretation';
 
 export interface Range { start: number; end: number }
 export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause';
@@ -59,6 +60,10 @@ export interface ProbeSummary extends Range {
   conditionStarts: readonly number[];
   targets: readonly string[];
   hasTargets: boolean;
+  siteCoordinations: Array<Range & {
+    type: 'site-coordination-phrase';
+    coordination: 'conjunction' | 'disjunction' | 'mixed';
+  }>;
   clause: CanonicalSigClause;
 }
 export interface PlannerMetrics {
@@ -66,6 +71,7 @@ export interface PlannerMetrics {
   dateScans: number;
   actionScans: number;
   clauseProbes: number;
+  siteCoordinationProbes: number;
   probeCacheHits: number;
   probedTokens: number;
   candidates: number;
@@ -84,7 +90,12 @@ export interface PlannerOptions {
   ownership?: boolean;
   cache?: boolean;
 }
-export interface PlanningInput { input: string; options?: ParseOptions; tokens: Token[] }
+export interface PlanningInput {
+  input: string;
+  options?: ParseOptions;
+  tokens: Token[];
+  dateSpans?: MedicationDateListMatch[];
+}
 
 /** A licensed relation connects segment identities, never reconstructed from display text. */
 export interface BoundaryRelation {
@@ -123,7 +134,6 @@ export interface CoordinationScopeFacts {
   rightHasTrailingPrn: boolean;
   /** A typed, exact trailing clinical predicate/exclusion whose mother scope is unresolved. */
   rightHasTrailingSafetyGuard: boolean;
-  rightHasCadenceConflict: boolean;
 }
 
 /** Typed facts for a terminal negative instruction scoped over one regimen. */

@@ -102,7 +102,6 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('targets.distinct', f => f.targetsDistinct),
     semanticConstraint('left.omitsCadence', f => !f.leftHasCadence),
     semanticConstraint('right.hasCadence', f => f.rightHasCadence),
-    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
   ]
 }, {
   id: 'hpsg.cx.coordination.trailing-shared-adjuncts',
@@ -125,7 +124,6 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('right.omitsCadence', f => !f.rightHasCadence),
     semanticConstraint('right.hasTrailingAdjunct', f =>
       f.rightHasTrailingSchedule || f.rightHasTrailingPrn),
-    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
   ]
 }, {
   id: 'hpsg.cx.coordination.leading-shared-adjuncts',
@@ -151,7 +149,6 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
       !f.leftHasFrontedSchedule || !f.rightHasSchedule),
     semanticConstraint('right.omitsSharedPrn', f =>
       !f.leftHasFrontedPrn || !f.rightHasPrn),
-    semanticConstraint('right.cadenceConsistent', f => !f.rightHasCadenceConflict)
   ]
 }];
 

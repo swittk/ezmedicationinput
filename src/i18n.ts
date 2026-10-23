@@ -27,6 +27,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveSymptomDefinition } from "./symptom-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_COORDINATION_CONNECTOR_I18N,
@@ -34,7 +35,8 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIER_I18N,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_BARE_NOMINAL_PREFIX_I18N,
-  BODY_SITE_BARE_NOMINAL_PREFIXES
+  BODY_SITE_BARE_NOMINAL_PREFIXES,
+  SITE_RESTRICTION_PREDICATES_BY_LEMMA
 } from "./hpsg/lexical-classes";
 import {
   instructionGraphHasNovelNonWarningContent,
@@ -1404,6 +1406,34 @@ function buildRoutePhraseThai(
   return text;
 }
 
+function appendSiteRestrictionsThai(
+  clause: CanonicalSigClause,
+  sitePhrase: string
+): string {
+  const restrictions = clause.site?.restrictions;
+  if (!restrictions?.length) return sitePhrase;
+  let result = sitePhrase;
+  const relation = getBodySiteRelationRealization("where", "th")?.surface ?? "ที่";
+  for (const restriction of restrictions) {
+    const predicate = restriction.predicate;
+    const lexicalPredicate = predicate.lemma
+      ? SITE_RESTRICTION_PREDICATES_BY_LEMMA.get(predicate.lemma)
+      : undefined;
+    const definition = predicate.lemma
+      ? resolveSymptomDefinition(predicate.lemma)
+      : undefined;
+    const localized = lexicalPredicate?.i18n?.th ??
+      definition?.conditionI18n?.th ?? definition?.i18n?.th ??
+      (/^[\u0E00-\u0E7F]/u.test(predicate.text.trim()) ? predicate.text.trim() : undefined);
+    if (!localized) continue;
+    const phrase = predicate.form === "existential"
+      ? `${relation}มี${localized}`
+      : `${relation}${localized}`;
+    if (!result.includes(phrase)) result += phrase;
+  }
+  return result;
+}
+
 function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): string | undefined {
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   const lower = text?.toLowerCase();
@@ -1451,8 +1481,9 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   if (!translated) {
     return undefined;
   }
+  const translatedSite = appendSiteRestrictionsThai(clause, translated);
   if (clause.route?.code === RouteCode["Nasal route"]) {
-    return `เข้า${translated}`;
+    return `เข้า${translatedSite}`;
   }
   const spatialRelation = clause.site?.spatialRelation;
   const spatialRealization = spatialRelation?.relationText
@@ -1465,14 +1496,14 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
     spatialRealization &&
     (spatialRealization.omitOuterSitePreposition || spatialTargetThai?.startsWith("บริเวณ"))
   ) {
-    return translated;
+    return translatedSite;
   }
   const preposition = grammar.sitePreposition ?? "ที่";
-  if (translated.startsWith(preposition)) {
-    return translated;
+  if (translatedSite.startsWith(preposition)) {
+    return translatedSite;
   }
-  const separator = /^[\u0E00-\u0E7F]/.test(translated) ? "" : " ";
-  return `${preposition}${separator}${translated}`.trim();
+  const separator = /^[\u0E00-\u0E7F]/.test(translatedSite) ? "" : " ";
+  return `${preposition}${separator}${translatedSite}`.trim();
 }
 
 const THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES: Record<string, string> = {

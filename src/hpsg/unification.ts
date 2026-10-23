@@ -174,6 +174,7 @@ function mergeSite(
     source: mergeOptionalScalar(left.source, right.source),
     coding: mergeOptionalScalar(left.coding, right.coding),
     spatialRelation: mergeOptionalScalar(left.spatialRelation, right.spatialRelation),
+    restrictions: appendUniqueStructured(left.restrictions, right.restrictions),
     lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest),
     administrationTargetCount: mergeOptionalScalar(
       left.administrationTargetCount,
@@ -356,6 +357,12 @@ function mergeCoordinationMarker(
   if (!left) return right;
   if (!right) return left;
   return left.coordination === right.coordination ? left : undefined;
+}
+
+function mergeStructuredFeature<T>(left: T | undefined, right: T | undefined): T | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return stableStructureKey(left) === stableStructureKey(right) ? left : undefined;
 }
 
 function mergeDose(
@@ -666,8 +673,24 @@ export function unifySynsem(
   );
   if (coordinationMarker === undefined &&
       left.cont.coordinationMarker && right.cont.coordinationMarker) return undefined;
+  const siteRelativeMarker = left.cont.siteRelativeMarker || right.cont.siteRelativeMarker
+    ? mergeStructuredFeature(left.cont.siteRelativeMarker, right.cont.siteRelativeMarker)
+    : undefined;
+  if (siteRelativeMarker === undefined &&
+      left.cont.siteRelativeMarker && right.cont.siteRelativeMarker) return undefined;
+  const sitePredicate = left.cont.sitePredicate || right.cont.sitePredicate
+    ? mergeStructuredFeature(left.cont.sitePredicate, right.cont.sitePredicate)
+    : undefined;
+  if (sitePredicate === undefined && left.cont.sitePredicate && right.cont.sitePredicate) {
+    return undefined;
+  }
+  const siteRestriction = left.cont.siteRestriction || right.cont.siteRestriction
+    ? mergeStructuredFeature(left.cont.siteRestriction, right.cont.siteRestriction)
+    : undefined;
+  if (siteRestriction === undefined &&
+      left.cont.siteRestriction && right.cont.siteRestriction) return undefined;
 
-  return {
+  const result: HpsgSynsem = {
     head: {
       method,
       route,
@@ -699,6 +722,88 @@ export function unifySynsem(
         left.nonlocal?.scopeRequirements,
         right.nonlocal?.scopeRequirements
       )
+    }
+  };
+  // Keep absent optional features absent. Otherwise every ordinary chart key
+  // and semantic comparison pays to walk three unused site-relative fields.
+  // This changes representation cost, never which licensed signs can combine.
+  if (siteRelativeMarker) result.cont.siteRelativeMarker = siteRelativeMarker;
+  if (sitePredicate) result.cont.sitePredicate = sitePredicate;
+  if (siteRestriction) result.cont.siteRestriction = siteRestriction;
+  return result;
+}
+
+function withoutSiteRelativeContent(synsem: HpsgSynsem): HpsgSynsem {
+  return {
+    ...synsem,
+    cont: {
+      ...synsem.cont,
+      siteRelativeMarker: undefined,
+      sitePredicate: undefined,
+      siteRestriction: undefined
+    }
+  };
+}
+
+function siteRelativeSynsem(
+  markerSign: HpsgSign,
+  predicateSign: HpsgSign,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const marker = markerSign.synsem.cont.siteRelativeMarker;
+  const predicate = predicateSign.synsem.cont.sitePredicate;
+  if (!marker || !predicate) return undefined;
+  const base = unifySynsem(
+    withoutSiteRelativeContent(markerSign.synsem),
+    withoutSiteRelativeContent(predicateSign.synsem),
+    context
+  );
+  if (!base) return undefined;
+  const range = {
+    start: Math.min(marker.range.start, predicate.range.start),
+    end: Math.max(marker.range.end, predicate.range.end)
+  };
+  return {
+    ...base,
+    cont: {
+      ...base.cont,
+      siteRestriction: {
+        relation: marker.relation,
+        sourceText: context.sourceText?.(range.start, range.end) ??
+          `${marker.relation} ${predicate.text}`,
+        range,
+        markerRange: { ...marker.range },
+        predicate: { ...predicate, range: { ...predicate.range } }
+      }
+    }
+  };
+}
+
+function restrictedSiteSynsem(
+  headSign: HpsgSign,
+  relativeSign: HpsgSign,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const restriction = relativeSign.synsem.cont.siteRestriction;
+  const headSite = headSign.synsem.valence.site;
+  if (!restriction || !headSite) return undefined;
+  const base = unifySynsem(
+    headSign.synsem,
+    withoutSiteRelativeContent(relativeSign.synsem),
+    context
+  );
+  if (!base?.valence.site) return undefined;
+  return {
+    ...base,
+    valence: {
+      ...base.valence,
+      site: {
+        ...base.valence.site,
+        restrictions: appendUniqueStructured(
+          base.valence.site.restrictions,
+          [restriction]
+        )
+      }
     }
   };
 }
@@ -775,10 +880,14 @@ export function combineSigns(
   const selectedConstruction = selectHpsgConstruction(left, right);
   if (!selectedConstruction) return undefined;
   const target = selectedConstruction.construction.headSide === "left" ? left : right;
-  const condition = selectedConstruction.construction.headSide === "left" ? right : left;
+  const nonHead = selectedConstruction.construction.headSide === "left" ? right : left;
   const refinement = scheduleRefinementSynsems(left, right);
   const synsem = selectedConstruction.construction.operation === "scope"
-    ? scopeSynsem(condition, target)
+    ? scopeSynsem(nonHead, target)
+    : selectedConstruction.construction.operation === "form-site-relative"
+      ? siteRelativeSynsem(left, right, context)
+    : selectedConstruction.construction.operation === "restrict-site"
+      ? restrictedSiteSynsem(target, nonHead, context)
     : selectedConstruction.motherType === "site-coordination-phrase"
       ? siteCoordinationSynsem(refinement.left, refinement.right, context)
     : unifySynsem(refinement.left, refinement.right, context);
@@ -789,6 +898,8 @@ export function combineSigns(
     selectedConstruction.motherType,
     selectedConstruction.construction.headSide,
     selectedConstruction.construction.operation === "scope" ||
+      selectedConstruction.construction.operation === "form-site-relative" ||
+      selectedConstruction.construction.operation === "restrict-site" ||
       selectedConstruction.motherType === "site-coordination-phrase" ||
       refinement.refined
       ? synsem

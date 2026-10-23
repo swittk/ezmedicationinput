@@ -33,6 +33,9 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.cont.coordinationMarker
       ? `O${synsem.cont.coordinationMarker.coordination}`
       : "",
+    synsem.cont.siteRelativeMarker ? "W" : "",
+    synsem.cont.sitePredicate ? "V" : "",
+    synsem.cont.siteRestriction ? "J" : "",
     synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
@@ -80,6 +83,15 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
   if (synsem.cont.scopeClosed) contentFeatures.SCOPE_CLOSED = featureAtom(true, "boolean");
   if (synsem.cont.coordinationMarker) {
     contentFeatures.COORDINATION_MARKER = featureNode("coordination-marker-feature");
+  }
+  if (synsem.cont.siteRelativeMarker) {
+    contentFeatures.SITE_RELATIVE_MARKER = featureNode("site-relative-marker-feature");
+  }
+  if (synsem.cont.sitePredicate) {
+    contentFeatures.SITE_PREDICATE = featureNode("site-predicate-feature");
+  }
+  if (synsem.cont.siteRestriction) {
+    contentFeatures.SITE_RESTRICTION = featureNode("site-restriction-feature");
   }
 
   const nonlocalFeatures: Record<string, HpsgFeatureNode> = {};

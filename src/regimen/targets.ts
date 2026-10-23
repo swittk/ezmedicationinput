@@ -13,6 +13,17 @@ function cloneSite(site: CanonicalSiteExpr): CanonicalSiteExpr {
       i18n: site.coding.i18n ? { ...site.coding.i18n } : undefined
     } : undefined,
     spatialRelation: site.spatialRelation ? { ...site.spatialRelation } : undefined,
+    ...(site.restrictions?.length ? {
+      restrictions: site.restrictions.map(restriction => ({
+        ...restriction,
+        range: restriction.range ? { ...restriction.range } : undefined,
+        markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
+        predicate: {
+          ...restriction.predicate,
+          range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
+        }
+      }))
+    } : {}),
     evidence: site.evidence?.map((item) => ({
       ...item,
       spans: item.spans.map((span) => ({ ...span }))

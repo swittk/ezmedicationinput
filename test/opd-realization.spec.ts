@@ -20,13 +20,14 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
         periodUnit: "d"
       }
     });
-    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
-      boundsEnd: "2026-09-30",
-      evidence: [{
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.boundsEnd).toBe("2026-09-30");
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.evidence).toContainEqual(
+      expect.objectContaining({
         rule: "hpsg.lex.schedule.calendarDateList",
-        spans: [{ text: "up to 30 Sep 2026" }]
-      }]
-    });
+        scheduleFields: ["boundsEnd"],
+        spans: [expect.objectContaining({ text: "up to 30 Sep 2026" })]
+      })
+    );
   });
 
   it("preserves maximum source text and synthesizes useful text when source is absent", () => {

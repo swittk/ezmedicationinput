@@ -8,6 +8,82 @@ const VULVA = "45292006";
 
 describe("body-site preposition grammar", () => {
   it.each([
+    [
+      "apply 1 mL at 08:00 to arm where irritated",
+      "302538001",
+      "irritated",
+      "state",
+      undefined,
+      "08:00:00"
+    ],
+    [
+      "apply 1 mL to skin where there is redness at 20:00",
+      "181469002",
+      "there is redness",
+      "existential",
+      "redness",
+      "20:00:00"
+    ]
+  ] as const)(
+    "keeps leading or trailing timing outside a site restriction in %s",
+    (source, siteCode, predicateText, form, focusText, timeOfDay) => {
+      const parsed = parseSig(source);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause?.site?.coding?.code).toBe(siteCode);
+      expect(clause?.site?.restrictions).toMatchObject([{
+        relation: "where",
+        predicate: {
+          text: predicateText,
+          form,
+          focusText
+        }
+      }]);
+      expect(clause?.schedule?.timeOfDay).toEqual([timeOfDay]);
+      expect(clause?.schedule?.frequency).toBeUndefined();
+      expect(clause?.prn).toBeUndefined();
+      expect(clause?.clinicalAdjuncts).toBeUndefined();
+      expect(parsed.fhir.timing?.repeat?.timeOfDay).toEqual([timeOfDay]);
+      expect(parsed.fhir.timing?.repeat?.frequency).toBeUndefined();
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.longText).not.toMatch(/\bat\s*\.$/iu);
+    }
+  );
+
+  it("retains an unknown predicate as typed raw content on a custom coded site", () => {
+    const parsed = parseSig("apply 1 mL to treatment zone where tender", {
+      siteCodeMap: {
+        "treatment zone": {
+          text: "treatment zone",
+          coding: {
+            system: "urn:test:body-site",
+            code: "zone-1",
+            display: "Treatment zone"
+          }
+        }
+      }
+    });
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause?.site).toMatchObject({
+      text: "treatment zone",
+      coding: { system: "urn:test:body-site", code: "zone-1" },
+      restrictions: [{
+        relation: "where",
+        sourceText: "where tender",
+        predicate: { text: "tender", form: "raw" }
+      }]
+    });
+    expect(clause?.schedule).toBeUndefined();
+    expect(clause?.prn).toBeUndefined();
+    expect(clause?.clinicalAdjuncts).toBeUndefined();
+    expect(parsed.fhir.site?.coding?.[0]).toMatchObject({
+      system: "urn:test:body-site",
+      code: "zone-1"
+    });
+    expect(parsed.longText.toLowerCase()).toContain("where tender");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each([
     "wash at external genital area",
     "wash at the external genital area",
     "wash on external genitals",

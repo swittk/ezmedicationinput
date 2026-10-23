@@ -347,7 +347,14 @@ function isRenderedInstructionMarker(extension: FhirExtension): boolean {
   if (extension.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) return false;
   const instruction = extension.extension?.find(value => value.url === "instruction")?.valueString;
   const projection = extension.extension?.find(value => value.url === "projection")?.valueString;
-  return typeof instruction === "string" && typeof projection === "string";
+  const projectionFingerprint = extension.extension?.find(value =>
+    value.url === "projectionFingerprint")?.valueString;
+  const textFingerprint = extension.extension?.find(value =>
+    value.url === "textFingerprint")?.valueString;
+  return typeof instruction === "string" && (
+    typeof projection === "string" ||
+    typeof projectionFingerprint === "string" && typeof textFingerprint === "string"
+  );
 }
 
 /** Project one EZMED dosage into a native R6 dosage component. */
@@ -584,24 +591,19 @@ function equivalentProjection(
  * Modifier metadata is deliberately excluded from the comparison: it can
  * describe a course but must never replace subsequently edited dosage values.
  */
-function comparableLiveDosage(dosage: FhirDosage | EzDosage): string {
+function liveDosageProjection(
+  dosage: FhirDosage | EzDosage,
+  includeText = true
+): object {
   const {
     condition: _condition, safety: _safety, siteReference: _siteReference,
     excludedDates: _excludedDates, doseAndRate, extension, modifierExtension,
+    text,
     ...r5
   } = dosage as EzDosage;
-  const clean = (value: object | number | boolean | string | null | undefined): object | number | boolean | string | null | undefined => {
-    if (Array.isArray(value)) return value.length ? value.map(clean) : undefined;
-    if (value === null || typeof value !== "object") return value;
-    const next: Record<string, object | number | boolean | string | null | undefined> = {};
-    for (const key of Object.keys(value).sort()) {
-      const entry = clean((value as Record<string, object | number | boolean | string | null | undefined>)[key]);
-      if (entry !== undefined) next[key] = entry;
-    }
-    return next;
-  };
-  const base = {
+  return {
     ...r5,
+    ...(includeText && text !== undefined ? { text } : {}),
     ...(doseAndRate ? { doseAndRate: doseAndRate.map(entry => {
       const { doseExpression: _dose, rateExpression: _rate, ...r5Entry } = entry;
       return r5Entry;
@@ -613,7 +615,158 @@ function comparableLiveDosage(dosage: FhirDosage | EzDosage): string {
       ? { modifierExtension: modifierExtension.filter(item =>
         item.url !== DOSAGE_DETAILS_R5_URL) } : {})
   };
-  return JSON.stringify(clean(base));
+}
+
+function comparableLiveDosage(
+  dosage: FhirDosage | EzDosage,
+  includeText = true
+): string {
+  const clean = (value: object | number | boolean | string | null | undefined): object | number | boolean | string | null | undefined => {
+    if (Array.isArray(value)) return value.length ? value.map(clean) : undefined;
+    if (value === null || typeof value !== "object") return value;
+    const next: Record<string, object | number | boolean | string | null | undefined> = {};
+    for (const key of Object.keys(value).sort()) {
+      const entry = clean((value as Record<string, object | number | boolean | string | null | undefined>)[key]);
+      if (entry !== undefined) next[key] = entry;
+    }
+    return next;
+  };
+  return JSON.stringify(clean(liveDosageProjection(dosage, includeText)));
+}
+
+/** A compact, deterministic identity for one JSON-safe projection. Keeping the
+ * identity rather than a second dosage snapshot makes the primary editable
+ * array cheap to persist while still detecting stale display text. */
+interface ProjectionFingerprintState {
+  first: number;
+  second: number;
+}
+
+function updateProjectionFingerprint(
+  state: ProjectionFingerprintState,
+  value: string
+): void {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    state.first = Math.imul(state.first ^ code, 0x01000193);
+    state.second = Math.imul(state.second ^ code, 0x85ebca6b);
+    state.second ^= state.second >>> 13;
+  }
+}
+
+function projectionFingerprintValue(
+  state: ProjectionFingerprintState,
+  value: unknown,
+  context: "general" | "coding-list" | "coding-item" = "general"
+): void {
+  if (value === null) {
+    updateProjectionFingerprint(state, "null;");
+    return;
+  }
+  if (Array.isArray(value)) {
+    updateProjectionFingerprint(state, "[");
+    const childContext = context === "coding-list" ? "coding-item" : "general";
+    for (const part of value) projectionFingerprintValue(state, part, childContext);
+    updateProjectionFingerprint(state, "]");
+    return;
+  }
+  if (typeof value === "object") {
+    updateProjectionFingerprint(state, "{");
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record).sort()) {
+      const part = record[key];
+      if (part === undefined || Array.isArray(part) && part.length === 0) continue;
+      // Validator-added coding versions do not alter an instruction. This is
+      // the same tolerated metadata class as the legacy exact comparator.
+      if (context === "coding-item" && key === "version") continue;
+      updateProjectionFingerprint(state, key.length + ":" + key);
+      projectionFingerprintValue(state, part,
+        key === "coding" ? "coding-list" : "general");
+    }
+    updateProjectionFingerprint(state, "}");
+    return;
+  }
+  const primitive = String(value);
+  updateProjectionFingerprint(state, typeof value + primitive.length + ":" + primitive + ";");
+}
+
+function finishProjectionFingerprint(state: ProjectionFingerprintState): string {
+  const hex = (part: number): string =>
+    ("00000000" + (part >>> 0).toString(16)).slice(-8);
+  return hex(state.first) + hex(state.second);
+}
+
+function compactProjectionFingerprint(value: unknown): string {
+  const state = { first: 0x811c9dc5, second: 0x9e3779b9 };
+  projectionFingerprintValue(state, value);
+  return finishProjectionFingerprint(state);
+}
+
+function dosageProjectionFingerprint(dosage: FhirDosage | EzDosage): string {
+  // The public editable shape includes R6-native fields. Unlike the legacy
+  // R5-vs-R6 comparator, its identity must retain condition/safety/expression
+  // edits; only display text and historical provenance are not live meaning.
+  const { text: _text, extension, modifierExtension, ...live } = dosage;
+  return compactProjectionFingerprint({
+    ...live,
+    ...(extension?.some(item => item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL)
+      ? { extension: extension.filter(item => item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) } : {}),
+    ...(modifierExtension?.some(item => item.url !== DOSAGE_DETAILS_R5_URL)
+      ? { modifierExtension: modifierExtension.filter(item => item.url !== DOSAGE_DETAILS_R5_URL) } : {})
+  });
+}
+
+function dosageTextFingerprint(dosage: FhirDosage | EzDosage): string {
+  return compactProjectionFingerprint(dosage.text ?? null);
+}
+
+function parseFingerprintList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every(item => typeof item === "string")
+      ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Attach source/display provenance to the primary editable extended-R5 array.
+ * The first row carries compact identities for every row; no FHIR field is
+ * interpreted here, and unfamiliar extensions remain part of the identity.
+ */
+export function withDosageEditProvenance<T extends FhirDosage | EzDosage>(
+  dosages: readonly T[],
+  instruction: string
+): T[] {
+  if (!dosages.length) return [];
+  const marker: FhirExtension = {
+    url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+    extension: [
+      { url: "instruction", valueString: instruction },
+      {
+        url: "projectionFingerprint",
+        valueString: JSON.stringify(dosages.map(dosage =>
+          dosageProjectionFingerprint(dosage)))
+      },
+      {
+        url: "textFingerprint",
+        valueString: JSON.stringify(dosages.map(dosage =>
+          dosageTextFingerprint(dosage)))
+      }
+    ]
+  };
+  return dosages.map((dosage, index) => index === 0
+    ? {
+      ...dosage,
+      extension: [
+        ...(dosage.extension ?? []).filter(value =>
+          !isRenderedInstructionMarker(value)),
+        marker
+      ]
+    } as T
+    : dosage);
 }
 
 /**
@@ -1023,6 +1176,14 @@ export function toDosageDetails(
     value.url === "instruction")?.valueString;
   const savedProjection = instructionMarker?.extension?.find(value =>
     value.url === "projection")?.valueString;
+  const savedProjectionFingerprints = parseFingerprintList(
+    instructionMarker?.extension?.find(value =>
+      value.url === "projectionFingerprint")?.valueString
+  );
+  const savedTextFingerprints = parseFingerprintList(
+    instructionMarker?.extension?.find(value =>
+      value.url === "textFingerprint")?.valueString
+  );
   let originalProjected: ProjectionValue[] | undefined;
   if (savedProjection) {
     try {
@@ -1030,22 +1191,49 @@ export function toDosageDetails(
       if (Array.isArray(parsed)) originalProjected = parsed;
     } catch { /* Damaged display-only metadata is never authoritative. */ }
   }
-  // Ordinary parseSig() calls have no persisted rendered-text fingerprint.
-  // Do not allocate or JSON-normalize any dosage on that hot path.
-  const instructionStillMatches = originalProjected !== undefined &&
+  // Direct parser-to-R6 projection has no marker and stays on the fast path.
+  // Fingerprint an imported array only when its producer supplied compact
+  // edit provenance; arbitrary FHIR imports pay no comparison cost.
+  const hasCompactBaseline = savedProjectionFingerprints !== undefined &&
+    savedTextFingerprints !== undefined;
+  const currentProjectionFingerprints = hasCompactBaseline
+    ? dosages.map(dosage => dosageProjectionFingerprint(dosage))
+    : undefined;
+  const currentTextFingerprints = hasCompactBaseline
+    ? dosages.map(dosage => dosageTextFingerprint(dosage))
+    : undefined;
+  const legacyInstructionStillMatches = originalProjected !== undefined &&
     equivalentProjection(originalProjected, dosages.map(dosage =>
       JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue));
-  const clinicianEditedText = originalProjected !== undefined && !instructionStillMatches &&
-    dosages.every(dosage => typeof dosage.text === "string" && dosage.text.length > 0) &&
+  const compactProjectionStillMatches = hasCompactBaseline &&
+    savedProjectionFingerprints!.length === currentProjectionFingerprints!.length &&
+    savedProjectionFingerprints!.every((value, index) =>
+      value === currentProjectionFingerprints![index]);
+  const compactTextStillMatches = hasCompactBaseline &&
+    savedTextFingerprints!.length === currentTextFingerprints!.length &&
+    savedTextFingerprints!.every((value, index) =>
+      value === currentTextFingerprints![index]);
+  const compactInstructionStillMatches = compactProjectionStillMatches &&
+    compactTextStillMatches;
+  const instructionStillMatches = originalProjected !== undefined
+    ? legacyInstructionStillMatches
+    : compactInstructionStillMatches;
+  const hasInstructionBaseline = originalProjected !== undefined || hasCompactBaseline;
+  const legacyTextWasEdited = originalProjected !== undefined &&
     dosages.some((dosage, index) => {
       const previous = originalProjected![index];
       return previous && !Array.isArray(previous) && typeof previous === "object" &&
         previous.text !== dosage.text;
-    })
+    });
+  const compactTextWasEdited = hasCompactBaseline && dosages.some((_, index) =>
+    savedTextFingerprints![index] !== currentTextFingerprints![index]);
+  const clinicianEditedText = hasInstructionBaseline && !instructionStillMatches &&
+    dosages.every(dosage => typeof dosage.text === "string" && dosage.text.length > 0) &&
+    (legacyTextWasEdited || compactTextWasEdited)
     ? dosages.map(dosage => dosage.text).join("; ")
     : undefined;
   const preservedInstruction = instructionStillMatches ? savedInstruction : clinicianEditedText;
-  if (savedInstruction !== undefined && originalProjected !== undefined &&
+  if (savedInstruction !== undefined && hasInstructionBaseline &&
       !instructionStillMatches) {
     addWarning(warnings,
       "Structured dosage fields changed; the previous rendered instruction was retained only as source provenance.");
@@ -1055,22 +1243,34 @@ export function toDosageDetails(
     const { text: _ignored, ...rest } = value;
     return rest;
   };
-  const effectiveDosages = originalProjected && !instructionStillMatches
+  const effectiveDosages = hasInstructionBaseline && !instructionStillMatches
     ? dosages.map((dosage, index) => {
-      const previous = originalProjected[index];
+      const previous = originalProjected?.[index];
       const prior = previous && !Array.isArray(previous) && typeof previous === "object"
         ? previous : undefined;
       const oldText = prior && "text" in prior ? prior.text : undefined;
-      const after = JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue;
-      return oldText !== undefined && oldText === dosage.text &&
-          !equivalentProjection(withoutText(prior), withoutText(after))
+      const legacyTextUnchanged = oldText !== undefined && oldText === dosage.text;
+      const legacyStructureChanged = prior !== undefined && !equivalentProjection(
+        withoutText(prior),
+        withoutText(JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue)
+      );
+      const compactTextUnchanged = hasCompactBaseline &&
+        savedTextFingerprints![index] === currentTextFingerprints![index];
+      const compactStructureChanged = hasCompactBaseline &&
+        savedProjectionFingerprints![index] !== currentProjectionFingerprints![index];
+      return (originalProjected !== undefined
+        ? legacyTextUnchanged && legacyStructureChanged
+        : compactTextUnchanged && compactStructureChanged)
         ? { ...dosage, text: undefined }
         : dosage;
     })
     : dosages;
   if (retained) {
+    // An edited component instruction is not a new whole-course instruction.
+    // Keep that component text, but let structured phases drive the summary
+    // unless the caller explicitly supplied a complete replacement course SIG.
     const result = reconcileRetainedCourse(retained, effectiveDosages,
-      course?.renderedInstruction ?? renderedInstruction ?? clinicianEditedText,
+      course?.renderedInstruction ?? renderedInstruction,
       course, preserveRetainedMarkers, warnings, retainedSource,
       reconciliationSources);
     return withPreservedSourceExtension(result,

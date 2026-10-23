@@ -20,7 +20,8 @@ export class EvidenceContext {
   private readonly actionCache = new Map<string, AdviceFrame[]>();
   private allActions?: AdviceFrame[];
   constructor(readonly input: string, readonly tokens: Token[], readonly options: ParseOptions | undefined,
-    readonly metrics: PlannerMetrics, readonly cacheEnabled: boolean) {}
+    readonly metrics: PlannerMetrics, readonly cacheEnabled: boolean,
+    private readonly customSiteHints?: Set<string>) {}
 
   probe(start: number, end: number): ProbeSummary {
     while (start < end && /\s/u.test(this.input[start])) start++;
@@ -28,7 +29,9 @@ export class EvidenceContext {
     const key = `${start}:${end}`;
     const cached = this.cacheEnabled ? this.cache.get(key) : undefined;
     if (cached) { this.metrics.probeCacheHits++; return cached; }
-    const state = parseClauseState(this.input.slice(start, end), this.options);
+    const state = parseClauseState(
+      this.input.slice(start, end), this.options, this.customSiteHints
+    );
     if (this.cacheEnabled) this.parsedStates.set(key, state);
     this.metrics.clauseProbes++; this.metrics.probedTokens += state.tokens.length;
     const c = state.primaryClause, s = c.schedule;
@@ -52,6 +55,16 @@ export class EvidenceContext {
         : target.text?.trim().toLowerCase().replace(/\s+/gu, ' ')
     ).filter((value): value is string => Boolean(value)) ??
       (directTarget ? [directTarget] : []);
+    // Boundary ownership follows the selected production analysis, not every
+    // competing chart hypothesis. The composed sign already retains its typed
+    // site coordination, so no extra chart-wide scan is needed per probe.
+    const coordination = c.administrationTargetGroup;
+    const siteCoordinations: ProbeSummary['siteCoordinations'] = coordination?.range ? [{
+      type: 'site-coordination-phrase',
+      coordination: coordination.coordination,
+      start: coordination.range.start + start,
+      end: coordination.range.end + start
+    }] : [];
     const summary: ProbeSummary = {
       start, end, clause: c,
       complete,
@@ -71,10 +84,18 @@ export class EvidenceContext {
       prn: c.prn?.enabled === true,
       targets,
       hasTargets: targets.length > 0,
-      conditionStarts: c.evidence.filter(e => e.rule === 'hpsg.lex.condition').reduce<number[]>((result, evidence) => {
-        for (const span of evidence.spans) result.push(span.start + start);
-        return result;
-      }, [])
+      siteCoordinations,
+      // Conditions are typed action/clinical-adjunct relations, never
+      // inferred from HPSG lexical production names.
+      conditionStarts: [
+        ...(c.instructionGraph?.relations ?? []).filter(relation =>
+          (relation.kind === 'if' || relation.kind === 'unless') &&
+          relation.span !== undefined
+        ).map(relation => relation.span!.start + start),
+        ...(c.clinicalAdjuncts?.condition
+          ? (c.clinicalAdjuncts.localRanges ?? []).map(range => range.start + start)
+          : [])
+      ]
     };
     if (this.cacheEnabled) this.cache.set(key, summary);
     return summary;

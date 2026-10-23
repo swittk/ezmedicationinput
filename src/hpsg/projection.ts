@@ -7,6 +7,7 @@ import {
   RouteCode,
   TextRange,
   type CanonicalEvidence,
+  type CanonicalLexicalCategory,
   type CanonicalScheduleSemanticField
 } from "../types";
 import {
@@ -31,7 +32,8 @@ export interface HpsgProjectionDeps {
     rule: string,
     startIndex: number,
     endIndex: number,
-    scheduleFields?: CanonicalScheduleSemanticField[]
+    scheduleFields?: CanonicalScheduleSemanticField[],
+    lexicalCategory?: CanonicalLexicalCategory
   ) => void;
   refreshMethodSurface: (state: ParserState) => void;
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
@@ -194,6 +196,20 @@ function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinical
   };
 }
 
+function cloneSiteRestrictions(
+  restrictions: NonNullable<HpsgSign["synsem"]["valence"]["site"]>["restrictions"]
+) {
+  return restrictions?.map((restriction) => ({
+    ...restriction,
+    range: restriction.range ? { ...restriction.range } : undefined,
+    markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
+    predicate: {
+      ...restriction.predicate,
+      range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
+    }
+  }));
+}
+
 function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolean {
   return Boolean(schedule && (
     schedule.frequency !== undefined ||
@@ -336,6 +352,12 @@ export function projectHpsgSignToState(
     if (site.spatialRelation !== undefined) {
       state.siteSpatialRelation = site.spatialRelation;
     }
+    if (site.restrictions?.length) {
+      state.primaryClause.site = {
+        ...state.primaryClause.site,
+        restrictions: cloneSiteRestrictions(site.restrictions)
+      };
+    }
     if (site.lookupRequest !== undefined) {
       state.siteLookupRequest = site.lookupRequest;
     }
@@ -364,6 +386,8 @@ export function projectHpsgSignToState(
             i18n: target.coding.i18n ? { ...target.coding.i18n } : undefined
           } : undefined,
           spatialRelation: target.spatialRelation ? { ...target.spatialRelation } : undefined,
+          ...(target.restrictions?.length
+            ? { restrictions: cloneSiteRestrictions(target.restrictions) } : {}),
           administrationTargetCount: target.administrationTargetCount,
           range: target.range ? { ...target.range } : undefined
         }))
@@ -507,7 +531,8 @@ export function projectHpsgSignToState(
       evidence.rule,
       startIndex,
       endIndex,
-      evidence.scheduleFields
+      evidence.scheduleFields,
+      evidence.lexicalCategory
     );
   }
 }

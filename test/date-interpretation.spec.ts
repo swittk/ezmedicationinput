@@ -826,13 +826,14 @@ describe("calendar date interpretation", () => {
     });
     expect(parsed.fhir.timing?.event).toBeUndefined();
     expect(parsed.meta.leftoverText).toBeUndefined();
-    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
-      boundsEnd: "2026-09-30",
-      evidence: [{
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.boundsEnd).toBe("2026-09-30");
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.evidence).toContainEqual(
+      expect.objectContaining({
         rule: "hpsg.lex.schedule.calendarDateList",
+        scheduleFields: ["boundsEnd"],
         spans: [{ start: 17, end: 34, text: "up to 30 Sep 2026" }]
-      }]
-    });
+      })
+    );
     expect(parsed.meta.canonical.clauses[0]?.schedule?.calendarEvents).toBeUndefined();
     expect(nextDueDoses(parsed.fhir, {
       from: "2026-09-28T08:00:00+07:00",
@@ -1029,10 +1030,11 @@ describe("calendar date interpretation", () => {
         periodUnit: "d"
       });
       expect(clause.schedule?.calendarEvents).toBeUndefined();
-      expect(clause.evidence).toContainEqual({
+      expect(clause.evidence).toContainEqual(expect.objectContaining({
         rule: "hpsg.lex.schedule.openEndedDate",
+        scheduleFields: ["boundsStart"],
         spans: [expect.objectContaining({ text: item.ownedSpan })]
-      });
+      }));
       expect(clause.instructionGraph, item.input).toBeUndefined();
       expect(clause.leftovers).toEqual([]);
       expect(clause.rawText).toBe(item.input);
@@ -1055,10 +1057,11 @@ describe("calendar date interpretation", () => {
     expect(clause.schedule?.calendarEvents).toEqual([
       expect.objectContaining({ isoDate: "2026-09-28", sourceText: "2026-09-28" })
     ]);
-    expect(clause.schedule?.evidence).toContainEqual({
+    expect(clause.schedule?.evidence).toContainEqual(expect.objectContaining({
       rule: "hpsg.lex.schedule.calendarDateList",
+      scheduleFields: ["calendarEvents"],
       spans: [expect.objectContaining({ text: "on 2026-09-28" })]
-    });
+    }));
     expect(clause.leftovers).toContainEqual(expect.objectContaining({
       text: "onwards"
     }));

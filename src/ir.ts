@@ -275,6 +275,21 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
+    for (const restriction of clause.site?.restrictions ?? []) {
+      if (restriction.range) {
+        restriction.range.start += offset;
+        restriction.range.end += offset;
+      }
+      if (restriction.markerRange) {
+        restriction.markerRange.start += offset;
+        restriction.markerRange.end += offset;
+      }
+      if (restriction.predicate.range) {
+        restriction.predicate.range.start += offset;
+        restriction.predicate.range.end += offset;
+      }
+    }
+
     const targetGroup = clause.administrationTargetGroup;
     if (targetGroup?.range) {
       targetGroup.range.start += offset;
@@ -286,6 +301,21 @@ export function shiftCanonicalSigClauses(
         target.range.end += offset;
       }
       shiftEvidenceSpans(target.evidence);
+      // Every independently projected target owns its predicate source spans.
+      for (const restriction of target.restrictions ?? []) {
+        if (restriction.range) {
+          restriction.range.start += offset;
+          restriction.range.end += offset;
+        }
+        if (restriction.markerRange) {
+          restriction.markerRange.start += offset;
+          restriction.markerRange.end += offset;
+        }
+        if (restriction.predicate.range) {
+          restriction.predicate.range.start += offset;
+          restriction.predicate.range.end += offset;
+        }
+      }
     }
 
     const shiftedInstructionFrames = new Set<object>();

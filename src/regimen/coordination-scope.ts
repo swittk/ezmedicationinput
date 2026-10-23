@@ -11,6 +11,7 @@ import type {
   AdviceFrame,
   CanonicalAdditionalInstructionExpr,
   CanonicalEvidence,
+  CanonicalLexicalCategory,
   CanonicalMethodExpr,
   CanonicalPrnExpr,
   CanonicalScheduleExpr,
@@ -35,8 +36,8 @@ export interface CoordinationScopeApplication {
   fields: string[];
 }
 
-function hasEvidence(clause: CanonicalSigClause, prefix: string): boolean {
-  return clause.evidence.some(item => item.rule.startsWith(prefix));
+function hasEvidence(clause: CanonicalSigClause, category: CanonicalLexicalCategory): boolean {
+  return clause.evidence.some(item => item.lexicalCategory === category);
 }
 
 function hasCadence(schedule: CanonicalScheduleExpr | undefined): boolean {
@@ -76,6 +77,9 @@ const SCHEDULE_FEATURE_GROUPS = {
   calendarEvents: ['calendarEvents'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
+
+// The feature inventory is static; don't allocate its keys for every scope probe.
+const SCHEDULE_GROUP_NAMES = Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[];
 
 type GroupedScheduleField = (typeof SCHEDULE_FEATURE_GROUPS)[ScheduleFeatureGroup][number];
 const scheduleFeatureCoverage: Exclude<ScheduleSemanticField, GroupedScheduleField> extends never
@@ -141,14 +145,14 @@ function hasSemanticValue(value: unknown): boolean {
 }
 
 function scheduleHasSemantics(schedule: CanonicalScheduleExpr | undefined): boolean {
-  return (Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[]).some(group =>
+  return SCHEDULE_GROUP_NAMES.some(group =>
     SCHEDULE_FEATURE_GROUPS[group].some(field =>
       hasSemanticValue(scheduleFieldValue(schedule, field)))
   );
 }
 
 function sameSemanticValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 interface ScheduleMergeResult {
@@ -170,7 +174,7 @@ function mergeScheduleFeatureGroups(
   const fields: string[] = [];
   const groups = new Set<ScheduleFeatureGroup>();
 
-  for (const group of Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[]) {
+  for (const group of SCHEDULE_GROUP_NAMES) {
     const groupFields = SCHEDULE_FEATURE_GROUPS[group];
     const donorFields = groupFields.filter(field =>
       hasSemanticValue(scheduleFieldValue(donor, field))
@@ -200,12 +204,6 @@ function mergeScheduleFeatureGroups(
     }
   }
   return { schedule, fields, groups };
-}
-
-function hasCadenceConflict(state: ParserState): boolean {
-  return state.warnings.some(warning =>
-    /(?:unresolved|incompatible|conflict).*(?:schedule|timing)|(?:schedule|timing).*(?:unresolved|incompatible|conflict)/iu.test(warning)
-  );
 }
 
 function targetKey(clause: CanonicalSigClause): string | undefined {
@@ -258,25 +256,15 @@ function cloneEvidence(evidence: CanonicalEvidence): CanonicalEvidence {
 }
 
 function scheduleEvidenceGroups(evidence: CanonicalEvidence): readonly ScheduleFeatureGroup[] {
-  if (evidence.scheduleFields?.length) {
-    const groups: ScheduleFeatureGroup[] = [];
-    for (const group of Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[]) {
-      const groupFields = SCHEDULE_FEATURE_GROUPS[group] as readonly ScheduleSemanticField[];
-      if (evidence.scheduleFields.some(field => groupFields.indexOf(field) >= 0)) {
-        groups.push(group);
-      }
+  if (!evidence.scheduleFields?.length) return [];
+  const groups: ScheduleFeatureGroup[] = [];
+  for (const group of SCHEDULE_GROUP_NAMES) {
+    const groupFields = SCHEDULE_FEATURE_GROUPS[group] as readonly ScheduleSemanticField[];
+    if (evidence.scheduleFields.some(field => groupFields.indexOf(field) >= 0)) {
+      groups.push(group);
     }
-    return groups;
   }
-  const rule = evidence.rule;
-  if (/eventOffset|activityTiming/iu.test(rule)) return ['eventAnchor'];
-  if (/administrationDuration/iu.test(rule)) return ['administrationDuration'];
-  if (/duration/iu.test(rule)) return ['courseBounds'];
-  if (/calendarDateList/iu.test(rule)) return ['courseBounds', 'calendarEvents'];
-  if (/occurrenceCap|maximumDose|count|frequency|interval|timing|clock|weekday/iu.test(rule)) {
-    return ['recurrence'];
-  }
-  return [];
+  return groups;
 }
 
 function sourceScheduleEvidence(
@@ -290,7 +278,7 @@ function sourceScheduleEvidence(
     }
   }
   for (const item of clause.evidence) {
-    if (item.rule.startsWith('hpsg.lex.schedule.') &&
+    if (item.scheduleFields?.length &&
         scheduleEvidenceGroups(item).some(group => copiedGroups.has(group))) {
       appendEvidence(evidence, item);
     }
@@ -300,12 +288,15 @@ function sourceScheduleEvidence(
 
 function evidenceBounds(
   clause: CanonicalSigClause,
-  prefix: string
+  category: CanonicalLexicalCategory | 'schedule'
 ): { start: number; end: number } | undefined {
   let start = Infinity;
   let end = -Infinity;
   for (const evidence of clause.evidence) {
-    if (!evidence.rule.startsWith(prefix)) continue;
+    const contributes = category === 'schedule'
+      ? Boolean(evidence.scheduleFields?.length)
+      : evidence.lexicalCategory === category;
+    if (!contributes) continue;
     for (const span of evidence.spans) {
       if (span.start < start) start = span.start;
       if (span.end > end) end = span.end;
@@ -314,16 +305,16 @@ function evidenceBounds(
   return start === Infinity ? undefined : { start, end };
 }
 
-function isFrontedEvidence(clause: CanonicalSigClause, prefix: string): boolean {
-  const adjunct = evidenceBounds(clause, prefix);
-  const head = evidenceBounds(clause, 'hpsg.lex.method') ??
-    evidenceBounds(clause, 'hpsg.lex.dose');
+function isFrontedEvidence(clause: CanonicalSigClause, category: 'schedule' | 'prn'): boolean {
+  const adjunct = evidenceBounds(clause, category);
+  const head = evidenceBounds(clause, 'method') ??
+    evidenceBounds(clause, 'dose');
   return Boolean(adjunct && head && adjunct.end <= head.start);
 }
 
-function isTrailingEvidence(clause: CanonicalSigClause, prefix: string): boolean {
-  const adjunct = evidenceBounds(clause, prefix);
-  const dose = evidenceBounds(clause, 'hpsg.lex.dose');
+function isTrailingEvidence(clause: CanonicalSigClause, category: 'schedule' | 'prn'): boolean {
+  const adjunct = evidenceBounds(clause, category);
+  const dose = evidenceBounds(clause, 'dose');
   return Boolean(adjunct && dose && adjunct.start >= dose.end);
 }
 
@@ -353,7 +344,7 @@ function sourcePrnEvidence(clause: CanonicalSigClause): CanonicalEvidence[] {
   const evidence: CanonicalEvidence[] = [];
   for (const item of clause.prn?.evidence ?? []) appendEvidence(evidence, item);
   for (const item of clause.evidence) {
-    if (item.rule.startsWith('hpsg.lex.prn')) appendEvidence(evidence, item);
+    if (item.lexicalCategory === 'prn') appendEvidence(evidence, item);
   }
   return evidence;
 }
@@ -373,15 +364,15 @@ function factsFor(
     adjacent: relation.to === relation.from + 1,
     leftComplete: findUnparsedTokenGroups(left.state).length === 0,
     rightComplete: findUnparsedTokenGroups(right.state).length === 0,
-    leftExplicitDose: Boolean(leftClause.dose && hasEvidence(leftClause, 'hpsg.lex.dose')),
-    rightExplicitDose: Boolean(rightClause.dose && hasEvidence(rightClause, 'hpsg.lex.dose')),
-    leftExplicitHead: hasEvidence(leftClause, 'hpsg.lex.method'),
+    leftExplicitDose: Boolean(leftClause.dose && hasEvidence(leftClause, 'dose')),
+    rightExplicitDose: Boolean(rightClause.dose && hasEvidence(rightClause, 'dose')),
+    leftExplicitHead: hasEvidence(leftClause, 'method'),
     // A typed dose and administration site constitute an elliptical
     // administration even without an explicit verb ("1 drop OD"). That
     // licenses a shared trailing cadence across coordinated site doses.
-    leftAdministrationContext: hasEvidence(leftClause, 'hpsg.lex.method') ||
+    leftAdministrationContext: hasEvidence(leftClause, 'method') ||
       inheritedAdministration || Boolean(leftClause.dose && leftClause.site),
-    rightExplicitHead: hasEvidence(rightClause, 'hpsg.lex.method'),
+    rightExplicitHead: hasEvidence(rightClause, 'method'),
     leftHasSite: Boolean(leftTarget),
     rightHasSite: Boolean(rightTarget),
     targetsDistinct: Boolean(leftTarget && rightTarget && leftTarget !== rightTarget),
@@ -391,10 +382,10 @@ function factsFor(
     rightHasCadence: hasCadence(rightClause.schedule),
     leftHasPrn: leftClause.prn?.enabled === true,
     rightHasPrn: rightClause.prn?.enabled === true,
-    leftHasFrontedSchedule: isFrontedEvidence(leftClause, 'hpsg.lex.schedule.'),
-    leftHasFrontedPrn: isFrontedEvidence(leftClause, 'hpsg.lex.prn'),
-    rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'hpsg.lex.schedule.'),
-    rightHasTrailingPrn: isTrailingEvidence(rightClause, 'hpsg.lex.prn'),
+    leftHasFrontedSchedule: isFrontedEvidence(leftClause, 'schedule'),
+    leftHasFrontedPrn: isFrontedEvidence(leftClause, 'prn'),
+    rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'schedule'),
+    rightHasTrailingPrn: isTrailingEvidence(rightClause, 'prn'),
     rightHasTrailingSafetyGuard: Boolean(
       (rightClause.clinicalAdjuncts?.condition &&
        rightClause.clinicalAdjuncts.condition.kind !== 'not') ||
@@ -404,8 +395,7 @@ function factsFor(
       ((rightClause.leftovers?.length ?? 0) > 0 &&
        ((rightClause.schedule?.dayOfWeek?.length ?? 0) > 0 ||
         (rightClause.schedule?.calendarEvents?.length ?? 0) > 0))
-    ),
-    rightHasCadenceConflict: hasCadenceConflict(right.state)
+    )
   };
 }
 
@@ -508,7 +498,7 @@ function cloneInstruction(
 function terminalSemicolon(clause: CanonicalSigClause): CanonicalSourceSpan | undefined {
   let selected: CanonicalSourceSpan | undefined;
   for (const evidence of clause.evidence) {
-    if (evidence.rule !== 'hpsg.lex.connector') continue;
+    if (evidence.lexicalCategory !== 'connector') continue;
     for (const span of evidence.spans) {
       if (span.text.trim() !== ';') continue;
       if (!selected || span.start > selected.start) selected = span;
@@ -1033,8 +1023,8 @@ export function applyCoordinatedCadenceScopes(
     const donorClause = donor.state.primaryClause;
     const targetClause = recipient.state.primaryClause;
     const copySchedule = leading
-      ? isFrontedEvidence(donorClause, 'hpsg.lex.schedule.')
-      : isTrailingEvidence(donorClause, 'hpsg.lex.schedule.');
+      ? isFrontedEvidence(donorClause, 'schedule')
+      : isTrailingEvidence(donorClause, 'schedule');
     const scheduleMerge = copySchedule
       ? mergeScheduleFeatureGroups(targetClause.schedule, donorClause.schedule)
       : { schedule: targetClause.schedule, fields: [], groups: new Set<ScheduleFeatureGroup>() };
@@ -1042,8 +1032,8 @@ export function applyCoordinatedCadenceScopes(
       shiftEvidenceToRecipient(item, donor.start, recipient.start)
     );
     const copyPrn = donorClause.prn?.enabled === true && (leading
-      ? isFrontedEvidence(donorClause, 'hpsg.lex.prn')
-      : isTrailingEvidence(donorClause, 'hpsg.lex.prn')) && targetClause.prn?.enabled !== true;
+      ? isFrontedEvidence(donorClause, 'prn')
+      : isTrailingEvidence(donorClause, 'prn')) && targetClause.prn?.enabled !== true;
     const inheritedPrnEvidence = copyPrn
       ? sourcePrnEvidence(donorClause).map(item =>
         shiftEvidenceToRecipient(item, donor.start, recipient.start)

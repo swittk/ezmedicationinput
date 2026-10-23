@@ -1,3 +1,4 @@
+import type { CanonicalEvidence, CanonicalLexicalCategory } from "./types";
 import { parseHpsgClause } from "./hpsg/clause-parser";
 import { findMedicationDateListSpans } from "./date-interpretation";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
@@ -74,7 +75,7 @@ export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
 }
 
-function buildCustomSiteHints(
+export function buildCustomSiteHints(
   map: Record<string, BodySiteDefinition> | undefined
 ): Set<string> | undefined {
   if (!map) {
@@ -156,13 +157,14 @@ function recordEvidence(
   rule: string,
   startIndex: number,
   endIndex: number,
-  scheduleFields?: CanonicalScheduleSemanticField[]
+  scheduleFields?: CanonicalScheduleSemanticField[],
+  lexicalCategory?: CanonicalLexicalCategory
 ): void {
   const clause = state.primaryClause;
   if (!clause.evidence) {
     clause.evidence = [];
   }
-  const evidence = {
+  const evidence: CanonicalEvidence = {
     rule,
     spans: [
       sourceSpan(
@@ -174,9 +176,9 @@ function recordEvidence(
       )
     ]
   };
-  clause.evidence.push(scheduleFields?.length
-    ? { ...evidence, scheduleFields: [...scheduleFields] }
-    : evidence);
+  if (lexicalCategory) evidence.lexicalCategory = lexicalCategory;
+  if (scheduleFields?.length) evidence.scheduleFields = [...scheduleFields];
+  clause.evidence.push(evidence);
 }
 
 function computeTrimmedInputRange(input: string): TextRange | undefined {
@@ -484,9 +486,13 @@ export function parseClauseSign(input: string, options?: ParseOptions) {
   return parseTypedClauseSign(state, tokens, options, false);
 }
 
-export function parseClauseState(input: string, options?: ParseOptions): ParserState {
+export function parseClauseState(
+  input: string,
+  options?: ParseOptions,
+  customSiteHints = buildCustomSiteHints(options?.siteCodeMap)
+): ParserState {
   const tokens = tokenize(input);
-  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+  const state = new ParserState(input, tokens, customSiteHints);
 
   const sign = parseTypedClauseSign(state, tokens, options, true);
 

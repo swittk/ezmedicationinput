@@ -636,6 +636,33 @@ export interface BodySiteSpatialRelation {
   sourceText?: string;
 }
 
+export type BodySiteRestrictionPredicateForm =
+  | "state"
+  | "existential"
+  | "raw";
+
+/**
+ * A source-backed predicate that narrows an administration site. It is not a
+ * diagnosis or a regimen-wide execution condition.
+ */
+export interface BodySiteRestrictionPredicate {
+  text: string;
+  lemma?: string;
+  form: BodySiteRestrictionPredicateForm;
+  /** Predicate payload after a declarative introducer such as "there is". */
+  focusText?: string;
+  range?: TextRange;
+}
+
+/** A restrictive relative clause attached locally to a body-site sign. */
+export interface BodySiteRestriction {
+  relation: "where";
+  sourceText: string;
+  range?: TextRange;
+  markerRange?: TextRange;
+  predicate: BodySiteRestrictionPredicate;
+}
+
 export interface BodySiteDefinition {
   coding?: BodySiteCode;
   text?: string;
@@ -1388,6 +1415,7 @@ export interface CanonicalSiteExpr {
   i18n?: Record<string, string>;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  restrictions?: BodySiteRestriction[];
   administrationTargetCount?: number;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   inferred?: boolean;
@@ -1566,8 +1594,14 @@ export interface CanonicalSourceSpan extends TextRange {
   tokenIndices?: number[];
 }
 
+/** Lexical grammatical role carried from the originating typed sign.
+ * Production names remain diagnostic labels, never semantic dispatch keys. */
+export type CanonicalLexicalCategory = "dose" | "method" | "prn" | "connector";
+
 export interface CanonicalEvidence {
   rule: string;
+  /** Role of the actual lexical sign, independent of the grammar-rule label. */
+  lexicalCategory?: CanonicalLexicalCategory;
   spans: CanonicalSourceSpan[];
   /** Exact schedule semantics owned by this evidence, independent of rule names. */
   scheduleFields?: CanonicalScheduleSemanticField[];
@@ -1660,6 +1694,8 @@ export interface BodySiteDetail {
   text?: string;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  /** Typed site-local predicates retained for editable normalized suggestions. */
+  restrictions?: BodySiteRestriction[];
   administrationTargetCount?: number;
 }
 

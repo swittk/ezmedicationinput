@@ -18,6 +18,19 @@ type ContextualPrnReasonLead = {
   canonical: string;
   requiresKnownReason?: boolean;
 };
+export type SiteRelativeMarkerLexeme = {
+  surface: string;
+  relation: "where";
+};
+export type SiteRestrictionPredicateIntroducer = {
+  parts: string[];
+  form: "existential";
+};
+export type SiteRestrictionPredicateLexeme = {
+  lemma: string;
+  form: "state";
+  i18n?: Record<string, string>;
+};
 type CompoundDoseUnit = {
   head: string;
   tails: string[];
@@ -160,11 +173,43 @@ function bodySiteFeatureScoreBonus(
   return map;
 }
 
+function siteRestrictionPredicateMap(
+  record: Record<string, SiteRestrictionPredicateLexeme>
+): Map<string, SiteRestrictionPredicateLexeme> {
+  const result = new Map<string, SiteRestrictionPredicateLexeme>();
+  for (const surface in record) {
+    if (Object.prototype.hasOwnProperty.call(record, surface)) {
+      result.set(surface, { ...record[surface] });
+    }
+  }
+  return result;
+}
+
 export const SITE_ANCHORS = new Set([
   ...source.siteAnchors,
   ...BODY_SITE_LOCATIVE_LEAD_TOKENS,
   ...BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES
 ]);
+export const SITE_RELATIVE_MARKERS = new Map<string, SiteRelativeMarkerLexeme>(
+  (source.siteRelativeMarkers as SiteRelativeMarkerLexeme[]).map((entry) => [
+    entry.surface,
+    { ...entry }
+  ])
+);
+export const SITE_RESTRICTION_PREDICATE_INTRODUCERS: SiteRestrictionPredicateIntroducer[] =
+  (source.siteRestrictionPredicateIntroducers as SiteRestrictionPredicateIntroducer[])
+    .map((entry) => ({ ...entry, parts: [...entry.parts] }))
+    .sort((left, right) => right.parts.length - left.parts.length);
+export const SITE_RESTRICTION_PREDICATES = siteRestrictionPredicateMap(
+  source.siteRestrictionPredicates as Record<string, SiteRestrictionPredicateLexeme>
+);
+export const SITE_RESTRICTION_PREDICATES_BY_LEMMA = (() => {
+  const result = new Map<string, SiteRestrictionPredicateLexeme>();
+  SITE_RESTRICTION_PREDICATES.forEach((entry) => {
+    result.set(entry.lemma, entry);
+  });
+  return result;
+})();
 export const SITE_SELF_DISPLAY_ANCHORS = new Set([
   ...BODY_SITE_LOCATIVE_LEAD_TOKENS,
   ...BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES

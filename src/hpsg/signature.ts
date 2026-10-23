@@ -9,6 +9,9 @@ import {
   CanonicalOccurrenceCapExpr,
   AdministrationTargetCoordinationKind,
   CanonicalScheduleSemanticField,
+  CanonicalLexicalCategory,
+  BodySiteRestriction,
+  BodySiteRestrictionPredicate,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
@@ -42,6 +45,10 @@ export type HpsgType =
   | "method-sign"
   | "route-sign"
   | "site-sign"
+  | "site-relative-marker-sign"
+  | "site-predicate-sign"
+  | "site-relative-clause"
+  | "restricted-site-phrase"
   | "dose-sign"
   | "schedule-sign"
   | "prn-sign"
@@ -53,6 +60,8 @@ export type HpsgType =
 
 export interface HpsgEvidence {
   rule: string;
+  /** Canonical provenance comes from the typed lexical sign, not its rule ID. */
+  lexicalCategory?: CanonicalLexicalCategory;
   tokenIndices: number[];
   /** Lexical evidence that a schedule field is an inferred, construction-local default. */
   scheduleDefault?: "daily-frequency";
@@ -70,7 +79,11 @@ export type HpsgConstructionKind =
   | "administration-clause"
   | "generic";
 
-export type HpsgConstructionOperation = "unify" | "scope";
+export type HpsgConstructionOperation =
+  | "unify"
+  | "scope"
+  | "form-site-relative"
+  | "restrict-site";
 
 export interface HpsgConstruction {
   kind: HpsgConstructionKind;
@@ -102,6 +115,7 @@ export interface HpsgAdministrationTargetFeature {
   source?: "abbreviation" | "text" | "selection" | "resolver";
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
+  restrictions?: BodySiteRestriction[];
   lookupRequest?: SiteCodeLookupRequest;
   administrationTargetCount?: number;
   range?: TextRange;
@@ -120,6 +134,15 @@ export interface HpsgSiteFeature extends HpsgAdministrationTargetFeature {
 
 export interface HpsgCoordinationMarkerFeature {
   coordination: Exclude<AdministrationTargetCoordinationKind, "mixed">;
+}
+
+export interface HpsgSiteRelativeMarkerFeature {
+  relation: BodySiteRestriction["relation"];
+  range: TextRange;
+}
+
+export interface HpsgSitePredicateFeature extends BodySiteRestrictionPredicate {
+  range: TextRange;
 }
 
 export interface HpsgPrnFeature {
@@ -288,6 +311,9 @@ export interface HpsgSynsem {
     scopedAdministrations?: HpsgScopedAdministrationFeature[];
     scopeClosed?: true;
     coordinationMarker?: HpsgCoordinationMarkerFeature;
+    siteRelativeMarker?: HpsgSiteRelativeMarkerFeature;
+    sitePredicate?: HpsgSitePredicateFeature;
+    siteRestriction?: BodySiteRestriction;
   };
   nonlocal?: {
     scopeRequirements?: HpsgConditionFeature[];
@@ -362,7 +388,27 @@ export function lexicalSign(args: {
     tokenIndices,
     scheduleDefault: args.scheduleDefault
   };
-  if (args.scheduleFields?.length) evidence.scheduleFields = [...args.scheduleFields];
+  switch (args.type) {
+    case "dose-sign": evidence.lexicalCategory = "dose"; break;
+    case "method-sign": evidence.lexicalCategory = "method"; break;
+    case "prn-sign": evidence.lexicalCategory = "prn"; break;
+    case "connector-sign": evidence.lexicalCategory = "connector"; break;
+  }
+  // Each lexical schedule sign declares the typed features it contributes.
+  // Coordination must NEVER guess those features from the production name.
+  const schedule = args.synsem.head.schedule;
+  if (args.scheduleFields?.length) {
+    evidence.scheduleFields = [...args.scheduleFields];
+  } else if (schedule) {
+    const fields: CanonicalScheduleSemanticField[] = [];
+    for (const key of Object.keys(schedule)) {
+      if (key === "attachmentClass" || key === "sourceRanges") continue;
+      const field = key as keyof HpsgScheduleFeature;
+      // Optional undefined values contribute no feature to the lexical sign.
+      if (schedule[field] !== undefined) fields.push(key as CanonicalScheduleSemanticField);
+    }
+    if (fields.length) evidence.scheduleFields = fields;
+  }
   return {
     type: args.type,
     span: { start, end },

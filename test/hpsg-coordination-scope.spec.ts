@@ -4,9 +4,12 @@ import {
   lintSig, nextDueDoses
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
-import { parseClauseSign, parseClauseState } from '../src/parser';
+import {
+  parseClauseSign,
+  parseClauseState
+} from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
-import { createBoundaryPlan } from '../src/regimen/candidate-adapter';
+import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/candidate-adapter';
 import type { BoundaryPlan } from '../src/regimen/types';
 import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/regimen/types';
@@ -47,7 +50,6 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
     rightHasTrailingSchedule: true,
     rightHasTrailingPrn: false,
     rightHasTrailingSafetyGuard: false,
-    rightHasCadenceConflict: false,
     ...overrides
   };
 }
@@ -118,6 +120,144 @@ describe('HPSG coordination cadence scope', () => {
     check(parseSig(input, { locale: 'th' }));
     check(await parseSigAsync(input, { locale: 'th' }));
     expect(lintSig(input, { locale: 'th' }).issues).toEqual([]);
+  });
+
+  it.each([
+    {
+      left: 'moob',
+      right: 'goob',
+      leftText: 'Moob',
+      rightText: 'Goob',
+      leftCode: 'MOOB',
+      rightCode: 'GOOB'
+    },
+    {
+      left: 'upper moob',
+      right: 'lower goob',
+      leftText: 'Upper Moob',
+      rightText: 'Lower Goob',
+      leftCode: 'UPPER-MOOB',
+      rightCode: 'LOWER-GOOB'
+    }
+  ])('owns repeated custom SITE-NP coordination at both clocks: $left and $right', async ({
+    left, right, leftText, rightText, leftCode, rightCode
+  }) => {
+    const input =
+      `apply to ${left} and ${right} 1 g at 08:00 and ` +
+      `apply to ${left} and ${right} 1 g at 20:00`;
+    const options = {
+      siteCodeMap: {
+        [left]: {
+          text: leftText,
+          coding: {
+            system: 'http://example.org/custom-sites',
+            code: leftCode,
+            display: leftText
+          }
+        },
+        [right]: {
+          text: rightText,
+          coding: {
+            system: 'http://example.org/custom-sites',
+            code: rightCode,
+            display: rightText
+          }
+        }
+      }
+    };
+    const groupText = `${left} and ${right}`;
+    const firstStart = input.indexOf(groupText);
+    const secondStart = input.lastIndexOf(groupText);
+    const expectedRanges = [firstStart, secondStart].map(start => ({
+      start,
+      end: start + groupText.length
+    }));
+
+    for (const clock of ['08:00', '20:00']) {
+      const clause = `apply to ${groupText} 1 g at ${clock}`;
+      const sign = parseClauseSign(clause, options);
+      expect(sign?.synsem.valence.site?.coordination).toMatchObject({
+        coordination: 'conjunction',
+        sourceText: groupText,
+        range: {
+          start: clause.indexOf(groupText),
+          end: clause.indexOf(groupText) + groupText.length
+        },
+        targets: [
+          { coding: { code: leftCode } },
+          { coding: { code: rightCode } }
+        ]
+      });
+    }
+
+    const boundary = createBoundaryPlan(input, options);
+    expect(boundary.claims.filter(claim => claim.kind === 'target-list')).toEqual(
+      expectedRanges.map(range => expect.objectContaining({
+        ...range,
+        producer: 'site-coordination-phrase'
+      }))
+    );
+    expect(boundary.segments.map(segment => segment.text)).toEqual([
+      `apply to ${groupText} 1 g at 08:00`,
+      `apply to ${groupText} 1 g at 20:00`
+    ]);
+    expect(boundary.relations).toContainEqual(expect.objectContaining({
+      kind: 'coordination',
+      connectorKind: 'conjunction'
+    }));
+    expect(boundary.metrics.clauseProbes).toBe(2);
+    expect(boundary.metrics.siteCoordinationProbes).toBe(2);
+    expect(boundary.metrics.probeCacheHits).toBeGreaterThanOrEqual(2);
+    for (const segment of boundary.segments) {
+      expect(takeBoundaryParsedState(
+        boundary, segment.start, segment.end, segment.text
+      )?.primaryClause.administrationTargetGroup).toMatchObject({
+        coordination: 'conjunction',
+        sourceText: groupText
+      });
+    }
+
+    const sync = parseSig(input, options);
+    const asyncParsed = await parseSigAsync(input, options);
+    const linted = lintSig(input, options);
+    for (const items of [
+      sync.items,
+      asyncParsed.items,
+      linted.items.map(entry => entry.result)
+    ]) {
+      expect(items).toHaveLength(2);
+      expect(items.map(item => item.fhir.site?.coding?.[0]?.code))
+        .toEqual([leftCode, rightCode]);
+      expect(items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+        .toEqual([{ value: 1, unit: 'g' }, { value: 1, unit: 'g' }]);
+      expect(items.map(item => item.fhir.timing?.repeat?.timeOfDay))
+        .toEqual([
+          ['08:00:00', '20:00:00'],
+          ['08:00:00', '20:00:00']
+        ]);
+      expect(items.every(item =>
+        item.meta.canonical.clauses[0].rawText === input &&
+        item.meta.canonical.clauses[0].administrationTargetGroup?.sourceText === groupText
+      )).toBe(true);
+    }
+    expect(sync.meta.leftoverText).toBeUndefined();
+    expect(asyncParsed.meta.leftoverText).toBeUndefined();
+    expect(linted.issues).toEqual([]);
+  });
+
+  it.each([
+    'take 1 tab PO BID and drink water',
+    'take 1 tab PO BID, drink water'
+  ])('does not activate site coordination analysis for a non-site seam: %s', input => {
+    for (const options of [undefined, {
+      siteCodeMap: {
+        'upper moob': { text: 'Upper Moob' }
+      }
+    }]) {
+      const boundary = createBoundaryPlan(input, options);
+      expect(boundary.claims.filter(claim => claim.kind === 'target-list')).toEqual([]);
+      expect(boundary.metrics.siteCoordinationProbes).toBe(0);
+    }
   });
 
   it('does not swallow a second explicit eye dose into a site-only conjunction', () => {
@@ -229,7 +369,6 @@ describe('HPSG coordination cadence scope', () => {
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightExplicitHead: true }))).toBeUndefined();
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ leftHasCadence: true }))).toBeUndefined();
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightComplete: false }))).toBeUndefined();
-    expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightHasCadenceConflict: true }))).toBeUndefined();
   });
 
   it('classifies disjunction as an alternative dosage construction', () => {

@@ -7,6 +7,8 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveSymptomDefinition } from "./symptom-terminology";
+import { SITE_RESTRICTION_PREDICATES_BY_LEMMA } from "./hpsg/lexical-classes";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { baseLanguageTag } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -814,6 +816,33 @@ function renderSpatialSiteEnglish(
   return `${target} ${realization.surface}`;
 }
 
+function appendSiteRestrictionsEnglish(
+  clause: CanonicalSigClause,
+  sitePhrase: string
+): string {
+  const restrictions = clause.site?.restrictions;
+  if (!restrictions?.length) return sitePhrase;
+  const parts = [sitePhrase];
+  for (const restriction of restrictions) {
+    const predicate = restriction.predicate;
+    const lexicalPredicate = predicate.lemma
+      ? SITE_RESTRICTION_PREDICATES_BY_LEMMA.get(predicate.lemma)
+      : undefined;
+    const symptom = predicate.form !== "existential" && predicate.lemma
+      ? resolveSymptomDefinition(predicate.lemma)
+      : undefined;
+    const normalizedPredicate = lexicalPredicate?.i18n?.en ?? symptom?.conditionI18n?.en;
+    const relative = normalizedPredicate
+      ? `${restriction.relation} ${normalizedPredicate}`
+      : restriction.sourceText.trim() ||
+        `${restriction.relation} ${predicate.text}`.trim();
+    if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
+      parts.push(relative);
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
 function formatSite(
   clause: CanonicalSigClause,
   grammar: RouteGrammar,
@@ -823,7 +852,7 @@ function formatSite(
   if (!text) {
     const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
     if (spatialSite) {
-      return spatialSite;
+      return appendSiteRestrictionsEnglish(clause, spatialSite);
     }
   }
   if (!text) {
@@ -856,11 +885,11 @@ function formatSite(
     return undefined;
   }
   if (resolvedSite?.features.kind === "locative") {
-    return resolvedSite.englishObjectText;
+    return appendSiteRestrictionsEnglish(clause, resolvedSite.englishObjectText);
   }
   const perTargetNoun = clause.dose ? resolvedSite?.definition?.perTargetText : undefined;
   const noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
-  if (directObject) return noun;
+  if (directObject) return appendSiteRestrictionsEnglish(clause, noun);
   const preferredPreposition = resolvedSite?.preferredPreposition;
   const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
   const sourcePreposition = relationHasSemanticClass(primarySiteRelation, "locative")
@@ -873,7 +902,7 @@ function formatSite(
   if (!preposition) {
     preposition = "at";
   }
-  return `${preposition} ${noun}`.trim();
+  return appendSiteRestrictionsEnglish(clause, `${preposition} ${noun}`.trim());
 }
 
 function formatIsoCalendarDateEnglish(value: string | undefined): string | undefined {

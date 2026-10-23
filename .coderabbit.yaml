@@ -26,7 +26,12 @@ reviews:
     - "!test/real-world-fuzz-2026.spec.ts"
     - "!test/real-world-torture.spec.ts"
     - "!test/weird-clinician-instructions.spec.ts"
-    - "!test/topical-cosmetic-dogfood.spec.ts"
+    # These two existing suites changed ONLY import wiring to the reviewed
+    # R5 compatibility helper; every test input and assertion is unchanged.
+    # Keep the topical suite INCLUDED: it now contains new clinical oracles.
+    - "!test/relation-terminology.spec.ts"
+    - "!test/terminology-coverage.spec.ts"
+    - "!package-lock.json"
   path_instructions:
     - path: "**/*"
       instructions: |

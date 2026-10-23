@@ -1,7 +1,13 @@
 import { lexInput } from '../lexer/lex';
 import { matchCalendarExclusion } from '../hpsg/rules/condition-rules';
 import { parseMedicationGuard } from '../medication-condition';
-import { annotateLexTokens, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from '../lexer/meaning';
+import { findMedicationDateListSpans } from '../date-interpretation';
+import {
+  annotateLexTokens,
+  hasEventTimingMeaning,
+  hasSiteMeaningCandidate,
+  hasTimingAbbreviationMeaning
+} from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
@@ -9,6 +15,7 @@ import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WO
   coordinationConnectorKind } from '../hpsg/lexical-classes';
 import type { ParseOptions, AdviceFrame } from '../types';
 import type { Token } from '../parser-state';
+import { buildCustomSiteHints } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan, BoundarySite, PlannerOptions, Proposal, ProbeSummary } from './types';
 import { EvidenceContext } from './evidence';
@@ -54,10 +61,26 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
   return sites;
 }
 
+/** Cheap lexical gate for the ordinary non-site connector path. This does not
+ * decide site meaning: it only determines whether the production clause chart
+ * can plausibly contribute a typed site-coordination constituent. */
+function hasSiteCoordinationCue(
+  tokens: Token[], start: number, end: number, customSiteHints?: Set<string>
+): boolean {
+  return tokens.some(token => token.sourceStart >= start && token.sourceEnd <= end && (
+    hasSiteMeaningCandidate(token) ||
+    customSiteHints?.has(lexeme(token)) ||
+    SITE_ANCHORS.has(lexeme(token)) ||
+    LATERAL_MODIFIER_WORDS.has(lexeme(token)) ||
+    SITE_MULTIPLICITY_WORDS.has(lexeme(token))
+  ));
+}
+
 const contexts = new WeakMap<BoundaryPlan, EvidenceContext>();
 
-/** Reuse exact completed HPSG probes, but never a partial probe or an input
- * requiring carry-forward inheritance. This is local to one parse operation. */
+/** Reuse exact completed HPSG probes, but never a partial probe. Carry-forward
+ * is applied to the returned state by the same production consumer as a fresh
+ * parse, so it does not invalidate an exact segment result. */
 export function takeBoundaryParsedState(
   plan: BoundaryPlan, start: number, end: number, text: string
 ) {
@@ -67,9 +90,56 @@ export function takeBoundaryParsedState(
 /** Experimental boundary grammar; deliberately not exported by the package or used by production. */
 export function planBoundaries(input: string, options?: ParseOptions, experiment: PlannerOptions = {}): BoundaryPlan {
   const tokens = annotateLexTokens(lexInput(input));
-  const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0, probeCacheHits: 0,
+  const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0,
+    siteCoordinationProbes: 0, probeCacheHits: 0,
     probedTokens: 0, candidates: 0, claimedCandidates: 0 };
-  const claims = recognizeStructures({ input, options, tokens });
+  const sites = candidateSites(input, tokens, options);
+  const dateSpans = findMedicationDateListSpans(input, options);
+  const customSiteHints = buildCustomSiteHints(options?.siteCodeMap);
+  const evidence = new EvidenceContext(
+    input, tokens, options, metrics, experiment.cache !== false, customSiteHints
+  );
+  const claims = recognizeStructures({ input, options, tokens, dateSpans });
+  // Site ownership comes from the selected production clause sign. Probe the
+  // natural clause window around a plausible site connector, then retain that
+  // exact cached ParserState for boundary evidence and final clause parsing.
+  // Adjacent-dose seams are not clause boundaries and therefore do not narrow
+  // these windows.
+  const clauseBoundarySites = sites.filter(site => site.kind !== 'adjacent-dose');
+  const administrationConnectors = new Set<number>();
+  for (let index = 0; index < clauseBoundarySites.length; index += 1) {
+    const site = clauseBoundarySites[index];
+    if (site.kind !== 'coordination' && site.kind !== 'comma') continue;
+    if (administrationConnectors.has(site.start)) continue;
+    const windowStart = clauseBoundarySites[index - 1]?.end ?? 0;
+    const windowEnd = clauseBoundarySites[index + 1]?.start ?? input.length;
+    if (!hasSiteCoordinationCue(tokens, windowStart, windowEnd, customSiteHints)) continue;
+    metrics.siteCoordinationProbes++;
+    const summary = evidence.probe(windowStart, windowEnd);
+    const coordination = summary.siteCoordinations.find(candidate =>
+      candidate.start < site.start && candidate.end > site.end
+    );
+    if (!coordination || coordination.start >= site.start || coordination.end <= site.end) continue;
+    const key = `${coordination.start}:${coordination.end}`;
+    if (claims.some(claim => claim.kind === 'target-list' &&
+        claim.start === coordination.start && claim.end === coordination.end)) continue;
+    claims.push({
+      id: `target-list:${key}`,
+      kind: 'target-list',
+      start: coordination.start,
+      end: coordination.end,
+      producer: coordination.type,
+      resolved: true,
+      policy: 'no-external-split'
+    });
+    // A complete administration ending at the next connector establishes that
+    // seam at clause level. Do not build an overlapping production chart just
+    // to ask whether that same connector is also internal to a SITE-NP.
+    if (summary.hasHead && summary.hasSchedule) {
+      const following = clauseBoundarySites[index + 1];
+      if (following) administrationConnectors.add(following.start);
+    }
+  }
   // Existing lexical recognizers can claim an indivisible calendar exclusion
   // or fronted conditional scope BEFORE HPSG boundary arbitration. Unlike the
   // former candidate-adapter rewrite, this never merges already-decided
@@ -108,8 +178,6 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   }
   claims.sort((a, b) => a.start - b.start || b.end - a.end || a.id.localeCompare(b.id));
   const owners = new OwnershipIndex(experiment.ownership === false ? [] : claims);
-  const sites = candidateSites(input, tokens, options);
-  const evidence = new EvidenceContext(input, tokens, options, metrics, experiment.cache !== false);
   const plan: BoundaryPlan = { experimental: true, segments: [], claims, decisions: [], relations: [], metrics };
   contexts.set(plan, evidence);
   let start = 0, inheritedAdministration = false;

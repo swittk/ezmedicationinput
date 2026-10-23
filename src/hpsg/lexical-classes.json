@@ -10,6 +10,46 @@
     "ที่",
     "บริเวณ"
   ],
+  "siteRelativeMarkers": [
+    {
+      "surface": "where",
+      "relation": "where"
+    }
+  ],
+  "siteRestrictionPredicateIntroducers": [
+    {
+      "parts": [
+        "there",
+        "is"
+      ],
+      "form": "existential"
+    },
+    {
+      "parts": [
+        "there",
+        "are"
+      ],
+      "form": "existential"
+    }
+  ],
+  "siteRestrictionPredicates": {
+    "affected": {
+      "lemma": "affected",
+      "form": "state",
+      "i18n": {
+        "en": "affected",
+        "th": "ได้รับผลกระทบ"
+      }
+    },
+    "irritated": {
+      "lemma": "irritated",
+      "form": "state",
+      "i18n": {
+        "en": "irritated",
+        "th": "ระคายเคือง"
+      }
+    }
+  },
   "siteFillers": [
     "the",
     "a",

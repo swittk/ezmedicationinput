@@ -1,5 +1,6 @@
 import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  withDosageEditProvenance,
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
@@ -488,9 +489,10 @@ function buildWholeCourseResult(
     );
   // A recurring-cycle course is projected as one R6 object and flattened by
   // the established R6->R5 bridge. No source text is reparsed or injected.
-  const fhir = typedRepeatCycle
+  const projectedFhir = typedRepeatCycle
     ? fromDosageDetails(fhirNext).dosages
     : parallel?.dosages ?? toEzDosages(dosageItems);
+  const fhir = withDosageEditProvenance(projectedFhir, input);
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -548,13 +550,6 @@ function buildWholeCourseResult(
   };
 }
 
-function hasSegmentCarry(carry: SegmentCarry): boolean {
-  return Boolean(
-    carry.routeCode || carry.routeText || carry.unit || carry.dose !== undefined ||
-    carry.siteText || carry.siteCoding || carry.administrationTargetGroup
-  );
-}
-
 /** Yield a parsed clause before advancing carry, so synchronous or asynchronous
  * semantic resolvers can complete before the next clause inherits route/site.
  * Coordination is applied only after all daughters are resolved, and before
@@ -576,9 +571,9 @@ function* iterateCoordinatedSegmentStates(
   let carry: SegmentCarry = {};
   for (const segment of segments) {
     if (independentStarts?.has(segment.start)) carry = {};
-    const state = (!hasSegmentCarry(carry)
-      ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? parseClauseState(segment.text, options);
+    const state = takeBoundaryParsedState(
+      boundaryPlan, segment.start, segment.end, segment.text
+    ) ?? parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     yield state;
     updateCarryForward(carry, state);
@@ -1309,6 +1304,17 @@ function buildNormalizedMetaFromClause(
           text: clause.site?.text,
           coding: siteCoding,
           spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation),
+          ...(clause.site?.restrictions?.length ? {
+            restrictions: clause.site.restrictions.map(restriction => ({
+              ...restriction,
+              range: restriction.range ? { ...restriction.range } : undefined,
+              markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
+              predicate: {
+                ...restriction.predicate,
+                range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
+              }
+            }))
+          } : {}),
           administrationTargetCount: clause.site?.administrationTargetCount
         }
         : undefined,

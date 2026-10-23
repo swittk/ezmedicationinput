@@ -46,10 +46,12 @@ import {
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
+  BodySiteRestriction,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
+  FhirExtension,
   FhirPeriodUnit,
   FhirPrimitiveElement,
   FhirQuantity,
@@ -70,6 +72,7 @@ export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhi
 export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
 export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
+export const BODY_SITE_RESTRICTION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-body-site-restriction";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
@@ -90,6 +93,92 @@ function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset"
     (candidate) => candidate.url === PRN_TRIGGER_PHASE_EXTENSION_URL
   )?.valueCode;
   return value === "onset" ? "onset" : undefined;
+}
+
+function restrictionRangeExtension(
+  prefix: string,
+  range: { start: number; end: number } | undefined
+): FhirExtension[] {
+  return range
+    ? [
+        { url: `${prefix}Start`, valueInteger: range.start },
+        { url: `${prefix}End`, valueInteger: range.end }
+      ]
+    : [];
+}
+
+function buildBodySiteRestrictionExtensions(
+  restrictions: BodySiteRestriction[] | undefined
+): FhirExtension[] {
+  if (!restrictions?.length) return [];
+  return restrictions.map((restriction) => ({
+    url: BODY_SITE_RESTRICTION_EXTENSION_URL,
+    extension: [
+      { url: "relation", valueCode: restriction.relation },
+      { url: "sourceText", valueString: restriction.sourceText },
+      { url: "predicateText", valueString: restriction.predicate.text },
+      { url: "predicateForm", valueCode: restriction.predicate.form },
+      ...(restriction.predicate.lemma
+        ? [{ url: "predicateLemma", valueString: restriction.predicate.lemma }]
+        : []),
+      ...(restriction.predicate.focusText
+        ? [{ url: "predicateFocusText", valueString: restriction.predicate.focusText }]
+        : []),
+      ...restrictionRangeExtension("source", restriction.range),
+      ...restrictionRangeExtension("marker", restriction.markerRange),
+      ...restrictionRangeExtension("predicate", restriction.predicate.range)
+    ]
+  }));
+}
+
+function restrictionExtensionChild(
+  extension: FhirExtension,
+  url: string
+): FhirExtension | undefined {
+  return extension.extension?.find((candidate) => candidate.url === url);
+}
+
+function restrictionRangeFromExtension(
+  extension: FhirExtension,
+  prefix: string
+): { start: number; end: number } | undefined {
+  const start = restrictionExtensionChild(extension, `${prefix}Start`)?.valueInteger;
+  const end = restrictionExtensionChild(extension, `${prefix}End`)?.valueInteger;
+  return Number.isInteger(start) && Number.isInteger(end) && (end as number) >= (start as number)
+    ? { start: start as number, end: end as number }
+    : undefined;
+}
+
+function parseBodySiteRestrictionExtensions(
+  concept: FhirCodeableConcept | undefined
+): BodySiteRestriction[] | undefined {
+  if (!concept?.extension?.length) return undefined;
+  const result: BodySiteRestriction[] = [];
+  for (const extension of concept.extension) {
+    if (extension.url !== BODY_SITE_RESTRICTION_EXTENSION_URL) continue;
+    const relation = restrictionExtensionChild(extension, "relation")?.valueCode;
+    const predicateText = restrictionExtensionChild(extension, "predicateText")?.valueString?.trim();
+    if (relation !== "where" || !predicateText) continue;
+    const rawForm = restrictionExtensionChild(extension, "predicateForm")?.valueCode;
+    const form = rawForm === "state" || rawForm === "existential" || rawForm === "raw"
+      ? rawForm
+      : "raw";
+    result.push({
+      relation,
+      sourceText: restrictionExtensionChild(extension, "sourceText")?.valueString?.trim() ??
+        `where ${predicateText}`,
+      range: restrictionRangeFromExtension(extension, "source"),
+      markerRange: restrictionRangeFromExtension(extension, "marker"),
+      predicate: {
+        text: predicateText,
+        lemma: restrictionExtensionChild(extension, "predicateLemma")?.valueString?.trim() || undefined,
+        form,
+        focusText: restrictionExtensionChild(extension, "predicateFocusText")?.valueString?.trim() || undefined,
+        range: restrictionRangeFromExtension(extension, "predicate")
+      }
+    });
+  }
+  return result.length ? result : undefined;
 }
 
 function timingOffsetExtensionValue(
@@ -943,7 +1032,8 @@ export function canonicalToFhir(
     }
   }
 
-  if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation) {
+  if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation ||
+      clause.site?.restrictions?.length) {
     const siteCoding = selectCanonicalSiteCoding(clause.site, options);
     const siteTextElement = options?.includeTranslationExtensions
       ? buildTranslationPrimitiveElement(clause.site.i18n ?? siteCoding?.i18n)
@@ -968,6 +1058,7 @@ export function canonicalToFhir(
         : undefined;
     const siteExtensions = [
       ...(buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation) ?? []),
+      ...buildBodySiteRestrictionExtensions(clause.site?.restrictions),
       ...(siteTargetCountExtension ? [siteTargetCountExtension] : [])
     ];
     dosage.site = {
@@ -1143,6 +1234,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   const siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
+  const siteRestrictions = parseBodySiteRestrictionExtensions(dosage.site);
   const siteText = getFallbackSiteText(dosage.site);
   const siteI18n = codeableConceptTranslationI18n(dosage.site, siteCoding);
   const siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
@@ -1150,12 +1242,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     siteText ||
     siteCoding?.code ||
     siteSpatialRelation ||
+    siteRestrictions?.length ||
     siteAdministrationTargetCount !== undefined
   ) {
     clause.site = {
       text: siteText,
       i18n: siteI18n.text,
       spatialRelation: siteSpatialRelation,
+      restrictions: siteRestrictions,
       administrationTargetCount: siteAdministrationTargetCount,
       coding: siteCoding?.code
         ? {

@@ -18,6 +18,7 @@ import {
 import { buildRegimenGraph } from "../src/regimen/regimen";
 import type { BoundaryPlan } from "../src/regimen/types";
 import type { HpsgSigSegment } from "../src/hpsg/segmenter";
+import { BODY_SITE_RESTRICTION_EXTENSION_URL } from "../src/fhir";
 
 const beginning = "2026-10-19T08:00:00+07:00";
 const scheduler = {
@@ -394,6 +395,169 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
       ?.find(e => e.url === "instruction")?.valueString;
     expect(staleMarker).not.toBe(original.renderedInstruction);
+  });
+
+  it.each([
+    "apply 1 mL to scalp where affected",
+    "apply 1 mL to scalp where there is hair loss",
+    "1 tab PO BID",
+    "1 drop OU BID",
+    "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID"
+  ])("keeps exact source for an unchanged primary editable projection: %s", (source) => {
+    const parsed = parseSig(source);
+    const marker = parsed.fhir[0].extension?.find(extension =>
+      extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    expect(marker?.extension?.find(child => child.url === "instruction")?.valueString)
+      .toBe(source);
+    const projectionFingerprint = marker?.extension?.find(child =>
+      child.url === "projectionFingerprint")?.valueString;
+    const textFingerprint = marker?.extension?.find(child =>
+      child.url === "textFingerprint")?.valueString;
+    const projectionIdentities = JSON.parse(projectionFingerprint ?? "null") as unknown;
+    const textIdentities = JSON.parse(textFingerprint ?? "null") as unknown;
+    expect(projectionIdentities).toHaveLength(parsed.fhir.length);
+    expect(textIdentities).toHaveLength(parsed.fhir.length);
+    expect(projectionIdentities).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{16}$/)])
+    );
+    expect(textIdentities).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{16}$/)])
+    );
+    // The extended public path retains only compact identities, not another
+    // complete JSON dosage snapshot on every ordinary parse.
+    expect(marker?.extension?.some(child => child.url === "projection")).not.toBe(true);
+
+    const unchanged = toDosageDetails(
+      JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[]
+    );
+    expect(unchanged.renderedInstruction).toBe(source);
+    expect(formatSig(unchanged, "long")).toBe(source);
+  });
+
+  it.each([
+    [
+      "apply 1 mL to scalp where affected",
+      "Apply 2 mL to the scalp where affected.",
+      "where affected"
+    ],
+    [
+      "apply 1 mL to scalp where there is hair loss",
+      "Apply 2 mL to the scalp where there is hair loss.",
+      "where there is hair loss"
+    ]
+  ])("reconciles a primary dose edit and retains its typed site restriction: %s",
+    (source, expected, restrictionText) => {
+      const parsed = parseSig(source);
+      const edited = JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[];
+      edited[0].doseAndRate![0].doseQuantity!.value = 2;
+      edited[0].extension = [
+        ...(edited[0].extension ?? []),
+        { url: "urn:test:unfamiliar-edit-metadata", valueString: "retain exactly" }
+      ];
+
+      const details = toDosageDetails(edited);
+      const component = details.step[0].component[0];
+      expect(component.doseAndRate?.[0].doseQuantity?.value).toBe(2);
+      expect(component.text).toBeUndefined();
+      expect(details.renderedInstruction).toBeUndefined();
+      expect(formatSig(details, "long")).toBe(expected);
+      expect(component.site?.concept?.coding?.[0]?.code).toBe("41695006");
+      expect(component.site?.concept?.extension).toContainEqual(expect.objectContaining({
+        url: BODY_SITE_RESTRICTION_EXTENSION_URL,
+        extension: expect.arrayContaining([
+          expect.objectContaining({ url: "sourceText", valueString: restrictionText })
+        ])
+      }));
+      expect(component.extension).toContainEqual({
+        url: "urn:test:unfamiliar-edit-metadata", valueString: "retain exactly"
+      });
+      const sourceMarker = details.extension?.find(extension =>
+        extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+      expect(sourceMarker?.extension?.find(child =>
+        child.url === "instruction")?.valueString).toBe(source);
+    }
+  );
+
+  it("uses explicitly edited text while retaining the previous source separately", () => {
+    const source = "1 tab PO BID";
+    const edited = JSON.parse(JSON.stringify(parseSig(source).fhir)) as FhirDosage[];
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    edited[0].text = "Take two tablets by mouth twice daily";
+    const details = toDosageDetails(edited);
+    expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(details.step[0].component[0].text).toBe(edited[0].text);
+    expect(details.renderedInstruction).toBe(edited[0].text);
+    expect(formatSig(details, "long")).toBe(edited[0].text);
+    expect(details.extension?.find(extension =>
+      extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
+      child.url === "instruction")?.valueString).toBe(source);
+  });
+
+  it.each([
+    "apply 1 mL to scalp where affected",
+    "apply 1 mL to scalp where there is hair loss"
+  ])("drops an obsolete site restriction only when the editable site is replaced: %s",
+    (source) => {
+      const parsed = parseSig(source);
+      const edited = JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[];
+      edited[0].site = {
+        text: "right arm",
+        coding: [{
+          system: "http://snomed.info/sct",
+          code: "368209003",
+          display: "Right upper arm"
+        }]
+      };
+
+      const details = toDosageDetails(edited);
+      const component = details.step[0].component[0];
+      expect(component.site?.concept).toEqual(edited[0].site);
+      expect(component.site?.concept?.extension?.some(extension =>
+        extension.url === BODY_SITE_RESTRICTION_EXTENSION_URL)).not.toBe(true);
+      expect(component.condition).toBeUndefined();
+      expect(component.timing).toBeUndefined();
+      expect(details.renderedInstruction).toBeUndefined();
+      expect(formatSig(details, "long")).toBe("Apply 1 mL to the right arm.");
+      expect(details.extension?.find(extension =>
+        extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
+        child.url === "instruction")?.valueString).toBe(source);
+    }
+  );
+
+  it.each([
+    ["1 tab PO BID", "Take 1 tablet orally three times daily."],
+    ["1 drop OU BID", "Instill 1 drop three times daily in both eyes."]
+  ])("uses an edited primary cadence instead of its old literal text: %s",
+    (source, expected) => {
+      const edited = JSON.parse(JSON.stringify(parseSig(source).fhir)) as FhirDosage[];
+      edited[0].timing!.repeat!.frequency = 3;
+      const details = toDosageDetails(edited);
+      expect(details.step[0].component[0].timing?.repeat?.frequency).toBe(3);
+      expect(details.step[0].component[0].text).toBeUndefined();
+      expect(details.renderedInstruction).toBeUndefined();
+      expect(formatSig(details, "long")).toBe(expected);
+    }
+  );
+
+  it("reconciles one edited eye-taper dose without changing its other typed stages", () => {
+    const source = "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID";
+    const parsed = parseSig(source);
+    const edited = JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[];
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    const details = toDosageDetails(edited);
+    expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(details.step.map(step => step.end)).toEqual(
+      parsed.fhirNext.step.map(step => step.end)
+    );
+    expect(details.step.flatMap(step => step.component).map(component =>
+      component.site?.concept?.coding?.[0]?.code)).toEqual(
+      parsed.fhirNext.step.flatMap(step => step.component).map(component =>
+        component.site?.concept?.coding?.[0]?.code)
+    );
+    const displayed = formatSig(details, "long");
+    expect(displayed).toContain("2 drops");
+    expect(displayed).not.toBe(source);
+    expect(details.renderedInstruction).toBeUndefined();
   });
 
   it("keeps later-stage components aligned when a prior stage loses a simple component", () => {
@@ -781,7 +945,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
         { from: 2, to: 3, kind: "sequence", rule: "regimen.test.sequence", range: { start: 81, end: 82 } }
       ],
       metrics: {
-        lexicalPasses: 0, dateScans: 0, actionScans: 0, clauseProbes: 0,
+        lexicalPasses: 0, dateScans: 0, actionScans: 0, clauseProbes: 0, siteCoordinationProbes: 0,
         probeCacheHits: 0, probedTokens: 0, candidates: 0, claimedCandidates: 0
       }
     };
@@ -806,5 +970,43 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(projection.details.step.map(step => step.end?.offsetDuration?.value))
         .toEqual([7, 1, undefined]);
     }
+  });
+});
+
+
+describe("native editable fields invalidate stale source realization", () => {
+  it.each([
+    { name: "condition", mutate(d: EzDosage) {
+      d.condition = [{ code: { text: "BP" }, operation: "gt", valueQuantity: { value: 160 } }];
+    }, field: "condition" as const },
+    { name: "lifetime safety", mutate(d: EzDosage) {
+      d.safety = { ifExceeded: "Review before another application", doseLimit: [{
+        scope: "lifetime", valueQuantity: { value: 40, unit: "mL" }
+      }] };
+    }, field: "safety" as const },
+    { name: "dose expression", mutate(d: EzDosage) {
+      d.doseAndRate = [{ doseExpression: { language: "text/fhirpath", expression: "%weight * 0.5" } }];
+    }, field: "doseAndRate" as const }
+  ])("retains $name edits and original source without reusing the stale complete SIG", ({ mutate, field }) => {
+    const input = "apply 1 mL to scalp where affected";
+    const parsed = parseSig(input);
+    const originalStructured = JSON.parse(JSON.stringify(parsed.fhir)) as EzDosage[];
+    const edited = JSON.parse(JSON.stringify(parsed.fhir)) as EzDosage[];
+    mutate(edited[0]);
+    const r6 = toDosageDetails(edited);
+    expect(r6.renderedInstruction).toBeUndefined();
+    expect(r6.step[0].component[0][field]).toEqual(edited[0][field]);
+    expect(r6.extension).toContainEqual(expect.objectContaining({
+      url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+      extension: expect.arrayContaining([{ url: "instruction", valueString: input }])
+    }));
+    expect(r6.step[0].component[0].site?.concept?.coding?.[0]?.code).toBe("41695006");
+    expect(r6.step[0].component[0].site?.concept?.extension).toContainEqual(
+      expect.objectContaining({ url: BODY_SITE_RESTRICTION_EXTENSION_URL })
+    );
+    // Dosage.text is the normal-form display; the original input remains in
+    // source provenance. Editing a clone must mutate neither representation.
+    expect(parsed.fhir).toEqual(originalStructured);
+    expect(parsed.input).toBe(input);
   });
 });

@@ -14,6 +14,7 @@ import { AdviceArgumentRole, RouteCode } from "../../types";
 import { resolveBodySitePhrase } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
+import { resolveSymptomDefinition } from "../../symptom-terminology";
 import {
   resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
@@ -47,6 +48,9 @@ import {
   SITE_ANCHORS,
   SITE_DISPLAY_FILLERS,
   SITE_MULTIPLICITY_WORDS,
+  SITE_RELATIVE_MARKERS,
+  SITE_RESTRICTION_PREDICATE_INTRODUCERS,
+  SITE_RESTRICTION_PREDICATES,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
   SITE_SELF_DISPLAY_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS,
@@ -83,15 +87,12 @@ function siteCoordinatorSpan(context: HpsgClauseContext, index: number): number 
   return coordinationConnectorKind(normalizeTokenLower(token)) === "unknown" ? 0 : 1;
 }
 
-/** A coordinator belongs to a site phrase only when it links two typed site atoms. */
-function startsSiteCoordination(
+function coordinatedRightSiteTokens(
   context: HpsgClauseContext,
-  index: number,
-  leftTokens: Token[]
-): boolean {
-  if (!leftTokens.length) return false;
+  index: number
+): Token[] | undefined {
   const connectorSpan = siteCoordinatorSpan(context, index);
-  if (!connectorSpan) return false;
+  if (!connectorSpan) return undefined;
   const rightStart = index + connectorSpan;
   let rightTokens: Token[] | undefined;
   for (let span = 1; span <= 5 && rightStart + span <= context.limit; span += 1) {
@@ -105,6 +106,19 @@ function startsSiteCoordination(
     });
     if (resolved?.coding || resolved?.definition) rightTokens = tokens;
   }
+  return rightTokens;
+}
+
+/** A coordinator belongs to a site phrase only when it links two typed site atoms. */
+function startsSiteCoordination(
+  context: HpsgClauseContext,
+  index: number,
+  leftTokens: Token[]
+): boolean {
+  if (!leftTokens.length) return false;
+  const connectorSpan = siteCoordinatorSpan(context, index);
+  if (!connectorSpan) return false;
+  const rightTokens = coordinatedRightSiteTokens(context, index);
   if (!rightTokens) return false;
 
   // A coded composite or explicitly counted bilateral site (for example
@@ -178,6 +192,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
+    SITE_RELATIVE_MARKERS.has(lower) ||
     SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
     INSTRUCTION_START_WORDS.has(lower) ||
     Boolean(
@@ -310,6 +325,122 @@ function shouldSuppressEyeSiteAbbreviation(
   );
 }
 
+function siteRelativeMarkerSign(
+  token: Token,
+  lower: string
+): HpsgSign | undefined {
+  const marker = SITE_RELATIVE_MARKERS.get(lower);
+  if (!marker) return undefined;
+  return lexicalSign({
+    type: "site-relative-marker-sign",
+    rule: "hpsg.lex.site.relative-marker",
+    tokens: [token],
+    synsem: {
+      head: {},
+      valence: {},
+      cont: {
+        siteRelativeMarker: {
+          relation: marker.relation,
+          range: { start: token.sourceStart, end: token.sourceEnd }
+        }
+      }
+    }
+  });
+}
+
+function sitePredicateEndsBefore(
+  context: HpsgClauseContext,
+  index: number,
+  predicateStart: number
+): boolean {
+  const token = context.tokens[index];
+  if (!token) return true;
+  const lower = normalizeTokenLower(token);
+  if (
+    isPunctuation(lower) ||
+    temporalRelationStarts(context, index) ||
+    coordinationLeadsToSchedule(context, index) ||
+    startsMaximumCountLead(context, index) ||
+    coordinationStartsAction(context, index) ||
+    Boolean(coordinatedRightSiteTokens(context, index)) ||
+    ACTION_SEQUENCE_MARKERS.has(lower) ||
+    (index > predicateStart && siteBoundary(lower, context))
+  ) return true;
+
+  if (!SITE_ANCHORS.has(lower)) return false;
+  for (let cursor = index + 1; cursor < Math.min(context.limit, index + 4); cursor += 1) {
+    const next = context.tokens[cursor];
+    if (!next || context.state.consumed.has(next.index)) return false;
+    const nextLower = normalizeTokenLower(next);
+    if (SITE_DISPLAY_FILLERS.has(nextLower)) continue;
+    return Boolean(
+      isClockLikeLower(nextLower) ||
+      getDayOfWeekMeaning(next) ||
+      sourceRangeOverlapsContextDate(context, next.sourceStart, next.sourceEnd) ||
+      EVENT_TIMING_TOKENS[nextLower] ||
+      TIMING_ABBREVIATIONS[nextLower] ||
+      WORD_FREQUENCIES[nextLower] ||
+      FREQUENCY_SIMPLE_WORDS[nextLower] !== undefined
+    );
+  }
+  return false;
+}
+
+function sitePredicateSign(
+  context: HpsgClauseContext,
+  start: number
+): HpsgSign | undefined {
+  const previous = context.tokens[start - 1];
+  if (!previous || !SITE_RELATIVE_MARKERS.has(normalizeTokenLower(previous))) {
+    return undefined;
+  }
+  const predicateTokens: Token[] = [];
+  for (let cursor = start; cursor < context.limit; cursor += 1) {
+    const token = context.tokens[cursor];
+    if (!token || context.state.consumed.has(token.index)) break;
+    if (sitePredicateEndsBefore(context, cursor, start)) break;
+    predicateTokens.push(token);
+  }
+  if (!predicateTokens.length) return undefined;
+
+  const text = joinTokenText(predicateTokens);
+  const lowers = predicateTokens.map((token) => normalizeTokenLower(token));
+  const normalized = lowers.join(" ");
+  const lexicalPredicate = SITE_RESTRICTION_PREDICATES.get(normalized);
+  const introducer = SITE_RESTRICTION_PREDICATE_INTRODUCERS.find((candidate) =>
+    candidate.parts.length < predicateTokens.length &&
+    candidate.parts.every((part, index) => lowers[index] === part)
+  );
+  const focusTokens = introducer
+    ? predicateTokens.slice(introducer.parts.length)
+    : undefined;
+  const focusText = focusTokens?.length ? joinTokenText(focusTokens) : undefined;
+  const symptom = resolveSymptomDefinition(focusText ?? normalized);
+  const symptomLemma = symptom?.text?.trim().toLowerCase() ||
+    symptom?.coding?.display?.trim().toLowerCase();
+  const range = rangeFromTokens(predicateTokens);
+  if (!range) return undefined;
+
+  return lexicalSign({
+    type: "site-predicate-sign",
+    rule: "hpsg.lex.site.restriction-predicate",
+    tokens: predicateTokens,
+    synsem: {
+      head: {},
+      valence: {},
+      cont: {
+        sitePredicate: {
+          text,
+          lemma: lexicalPredicate?.lemma ?? symptomLemma,
+          form: lexicalPredicate?.form ?? introducer?.form ?? "raw",
+          focusText,
+          range
+        }
+      }
+    }
+  });
+}
+
 export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.site", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -318,6 +449,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    const relativeMarker = siteRelativeMarkerSign(token, lower);
+    if (relativeMarker) return [relativeMarker];
+    const predicate = sitePredicateSign(context, start);
+    if (predicate) return [predicate];
     if (
       tokenBelongsToContextualPrnReasonLead(context, start) ||
       anchorTargetsTypedNonSiteConcept(context, start)

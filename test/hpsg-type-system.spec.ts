@@ -11,7 +11,9 @@ import {
 import { combineSignFeatureStructures, signFeatureStructure } from "../src/hpsg/feature-structure";
 import { selectHpsgConstruction } from "../src/hpsg/constructions";
 import { lexicalSign } from "../src/hpsg/signature";
-import { tokenize } from "../src/parser";
+import { tokenize, parseClauseState } from "../src/parser";
+import { applyCoordinatedCadenceScopes } from "../src/regimen/coordination-scope";
+import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
 import { ParserState } from "../src/parser-state";
 import { findMedicationDateListSpans } from "../src/date-interpretation";
 import {
@@ -207,4 +209,71 @@ describe("formal HPSG typed feature structures", () => {
     expect(exclusion?.synsem.cont.clinicalAdjunct?.excludedWeekdays).toEqual(["sun"]);
     expect(exclusion ? validateFeatureStructure(exclusion.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
   });
+});
+
+
+describe("typed lexical provenance independent of production names", () => {
+  it("records lexical categories from typed signs, not diagnostic labels", () => {
+    const tokens = tokenize("1");
+    const dose = lexicalSign({
+      type: "dose-sign", rule: "an.unrelated.diagnostic.label", tokens,
+      synsem: { head: { dose: { value: 1, unit: "tab" } }, valence: {}, cont: {} }
+    });
+    expect(dose.evidence[0].lexicalCategory).toBe("dose");
+    expect(dose.evidence[0].rule).toBe("an.unrelated.diagnostic.label");
+  });
+
+  it("does not claim undefined optional schedule fields as contributed meaning", () => {
+    const sign = lexicalSign({
+      type: "schedule-sign", rule: "custom.schedule.alias", tokens: tokenize("BID"),
+      synsem: {
+        head: { schedule: {
+          frequency: 2, period: 1, periodUnit: "d", timingCode: undefined,
+          boundsStart: undefined
+        } }, valence: {}, cont: {}
+      }
+    });
+    expect(sign.evidence[0].scheduleFields).toEqual(["frequency", "period", "periodUnit"]);
+  });
+
+  it.each([
+    ["instill 1 drop in left eye and 2 drops in right eye twice daily", false],
+    ["instill 1 drop in left eye and 2 drops in right eye twice daily as needed", true]
+  ])("preserves coordination after every diagnostic production label is renamed: %s", (input, prn) => {
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments).toHaveLength(2);
+    const clauses = plan.segments.map(segment => ({
+      state: parseClauseState(segment.text), start: segment.start, end: segment.end
+    }));
+    for (const item of clauses) {
+      const clause = item.state.primaryClause;
+      for (const evidence of clause.evidence) evidence.rule = "renamed-diagnostic-label";
+      for (const evidence of clause.schedule?.evidence ?? []) evidence.rule = "renamed-schedule-label";
+      for (const evidence of clause.prn?.evidence ?? []) evidence.rule = "renamed-prn-label";
+    }
+    const scopes = applyCoordinatedCadenceScopes(clauses, plan, input);
+    expect(scopes.length).toBeGreaterThan(0);
+    expect(clauses.map(item => item.state.primaryClause.dose?.value)).toEqual([1, 2]);
+    expect(clauses.map(item => item.state.primaryClause.site?.text)).toEqual(["left eye", "right eye"]);
+    expect(clauses.map(item => item.state.primaryClause.schedule?.frequency)).toEqual([2, 2]);
+    if (prn) expect(clauses.every(item => item.state.primaryClause.prn?.enabled)).toBe(true);
+  });
+});
+
+
+describe("typed coordination ignores diagnostic prose", () => {
+  it.each(["Unresolved schedule", "incompatible timing", "timing conflict", "some localized warning"])(
+    "retains a licensed shared cadence regardless of warning wording: %s", warning => {
+      const input = "instill 1 drop in left eye and 2 drops in right eye twice daily";
+      const plan = createBoundaryPlan(input);
+      const states = plan.segments.map(segment => ({
+        state: parseClauseState(segment.text), start: segment.start, end: segment.end
+      }));
+      states[1].state.warnings.push(warning);
+      applyCoordinatedCadenceScopes(states, plan, input);
+      expect(states.map(item => item.state.primaryClause.schedule?.frequency)).toEqual([2, 2]);
+      expect(states.map(item => item.state.primaryClause.dose?.value)).toEqual([1, 2]);
+      expect(states[1].state.warnings).toContain(warning);
+    }
+  );
 });

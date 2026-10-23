@@ -293,7 +293,8 @@ export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
 const SIGN_TYPES = [
   "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign",
   "prn-sign", "instruction-sign", "conditional-sign", "clinical-adjunct-sign",
-  "adjustment-sign", "connector-sign"
+  "adjustment-sign", "connector-sign", "site-relative-marker-sign",
+  "site-predicate-sign"
 ];
 
 export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
@@ -324,6 +325,8 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "head-complement-phrase", parents: ["headed-phrase"] },
   { name: "head-adjunct-phrase", parents: ["headed-phrase"] },
   { name: "head-marker-phrase", parents: ["headed-phrase"] },
+  { name: "site-relative-clause", parents: ["head-marker-phrase"] },
+  { name: "restricted-site-phrase", parents: ["head-adjunct-phrase"] },
   { name: "procedure-sequence-phrase", parents: ["phrase-sign"] },
   { name: "conditional-instruction-phrase", parents: ["phrase-sign"] },
   { name: "coordination-phrase", parents: ["phrase-sign"] },
@@ -370,7 +373,10 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
       CLINICAL_ADJUNCT: { valueType: "clinical-adjunct-feature" },
       SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },
       SCOPE_CLOSED: { valueType: "boolean" },
-      COORDINATION_MARKER: { valueType: "coordination-marker-feature" }
+      COORDINATION_MARKER: { valueType: "coordination-marker-feature" },
+      SITE_RELATIVE_MARKER: { valueType: "site-relative-marker-feature" },
+      SITE_PREDICATE: { valueType: "site-predicate-feature" },
+      SITE_RESTRICTION: { valueType: "site-restriction-feature" }
     }
   },
   { name: "method-feature", parents: ["top"] },
@@ -385,6 +391,9 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "clinical-adjunct-feature", parents: ["top"] },
   { name: "scoped-administration-feature", parents: ["top"] },
   { name: "coordination-marker-feature", parents: ["top"] },
+  { name: "site-relative-marker-feature", parents: ["top"] },
+  { name: "site-predicate-feature", parents: ["top"] },
+  { name: "site-restriction-feature", parents: ["top"] },
   {
     name: "nonlocal",
     parents: ["top"],

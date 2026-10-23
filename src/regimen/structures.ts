@@ -1,6 +1,6 @@
 import { recognizeCycles } from './cycles';
 import { findMedicationDateListSpans } from '../date-interpretation';
-import { getDayOfWeekMeaning, hasTokenWordClass, TokenWordClass } from '../lexer/meaning';
+import { getDayOfWeekMeaning } from '../lexer/meaning';
 import { normalizeUnit } from '../unit-lexicon';
 import { LexKind } from '../lexer/token-types';
 import { ACTION_COORDINATION_CONNECTORS } from '../hpsg/lexical-classes';
@@ -30,7 +30,7 @@ export function recognizeStructures(context: PlanningInput): StructuralClaim[] {
   const add = (kind: StructuralClaim['kind'], start: number, end: number, producer: string, resolved = true) => {
     if (end > start) claims.push({ id: `${kind}:${start}:${end}`, kind, start, end, producer, resolved, policy: 'no-external-split' });
   };
-  for (const span of findMedicationDateListSpans(input, options)) {
+  for (const span of context.dateSpans ?? findMedicationDateListSpans(input, options)) {
     // A structural proposal is not authority to swallow a typed dose. Numeric date
     // regexes can overrun `until 30/9 and 1/2 tab`; let the quantity/unit constituent
     // bound the proposal before it becomes an ownership claim. No separator-language exception.
@@ -46,25 +46,6 @@ export function recognizeStructures(context: PlanningInput): StructuralClaim[] {
     add('calendar-date-list', span.start, end, 'findMedicationDateListSpans', !span.unresolved);
   }
   for (const cycle of recognizeCycles(input, options)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
-  // HPSG site heads were already typed by the lexer. Claim their coordinator
-  // BEFORE boundary arbitration; do not invoke another body-site grammar here.
-  // A dose before the right target ("OD and 2 drops OS") breaks site-list
-  // constituency and must remain available to the dose-coordination grammar.
-  const isSite = (index: number): boolean =>
-    hasTokenWordClass(tokens[index], TokenWordClass.SiteAtom);
-  const isSiteModifier = (index: number): boolean =>
-    hasTokenWordClass(tokens[index], TokenWordClass.SiteSurfaceModifier);
-  for (let index = 1; index + 1 < tokens.length; index++) {
-    if (!listConnector(tokens[index]) || !isSite(index - 1)) continue;
-    let right = index + 1;
-    if (tokens[index].original === ',' &&
-        ACTION_COORDINATION_CONNECTORS.has(lexeme(tokens[right]))) right++;
-    const startRight = right;
-    while (right < startRight + 2 && isSiteModifier(right)) right++;
-    if (!isSite(right)) continue;
-    add('target-list', tokens[index - 1].sourceStart, tokens[right].sourceEnd,
-      'hpsg.cx.site-coordination');
-  }
   // List constructions compose typed atoms and canonical coordinators, not medication phrases.
   for (const kind of ['clock-list', 'weekday-list'] as const) {
     const atomEnd = (index: number): number | undefined => kind === 'clock-list'
