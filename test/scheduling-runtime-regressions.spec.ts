@@ -17,6 +17,16 @@ const shapes = (source: string) => {
 };
 
 describe("dose scheduling runtime guarantees", () => {
+  it("does not report zero supply for an empty regimen", () => {
+    expect(() => calculateTotalUnits({
+      dosage: [],
+      from: base.from,
+      orderedAt: base.orderedAt,
+      timeZone: base.timeZone,
+      durationValue: 1,
+      durationUnit: "d"
+    })).toThrow(/medication dosage or complete treatment course/i);
+  });
   it("does not recursively overflow on calendar exclusions in the flat native result", () => {
     const expected = [
       "2026-10-19T09:00:00+07:00",

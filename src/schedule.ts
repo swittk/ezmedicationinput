@@ -3697,7 +3697,9 @@ function calculateCourseTotalUnits(
       "Provide timeZone to calculate local administration times and calendar-month transitions.");
   const queryStart = coerceDate(options.from, "from");
   const queryEnd = calculationHorizon(options, zone);
-  if (!course.step.length) return { totalUnits: 0 };
+  if (!course.step.length || course.step.every(step => !step.component.length))
+    throw new MedicationQuantityCalculationError("missing-regimen",
+      "A medication dosage or complete treatment course is required for supply calculation.");
   const cycleAdvance = durationStepper(course.repeatCycle, zone);
   if (cycleAdvance) {
     const anchor = options.orderedAt === undefined
