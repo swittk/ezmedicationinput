@@ -1,9 +1,16 @@
 import { normalizeOpenEndedSchedule } from './open-ended';
 import { normalizeTemporalBoundArtifacts } from './temporal-artifact-ownership';
-import { normalizeAnchoredBounds, normalizeClockFrequency } from './bounds';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { ParseResult, ParseOptions, FhirDosage, CanonicalSigClause } from '../types';
+import type { ParserState } from '../parser-state';
+import type {
+  CanonicalEvidence,
+  CanonicalSigClause,
+  CanonicalSourceSpan,
+  FhirDosage,
+  ParseOptions,
+  ParseResult
+} from '../types';
 
 type Render = (dosage: FhirDosage, style: 'short' | 'long', options?: ParseOptions) => string;
 export interface RegimenPhase { id: number; members: number[] }
@@ -65,8 +72,149 @@ function sameSet(left: readonly string[] | undefined, right: readonly string[] |
   return (left?.length ?? 0) === (right?.length ?? 0) && (left ?? []).every(v => (right?.indexOf(v) ?? -1) >= 0);
 }
 
-/** Compose a whole predecessor phase, preserving explicit values without inventing an arbitrary anchor. */
-export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], plan: BoundaryPlan,
+function sameSpan(left: CanonicalSourceSpan, right: CanonicalSourceSpan): boolean {
+  return left.start === right.start && left.end === right.end && left.text === right.text;
+}
+
+function appendEvidence(target: CanonicalEvidence[], candidate: CanonicalEvidence): void {
+  if (!target.some(item =>
+    item.rule === candidate.rule &&
+    item.spans.length === candidate.spans.length &&
+    item.spans.every((span, index) => sameSpan(span, candidate.spans[index]))
+  )) target.push(candidate);
+}
+
+function shiftEvidence(
+  evidence: CanonicalEvidence,
+  donorStart: number,
+  recipientStart: number
+): CanonicalEvidence {
+  return {
+    ...evidence,
+    spans: evidence.spans.map(span => ({
+      start: span.start + donorStart - recipientStart,
+      end: span.end + donorStart - recipientStart,
+      text: span.text
+    }))
+  };
+}
+
+function appendPredecessorScheduleEvidence(
+  target: CanonicalEvidence[],
+  clause: CanonicalSigClause,
+  donorStart: number,
+  recipientStart: number
+): void {
+  for (const item of clause.schedule?.evidence ?? []) {
+    appendEvidence(target, shiftEvidence(item, donorStart, recipientStart));
+  }
+  for (const item of clause.evidence) {
+    if (!item.rule.startsWith('hpsg.lex.schedule.')) continue;
+    appendEvidence(target, shiftEvidence(item, donorStart, recipientStart));
+  }
+}
+
+function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean {
+  return Boolean(schedule && (
+    schedule.dayOfWeek?.length ||
+    schedule.frequency !== undefined ||
+    schedule.period !== undefined ||
+    schedule.timingCode ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+}
+
+/**
+ * License sequential schedule inheritance on the typed regimen graph before
+ * canonical clauses are lowered to FHIR. A complete predecessor phase owns
+ * the derived start, and only anchors shared by every predecessor daughter
+ * may fill an otherwise unanchored successor.
+ */
+export function scopeSequentialPhaseSchedules(
+  states: readonly ParserState[],
+  segments: readonly HpsgSigSegment[],
+  graph: RegimenGraph,
+  source: string
+): InheritanceEvidence[] {
+  const applications: InheritanceEvidence[] = [];
+  for (const edge of graph.sequences) {
+    const prior = graph.phases[edge.from].members;
+    const schedules = prior.map(index => states[index]?.primaryClause.schedule);
+    const endpoints = schedules.map(phaseEndExclusive);
+    // All coordinated daughters must be finite. An unbounded sibling prevents
+    // the sequence construction from inventing a phase boundary.
+    const start = endpoints.length && endpoints.every((value): value is string => !!value)
+      ? endpoints.reduce((latest, value) => value > latest ? value : latest, '')
+      : undefined;
+    const shared = schedules[0];
+    const sharedAnchors = schedules.every(schedule =>
+      sameSet(schedule?.when, shared?.when) &&
+      sameSet(schedule?.timeOfDay, shared?.timeOfDay)
+    );
+
+    for (const index of graph.phases[edge.to].members) {
+      const clause = states[index]?.primaryClause;
+      const schedule = clause?.schedule;
+      if (!clause || !schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) continue;
+
+      const fields: string[] = [];
+      if (!schedule.boundsStart && start) {
+        schedule.boundsStart = start;
+        fields.push('boundsStart');
+      }
+      // An explicit local meal/event or clock anchor owns the whole anchor
+      // group, so inherited anchors can never create a mixed local/donor pair.
+      if (!schedule.when?.length && !schedule.timeOfDay?.length && sharedAnchors) {
+        if (shared?.when?.length) {
+          schedule.when = [...shared.when];
+          fields.push('when');
+        }
+        if (shared?.timeOfDay?.length) {
+          schedule.timeOfDay = [...shared.timeOfDay];
+          fields.push('timeOfDay');
+        }
+      }
+      if (!fields.length) continue;
+
+      const scheduleEvidence = [...(schedule.evidence ?? [])];
+      for (const donor of prior) {
+        const donorClause = states[donor]?.primaryClause;
+        const donorSegment = segments[donor];
+        const recipientSegment = segments[index];
+        if (!donorClause || !donorSegment || !recipientSegment) continue;
+        appendPredecessorScheduleEvidence(
+          scheduleEvidence,
+          donorClause,
+          donorSegment.start,
+          recipientSegment.start
+        );
+      }
+      const recipientStart = segments[index]?.start ?? 0;
+      appendEvidence(scheduleEvidence, {
+        rule: 'regimen.sequence.whole-predecessor-phase',
+        spans: [{
+          start: edge.relation.range.start - recipientStart,
+          end: edge.relation.range.end - recipientStart,
+          text: source.slice(edge.relation.range.start, edge.relation.range.end)
+        }],
+        note: `Licensed by ${edge.relation.rule}; inherited ${fields.join(', ')} from the complete predecessor phase.`
+      });
+      schedule.evidence = scheduleEvidence;
+      applications.push({
+        rule: 'regimen.sequence.whole-predecessor-phase',
+        phase: edge.to,
+        sources: [...prior],
+        target: index,
+        fields
+      });
+    }
+  }
+  return applications;
+}
+
+/** Project regimen graph metadata and normalize non-transition artifacts after clause lowering. */
+export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], graph: RegimenGraph,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
     const source = segments[index]?.text ?? '';
@@ -79,7 +227,7 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
     }
   }
   if (results.length < 2) return [];
-  const graph = buildRegimenGraph(plan, segments), evidence: InheritanceEvidence[] = [];
+  const evidence: InheritanceEvidence[] = [];
   // FHIR R5 Dosage.sequence represents ordered phases; coordinated administrations
   // retain the same sequence instead of being misrepresented as consecutive.
   if (graph.sequences.length > 0) {
@@ -103,43 +251,19 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
       JSON.stringify(results[i]?.meta.canonical.clauses[0]?.method) ===
       JSON.stringify(results[prior[0]]?.meta.canonical.clauses[0]?.method))
       ? results[prior[0]]?.meta.canonical.clauses[0]?.method : undefined;
-    const schedules = prior.map(i => results[i]?.meta.canonical.clauses[0]?.schedule);
-    const endpoints = schedules.map(phaseEndExclusive);
-    // All members must have an explicit finite end; an unbounded sibling prevents inference.
-    const start = endpoints.length && endpoints.every((s): s is string => !!s)
-      ? endpoints.reduce((latest, value) => value! > latest ? value! : latest, '') : undefined;
-    const shared = schedules[0];
-    const sharedAnchors = schedules.every(s => sameSet(s?.when, shared?.when) && sameSet(s?.timeOfDay, shared?.timeOfDay));
     for (const index of graph.phases[edge.to].members) {
       const item = results[index], clause = item?.meta.canonical.clauses[0], schedule = clause?.schedule;
       if (!item || !schedule || schedule.calendarEvents?.length) continue;
+      const fields: string[] = [];
       if (edge.relation.rule.indexOf('regimen.target-') === 0 &&
           !item.fhir.method && sharedMethod && !clause?.method) {
         item.fhir.method = JSON.parse(JSON.stringify(sharedMethod));
         if (clause && sharedCanonicalMethod) {
           clause.method = JSON.parse(JSON.stringify(sharedCanonicalMethod));
         }
-      }
-      if (!schedule.dayOfWeek?.length && schedule.frequency === undefined && schedule.period === undefined && !schedule.timingCode && !schedule.when?.length && !schedule.timeOfDay?.length) continue;
-      const fields: string[] = [];
-      if (!schedule.boundsStart && start) { schedule.boundsStart = start; fields.push('boundsStart'); }
-      // A clock explicitly supplied by this phase overrides inherited meal/clock anchors together.
-      if (!schedule.when?.length && !schedule.timeOfDay?.length && sharedAnchors) {
-        if (shared?.when?.length) { schedule.when = [...shared.when]; fields.push('when'); }
-        if (shared?.timeOfDay?.length) { schedule.timeOfDay = [...shared.timeOfDay]; fields.push('timeOfDay'); }
+        fields.push('method');
       }
       if (!fields.length) continue;
-      item.fhir.timing = item.fhir.timing ?? {};
-      const repeat = { ...(item.fhir.timing.repeat ?? {}) };
-      if (schedule.boundsStart || schedule.boundsEnd) repeat.boundsPeriod = {
-        ...(schedule.boundsStart ? { start: schedule.boundsStart } : {}),
-        ...(schedule.boundsEnd ? { end: schedule.boundsEnd } : {})
-      };
-      if (schedule.when?.length) repeat.when = [...schedule.when];
-      if (schedule.timeOfDay?.length) repeat.timeOfDay = [...schedule.timeOfDay];
-      normalizeAnchoredBounds(repeat, schedule);
-      normalizeClockFrequency(repeat);
-      item.fhir.timing.repeat = repeat;
       item.longText = render(item.fhir, 'long', options);
       item.shortText = render(item.fhir, 'short', options);
       item.fhir.text = item.longText;

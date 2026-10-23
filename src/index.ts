@@ -12,7 +12,9 @@ import {
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
-import { composeRegimenPhases } from "./regimen/regimen";
+import {
+  buildRegimenGraph, composeRegimenPhases, scopeSequentialPhaseSchedules
+} from "./regimen/regimen";
 import { expandAdministrationTargets, expandLintAdministrationTargets } from "./regimen/targets";
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir } from "./fhir";
@@ -789,92 +791,6 @@ function propagateTrailingSharedSafety(results: ParseResult[], options?: ParseOp
   }
 }
 
-/**
- * The segmenter has already licensed a shared trailing duration. Attach that
- * course bound to the canonical left daughter before any FHIR projection.
- * This used to mutate FHIR Timing and then regenerate text after lowering.
- */
-function nextIsoCalendarDay(value: string): string | undefined {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
-  if (!match) return undefined;
-  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  if (Number.isNaN(date.getTime())) return undefined;
-  date.setUTCDate(date.getUTCDate() + 1);
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1);
-  const day = String(date.getUTCDate());
-  return `${year}-${month.length < 2 ? `0${month}` : month}-${day.length < 2 ? `0${day}` : day}`;
-}
-
-function propagateDateTransitionEventTiming(
-  results: ParseResult[],
-  segments: ReturnType<typeof parseSigSegments>,
-  input: string,
-  options?: ParseOptions
-): void {
-  for (let index = 1; index < results.length; index += 1) {
-    const previousSegment = segments[index - 1];
-    const currentSegment = segments[index];
-    if (!previousSegment || !currentSegment) continue;
-    const transitionGap = input.slice(previousSegment.end, currentSegment.start);
-    if (!/(?:\bthen\b|จากนั้น)/iu.test(transitionGap)) continue;
-
-    const previous = results[index - 1];
-    const current = results[index];
-    const previousSchedule = previous.meta.canonical.clauses[0]?.schedule;
-    const currentClause = current.meta.canonical.clauses[0];
-    const currentSchedule = currentClause?.schedule;
-    if (!previousSchedule?.calendarEvents?.length || !currentClause || !currentSchedule) continue;
-    const isRecurring = Boolean(
-      currentSchedule.dayOfWeek?.length ||
-      currentSchedule.frequency !== undefined ||
-      currentSchedule.period !== undefined ||
-      currentSchedule.timingCode
-    );
-    if (!isRecurring || currentSchedule.calendarEvents?.length) continue;
-
-    let changed = false;
-    if (!currentSchedule.boundsStart) {
-      let latestDate: string | undefined;
-      for (const event of previousSchedule.calendarEvents) {
-        if (!latestDate || event.isoDate > latestDate) latestDate = event.isoDate;
-      }
-      const nextDay = latestDate ? nextIsoCalendarDay(latestDate) : undefined;
-      if (nextDay) {
-        currentSchedule.boundsStart = nextDay;
-        changed = true;
-      }
-    }
-    if (!currentSchedule.when?.length && previousSchedule.when?.length) {
-      currentSchedule.when = [...previousSchedule.when];
-      changed = true;
-    }
-    if (!currentSchedule.timeOfDay?.length && previousSchedule.timeOfDay?.length) {
-      currentSchedule.timeOfDay = [...previousSchedule.timeOfDay];
-      changed = true;
-    }
-    if (!changed) continue;
-
-    current.fhir.timing = current.fhir.timing ?? {};
-    current.fhir.timing.repeat = {
-      ...(current.fhir.timing.repeat ?? {}),
-      ...(currentSchedule.boundsStart || currentSchedule.boundsEnd
-        ? {
-          boundsPeriod: {
-            ...(currentSchedule.boundsStart ? { start: currentSchedule.boundsStart } : {}),
-            ...(currentSchedule.boundsEnd ? { end: currentSchedule.boundsEnd } : {})
-          }
-        }
-        : {}),
-      ...(currentSchedule.when?.length ? { when: [...currentSchedule.when] } : {}),
-      ...(currentSchedule.timeOfDay?.length ? { timeOfDay: [...currentSchedule.timeOfDay] } : {})
-    };
-    current.longText = formatSig(current.fhir, "long", options);
-    current.shortText = formatSig(current.fhir, "short", options);
-    current.fhir.text = current.longText;
-  }
-}
-
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
   const clauses: ParseResult["meta"]["canonical"]["clauses"] = [];
   for (const result of results) {
@@ -1078,6 +994,8 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1088,7 +1006,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     rawResults.push(result);
   }
 
-  composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
+  composeRegimenPhases(rawResults, segments, regimenGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
@@ -1115,6 +1033,8 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1145,7 +1065,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);
+  composeRegimenPhases(lintParseResults, segments, regimenGraph, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
     const parsed = applyClinicalConstraints(lintParseResults[index], segments[index].text, options);
     results[index].issues = results[index].issues.filter(issue =>
@@ -1216,6 +1136,8 @@ export async function parseSigAsync(
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1226,7 +1148,7 @@ export async function parseSigAsync(
     rawResults.push(result);
   }
 
-  composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
+  composeRegimenPhases(rawResults, segments, regimenGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }

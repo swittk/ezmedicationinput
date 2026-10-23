@@ -87,6 +87,25 @@ describe("calendar date interpretation", () => {
       dayOfWeek: ["sun"],
       when: ["PCM"]
     });
+    const recurringSchedule = recurring.meta.canonical.clauses[0]?.schedule;
+    expect(recurringSchedule).toMatchObject({
+      boundsStart: "2026-10-05",
+      dayOfWeek: ["sun"],
+      when: ["PCM"]
+    });
+    expect(recurringSchedule?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule: "hpsg.lex.schedule.eventPhrase.mealRelation" }),
+      expect.objectContaining({ rule: "hpsg.lex.schedule.calendarDateList" }),
+      expect.objectContaining({
+        rule: "regimen.sequence.whole-predecessor-phase",
+        spans: [expect.objectContaining({ text: "จากนั้น" })]
+      })
+    ]));
+    for (const evidence of recurringSchedule?.evidence ?? []) {
+      for (const span of evidence.spans) {
+        expect(input.slice(span.start, span.end)).toBe(span.text);
+      }
+    }
     expect(nextDueDoses(recurring.fhir, {
       from: "2026-09-27T00:00:00+07:00",
       timeZone: "Asia/Bangkok",
@@ -98,6 +117,26 @@ describe("calendar date interpretation", () => {
     expect(recurring.longText).toBe(
       "Take 1 tablet orally once weekly after breakfast on Sunday starting 5 Oct 2026."
     );
+  });
+
+  it("inherits an exact clock through a licensed date-to-recurrence transition", () => {
+    const input = "take 1 tab at 08:00 on 28/9/2026 then every Sunday";
+    const result = parseSig(input, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+
+    expect(result.count).toBe(2);
+    expect(result.items[1]?.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      boundsStart: "2026-09-29",
+      dayOfWeek: ["sun"],
+      timeOfDay: ["08:00:00"]
+    });
+    expect(result.items[1]?.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { start: "2026-09-29" },
+      dayOfWeek: ["sun"],
+      timeOfDay: ["08:00:00"]
+    });
   });
 
   it("selects Gregorian or Buddhist full years without caller configuration", () => {
