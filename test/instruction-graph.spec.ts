@@ -1,19 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
-import {
-  buildMedicationInstructionActionCodeSystem,
-  buildMedicationInstructionConceptCodeSystem,
-  formatSig,
-  fromFhirDosage,
-  getMedicationInstructionAction,
-  getMedicationInstructionConcept,
-  listMedicationInstructionActions,
-  listMedicationInstructionConcepts,
-  parseInstructionActions,
-  parseSig,
-  parseSigAsync,
-  realizeInstructionGraph
-} from "../src/index";
+import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("procedural instruction graph", () => {
   it("preserves graph action order, relation indices, and coding translations through FHIR", () => {
@@ -31,10 +19,42 @@ describe("procedural instruction graph", () => {
     };
 
     const extension = buildInstructionGraphExtension(graph)!;
+    const argumentCoding = extension.extension?.find(item => item.url === "action")
+      ?.extension?.find(item => item.url === "argument")
+      ?.extension?.find(item => item.url === "coding")?.valueCoding;
+    expect(argumentCoding?.i18n).toBeUndefined();
+    expect(argumentCoding?._display?.extension).toContainEqual(
+      expect.objectContaining({
+        url: "http://hl7.org/fhir/StructureDefinition/translation"
+      })
+    );
+    expect(Object.entries(argumentCoding ?? {}).every(([, value]) => value !== undefined)).toBe(true);
     const restored = parseInstructionGraphExtension([extension])!;
     expect(restored.actions.map((action) => action.predicate.lemma)).toEqual(["wash", "wait"]);
     expect(restored.relations?.[0]).toMatchObject({ fromActionIndex: 0, toActionIndex: 1 });
     expect(restored.actions[0].args[0].coding?.i18n).toEqual({ th: "มือ" });
+  });
+
+  it.each([
+    "Wait five minutes between eye drops",
+    "Take 1 tab each evening; do not crush",
+    "Gargle 10 mL for 30 seconds then spit twice daily"
+  ])("emits nested FHIR-standard Coding with no undefined or inline i18n fields: %s", source => {
+    const graph = parseSig(source).meta.canonical.clauses[0]?.instructionGraph;
+    const extension = buildInstructionGraphExtension(graph);
+    expect(extension).toBeDefined();
+    let observedCodings = 0;
+    const visit = (part: NonNullable<typeof extension>): void => {
+      const coding = part.valueCoding;
+      if (coding) {
+        observedCodings += 1;
+        expect(coding.i18n).toBeUndefined();
+        expect(Object.values(coding).some(value => value === undefined)).toBe(false);
+      }
+      for (const child of part.extension ?? []) visit(child);
+    };
+    visit(extension!);
+    expect(observedCodings).toBeGreaterThan(0);
   });
 
   it("rebases primary administration spans with the rest of a later batch segment", () => {
@@ -354,7 +374,7 @@ describe("procedural instruction graph", () => {
 
   it("keeps classic medication conditional shorthand as PRN", () => {
     const parsed = parseSig("1 tab po if pain", { context: { dosageForm: "tablet" } });
-    expect(parsed.fhir.asNeededBoolean).toBe(true);
+    expect(parsed.fhir.asNeeded).toBe(true);
     expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("22253000");
   });
 
@@ -529,7 +549,7 @@ describe("procedural instruction graph", () => {
     );
     const clause = parsed.meta.canonical.clauses[0];
     const graph = clause?.instructionGraph;
-    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
     expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["remove", "apply_patch"]);
     expect(graph?.actions[0]).toMatchObject({
       relation: "before",

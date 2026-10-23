@@ -5,10 +5,42 @@ import type {
   HpsgSign,
   HpsgType
 } from "./signature";
+import { grammaticalCoordinationScopes } from "../regimen/grammar";
+import type {
+  BoundaryRelation,
+  CoordinationScopeFacts,
+  RegimenSemanticSelection
+} from "../regimen/types";
 
 export interface HpsgConstructionSelection {
   motherType: HpsgType;
   construction: HpsgConstruction;
+}
+
+export interface HpsgCoordinationScopeSelection extends HpsgConstructionSelection {
+  semantic: RegimenSemanticSelection;
+}
+
+/** Typed daughter facts for one administration with coordinated timing anchors. */
+export interface HpsgTimingAnchorCoordinationFacts {
+  relation?: BoundaryRelation;
+  sameSourceExpansion: boolean;
+  adjacent: boolean;
+  leftComplete: boolean;
+  rightComplete: boolean;
+  sameAdministration: boolean;
+  compatibleMethod: boolean;
+  leftHasMethod: boolean;
+  rightHasMethod: boolean;
+  leftAnchorOnly: boolean;
+  rightAnchorOnly: boolean;
+  sameScheduleContext: boolean;
+  addsAnchor: boolean;
+}
+
+export interface HpsgTimingAnchorCoordinationSelection
+  extends HpsgConstructionSelection {
+  id: "hpsg.cx.regimen.coordinated-timing-anchors";
 }
 
 type SignTrait =
@@ -19,6 +51,8 @@ type SignTrait =
   | "method-specialization"
   | "complement"
   | "adjunct"
+  | "clinical-adjunct"
+  | "site"
   | "procedure"
   | "scope-target"
   | "marked";
@@ -47,12 +81,17 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
     if (sign.synsem.head.method.headClass === "procedure") traits.add("procedure");
   }
   if (sign.synsem.head.route || sign.synsem.head.dose || sign.synsem.valence.site) traits.add("complement");
+  if (sign.synsem.valence.site) traits.add("site");
   if (
     sign.synsem.head.schedule ||
     sign.synsem.valence.prn ||
     sign.synsem.valence.instructions?.length ||
     sign.type === "adjustment-sign"
   ) traits.add("adjunct");
+  if (sign.synsem.cont.clinicalAdjunct) {
+    traits.add("adjunct");
+    traits.add("clinical-adjunct");
+  }
   if (sign.synsem.valence.patientInstruction || sign.construction?.kind === "procedure-sequence") {
     traits.add("procedure");
   }
@@ -119,6 +158,16 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     right: ["procedure"],
     symmetric: true,
     headFrom: "administration-head"
+  },
+  {
+    motherType: "site-coordination-phrase",
+    kind: "coordination",
+    left: ["marked", "site"],
+    right: ["site"],
+    symmetric: true,
+    headFrom: "none",
+    forbidLeft: ["condition"],
+    forbidRight: ["condition"]
   },
   {
     motherType: "coordination-phrase",
@@ -310,4 +359,65 @@ export function selectHpsgConstruction(left: HpsgSign, right: HpsgSign): HpsgCon
     };
   }
   return undefined;
+}
+
+/**
+ * Select a construction over two already chart-parsed administration clauses.
+ * This is the cross-clause counterpart of `selectHpsgConstruction`: the chart
+ * daughters retain their own dose/site values while the licensed adjunct
+ * daughter scopes over the coordinated phrase. An alternative has no head:
+ * neither daughter is privileged as the executable administration.
+ */
+export function selectHpsgCoordinationScopeConstruction(
+  facts: CoordinationScopeFacts
+): HpsgCoordinationScopeSelection | undefined {
+  const semantic = grammaticalCoordinationScopes(facts)[0];
+  if (!semantic) return undefined;
+  const operation = semantic.construction.operation;
+  return {
+    motherType: "coordination-phrase",
+    construction: {
+      kind: "coordination",
+      operation: "scope",
+      headSide: operation === "preserve-disjunctive-dosages"
+        ? undefined
+        : operation === "share-leading-adjuncts" ? "left" : "right",
+      leftType: "administration-clause",
+      rightType: "administration-clause"
+    },
+    semantic
+  };
+}
+
+/**
+ * License two complete administration daughters as one dosage with coordinated
+ * timing anchors. Sequence and alternative relations remain separate phases;
+ * a meal-dash expansion is already one source construction and needs no
+ * surface connector relation.
+ */
+export function selectHpsgTimingAnchorCoordinationConstruction(
+  facts: HpsgTimingAnchorCoordinationFacts
+): HpsgTimingAnchorCoordinationSelection | undefined {
+  const relationLicensed = facts.sameSourceExpansion || Boolean(
+    facts.relation?.kind === "coordination"
+  );
+  if (!relationLicensed || !facts.adjacent ||
+      !facts.leftComplete || !facts.rightComplete ||
+      !facts.sameAdministration || !facts.compatibleMethod ||
+      !facts.leftAnchorOnly || !facts.rightAnchorOnly ||
+      !facts.sameScheduleContext || !facts.addsAnchor) {
+    return undefined;
+  }
+
+  return {
+    id: "hpsg.cx.regimen.coordinated-timing-anchors",
+    motherType: "coordination-phrase",
+    construction: {
+      kind: "coordination",
+      operation: "unify",
+      headSide: facts.leftHasMethod || !facts.rightHasMethod ? "left" : "right",
+      leftType: "administration-clause",
+      rightType: "administration-clause"
+    }
+  };
 }

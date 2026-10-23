@@ -1,3 +1,8 @@
+import { normalizeAnchoredBounds, normalizeClockFrequency } from "./regimen/bounds";
+import {
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
+} from "./dosage-course";
+import { projectHpsgClinicalQuantityToFhir } from "./hpsg/clinical-quantity-fhir";
 import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
@@ -47,6 +52,7 @@ import {
   FhirPeriodUnit,
   FhirPrimitiveElement,
   FhirQuantity,
+  FhirSimpleQuantity,
   FhirRange,
   FhirTimingRepeat,
   RouteCode,
@@ -66,6 +72,13 @@ export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/Str
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const FHIR_GTS_TIMING_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+// R5 preferred TimingAbbreviation expansion, not arbitrary local Q12H/Q24H.
+const FHIR_GTS_TIMING_CODES = new Set([
+  "BID", "TID", "QID", "AM", "PM", "QD", "QOD",
+  "Q1H", "Q2H", "Q3H", "Q4H", "Q6H", "Q8H",
+  "BED", "WK", "MO"
+]);
 
 function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
@@ -538,7 +551,7 @@ function calendarEventFromFhir(
   };
 }
 
-function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirQuantity {
+function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirSimpleQuantity {
   return {
     value,
     unit: describeDurationUnit(unit, value),
@@ -755,6 +768,7 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
+  normalizeAnchoredBounds(repeat, schedule);
   if (schedule?.frequencyMax !== undefined) {
     repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;
@@ -820,6 +834,7 @@ export function canonicalToFhir(
     hasRepeat = true;
   }
 
+  normalizeClockFrequency(repeat);
   if (hasRepeat) {
     dosage.timing = {
       ...(dosage.timing ?? {}),
@@ -829,10 +844,13 @@ export function canonicalToFhir(
 
   if (schedule?.timingCode) {
     dosage.timing = dosage.timing ?? {};
-    dosage.timing.code = {
-      coding: [{ code: schedule.timingCode }],
-      text: schedule.timingCode
-    };
+    const normalizedCode = schedule.timingCode.toUpperCase();
+    // A CodeableConcept.text preserves supported local wording without
+    // falsely attaching an HL7 standard identity to non-standard codes.
+    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
+      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
+          text: schedule.timingCode }
+      : { text: schedule.timingCode };
   }
 
   if (clause.dose?.range) {
@@ -854,6 +872,11 @@ export function canonicalToFhir(
       }
     ];
   }
+
+  // HPSG produces the dimensional meaning; FHIR simply lowers that typed
+  // value. Safety checks must never reparse and overwrite clinical dosage.
+  if (clause.clinicalQuantity)
+    projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
 
   if (clause.route?.code || clause.route?.text) {
     const routeCode = clause.route?.code;
@@ -973,7 +996,7 @@ export function canonicalToFhir(
   }
 
   if (clause.prn?.enabled) {
-    dosage.asNeededBoolean = true;
+    dosage.asNeeded = true;
     const reasons = clause.prn.reasons?.length ? clause.prn.reasons : clause.prn.reason ? [clause.prn.reason] : [];
     if (reasons.length) {
       dosage.asNeededFor = [];
@@ -1017,6 +1040,18 @@ export function canonicalToFhir(
     }
   }
 
+  // The HPSG clinical scope is already resolved in CanonicalSigClause.
+  // FHIR projects it exactly once; it must never decide which daughter
+  // receives an administration condition or calendar exclusion.
+  const adjunct = clause.clinicalAdjuncts;
+  if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition);
+  if (adjunct?.excludedDates?.length) {
+    setDosageExcludedDates(dosage, adjunct.excludedDates);
+  }
+  if (adjunct?.excludedWeekdays?.length) {
+    setDosageExcludedWeekdays(dosage, adjunct.excludedWeekdays);
+  }
+
   const longText = textOverride ?? formatCanonicalClause(clause, "long");
   if (longText) {
     dosage.text = longText;
@@ -1032,6 +1067,17 @@ export function toFhir(state: ParserState): FhirDosage {
   const clauses = state.clauses;
   const clause = clauses[0] ?? createEmptyCanonicalClause(state.input);
   return canonicalToFhir(clause);
+}
+
+/** Recover local FHIR Timing.code.text only when it is a recognizable
+ * abbreviation, not arbitrary prose. Coding identities always take priority.
+ */
+const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
+function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
+  const coding = dosage.timing?.code?.coding?.find(value => value.code)?.code;
+  if (coding) return coding;
+  const raw = dosage.timing?.code?.text?.trim();
+  return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
 }
 
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
@@ -1097,6 +1143,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const repeat = dosage.timing?.repeat;
+  const timingCode = timingCodeFromFhir(dosage);
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
@@ -1110,7 +1157,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const activityTiming = parseActivityTimingExtensions(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   if (
-    dosage.timing?.code?.coding?.[0]?.code ||
+    timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
@@ -1138,7 +1185,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
-      timingCode: dosage.timing?.code?.coding?.[0]?.code,
+      timingCode,
       count: repeat?.count,
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
@@ -1212,9 +1259,11 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     })
     : undefined;
   const primaryReason = prnReasons?.[0];
-  if (dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code) {
+  const asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
+  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
     clause.prn = {
-      enabled: Boolean(dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code),
+      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
       reason:
         prnReasons?.length === 1
           ? primaryReason
@@ -1272,7 +1321,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
   }
-  state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
+  state.timingCode = timingCodeFromFhir(dosage);
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;
@@ -1311,7 +1360,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
-  state.asNeeded = dosage.asNeededBoolean;
+  state.asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);

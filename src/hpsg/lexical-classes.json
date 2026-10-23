@@ -160,6 +160,14 @@
   "prnContextualReasonLeads": [
     {
       "parts": [
+        "only",
+        "if"
+      ],
+      "canonical": "if",
+      "requiresKnownReason": false
+    },
+    {
+      "parts": [
         "เวลา",
         "ที่"
       ],
@@ -629,6 +637,14 @@
     "maximum"
   ],
   "maximumCountLeadSequences": [
+    [
+      "at",
+      "most"
+    ],
+    [
+      "up",
+      "to"
+    ],
     [
       "max"
     ],

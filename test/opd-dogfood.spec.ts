@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, nextDueDoses, parseSig, RouteCode } from "../src";
+import { formatSig, fromFhirDosage, nextDueDoses, RouteCode } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD clinician dogfood grammar", () => {
   it.each([

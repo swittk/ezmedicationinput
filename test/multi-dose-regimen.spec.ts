@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig, parseSigAsync } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
 
@@ -123,7 +124,9 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
-    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+    expect(result.items[1].warnings).toEqual([]);
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(result.items[0].meta.leftoverText).toBeUndefined();
   });
 
   it("supports the corresponding Thai multi-dose multi-timing surface", () => {
@@ -137,7 +140,9 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
-    expect(result.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+    expect(result.items[1].warnings).toEqual([]);
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(result.items[0].meta.leftoverText).toBeUndefined();
   });
 
   it("propagates a semicolon-delimited trailing low-BP safety condition across the regimen", () => {

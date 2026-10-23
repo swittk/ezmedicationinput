@@ -13,6 +13,10 @@ import {
   FhirCoding,
   FhirExtension
 } from "./types";
+import {
+  getPrimitiveTranslations,
+  mergeTranslationPrimitiveElement
+} from "./fhir-translations";
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
   "https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph";
@@ -41,19 +45,31 @@ function valueDecimal(url: string, value: number | undefined): FhirExtension | u
 function valueBoolean(url: string, value: boolean | undefined): FhirExtension | undefined {
   return value === undefined ? undefined : { url, valueBoolean: value };
 }
-function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension | undefined {
-  if (!value) return undefined;
+/** FHIR Coding has no i18n member. Preserve internal translations as the
+ * standard _display translation primitive, and omit optional undefined
+ * members: strict nested Extension unions validate the in-memory FHIR shape.
+ */
+function wireCoding(value: FhirCoding): FhirCoding {
+  const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
   return {
-    url,
-    valueCoding: {
-      system: value.system,
-      code: value.code,
-      display: value.display,
-      extension: value.extension,
-      _display: value._display,
-      i18n: value.i18n
-    }
+    ...(value.system !== undefined ? { system: value.system } : {}),
+    ...(value.code !== undefined ? { code: value.code } : {}),
+    ...(value.display !== undefined ? { display: value.display } : {}),
+    ...(value.extension?.length ? { extension: value.extension } : {}),
+    ...(displayPrimitive ? { _display: displayPrimitive } : {})
   };
+}
+
+function readCoding(value: FhirCoding | undefined): FhirCoding | undefined {
+  if (!value) return undefined;
+  const translations = getPrimitiveTranslations(value._display);
+  return translations
+    ? { ...value, i18n: { ...(value.i18n ?? {}), ...translations } }
+    : value;
+}
+
+function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension | undefined {
+  return value ? { url, valueCoding: wireCoding(value) } : undefined;
 }
 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
@@ -64,7 +80,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   add(nested, valueString("conceptId", argument.conceptId));
   add(nested, valueCoding("coding", argument.coding));
   for (const coding of argument.codings ?? []) {
-    nested.push({ url: "argumentCoding", valueCoding: { ...coding } });
+    nested.push({ url: "argumentCoding", valueCoding: wireCoding(coding) });
   }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
@@ -131,7 +147,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     }
     nested.push({ url: "predicateRealizerLocale", extension: localized });
   }
-  for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: { ...coding } });
+  for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: wireCoding(coding) });
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
   add(nested, valueString("sourceText", frame.sourceText));
@@ -192,9 +208,9 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
     text,
     normalized: child(extension, "normalized")?.valueString,
     conceptId: child(extension, "conceptId")?.valueString,
-    coding: child(extension, "coding")?.valueCoding,
+    coding: readCoding(child(extension, "coding")?.valueCoding),
     codings: children(extension, "argumentCoding")
-      .map((entry) => entry.valueCoding)
+      .map((entry) => readCoding(entry.valueCoding))
       .filter((entry): entry is FhirCoding => Boolean(entry))
   };
   const spanStart = child(extension, "spanStart")?.valueInteger;
@@ -290,7 +306,7 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
         ? { locales: localeRealizerConfig }
         : undefined,
       codings: children(extension, "predicateCoding")
-        .map((entry) => entry.valueCoding)
+        .map((entry) => readCoding(entry.valueCoding))
         .filter((entry): entry is FhirCoding => Boolean(entry))
     },
     args,

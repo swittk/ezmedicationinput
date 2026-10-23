@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src";
+import { formatSig } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 const SNOMED = "http://snomed.info/sct";
 const EXTERNAL_GENITALIA = "362207005";

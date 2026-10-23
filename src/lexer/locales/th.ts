@@ -1,3 +1,4 @@
+import { splitTokensAtRecognizedThaiDateBoundaries } from "../../regimen/thai-date-token-boundaries";
 import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_BODY_SITE_SNOMED,
@@ -78,6 +79,7 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "การออกกำลังกาย": "exercise",
   "วันเว้นวัน": "qod",
   "สัปดาห์ละครั้ง": "weekly",
+  "เดือนละครั้ง": "monthly",
 
   // cadence / event timing
   "ครั้ง": "times",
@@ -567,7 +569,8 @@ export function listThaiMedicationLocaleLexemes(locale: string): MedicationLocal
 }
 
 export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
-  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(tokens));
+  const dateBounded = splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" });
+  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(dateBounded));
   const normalized: LexToken[] = [];
   let cursor = 0;
 

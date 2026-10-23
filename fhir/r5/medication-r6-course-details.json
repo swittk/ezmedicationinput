@@ -1,0 +1,93 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "medication-r6-course-details",
+  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-course-details",
+  "version": "0.1.68-dev",
+  "name": "MedicationR6CourseDetails",
+  "title": "R6 dosage course details",
+  "status": "draft",
+  "experimental": true,
+  "date": "2026-10-16",
+  "publisher": "ezmedicationinput contributors",
+  "description": "Lossless serialized R6 DosageDetails metadata that R5 cannot represent as ordinary Dosage fields. Requires a capable consumer.",
+  "fhirVersion": "5.0.0",
+  "kind": "complex-type",
+  "abstract": false,
+  "context": [
+    {
+      "type": "element",
+      "expression": "Dosage"
+    }
+  ],
+  "type": "Extension",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Extension",
+        "path": "Extension",
+        "short": "R6 dosage course details",
+        "definition": "Lossless serialized R6 DosageDetails metadata that R5 cannot represent as ordinary Dosage fields. Requires a capable consumer.",
+        "min": 0,
+        "max": "1",
+        "isModifier": true,
+        "isModifierReason": "Ignoring these course details can change the sequence or repetition of a regimen."
+      },
+      {
+        "id": "Extension.extension",
+        "path": "Extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:dosageDetails",
+        "path": "Extension.extension",
+        "sliceName": "dosageDetails",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:dosageDetails.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:dosageDetails.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "dosageDetails"
+      },
+      {
+        "id": "Extension.extension:dosageDetails.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-course-details"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
+      }
+    ]
+  }
+}

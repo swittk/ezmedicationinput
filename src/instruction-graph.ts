@@ -2290,7 +2290,8 @@ function canonicalPrimaryAdministrationSpan(
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
-  options?: ParseOptions
+  options?: ParseOptions,
+  semanticOwnershipRanges?: readonly TextRange[]
 ): CanonicalInstructionGraph | undefined {
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
@@ -2336,6 +2337,9 @@ export function buildInstructionGraph(
     }
   }
   for (const frame of fullInputFrames) {
+    if (semanticOwnershipRanges?.some((range) =>
+      range.start <= frame.span.start && frame.span.end <= range.end
+    )) continue;
     if (
       frameIsProcedural(frame, options) ||
       frameIsSecondaryAdministration(frame, clause, options) ||

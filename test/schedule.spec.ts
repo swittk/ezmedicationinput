@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits, parseSig } from "../src/index";
+import { nextDueDoses, calculateTotalUnits } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 const EVENT_CLOCK = {
@@ -939,9 +940,9 @@ describe("calculateTotalUnits", () => {
     expect(res.totalUnits).toBe(10);
   });
 
-  it("handles PRN (asNeededBoolean)", () => {
+  it("handles PRN (asNeeded)", () => {
     const dosage: FhirDosage = {
-      asNeededBoolean: true,
+      asNeeded: true,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour } }
     };
@@ -1081,7 +1082,7 @@ describe("calculateTotalUnits", () => {
         }
       },
       {
-        name: "monthly monday",
+        name: "monthly anchored cadence",
         from: "2024-01-01T08:00:00Z",
         durationValue: 6,
         durationUnit: FhirPeriodUnit.Month,
@@ -1091,8 +1092,7 @@ describe("calculateTotalUnits", () => {
           timing: {
             repeat: {
               period: 1,
-              periodUnit: FhirPeriodUnit.Month,
-              dayOfWeek: [FhirDayOfWeek.Monday]
+              periodUnit: FhirPeriodUnit.Month
             }
           }
         }
@@ -1171,6 +1171,28 @@ describe("calculateTotalUnits", () => {
       });
       expect(actual.totalUnits / scenario.doseValue, scenario.name).toBe(expectedCount);
     }
+  });
+
+  it("uses the first matching weekday as a best-effort monthly interpretation when no ordinal is supplied", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: [FhirDayOfWeek.Monday]
+      } }
+    };
+    expect(nextDueDoses(dosage, {
+      ...BASE_OPTIONS, from: "2024-01-01T08:00:00Z", orderedAt: "2024-01-01T08:00:00Z",
+      limit: 3
+    })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-02-05T08:00:00+00:00",
+      "2024-03-04T08:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      dosage, from: "2024-01-01T08:00:00Z",
+      durationValue: 2, durationUnit: FhirPeriodUnit.Month, ...BASE_OPTIONS
+    }).totalUnits).toBe(2);
   });
 
   it("calculates liquid containers for monthly cadence with strength conversion", () => {

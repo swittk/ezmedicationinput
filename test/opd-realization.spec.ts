@@ -1,10 +1,99 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatSig, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig,
-  TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL
-} from "../src";
+import { formatSig, fromFhir, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
+import type { FhirDosage, FhirR6DosageDetails } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD normalized realization and advanced schedule semantics", () => {
+  it("realizes an HPSG-owned up-to date as one inclusive calendar bound", () => {
+    const parsed = parseSig("apply cream to wound daily up to 30 Sep 2026", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: "2026-09-27" }
+    });
+
+    expect(parsed.longText)
+      .toBe("Apply the medication once daily through 30 Sep 2026 to the wound.");
+    expect(parsed.fhir.timing).toEqual({
+      repeat: {
+        boundsPeriod: { end: "2026-09-30" },
+        frequency: 1,
+        period: 1,
+        periodUnit: "d"
+      }
+    });
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      boundsEnd: "2026-09-30",
+      evidence: [{
+        rule: "hpsg.lex.schedule.calendarDateList",
+        spans: [{ text: "up to 30 Sep 2026" }]
+      }]
+    });
+  });
+
+  it("preserves maximum source text and synthesizes useful text when source is absent", () => {
+    const base: FhirDosage = {
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const cases: Array<{
+      maximum: Partial<Pick<FhirDosage, "maxDosePerAdministration" | "maxDosePerLifetime">>;
+      source: string;
+    }> = [
+      {
+        maximum: { maxDosePerAdministration: { value: 1, unit: "tab" } },
+        source: "Take 1 tablet twice daily; maximum 1 tablet per administration"
+      },
+      {
+        maximum: { maxDosePerLifetime: { value: 10, unit: "tab" } },
+        source: "Take 1 tablet twice daily; maximum 10 tablets over the lifetime course"
+      }
+    ];
+
+    for (const { maximum, source } of cases) {
+      const dosage: FhirDosage = { ...base, ...maximum, text: source };
+      expect(formatSig(dosage, "short", { locale: "th" })).toBe(source);
+      expect(formatSig(dosage, "long", { locale: "th" })).toBe(source);
+
+      const imported = fromFhirDosage({ ...dosage }, { locale: "th" });
+      expect(imported.shortText).toBe(source);
+      expect(imported.longText).toBe(source);
+      expect(imported.fhir.text).toBe(source);
+
+      const withoutSource: FhirDosage = { ...base, ...maximum };
+      const maximumText = maximum.maxDosePerAdministration
+        ? "max per administration: 1 tab" : "max lifetime: 10 tab";
+      expect(formatSig(withoutSource, "long")).toBe(
+        `Use 1 tablet twice daily; ${maximumText}`
+      );
+      const partial = fromFhirDosage({ ...withoutSource });
+      expect(partial.shortText).toContain(maximumText);
+      expect(partial.longText).toBe(`Use 1 tablet twice daily; ${maximumText}`);
+      expect(partial.warnings).toEqual([]);
+      expect(partial.fhir.text).toBeUndefined();
+    }
+  });
+
+  it("keeps a source-less R6 safety course data-preserving with useful display text", () => {
+    const details: FhirR6DosageDetails = {
+      step: [{ component: [{
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        safety: { doseLimit: [{
+          scope: "administration", valueQuantity: { value: 1, unit: "tab" }
+        }] }
+      }] }]
+    };
+
+    const imported = fromFhir(details);
+    expect(imported.longText)
+      .toBe("Use 1 tablet twice daily; max per administration: 1 tab");
+    expect(imported.shortText).toBe("1 tab 2x/d; max per administration: 1 tab");
+    expect(imported.items[0]?.longText)
+      .toBe("Use 1 tablet twice daily; max per administration: 1 tab");
+    expect(imported.items[0]?.fhir.text).toBeUndefined();
+    expect(imported.warnings).toEqual([]);
+    expect(imported.fhirNext).toEqual(details);
+  });
+
   it("keeps offsets scoped and carries ophthalmic state into step-down stages", () => {
     const mixed = parseSig("take 1 tab 30 min before meals and at bedtime");
     expect(mixed.count).toBe(2);
@@ -317,11 +406,15 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("เล็งออกจากผนังกั้นจมูก");
   });
 
-  it("keeps multi-target topical text uncoded but bilingual instead of inventing one anatomy code", () => {
-    const parsed = parseSig("apply thin layer to groin and axilla bid");
-    expect(parsed.fhir.site?.coding).toBeUndefined();
-    expect(parsed.fhir.site?.text).toBe("groin and axilla");
-    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ขาหนีบและรักแร้");
+  it("keeps explicitly coordinated topical sites as separate, coded doses while preserving bilingual instructions", () => {
+    const parsed = parseCompleteSig("apply thin layer to groin and axilla bid");
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhir.map(dose => dose.site?.text)).toEqual(["groin", "axilla"]);
+    expect(parsed.fhir.every(dose => Boolean(dose.site?.coding?.[0]?.code))).toBe(true);
+    expect(parsed.fhir.map(dose => dose.timing?.repeat?.frequency)).toEqual([2, 2]);
+    const thai = formatSig(parsed.fhir, "long", { locale: "th" });
+    expect(thai).toContain("ขาหนีบ");
+    expect(thai).toContain("รักแร้");
 
     const warning = parseSig("apply to rash avoid face and eyes");
     expect(formatSig(warning.fhir, "long", { locale: "th" }))

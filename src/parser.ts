@@ -242,16 +242,21 @@ function cleanupClause(state: ParserState): void {
   const clause = state.primaryClause;
   const schedule = clause.schedule;
   if (schedule) {
-    if (
-      schedule.dayOfWeek &&
-      schedule.dayOfWeek.length > 1 &&
-      schedule.frequency === 1 &&
-      schedule.period === 1 &&
-      schedule.periodUnit === "wk" &&
-      schedule.timingCode === undefined
-    ) {
-      schedule.frequency =
-        schedule.dayOfWeek.length * (schedule.timeOfDay?.length || 1);
+    // A weekday-recursion sign (`every Monday`) contributes one recurrence
+    // for its own weekday. A coordination of such signs licenses the summed
+    // weekday/clock slots, but an explicitly stated once-weekly frequency
+    // has independent evidence and must NEVER be silently promoted to twice.
+    const derivedWeekdayRecurrence = clause.evidence.some(item =>
+      item.rule === "hpsg.lex.schedule.weekdayRecurrence");
+    const explicitFrequency = clause.evidence.some(item =>
+      item.rule === "hpsg.lex.schedule.frequency" ||
+      item.rule === "hpsg.lex.schedule.cadenceFirstFrequency");
+    if (derivedWeekdayRecurrence && !explicitFrequency &&
+        schedule.dayOfWeek && schedule.dayOfWeek.length > 1 &&
+        schedule.frequency === 1 && schedule.period === 1 &&
+        schedule.periodUnit === "wk" && schedule.timingCode === undefined) {
+      schedule.frequency = schedule.dayOfWeek.length *
+        (schedule.timeOfDay?.length ?? 1);
     }
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
@@ -355,7 +360,11 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
   }
 }
 
-function finalizeClause(state: ParserState, options?: ParseOptions): void {
+function finalizeClause(
+  state: ParserState,
+  options?: ParseOptions,
+  semanticOwnershipRanges?: readonly TextRange[]
+): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
   clause.rawText = state.input;
@@ -365,7 +374,12 @@ function finalizeClause(state: ParserState, options?: ParseOptions): void {
   clause.warnings = state.warnings.length ? state.warnings.slice() : undefined;
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
-  clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
+  clause.instructionGraph = buildInstructionGraph(
+    state.input,
+    clause,
+    options,
+    semanticOwnershipRanges
+  );
   promoteGraphDirectivesToAdditionalInstructions(clause);
 }
 
@@ -429,32 +443,55 @@ function seedKnownSiteCoding(state: ParserState): void {
   }
 }
 
-export function parseClauseState(input: string, options?: ParseOptions): ParserState {
-  const tokens = tokenize(input);
-  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
-
-  parseHpsgClause({
+function parseTypedClauseSign(
+  state: ParserState,
+  tokens: Token[],
+  options: ParseOptions | undefined,
+  project: boolean
+) {
+  return parseHpsgClause({
     state,
     tokens,
     options,
-    dateSpans: findMedicationDateListSpans(input, options),
+    dateSpans: findMedicationDateListSpans(state.input, options),
     limit: tokens.length,
+    clinicalCache: {},
     deps: {
       addDayOfWeekList,
       addWhen,
       isCompatibleRouteRefinement,
       markToken,
       normalizeSiteText: normalizeBodySiteKey,
+      sourceText: (start, end) => state.input.slice(start, end),
       recordEvidence,
       refreshMethodSurface: (target) => refreshMethodSurface(target, options),
       setRoute
     },
-    project: true
+    project
   });
+}
+
+/** Raw typed analysis for grammar/treebank tests; no canonical or FHIR projection. */
+export function parseClauseSign(input: string, options?: ParseOptions) {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+  return parseTypedClauseSign(state, tokens, options, false);
+}
+
+export function parseClauseState(input: string, options?: ParseOptions): ParserState {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+
+  const sign = parseTypedClauseSign(state, tokens, options, true);
 
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);
   seedKnownSiteCoding(state);
-  finalizeClause(state, options);
+  const schedule = sign?.synsem.head.schedule;
+  finalizeClause(
+    state,
+    options,
+    schedule?.attachmentClass !== "procedure" ? schedule?.sourceRanges : undefined
+  );
   return state;
 }

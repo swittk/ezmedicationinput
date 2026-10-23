@@ -3,6 +3,75 @@
 > **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
 
 
+## 2026-10-23 — CodeRabbit review scope and exact remaining architecture debt
+
+PR #10 had 114 changed files and 108 explicitly reviewable before this change (107 if CodeRabbit's default lockfile exclusion applies). Kept **all 55 production `src/` files, all six `fhir/` StructureDefinitions, and substantive HPSG/clinical oracle suites** eligible. Consolidated three small new related spec files (FHIR timing into `test/r6-primary.spec.ts`; clock bounds and scheduling runtime into `test/schedule-family-audit.spec.ts`) without removing a single test. Excluded six still-executed bulk/adversarial test and corpus-fixture files *from CodeRabbit review only*. Net PR: **112 GitHub paths, 99 explicitly CodeRabbit-reviewable paths** (98 if default lockfile exclusion applies). All 1,866 source tests pass, the ESM/CJS/TS declaration build passes.
+
+**Which remaining non-HPSG semantics are inherited and which were introduced by 0.2:**
+
+- **Inherited from original master:** `src/index.ts` `canMergeTimingOnly()`, `mergeParseResults()`, and `mergeParseResultList()` exist in original pre-0.2. They coalesce compatible dosage clauses for the old public interface. They are FHIR-aware compatibility/IR infrastructure, not invented safety gates. Preserve functioning public behavior; only replace after independent before/after real SIG and phone performance evidence.
+- **Introduced in 0.2 (still refactoring debt):** `src/clinical-safety.ts` `applyClinicalConstraints()` still recognizes some maximum-dose/source constraints after FHIR lowering and supplements projected maximum quantity. The upper clinical fact belongs to typed HPSG clinical-quantity/schedule features, then one FHIR lowering. No destructive quarantine should be added.
+- **Introduced in 0.2 (still refactoring debt):** `src/regimen/temporal-artifact-ownership.ts` `normalizeTemporalBoundArtifacts()` handles inclusive `up to DATE` and removes procedural graph artifacts already owned by timing. `src/regimen/open-ended.ts` `normalizeOpenEndedSchedule()` similarly reclassifies recognized open-ended dates as starts and removes duplicated event instructions. They currently update canonical/FHIR after lowering; the positive temporal semantics should move into the HPSG/date-bound lexical layer, but do not discard existing date/calendar metadata or turn unsupported dates into no result.
+- **Not architecture debt:** `canonicalToFhir()`, `composeRegimenPhases()` assignment of standard FHIR sequence indices, and purely structural persistence/realization are legitimate *projections* of already resolved typed semantics. They do not need to become HPSG grammar.
+- **Removed in HPSG cleanup:** `annotateCanonicalClinicalAdjuncts()`, `propagateTrailingSharedSafety()`, `propagateDateTransitionEventTiming()`, and post-decision `candidate-adapter` segment stitching.
+
+The remaining 0.2 helper paths were **not** left because they were deemed desirable; they were deliberately deferred from unrelated shared-scope refactoring to avoid destroying already-correct clinician suggestions, regressions to inclusive/calendar dates, and hot-path latency. They require their own real-SIG oracle tests and typed pre-projection changes, not a blanket deletion or new defensive gates.
+
+## 2026-10-23 — HPSG semantic-ownership debt audit and cleanup
+
+Product contract: clinical SIG **suggester**; no autonomous-prescriber semantics, blanket quarantine, or data loss. Code is HPSG-first with a single downstream FHIR projection.
+
+The team and coordinator removed these genuine semantic repair passes from the PR:
+- `annotateCanonicalClinicalAdjuncts()` removed. Medication conditions and calendar exclusions enter typed `clinical-adjunct-sign` lexical rules and the HPSG chart/unification/feature-structure system, including Thai `ยกเว้นกรณี` and a conditional **elliptical phase** (`then BID only if BP >160`). The canonical adjunct is projected once to FHIR. No standalone post-clause guard parsing pass remains.
+- `propagateTrailingSharedSafety()` removed. A semicolon-terminal negative action is associated through typed instruction/coordination relations before FHIR lowering.
+- `propagateDateTransitionEventTiming()` removed. Sequence edges license transition starts and inherited clocks/events through typed regimen phases, before FHIR.
+- Sequenced administration-method inheritance moved out of FHIR mutation to typed canonical clauses.
+- Clinical exclusion lists and fronted conditional scope are owned by the HPSG boundary planner *before* boundary decisions; removed `candidate-adapter` post-decision segment stitching.
+
+Preserved the existing represented clinical meaning: full source tests **1866/1866**, built distribution tests **4/4**, and ESM/CJS+TypeScript declaration build pass. An independent 328-SIG baseline differential found one difference: the old parser erroneously treated `Mondays` as an anatomical site in `1 tablet twice daily with food except on Mondays`; dose, food timing, Monday exclusion and cadence were unchanged. No previously correct clinically meaningful fields were lost in that corpus. Cheap grammar cue selection skips constructing unnecessary adjunct signs for ordinary SIGs. Interleaved host performance comparison versus pre-refactor: ordinary BID ~0.97x, independent-eye taper ~1.02x, shared conditional ~1.07x, shared exclusion ~1.09x. The latter cases have some extra HPSG scope cost; monitor on-device, but there is no blanket normal-path validation pass.
+
+**Residual architectural debt — do not hide, and do not 'fix' by deleting functionality:**
+1. `applyClinicalConstraints()` in `src/clinical-safety.ts` still recognizes scalar daily/weekly maxima from source text and mutates `fhir.maxDosePerPeriod` after lowering. Move the *recognized maxima* to an HPSG clinical-quantity/schedule feature and lower them once, avoiding double lexical work.
+2. `normalizeTemporalBoundArtifacts()` and `normalizeOpenEndedSchedule()` in `src/regimen/regimen.ts` still normalize some canonical/FHIR timing after lowering. Make their existing semantics typed before projection; preserve recurring courses, annotations and source provenance.
+3. FHIR-aware coalescing in `mergeParseResults` / `canMergeTimingOnly` remains a compatibility/IR concern. Do not rewrite solely for ideology: first prove concrete ordinary SIG regressions and benchmark mobile cost. The semantics above are already protected by canonical HPSG tests.
+4. Pure FHIR serializer helpers and formatting from already-decided clinical meaning are **not** semantic debt.
+
+No extra parser refusal or post-FHIR safety veto is warranted from this audit.
+
+## 2026-10-23 — HPSG-first clinical scope / no downstream FHIR repair
+
+Moved local condition and exclusion recognition onto typed `CanonicalSigClause.clinicalAdjuncts` **before HPSG coordination**. The existing Boolean/clinical-calendar recognizers only supply typed local facts with source evidence; HPSG's licensed coordination construction determines which daughter receives shared condition, excluded dates or excluded weekdays. FHIR now projects those decisions once from the canonical clause. Deleted the old `propagateCoordinatedSharedConstraints()` pass that copied conditions/exclusions/weekday events between already-lowered FHIR dosages and regenerated text. Also moved licensed trailing shared-duration semantics into the typed regimen/coordination layer before projection, removing its FHIR mutation pass.
+
+This is **not** a new strict validator or quarantine: best-effort parsing still retains dose, eye, cadence, original wording and clinician-editable FHIR data. Independent `unless` remains local when HPSG doesn't license wider scope. The provenance of inherited adjuncts records both the lexical fact and HPSG construction. Ordinary R5/R6 projection and public API shape are preserved.
+
+Validation: 1,857/1,857 source tests; 4/4 distribution entry tests (before moving the unchanged duration function into its module); full build green. A 328-input old-vs-new corpus comparison found zero changes to key dosage/site/route/timing/condition/exclusion fields. Interleaved host parse benchmarks showed no meaningful common-path slowdown (ordinary BID 0.967x baseline; independent eye taper 1.016x; shared condition 0.995x; repeated shared-exclusion 0.991x). These are host, not on-device benchmarks.
+
+**Remaining architectural debt, NOT grounds for new safety gates:** `propagateTrailingSharedSafety()` still distributes certain semicolon-trailing negative advice at the FHIR level; `propagateDateTransitionEventTiming()` retains its historical cross-clause projection behavior. If changed, move their *existing* semantics to typed regimen/HPSG scope with ordinary-case equivalence and performance tests. Do not remove useful suggestions or add parser refusal behavior.
+
+## 2026-10-23 — 0.2 permissiveness / no-guard reset
+
+Owner rejected the autonomous-validator direction. Emergency audit removed the PR-era destructive parser quarantine philosophy: partial or ambiguous SIGs must retain useful dose/site/route/timing/source data for clinician review instead of deleting timing/dose or turning parse output into a refusal. Parser/regimen/FHIR interpretation code no longer throws merely because semantic meaning is incomplete.
+
+Implemented during the reset instead of guarding:
+- event timing + exact clocks can coexist;
+- OD/OS/OU remains ophthalmic in ocular context (for example Apply 1 drop OD BID);
+- trailing cadence scopes across disjunctive/coordinated eye doses;
+- trailing typed conditions/exclusions scope across coordinated daughters when the HPSG construction licenses a shared adjunct, without a second semantic parse pass;
+- only-if owns both guard-lead tokens, so later conditional phases such as OS QID x1mo then BID only if BP >160 segment correctly;
+- up to DATE is inclusive;
+- Thai attached Buddhist dates and plausible Buddhist YMD years in English SIG text resolve without losing cadence;
+- monthly ordinal weekday schedules actually schedule;
+- recurring on/off courses actually schedule;
+- ranges and incompletely constrained numeric utilities return labelled best-effort/maximum/relative quantities where meaningful instead of fabricating zero or deleting the regimen.
+
+Remaining realistic best-effort/TODO cases — these are NOT reasons to reintroduce parser guards:
+1. External event-relative starts such as starting on date of discharge need a caller-supplied/event-resolver anchor before they can be placed on an absolute calendar. Preserve the parsed regimen and source meanwhile. TODO: pluggable event-anchor resolver analogous to condition evaluation.
+2. Malformed external FHIR dates/sequences and mathematically impossible absolute quantity requests may still error inside scheduling/supply APIs; those are runtime-data/numeric-contract errors, not parser refusal semantics.
+
+The old medication-unresolved-schedule modifier contract and all active quarantine semantics were removed. Unknown external modifiers remain attached as opaque/editable data. fromFhirDosage computes requested display text without rewriting supplied FHIR source data.
+
+Validation at this checkpoint: source tests 1856/1856, dist 4/4, build green. Final interleaved ABBA microbench: ordinary BID 1.006x baseline, PRN 0.991x, eye taper 0.568x; common-path cost is effectively flat while complex eye-course parsing is materially faster.
+
 ## 2026-04-21
 
 ### Immediate Goal
@@ -2718,3 +2787,38 @@ Verified four substantive CodeRabbit findings against the experiment and fixed a
 ## 2026-09-28 — PR #9 second CodeRabbit audit pass
 
 Verified three new CodeRabbit findings and fixed all three. Finite-cycle validation now preserves the first specific error with nullish assignment, so an invalid day range is not overwritten by a later missing-anchor error. Alternative-target warnings are deduplicated on both ParseResult and canonical clauses across repeated non-expanding passes. The generated integration-typecheck mirror is deleted before every copy; this was validated by planting an intentionally invalid stale TypeScript file and confirming the typecheck removed it before compilation. Added two focused permanent contract regressions, raising boundary contracts from 111 to 113. Post-fix validation: contracts 113/113, clinical/adversarial 477/477, native 1210/1210, shadow 1210/1210, dist 4/4, both typechecks green, strict correctness and 30-round performance gates green. Final fingerprint `428903cb46f631b6c156c84e40161c6bf8bd19032405d46fa09e5c112387cfc1`. Production `src/` remains unchanged; package dry-run includes no experiment files.
+
+## 2026-10-21 — PR #10 CodeRabbit follow-up
+
+- Multi-clause ordinary R5-compatible directions now generate short/long display text from structured dosage rather than repeating the original shorthand. Rich R6 stages/conditions keep the exact clinician instruction because flattening them could silently omit treatment information. The display safety rule is shared with formatSig instead of being copied or invoking exceptions on normal paths.
+- Whole-course roundToMultiple is applied once before container counts. The single-dosage path now also reports the exact container-unit quantity when dose and container share that unit.
+- Thai ยกเว้นกรณี (unless) is no longer mistaken for a calendar exclusion; the real negated condition is retained. Infusion mcg/µg/μg is serialized with UCUM code ug. The R6 Boolean-condition extension declares URL-discriminated slicing, and the regression benchmark rebuilds before reading dist.
+- Added focused regressions. Full source tests pass 1305/1305 across 41 files; ESM/CJS build and dist exports 4/4 pass. Short R6 benchmark command runs. No package publication or merge.
+
+## 2026-10-21 — PR #10 further CodeRabbit rounding and supply parity
+
+- Verified the new review issue: whole-course roundToMultiple updated totalUnits before container math but left estimated volume and active-ingredient amount at the unrounded stage totals. This undercounted bottles and was inconsistent with the single-dosage path. Course rounding now scales estimated usage to the rounded dispensed supply and derives the ingredient quantity from the updated estimate and product strength. Existing dosage stages/schedule remain untouched; there is no repeated parser call.
+- Found and fixed adjacent fractional-package parity bug: one half-bottle dosage returned 60 mL requested from a 120 mL package, but the same dosage as a one-item course returned 120 mL despite the same single physical container. Course totalContainerQuantity now reflects requested amount, not full package capacity, matching the single-dose path.
+- Added regressions for eye drops crossing bottle boundaries (with ingredient strength), parallel-course rounding, all four supported course representations and fractional package units. Full 1308/1308 source tests across 41 files pass; dist tests 4/4, CJS+ESM builds pass. No version/publish/merge.
+
+
+## 2026-10-23 — 0.2 permissiveness reset: parser/suggester, not gatekeeper
+
+Owner rejected the 0.2 quarantine/refusal direction. The parser is clinician-reviewed best effort: partial understanding must preserve useful dose, route, site, timing, source, FHIR metadata and editability instead of deleting fields or refusing the suggestion. Exact scheduling/supply may label assumptions or maximum/relative quantities when facts are incomplete, but parser uncertainty is not grounds for blanking the interpretation.
+
+Emergency rewrite completed:
+- destructive parser-level schedule/dose quarantine removed; unresolved fragments are warnings/source evidence only
+- event timing and exact clock timing may coexist
+- cadence/clock conflicts retain the best parsed suggestion for clinician correction
+- disjunctive alternatives retain typed daughters and shared trailing cadence rather than losing timing
+- OD in ophthalmic context (including generic verbs such as Apply) resolves as right eye without suppressing BID/QID cadence
+- inclusive "up to/through DATE" bounds retained; Thai Buddhist attached date forms resolve correctly
+- monthly ordinal weekday schedules are implemented rather than rejected
+- recurring on/off courses are represented and scheduled rather than quarantined
+- frequency/period ranges and incomplete numeric constraints produce useful best-effort or labelled maximum quantities where calculable
+- weight-based quantities remain relative (e.g. mg/kg, ug/kg) without patient weight and become absolute when weight is supplied
+- unknown/malformed R5/R6 metadata remains attached and editable; live edited fields beat stale rendered text while original snapshots remain provenance
+- unbounded sequential transitions schedule only the known prefix; they do not run later phases concurrently
+- old tests whose sole oracle was "throw", "timing undefined", or "quarantine" were replaced with clinical meaning/data-preservation oracles
+
+Validation on the combined rewrite: build/type declarations pass; 1848/1848 source tests and 4/4 dist tests pass. A 353-case old-vs-new corpus inspection found apparent shape losses were corrections of old misparses (e.g. interval represented as frequency, infusion rates represented as scalar doses, dates interpreted as body sites, OD/BID interpreted as topical once-daily). Interleaved 353-case throughput benchmark is effectively flat vs old master (~0.99x new/old median time); ordinary simple and PRN paths are flat/slightly faster, multi-eye taper materially faster. A mixed event+clock case is slower only because old master aborted/quarantined it while current code actually parses and realizes both meanings.

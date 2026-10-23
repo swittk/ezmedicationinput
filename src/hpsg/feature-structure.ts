@@ -27,8 +27,12 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.valence.instructions?.length ? "I" : "",
     synsem.valence.patientInstruction ? "U" : "",
     synsem.cont.condition ? "C" : "",
+    synsem.cont.clinicalAdjunct ? "A" : "",
     synsem.cont.scopedAdministrations?.length ? "X" : "",
     synsem.cont.scopeClosed ? "K" : "",
+    synsem.cont.coordinationMarker
+      ? `O${synsem.cont.coordinationMarker.coordination}`
+      : "",
     synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
@@ -67,10 +71,16 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
     contentFeatures.CLAUSE_KIND = featureAtom(synsem.cont.clauseKind);
   }
   if (synsem.cont.condition) contentFeatures.CONDITION = featureNode("condition-feature");
+  if (synsem.cont.clinicalAdjunct) {
+    contentFeatures.CLINICAL_ADJUNCT = featureNode("clinical-adjunct-feature");
+  }
   if (synsem.cont.scopedAdministrations?.length) {
     contentFeatures.SCOPED_ADMINISTRATION = featureNode("scoped-administration-feature");
   }
   if (synsem.cont.scopeClosed) contentFeatures.SCOPE_CLOSED = featureAtom(true, "boolean");
+  if (synsem.cont.coordinationMarker) {
+    contentFeatures.COORDINATION_MARKER = featureNode("coordination-marker-feature");
+  }
 
   const nonlocalFeatures: Record<string, HpsgFeatureNode> = {};
   if (synsem.nonlocal?.scopeRequirements?.length) {

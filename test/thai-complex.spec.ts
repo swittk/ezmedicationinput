@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatSig,
-  fromFhirDosage,
-  lintSig,
-  parseInstructionActions,
-  parseSig,
-  realizeInstructionGraph
-} from "../src/index";
+import { formatSig, fromFhirDosage, lintSig, parseInstructionActions, realizeInstructionGraph } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { lexInput } from "../src/lexer/lex";
 import { scanSurfaceTokens } from "../src/lexer/surface";
 

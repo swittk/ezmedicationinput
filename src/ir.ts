@@ -274,6 +274,20 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
+    const targetGroup = clause.administrationTargetGroup;
+    if (targetGroup?.range) {
+      targetGroup.range.start += offset;
+      targetGroup.range.end += offset;
+    }
+    for (const target of targetGroup?.targets ?? []) {
+      if (target.range) {
+        target.range.start += offset;
+        target.range.end += offset;
+      }
+      shiftEvidenceSpans(target.evidence);
+    }
+
+    const shiftedInstructionFrames = new Set<object>();
     if (clause.instructionGraph) {
       if (clause.instructionGraph.primaryAdministrationSpan) {
         clause.instructionGraph.primaryAdministrationSpan.start += offset;
@@ -282,6 +296,7 @@ export function shiftCanonicalSigClauses(
       for (const action of clause.instructionGraph.actions) {
         action.span.start += offset;
         action.span.end += offset;
+        shiftedInstructionFrames.add(action);
         for (const arg of action.args) {
           if (arg.span) {
             arg.span.start += offset;
@@ -304,6 +319,18 @@ export function shiftCanonicalSigClauses(
     if (clause.additionalInstructions) {
       for (const instruction of clause.additionalInstructions) {
         shiftEvidenceSpans(instruction.evidence);
+        for (const frame of instruction.frames ?? []) {
+          if (shiftedInstructionFrames.has(frame)) continue;
+          frame.span.start += offset;
+          frame.span.end += offset;
+          shiftedInstructionFrames.add(frame);
+          for (const arg of frame.args) {
+            if (arg.span) {
+              arg.span.start += offset;
+              arg.span.end += offset;
+            }
+          }
+        }
       }
     }
   }

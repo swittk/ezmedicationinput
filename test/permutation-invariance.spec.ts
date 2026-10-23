@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
+import { getDosageCondition } from "../src/dosage-course";
+import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
 import type { AdviceFrame, ParseOptions } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
@@ -49,7 +51,7 @@ function canonicalFingerprint(result: Result): unknown {
       dayOfWeek: [...(repeat.dayOfWeek ?? [])].sort(),
       timeOfDay: [...(repeat.timeOfDay ?? [])].sort()
     } : undefined,
-    prn: result.fhir.asNeededBoolean === true,
+    prn: result.fhir.asNeeded === true,
     reasons: [...(result.fhir.asNeededFor ?? [])].map(codeable).sort(),
     leftover: result.meta.leftoverText
   };
@@ -196,5 +198,52 @@ describe("HPSG permutation invariance", () => {
     expect(order(forward)).toEqual(["wash", "wait"]);
     expect(order(reverse)).toEqual(["wait", "wash"]);
     expect(order(forward)).not.toEqual(order(reverse));
+  });
+});
+
+
+describe("HPSG structural ownership before boundary arbitration", () => {
+  it.each([
+    "Only if SBP > 100, take 2 tabs BID, otherwise hold",
+    "Unless BP < 90, take 1 tab BID",
+    "เฉพาะเมื่อ BP > 160, take 1 tab BID"
+  ])("attaches a fronted condition to its administration without post-plan stitching: %s", text => {
+    const plan = createBoundaryPlan(text);
+    expect(plan.segments.map(segment => segment.text)).toEqual([text]);
+    expect(plan.claims).toContainEqual(expect.objectContaining({
+      kind: "fronted-conditional-clause",
+      producer: "lexical.conditional-attachment"
+    }));
+    const parsed = parseSig(text);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeGreaterThan(0);
+    expect(getDosageCondition(parsed.fhir)).toBeDefined();
+  });
+
+  it.each([
+    "take 1 tab BID except 1/11, 2/11 and 3/11",
+    "take 1 tab BID except Sunday and Monday"
+  ])("keeps an owned exclusion list inside one typed clause: %s", text => {
+    const plan = createBoundaryPlan(text);
+    expect(plan.segments.map(segment => segment.text)).toEqual([text]);
+    expect(plan.claims).toContainEqual(expect.objectContaining({
+      kind: "calendar-exclusion",
+      producer: "lexical.calendar-exclusion"
+    }));
+    const parsed = parseSig(text);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(2);
+  });
+
+  it("keeps a distinct semicolon order independent of the fronted guard", () => {
+    const text = "Only if SBP > 100, take 2 tabs BID; take 1 tab at bedtime";
+    const plan = createBoundaryPlan(text);
+    expect(plan.segments).toHaveLength(2);
+    expect(plan.relations).toContainEqual(expect.objectContaining({
+      kind: "independent"
+    }));
+    const parsed = parseSig(text);
+    expect(parsed.items).toHaveLength(2);
+    expect(getDosageCondition(parsed.items[0].fhir)).toBeDefined();
   });
 });

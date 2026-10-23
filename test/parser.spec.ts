@@ -1,21 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  fromFhirDosage,
-  formatSig,
-  getDoseUnitSemantics,
-  getBodySiteCode,
-  getBodySiteCodeAsync,
-  getBodySiteText,
-  getBodySiteTextAsync,
-  listSupportedBodySiteGrammar,
-  listSupportedBodySiteText,
-  lookupBodySite,
-  parseSig,
-  parseSigAsync,
-  listDoseUnitTerminology,
-  suggestBodySiteText,
-  suggestBodySites
-} from "../src/index";
+import { fromFhirDosage, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
+import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import {
@@ -1322,7 +1307,7 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q6H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("pain");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -1345,7 +1330,7 @@ describe("parseSig core scenarios", () => {
       periodMax: 8,
       periodUnit: "h"
     });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("constipation");
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -1418,7 +1403,7 @@ describe("parseSig core scenarios", () => {
 
   it("stops PRN reason text at trailing additional instructions", () => {
     const result = parseSig("1x3 po prn vomiting; no alcohol", { context: TAB_CONTEXT });
-    expect(result.fhir.asNeededBoolean).toBe(true);
+    expect(result.fhir.asNeeded).toBe(true);
     expect(result.fhir.asNeededFor?.[0]?.text).toBe("vomiting");
     expect(result.fhir.additionalInstruction?.[0]).toEqual({
       text: "Avoid alcoholic drinks",
@@ -2013,7 +1998,9 @@ describe("parseSig core scenarios", () => {
 
   it("parses q12h", () => {
     const result = parseSig("q12h");
-    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q12H");
+    // Q12H is local shorthand, not an R5 GTSAbbreviation code.
+    expect(result.fhir.timing?.code?.coding).toBeUndefined();
+    expect(result.fhir.timing?.code?.text).toBe("Q12H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 12, periodUnit: "h" });
   });
 
@@ -2272,7 +2259,8 @@ describe("parseSig core scenarios", () => {
   it("parses separated q 2 mo", () => {
     const result = parseSig("q 2 mo");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "mo" });
-    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q2MO");
+    expect(result.fhir.timing?.code?.coding).toBeUndefined();
+    expect(result.fhir.timing?.code?.text).toBe("Q2MO");
   });
 
   it("parses monthly token", () => {
@@ -3388,12 +3376,14 @@ describe("parseSig core scenarios", () => {
     });
   });
 
-  it("preserves coordinated topical site phrases", () => {
+  it("preserves coordinated topical sites as concurrent, independently identified targets", () => {
     const result = parseSig("apply to scalp and forehead bid");
-    expect(result.fhir.site?.text).toBe("scalp and forehead");
-    expect(result.fhir.route?.coding?.[0]?.code).toBe(
+    expect(result.items.map(item => item.fhir.site?.text)).toEqual(["scalp", "forehead"]);
+    expect(result.items.map(item => item.fhir.route?.coding?.[0]?.code)).toEqual([
+      SNOMEDCTRouteCodes["Topical route"],
       SNOMEDCTRouteCodes["Topical route"]
-    );
+    ]);
+    expect(result.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([2, 2]);
   });
 
   it("records probe requests for unresolved sites so UIs can prompt", () => {
@@ -3579,8 +3569,9 @@ describe("parseSig core scenarios", () => {
     expect(again.longText).toBe(parsed.longText);
   });
 
-  it("fromFhirDosage prefers computed formatting when format options are provided", () => {
+  it("fromFhirDosage computes requested formatting without rewriting supplied FHIR", () => {
     const parsed = parseSig("1 tab po pc breakfast lunch dinner");
+    const original = JSON.parse(JSON.stringify(parsed.fhir));
     const again = fromFhirDosage(parsed.fhir, {
       groupMealTimingsByRelation: true,
       includeTimesPerDaySummary: true
@@ -3588,7 +3579,9 @@ describe("parseSig core scenarios", () => {
     expect(again.longText).toBe(
       "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
     );
-    expect(again.fhir.text).toBe(again.longText);
+    expect(again.fhir).toEqual(original);
+    expect(parsed.fhir).toEqual(original);
+    expect(again.fhir.text).not.toBe(again.longText);
   });
 
   it("fromFhirDosage preserves non-SNOMED site codings when no site text is present", () => {
@@ -3717,7 +3710,7 @@ describe("parseSig core scenarios", () => {
           }
         ]
       },
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [
         {
           text: "dryness",
@@ -3864,7 +3857,7 @@ describe("parseSig core scenarios", () => {
 
     for (const input of cases) {
       const result = parseSig(input, { context: TAB_CONTEXT });
-      expect(result.fhir.asNeededBoolean).toBe(true);
+      expect(result.fhir.asNeeded).toBe(true);
       expect(result.fhir.asNeededFor).toBeUndefined();
       expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418639000");
       expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("418639000");
@@ -4877,6 +4870,15 @@ describe("topical workflow and timing", () => {
     );
   });
 
+  it("keeps a terminal 'leave on' workflow editable without treating 'on' as monthly timing", () => {
+    const result = parseSig("apply cream to face and leave on");
+    expect(result.fhir.site?.text).toBe("face");
+    expect(result.fhir.route?.text).toBe("topical");
+    expect(result.fhir.timing).toBeUndefined();
+    expect(result.fhir.patientInstruction).toBe("leave on");
+    expect(result.fhir.text).toBe("Apply the medication to the face; then leave on.");
+  });
+
   it("keeps workflow timing separate from medication timing", () => {
     const result = parseSig("apply to scalp nightly and rinse in the morning");
     expect(result.fhir.site?.text).toBe("scalp");
@@ -5531,14 +5533,19 @@ describe("time-based schedules", () => {
     expect(result.longText).toContain("at 9:00 am, 10:00 pm");
   });
 
-  it("formats multiple meals and times in English", () => {
+  it("formats multiple meals and exact times together in English", () => {
     const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
     expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["CM", "CD"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "17:00:00"]);
+    expect(result.warnings).toEqual([]);
   });
 
-  it("formats generic 'with meals' and specific times in English", () => {
+  it("formats generic 'with meals' and exact time together in English", () => {
     const result = parseSig("1 tab with meals and @ 10:00");
     expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["10:00:00"]);
   });
 
   it("formats complex mixed schedules in Thai", () => {
@@ -5560,15 +5567,19 @@ describe("time-based schedules", () => {
     for (const { input, expected } of cases) {
       const result = parseSig(input, { locale: "th" });
       expect(result.longText).toBe(expected);
+      expect(result.fhir.timing?.repeat?.when?.length).toBeGreaterThan(0);
+      expect(result.fhir.timing?.repeat?.timeOfDay?.length).toBeGreaterThan(0);
+      expect(result.warnings).toEqual([]);
     }
   });
 
   it("consumes 'and' connector between schedule blocks to prevent leakage", () => {
     const result = parseSig("1 tab with meals and at 9:00");
-    // Ensure "and" is not in additional instructions
     expect(result.fhir.additionalInstruction).toBeUndefined();
     expect(result.longText).not.toContain("and.");
     expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
+    expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
   });
 });
 

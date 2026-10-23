@@ -41,6 +41,7 @@ import {
   PRODUCT_FORM_MODIFIERS,
   methodAuxiliaryVerbsForLocale,
   productMethodRealizations,
+  coordinationConnectorKind,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
   ROUTE_SITE_PREPOSITIONS,
   SITE_ANCHORS,
@@ -995,12 +996,31 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!CONNECTORS.has(lower) && !isPunctuation(lower)) {
       return [];
     }
+    const following = token.original === "," ? context.tokens[start + 1] : undefined;
+    const followingCoordination = following
+      ? coordinationConnectorKind(normalizeTokenLower(following))
+      : "unknown";
+    const tokens = following && followingCoordination !== "unknown"
+      ? [token, following]
+      : [token];
+    const coordination = followingCoordination !== "unknown"
+      ? followingCoordination
+      : token.original === ","
+        ? "conjunction"
+        : coordinationConnectorKind(lower);
     return [
       lexicalSign({
         type: "connector-sign",
         rule: "hpsg.lex.connector",
-        tokens: [token],
-        synsem: emptySynsem(),
+        tokens,
+        synsem: coordination === "unknown"
+          ? emptySynsem()
+          : {
+            head: {},
+            valence: {},
+            cont: { coordinationMarker: { coordination } },
+            nonlocal: {}
+          },
         score: 0
       })
     ];

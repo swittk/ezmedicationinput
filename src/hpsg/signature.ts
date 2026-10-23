@@ -6,15 +6,18 @@ import {
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
   CanonicalOccurrenceCapExpr,
+  AdministrationTargetCoordinationKind,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
   FhirDayOfWeek,
   FhirPeriodUnit,
   FhirPrimitiveElement,
+  MedicationCondition,
   RouteCode,
   PrnReasonLookupRequest,
-  SiteCodeLookupRequest
+  SiteCodeLookupRequest,
+  TextRange
 } from "../types";
 import { Token } from "../parser-state";
 import { signFeatureStructure } from "./feature-structure";
@@ -31,6 +34,7 @@ export type HpsgType =
   | "procedure-sequence-phrase"
   | "conditional-instruction-phrase"
   | "coordination-phrase"
+  | "site-coordination-phrase"
   | "clause-sign"
   | "administration-clause"
   | "method-sign"
@@ -41,6 +45,7 @@ export type HpsgType =
   | "prn-sign"
   | "instruction-sign"
   | "conditional-sign"
+  | "clinical-adjunct-sign"
   | "adjustment-sign"
   | "connector-sign";
 
@@ -86,7 +91,7 @@ export interface HpsgRouteFeature {
   text?: string;
 }
 
-export interface HpsgSiteFeature {
+export interface HpsgAdministrationTargetFeature {
   attachmentClass?: "administration" | "procedure";
   text?: string;
   i18n?: Record<string, string>;
@@ -94,6 +99,23 @@ export interface HpsgSiteFeature {
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
   lookupRequest?: SiteCodeLookupRequest;
+  administrationTargetCount?: number;
+  range?: TextRange;
+}
+
+export interface HpsgSiteCoordinationFeature {
+  coordination: AdministrationTargetCoordinationKind;
+  sourceText: string;
+  range: TextRange;
+  targets: HpsgAdministrationTargetFeature[];
+}
+
+export interface HpsgSiteFeature extends HpsgAdministrationTargetFeature {
+  coordination?: HpsgSiteCoordinationFeature;
+}
+
+export interface HpsgCoordinationMarkerFeature {
+  coordination: Exclude<AdministrationTargetCoordinationKind, "mixed">;
 }
 
 export interface HpsgPrnFeature {
@@ -127,6 +149,20 @@ export interface HpsgConditionFeature {
   frames: AdviceFrame[];
 }
 
+/**
+ * A medication-level guard or calendar omission contributed by a lexical
+ * sign. This is distinct from HpsgConditionFeature, which scopes procedural
+ * instruction programs such as "if irritation occurs, stop use".
+ */
+export interface HpsgClinicalAdjunctFeature {
+  condition?: MedicationCondition;
+  excludedDates?: string[];
+  excludedWeekdays?: FhirDayOfWeek[];
+  includedWeekdays?: FhirDayOfWeek[];
+  localRanges: TextRange[];
+  evidence: Array<{ rule: string; ranges: TextRange[] }>;
+}
+
 export interface HpsgScopedAdministrationFeature {
   condition: HpsgConditionFeature;
   head: HpsgSynsem["head"];
@@ -141,10 +177,61 @@ export interface HpsgDoseFeature {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  /**
+   * Dimensionally typed clinical quantity contributed by the grammar.  This
+   * remains distinct from `value`/`unit`: an infusion rate must never be
+   * projected through the ordinary doseQuantity path.
+   */
+  clinicalQuantity?: HpsgClinicalQuantityFeature;
+}
+
+export type HpsgClinicalQuantityDimension =
+  | "mass"
+  | "volume"
+  | "biologic-activity"
+  | "patient-mass"
+  | "time";
+
+export interface HpsgDimensionalQuantityTerm {
+  value: number;
+  unit: string;
+  dimension: HpsgClinicalQuantityDimension;
+}
+
+export interface HpsgClinicalQuantityFeature {
+  representation: "dose" | "rate-quantity" | "dose-with-rate-ratio";
+  status: "resolved" | "incomplete" | "unsupported";
+  numerator: HpsgDimensionalQuantityTerm;
+  denominators: HpsgDimensionalQuantityTerm[];
+  /** Per-administration value after an explicit daily total is divided. */
+  projectedDose?: { value: number; unit: string };
+  /** Carrier amount used for an administration rate when it differs from the active drug dose. */
+  rateNumerator?: { value: number; unit: string };
+  dailyTotal?: boolean;
+  dividedDoseCount?: number;
+  administrationDuration?: { value: number; unit: FhirPeriodUnit };
+  requiresPatientWeight?: true;
+  reviewReason?:
+    | "incomplete-weight-based-dose"
+    | "unsupported-weight-based-rate";
+}
+
+/**
+ * The public canonical schema predates rate parsing.  Declaration merging
+ * exposes the typed grammar contribution without forcing it into the scalar
+ * CanonicalDoseExpr shape.  FHIR lowering can therefore distinguish a dose,
+ * a rateQuantity, and a dose/rateRatio without reparsing source text.
+ */
+declare module "../types" {
+  interface CanonicalSigClause {
+    clinicalQuantity?: HpsgClinicalQuantityFeature;
+  }
 }
 
 export interface HpsgScheduleFeature {
   attachmentClass?: "administration" | "procedure";
+  /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
+  sourceRanges?: TextRange[];
   timingCode?: string;
   count?: number;
   countMax?: number;
@@ -185,8 +272,10 @@ export interface HpsgSynsem {
   cont: {
     clauseKind?: "administration";
     condition?: HpsgConditionFeature;
+    clinicalAdjunct?: HpsgClinicalAdjunctFeature;
     scopedAdministrations?: HpsgScopedAdministrationFeature[];
     scopeClosed?: true;
+    coordinationMarker?: HpsgCoordinationMarkerFeature;
   };
   nonlocal?: {
     scopeRequirements?: HpsgConditionFeature[];

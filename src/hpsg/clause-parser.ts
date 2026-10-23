@@ -1,3 +1,5 @@
+import { cycleScheduleRule, insideCycle } from "../regimen/cycles";
+import { insideOpenEndedSchedule, openEndedScheduleRule } from "../regimen/open-ended";
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
@@ -29,7 +31,13 @@ import {
   proceduralActionLexicalRule,
   workflowLexicalRule
 } from "./rules/instruction-rules";
-import { conditionLexicalRule, getConditionFeatures } from "./rules/condition-rules";
+import {
+  calendarExclusionLexicalRule,
+  containsCalendarExclusionCue,
+  conditionLexicalRule,
+  getConditionFeatures,
+  medicationGuardLexicalRule
+} from "./rules/condition-rules";
 import { sourceRangeAttachmentClass } from "./procedural-context";
 import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
@@ -43,6 +51,7 @@ import {
   routeLexicalRule
 } from "./rules/core-rules";
 import { HpsgClauseContext } from "./rule-context";
+import { clinicalQuantityLexicalRule } from "./rules/clinical-quantity-rules";
 
 function withScopeRequirements(
   rule: HpsgLexicalRule<HpsgClauseContext>
@@ -51,6 +60,8 @@ function withScopeRequirements(
     id: rule.id,
     type: rule.type,
     match(context, start) {
+      if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];
+      if (rule.id !== 'hpsg.lex.schedule.openEndedDate' && insideOpenEndedSchedule(context, start)) return [];
       const conditions = getConditionFeatures(context);
       return rule.match(context, start).map((sign) => {
         if (!sign.tokens.length || sign.type === "conditional-sign") return sign;
@@ -96,18 +107,29 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
     combine: (_context, left, right) =>
       combineSigns(left, right, context.deps, "hpsg.phrase.unify-adjacent")
   };
+  // Only install clinical-adjunct constructions when lexical surface cues
+  // occur. Ordinary BID/eye/route SIGs pay no extra sign/chart cost.
+  const source = context.state.input;
+  const hasMedicationGuardLead =
+    /\b(?:only\s+if|unless|if)\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้น\s*กรณี/iu.test(source);
+  const hasCalendarExclusion = containsCalendarExclusionCue(source);
   return {
     lexicalRules: [
       conditionLexicalRule(),
+      ...(hasMedicationGuardLead ? [medicationGuardLexicalRule()] : []),
+      ...(hasCalendarExclusion ? [calendarExclusionLexicalRule()] : []),
       ...[
       directiveMarkerLexicalRule(),
       methodLexicalRule(),
       routeLexicalRule(),
       productLexicalRule(),
+      clinicalQuantityLexicalRule(),
       multiplicativeDoseFrequencyRule(),
       perTargetCountDoseRule(),
       doseLexicalRule(),
+      cycleScheduleRule(),
       calendarDateListRule(),
+      openEndedScheduleRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
       cadenceFirstImplicitSingleDoseRule(),
@@ -157,6 +179,10 @@ function hasUsefulAnalysis(sign: HpsgSign | undefined): sign is HpsgSign {
   );
 }
 
+function hasClinicalAdjunctAnalysis(sign: HpsgSign): boolean {
+  return Boolean(sign.synsem.cont.clinicalAdjunct);
+}
+
 function semanticFeatureCount(sign: HpsgSign): number {
   const { head, valence } = sign.synsem;
   let count = 0;
@@ -164,10 +190,11 @@ function semanticFeatureCount(sign: HpsgSign): number {
   if (head.route) count += 1;
   if (head.dose) count += 1;
   if (head.schedule) count += 1;
-  if (valence.site) count += 1;
+  if (valence.site) count += valence.site.coordination ? 3 : 1;
   if (valence.prn) count += 1;
   if (valence.instructions?.length) count += 1;
   if (valence.patientInstruction) count += 1;
+  if (sign.synsem.cont.clinicalAdjunct) count += 1;
   return count;
 }
 
@@ -183,7 +210,8 @@ function buildCompatibleSemanticCover(
 ): HpsgSign {
   let cover = best;
   const candidates = signs
-    .filter((sign) => sign !== best && hasUsefulAnalysis(sign))
+    .filter((sign) => sign !== best &&
+      (hasUsefulAnalysis(sign) || hasClinicalAdjunctAnalysis(sign)))
     .sort((left, right) => {
       const semanticDelta = semanticFeatureCount(right) - semanticFeatureCount(left);
       if (semanticDelta) return semanticDelta;

@@ -43,11 +43,27 @@ function applyRouteDefault(
   context: MedicationContext | undefined,
   deps: HpsgDefaultConstraintDeps
 ): void {
+  const contextRoute = inferRouteFromContext(context);
   if (state.routeCode !== undefined) {
+    // Routes such as topical vs intravitreal or oral vs sublingual are not
+    // interchangeable. Do not invent broad route-family equivalences.
+    if (contextRoute !== undefined && state.routeCode !== contextRoute) {
+      addWarning(
+        state,
+        `Explicit route ${ROUTE_TEXT[state.routeCode]} conflicts with dosage-form context route ${ROUTE_TEXT[contextRoute]}; using the explicit route.`
+      );
+    }
     return;
   }
   if (state.unit === "puff") {
     deps.setRoute(state, RouteCode["Respiratory tract route (qualifier value)"], ROUTE_TEXT[RouteCode["Respiratory tract route (qualifier value)"]]);
+    return;
+  }
+  // Dosage-form context is more specific than a generic administration verb.
+  // In particular, "apply" does not turn eye drops or a transdermal patch into
+  // an unspecified topical product.
+  if (contextRoute !== undefined) {
+    deps.setRoute(state, contextRoute, ROUTE_TEXT[contextRoute]);
     return;
   }
   if (state.methodCoding?.code === "738991002" || state.methodText?.toLowerCase() === "apply") {
@@ -60,10 +76,6 @@ function applyRouteDefault(
       deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
       return;
     }
-  }
-  const route = inferRouteFromContext(context);
-  if (route !== undefined) {
-    deps.setRoute(state, route, ROUTE_TEXT[route]);
   }
 }
 
