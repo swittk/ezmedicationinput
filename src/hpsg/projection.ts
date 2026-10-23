@@ -126,6 +126,30 @@ function findTokenByIndex(tokens: Token[], tokenIndex: number): Token | undefine
   return tokens.find((candidate) => candidate.index === tokenIndex);
 }
 
+function appendScheduleEvidence(
+  state: ParserState,
+  evidence: HpsgSign["evidence"][number],
+  tokens: Token[]
+): void {
+  if (evidence.rule !== "hpsg.lex.schedule.calendarDateList" || !evidence.tokenIndices.length) return;
+  const owned = evidence.tokenIndices
+    .map((tokenIndex) => findTokenByIndex(tokens, tokenIndex))
+    .filter((token): token is Token => token !== undefined);
+  if (!owned.length) return;
+  const start = Math.min(...owned.map((token) => token.sourceStart));
+  const end = Math.max(...owned.map((token) => token.sourceEnd));
+  const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+  const scheduleEvidence = target.evidence ?? (target.evidence = []);
+  if (scheduleEvidence.some((candidate) =>
+    candidate.rule === evidence.rule &&
+    candidate.spans.some((span) => span.start === start && span.end === end)
+  )) return;
+  scheduleEvidence.push({
+    rule: evidence.rule,
+    spans: [{ start, end, text: state.input.slice(start, end) }]
+  });
+}
+
 function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinicalQuantityFeature {
   return {
     ...value,
@@ -406,6 +430,7 @@ export function projectHpsgSignToState(
     if (!evidence.tokenIndices.length) {
       continue;
     }
+    if (schedule?.attachmentClass !== "procedure") appendScheduleEvidence(state, evidence, tokens);
     const startIndex = Math.min(...evidence.tokenIndices);
     const endIndex = Math.max(...evidence.tokenIndices);
     deps.recordEvidence(state, evidence.rule, startIndex, endIndex);

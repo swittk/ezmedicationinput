@@ -1,5 +1,4 @@
 import { normalizeOpenEndedSchedule } from './open-ended';
-import { normalizeTemporalBoundArtifacts } from './temporal-artifact-ownership';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { ParserState } from '../parser-state';
@@ -244,9 +243,8 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
   for (let index = 0; index < results.length; index++) {
     const source = segments[index]?.text ?? '';
-    const temporalChanged = normalizeTemporalBoundArtifacts(results[index], source, options);
     const openEndedChanged = normalizeOpenEndedSchedule(results[index], source, options);
-    if (temporalChanged || openEndedChanged) {
+    if (openEndedChanged) {
       results[index].longText = render(results[index].fhir, 'long', options);
       results[index].shortText = render(results[index].fhir, 'short', options);
       results[index].fhir.text = results[index].longText;

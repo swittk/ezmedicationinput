@@ -4,6 +4,31 @@ import type { FhirDosage, FhirR6DosageDetails } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD normalized realization and advanced schedule semantics", () => {
+  it("realizes an HPSG-owned up-to date as one inclusive calendar bound", () => {
+    const parsed = parseSig("apply cream to wound daily up to 30 Sep 2026", {
+      locale: "en-GB",
+      datePolicy: { referenceDate: "2026-09-27" }
+    });
+
+    expect(parsed.longText)
+      .toBe("Apply the medication once daily through 30 Sep 2026 to the wound.");
+    expect(parsed.fhir.timing).toEqual({
+      repeat: {
+        boundsPeriod: { end: "2026-09-30" },
+        frequency: 1,
+        period: 1,
+        periodUnit: "d"
+      }
+    });
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      boundsEnd: "2026-09-30",
+      evidence: [{
+        rule: "hpsg.lex.schedule.calendarDateList",
+        spans: [{ text: "up to 30 Sep 2026" }]
+      }]
+    });
+  });
+
   it("preserves maximum source text and synthesizes useful text when source is absent", () => {
     const base: FhirDosage = {
       timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },

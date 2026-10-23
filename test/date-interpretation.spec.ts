@@ -770,12 +770,34 @@ describe("calendar date interpretation", () => {
   });
 
   it("treats up to DATE as an inclusive end bound", () => {
-    const parsed = parseSig("take 1 tab daily up to 30 Sep 2026", {
+    const input = "take 1 tab daily up to 30 Sep 2026";
+    const options = {
       locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE }
-    });
+    };
+    const spans = findMedicationDateListSpans(input, options);
+    expect(spans).toEqual([
+      expect.objectContaining({
+        sourceText: "up to 30 Sep 2026",
+        relation: "end-inclusive",
+        unresolved: false,
+        events: [expect.objectContaining({ isoDate: "2026-09-30" })]
+      })
+    ]);
+
+    const parsed = parseSig(input, options);
     expect(parsed.fhir.timing?.repeat).toMatchObject({
       boundsPeriod: { end: "2026-09-30" }, frequency: 1, period: 1, periodUnit: "d"
     });
+    expect(parsed.fhir.timing?.event).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      boundsEnd: "2026-09-30",
+      evidence: [{
+        rule: "hpsg.lex.schedule.calendarDateList",
+        spans: [{ start: 17, end: 34, text: "up to 30 Sep 2026" }]
+      }]
+    });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.calendarEvents).toBeUndefined();
     expect(nextDueDoses(parsed.fhir, {
       from: "2026-09-28T08:00:00+07:00",
       timeZone: "Asia/Bangkok", limit: 10

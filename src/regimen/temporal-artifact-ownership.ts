@@ -1,6 +1,5 @@
-import { findMedicationDateListSpans, type MedicationDateListMatch } from '../date-interpretation';
 import { buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from '../instruction-graph-fhir';
-import type { ParseOptions, ParseResult } from '../types';
+import type { ParseResult } from '../types';
 
 export interface RelativeTemporalRange { start: number; end: number }
 
@@ -27,8 +26,8 @@ function unionLength(ranges: Array<{ start: number; end: number }>): number {
 }
 
 /**
- * Timing-owned source ranges cannot simultaneously survive as procedural actions.
- * Ranges are segment-relative; canonical graph spans are rebased to the full input.
+ * Compatibility utility for the open-ended and clinical-constraint passes.
+ * Temporal calendar bounds no longer use this post-FHIR mutation path.
  */
 export function removeInstructionArtifactsOwnedByTemporalRanges(
   item: ParseResult,
@@ -82,95 +81,4 @@ export function removeInstructionArtifactsOwnedByTemporalRanges(
     if (item.fhir.patientInstruction && clause.patientInstruction === undefined) delete item.fhir.patientInstruction;
   }
   return changed;
-}
-
-function inclusiveUpToRange(source: string, span: MedicationDateListMatch): RelativeTemporalRange | undefined {
-  if (span.unresolved || span.relation !== 'event' || span.events.length !== 1) return undefined;
-  const windowStart = Math.max(0, span.start - 32);
-  const prefix = source.slice(windowStart, span.start);
-  const lead = prefix.match(/\bup\s+to\s*$/iu);
-  if (!lead || lead.index === undefined) return undefined;
-  return { start: windowStart + lead.index, end: span.end };
-}
-
-/** Move only the event owned by `up to DATE` to an inclusive end bound. */
-function normalizeInclusiveUpToBound(item: ParseResult, span: MedicationDateListMatch): boolean {
-  const clause = item.meta.canonical.clauses[0];
-  const schedule = clause?.schedule;
-  const event = span.events[0];
-  if (!schedule || !event || (schedule.boundsEnd && schedule.boundsEnd !== event.isoDate)) return false;
-
-  const calendarEvents = schedule.calendarEvents ?? [];
-  let eventIndex = calendarEvents.findIndex(candidate =>
-    candidate.isoDate === event.isoDate && candidate.sourceText === event.sourceText
-  );
-  if (eventIndex < 0) {
-    const matchingDates = calendarEvents
-      .map((candidate, index) => candidate.isoDate === event.isoDate ? index : -1)
-      .filter(index => index >= 0);
-    if (matchingDates.length !== 1) return false;
-    eventIndex = matchingDates[0];
-  }
-
-  schedule.boundsEnd = event.isoDate;
-  schedule.calendarEvents = calendarEvents.filter((_, index) => index !== eventIndex);
-  if (!schedule.calendarEvents.length) delete schedule.calendarEvents;
-
-  const timing = item.fhir.timing;
-  if (timing) {
-    const fhirEvents = timing.event ?? [];
-    let fhirIndex = eventIndex < fhirEvents.length && fhirEvents[eventIndex].slice(0, 10) === event.isoDate
-      ? eventIndex
-      : -1;
-    if (fhirIndex < 0) {
-      const matchingDates = fhirEvents
-        .map((value, index) => value.slice(0, 10) === event.isoDate ? index : -1)
-        .filter(index => index >= 0);
-      if (matchingDates.length === 1) fhirIndex = matchingDates[0];
-    }
-    if (fhirIndex >= 0) {
-      timing.event = fhirEvents.filter((_, index) => index !== fhirIndex);
-      if (!timing.event.length) delete timing.event;
-      if (timing._event) {
-        timing._event = timing._event.filter((_, index) => index !== fhirIndex);
-        if (!timing._event.length) delete timing._event;
-      }
-    }
-    timing.repeat = {
-      ...(timing.repeat ?? {}),
-      boundsPeriod: {
-        ...(timing.repeat?.boundsPeriod ?? {}),
-        end: event.isoDate
-      }
-    };
-  }
-  return true;
-}
-
-/** Resolved calendar bounds own their source spans; `up to DATE` is inclusive. */
-export function normalizeTemporalBoundArtifacts(
-  item: ParseResult,
-  source: string,
-  options?: ParseOptions
-): boolean {
-  const clause = item.meta.canonical.clauses[0];
-  // Ownership pruning only changes procedural instructions/graphs.
-  // A simple timing-only clause has nothing to prune, so avoid reparsing its
-  // entire date grammar unless there is an inclusive "up to" bound to normalize.
-  const hasUpTo = /\bup\s+to\b/iu.test(source);
-  if (!clause?.instructionGraph && !clause?.patientInstruction && !hasUpTo) return false;
-  const spans = findMedicationDateListSpans(source, options);
-  if (!spans.length) return false;
-
-  const ranges: RelativeTemporalRange[] = spans
-    .filter(span => !span.unresolved && span.relation !== 'event')
-    .map(span => ({ start: span.start, end: span.end }));
-  let changed = false;
-  for (const span of spans) {
-    const range = inclusiveUpToRange(source, span);
-    if (!range || !normalizeInclusiveUpToBound(item, span)) continue;
-    ranges.push(range);
-    changed = true;
-  }
-  return removeInstructionArtifactsOwnedByTemporalRanges(item, ranges) || changed;
 }
