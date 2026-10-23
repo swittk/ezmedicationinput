@@ -1542,7 +1542,9 @@ function buildParseResult(
   // than the ordinary text realizer. Keep the prescriber's *exact* source
   // display until a lossless rich-quantity realizer exists. No source reparse
   // and no semantic mutation after FHIR lowering.
-  const typedRichQuantitySource = clause.clinicalQuantity && clause.rawText.trim()
+  const typedRichQuantitySource = (clause.clinicalQuantity ||
+    clause.clinicalAdjuncts?.localRanges?.length ||
+    clause.leftovers?.length) && clause.rawText.trim()
     ? clause.rawText : undefined;
   let shortText = typedRichQuantitySource ??
     formatCanonicalClause(clause, "short", localization, options);
