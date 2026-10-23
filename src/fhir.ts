@@ -1,4 +1,4 @@
-import { normalizeAnchoredBounds, normalizeClockFrequency } from "./regimen/bounds";
+import { normalizeClockFrequency } from "./regimen/bounds";
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
 } from "./dosage-course";
@@ -252,6 +252,8 @@ function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): Ca
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
 export interface FhirProjectionOptions {
+  /** Typed regimen-graph sequence; serialized without inferring phase meaning. */
+  sequence?: number;
   /**
    * Defaults to true. When true, structured spatial body-site phrases such as
    * "top of head" can emit a SNOMED topographical modifier expression in
@@ -729,7 +731,9 @@ export function canonicalToFhir(
   textOverride?: string,
   options?: FhirProjectionOptions
 ): FhirDosage {
-  const dosage: FhirDosage = {};
+  const dosage: FhirDosage = options?.sequence !== undefined
+    ? { sequence: options.sequence }
+    : {};
   const instructionGraphExtension = buildInstructionGraphExtension(clause.instructionGraph);
   if (instructionGraphExtension) {
     dosage.extension = [instructionGraphExtension];
@@ -780,7 +784,12 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
-  if (schedule?.duration !== undefined && schedule.durationUnit) {
+  // An anchored canonical schedule retains its source duration alongside the
+  // derived inclusive calendar end. FHIR Timing allows only one bounds[x], so
+  // boundsPeriod is the lossless executable projection while canonical keeps
+  // both typed facts for editing and provenance.
+  if (schedule?.duration !== undefined && schedule.durationUnit &&
+      !schedule.boundsStart && !schedule.boundsEnd) {
     if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
       repeat.boundsRange = buildFhirBoundsRange(
         schedule.duration,
@@ -792,7 +801,6 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
-  normalizeAnchoredBounds(repeat, schedule);
   if (schedule?.frequencyMax !== undefined) {
     repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;

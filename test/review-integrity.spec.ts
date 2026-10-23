@@ -11,7 +11,11 @@ import {
   DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL
 } from "../src/dosage-course";
 import { recognizeCycles } from "../src/regimen/cycles";
-import { projectParallelRegimen } from "../src/regimen/parallel-course";
+import { parseClauseState } from "../src/parser";
+import {
+  buildCanonicalParallelRegimen, projectParallelRegimen
+} from "../src/regimen/parallel-course";
+import { buildRegimenGraph } from "../src/regimen/regimen";
 import type { BoundaryPlan } from "../src/regimen/types";
 import type { HpsgSigSegment } from "../src/hpsg/segmenter";
 
@@ -751,7 +755,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("maps independent boundaries after source-span-based meal-dash expansion", () => {
-    const make = (source: string) => parseSig(source).items[0];
+    const make = (source: string) => parseClauseState(source);
     const raw: HpsgSigSegment[] = [
       { text: "morning/noon/night x7d", start: 0, end: 25 },
       { text: "then morning/noon/night", start: 26, end: 54 },
@@ -784,7 +788,13 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       make("1 tab PO BID x1mo"),
       make("1 tab PO QID")
     ];
-    const projection = projectParallelRegimen(values, expanded, plan, "multiple independent plans");
+    const graph = buildRegimenGraph(plan, expanded);
+    const regimen = buildCanonicalParallelRegimen(values.map(state => state.primaryClause), expanded, plan, graph);
+    const projection = projectParallelRegimen(
+      regimen,
+      values.map(value => value.primaryClause.rawText),
+      "multiple independent plans"
+    );
     expect(projection.kind).toBe("resolved");
     if (projection.kind === "resolved") {
       expect(projection.details.step[0].component).toHaveLength(4);

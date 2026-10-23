@@ -4,7 +4,13 @@ import {
   toDosageDetails, toFhirR5Dosages, fromFhir, getDosageCondition
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
-import { projectParallelRegimen } from "../src/regimen/parallel-course";
+import { parseClauseState } from "../src/parser";
+import {
+  buildCanonicalParallelRegimen
+} from "../src/regimen/parallel-course";
+import {
+  buildRegimenGraph, scopeSequentialPhaseSemantics
+} from "../src/regimen/regimen";
 
 const twoSites =
   "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
@@ -14,6 +20,105 @@ const options = (from: string, limit = 8) => ({
 });
 
 describe("concurrent independent treatment sequences", () => {
+  it("owns independent windows and dosage stages in the raw typed regimen graph", () => {
+    const input =
+      "1 drop OD q2h x1wk then 1 drop OD qid only if BP >160; " +
+      "1 drop OS qid x1mo then 1 drop OS bid";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, input);
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+
+    expect(regimen.kind).toBe("resolved");
+    if (regimen.kind !== "resolved") return;
+    expect(regimen.tracks.map(track => track.phases.map(phase => ({
+      start: phase.start,
+      end: phase.end,
+      sites: phase.members.map(member => member.clause.site?.text)
+    })))).toEqual([
+      [
+        { start: { unit: "d", value: 0 }, end: { unit: "d", value: 7 }, sites: ["right eye"] },
+        { start: { unit: "d", value: 7 }, end: undefined, sites: ["right eye"] }
+      ],
+      [
+        { start: { unit: "d", value: 0 }, end: { unit: "mo", value: 1 }, sites: ["left eye"] },
+        { start: { unit: "mo", value: 1 }, end: undefined, sites: ["left eye"] }
+      ]
+    ]);
+    expect(regimen.stages.map(stage => stage.end)).toEqual([
+      { unit: "d", value: 7 },
+      { unit: "mo", value: 1 },
+      undefined
+    ]);
+    expect(regimen.tracks[0].phases[0].members[0].clause.schedule)
+      .toMatchObject({ duration: 1, durationUnit: "wk" });
+    expect(regimen.tracks[0].phases[1].members[0].clause.clinicalAdjuncts?.condition)
+      .toMatchObject({ kind: "measurement", operation: "gt", value: 160 });
+    expect(regimen.stages.flatMap(stage => stage.components)
+      .every(component => component.clause.schedule?.duration === undefined)).toBe(true);
+  });
+
+  it("owns inferred calendar phase ends before any FHIR projection", () => {
+    const input =
+      "1 drop OD QID x7d then 1 drop OD BID; " +
+      "1 drop OS QID from 2026-10-25 then 1 drop OS BID from 2026-11-01";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, input);
+    expect(states[2].primaryClause.schedule?.boundsEnd).toBeUndefined();
+
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+    expect(regimen.kind).toBe("resolved");
+    if (regimen.kind !== "resolved") return;
+    expect(regimen.tracks[1].phases[0].members[0].clause.schedule)
+      .toMatchObject({ boundsStart: "2026-10-25" });
+    expect(regimen.tracks[1].phases[0].members[0].clause.schedule?.boundsEnd)
+      .toBeUndefined();
+    expect(regimen.tracks[1].phases[0].members[0]).toMatchObject({
+      effectiveBoundsEnd: "2026-10-31",
+      boundsEndBasis: "next-phase-start"
+    });
+    expect(regimen.tracks[1].phases[0].members[0].clause.rawText)
+      .toContain("from 2026-10-25");
+  });
+
+  it("retains a clinician end bound when an anchored duration cuts execution earlier", () => {
+    const input =
+      "1 drop OD QID x7d then 1 drop OD BID; " +
+      "1 drop OS QID from 2026-10-25 for 7 days until 2026-11-15 " +
+      "then 1 drop OS BID from 2026-11-16";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, input);
+    const sourceSchedule = states[2].primaryClause.schedule;
+    expect(sourceSchedule).toMatchObject({
+      boundsStart: "2026-10-25",
+      boundsEnd: "2026-11-15",
+      duration: 7,
+      durationUnit: "d"
+    });
+
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+    expect(regimen.kind).toBe("resolved");
+    if (regimen.kind !== "resolved") return;
+    const sourceComponent = regimen.tracks[1].phases[0].members[0];
+    expect(sourceComponent.clause.schedule?.boundsEnd).toBe("2026-11-15");
+    expect(sourceComponent).toMatchObject({
+      effectiveBoundsEnd: "2026-10-31",
+      boundsEndBasis: "anchored-duration"
+    });
+    const projectedComponent = regimen.stages[0].components.find(component =>
+      component.clause.site?.text === "left eye");
+    expect(projectedComponent?.clause.schedule).toMatchObject({
+      boundsEnd: "2026-10-31",
+      duration: 7,
+      durationUnit: "d"
+    });
+  });
+
   it("separates two independently dosed semicolon clauses without leaking site inheritance", () => {
     const parsed = parseSig(twoSites);
     expect(parsed.count).toBe(4);
@@ -122,6 +227,28 @@ describe("concurrent independent treatment sequences", () => {
       .toEqual([7, 14, undefined]);
     expect(parsed.fhir.map(item => item.doseAndRate?.[0]?.doseQuantity?.value))
       .toEqual([1, 2, 1, 2, 1, 2]);
+  });
+
+  it("keeps a conditional oral phase independent from an inhaled taper", () => {
+    const input =
+      "1 tablet PO BID x7d then 1 tablet PO QD only if BP >160; " +
+      "inhale 2 puffs TID x14d then inhale 2 puffs BID";
+    const parsed = parseSig(input);
+    expect(parsed.count).toBe(4);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhirNext.step.map(step => step.end?.offsetDuration?.value))
+      .toEqual([7, 14, undefined]);
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 2, 2]);
+    const conditionalOral = parsed.fhirNext.step.flatMap(step => step.component)
+      .filter(component =>
+        component.route?.text === "by mouth" && component.timing?.code?.text === "QD");
+    expect(conditionalOral).toHaveLength(2);
+    for (const component of conditionalOral) {
+      expect(component.condition?.[0]).toMatchObject({
+        operation: "gt", valueQuantity: { value: 160 }
+      });
+    }
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext))).toEqual(parsed.fhirNext);
   });
 
   it("handles coincident transition times without creating redundant global stages", () => {

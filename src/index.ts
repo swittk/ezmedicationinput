@@ -3,7 +3,9 @@ import {
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
-import { projectParallelRegimen } from "./regimen/parallel-course";
+import {
+  buildCanonicalParallelRegimen, projectParallelRegimen
+} from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
@@ -14,7 +16,7 @@ import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
 import {
-  buildRegimenGraph, composeRegimenPhases, scopeSequentialPhaseSemantics
+  buildRegimenGraph, regimenMemberSequences, scopeSequentialPhaseSemantics
 } from "./regimen/regimen";
 import {
   administrationTargetProjections,
@@ -522,8 +524,8 @@ function buildWholeCourseResult(
  * Invalid but explicitly framed medication cycles must not contribute their
  * day numbers as dose amounts. Keep original offsets intact by masking only
  * the invalid cycle frame while parsing the preceding administered amount.
- * composeRegimenPhases still retains the original source, the precise cycle
- * error, and all unparsed clinical text.
+ * The original source and all unparsed clinical text remain on the typed
+ * clause even when this compatibility path masks an invalid cycle frame.
  *
  * Ordinary "on day N" text is not a cycle frame; valid explicit cycles are
  * parsed normally without this fallback.
@@ -628,6 +630,39 @@ function retainComposedMembers<T>(values: readonly T[], absorbed: ReadonlySet<nu
   return values.filter((_value, index) => !absorbed.has(index));
 }
 
+/**
+ * Parallel-course construction consumes projected canonical HPSG members,
+ * never already-lowered FHIR. Site conjunctions are expanded only through
+ * the typed administration-target group, with a matching typed regimen graph.
+ */
+function prepareCanonicalParallel(
+  states: readonly ParserState[],
+  segments: ReturnType<typeof parseSigSegments>,
+  plan: BoundaryPlan,
+  graph: ReturnType<typeof buildRegimenGraph>
+) {
+  if (!graph.sequences.length || !plan.relations.some(edge => edge.kind === 'independent')) {
+    return { kind: 'not-parallel' as const };
+  }
+  const clauses: CanonicalSigClause[] = [];
+  const projectedSegments: ReturnType<typeof parseSigSegments> = [];
+  const counts: number[] = [];
+  for (let index = 0; index < states.length; index++) {
+    const state = states[index];
+    const targets = administrationTargetProjections(state.clauses);
+    counts.push(targets.length);
+    for (const target of targets) {
+      clauses.push(getPrimaryClause(
+        projectAdministrationTargetClauses(state.clauses, target), state.input
+      ));
+      projectedSegments.push(segments[index]);
+    }
+  }
+  return buildCanonicalParallelRegimen(
+    clauses, projectedSegments, plan, expandRegimenGraphMembers(graph, counts)
+  );
+}
+
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const boundaryPlan = createBoundaryPlan(input, options);
@@ -657,27 +692,30 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   const outputRegimenGraph = hasComposedTiming
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
+  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
+  const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const rawResults: ParseResult[] = [];
-  const resultSegments: typeof segments = [];
-  const projectionCounts: number[] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
     const segment = outputSegments[index];
     const state = outputStates[index];
-    const projected = buildParseResults(state, options);
-    projectionCounts.push(projected.length);
+    const projected = buildParseResults(state, options, phaseSequences[index]);
     for (const result of projected) {
       rebaseParseResult(result, input, segment.start);
       rawResults.push(result);
-      resultSegments.push(segment);
     }
   }
 
-  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
-  composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
-  let results = rawResults;
+  const results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
-  const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
+  const parallel = canonicalParallel.kind === "resolved"
+    ? projectParallelRegimen(
+      canonicalParallel, results.map(result => result.longText), input, {
+        bodySitePostcoordination: options?.bodySitePostcoordination,
+        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+      }
+    )
+    : canonicalParallel;
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -711,9 +749,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   const outputRegimenGraph = hasComposedTiming
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
+  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
   const results: LintResult[] = [];
   const resultSegments: typeof segments = [];
-  const projectionCounts: number[] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
     const segment = outputSegments[index];
@@ -731,8 +769,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
         range: shiftedRange
       };
     });
-    const projected = buildParseResults(state, options);
-    projectionCounts.push(projected.length);
+    const projected = buildParseResults(state, options, phaseSequences[index]);
     for (const result of projected) {
       rebaseParseResult(result, input, segment.start);
       const issues = [...recognizedIssues];
@@ -748,8 +785,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
-  composeRegimenPhases(lintParseResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
     const segment = resultSegments[index];
     for (const warning of lintParseResults[index].warnings) {
@@ -831,27 +866,30 @@ export async function parseSigAsync(
   const outputRegimenGraph = hasComposedTiming
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
+  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
+  const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const rawResults: ParseResult[] = [];
-  const resultSegments: typeof segments = [];
-  const projectionCounts: number[] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
     const segment = outputSegments[index];
     const state = outputStates[index];
-    const projected = buildParseResults(state, options);
-    projectionCounts.push(projected.length);
+    const projected = buildParseResults(state, options, phaseSequences[index]);
     for (const result of projected) {
       rebaseParseResult(result, input, segment.start);
       rawResults.push(result);
-      resultSegments.push(segment);
     }
   }
 
-  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
-  composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
-  let results = rawResults;
+  const results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
-  const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
+  const parallel = canonicalParallel.kind === "resolved"
+    ? projectParallelRegimen(
+      canonicalParallel, results.map(result => result.longText), input, {
+        bodySitePostcoordination: options?.bodySitePostcoordination,
+        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+      }
+    )
+    : canonicalParallel;
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -1306,7 +1344,8 @@ function buildNormalizedMetaFromClause(
 function buildParseResult(
   state: ReturnType<typeof parseClauseState>,
   options?: ParseOptions,
-  projectedTarget?: CanonicalSiteExpr
+  projectedTarget?: CanonicalSiteExpr,
+  sequence?: number
 ): ParseResult {
   const canonicalClauses = projectAdministrationTargetClauses(
     state.clauses,
@@ -1364,6 +1403,7 @@ function buildParseResult(
     }
   }
   const fhir = canonicalToFhir(clause, longText, {
+    sequence,
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
@@ -1439,10 +1479,11 @@ function buildParseResult(
 
 function buildParseResults(
   state: ReturnType<typeof parseClauseState>,
-  options?: ParseOptions
+  options?: ParseOptions,
+  sequence?: number
 ): ParseResult[] {
   return administrationTargetProjections(state.clauses).map((target) =>
-    buildParseResult(state, options, target)
+    buildParseResult(state, options, target, sequence)
   );
 }
 

@@ -4,13 +4,9 @@ import type { ParserState } from '../parser-state';
 import type {
   CanonicalEvidence,
   CanonicalSigClause,
-  CanonicalSourceSpan,
-  FhirDosage,
-  ParseOptions,
-  ParseResult
+  CanonicalSourceSpan
 } from '../types';
 
-type Render = (dosage: FhirDosage, style: 'short' | 'long', options?: ParseOptions) => string;
 export interface RegimenPhase { id: number; members: number[] }
 export interface PhaseEdge { from: number; to: number; relation: BoundaryRelation }
 export interface RegimenGraph { phases: RegimenPhase[]; sequences: PhaseEdge[] }
@@ -40,6 +36,33 @@ function nextDate(value: string): string | undefined {
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return undefined;
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * A date-anchored exact day/week duration has one canonical inclusive window.
+ * Materialize that window on the typed schedule before FHIR projection so the
+ * wire layer never has to choose between boundsPeriod and boundsDuration.
+ */
+export function anchoredScheduleDurationEnd(
+  schedule: CanonicalSigClause['schedule']
+): string | undefined {
+  if (!schedule?.boundsStart || schedule.duration === undefined ||
+      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.boundsStart) || schedule.duration <= 0) {
+    return undefined;
+  }
+  const factor = schedule.durationUnit === 'd' ? 1 : schedule.durationUnit === 'wk' ? 7 : undefined;
+  if (factor === undefined || !Number.isInteger(schedule.duration * factor)) return undefined;
+  const date = new Date(`${schedule.boundsStart}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  date.setUTCDate(date.getUTCDate() + schedule.duration * factor - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedule']): void {
+  if (!schedule || schedule.boundsEnd) return;
+  const durationEnd = anchoredScheduleDurationEnd(schedule);
+  if (durationEnd) schedule.boundsEnd = durationEnd;
 }
 /** Half-open phase endpoint derived from explicit dates, end bounds, or anchored duration. */
 function phaseEndExclusive(schedule: CanonicalSigClause['schedule']): string | undefined {
@@ -136,6 +159,7 @@ export function scopeSequentialPhaseSemantics(
   source: string
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
+  for (const state of states) materializeAnchoredScheduleWindow(state.primaryClause.schedule);
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
@@ -186,6 +210,7 @@ export function scopeSequentialPhaseSemantics(
       if (!schedule.boundsStart && start) {
         schedule.boundsStart = start;
         fields.push('boundsStart');
+        materializeAnchoredScheduleWindow(schedule);
       }
       // An explicit local meal/event or clock anchor owns the whole anchor
       // group, so inherited anchors can never create a mixed local/donor pair.
@@ -237,22 +262,16 @@ export function scopeSequentialPhaseSemantics(
   return applications;
 }
 
-/** Serialize ordered typed regimen phases. No downstream grammar or rescan. */
-export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], graph: RegimenGraph,
-  options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
-  if (results.length < 2) return [];
-  // FHIR R5 Dosage.sequence represents ordered phases; coordinated administrations
-  // retain the same sequence instead of being misrepresented as consecutive.
-  if (graph.sequences.length > 0) {
-    const phaseSequence = graph.phases.map(() => 1);
-    for (const edge of graph.sequences) {
-      phaseSequence[edge.to] = Math.max(phaseSequence[edge.to], phaseSequence[edge.from] + 1);
-    }
-    for (const phase of graph.phases) {
-      for (const member of phase.members) {
-        if (results[member]) results[member].fhir.sequence = phaseSequence[phase.id];
-      }
-    }
+/** Sequence belongs to the typed graph, before FHIR projection. */
+export function regimenMemberSequences(graph: RegimenGraph): number[] {
+  if (!graph.sequences.length) return [];
+  const phaseSequence = graph.phases.map(() => 1);
+  for (const edge of graph.sequences) {
+    phaseSequence[edge.to] = Math.max(phaseSequence[edge.to], phaseSequence[edge.from] + 1);
   }
-  return [];
+  const members: number[] = [];
+  for (const phase of graph.phases) {
+    for (const member of phase.members) members[member] = phaseSequence[phase.id];
+  }
+  return members;
 }
