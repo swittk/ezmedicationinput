@@ -1,5 +1,6 @@
 import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates,
   getDosageExcludedWeekdays, getUnresolvedDosage,
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
@@ -960,6 +961,22 @@ function buildWholeCourseResult(
     frame.kind === "recurring-on-off" && !frame.error && frame.repeatCycle);
   if (recurringCycle?.repeatCycle && !fhirNext.repeatCycle) {
     fhirNext.repeatCycle = { ...recurringCycle.repeatCycle };
+    // The flat R5/EzDosage array may be persisted independently of fhirNext.
+    // Keep every live flat field, but attach the same retained-course marker
+    // so JSON round trips can reconstruct repeatCycle instead of degrading to
+    // the first active on-phase only.
+    const projected = toFhirR5Dosages(fhirNext);
+    const retained = projected[0]?.modifierExtension?.find(extension =>
+      extension.url === DOSAGE_DETAILS_R5_URL);
+    if (retained) {
+      for (const dosage of fhir) {
+        dosage.modifierExtension = [
+          ...(dosage.modifierExtension ?? []).filter(extension =>
+            extension.url !== DOSAGE_DETAILS_R5_URL),
+          ...(cloneExtensions([retained]) ?? [])
+        ];
+      }
+    }
   }
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];

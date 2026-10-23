@@ -7,7 +7,7 @@ const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|�
 const TRAILING_ELSE = /(?:,\s*|\s+)\b(?:otherwise|else)\s+(hold|do\s+not\s+take|skip)\s*\.?$|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?\s*$/iu;
 const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
 const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d+)?|\.\d+)`;
-const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|มากกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
+const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
 const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(%|mmhg|mg/dl|mmol/l|bpm|°c|c|องศา)?$`, "iu");
 const SEPARATOR_OR = /\s+or\s+|\s*หรือ\s*/iu;
 const SEPARATOR_AND = /\s+and\s+|\s*และ\s*/iu;
@@ -16,7 +16,7 @@ function canonicalOperator(value: string): "gt" | "ge" | "lt" | "le" | "eq" {
   const term = value.toLowerCase().replace(/\s+/gu, " ").trim();
   if (/^(?:>=|at least|no less than|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า)$/iu.test(term)) return "ge";
   if (/^(?:<=|at most|no more than|ไม่เกิน)$/iu.test(term)) return "le";
-  if (/^(?:>|above|over|greater than|มากกว่า)$/iu.test(term)) return "gt";
+  if (/^(?:>|above|over|greater than|มากกว่า|สูงกว่า)$/iu.test(term)) return "gt";
   if (/^(?:<|below|under|less than|ต่ำกว่า|น้อยกว่า)$/iu.test(term)) return "lt";
   return "eq";
 }

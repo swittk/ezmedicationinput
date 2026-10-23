@@ -295,7 +295,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
       url: DOSAGE_RECONCILIATION_WARNING_URL
     }));
-    expect(calculateTotalUnits({ ...supply, dosage: edited }).totalUnits).toBe(296);
+    expect(calculateTotalUnits({ ...supply, dosage: edited }).totalUnits).toBe(273);
     expect(nextDueDoses(edited, {
       ...scheduler, from: "2026-10-27T08:00:00+07:00"
     }).length).toBeGreaterThan(0);
@@ -339,7 +339,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const changedWithRetainedCode = nextDueDoses(edited, options);
     expect(changedWithRetainedCode).toHaveLength(8);
     expect(changedWithRetainedCode.slice(0, 3).map(v => v.slice(11, 19)))
-      .toEqual(["08:00:00", "12:00:00", "16:00:00"]);
+      .toEqual(["08:00:00", "14:00:00", "20:00:00"]);
     expect(edited.timing?.code?.coding?.[0]?.code).toBe("QID");
     delete edited.timing!.code;
     const changed = nextDueDoses(edited, options);

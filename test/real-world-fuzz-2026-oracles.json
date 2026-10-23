@@ -596,7 +596,10 @@
     "dose": 1,
     "unit": "tab",
     "frequency": 1,
-    "condition": true
+    "condition": true,
+    "conditionKind": "measurement",
+    "conditionOperation": "gt",
+    "conditionValue": 160
   },
   "thai-154": {
     "dose": 1,

@@ -14,6 +14,7 @@ interface Oracle {
   rows?: number; countMax?: number;
   route?: string; site?: string;
   prn?: boolean; condition?: boolean;
+  conditionKind?: string; conditionOperation?: string; conditionValue?: number;
   unresolved?: string;
   invalidSupply?: boolean; maxSupply?: number; threeDaySupply?: number;
 }
@@ -69,7 +70,15 @@ describe("manually specified clinical semantic oracles for the independent 200-c
       if (oracle.route) expect(dosage.route?.text?.toLowerCase()).toContain(oracle.route.toLowerCase());
       if (oracle.site) expect(dosage.site?.text?.toLowerCase()).toContain(oracle.site.toLowerCase());
       if (oracle.prn !== undefined) expect(Boolean(dosage.asNeeded)).toBe(oracle.prn);
-      if (oracle.condition !== undefined) expect(Boolean(getDosageCondition(dosage))).toBe(oracle.condition);
+      const condition = getDosageCondition(dosage);
+      if (oracle.condition !== undefined) expect(Boolean(condition)).toBe(oracle.condition);
+      if (oracle.conditionKind !== undefined) expect(condition?.kind).toBe(oracle.conditionKind);
+      if (oracle.conditionOperation !== undefined) {
+        expect(condition).toMatchObject({ operation: oracle.conditionOperation });
+      }
+      if (oracle.conditionValue !== undefined) {
+        expect(condition).toMatchObject({ value: oracle.conditionValue });
+      }
 
       if (oracle.unresolved) {
         expect(dosage.text).toBeTruthy();

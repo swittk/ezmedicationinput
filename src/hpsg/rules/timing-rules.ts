@@ -167,10 +167,12 @@ function monthlyOrdinalWeekdaySign(
     return token;
   };
 
-  const firstLower = normalizeTokenLower(context.tokens[cursor]);
-  if (firstLower === "on") take("on");
-  const articleLower = normalizeTokenLower(context.tokens[cursor]);
-  if (articleLower === "the") take("the");
+  const lowerAt = (index: number): string => {
+    const token = context.tokens[index];
+    return token ? normalizeTokenLower(token) : "";
+  };
+  if (lowerAt(cursor) === "on") take("on");
+  if (lowerAt(cursor) === "the") take("the");
 
   const ordinalToken = context.tokens[cursor];
   const ordinal = ordinalToken

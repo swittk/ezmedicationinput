@@ -1284,7 +1284,18 @@ function resolveFrequencyClocks(
   const code = timing.code?.coding?.find((coding) => coding.code)?.code;
   const normalizedCode = code?.toUpperCase();
   const repeat = timing.repeat;
-  const codeClocks = normalizedCode ? defaults.byCode?.[normalizedCode] : undefined;
+  const codeFrequency = normalizedCode
+    ? DAILY_FREQUENCY_BY_TIMING_CODE[normalizedCode]
+    : undefined;
+  const liveDailyFrequency = repeat?.frequency !== undefined &&
+    repeat.period === 1 && repeat.periodUnit === "d"
+    ? repeat.frequency
+    : undefined;
+  const staleDailyCode = codeFrequency !== undefined &&
+    liveDailyFrequency !== undefined && codeFrequency !== liveDailyFrequency;
+  const codeClocks = !staleDailyCode && normalizedCode
+    ? defaults.byCode?.[normalizedCode]
+    : undefined;
   if (codeClocks) {
     for (const clock of codeClocks) {
       collected.add(normalizeClock(clock));

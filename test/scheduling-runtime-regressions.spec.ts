@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseSig, nextDueDoses, calculateTotalUnits, toFhirR5Dosages, fromFhir } from "../src";
+import {
+  parseSig, nextDueDoses, calculateTotalUnits, toDosageDetails,
+  toFhirR5Dosages, fromFhir
+} from "../src";
 import type { FhirR6DosageDetails } from "../src";
 
 const base = {
@@ -154,6 +157,17 @@ describe("dose scheduling runtime guarantees", () => {
     expect(nextDueDoses(dosage, {
       ...options, orderedAt: undefined, from: "2026-10-26T08:00:00+07:00"
     })).toEqual([]);
+  });
+
+  it("preserves a recurring on/off cycle through flat FHIR JSON persistence", () => {
+    const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat");
+    const flat = JSON.parse(JSON.stringify(parsed.fhir));
+    expect(toDosageDetails(flat).repeatCycle).toMatchObject({
+      value: 14, unit: "d", code: "d"
+    });
+    expect(nextDueDoses(flat, { ...base, limit: 10 })).toEqual(
+      nextDueDoses(parsed.fhirNext, { ...base, limit: 10 })
+    );
   });
 
   it("uses calendar-day horizons across daylight-saving transitions", () => {

@@ -4867,6 +4867,15 @@ describe("topical workflow and timing", () => {
     );
   });
 
+  it("keeps a terminal 'leave on' workflow editable without treating 'on' as monthly timing", () => {
+    const result = parseSig("apply cream to face and leave on");
+    expect(result.fhir.site?.text).toBe("face");
+    expect(result.fhir.route?.text).toBe("topical");
+    expect(result.fhir.timing).toBeUndefined();
+    expect(result.fhir.patientInstruction).toBe("leave on");
+    expect(result.fhir.text).toBe("Apply the medication to the face; then leave on.");
+  });
+
   it("keeps workflow timing separate from medication timing", () => {
     const result = parseSig("apply to scalp nightly and rinse in the morning");
     expect(result.fhir.site?.text).toBe("scalp");
