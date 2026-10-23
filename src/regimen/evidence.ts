@@ -5,12 +5,11 @@ import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { parseAdditionalInstructions } from '../advice';
 import { AdviceForce } from '../types';
-import { ACTION_COORDINATION_CONNECTORS, CLAUSE_LEAD_WORDS } from '../hpsg/lexical-classes';
+import { CLAUSE_LEAD_WORDS } from '../hpsg/lexical-classes';
 import type { AdviceFrame, ParseOptions } from '../types';
 import type { Token } from '../parser-state';
 import type { PlannerMetrics, ProbeSummary, Range } from './types';
 import { lexeme } from './structures';
-import { mayContainAdministrationTargetGroup, targetKeys } from './targets';
 
 /** Per-input cache: no global results, no mutation of parser state, no cross-option reuse. */
 export class EvidenceContext {
@@ -33,8 +32,6 @@ export class EvidenceContext {
     if (this.cacheEnabled) this.parsedStates.set(key, state);
     this.metrics.clauseProbes++; this.metrics.probedTokens += state.tokens.length;
     const c = state.primaryClause, s = c.schedule;
-    const hasTargetCoordinator = state.tokens.some(token =>
-      token.original === ',' || ACTION_COORDINATION_CONNECTORS.has(lexeme(token)));
     const directTarget = c.site?.text?.trim().toLowerCase().replace(/\s+/gu, ' ') ||
       (c.site?.coding?.code ? 'code:' + c.site.coding.code : undefined);
     const probeSource = this.input.slice(start, end);
@@ -49,11 +46,12 @@ export class EvidenceContext {
       : [];
     const complete = leftoverGroups.every(group => group.tokens.every(token =>
       bounds.some(span => token.sourceStart >= span.start && token.sourceEnd <= span.end)));
-    const targets = (c.site?.text || c.site?.coding)
-      ? hasTargetCoordinator && mayContainAdministrationTargetGroup(probeSource, this.options, state.tokens)
-        ? targetKeys(probeSource, this.options)
-        : directTarget ? [directTarget] : []
-      : [];
+    const targets = c.administrationTargetGroup?.targets.map(target =>
+      target.coding?.code
+        ? `code:${target.coding.code}`
+        : target.text?.trim().toLowerCase().replace(/\s+/gu, ' ')
+    ).filter((value): value is string => Boolean(value)) ??
+      (directTarget ? [directTarget] : []);
     const summary: ProbeSummary = {
       start, end, clause: c,
       complete,

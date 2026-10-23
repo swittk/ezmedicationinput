@@ -26,6 +26,7 @@ type SignTrait =
   | "complement"
   | "adjunct"
   | "clinical-adjunct"
+  | "site"
   | "procedure"
   | "scope-target"
   | "marked";
@@ -54,6 +55,7 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
     if (sign.synsem.head.method.headClass === "procedure") traits.add("procedure");
   }
   if (sign.synsem.head.route || sign.synsem.head.dose || sign.synsem.valence.site) traits.add("complement");
+  if (sign.synsem.valence.site) traits.add("site");
   if (
     sign.synsem.head.schedule ||
     sign.synsem.valence.prn ||
@@ -130,6 +132,16 @@ const CONSTRUCTION_SCHEMAS: readonly ConstructionSchema[] = [
     right: ["procedure"],
     symmetric: true,
     headFrom: "administration-head"
+  },
+  {
+    motherType: "site-coordination-phrase",
+    kind: "coordination",
+    left: ["marked", "site"],
+    right: ["site"],
+    symmetric: true,
+    headFrom: "none",
+    forbidLeft: ["condition"],
+    forbidRight: ["condition"]
   },
   {
     motherType: "coordination-phrase",

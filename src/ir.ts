@@ -274,6 +274,19 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
+    const targetGroup = clause.administrationTargetGroup;
+    if (targetGroup?.range) {
+      targetGroup.range.start += offset;
+      targetGroup.range.end += offset;
+    }
+    for (const target of targetGroup?.targets ?? []) {
+      if (target.range) {
+        target.range.start += offset;
+        target.range.end += offset;
+      }
+      shiftEvidenceSpans(target.evidence);
+    }
+
     const shiftedInstructionFrames = new Set<object>();
     if (clause.instructionGraph) {
       if (clause.instructionGraph.primaryAdministrationSpan) {

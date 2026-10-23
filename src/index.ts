@@ -16,7 +16,10 @@ import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate
 import {
   buildRegimenGraph, composeRegimenPhases, scopeSequentialPhaseSemantics
 } from "./regimen/regimen";
-import { expandAdministrationTargets, expandLintAdministrationTargets } from "./regimen/targets";
+import {
+  administrationTargetProjections,
+  projectAdministrationTargetClauses
+} from "./regimen/targets";
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
@@ -58,6 +61,7 @@ import {
   ParseResult,
   MedicationCondition,
   CanonicalSigClause,
+  CanonicalSiteExpr,
   TextRange
 } from "./types";
 export {
@@ -291,6 +295,7 @@ interface SegmentCarry {
   siteSource?: ParserState["siteSource"];
   siteCoding?: ParserState["siteCoding"];
   siteSpatialRelation?: ParserState["siteSpatialRelation"];
+  administrationTargetGroup?: ParserState["administrationTargetGroup"];
 }
 
 type MealDashRelation = "meal" | "ac" | "pc";
@@ -849,7 +854,7 @@ function parseCycleSafeClauseState(text: string, options?: ParseOptions) {
 function hasSegmentCarry(carry: SegmentCarry): boolean {
   return Boolean(
     carry.routeCode || carry.routeText || carry.unit || carry.dose !== undefined ||
-    carry.siteText || carry.siteCoding
+    carry.siteText || carry.siteCoding || carry.administrationTargetGroup
   );
 }
 
@@ -905,6 +910,27 @@ function scopeCoordinatedSegmentStates(
   );
 }
 
+function expandRegimenGraphMembers(
+  graph: ReturnType<typeof buildRegimenGraph>,
+  projectionCounts: readonly number[]
+): ReturnType<typeof buildRegimenGraph> {
+  const projectedIndices: number[][] = [];
+  let next = 0;
+  for (const count of projectionCounts) {
+    const indices: number[] = [];
+    for (let offset = 0; offset < count; offset += 1) indices.push(next++);
+    projectedIndices.push(indices);
+  }
+  return {
+    phases: graph.phases.map((phase) => {
+      const members: number[] = [];
+      for (const member of phase.members) members.push(...(projectedIndices[member] ?? []));
+      return { ...phase, members };
+    }),
+    sequences: graph.sequences.map((edge) => ({ ...edge }))
+  };
+}
+
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const boundaryPlan = createBoundaryPlan(input, options);
@@ -922,23 +948,29 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
+  const resultSegments: typeof segments = [];
+  const projectionCounts: number[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const state = states[index];
-    const result = buildParseResult(state, options);
-    rebaseParseResult(result, input, segment.start);
-    rawResults.push(result);
+    const projected = buildParseResults(state, options);
+    projectionCounts.push(projected.length);
+    for (const result of projected) {
+      rebaseParseResult(result, input, segment.start);
+      rawResults.push(result);
+      resultSegments.push(segment);
+    }
   }
 
-  composeRegimenPhases(rawResults, segments, regimenGraph, options, formatSig);
+  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
-    applyClinicalConstraints(rawResults[index], segments[index].text, options);
+    applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
   }
   let results = mergeParseResultList(rawResults, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
-  results = expandAdministrationTargets(results, options, formatSig);
-  const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
+  const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -960,14 +992,14 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const results: LintResult[] = [];
+  const resultSegments: typeof segments = [];
+  const projectionCounts: number[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const state = states[index];
-    const result = buildParseResult(state, options);
-    rebaseParseResult(result, input, segment.start);
     const groups = findUnparsedTokenGroups(state);
-    const issues: LintIssue[] = groups.map((group) => {
+    const recognizedIssues: LintIssue[] = groups.map((group) => {
       const shiftedRange = shiftRange(group.range, segment.start);
       const text = shiftedRange
         ? input.slice(shiftedRange.start, shiftedRange.end)
@@ -979,19 +1011,28 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
         range: shiftedRange
       };
     });
-    issues.push(
-      ...buildSemanticLintIssues(result, input, {
-        start: segment.start,
-        end: segment.start + segment.text.length
-      })
-    );
-    results.push({ result, issues });
+    const projected = buildParseResults(state, options);
+    projectionCounts.push(projected.length);
+    for (const result of projected) {
+      rebaseParseResult(result, input, segment.start);
+      const issues = [...recognizedIssues];
+      issues.push(
+        ...buildSemanticLintIssues(result, input, {
+          start: segment.start,
+          end: segment.start + segment.text.length
+        })
+      );
+      results.push({ result, issues });
+      resultSegments.push(segment);
+    }
   }
 
   const lintParseResults = results.map((item) => item.result);
-  composeRegimenPhases(lintParseResults, segments, regimenGraph, options, formatSig);
+  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  composeRegimenPhases(lintParseResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
-    const parsed = applyClinicalConstraints(lintParseResults[index], segments[index].text, options);
+    const segment = resultSegments[index];
+    const parsed = applyClinicalConstraints(lintParseResults[index], segment.text, options);
     results[index].issues = results[index].issues.filter(issue =>
       !issue.range || !parsed.ownedRanges.some(range => range.start <= issue.range!.start && range.end >= issue.range!.end)
     );
@@ -1000,14 +1041,13 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       if (results[index].issues.some(issue => issue.message === warning)) continue;
       results[index].issues.push({
         message: warning,
-        text: segments[index].text,
+        text: segment.text,
         tokens: [],
-        range: { start: segments[index].start, end: segments[index].end }
+        range: { start: segment.start, end: segment.end }
       });
     }
   }
-  const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
-  for (const entry of expandedLintResults) {
+  for (const entry of results) {
     for (const warning of entry.result.warnings) {
       if (!warning.startsWith("Unresolved schedule")) continue;
       if (entry.issues.some(issue => issue.message === warning)) continue;
@@ -1019,10 +1059,10 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       });
     }
   }
-  const primary = resolvePrimaryLintResult(expandedLintResults, input, options);
+  const primary = resolvePrimaryLintResult(results, input, options);
   const issues: LintIssue[] = [];
   const seenIssues = new Set<string>();
-  for (const entry of expandedLintResults) {
+  for (const entry of results) {
     for (const issue of entry.issues) {
       const key = issue.message + ":" + (issue.range?.start ?? -1) +
         ":" + (issue.range?.end ?? -1) + ":" + issue.text;
@@ -1034,8 +1074,8 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
 
   return {
     input,
-    count: expandedLintResults.length,
-    items: expandedLintResults,
+    count: results.length,
+    items: results,
     result: primary.result,
     issues,
     meta: {
@@ -1063,23 +1103,29 @@ export async function parseSigAsync(
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
+  const resultSegments: typeof segments = [];
+  const projectionCounts: number[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const state = states[index];
-    const result = buildParseResult(state, options);
-    rebaseParseResult(result, input, segment.start);
-    rawResults.push(result);
+    const projected = buildParseResults(state, options);
+    projectionCounts.push(projected.length);
+    for (const result of projected) {
+      rebaseParseResult(result, input, segment.start);
+      rawResults.push(result);
+      resultSegments.push(segment);
+    }
   }
 
-  composeRegimenPhases(rawResults, segments, regimenGraph, options, formatSig);
+  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
-    applyClinicalConstraints(rawResults[index], segments[index].text, options);
+    applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
   }
   let results = mergeParseResultList(rawResults, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
-  results = expandAdministrationTargets(results, options, formatSig);
-  const parallel = projectParallelRegimen(results, segments, boundaryPlan, input);
+  const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
   const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, options,
@@ -1533,9 +1579,13 @@ function buildNormalizedMetaFromClause(
 
 function buildParseResult(
   state: ReturnType<typeof parseClauseState>,
-  options?: ParseOptions
+  options?: ParseOptions,
+  projectedTarget?: CanonicalSiteExpr
 ): ParseResult {
-  const canonicalClauses = state.clauses;
+  const canonicalClauses = projectAdministrationTargetClauses(
+    state.clauses,
+    projectedTarget
+  );
   const clause = getPrimaryClause(canonicalClauses, state.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   // The typed HPSG clinical-quantity feature carries richer dose/rate units
@@ -1644,6 +1694,15 @@ function buildParseResult(
   };
 }
 
+function buildParseResults(
+  state: ReturnType<typeof parseClauseState>,
+  options?: ParseOptions
+): ParseResult[] {
+  return administrationTargetProjections(state.clauses).map((target) =>
+    buildParseResult(state, options, target)
+  );
+}
+
 function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
   if (!internal.routeCode && !internal.routeText) {
     if (carry.routeCode) {
@@ -1664,6 +1723,7 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
     internal.siteSource = carry.siteSource;
     internal.siteCoding = carry.siteCoding;
     internal.siteSpatialRelation = carry.siteSpatialRelation;
+    internal.administrationTargetGroup = carry.administrationTargetGroup;
   }
 
   if (
@@ -1693,6 +1753,7 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
     carry.siteSource = internal.siteSource;
     carry.siteCoding = internal.siteCoding;
     carry.siteSpatialRelation = internal.siteSpatialRelation;
+    carry.administrationTargetGroup = internal.administrationTargetGroup;
   }
   if (internal.dose !== undefined) {
     carry.dose = internal.dose;

@@ -443,15 +443,17 @@ function seedKnownSiteCoding(state: ParserState): void {
   }
 }
 
-export function parseClauseState(input: string, options?: ParseOptions): ParserState {
-  const tokens = tokenize(input);
-  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
-
-  const sign = parseHpsgClause({
+function parseTypedClauseSign(
+  state: ParserState,
+  tokens: Token[],
+  options: ParseOptions | undefined,
+  project: boolean
+) {
+  return parseHpsgClause({
     state,
     tokens,
     options,
-    dateSpans: findMedicationDateListSpans(input, options),
+    dateSpans: findMedicationDateListSpans(state.input, options),
     limit: tokens.length,
     clinicalCache: {},
     deps: {
@@ -460,12 +462,27 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
       isCompatibleRouteRefinement,
       markToken,
       normalizeSiteText: normalizeBodySiteKey,
+      sourceText: (start, end) => state.input.slice(start, end),
       recordEvidence,
       refreshMethodSurface: (target) => refreshMethodSurface(target, options),
       setRoute
     },
-    project: true
+    project
   });
+}
+
+/** Raw typed analysis for grammar/treebank tests; no canonical or FHIR projection. */
+export function parseClauseSign(input: string, options?: ParseOptions) {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+  return parseTypedClauseSign(state, tokens, options, false);
+}
+
+export function parseClauseState(input: string, options?: ParseOptions): ParserState {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+
+  const sign = parseTypedClauseSign(state, tokens, options, true);
 
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);

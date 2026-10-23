@@ -1,6 +1,7 @@
 import { stableStructureKey } from "../stable-structure";
 import {
   HpsgDoseFeature,
+  HpsgAdministrationTargetFeature,
   HpsgMethodFeature,
   HpsgRouteFeature,
   HpsgScheduleFeature,
@@ -21,6 +22,7 @@ import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
   isCompatibleRouteRefinement(current: RouteCode | undefined, next: RouteCode): boolean;
+  sourceText?(start: number, end: number): string;
 }
 
 function sameOptionalScalar<T>(left: T | undefined, right: T | undefined): boolean {
@@ -172,7 +174,62 @@ function mergeSite(
     source: mergeOptionalScalar(left.source, right.source),
     coding: mergeOptionalScalar(left.coding, right.coding),
     spatialRelation: mergeOptionalScalar(left.spatialRelation, right.spatialRelation),
-    lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest)
+    lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest),
+    administrationTargetCount: mergeOptionalScalar(
+      left.administrationTargetCount,
+      right.administrationTargetCount
+    ),
+    range: left.range ?? right.range,
+    coordination: left.coordination ?? right.coordination
+  };
+}
+
+function atomicSite(site: HpsgSiteFeature): HpsgAdministrationTargetFeature {
+  const { coordination: _coordination, ...target } = site;
+  return target;
+}
+
+function siteTargets(site: HpsgSiteFeature): HpsgAdministrationTargetFeature[] {
+  return site.coordination?.targets.map((target) => ({ ...target })) ?? [atomicSite(site)];
+}
+
+function coordinatedSite(
+  left: HpsgSiteFeature,
+  right: HpsgSiteFeature,
+  marker: "conjunction" | "disjunction",
+  context: HpsgUnificationContext
+): HpsgSiteFeature | undefined {
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return undefined;
+  const leftRange = left.coordination?.range ?? left.range;
+  const rightRange = right.coordination?.range ?? right.range;
+  if (!leftRange || !rightRange) return undefined;
+  const range = {
+    start: Math.min(leftRange.start, rightRange.start),
+    end: Math.max(leftRange.end, rightRange.end)
+  };
+  const prior = left.coordination?.coordination ?? right.coordination?.coordination;
+  const coordination = prior && prior !== marker ? "mixed" : prior ?? marker;
+  const targets: HpsgAdministrationTargetFeature[] = [];
+  for (const target of [...siteTargets(left), ...siteTargets(right)]) {
+    const duplicate = targets.some((candidate) =>
+      candidate.range?.start === target.range?.start &&
+      candidate.range?.end === target.range?.end &&
+      candidate.text === target.text &&
+      sameCoding(candidate.coding, target.coding)
+    );
+    if (!duplicate) targets.push({ ...target });
+  }
+  const sourceText = context.sourceText?.(range.start, range.end) ??
+    targets.map((target) => target.text).filter(Boolean).join(
+      marker === "disjunction" ? " or " : " and "
+    );
+  return {
+    attachmentClass: attachmentClass(left.attachmentClass),
+    text: sourceText,
+    source: "text",
+    range,
+    coordination: { coordination, sourceText, range, targets }
   };
 }
 
@@ -290,6 +347,15 @@ function mergePatientInstruction(
   if (!right) return left;
   if (left.text === right.text) return left;
   return { text: `${left.text}; ${right.text}` };
+}
+
+function mergeCoordinationMarker(
+  left: HpsgSynsem["cont"]["coordinationMarker"],
+  right: HpsgSynsem["cont"]["coordinationMarker"]
+): HpsgSynsem["cont"]["coordinationMarker"] | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left.coordination === right.coordination ? left : undefined;
 }
 
 function mergeDose(
@@ -579,6 +645,12 @@ export function unifySynsem(
   );
   if (clinicalAdjunct === undefined &&
       left.cont.clinicalAdjunct && right.cont.clinicalAdjunct) return undefined;
+  const coordinationMarker = mergeCoordinationMarker(
+    left.cont.coordinationMarker,
+    right.cont.coordinationMarker
+  );
+  if (coordinationMarker === undefined &&
+      left.cont.coordinationMarker && right.cont.coordinationMarker) return undefined;
 
   return {
     head: {
@@ -604,7 +676,8 @@ export function unifySynsem(
         left.cont.scopedAdministrations,
         right.cont.scopedAdministrations
       ),
-      scopeClosed: left.cont.scopeClosed || right.cont.scopeClosed ? true : undefined
+      scopeClosed: left.cont.scopeClosed || right.cont.scopeClosed ? true : undefined,
+      coordinationMarker
     },
     nonlocal: {
       scopeRequirements: mergeScopeRequirements(
@@ -612,6 +685,30 @@ export function unifySynsem(
         right.nonlocal?.scopeRequirements
       )
     }
+  };
+}
+
+function siteCoordinationSynsem(
+  left: HpsgSynsem,
+  right: HpsgSynsem,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const leftSite = left.valence.site;
+  const rightSite = right.valence.site;
+  const marker = left.cont.coordinationMarker ?? right.cont.coordinationMarker;
+  if (!leftSite || !rightSite || !marker) return undefined;
+  const withoutSites = (synsem: HpsgSynsem): HpsgSynsem => ({
+    ...synsem,
+    valence: { ...synsem.valence, site: undefined },
+    cont: { ...synsem.cont, coordinationMarker: undefined }
+  });
+  const base = unifySynsem(withoutSites(left), withoutSites(right), context);
+  const site = coordinatedSite(leftSite, rightSite, marker.coordination, context);
+  if (!base || !site) return undefined;
+  return {
+    ...base,
+    valence: { ...base.valence, site },
+    cont: { ...base.cont, coordinationMarker: undefined }
   };
 }
 
@@ -667,6 +764,8 @@ export function combineSigns(
   const refinement = scheduleRefinementSynsems(left, right);
   const synsem = selectedConstruction.construction.operation === "scope"
     ? scopeSynsem(condition, target)
+    : selectedConstruction.motherType === "site-coordination-phrase"
+      ? siteCoordinationSynsem(refinement.left, refinement.right, context)
     : unifySynsem(refinement.left, refinement.right, context);
   if (!synsem) return undefined;
   const fs = combineSignFeatureStructures(
@@ -674,7 +773,9 @@ export function combineSigns(
     right.fs,
     selectedConstruction.motherType,
     selectedConstruction.construction.headSide,
-    selectedConstruction.construction.operation === "scope" || refinement.refined
+    selectedConstruction.construction.operation === "scope" ||
+      selectedConstruction.motherType === "site-coordination-phrase" ||
+      refinement.refined
       ? synsem
       : undefined
   );
@@ -705,6 +806,7 @@ export function combineSigns(
         tokenIndices
       }
     ],
-    score: left.score + right.score + 1
+    score: left.score + right.score +
+      (selectedConstruction.motherType === "site-coordination-phrase" ? 6 : 1)
   };
 }

@@ -300,6 +300,36 @@ export function projectHpsgSignToState(
     if (site.lookupRequest !== undefined) {
       state.siteLookupRequest = site.lookupRequest;
     }
+    if (site.administrationTargetCount !== undefined) {
+      state.siteAdministrationTargetCount = site.administrationTargetCount;
+    }
+    if (site.range !== undefined) {
+      state.primaryClause.site = {
+        ...state.primaryClause.site,
+        range: { ...site.range }
+      };
+    }
+    if (site.coordination) {
+      state.administrationTargetGroup = {
+        coordination: site.coordination.coordination,
+        sourceText: site.coordination.sourceText,
+        range: { ...site.coordination.range },
+        targets: site.coordination.targets.map((target) => ({
+          text: target.text,
+          i18n: target.i18n ? { ...target.i18n } : undefined,
+          source: target.source,
+          coding: target.coding?.code ? {
+            code: target.coding.code,
+            system: target.coding.system,
+            display: target.coding.display,
+            i18n: target.coding.i18n ? { ...target.coding.i18n } : undefined
+          } : undefined,
+          spatialRelation: target.spatialRelation ? { ...target.spatialRelation } : undefined,
+          administrationTargetCount: target.administrationTargetCount,
+          range: target.range ? { ...target.range } : undefined
+        }))
+      };
+    }
   }
 
   const prn = sign.synsem.valence.prn;

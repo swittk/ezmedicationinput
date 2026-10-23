@@ -4,7 +4,7 @@ import {
   lintSig, nextDueDoses
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
-import { parseClauseState } from '../src/parser';
+import { parseClauseSign, parseClauseState } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan } from '../src/regimen/candidate-adapter';
 import type { BoundaryPlan } from '../src/regimen/types';
@@ -65,6 +65,107 @@ function expectBid(items: ReturnType<typeof parseSig>['items']): void {
 }
 
 describe('HPSG coordination cadence scope', () => {
+  it('builds typed administration-target atoms before canonical and FHIR projection', () => {
+    const input = 'apply to scalp and forehead bid';
+    const sign = parseClauseSign(input);
+    expect(sign?.synsem.valence.site?.coordination).toMatchObject({
+      coordination: 'conjunction',
+      sourceText: 'scalp and forehead',
+      range: { start: input.indexOf('scalp'), end: input.indexOf('forehead') + 8 },
+      targets: [
+        { text: 'scalp', coding: { code: '41695006' } },
+        { text: 'forehead', coding: { code: '52795006' } }
+      ]
+    });
+
+    const state = parseClauseState(input);
+    expect(state.primaryClause.administrationTargetGroup).toMatchObject({
+      coordination: 'conjunction',
+      sourceText: 'scalp and forehead'
+    });
+    expect(state.primaryClause.leftovers).toEqual([]);
+
+    const parsed = parseSig(input);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['scalp', 'forehead']);
+    expect(parsed.items.every(item =>
+      item.meta.canonical.clauses[0].rawText === input &&
+      item.meta.canonical.clauses[0].administrationTargetGroup?.targets.length === 2
+    )).toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(lintSig(input).issues).toEqual([]);
+  });
+
+  it('keeps disjunctive sites typed without inventing simultaneous administrations', () => {
+    const input = 'apply to scalp or forehead bid';
+    const sign = parseClauseSign(input);
+    expect(sign?.synsem.valence.site?.coordination?.coordination).toBe('disjunction');
+    expect(sign?.synsem.valence.site?.coordination?.targets.map(target => target.text))
+      .toEqual(['scalp', 'forehead']);
+
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0].fhir.site?.text).toBe('scalp or forehead');
+    expect(parsed.items[0].meta.canonical.clauses[0].administrationTargetGroup)
+      .toMatchObject({ coordination: 'disjunction', sourceText: 'scalp or forehead' });
+  });
+
+  it('resolves OD plus OS as targets while retaining OU as one bilateral atom', () => {
+    const coordinated = parseSig('instill 1 drop OD and OS QID');
+    expect(coordinated.items.map(item => item.fhir.site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(coordinated.items.map(item => item.meta.canonical.clauses[0].dose))
+      .toEqual([{ value: 1, unit: 'drop' }, { value: 1, unit: 'drop' }]);
+    expect(coordinated.items.map(item => item.meta.canonical.clauses[0].site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(coordinated.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 1, unit: 'drop' }, { value: 1, unit: 'drop' }]);
+    expect(coordinated.items.map(item => item.fhir.timing?.repeat?.frequency))
+      .toEqual([4, 4]);
+    expect(coordinated.meta.leftoverText).toBeUndefined();
+
+    const bilateralSign = parseClauseSign('instill 1 drop OU QID');
+    expect(bilateralSign?.synsem.valence.site?.coordination).toBeUndefined();
+    expect(bilateralSign?.synsem.valence.site).toMatchObject({
+      text: 'both eyes',
+      administrationTargetCount: 2,
+      coding: { code: '40638003' }
+    });
+    const bilateral = parseSig('instill 1 drop OU QID');
+    expect(bilateral.items).toHaveLength(1);
+    expect(bilateral.meta.normalized.site?.administrationTargetCount).toBe(2);
+  });
+
+  it('coordinates Thai site atoms and shares the adjacent cadence', () => {
+    const input = 'หยอด 1 หยด ตาขวา และ ตาซ้าย วันละ 4 ครั้ง';
+    const sign = parseClauseSign(input, { locale: 'th' });
+    expect(sign?.synsem.valence.site?.coordination).toMatchObject({
+      coordination: 'conjunction',
+      sourceText: 'ตาขวา และ ตาซ้าย'
+    });
+    const parsed = parseSig(input, { locale: 'th' });
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['right eye', 'left eye']);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([4, 4]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it('keeps target and clock coordination as separate typed constructions', () => {
+    const input = 'apply to scalp and forehead at 08:00 and 20:00';
+    const parsed = parseSig(input);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(['scalp', 'forehead']);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.timeOfDay))
+      .toEqual([['08:00:00', '20:00:00'], ['08:00:00', '20:00:00']]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it('retains named bilateral anatomy as one pre-coordinated target', () => {
+    const parsed = parseSig('apply 1 g to left and right eyebrows bid');
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0].fhir.site?.text).toBe('both eyebrows');
+    expect(parsed.meta.normalized.site?.administrationTargetCount).toBe(2);
+    expect(parsed.items[0].meta.canonical.clauses[0].administrationTargetGroup)
+      .toBeUndefined();
+  });
+
   it('licenses only a complete, headed-left/head-elliptic-right dose coordination', () => {
     const selected = selectHpsgCoordinationScopeConstruction(scopeFacts());
     expect(selected).toMatchObject({

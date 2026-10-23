@@ -30,6 +30,9 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.cont.clinicalAdjunct ? "A" : "",
     synsem.cont.scopedAdministrations?.length ? "X" : "",
     synsem.cont.scopeClosed ? "K" : "",
+    synsem.cont.coordinationMarker
+      ? `O${synsem.cont.coordinationMarker.coordination}`
+      : "",
     synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
@@ -75,6 +78,9 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
     contentFeatures.SCOPED_ADMINISTRATION = featureNode("scoped-administration-feature");
   }
   if (synsem.cont.scopeClosed) contentFeatures.SCOPE_CLOSED = featureAtom(true, "boolean");
+  if (synsem.cont.coordinationMarker) {
+    contentFeatures.COORDINATION_MARKER = featureNode("coordination-marker-feature");
+  }
 
   const nonlocalFeatures: Record<string, HpsgFeatureNode> = {};
   if (synsem.nonlocal?.scopeRequirements?.length) {

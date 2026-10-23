@@ -6,6 +6,7 @@ import {
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
   CanonicalOccurrenceCapExpr,
+  AdministrationTargetCoordinationKind,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
@@ -33,6 +34,7 @@ export type HpsgType =
   | "procedure-sequence-phrase"
   | "conditional-instruction-phrase"
   | "coordination-phrase"
+  | "site-coordination-phrase"
   | "clause-sign"
   | "administration-clause"
   | "method-sign"
@@ -89,7 +91,7 @@ export interface HpsgRouteFeature {
   text?: string;
 }
 
-export interface HpsgSiteFeature {
+export interface HpsgAdministrationTargetFeature {
   attachmentClass?: "administration" | "procedure";
   text?: string;
   i18n?: Record<string, string>;
@@ -97,6 +99,23 @@ export interface HpsgSiteFeature {
   coding?: FhirCoding;
   spatialRelation?: BodySiteSpatialRelation;
   lookupRequest?: SiteCodeLookupRequest;
+  administrationTargetCount?: number;
+  range?: TextRange;
+}
+
+export interface HpsgSiteCoordinationFeature {
+  coordination: AdministrationTargetCoordinationKind;
+  sourceText: string;
+  range: TextRange;
+  targets: HpsgAdministrationTargetFeature[];
+}
+
+export interface HpsgSiteFeature extends HpsgAdministrationTargetFeature {
+  coordination?: HpsgSiteCoordinationFeature;
+}
+
+export interface HpsgCoordinationMarkerFeature {
+  coordination: Exclude<AdministrationTargetCoordinationKind, "mixed">;
 }
 
 export interface HpsgPrnFeature {
@@ -256,6 +275,7 @@ export interface HpsgSynsem {
     clinicalAdjunct?: HpsgClinicalAdjunctFeature;
     scopedAdministrations?: HpsgScopedAdministrationFeature[];
     scopeClosed?: true;
+    coordinationMarker?: HpsgCoordinationMarkerFeature;
   };
   nonlocal?: {
     scopeRequirements?: HpsgConditionFeature[];

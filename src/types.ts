@@ -1392,6 +1392,24 @@ export interface CanonicalSiteExpr {
   source?: "abbreviation" | "text" | "selection" | "resolver";
   inferred?: boolean;
   evidence?: CanonicalEvidence[];
+  range?: TextRange;
+}
+
+export type AdministrationTargetCoordinationKind =
+  | "conjunction"
+  | "disjunction"
+  | "mixed";
+
+/**
+ * A grammatical coordination of administration sites. Each target is an
+ * independently typed site atom; the relation is retained before the singular
+ * FHIR Dosage.site projection chooses whether conjunction fan-out is needed.
+ */
+export interface CanonicalAdministrationTargetGroup {
+  coordination: AdministrationTargetCoordinationKind;
+  sourceText: string;
+  range?: TextRange;
+  targets: CanonicalSiteExpr[];
 }
 
 export interface CanonicalMethodExpr {
@@ -1564,6 +1582,7 @@ export interface CanonicalSigClause {
   dose?: CanonicalDoseExpr;
   route?: CanonicalRouteExpr;
   site?: CanonicalSiteExpr;
+  administrationTargetGroup?: CanonicalAdministrationTargetGroup;
   method?: CanonicalMethodExpr;
   /** Only the executable schedule. Undefined when scheduling is unresolved. */
   schedule?: CanonicalScheduleExpr;

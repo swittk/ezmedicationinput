@@ -102,7 +102,7 @@ interface IntlDateTimeFormatOptionsExtended extends Intl.DateTimeFormatOptions {
   numberingSystem?: string;
 }
 
-interface DateTimeFormatWithParts extends Intl.DateTimeFormat {
+interface DateTimeFormatWithParts {
   formatToParts?: (date: Date) => DateTimeFormatPart[];
 }
 
