@@ -1,3 +1,5 @@
+import { equalStructuredValues } from "../stable-structure";
+
 export interface HpsgAppropriateFeature {
   valueType: string;
   required?: boolean;
@@ -208,12 +210,6 @@ export function validateFeatureStructure(
   return issues;
 }
 
-function atomValuesEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export function unifyFeatureStructures(
   left: HpsgFeatureValue,
   right: HpsgFeatureValue,
@@ -240,7 +236,7 @@ export function unifyFeatureStructures(
       return undefined;
     }
     if (a.kind === "atom" || b.kind === "atom") {
-      if (a.kind !== "atom" || b.kind !== "atom" || !atomValuesEqual(a.value, b.value)) {
+      if (a.kind !== "atom" || b.kind !== "atom" || !equalStructuredValues(a.value, b.value)) {
         issues.push({ path, message: "Feature atom values conflict." });
         return undefined;
       }
@@ -273,6 +269,10 @@ export function unifyFeatureStructures(
   return { value, issues };
 }
 
+/** Export diagnostic JSON with explicit reentrancy references. This wire/debug
+ * representation is never used for runtime equality, hashing, or unification.
+ * @param value Feature graph to inspect outside the unifier.
+ */
 export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
   const ids = new Map<HpsgFeatureNode, number>();
   let nextId = 1;

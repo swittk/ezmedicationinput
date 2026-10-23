@@ -1,3 +1,4 @@
+import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { Token } from "../parser-state";
 import {
   HpsgGrammar,
@@ -103,7 +104,7 @@ function chartKey(sign: HpsgSign): string {
     packedType,
     sign.span.start,
     sign.span.end,
-    JSON.stringify(sign.synsem)
+    hashStructuredValue(sign.synsem)
   ].join("|");
   CHART_KEY_CACHE.set(sign, key);
   return key;
@@ -131,9 +132,12 @@ function isBetterDerivation(candidate: HpsgSign, existing: HpsgSign): boolean {
   return candidateSpecific && !existingSpecific;
 }
 
-function pushUnique(signs: HpsgSign[], seen: Map<string, HpsgSign>, sign: HpsgSign): boolean {
+function pushUnique(signs: HpsgSign[], seen: Map<string, HpsgSign[]>, sign: HpsgSign): boolean {
   const key = chartKey(sign);
-  const existing = seen.get(key);
+  const bucket = seen.get(key);
+  // Hash collisions must not merge clinically different signs.
+  const match = bucket?.findIndex(candidate => equalStructuredValues(candidate.synsem, sign.synsem)) ?? -1;
+  const existing = match >= 0 ? bucket![match] : undefined;
   if (existing) {
     if (!isBetterDerivation(sign, existing)) {
       return false;
@@ -142,10 +146,11 @@ function pushUnique(signs: HpsgSign[], seen: Map<string, HpsgSign>, sign: HpsgSi
     if (index >= 0) {
       signs[index] = sign;
     }
-    seen.set(key, sign);
+    bucket![match] = sign;
     return true;
   }
-  seen.set(key, sign);
+  if (bucket) bucket.push(sign);
+  else seen.set(key, [sign]);
   signs.push(sign);
   return true;
 }
@@ -163,7 +168,7 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
     ? Math.max(options.maxIterations, limit * 8)
     : Math.max(192, limit * limit * 4);
   const signs: HpsgSign[] = [];
-  const seen = new Map<string, HpsgSign>();
+  const seen = new Map<string, HpsgSign[]>();
   const agenda: HpsgSign[] = [];
   let agendaCursor = 0;
   const byStart = new Map<number, HpsgSign[]>();
@@ -223,20 +228,20 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
     // A better derivation may replace an equivalent sign while an older copy
     // is still queued. Skip stale copies; their structural combinations are
     // represented by the current best derivation for the same chart key.
-    if (seen.get(chartKey(current)) !== current) {
+    if ((seen.get(chartKey(current))?.indexOf(current) ?? -1) < 0) {
       continue;
     }
 
     const leftNeighbors = (byEnd.get(current.span.start) ?? []).slice();
     for (const left of leftNeighbors) {
-      if (seen.get(chartKey(left)) === left) {
+      if ((seen.get(chartKey(left))?.indexOf(left) ?? -1) >= 0) {
         combinePair(left, current);
       }
     }
 
     const rightNeighbors = (byStart.get(current.span.end) ?? []).slice();
     for (const right of rightNeighbors) {
-      if (seen.get(chartKey(right)) === right) {
+      if ((seen.get(chartKey(right))?.indexOf(right) ?? -1) >= 0) {
         combinePair(current, right);
       }
     }
@@ -244,7 +249,7 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
 
   let best: HpsgSign | undefined;
   for (const sign of signs) {
-    if (seen.get(chartKey(sign)) !== sign) {
+    if ((seen.get(chartKey(sign))?.indexOf(sign) ?? -1) < 0) {
       continue;
     }
     if (isBetterSign(sign, best)) {

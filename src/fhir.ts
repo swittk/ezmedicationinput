@@ -1,4 +1,3 @@
-import { normalizeClockFrequency } from "./regimen/bounds";
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
 } from "./dosage-course";
@@ -73,6 +72,22 @@ export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir
 export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
 export const BODY_SITE_RESTRICTION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-body-site-restriction";
+
+/** Make an implicit multi-clock cadence explicit without overriding a stated frequency.
+ * @param repeat Editable FHIR timing currently being lowered.
+ */
+function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
+  if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit || (repeat.timeOfDay?.length ?? 0) < 2) return;
+  const clocks = new Set(repeat.timeOfDay).size;
+  if (repeat.periodUnit === 'd') {
+    repeat.frequency = clocks;
+    return;
+  }
+  const weekdays = new Set(repeat.dayOfWeek ?? []).size;
+  if (repeat.periodUnit === 'wk' && repeat.period === 1 && weekdays > 0) {
+    repeat.frequency = clocks * weekdays;
+  }
+}
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";

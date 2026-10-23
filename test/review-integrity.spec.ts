@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { cloneStructuredValue } from "../src/stable-structure";
+import { readFileSync, readdirSync } from "node:fs";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
@@ -1009,4 +1011,90 @@ describe("native editable fields invalidate stale source realization", () => {
     expect(parsed.fhir).toEqual(originalStructured);
     expect(parsed.input).toBe(input);
   });
+});
+
+
+describe("FHIR projection structural comparison hygiene", () => {
+  it("preserves a parallel eye course after a consumer reorders object properties", () => {
+    const expected = parseSig(parallel).fhirNext;
+    const exported = toFhirR5Dosages(expected);
+    const reorder = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reorder);
+      if (!value || typeof value !== "object") return value;
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(value).reverse()) {
+        result[key] = reorder((value as Record<string, unknown>)[key]);
+      }
+      return result;
+    };
+    const reordered = reorder(exported) as FhirDosage[];
+    expect(toDosageDetails(reordered)).toEqual(expected);
+  });
+
+  it("keeps unknown nested FHIR content isolated without JSON cloning", () => {
+    const shared: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+      extension: [{ url: "urn:test:unknown", extension: [{ url: "detail", valueString: "retain" }] }]
+    };
+    const input: FhirR6DosageDetails = { step: [{ component: [shared, shared] }] };
+    const output = toFhirR5Dosages(input);
+    output[0].doseAndRate![0].doseQuantity!.value = 2;
+    output[0].extension![0].extension![0].valueString = "edited";
+    expect(output[1].doseAndRate![0].doseQuantity!.value).toBe(1);
+    expect(output[1].extension![0].extension![0].valueString).toBe("retain");
+    expect(shared.doseAndRate![0].doseQuantity!.value).toBe(1);
+    expect(shared.extension![0].extension![0].valueString).toBe("retain");
+  });
+
+  it("preserves dose edits and original text when optional empty metadata is omitted", () => {
+    const parsed = parseSig("apply 1 mL to scalp where affected twice daily");
+    const edited = cloneStructuredValue(parsed.fhir);
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    edited[0].site!.coding = edited[0].site!.coding?.map(coding => ({ ...coding, extension: [] }));
+    const rebuilt = toDosageDetails(edited);
+    expect(rebuilt.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
+    expect(formatSig(rebuilt, "long")).toContain("2 mL");
+    expect(formatSig(rebuilt, "long")).toContain("affected");
+    expect(edited[0].extension).toEqual(parsed.fhir[0].extension);
+  });
+});
+
+
+it("confines library JSON serialization to declared wire and diagnostic exporters", () => {
+  const allowed = new Set([
+    "dosage-course.ts:setDosageCondition",
+    "dosage-course.ts:conditionToR6",
+    "dosage-course.ts:conditionFromR6",
+    "dosage-course.ts:withReconciliationSources",
+    "dosage-course.ts:retainedCourseStepSource",
+    "dosage-course.ts:withDosageEditProvenance",
+    "dosage-course.ts:toFhirR5Dosages",
+    "hpsg/type-system.ts:canonicalFeatureStructure"
+  ]);
+  const unexpected: string[] = [];
+  const walk = (directory: URL, prefix = ""): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relative = prefix + entry.name;
+      const url = new URL(entry.name + (entry.isDirectory() ? "/" : ""), directory);
+      if (entry.isDirectory()) { walk(url, relative + "/"); continue; }
+      if (!entry.name.endsWith(".ts")) continue;
+      const source = readFileSync(url, "utf8");
+      if (!source.includes("JSON.stringify")) continue;
+      const file = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+            node.expression.expression.getText(file) === "JSON" && node.expression.name.text === "stringify") {
+          let parent: ts.Node | undefined = node.parent;
+          while (parent && !(ts.isFunctionDeclaration(parent) && parent.name)) parent = parent.parent;
+          const owner = parent && ts.isFunctionDeclaration(parent) ? parent.name?.text : undefined;
+          const key = relative + ":" + (owner ?? "<module>");
+          if (!allowed.has(key)) unexpected.push(key);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(file);
+    }
+  };
+  walk(new URL("../src/", import.meta.url));
+  expect(unexpected).toEqual([]);
 });

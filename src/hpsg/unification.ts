@@ -1,4 +1,4 @@
-import { stableStructureKey } from "../stable-structure";
+import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import {
   HpsgDoseFeature,
   HpsgAdministrationTargetFeature,
@@ -362,7 +362,7 @@ function mergeCoordinationMarker(
 function mergeStructuredFeature<T>(left: T | undefined, right: T | undefined): T | undefined {
   if (!left) return right;
   if (!right) return left;
-  return stableStructureKey(left) === stableStructureKey(right) ? left : undefined;
+  return equalStructuredValues(left, right) ? left : undefined;
 }
 
 function mergeDose(
@@ -412,12 +412,16 @@ function appendUnique<T>(left: T[] | undefined, right: T[] | undefined): T[] | u
 
 function appendUniqueStructured<T>(left: T[] | undefined, right: T[] | undefined): T[] | undefined {
   const result: T[] = [];
-  const seen = new Set<string>();
-  for (const item of [...(left ?? []), ...(right ?? [])]) {
-    const key = stableStructureKey(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
+  const seen = new Map<number, T[]>();
+  for (const items of [left, right]) {
+    for (const item of items ?? []) {
+      const hash = hashStructuredValue(item);
+      const bucket = seen.get(hash);
+      if (bucket?.some(candidate => equalStructuredValues(candidate, item))) continue;
+      if (bucket) bucket.push(item);
+      else seen.set(hash, [item]);
+      result.push(item);
+    }
   }
   return result.length ? result : undefined;
 }
@@ -525,7 +529,7 @@ function mergeClinicalAdjunct(
   if (!left) return right;
   if (!right) return left;
   if (left.condition && right.condition &&
-      stableStructureKey(left.condition) !== stableStructureKey(right.condition)) {
+      !equalStructuredValues(left.condition, right.condition)) {
     return undefined;
   }
   return {

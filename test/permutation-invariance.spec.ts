@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseSig } from "./helpers/r5-parser";
 import { getDosageCondition } from "../src/dosage-course";
-import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { createBoundaryPlan } from "../src/regimen/planner";
 import type { AdviceFrame, ParseOptions } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;

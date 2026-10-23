@@ -1,3 +1,4 @@
+import { cloneStructuredValue } from "./stable-structure";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { baseLanguageTag } from "./localization";
 import { inferMedicationLocale } from "./locale-detection";
@@ -38,10 +39,6 @@ function toArray<T>(value: T | T[] | undefined): T[] {
 
 function isPromise<T>(value: unknown): value is Promise<T> {
   return !!value && typeof (value as { then?: unknown }).then === "function";
-}
-
-function cloneGraph(graph: CanonicalInstructionGraph): CanonicalInstructionGraph {
-  return JSON.parse(JSON.stringify(graph)) as CanonicalInstructionGraph;
 }
 
 function validRelativeRange(range: TextRange, sourceLength: number): boolean {
@@ -335,7 +332,7 @@ function requestForOpaque(
     range: { start: opaque.start, end: opaque.end },
     locale: options?.locale,
     context: options?.context,
-    existingGraph: cloneGraph(graph)
+    existingGraph: cloneStructuredValue(graph)
   };
 }
 

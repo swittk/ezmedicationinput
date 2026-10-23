@@ -1,4 +1,4 @@
-import { stableStructureKey } from "../stable-structure";
+import { equalStructuredValues } from "../stable-structure";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
@@ -105,8 +105,7 @@ function applySchedule(
   if (schedule.activityTiming?.length) {
     const existing = state.activityTiming ? state.activityTiming.slice() : [];
     for (const item of schedule.activityTiming) {
-      const key = stableStructureKey(item);
-      if (!existing.some((candidate) => stableStructureKey(candidate) === key)) {
+      if (!existing.some((candidate) => equalStructuredValues(candidate, item))) {
         existing.push(item);
       }
     }
@@ -124,8 +123,7 @@ function applySchedule(
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     const existing = target.calendarEvents ? target.calendarEvents.slice() : [];
     for (const event of schedule.calendarEvents) {
-      const key = stableStructureKey(event);
-      if (!existing.some((candidate) => stableStructureKey(candidate) === key)) {
+      if (!existing.some((candidate) => equalStructuredValues(candidate, event))) {
         existing.push(event);
       }
     }
@@ -292,7 +290,7 @@ function applyClinicalAdjunct(
     }));
     if (!evidence.some((candidate) =>
       candidate.rule === item.rule &&
-      stableStructureKey(candidate.spans) === stableStructureKey(spans)
+      equalStructuredValues(candidate.spans, spans)
     )) evidence.push({ rule: item.rule, spans });
     for (const range of item.ranges) appendRange(localRanges, range);
     if (item.kind === "unresolved") {

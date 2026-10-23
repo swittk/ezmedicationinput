@@ -6,7 +6,7 @@ import {
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
 import { canonicalToFhir } from "../src/fhir";
 import { parseClauseState } from "../src/parser";
-import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
 
 const start = "2024-01-01T00:00:00Z";

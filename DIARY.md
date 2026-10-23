@@ -2834,3 +2834,38 @@ Emergency rewrite completed:
 - old tests whose sole oracle was "throw", "timing undefined", or "quarantine" were replaced with clinical meaning/data-preservation oracles
 
 Validation on the combined rewrite: build/type declarations pass; 1848/1848 source tests and 4/4 dist tests pass. A 353-case old-vs-new corpus inspection found apparent shape losses were corrections of old misparses (e.g. interval represented as frequency, infusion rates represented as scalar doses, dates interpreted as body sites, OD/BID interpreted as topical once-daily). Interleaved 353-case throughput benchmark is effectively flat vs old master (~0.99x new/old median time); ordinary simple and PRN paths are flat/slightly faster, multi-eye taper materially faster. A mixed event+clock case is slower only because old master aborted/quarantined it while current code actually parses and realizes both meanings.
+
+
+## 2026-10-23 — structured equality and zero avoidable JSON churn
+
+Removed JSON serialization from in-memory cloning, typed feature equality,
+schedule/method comparison, chart packing, and FHIR projection comparison.
+The structured comparator ignores object insertion order and absent optional
+undefined fields, while preserving array order and scalar distinctions. Chart
+packing uses compact candidate hashes with mandatory structural collision checks;
+hash equality alone never discards a sign. Editable copies retain unknown nested
+FHIR fields without serializing and parsing them. Removed thirteen throwaway
+projection stringify/parse chains and the normalization-copy comparison helper.
+
+The twelve remaining production JSON.stringify calls encode existing FHIR string
+payloads/provenance or export diagnostic feature graphs. The condition bridge's
+unknown-condition textual fallback remains lossless. Added a source-level test
+confining serialization to those named boundary/export functions, plus regressions
+for reordered feature atoms, explicit undefined edits, collision handling, editable
+copy isolation, ordinary clause parsing without JSON, and R5/R6 edit preservation.
+
+Consolidated the added candidate-adapter wrapper into its production planner,
+removed its write-only global stats module, and moved single-consumer clock
+normalization into FHIR lowering. No new production exclusions: 115 raw changed
+paths, exactly 100 reviewable paths against master 0d096a4. The standalone
+body-site qualifier API/whole-SIG ownership follow-up is not silently redefined
+by this data-representation cleanup.
+
+Validation: 1996/1996 source tests, built ESM/CJS exports 4/4, both bundles and
+TypeScript declarations pass. Independent 39/39 clinical oracles pass; 181-case
+comparison against the frozen pre-cleanup build has zero changes across 10889
+compared fields. Balanced host measurements are broadly flat with case-specific
+variation: common BID 1.3158->1.3233 ms; eye taper 4.1819->3.8195 ms. A larger
+conjunction recheck measured 3.0969->3.1418 ms and the configured-map variant
+3.2878->3.3774 ms. These are host results, not a universal or mobile speedup claim.
+No push, merge, version change, or package publication.

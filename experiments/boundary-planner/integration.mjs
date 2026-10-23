@@ -22,7 +22,7 @@ export function candidateTransform(source, filename) {
   const file = normalizeCandidateModulePath(filename);
   // Once the audited boundary modules are promoted to src/regimen, the old
   // shadow adapter must not inject a second copy into the production pipeline.
-  if (existsSync(path.join(root, 'src/regimen/candidate-adapter.ts'))) return undefined;
+  if (existsSync(path.join(root, 'src/regimen/planner.ts'))) return undefined;
   if (file === candidateSourcePath('src/index.ts')) {
     source = replace(source,
       'const segments = expandMealDashSegments(parseSigSegments(input, options), options);',

@@ -1,3 +1,4 @@
+import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { ParserState } from '../parser-state';
@@ -224,7 +225,7 @@ export function scopeSequentialPhaseSemantics(
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
     const sharedMethod = edge.relation.semanticLicense === 'target-transition' &&
       sourceMethods[0] &&
-      sourceMethods.every(method => JSON.stringify(method) === JSON.stringify(sourceMethods[0]))
+      sourceMethods.every(method => equalStructuredValues(method, sourceMethods[0]))
       ? sourceMethods[0] : undefined;
 
     for (const index of graph.phases[edge.to].members) {
@@ -234,7 +235,7 @@ export function scopeSequentialPhaseSemantics(
 
       const fields: string[] = [];
       if (sharedMethod && !clause.method) {
-        clause.method = JSON.parse(JSON.stringify(sharedMethod));
+        clause.method = cloneStructuredValue(sharedMethod);
         fields.push('method');
       }
       if (!hasRecurringSchedule(schedule)) {

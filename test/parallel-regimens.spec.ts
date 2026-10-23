@@ -3,7 +3,7 @@ import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, fromFhir, getDosageCondition
 } from "../src";
-import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { createBoundaryPlan } from "../src/regimen/planner";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen

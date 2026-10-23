@@ -1,3 +1,4 @@
+import { equalStructuredValues } from '../stable-structure';
 import {
   selectHpsgCoordinationScopeConstruction,
   selectHpsgTimingAnchorCoordinationConstruction
@@ -151,10 +152,6 @@ function scheduleHasSemantics(schedule: CanonicalScheduleExpr | undefined): bool
   );
 }
 
-function sameSemanticValue(left: unknown, right: unknown): boolean {
-  return left === right || JSON.stringify(left) === JSON.stringify(right);
-}
-
 interface ScheduleMergeResult {
   schedule?: CanonicalScheduleExpr;
   fields: string[];
@@ -191,7 +188,7 @@ function mergeScheduleFeatureGroups(
     if (group === 'recurrence' && donorFields.some(field => {
       const local = scheduleFieldValue(recipient, field);
       return hasSemanticValue(local) &&
-        !sameSemanticValue(local, scheduleFieldValue(donor, field));
+        !equalStructuredValues(local, scheduleFieldValue(donor, field));
     })) continue;
 
     for (const field of donorFields) {
@@ -549,7 +546,7 @@ function sameDose(
 ): boolean {
   if (!left || !right) return left === right;
   return left.value === right.value && left.unit === right.unit &&
-    sameSemanticValue(left.range, right.range);
+    equalStructuredValues(left.range, right.range);
 }
 
 function sameSite(
@@ -563,7 +560,7 @@ function sameSite(
     : normalizedInstructionText(left.text) === normalizedInstructionText(right.text);
   return Boolean(sameIdentity) &&
     left.administrationTargetCount === right.administrationTargetCount &&
-    sameSemanticValue(left.spatialRelation, right.spatialRelation);
+    equalStructuredValues(left.spatialRelation, right.spatialRelation);
 }
 
 function hasOnlyTimingAnchorSemantics(clause: CanonicalSigClause): boolean {
@@ -589,7 +586,7 @@ function sameAnchorScheduleContext(
       if (!sameStringValueSet(left.dayOfWeek, right.dayOfWeek)) return false;
       continue;
     }
-    if (!sameSemanticValue(scheduleFieldValue(left, field), scheduleFieldValue(right, field))) {
+    if (!equalStructuredValues(scheduleFieldValue(left, field), scheduleFieldValue(right, field))) {
       return false;
     }
   }

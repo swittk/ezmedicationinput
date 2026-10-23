@@ -1,3 +1,7 @@
+/** JSON encoding in this module is confined to declared FHIR string payloads
+ * (condition/course/source/display metadata) and their inverse imports.
+ * In-memory projection equality and cloning never serialize data. */
+import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageDetails, FhirR6DosageSafety, FhirR6DoseLimit, MedicationCondition,
@@ -251,6 +255,9 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
       value: value.valueQuantity.value, unit: value.valueQuantity.unit, text: value.text ?? name
     };
   }
+  // Bridge fallback for an unfamiliar condition with no human text: preserve
+  // its actual wire data as the opaque predicate text, not as an equality key.
+  // The original structured R6 condition also remains in the retained course.
   return { kind: "text", text: value.text ?? JSON.stringify(value) };
 }
 
@@ -391,13 +398,13 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     if (!bridged) return true;
     if (!isExactConditionBridge(value)) return true;
     return nativeCondition !== undefined &&
-      !equivalentProjection(comparableJson(bridged), comparableJson(nativeCondition));
+      !equivalentProjection(bridged, nativeCondition);
   });
   const r6Extensions = (extension ?? []).filter(value =>
     !isRenderedInstructionMarker(value));
   if (_sequence !== undefined && (!Number.isInteger(_sequence) || _sequence < 1)) {
     r6Extensions.push({ url: DOSAGE_RETAINED_R5_SEQUENCE_URL,
-      valueString: JSON.stringify(_sequence) });
+      valueString: String(_sequence) });
   }
   return {
     ...rest,
@@ -472,10 +479,6 @@ type ProjectionValue =
   | string | number | boolean | null
   | ProjectionValue[] | { [key: string]: ProjectionValue };
 
-function cloneFhirJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
 function addWarning(warnings: string[], warning: string): void {
   if (warnings.indexOf(warning) < 0) warnings.push(warning);
 }
@@ -500,8 +503,7 @@ function withPreservedSourceExtension(
   extension: FhirExtension | undefined
 ): FhirR6DosageDetails {
   if (!extension) return details;
-  const serialized = JSON.stringify(extension);
-  if (details.extension?.some(value => JSON.stringify(value) === serialized)) return details;
+  if (details.extension?.some(value => equalStructuredValues(value, extension))) return details;
   return { ...details, extension: [...(details.extension ?? []), extension] };
 }
 
@@ -547,16 +549,13 @@ function isDosageDetailsShape(value: unknown): value is FhirR6DosageDetails {
  * add known Coding.system/version metadata where a code was already supplied,
  * and omit optional empty arrays. Neither is an edited medication instruction.
  * Existing system/version values and every clinical field remain significant.
+ * @param original Prior projection, without cloning or normalization.
+ * @param current Editable current projection.
+ * @param context Limits validator-added metadata tolerance to Coding entries.
  */
-function comparableJson(value: object | undefined): ProjectionValue | undefined {
-  // JSON-safe FHIR datatypes have no cyclic references; the clone provides
-  // a typed, plain-object comparison shape without asserting an index signature.
-  return value === undefined ? undefined : cloneFhirJson(value) as ProjectionValue;
-}
-
 function equivalentProjection(
-  original: ProjectionValue | undefined,
-  current: ProjectionValue | undefined,
+  original: unknown,
+  current: unknown,
   context: "general" | "coding-list" | "coding-item" = "general"
 ): boolean {
   if (original === current) return true;
@@ -564,26 +563,36 @@ function equivalentProjection(
     if (!Array.isArray(original) || !Array.isArray(current) ||
         original.length !== current.length) return false;
     const nextContext = context === "coding-list" ? "coding-item" : "general";
-    return original.every((part, i) =>
-      equivalentProjection(part, current[i], nextContext));
+    for (let index = 0; index < original.length; index++) {
+      if (!equivalentProjection(original[index], current[index], nextContext)) return false;
+    }
+    return true;
   }
   if (original === null || current === null ||
-      typeof original !== "object" || typeof current !== "object")
-    return false;
-  const before = original as Record<string, ProjectionValue>;
-  const after = current as Record<string, ProjectionValue>;
+      typeof original !== "object" || typeof current !== "object") return false;
+  const before = original as Record<string, unknown>;
+  const after = current as Record<string, unknown>;
   for (const key of Object.keys(before)) {
-    if (!(key in after)) return false;
-    if (!equivalentProjection(before[key], after[key],
-      key === "coding" ? "coding-list" : "general")) return false;
+    if (isAbsentProjectionField(before[key])) continue;
+    if (!Object.prototype.hasOwnProperty.call(after, key) ||
+        !equivalentProjection(before[key], after[key],
+          key === "coding" ? "coding-list" : "general")) return false;
   }
   for (const key of Object.keys(after)) {
-    if (key in before) continue;
-    if (context === "coding-item" && (key === "system" || key === "version"))
-      continue;
+    if (isAbsentProjectionField(after[key])) continue;
+    if (Object.prototype.hasOwnProperty.call(before, key) &&
+        !isAbsentProjectionField(before[key])) continue;
+    if (context === "coding-item" && (key === "system" || key === "version")) continue;
     return false;
   }
   return true;
+}
+
+/** Optional empty arrays and undefined object fields carry no projection data.
+ * @param value The optional field currently being compared.
+ */
+function isAbsentProjectionField(value: unknown): boolean {
+  return value === undefined || Array.isArray(value) && value.length === 0;
 }
 
 /**
@@ -615,23 +624,6 @@ function liveDosageProjection(
       ? { modifierExtension: modifierExtension.filter(item =>
         item.url !== DOSAGE_DETAILS_R5_URL) } : {})
   };
-}
-
-function comparableLiveDosage(
-  dosage: FhirDosage | EzDosage,
-  includeText = true
-): string {
-  const clean = (value: object | number | boolean | string | null | undefined): object | number | boolean | string | null | undefined => {
-    if (Array.isArray(value)) return value.length ? value.map(clean) : undefined;
-    if (value === null || typeof value !== "object") return value;
-    const next: Record<string, object | number | boolean | string | null | undefined> = {};
-    for (const key of Object.keys(value).sort()) {
-      const entry = clean((value as Record<string, object | number | boolean | string | null | undefined>)[key]);
-      if (entry !== undefined) next[key] = entry;
-    }
-    return next;
-  };
-  return JSON.stringify(clean(liveDosageProjection(dosage, includeText)));
 }
 
 /** A compact, deterministic identity for one JSON-safe projection. Keeping the
@@ -801,8 +793,8 @@ function retainDoseExpressions(
     if (old.doseExpression) {
       const conflictsWithLiveDose = current.doseQuantity !== undefined ||
         current.doseRange !== undefined || current.doseExpression !== undefined &&
-        !equivalentProjection(comparableJson(current.doseExpression),
-          comparableJson(old.doseExpression));
+        !equivalentProjection(current.doseExpression,
+          old.doseExpression);
       if (conflictsWithLiveDose) detached.doseExpression = old.doseExpression;
       else if (!current.doseExpression) current.doseExpression = old.doseExpression;
     }
@@ -810,8 +802,8 @@ function retainDoseExpressions(
       const conflictsWithLiveRate = current.rateQuantity !== undefined ||
         current.rateRange !== undefined || current.rateRatio !== undefined ||
         current.rateExpression !== undefined &&
-        !equivalentProjection(comparableJson(current.rateExpression),
-          comparableJson(old.rateExpression));
+        !equivalentProjection(current.rateExpression,
+          old.rateExpression);
       if (conflictsWithLiveRate) detached.rateExpression = old.rateExpression;
       else if (!current.rateExpression) current.rateExpression = old.rateExpression;
     }
@@ -884,10 +876,10 @@ function reconcileRetainedCourse(
     const live = groups.get(index + 1) ?? [];
     if (live.length !== step.component.length) return true;
     const originals = step.component.map(component =>
-      JSON.parse(comparableLiveDosage(fromR6Dosage(component, index + 1))) as ProjectionValue);
+      liveDosageProjection(fromR6Dosage(component, index + 1)));
     const used = new Set<number>();
     return live.some(dosage => {
-      const current = JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue;
+      const current = liveDosageProjection(dosage);
       const match = originals.findIndex((original, candidate) =>
         !used.has(candidate) && equivalentProjection(original, current));
       if (match < 0) return true;
@@ -910,15 +902,15 @@ function reconcileRetainedCourse(
   let structuredChanged = Boolean(
     course?.id !== undefined && course.id !== retained.id ||
     course?.extension !== undefined && !equivalentProjection(
-      comparableJson({ extension: retained.extension }),
-      comparableJson({ extension: course.extension })) ||
+      { extension: retained.extension },
+      { extension: course.extension }) ||
     course?.modifierExtension !== undefined && !equivalentProjection(
-      comparableJson({ modifierExtension: retained.modifierExtension }),
-      comparableJson({ modifierExtension: course.modifierExtension })) ||
+      { modifierExtension: retained.modifierExtension },
+      { modifierExtension: course.modifierExtension }) ||
     course?.repeatCycle !== undefined && !equivalentProjection(
-      comparableJson(retained.repeatCycle), comparableJson(course.repeatCycle)) ||
+      retained.repeatCycle, course.repeatCycle) ||
     course?.safety !== undefined && !equivalentProjection(
-      comparableJson(retained.safety), comparableJson(course.safety))
+      retained.safety, course.safety)
   );
   const steps: FhirR6DosageDetails["step"] = [];
   for (const sequence of sequences) {
@@ -936,7 +928,7 @@ function reconcileRetainedCourse(
     }
     const { component: _retainedComponents, ...retainedStepFields } = step;
     if (editedStep && !equivalentProjection(
-      comparableJson(retainedStepFields), comparableJson(editedStepFields))) {
+      retainedStepFields, editedStepFields)) {
       structuredChanged = true;
     }
     const componentCountChanged = live.length !== step.component.length;
@@ -948,7 +940,7 @@ function reconcileRetainedCourse(
     // position to a changed row. A swapped-and-edited dosage must not claim
     // the original slot of an unedited dosage that appears later.
     const originalProjections = step.component.map(component =>
-      JSON.parse(comparableLiveDosage(fromR6Dosage(component, sequence))) as ProjectionValue);
+      liveDosageProjection(fromR6Dosage(component, sequence)));
     const assigned: number[] = live.map(() => -1);
     const usedOriginalIndices = new Set<number>();
     const originalIdCounts = new Map<string, number>();
@@ -971,7 +963,7 @@ function reconcileRetainedCourse(
     }
     for (let j = 0; j < live.length; j++) {
       if (assigned[j] >= 0) continue;
-      const current = JSON.parse(comparableLiveDosage(live[j])) as ProjectionValue;
+      const current = liveDosageProjection(live[j]);
       const exact = originalProjections.findIndex((projection, candidate) =>
         !usedOriginalIndices.has(candidate) &&
         equivalentProjection(projection, current));
@@ -982,11 +974,11 @@ function reconcileRetainedCourse(
     }
     for (let j = 0; j < live.length; j++) {
       if (assigned[j] >= 0 || !live[j].site) continue;
-      const currentSite = comparableJson(live[j].site);
+      const currentSite = live[j].site;
       const matches = step.component.map((component, index) => ({ component, index }))
         .filter(({ component, index }) => !usedOriginalIndices.has(index) &&
           component.site?.concept &&
-          equivalentProjection(currentSite, comparableJson(component.site.concept)));
+          equivalentProjection(currentSite, component.site.concept));
       if (matches.length === 1) {
         assigned[j] = matches[0].index;
         usedOriginalIndices.add(matches[0].index);
@@ -1010,21 +1002,21 @@ function reconcileRetainedCourse(
       const old = oldIndex >= 0 ? step.component[oldIndex] : undefined;
       const baseline = old ? fromR6Dosage(old, sequence) : undefined;
       const rawEqual = old !== undefined && baseline !== undefined &&
-        equivalentProjection(JSON.parse(comparableLiveDosage(baseline)),
-          JSON.parse(comparableLiveDosage(dosage)));
+        equivalentProjection(liveDosageProjection(baseline),
+          liveDosageProjection(dosage));
       const expanded = dosage as EzDosage;
       const datesEqual = old !== undefined &&
-        JSON.stringify(getDosageExcludedDates(dosage)) ===
-        JSON.stringify(getDosageExcludedDates(fromR6Dosage(old, sequence)));
+        equalStructuredValues(getDosageExcludedDates(dosage),
+          getDosageExcludedDates(baseline!));
       const conditionsEqual = expanded.condition === undefined || old !== undefined &&
-        equivalentProjection(comparableJson(old.condition),
-          comparableJson(expanded.condition));
+        equivalentProjection(old.condition,
+          expanded.condition);
       const safetyEqual = expanded.safety === undefined || old !== undefined &&
-        equivalentProjection(comparableJson(old.safety),
-          comparableJson(expanded.safety));
+        equivalentProjection(old.safety,
+          expanded.safety);
       const referenceEqual = expanded.siteReference === undefined || old !== undefined &&
-        equivalentProjection(comparableJson(old.site?.reference),
-          comparableJson(expanded.siteReference));
+        equivalentProjection(old.site?.reference,
+          expanded.siteReference);
       if (!rawEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual)
         structuredChanged = true;
       if (old && rawEqual && datesEqual &&
@@ -1040,21 +1032,21 @@ function reconcileRetainedCourse(
         if (old.doseAndRate?.some(entry => entry.doseExpression || entry.rateExpression))
           fresh.doseAndRate = retainDoseExpressions(old.doseAndRate, fresh.doseAndRate, warnings);
         if (old.site?.reference && !expanded.siteReference &&
-            equivalentProjection(JSON.parse(comparableLiveDosage({ site: baseline.site })),
-              JSON.parse(comparableLiveDosage({ site: dosage.site })))) {
+            equivalentProjection(liveDosageProjection({ site: baseline.site }),
+              liveDosageProjection({ site: dosage.site }))) {
           fresh.site = { ...(fresh.site ?? {}), reference: old.site.reference };
         }
         const maximaUnchanged = equivalentProjection(
-          JSON.parse(comparableLiveDosage({
+          liveDosageProjection({
             maxDosePerPeriod: baseline.maxDosePerPeriod,
             maxDosePerAdministration: baseline.maxDosePerAdministration,
             maxDosePerLifetime: baseline.maxDosePerLifetime
-          })),
-          JSON.parse(comparableLiveDosage({
+          }),
+          liveDosageProjection({
             maxDosePerPeriod: dosage.maxDosePerPeriod,
             maxDosePerAdministration: dosage.maxDosePerAdministration,
             maxDosePerLifetime: dosage.maxDosePerLifetime
-          })));
+          }));
         if (old.safety && expanded.safety === undefined) {
           fresh.safety = maximaUnchanged
             ? old.safety
@@ -1065,7 +1057,7 @@ function reconcileRetainedCourse(
           const hasLiveBridge = dosage.modifierExtension?.some(extension =>
             extension.url === DOSAGE_CONDITION_R5_URL);
           if (hasLiveBridge && (liveCondition === undefined || equivalentProjection(
-            comparableJson(liveCondition), comparableJson(parseDosageCondition(baseline))))) {
+            liveCondition, parseDosageCondition(baseline)))) {
             fresh.condition = old.condition;
           }
         }
@@ -1204,7 +1196,7 @@ export function toDosageDetails(
     : undefined;
   const legacyInstructionStillMatches = originalProjected !== undefined &&
     equivalentProjection(originalProjected, dosages.map(dosage =>
-      JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue));
+      liveDosageProjection(dosage)));
   const compactProjectionStillMatches = hasCompactBaseline &&
     savedProjectionFingerprints!.length === currentProjectionFingerprints!.length &&
     savedProjectionFingerprints!.every((value, index) =>
@@ -1238,9 +1230,9 @@ export function toDosageDetails(
     addWarning(warnings,
       "Structured dosage fields changed; the previous rendered instruction was retained only as source provenance.");
   }
-  const withoutText = (value: ProjectionValue | undefined): ProjectionValue | undefined => {
+  const withoutText = (value: unknown): unknown => {
     if (!value || Array.isArray(value) || typeof value !== "object") return value;
-    const { text: _ignored, ...rest } = value;
+    const { text: _ignored, ...rest } = value as Record<string, unknown>;
     return rest;
   };
   const effectiveDosages = hasInstructionBaseline && !instructionStillMatches
@@ -1252,7 +1244,7 @@ export function toDosageDetails(
       const legacyTextUnchanged = oldText !== undefined && oldText === dosage.text;
       const legacyStructureChanged = prior !== undefined && !equivalentProjection(
         withoutText(prior),
-        withoutText(JSON.parse(comparableLiveDosage(dosage)) as ProjectionValue)
+        withoutText(liveDosageProjection(dosage))
       );
       const compactTextUnchanged = hasCompactBaseline &&
         savedTextFingerprints![index] === currentTextFingerprints![index];
@@ -1399,7 +1391,7 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
     for (const component of step.component) {
       const r5 = fromR6Dosage(component, sequence);
       const dates = getDosageExcludedDates(r5);
-      dosages.push(cloneFhirJson({
+      dosages.push(cloneStructuredValue({
         ...r5,
         ...(component.doseAndRate ? { doseAndRate: component.doseAndRate } : {}),
         ...(component.condition?.length ? { condition: component.condition } : {}),
@@ -1425,7 +1417,7 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
         extension.url === DOSAGE_DETAILS_R5_URL && extension.extension?.some(child =>
           child.url === "dosageDetails" && child.valueString === serialized))
         ? existing
-        : [...existing, cloneFhirJson(retainedCourse)];
+        : [...existing, cloneStructuredValue(retainedCourse)];
     }
   }
   return {
@@ -1456,7 +1448,7 @@ export function toFhirR5Dosages(
     for (const component of details.step[index].component) {
       // Public rows must be independently editable even when a caller's R6
       // course reuses the same nested object across several stages.
-      result.push(cloneFhirJson(fromR6Dosage(component, index + 1)));
+      result.push(cloneStructuredValue(fromR6Dosage(component, index + 1)));
     }
   }
   // The rendered whole-course instruction is display information, not
@@ -1476,7 +1468,7 @@ export function toFhirR5Dosages(
           // This is a display-text fingerprint only. When a clinician edits
           // the live dosage, the stored instruction must not override it.
           { url: "projection", valueString: JSON.stringify(result.map(dosage =>
-            JSON.parse(comparableLiveDosage(dosage)))) }
+            liveDosageProjection(dosage))) }
         ]
       }
     ];
@@ -1515,7 +1507,7 @@ export function toFhirR5Dosages(
           child.url === "dosageDetails" &&
           child.valueString === retainedCourse.extension[0].valueString))
         ? existing
-        : [...existing, cloneFhirJson(retainedCourse)];
+        : [...existing, cloneStructuredValue(retainedCourse)];
     }
   }
   return result;

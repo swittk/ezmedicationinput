@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig } from "../src/index";
 import { parseClauseState } from "../src/parser";
-import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 

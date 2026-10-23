@@ -9,7 +9,7 @@ import {
   parseClauseState
 } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
-import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/candidate-adapter';
+import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
 import type { BoundaryPlan } from '../src/regimen/types';
 import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/regimen/types';

@@ -14,7 +14,7 @@ import {
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
-import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
+import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
   buildRegimenGraph, regimenMemberSequences,
   scopeSequentialPhaseSemantics, type RegimenGraph

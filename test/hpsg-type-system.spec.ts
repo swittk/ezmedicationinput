@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as structuredValues from "../src/stable-structure";
+import { parseHpsgChart } from "../src/hpsg/chart";
 import {
   HPSG_TYPE_SYSTEM,
   HpsgTypeSystem,
@@ -13,7 +15,7 @@ import { selectHpsgConstruction } from "../src/hpsg/constructions";
 import { lexicalSign } from "../src/hpsg/signature";
 import { tokenize, parseClauseState } from "../src/parser";
 import { applyCoordinatedCadenceScopes } from "../src/regimen/coordination-scope";
-import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { createBoundaryPlan } from "../src/regimen/planner";
 import { ParserState } from "../src/parser-state";
 import { findMedicationDateListSpans } from "../src/date-interpretation";
 import {
@@ -276,4 +278,60 @@ describe("typed coordination ignores diagnostic prose", () => {
       expect(states[1].state.warnings).toContain(warning);
     }
   );
+});
+
+
+describe("HPSG structural equality hygiene", () => {
+  it("unifies equal structured atoms regardless of property order, without serialization", () => {
+    const left = featureAtom({ code: "x", coding: { system: "urn:test", display: "Apply" } }, "json");
+    const right = featureAtom({ coding: { display: "Apply", system: "urn:test" }, code: "x" }, "json");
+    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("grammar must stay structured"); });
+    let result: ReturnType<typeof unifyFeatureStructures>;
+    try {
+      result = unifyFeatureStructures(left, right, HPSG_TYPE_SYSTEM);
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(result!.value).toBeDefined();
+    expect(result!.issues).toEqual([]);
+    expect(unifyFeatureStructures(left, featureAtom({ code: "different" }, "json"), HPSG_TYPE_SYSTEM).value)
+      .toBeUndefined();
+  });
+
+  it("does not serialize ordinary typed clause parsing", () => {
+    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("grammar must stay structured"); });
+    let state: ReturnType<typeof parseClauseState>;
+    try {
+      state = parseClauseState("instill 1 drop OD QID");
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(state!.primaryClause.dose?.value).toBe(1);
+    expect(state!.primaryClause.schedule?.frequency).toBe(4);
+  });
+
+  it("keeps distinct doses on a hash collision while packing equivalent derivations", () => {
+    const tokens = tokenize("1 tab");
+    const one = lexicalSign({ type: "dose-sign", rule: "test.dose.one", tokens,
+      synsem: { head: { dose: { value: 1, unit: "tab" } }, valence: {}, cont: {} } });
+    const two = lexicalSign({ type: "dose-sign", rule: "test.dose.two", tokens,
+      synsem: { head: { dose: { value: 2, unit: "tab" } }, valence: {}, cont: {} } });
+    const equivalent = lexicalSign({ type: "dose-sign", rule: "test.dose.reordered", tokens, score: 10,
+      synsem: { cont: {}, valence: {}, head: { dose: { unit: "tab", value: 1 } } } });
+    const hash = vi.spyOn(structuredValues, "hashStructuredValue").mockReturnValue(7);
+    let result: ReturnType<typeof parseHpsgChart>;
+    try {
+      result = parseHpsgChart({ tokens }, {
+        lexicalRules: [{ id: "test.doses", type: "dose-sign", match: (_context, start) =>
+          start === 0 ? [one, two, equivalent] : [] }],
+        phraseRules: []
+      });
+    } finally {
+      hash.mockRestore();
+    }
+    expect(result!.signs).toHaveLength(2);
+    expect(result!.signs.map(sign => sign.synsem.head.dose?.value).sort()).toEqual([1, 2]);
+    expect(result!.signs).toContain(equivalent);
+    expect(result!.signs).not.toContain(one);
+  });
 });

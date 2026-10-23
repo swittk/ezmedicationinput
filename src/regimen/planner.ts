@@ -87,7 +87,12 @@ export function takeBoundaryParsedState(
   return contexts.get(plan)?.takeParsedState(start, end, text);
 }
 
-/** Experimental boundary grammar; deliberately not exported by the package or used by production. */
+/** Production boundary grammar: lexical candidates are arbitrated using typed
+ * constituent ownership before final clause parsing.
+ * @param input Original clinician instruction.
+ * @param options Terminology and interpretation context.
+ * @param experiment Optional diagnostic switches used by the comparison harness.
+ */
 export function planBoundaries(input: string, options?: ParseOptions, experiment: PlannerOptions = {}): BoundaryPlan {
   const tokens = annotateLexTokens(lexInput(input));
   const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0,
@@ -345,7 +350,10 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   return plan;
 }
 
-/** Adapter used ONLY by the experiment's module substitution, never production. */
+/** Return the segment view of the production boundary plan. */
 export function parseSigSegments(input: string, options?: ParseOptions): HpsgSigSegment[] {
   return planBoundaries(input, options).segments;
 }
+
+/** The public parse pipelines use the production planner directly. */
+export { planBoundaries as createBoundaryPlan };
