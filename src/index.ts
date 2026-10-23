@@ -1,12 +1,14 @@
 import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getDosageCondition, getDosageExcludedDates,
-  getDosageExcludedWeekdays, getUnresolvedDosage
+  getDosageExcludedWeekdays, getUnresolvedDosage,
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
 } from "./dosage-course";
 import { applyClinicalConstraints } from "./clinical-safety";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import { applyCoordinatedCadenceScopes } from "./regimen/coordination-scope";
+import type { CoordinationScopeApplication } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
@@ -51,6 +53,7 @@ import {
   ParseBatchSegmentMeta,
   ParseOptions,
   ParseResult,
+  MedicationCondition,
   CanonicalSigClause,
   TextRange
 } from "./types";
@@ -1068,9 +1071,9 @@ function scopeCoordinatedSegmentStates(
   boundaryPlan: BoundaryPlan,
   segments: ReturnType<typeof parseSigSegments>,
   input: string
-): void {
-  if (!boundaryPlan.relations.length) return;
-  applyCoordinatedCadenceScopes(
+): CoordinationScopeApplication[] {
+  if (!boundaryPlan.relations.length) return [];
+  return applyCoordinatedCadenceScopes(
     states.map((state, index) => ({
       state,
       start: segments[index].start,
@@ -1079,6 +1082,108 @@ function scopeCoordinatedSegmentStates(
     boundaryPlan,
     input
   );
+}
+
+
+function propagateCoordinatedSharedConstraints(
+  results: ParseResult[],
+  applications: readonly CoordinationScopeApplication[],
+  options?: ParseOptions
+): void {
+  if (!applications.length || results.length < 2) return;
+  const outgoing = new Map<number, CoordinationScopeApplication[]>();
+  for (const application of applications) {
+    const list = outgoing.get(application.from);
+    if (list) list.push(application);
+    else outgoing.set(application.from, [application]);
+  }
+
+  for (let sourceIndex = 0; sourceIndex < results.length; sourceIndex++) {
+    const source = results[sourceIndex];
+    const condition = getDosageCondition(source.fhir);
+    const excludedDates = getDosageExcludedDates(source.fhir);
+    const excludedWeekdays = getDosageExcludedWeekdays(source.fhir);
+    if (!condition && !excludedDates.length && !excludedWeekdays.length) continue;
+
+    const queue = [sourceIndex];
+    const visited = new Set<number>([sourceIndex]);
+    while (queue.length) {
+      const from = queue.shift()!;
+      for (const application of outgoing.get(from) ?? []) {
+        const targetIndex = application.to;
+        if (visited.has(targetIndex)) continue;
+        const target = results[targetIndex];
+        let propagated = false;
+
+        if (condition && application.fields.indexOf("prn") >= 0 &&
+            !getDosageCondition(target.fhir)) {
+          setDosageCondition(target.fhir, condition);
+          delete target.fhir.asNeeded;
+          delete target.fhir.asNeededFor;
+          for (const clause of target.meta.canonical.clauses) delete clause.prn;
+          propagated = true;
+        }
+
+        if (excludedWeekdays.length && application.fields.indexOf("dayOfWeek") >= 0) {
+          const mergedExcluded = [...new Set([
+            ...getDosageExcludedWeekdays(target.fhir),
+            ...excludedWeekdays
+          ])];
+          setDosageExcludedWeekdays(target.fhir, mergedExcluded);
+          const donorDays = source.fhir.timing?.repeat?.dayOfWeek;
+          if (donorDays?.length && target.fhir.timing?.repeat) {
+            // application.fields contains dayOfWeek only when this target
+            // inherited that field from the trailing donor. Replace the
+            // pre-lowering raw exclusion weekday with the donor's final
+            // allowed-weekday set.
+            target.fhir.timing.repeat.dayOfWeek = [...donorDays];
+          }
+          const donorCanonicalDays = source.meta.canonical.clauses[0]?.schedule?.dayOfWeek;
+          for (const clause of target.meta.canonical.clauses) {
+            if (donorCanonicalDays?.length && clause.schedule) {
+              clause.schedule.dayOfWeek = [...donorCanonicalDays];
+            }
+          }
+          propagated = true;
+        }
+
+        if (excludedDates.length && application.fields.indexOf("calendarEvents") >= 0) {
+          setDosageExcludedDates(target.fhir, [...new Set([
+            ...getDosageExcludedDates(target.fhir),
+            ...excludedDates
+          ])]);
+          const donorEvents = source.fhir.timing?.event;
+          if (target.fhir.timing) {
+            target.fhir.timing.event = donorEvents?.length ? [...donorEvents] : undefined;
+            target.fhir.timing._event = source.fhir.timing?._event?.length
+              ? source.fhir.timing._event.map(event => ({ ...event }))
+              : undefined;
+          }
+          const donorCanonicalEvents =
+            source.meta.canonical.clauses[0]?.schedule?.calendarEvents;
+          for (const clause of target.meta.canonical.clauses) {
+            if (clause.schedule) {
+              clause.schedule.calendarEvents = donorCanonicalEvents?.length
+                ? donorCanonicalEvents.map(event => ({ ...event }))
+                : undefined;
+            }
+          }
+          propagated = true;
+        }
+
+        if (!propagated) continue;
+        // The target text may have been generated before the shared condition
+        // or exclusion was lowered. Regenerate from the live structured fields;
+        // exact source remains in canonical/raw and instruction-graph provenance.
+        target.fhir.text = undefined;
+        target.longText = formatSig(target.fhir, "long", options);
+        target.shortText = formatSig(target.fhir, "short", options);
+        target.fhir.text = target.longText;
+        visited.add(targetIndex);
+        queue.push(targetIndex);
+      }
+    }
+  }
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
@@ -1091,7 +1196,9 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyInstructionSemanticResolvers(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const coordinationApplications = scopeCoordinatedSegmentStates(
+    states, boundaryPlan, segments, input
+  );
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1107,6 +1214,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
+  propagateCoordinatedSharedConstraints(rawResults, coordinationApplications, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1127,7 +1235,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     applySiteCoding(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const coordinationApplications = scopeCoordinatedSegmentStates(
+    states, boundaryPlan, segments, input
+  );
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1176,6 +1286,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       });
     }
   }
+  propagateCoordinatedSharedConstraints(
+    lintParseResults, coordinationApplications, options
+  );
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
   for (const entry of expandedLintResults) {
     for (const warning of entry.result.warnings) {
@@ -1227,7 +1340,9 @@ export async function parseSigAsync(
     await applyInstructionSemanticResolversAsync(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  const coordinationApplications = scopeCoordinatedSegmentStates(
+    states, boundaryPlan, segments, input
+  );
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1243,6 +1358,7 @@ export async function parseSigAsync(
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
+  propagateCoordinatedSharedConstraints(rawResults, coordinationApplications, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1252,6 +1368,72 @@ export async function parseSigAsync(
 
   return buildWholeCourseResult(input, results, primary, segments, options,
     parallel.kind === "resolved" ? parallel : undefined);
+}
+
+
+function medicationConditionBody(
+  condition: MedicationCondition,
+  locale?: string
+): string {
+  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
+  switch (condition.kind) {
+    case "measurement": {
+      if (condition.text?.trim()) return condition.text.trim();
+      const operator = {
+        gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!="
+      }[condition.operation];
+      return condition.name + " " + operator + " " + condition.value +
+        (condition.unit ? " " + condition.unit : "");
+    }
+    case "state":
+      if (condition.text?.trim()) return condition.text.trim();
+      return condition.expected
+        ? condition.name
+        : (thai ? "ไม่ " : "not ") + condition.name;
+    case "text":
+      return condition.text;
+    case "not":
+      return medicationConditionBody(condition.condition, locale);
+    case "all":
+      return condition.conditions
+        .map(value => medicationConditionBody(value, locale))
+        .join(thai ? " และ " : " and ");
+    case "any":
+      return condition.conditions
+        .map(value => medicationConditionBody(value, locale))
+        .join(thai ? " หรือ " : " or ");
+  }
+}
+
+function appendMedicationExcludedDatesText(
+  text: string,
+  dates: readonly string[],
+  options?: FormatOptions
+): string {
+  if (!dates.length) return text;
+  const thai = (options?.locale ?? "").toLowerCase().indexOf("th") === 0;
+  const trimmed = text.trim().replace(/[.!?]+$/u, "");
+  const lead = thai ? "ยกเว้นวันที่" : "except";
+  const separator = thai ? " และ " : " and ";
+  return (trimmed ? trimmed + " " : "") + lead + " " +
+    dates.join(separator) + ".";
+}
+
+function appendMedicationConditionText(
+  text: string,
+  condition: MedicationCondition,
+  options?: FormatOptions
+): string {
+  const locale = options?.locale;
+  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
+  const body = condition.kind === "not"
+    ? medicationConditionBody(condition.condition, locale)
+    : medicationConditionBody(condition, locale);
+  const lead = condition.kind === "not"
+    ? (thai ? "เว้นแต่" : "unless")
+    : (thai ? "เฉพาะเมื่อ" : "only if");
+  const trimmed = text.trim().replace(/[.!?]+$/u, "");
+  return (trimmed ? trimmed + " " : "") + lead + " " + body + ".";
 }
 
 export function formatSig(
@@ -1297,11 +1479,19 @@ export function formatSig(
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
+  let displayCondition = dosage.condition?.length
+    ? getDosageCondition(dosage)
+    : undefined;
+  let displayExcludedDates = dosage.excludedDates?.length
+    ? [...dosage.excludedDates]
+    : [];
   let hasDisplayRelevantModifier = false;
   if (hasModifiers) {
     try {
-      hasDisplayRelevantModifier = getDosageCondition(dosage) !== undefined ||
-        getDosageExcludedDates(dosage).length > 0 ||
+      if (!displayCondition) displayCondition = getDosageCondition(dosage);
+      displayExcludedDates = getDosageExcludedDates(dosage);
+      hasDisplayRelevantModifier = displayCondition !== undefined ||
+        displayExcludedDates.length > 0 ||
         getUnresolvedDosage(dosage) !== undefined;
     } catch (error) {
       if (!isUninterpretableModifier(error)) throw error;
@@ -1337,7 +1527,14 @@ export function formatSig(
   )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  return formatCanonicalClause(clause, style, localization, options);
+  const rendered = formatCanonicalClause(clause, style, localization, options);
+  let displayed = displayCondition
+    ? appendMedicationConditionText(rendered, displayCondition, options)
+    : rendered;
+  if (displayExcludedDates.length) {
+    displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
+  }
+  return displayed;
 }
 
 export function formatSigBatch(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calculateTotalUnits, getDosageCondition, getDosageExcludedWeekdays,
+  calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
   lintSig, nextDueDoses
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
@@ -169,11 +169,11 @@ describe('HPSG coordination cadence scope', () => {
     ['instill 1 drop in left eye once daily and 2 drops in right eye twice daily unless BP < 100',
       [1, 2], 'condition', 'lt', 100],
     ['instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday',
-      [undefined, 2], 'exclusion', undefined, undefined],
+      [2, 2], 'exclusion', undefined, undefined],
     ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily only if BP > 160',
       [2, 2, 2], 'condition', 'gt', 160],
     ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily except Sunday',
-      [undefined, undefined, 2], 'exclusion', undefined, undefined]
+      [2, 2, 2], 'exclusion', undefined, undefined]
   ] as const)('keeps locally parsed cadence and an editable trailing guard/exclusion: %s', async (
     input, expectedFrequencies, guardKind, operation, value
   ) => {
@@ -192,29 +192,58 @@ describe('HPSG coordination cadence scope', () => {
         .toEqual(expectedItems === 3 ? [1, 2, 1] : [1, 2]);
       expect(result.items.map(item => item.fhir.timing?.repeat?.frequency))
         .toEqual(expectedFrequencies);
-      const guarded = result.items.at(-1)!;
       if (guardKind === 'condition') {
-        const condition = getDosageCondition(guarded.fhir);
-        if (input.includes('unless')) {
-          expect(condition).toMatchObject({
-            kind: 'not',
-            condition: { kind: 'measurement', name: 'bp', operation, value }
-          });
-        } else {
-          expect(condition).toMatchObject({
-            kind: 'measurement', name: 'bp', operation, value
-          });
+        const guardedItems = input.includes('unless')
+          ? [result.items.at(-1)!]
+          : result.items;
+        for (const item of guardedItems) {
+          const condition = getDosageCondition(item.fhir);
+          if (input.includes('unless')) {
+            expect(condition).toMatchObject({
+              kind: 'not',
+              condition: { kind: 'measurement', name: 'bp', operation, value }
+            });
+          } else {
+            expect(condition).toMatchObject({
+              kind: 'measurement', name: 'bp', operation, value
+            });
+          }
+          expect(item.fhir.asNeeded).toBeUndefined();
+          expect(item.fhir.text).toMatch(/(?:only if|unless) BP/u);
         }
-        expect(guarded.fhir.text).toMatch(/(?:only if|unless) BP/u);
+        if (input.includes('unless')) {
+          expect(getDosageCondition(result.items[0].fhir)).toBeUndefined();
+        }
       } else {
-        expect(getDosageExcludedWeekdays(guarded.fhir)).toEqual(['sun']);
-        expect(guarded.fhir.timing?.repeat?.dayOfWeek)
-          .toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
-        expect(guarded.fhir.text).toContain('except Sunday');
+        for (const item of result.items) {
+          expect(getDosageExcludedWeekdays(item.fhir)).toEqual(['sun']);
+          expect(item.fhir.timing?.repeat?.dayOfWeek)
+            .toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+        }
       }
       expect(result.items.every(item => item.warnings.length === 0)).toBe(true);
     }
     expect(linted.issues).toEqual([]);
+  });
+
+  it("shares a trailing explicit-date exclusion across coordinated doses", async () => {
+    const input =
+      "instill 1 drop in left eye and 2 drops in right eye twice daily except 2026-11-01";
+    const sync = parseSig(input);
+    const asyncParsed = await parseSigAsync(input);
+    for (const result of [sync, asyncParsed]) {
+      expect(result.items.map(item => item.fhir.site?.text))
+        .toEqual(["left eye", "right eye"]);
+      expect(result.items.map(item => item.fhir.timing?.repeat?.frequency))
+        .toEqual([2, 2]);
+      for (const item of result.items) {
+        expect(getDosageExcludedDates(item.fhir)).toEqual(["2026-11-01"]);
+        expect(item.fhir.timing?.event).toBeUndefined();
+        expect(item.fhir.text).toContain("except 2026-11-01");
+      }
+      expect(result.items.every(item => item.warnings.length === 0)).toBe(true);
+    }
+    expect(lintSig(input).issues).toEqual([]);
   });
 
   it.each([

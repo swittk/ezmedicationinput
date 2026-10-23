@@ -340,7 +340,12 @@ function factsFor(
     leftHasFrontedPrn: isFrontedEvidence(leftClause, 'hpsg.lex.prn'),
     rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'hpsg.lex.schedule.'),
     rightHasTrailingPrn: isTrailingEvidence(rightClause, 'hpsg.lex.prn'),
-    rightHasTrailingSafetyGuard: false,
+    rightHasTrailingSafetyGuard: Boolean(
+      rightClause.prn?.enabled === true ||
+      ((rightClause.leftovers?.length ?? 0) > 0 &&
+       ((rightClause.schedule?.dayOfWeek?.length ?? 0) > 0 ||
+        (rightClause.schedule?.calendarEvents?.length ?? 0) > 0))
+    ),
     rightHasCadenceConflict: hasCadenceConflict(right.state)
   };
 }

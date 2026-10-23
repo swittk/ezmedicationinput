@@ -67,7 +67,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
 }, {
   id: 'hpsg.cx.coordination.ambiguous-shared-guard',
   priority: 925,
-  operation: 'preserve-ambiguous-shared-guard',
+  operation: 'share-trailing-adjuncts',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
     semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
