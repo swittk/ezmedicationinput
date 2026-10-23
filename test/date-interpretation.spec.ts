@@ -745,22 +745,27 @@ describe("calendar date interpretation", () => {
     ]);
   });
 
-  it("keeps distant YMD text editable outside a Thai Buddhist context", () => {
+  it("uses a plausible Buddhist YMD year even when the surrounding SIG is English", () => {
     const options = { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } };
-    for (const input of [
-      "take 1 tab daily until 2569-11-01",
-      "take 1 tab daily from 2400-01-01"
-    ]) {
-      const parsed = parseSig(input, options);
-      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
-      expect(parsed.fhir.timing?.repeat).toMatchObject({
-        frequency: 1, period: 1, periodUnit: "d"
-      });
-      expect(parsed.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
-      expect(parsed.fhir.text).toContain(input.match(/\d{4}-\d{2}-\d{2}/u)![0]);
-      expect(findMedicationDateListSpans(input, options))
-        .toContainEqual(expect.objectContaining({ unresolved: true }));
-    }
+    const buddhist = parseSig("take 1 tab daily until 2569-11-01", options);
+    expect(buddhist.fhir.timing?.repeat).toMatchObject({
+      boundsPeriod: { end: "2026-11-01" }, frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(findMedicationDateListSpans("take 1 tab daily until 2569-11-01", options))
+      .toContainEqual(expect.objectContaining({
+        unresolved: false,
+        events: [expect.objectContaining({
+          isoDate: "2026-11-01", calendar: "buddhist", calendarYear: 2569
+        })]
+      }));
+
+    const distant = parseSig("take 1 tab daily from 2400-01-01", options);
+    expect(distant.fhir.timing?.repeat).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(distant.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
+    expect(findMedicationDateListSpans("take 1 tab daily from 2400-01-01", options))
+      .toContainEqual(expect.objectContaining({ unresolved: true }));
   });
 
   it("preserves intentional Gregorian and Buddhist calendar semantics", () => {

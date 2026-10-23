@@ -539,7 +539,29 @@ function sameMergeableSharedRepeat(
  * @returns `true` when both items differ only by timing anchors and any
  * shared duration/bounds fields are identical.
  */
+function hasPinnedDosageTextSemantics(dosage: FhirDosage): boolean {
+  const expanded = dosage as EzDosage;
+  const quantity = expanded.doseAndRate?.[0];
+  return hasMaximumDoseForDisplay(dosage) ||
+    Boolean(
+      quantity?.rateQuantity || quantity?.rateRatio || quantity?.rateRange ||
+      quantity?.doseExpression || quantity?.rateExpression ||
+      (quantity?.doseQuantity?.unit !== undefined &&
+        quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
+      expanded.condition?.length || expanded.safety || expanded.siteReference ||
+      expanded.excludedDates?.length ||
+      getDosageCondition(dosage) !== undefined ||
+      getDosageExcludedDates(dosage).length > 0 ||
+      getUnresolvedDosage(dosage) !== undefined ||
+      getDosageExcludedWeekdays(dosage).length > 0
+    );
+}
+
 function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
+  if (hasPinnedDosageTextSemantics(base.fhir) ||
+      hasPinnedDosageTextSemantics(next.fhir)) {
+    return false;
+  }
   const baseTiming = base.fhir.timing;
   const nextTiming = next.fhir.timing;
   const baseRepeat = baseTiming?.repeat;

@@ -3069,7 +3069,26 @@ function calculationHorizon(options: TotalUnitsOptions, zone: string): Date {
   if (!advance) throw new MedicationQuantityCalculationError("unsupported-horizon",
     "The requested dispensing duration has no supported time unit; supply a duration in minutes, hours, days, weeks, months or years.");
   const from = coerceDate(options.from, "from");
-  const end = advance(from);
+  let end: Date | null;
+  if ((options.durationUnit === FhirPeriodUnit.Day ||
+       options.durationUnit === FhirPeriodUnit.Week) &&
+      Number.isInteger(options.durationValue)) {
+    const days = options.durationValue *
+      (options.durationUnit === FhirPeriodUnit.Week ? 7 : 1);
+    const parts = getTimeParts(from, zone);
+    const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+    end = makeZonedDate(
+      zone,
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth() + 1,
+      shifted.getUTCDate(),
+      parts.hour,
+      parts.minute,
+      parts.second
+    ) ?? advance(from);
+  } else {
+    end = advance(from);
+  }
   if (!end || end <= from) throw new MedicationQuantityCalculationError("invalid-horizon",
     "Dispensing duration does not produce a date after the start of the dispensing window.");
   return end;

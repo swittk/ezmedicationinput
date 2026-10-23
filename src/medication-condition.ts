@@ -66,6 +66,20 @@ function parseExpression(text: string): MedicationCondition {
     : parseAnd(text);
 }
 
+function trailingClauseBoundary(text: string): number {
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+    if (ch === "," || ch === ";") return index;
+    if (ch === "!" || ch === "?") return index;
+    if (ch === ".") {
+      const previousDigit = index > 0 && /\d/u.test(text[index - 1]);
+      const nextDigit = index + 1 < text.length && /\d/u.test(text[index + 1]);
+      if (!previousDigit || !nextDigit) return index;
+    }
+  }
+  return text.length;
+}
+
 export interface ParsedMedicationGuard {
   condition: MedicationCondition;
   start: number;
@@ -102,13 +116,24 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
     // A different alternate *dose* is not the same as withholding the dose.
     return undefined;
   }
-  // Prefixed guards have an explicit boundary before the administration.
+  // Prefixed guards end before the administration. Suffixed guards end at
+  // the next clause boundary so trailing maxima/advice remain independently
+  // parseable rather than becoming part of the Boolean condition.
   if (lead.index === source.search(/\S/u)) {
     const comma = tail.search(/[,;:]/u);
     const action = ACTION_LEAD.exec(tail);
     const cut = [comma >= 0 ? comma : tail.length, action?.index ?? tail.length]
       .reduce((a, b) => Math.min(a, b), tail.length);
-    if (cut < tail.length) { end = Math.min(end, lead.index + lead[0].length + cut); tail = tail.slice(0, cut); }
+    if (cut < tail.length) {
+      end = Math.min(end, lead.index + lead[0].length + cut);
+      tail = tail.slice(0, cut);
+    }
+  } else {
+    const cut = trailingClauseBoundary(tail);
+    if (cut < tail.length) {
+      end = Math.min(end, lead.index + lead[0].length + cut);
+      tail = tail.slice(0, cut);
+    }
   }
   const phrase = tail.trim().replace(/[.!?;,]+$/gu, "").trim();
   if (!phrase) return undefined;

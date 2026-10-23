@@ -34,6 +34,22 @@ describe("clinical SIG correctness and boundary promotion", () => {
     }
   });
 
+  it("keeps equally conditioned clocks separate so each displayed clause matches its timing", () => {
+    const parsed = parseSig(
+      "1 tab at 08:00 if SBP > 160, 1 tab at 20:00 if SBP > 160"
+    );
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.timeOfDay)).toEqual([
+      ["08:00:00"], ["20:00:00"]
+    ]);
+    expect(parsed.items.map(item => getDosageCondition(item.fhir))).toEqual([
+      expect.objectContaining({ kind: "measurement", name: "sbp", value: 160 }),
+      expect.objectContaining({ kind: "measurement", name: "sbp", value: 160 })
+    ]);
+    expect(parsed.items[0].fhir.text).toContain("08:00");
+    expect(parsed.items[1].fhir.text).toContain("20:00");
+  });
+
   it("preserves trailing maximum-dose constraints rather than merging them away", () => {
     const parsed = parseSig("1 tab at 08:00, 1 tab at 20:00 max 1 tab/day");
     expect(parsed.items).toHaveLength(2);
@@ -152,6 +168,20 @@ describe("clinical SIG correctness and boundary promotion", () => {
     });
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
+  });
+
+  it("ends a suffixed guard before a following maximum clause", () => {
+    const source = "Take 1 tab q4h prn pain unless SBP < 90, max 4 tabs";
+    const parsed = parseSig(source);
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "not",
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90 }
+    });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir.timing?.repeat?.period).toBe(4);
+    expect(parsed.fhir.asNeeded).toBe(true);
+    expect(parsed.fhir.text).toBe(source);
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-critical-constraint"));
   });
 
   it("handles Thai unless-conditions without fabricating a calendar exclusion", () => {

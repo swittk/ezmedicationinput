@@ -434,35 +434,31 @@ describe("concurrent independent treatment sequences", () => {
     ]);
   });
 
-  it("keeps the parsed conditional phase editable when a later transition is incomplete", () => {
+  it("parses a conditional later phase in an independent eye taper", () => {
     const input =
       "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid only if BP >160";
     const parsed = parseSig(input);
-    expect(parsed.count).toBe(3);
+    expect(parsed.count).toBe(4);
     expect(parsed.items.map(item => item.fhir.site?.text))
-      .toEqual(["right eye", "right eye", "left eye"]);
+      .toEqual(["right eye", "right eye", "left eye", "left eye"]);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
-      .toEqual([1, 1, 1]);
+      .toEqual([1, 1, 1, 1]);
     expect(parsed.items.map(item => item.fhir.timing?.code?.text))
-      .toEqual(["Q2H", "QID", "QID"]);
-    expect(getDosageCondition(parsed.items[2].fhir)).toMatchObject({
+      .toEqual(["Q2H", "QID", "QID", "BID"]);
+    expect(getDosageCondition(parsed.items[3].fhir)).toMatchObject({
       kind: "measurement", name: "bp", operation: "gt", value: 160
     });
-    expect(parsed.items[2].fhir.text).toContain("then bid only if BP >160");
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("unresolved-timing-conflict")
-    );
-    expect(parsed.meta.leftoverText).toContain("bid only");
-    const leftComponent = parsed.fhirNext.step
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const leftBidComponent = parsed.fhirNext.step
       .flatMap(step => step.component)
-      .find(component => component.site?.concept?.text === "left eye");
-    expect(leftComponent?.condition?.[0]).toMatchObject({
+      .find(component =>
+        component.site?.concept?.text === "left eye" &&
+        component.timing?.code?.text === "BID");
+    expect(leftBidComponent?.condition?.[0]).toMatchObject({
       operation: "gt", valueQuantity: { value: 160 }
     });
-    expect(lintSig(input).issues).toContainEqual(expect.objectContaining({
-      message: "Unrecognized text",
-      text: expect.stringContaining("bid only")
-    }));
+    expect(lintSig(input).issues).toEqual([]);
   });
 
   it("uses the query start as a provisional anchor when the original treatment start is unavailable", () => {

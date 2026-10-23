@@ -3,6 +3,28 @@
 > **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
 
 
+## 2026-10-23 — 0.2 permissiveness / no-guard reset
+
+Owner rejected the autonomous-validator direction. Emergency audit removed the PR-era destructive parser quarantine philosophy: partial or ambiguous SIGs must retain useful dose/site/route/timing/source data for clinician review instead of deleting timing/dose or turning parse output into a refusal. Parser/regimen/FHIR interpretation code no longer throws merely because semantic meaning is incomplete.
+
+Implemented during the reset instead of guarding:
+- event timing + exact clocks can coexist;
+- OD/OS/OU remains ophthalmic in ocular context (for example Apply 1 drop OD BID);
+- trailing cadence scopes across disjunctive/coordinated eye doses;
+- only-if owns both guard-lead tokens, so later conditional phases such as OS QID x1mo then BID only if BP >160 segment correctly;
+- up to DATE is inclusive;
+- Thai attached Buddhist dates and plausible Buddhist YMD years in English SIG text resolve without losing cadence;
+- monthly ordinal weekday schedules actually schedule;
+- recurring on/off courses actually schedule;
+- ranges and incompletely constrained numeric utilities return labelled best-effort/maximum/relative quantities where meaningful instead of fabricating zero or deleting the regimen.
+
+Remaining realistic best-effort/TODO cases — these are NOT reasons to reintroduce parser guards:
+1. External event-relative starts such as starting on date of discharge need a caller-supplied/event-resolver anchor before they can be placed on an absolute calendar. Preserve the parsed regimen and source meanwhile. TODO: pluggable event-anchor resolver analogous to condition evaluation.
+2. Trailing guard/exclusion scope across coordinated daughters can genuinely be ambiguous. Current best-effort behavior keeps shared cadence and attaches the trailing guard/exclusion to the locally parsed final daughter. Clinicians can rewrite if they intend the guard to govern every daughter. TODO: typed explicit shared-guard scope construction if real usage demonstrates enough value.
+3. Malformed external FHIR dates/sequences and mathematically impossible absolute quantity requests may still error inside scheduling/supply APIs; those are runtime-data/numeric-contract errors, not parser refusal semantics.
+
+Validation at this checkpoint: source tests 1851/1851, dist 4/4, build green. Interleaved 353-case real-world corpus benchmark: new parser 1.009x baseline time (effectively flat).
+
 ## 2026-04-21
 
 ### Immediate Goal

@@ -45,6 +45,7 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
     leftHasFrontedPrn: false,
     rightHasTrailingSchedule: true,
     rightHasTrailingPrn: false,
+    rightHasTrailingSafetyGuard: false,
     rightHasCadenceConflict: false,
     ...overrides
   };
@@ -164,13 +165,13 @@ describe('HPSG coordination cadence scope', () => {
 
   it.each([
     ['instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160',
-      [undefined, 2], 'condition', 'gt', 160],
+      [2, 2], 'condition', 'gt', 160],
     ['instill 1 drop in left eye once daily and 2 drops in right eye twice daily unless BP < 100',
       [1, 2], 'condition', 'lt', 100],
     ['instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday',
       [undefined, 2], 'exclusion', undefined, undefined],
     ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily only if BP > 160',
-      [undefined, undefined, 2], 'condition', 'gt', 160],
+      [2, 2, 2], 'condition', 'gt', 160],
     ['instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes twice daily except Sunday',
       [undefined, undefined, 2], 'exclusion', undefined, undefined]
   ] as const)('keeps locally parsed cadence and an editable trailing guard/exclusion: %s', async (

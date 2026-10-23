@@ -146,6 +146,18 @@ describe("dose scheduling runtime guarantees", () => {
     })).toEqual([]);
   });
 
+  it("uses calendar-day horizons across daylight-saving transitions", () => {
+    const dosage = parseSig("1 tab daily at 08:00").fhir[0];
+    expect(calculateTotalUnits({
+      dosage,
+      from: "2024-03-09T08:00:00-05:00",
+      orderedAt: "2024-03-09T08:00:00-05:00",
+      timeZone: "America/New_York",
+      durationValue: 2,
+      durationUnit: "d"
+    })).toMatchObject({ totalUnits: 2, unit: "tab" });
+  });
+
   it("keeps ordinary schedule opportunities visible when maxima need extra clinical context", () => {
     const source = parseSig("1 tab PO BID").fhir[0];
     const period = {

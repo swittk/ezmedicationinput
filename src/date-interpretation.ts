@@ -377,20 +377,28 @@ function resolveDatePart(
   };
   if (source.day === undefined || source.month === undefined) return undefined;
 
-  // YYYY-MM-DD is structurally YMD. In Thai clinical text an explicit year
-  // in the Buddhist range is still a Buddhist year; interpreting 2569 as
-  // Gregorian would be far less plausible than preserving the clinician's
-  // calendar convention.
+  const dateContext: MedicationDateResolverContext = {
+    locale,
+    referenceDate: referenceIsoDate(options?.datePolicy)
+  };
+
+  // YYYY-MM-DD is structurally YMD. A year in the Buddhist range is a useful
+  // best-effort Buddhist interpretation even in an English SIG when the
+  // converted Gregorian year is clinically plausible around the reference
+  // date. This supports Thai clinics that type English directions but BE dates
+  // without turning arbitrary distant four-digit years into Buddhist dates.
   if (part.isoYearFirst) {
     if (source.year === undefined) return undefined;
-    if (locale.toLowerCase().startsWith("th") && source.year >= 2400 && source.year <= 2999) {
+    if (source.year >= 2400 && source.year <= 2999) {
       const gregorianYear = source.year - 543;
-      if (!validGregorianDate(gregorianYear, source.month, source.day)) return undefined;
-      return {
-        isoDate: isoDate(gregorianYear, source.month, source.day),
-        calendar: "buddhist", calendarYear: source.year,
-        month: source.month, day: source.day, sourceText: part.sourceText
-      };
+      if (validGregorianDate(gregorianYear, source.month, source.day) &&
+          inferredYearPlausible(gregorianYear, dateContext, options?.datePolicy)) {
+        return {
+          isoDate: isoDate(gregorianYear, source.month, source.day),
+          calendar: "buddhist", calendarYear: source.year,
+          month: source.month, day: source.day, sourceText: part.sourceText
+        };
+      }
     }
     if (source.year < GREGORIAN_YEAR_MIN || source.year > GREGORIAN_YEAR_MAX ||
         !validGregorianDate(source.year, source.month, source.day)) return undefined;
@@ -410,10 +418,7 @@ function resolveDatePart(
     : dateFields(source.day, source.month, order);
   if (!fields) return undefined;
 
-  const context: MedicationDateResolverContext = {
-    locale,
-    referenceDate: referenceIsoDate(options?.datePolicy)
-  };
+  const context = dateContext;
   const configuredCalendars = options?.datePolicy?.calendars;
   const enabled = configuredCalendars !== undefined
     ? configuredCalendars.map((id) => id.toLowerCase())

@@ -155,6 +155,23 @@ describe("HPSG clinical quantity grammar", () => {
     });
   });
 
+  it("parses compact weight units followed by a spaced per-time suffix", () => {
+    const infusion = parseSig("dopamine 5 mcg/kg per min IV");
+    expect(infusion.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved", requiresPatientWeight: true
+    });
+    expect(infusion.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 5, code: "ug/kg/min"
+    });
+
+    const divided = parseSig("5 mg/kg per day divided into 3 doses PO");
+    expect(divided.fhir.doseAndRate?.[0]?.doseQuantity?.unit).toBe("mg/kg");
+    expect(divided.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeCloseTo(5 / 3);
+    expect(divided.fhir.timing?.repeat).toMatchObject({
+      frequency: 3, period: 1, periodUnit: "d"
+    });
+  });
+
   it("preserves an undivided daily total as a rate quantity instead of pretending it is a bolus", () => {
     const parsed = parseSig("10 mg/kg/day");
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({

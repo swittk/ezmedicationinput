@@ -31,17 +31,18 @@ function compactUnitExpression(
 ): UnitExpression | undefined {
   let result: UnitExpression | undefined;
   let compact = "";
-  const first = context.tokens[start];
-  const maxLength = first?.original.includes("/") ? 1 : 5;
-  // One compact token is normal; five covers "mg / kg / min" without a
-  // clause-wide scan.  Longest-match prevents /kg from hiding a suffix.
+  const maxLength = 5;
+  // Five tokens cover compact/spaced mixtures such as `mcg/kg per min` and
+  // `mg / kg / day` without a clause-wide scan. Longest match prevents /kg
+  // from hiding a real time suffix.
   for (let length = 1; length <= maxLength && available(context, start + length - 1); length += 1) {
     const token = context.tokens[start + length - 1];
-    // Spaced expressions have a strict UNIT / UNIT (/ UNIT) shape. Do not
-    // absorb a following route or cadence into an "unknown suffix".
-    if (length > 1 && length % 2 === 0 && token.original !== "/") break;
-    if (length > 1 && length % 2 === 1 && token.original === "/") break;
-    compact += token.original.replace(/\s+/gu, "");
+    const separator = token.original === "/" || normalizeTokenLower(token) === "per";
+    // Spaced expressions have a strict UNIT separator UNIT shape. Do not
+    // absorb a following route or cadence into an unknown suffix.
+    if (length > 1 && length % 2 === 0 && !separator) break;
+    if (length > 1 && length % 2 === 1 && separator) break;
+    compact += separator ? "/" : token.original.replace(/\s+/gu, "");
     const normalized = compact.toLowerCase().replace(/[μµ]/gu, "u");
     if (accepts(normalized)) result = { compact: normalized, end: start + length };
   }
