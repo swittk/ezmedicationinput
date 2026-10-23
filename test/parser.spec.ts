@@ -3569,8 +3569,9 @@ describe("parseSig core scenarios", () => {
     expect(again.longText).toBe(parsed.longText);
   });
 
-  it("fromFhirDosage prefers computed formatting when format options are provided", () => {
+  it("fromFhirDosage computes requested formatting without rewriting supplied FHIR", () => {
     const parsed = parseSig("1 tab po pc breakfast lunch dinner");
+    const original = JSON.parse(JSON.stringify(parsed.fhir));
     const again = fromFhirDosage(parsed.fhir, {
       groupMealTimingsByRelation: true,
       includeTimesPerDaySummary: true
@@ -3578,7 +3579,9 @@ describe("parseSig core scenarios", () => {
     expect(again.longText).toBe(
       "Take 1 tablet orally three times daily after breakfast, lunch and dinner."
     );
-    expect(again.fhir.text).toBe(again.longText);
+    expect(again.fhir).toEqual(original);
+    expect(parsed.fhir).toEqual(original);
+    expect(again.fhir.text).not.toBe(again.longText);
   });
 
   it("fromFhirDosage preserves non-SNOMED site codings when no site text is present", () => {

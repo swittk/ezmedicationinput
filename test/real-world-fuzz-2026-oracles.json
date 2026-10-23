@@ -124,12 +124,12 @@
   "ophthalmic-031": {
     "dose": 1,
     "unit": "drop",
-    "unresolved": "disjunctive-dose-choice"
+    "review": "disjunctive-dose-choice"
   },
   "ophthalmic-032": {
     "dose": 1,
     "unit": "drop",
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "ophthalmic-035": {
     "dose": 1,
@@ -140,7 +140,7 @@
   "ophthalmic-037": {
     "dose": 1,
     "unit": "drop",
-    "unresolved": "frequency-clock-count-conflict"
+    "review": "frequency-clock-count-conflict"
   },
   "ophthalmic-038": {
     "dose": 1,
@@ -251,10 +251,10 @@
     "duration": 7
   },
   "pediatric-weight-065": {
-    "unresolved": "unsupported-weight-based-rate"
+    "review": "unsupported-weight-based-rate"
   },
   "pediatric-weight-066": {
-    "unresolved": "incomplete-weight-based-dose"
+    "review": "incomplete-weight-based-dose"
   },
   "pediatric-weight-068": {
     "dose": 7.5,
@@ -308,7 +308,7 @@
     "rateUnit": "[iU]/kg/h"
   },
   "pediatric-weight-080": {
-    "unresolved": "unsupported-weight-based-dose"
+    "review": "unsupported-weight-based-dose"
   },
   "infusion-081": {
     "dose": 500,
@@ -386,7 +386,7 @@
     "frequency": 2
   },
   "infusion-096": {
-    "unresolved": "unresolved-infusion-instructions"
+    "review": "unresolved-infusion-instructions"
   },
   "infusion-097": {
     "rate": 125,
@@ -444,19 +444,19 @@
     "prn": false
   },
   "prn-safety-108": {
-    "unresolved": "daily-dose-exceeds-explicit-maximum"
+    "review": "daily-dose-exceeds-explicit-maximum"
   },
   "prn-safety-109": {
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "prn-safety-110": {
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "prn-safety-111": {
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "prn-safety-112": {
-    "unresolved": "unresolved-calendar-exclusion"
+    "review": "unresolved-calendar-exclusion"
   },
   "prn-safety-113": {
     "dose": 1,
@@ -476,7 +476,7 @@
     "prn": false
   },
   "prn-safety-117": {
-    "unresolved": "unresolved-critical-constraint"
+    "review": "unresolved-critical-constraint"
   },
   "prn-safety-118": {
     "dose": 1,
@@ -534,7 +534,7 @@
   "temporal-137": {
     "dose": 1,
     "unit": "tab",
-    "unresolved": "unresolved-critical-constraint"
+    "review": "unresolved-critical-constraint"
   },
   "thai-141": {
     "dose": 1,
@@ -582,7 +582,7 @@
     "rows": 2
   },
   "thai-149": {
-    "unresolved": "disjunctive-dose-choice"
+    "review": "disjunctive-dose-choice"
   },
   "thai-150": {
     "dose": 1,
@@ -590,7 +590,7 @@
     "frequency": 1
   },
   "thai-152": {
-    "unresolved": "invalid-or-ambiguous-calendar-bound"
+    "review": "invalid-or-ambiguous-calendar-bound"
   },
   "thai-153": {
     "dose": 1,
@@ -664,10 +664,10 @@
     "frequency": 4
   },
   "tricky-conflicts-182": {
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "tricky-conflicts-183": {
-    "unresolved": "unresolved-timing-conflict"
+    "review": "timing-text-needs-review"
   },
   "tricky-conflicts-184": {
     "dose": 2,
@@ -682,16 +682,16 @@
     "rows": 2
   },
   "tricky-conflicts-186": {
-    "unresolved": "interval-clock-count-conflict"
+    "review": "interval-clock-count-conflict"
   },
   "tricky-conflicts-187": {
-    "unresolved": "incompatible-event-and-clock"
+    "review": "incompatible-event-and-clock"
   },
   "tricky-conflicts-188": {
-    "unresolved": "conflicting-infusion-stop-duration"
+    "review": "conflicting-infusion-stop-duration"
   },
   "tricky-conflicts-189": {
-    "unresolved": "disjunctive-dose-choice"
+    "review": "disjunctive-dose-choice"
   },
   "tricky-conflicts-190": {
     "dose": 1,
@@ -702,10 +702,10 @@
     "invalidSupply": true
   },
   "tricky-conflicts-191": {
-    "unresolved": "unresolved-calendar-exclusion"
+    "review": "unresolved-calendar-exclusion"
   },
   "tricky-conflicts-192": {
-    "unresolved": "calendar-start-after-end"
+    "review": "calendar-start-after-end"
   },
   "tricky-conflicts-195": {
     "dose": 1,
@@ -729,7 +729,7 @@
     "invalidSupply": true
   },
   "tricky-conflicts-198": {
-    "unresolved": "incomplete-weight-based-dose"
+    "review": "incomplete-weight-based-dose"
   },
   "tricky-conflicts-200": {
     "dose": 1,
@@ -741,21 +741,21 @@
   "temporal-124": {
     "dose": 1,
     "unit": "tab",
-    "unresolved": "unresolved-monthly-weekday-ordinal"
+    "review": "unresolved-monthly-weekday-ordinal"
   },
   "temporal-125": {
     "dose": 1,
     "unit": "tab",
-    "unresolved": "unresolved-relative-course-start"
+    "review": "unresolved-relative-course-start"
   },
   "temporal-140": {
     "dose": 1,
     "unit": "tab",
-    "unresolved": "unresolved-relative-course-start"
+    "review": "unresolved-relative-course-start"
   },
   "tricky-conflicts-193": {
     "dose": 1,
     "unit": "tab",
-    "unresolved": "unresolved-recurring-on-off-cycle"
+    "review": "unresolved-recurring-on-off-cycle"
   }
 }

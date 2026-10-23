@@ -249,8 +249,7 @@ export function projectParallelRegimen(
     let at: Position = ZERO;
     for (let index = 0; index < track.length; index++) {
       const members = track[index].members.map(i => results[i].fhir);
-      if (!members.length || members.some(item => !item.timing?.repeat ||
-          item.modifierExtension?.some(ext => ext.url.endsWith('/medication-unresolved-schedule')))) {
+      if (!members.length || members.some(item => !item.timing?.repeat)) {
         return { kind: 'unresolved', reason: 'parallel-regimen-incomplete-dose' };
       }
       // A true boundsRange is not an exact relative duration, so global

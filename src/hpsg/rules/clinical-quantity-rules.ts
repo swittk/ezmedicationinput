@@ -269,7 +269,7 @@ function weightQuantity(
       numerator,
       denominators: [bodyMass],
       requiresPatientWeight: true,
-      quarantineReason: "unsupported-weight-based-rate"
+      reviewReason: "unsupported-weight-based-rate"
     });
   }
 
@@ -354,7 +354,7 @@ function weightQuantity(
     denominators: [bodyMass, { value: 1, unit: FhirPeriodUnit.Day, dimension: "time" }],
     dailyTotal: true,
     requiresPatientWeight: true,
-    quarantineReason: "incomplete-weight-based-dose"
+    reviewReason: "incomplete-weight-based-dose"
   });
 }
 

@@ -195,7 +195,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   const unresolvedText = item.meta.leftoverText;
   if (item.fhir.timing && unresolvedText &&
       UNRESOLVED_TIMING_SIGNAL.test(unresolvedText)) {
-    preserveSuggestionWarning(item, source, "unresolved-timing-conflict");
+    preserveSuggestionWarning(item, source, "timing-text-needs-review");
   }
   let clinicalQuantity: HpsgClinicalQuantityFeature | undefined;
   for (const clause of item.meta.canonical.clauses) {
@@ -239,7 +239,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     // layer preserves it and adds a warning when part of it is unresolved.
     if (clinicalQuantity.status !== "resolved")
       preserveSuggestionWarning(item, source,
-        clinicalQuantity.quarantineReason ?? "unsupported-weight-based-dose");
+        clinicalQuantity.reviewReason ?? "unsupported-weight-based-dose");
     else
       keepOriginalText(item, source);
   }

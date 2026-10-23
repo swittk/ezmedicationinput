@@ -21,8 +21,6 @@ export const DOSAGE_RENDERED_INSTRUCTION_R5_URL =
   "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction";
 export const DOSAGE_EXCLUDED_WEEKDAYS_R5_URL =
   "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-weekdays";
-export const DOSAGE_UNRESOLVED_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unresolved-schedule";
 /** Non-modifier provenance emitted when an editable R5 projection and its
  * retained R6 source cannot be merged one-to-one. */
 export const DOSAGE_RECONCILIATION_WARNING_URL =
@@ -177,21 +175,6 @@ export function setDosageExcludedWeekdays(dosage: FhirDosage, days: FhirDayOfWee
     ? [...remaining, { url: DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
       extension: days.map(valueCode => ({ url: "day", valueCode })) }]
     : remaining.length ? remaining : undefined;
-}
-
-export function getUnresolvedDosage(dosage: FhirDosage): string | undefined {
-  const unresolved = dosage.modifierExtension?.find(value =>
-    value.url === DOSAGE_UNRESOLVED_R5_URL);
-  if (!unresolved) return undefined;
-  return unresolved.extension?.find(value => value.url === "reason" &&
-    typeof value.valueString === "string" && value.valueString.length > 0)?.valueString;
-}
-
-export function setUnresolvedDosage(dosage: FhirDosage, reason: string | undefined): void {
-  replacementExtensions(dosage, DOSAGE_UNRESOLVED_R5_URL, reason ? {
-    url: DOSAGE_UNRESOLVED_R5_URL,
-    extension: [{ url: "reason", valueString: reason }]
-  } : undefined);
 }
 
 function describe(condition: MedicationCondition): string {

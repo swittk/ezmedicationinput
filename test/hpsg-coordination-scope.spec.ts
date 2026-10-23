@@ -649,7 +649,7 @@ describe('HPSG coordination cadence scope', () => {
       .toEqual([undefined, 2]);
     expect(parsed.items[1].meta.leftoverText).toContain('q8h');
     expect(parsed.items[1].warnings).toContainEqual(
-      expect.stringContaining('unresolved-timing-conflict')
+      expect.stringContaining('timing-text-needs-review')
     );
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'

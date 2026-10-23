@@ -86,7 +86,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.input).toBe(sig);
     expect(parsed.fhir.text).toBeTruthy();
     expect(parsed.warnings.some(warning =>
-      warning.includes("unresolved-timing-conflict"))).toBe(conflict);
+      warning.includes("timing-text-needs-review"))).toBe(conflict);
     if (sig.includes("OD")) expect(parsed.fhir.site?.text).toBe("right eye");
     expect(nextDueDoses(parsed.fhir, {
       from: "2026-10-21T08:00:00+07:00",
@@ -432,7 +432,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.items[1].fhir.timing?.repeat).toMatchObject({
       frequency: 2, period: 1, periodUnit: "d"
     });
-    expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-timing-conflict"));
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("timing-text-needs-review"));
   });
 
   it.each([

@@ -137,7 +137,7 @@ describe("HPSG clinical quantity grammar", () => {
       const parsed = parseSig(source);
       expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
         status: "unsupported",
-        quarantineReason: "unsupported-weight-based-rate",
+        reviewReason: "unsupported-weight-based-rate",
         requiresPatientWeight: true
       });
       expect(parsed.fhir.text).toBe(source);
@@ -177,7 +177,7 @@ describe("HPSG clinical quantity grammar", () => {
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
       status: "incomplete",
       dailyTotal: true,
-      quarantineReason: "incomplete-weight-based-dose"
+      reviewReason: "incomplete-weight-based-dose"
     });
     expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
       value: 10, code: "mg/kg/d"

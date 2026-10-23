@@ -2,7 +2,7 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates,
-  getDosageExcludedWeekdays, getUnresolvedDosage,
+  getDosageExcludedWeekdays,
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
 } from "./dosage-course";
 import { applyClinicalConstraints } from "./clinical-safety";
@@ -177,9 +177,9 @@ export {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getDosageCondition, setDosageCondition,
   getDosageExcludedDates, setDosageExcludedDates,
-  getDosageExcludedWeekdays, setDosageExcludedWeekdays, getUnresolvedDosage,
+  getDosageExcludedWeekdays, setDosageExcludedWeekdays,
   DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, DOSAGE_UNRESOLVED_R5_URL, DOSAGE_DETAILS_R5_URL
+  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, DOSAGE_DETAILS_R5_URL
 } from "./dosage-course";
 export { evaluateMedicationCondition } from "./medication-condition";
 export { parseStrength, parseStrengthIntoRatio, parseStrengthComponents } from "./utils/strength";
@@ -556,7 +556,6 @@ function hasPinnedDosageTextSemantics(dosage: FhirDosage): boolean {
       expanded.excludedDates?.length ||
       getDosageCondition(dosage) !== undefined ||
       getDosageExcludedDates(dosage).length > 0 ||
-      getUnresolvedDosage(dosage) !== undefined ||
       getDosageExcludedWeekdays(dosage).length > 0
     );
 }
@@ -1504,22 +1503,10 @@ export function formatSig(
     : [];
   let hasDisplayRelevantModifier = false;
   if (hasModifiers) {
-    try {
-      if (!displayCondition) displayCondition = getDosageCondition(dosage);
-      displayExcludedDates = getDosageExcludedDates(dosage);
-      hasDisplayRelevantModifier = displayCondition !== undefined ||
-        displayExcludedDates.length > 0 ||
-        getUnresolvedDosage(dosage) !== undefined;
-    } catch (error) {
-      if (!isUninterpretableModifier(error)) throw error;
-      // Formatting is a read path. Preserve literal wording when present and
-      // otherwise expose the independently understood fields for correction;
-      // unknown modifier data stays attached for downstream consumers and clinician correction.
-      if (dosage.text?.trim()) return dosage.text;
-      const clause = canonicalFromFhir(dosage);
-      const localization = resolveSigLocalization(options?.locale, options?.i18n);
-      return provisionalFhirDisplay(dosage, clause, style, localization, options);
-    }
+    if (!displayCondition) displayCondition = getDosageCondition(dosage);
+    displayExcludedDates = getDosageExcludedDates(dosage);
+    hasDisplayRelevantModifier = displayCondition !== undefined ||
+      displayExcludedDates.length > 0;
   }
   if (hasMaximumDoseForDisplay(dosage)) {
     if (typeof dosage.text === "string" && dosage.text.trim().length > 0) {
@@ -1603,55 +1590,9 @@ export function fromFhir(
     clauses.push(...item.meta.canonical.clauses);
     for (const warning of item.warnings) warnings.add(warning);
   }
-  // Importing structured R6 data must not depend on an optional display string.
-  // Preserve the original object while realizing every supported component.
-  const safeFormat = (style: "short" | "long"): string => {
-    try {
-      return formatSig(dosageDetails, style, options);
-    } catch (error) {
-      if (!isUninterpretableModifier(error)) throw error;
-      warnings.add(`Non-executable imported modifier; original FHIR retained: ${error.message}`);
-      const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
-        ? "ข้อมูลคำสั่งใช้ยาบางส่วน — ต้องตรวจสอบ modifier ที่ไม่รู้จัก"
-        : "INCOMPLETE R6 course — unrecognized modifier requires review";
-      const localization = resolveSigLocalization(options?.locale, options?.i18n);
-      const recognized = joinGeneratedClauses(items.map(item =>
-        item.fhir.text?.trim()
-          ? item.fhir.text
-          : provisionalFhirDisplay(
-            item.fhir,
-            item.meta.canonical.clauses[0],
-            style,
-            localization,
-            options,
-            false
-          )
-      ).filter(Boolean));
-      // R6-only expressions cannot become dose quantities until evaluated.
-      // Show their literal typed expressions as non-executable evidence, never
-      // reinterpret them as a dose or silently hide them from the user.
-      const unevaluatedExpressions: string[] = [];
-      for (const step of dosageDetails.step) {
-        for (const component of step.component) {
-          for (const rate of component.doseAndRate ?? []) {
-            if (rate.doseExpression?.expression) {
-              unevaluatedExpressions.push(
-                `unevaluated dose expression: ${rate.doseExpression.expression}`);
-            }
-            if (rate.rateExpression?.expression) {
-              unevaluatedExpressions.push(
-                `unevaluated rate expression: ${rate.rateExpression.expression}`);
-            }
-          }
-        }
-      }
-      const visible = [recognized, ...unevaluatedExpressions].filter(Boolean).join("; ");
-      return visible ? `${prefix}: ${visible}` :
-        `${prefix}. Structured FHIR dosage data is retained.`;
-    }
-  };
-  const shortText = safeFormat("short");
-  const longText = safeFormat("long");
+  // Importing structured R6 data is best-effort and data-preserving.
+  const shortText = formatSig(dosageDetails, "short", options);
+  const longText = formatSig(dosageDetails, "long", options);
   return {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
@@ -1716,12 +1657,6 @@ function provisionalFhirDisplay(
   return body ? `${prefix}: ${body}` : `${prefix}. Structured FHIR data is retained.`;
 }
 
-/** Unknown/invalid modifiers block execution, but never block read-only import
- * of the original resource for correction. Other programming errors still throw. */
-function isUninterpretableModifier(error: unknown): error is Error {
-  return error instanceof Error && error.message.indexOf("modifierExtension") >= 0;
-}
-
 function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
@@ -1734,41 +1669,18 @@ function fromFhirDosageInternal(
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  let guarded = false;
-  let unresolvedModifier: string | undefined;
-  try {
-    guarded = getDosageCondition(dosage) !== undefined ||
-      getDosageExcludedDates(dosage).length > 0 ||
-      getDosageExcludedWeekdays(dosage).length > 0 ||
-      getUnresolvedDosage(dosage) !== undefined;
-  } catch (error) {
-    if (!isUninterpretableModifier(error)) throw error;
-    unresolvedModifier = error.message;
-  }
+  const guarded = getDosageCondition(dosage) !== undefined ||
+    getDosageExcludedDates(dosage).length > 0 ||
+    getDosageExcludedWeekdays(dosage).length > 0;
   const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
-  // Never alter an imported FHIR resource when its modifier is unknown. The
-  // original text and extension remain recoverable for correction or remap;
-  // the original modifier remains attached so downstream consumers can interpret or edit it.
-  const label = String(options?.locale ?? "").toLowerCase().startsWith("th")
-    ? "ข้อมูลบางส่วน — มีข้อจำกัดการใช้ยาที่ต้องตรวจสอบ"
-    : "INCOMPLETE medication interpretation — unrecognized safety restriction";
-  const partial = (style: "short" | "long") => dosage.text?.trim()
-    ? `${label}: ${dosage.text}`
-    : provisionalFhirDisplay(dosage, clause, style, localization, options);
-  const shortText = unresolvedModifier ? partial("short")
-    : suppressMaximumDisplay
-      ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
-      : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
-  const computedLong = unresolvedModifier ? partial("long")
-    : suppressMaximumDisplay
-      ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
-      : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
+  const shortText = suppressMaximumDisplay
+    ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
+    : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
+  const computedLong = suppressMaximumDisplay
+    ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
+    : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
   const longText = computedLong || dosage.text || "";
-  if (!suppressMaximumDisplay && !unresolvedModifier) dosage.text = longText;
   const warnings = [...(clause.warnings ?? [])];
-  if (unresolvedModifier) {
-    warnings.push(`Non-executable imported modifier; original FHIR retained: ${unresolvedModifier}`);
-  }
   return {
     fhir: dosage,
     shortText,

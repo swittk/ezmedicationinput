@@ -175,7 +175,7 @@ export interface HpsgClinicalQuantityFeature {
   dividedDoseCount?: number;
   administrationDuration?: { value: number; unit: FhirPeriodUnit };
   requiresPatientWeight?: true;
-  quarantineReason?:
+  reviewReason?:
     | "incomplete-weight-based-dose"
     | "unsupported-weight-based-rate";
 }

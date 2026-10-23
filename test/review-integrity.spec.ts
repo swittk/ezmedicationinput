@@ -8,8 +8,7 @@ import {
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
   DOSAGE_DETAILS_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL,
-  DOSAGE_UNRESOLVED_R5_URL
+  DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL
 } from "../src/dosage-course";
 import { recognizeCycles } from "../src/regimen/cycles";
 import { projectParallelRegimen } from "../src/regimen/parallel-course";
@@ -91,13 +90,6 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
         modifierExtension: [{
           url: DOSAGE_EXCLUDED_DATES_R5_URL,
           extension: [{ url: "date", valueDate: "not-a-date" }]
-        }]
-      },
-      {
-        ...base,
-        modifierExtension: [{
-          url: DOSAGE_UNRESOLVED_R5_URL,
-          extension: []
         }]
       },
       {

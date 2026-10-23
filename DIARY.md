@@ -11,6 +11,7 @@ Implemented during the reset instead of guarding:
 - event timing + exact clocks can coexist;
 - OD/OS/OU remains ophthalmic in ocular context (for example Apply 1 drop OD BID);
 - trailing cadence scopes across disjunctive/coordinated eye doses;
+- trailing typed conditions/exclusions scope across coordinated daughters when the HPSG construction licenses a shared adjunct, without a second semantic parse pass;
 - only-if owns both guard-lead tokens, so later conditional phases such as OS QID x1mo then BID only if BP >160 segment correctly;
 - up to DATE is inclusive;
 - Thai attached Buddhist dates and plausible Buddhist YMD years in English SIG text resolve without losing cadence;
@@ -20,10 +21,11 @@ Implemented during the reset instead of guarding:
 
 Remaining realistic best-effort/TODO cases — these are NOT reasons to reintroduce parser guards:
 1. External event-relative starts such as starting on date of discharge need a caller-supplied/event-resolver anchor before they can be placed on an absolute calendar. Preserve the parsed regimen and source meanwhile. TODO: pluggable event-anchor resolver analogous to condition evaluation.
-2. Trailing guard/exclusion scope across coordinated daughters can genuinely be ambiguous. Current best-effort behavior keeps shared cadence and attaches the trailing guard/exclusion to the locally parsed final daughter. Clinicians can rewrite if they intend the guard to govern every daughter. TODO: typed explicit shared-guard scope construction if real usage demonstrates enough value.
-3. Malformed external FHIR dates/sequences and mathematically impossible absolute quantity requests may still error inside scheduling/supply APIs; those are runtime-data/numeric-contract errors, not parser refusal semantics.
+2. Malformed external FHIR dates/sequences and mathematically impossible absolute quantity requests may still error inside scheduling/supply APIs; those are runtime-data/numeric-contract errors, not parser refusal semantics.
 
-Validation at this checkpoint: source tests 1851/1851, dist 4/4, build green. Interleaved 353-case real-world corpus benchmark: new parser 1.009x baseline time (effectively flat).
+The old medication-unresolved-schedule modifier contract and all active quarantine semantics were removed. Unknown external modifiers remain attached as opaque/editable data. fromFhirDosage computes requested display text without rewriting supplied FHIR source data.
+
+Validation at this checkpoint: source tests 1856/1856, dist 4/4, build green. Final interleaved ABBA microbench: ordinary BID 1.006x baseline, PRN 0.991x, eye taper 0.568x; common-path cost is effectively flat while complex eye-course parsing is materially faster.
 
 ## 2026-04-21
 

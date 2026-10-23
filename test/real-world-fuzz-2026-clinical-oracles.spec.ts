@@ -15,7 +15,7 @@ interface Oracle {
   route?: string; site?: string;
   prn?: boolean; condition?: boolean;
   conditionKind?: string; conditionOperation?: string; conditionValue?: number;
-  unresolved?: string;
+  review?: string;
   invalidSupply?: boolean; maxSupply?: number; threeDaySupply?: number;
 }
 const cases = new Map((casesJson as FuzzCase[]).map(item => [item.id, item]));
@@ -80,12 +80,12 @@ describe("manually specified clinical semantic oracles for the independent 200-c
         expect(condition).toMatchObject({ value: oracle.conditionValue });
       }
 
-      if (oracle.unresolved) {
+      if (oracle.review) {
         expect(dosage.text).toBeTruthy();
         expect(Boolean(
           dosage.doseAndRate?.length || dosage.timing || dosage.route || dosage.site || dosage.text
         )).toBe(true);
-        if (oracle.unresolved === "calendar-start-after-end") {
+        if (oracle.review === "calendar-start-after-end") {
           expect(repeat?.boundsPeriod).toEqual({
             start: "2026-11-08", end: "2026-11-01"
           });
