@@ -6,7 +6,11 @@ import type {
   HpsgType
 } from "./signature";
 import { grammaticalCoordinationScopes } from "../regimen/grammar";
-import type { CoordinationScopeFacts, RegimenSemanticSelection } from "../regimen/types";
+import type {
+  BoundaryRelation,
+  CoordinationScopeFacts,
+  RegimenSemanticSelection
+} from "../regimen/types";
 
 export interface HpsgConstructionSelection {
   motherType: HpsgType;
@@ -15,6 +19,28 @@ export interface HpsgConstructionSelection {
 
 export interface HpsgCoordinationScopeSelection extends HpsgConstructionSelection {
   semantic: RegimenSemanticSelection;
+}
+
+/** Typed daughter facts for one administration with coordinated timing anchors. */
+export interface HpsgTimingAnchorCoordinationFacts {
+  relation?: BoundaryRelation;
+  sameSourceExpansion: boolean;
+  adjacent: boolean;
+  leftComplete: boolean;
+  rightComplete: boolean;
+  sameAdministration: boolean;
+  compatibleMethod: boolean;
+  leftHasMethod: boolean;
+  rightHasMethod: boolean;
+  leftAnchorOnly: boolean;
+  rightAnchorOnly: boolean;
+  sameScheduleContext: boolean;
+  addsAnchor: boolean;
+}
+
+export interface HpsgTimingAnchorCoordinationSelection
+  extends HpsgConstructionSelection {
+  id: "hpsg.cx.regimen.coordinated-timing-anchors";
 }
 
 type SignTrait =
@@ -360,5 +386,38 @@ export function selectHpsgCoordinationScopeConstruction(
       rightType: "administration-clause"
     },
     semantic
+  };
+}
+
+/**
+ * License two complete administration daughters as one dosage with coordinated
+ * timing anchors. Sequence and alternative relations remain separate phases;
+ * a meal-dash expansion is already one source construction and needs no
+ * surface connector relation.
+ */
+export function selectHpsgTimingAnchorCoordinationConstruction(
+  facts: HpsgTimingAnchorCoordinationFacts
+): HpsgTimingAnchorCoordinationSelection | undefined {
+  const relationLicensed = facts.sameSourceExpansion || Boolean(
+    facts.relation?.kind === "coordination"
+  );
+  if (!relationLicensed || !facts.adjacent ||
+      !facts.leftComplete || !facts.rightComplete ||
+      !facts.sameAdministration || !facts.compatibleMethod ||
+      !facts.leftAnchorOnly || !facts.rightAnchorOnly ||
+      !facts.sameScheduleContext || !facts.addsAnchor) {
+    return undefined;
+  }
+
+  return {
+    id: "hpsg.cx.regimen.coordinated-timing-anchors",
+    motherType: "coordination-phrase",
+    construction: {
+      kind: "coordination",
+      operation: "unify",
+      headSide: facts.leftHasMethod || !facts.rightHasMethod ? "left" : "right",
+      leftType: "administration-clause",
+      rightType: "administration-clause"
+    }
   };
 }

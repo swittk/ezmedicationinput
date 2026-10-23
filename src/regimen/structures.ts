@@ -3,7 +3,8 @@ import { findMedicationDateListSpans } from '../date-interpretation';
 import { getDayOfWeekMeaning } from '../lexer/meaning';
 import { normalizeUnit } from '../unit-lexicon';
 import { LexKind } from '../lexer/token-types';
-import { ACTION_COORDINATION_CONNECTORS, MERIDIEM_TOKENS } from '../hpsg/lexical-classes';
+import { ACTION_COORDINATION_CONNECTORS } from '../hpsg/lexical-classes';
+import { parseClockToken } from '../hpsg/rule-context';
 import type { Token } from '../parser-state';
 import type { PlanningInput, StructuralClaim } from './types';
 
@@ -14,15 +15,8 @@ export function lexeme(token: Token | undefined): string {
 
 /** Recognize typed clock atoms, including a numeral followed by a shared meridiem token. */
 export function clockEnd(tokens: Token[], index: number): number | undefined {
-  const token = tokens[index];
-  if (!token) return undefined;
-  if (token.kind === LexKind.TimeLike) {
-    return MERIDIEM_TOKENS.has(lexeme(tokens[index + 1])) ? index + 2 : index + 1;
-  }
-  if (token.kind === LexKind.Number && token.value !== undefined &&
-      token.value >= 1 && token.value <= 12 && Number.isInteger(token.value) &&
-      MERIDIEM_TOKENS.has(lexeme(tokens[index + 1]))) return index + 2;
-  return undefined;
+  const parsed = parseClockToken(tokens[index], tokens[index + 1]);
+  return parsed ? index + parsed.tokens.length : undefined;
 }
 
 function listConnector(token: Token | undefined): boolean {

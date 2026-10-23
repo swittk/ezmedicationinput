@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig } from "../src/index";
+import { parseClauseState } from "../src/parser";
+import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("multi-clause parsing", () => {
@@ -19,6 +22,136 @@ describe("multi-clause parsing", () => {
         range: { start: 0, end: "1 tab po bid".length }
       }
     ]);
+  });
+
+  it("composes method ellipsis and clock anchors on the typed clause before FHIR", () => {
+    const input = "take 1 tab po at 08:00 and 1 tab po at 20:00";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+
+    const composition = composeCoordinatedTimingAnchors(states, plan, plan.segments, input);
+
+    expect(composition.absorbed.has(1)).toBe(true);
+    expect(states[0].primaryClause.method?.text).toBe("Take");
+    expect(states[0].primaryClause.schedule?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    expect(states[0].primaryClause.rawText).toBe(input);
+    expect(states[0].primaryClause.span).toEqual({ start: 0, end: input.length });
+    expect(states[0].primaryClause.schedule?.evidence?.flatMap(item => item.spans)
+      .some(span => span.text.includes("20:00") && span.start > input.indexOf("and"))).toBe(true);
+    expect(states[0].primaryClause.evidence.some(item =>
+      item.rule === "hpsg.cx.regimen.coordinated-timing-anchors"
+    )).toBe(true);
+
+    const batch = parseSig(input);
+    expect(batch.count).toBe(1);
+    expect(batch.meta.canonical.clauses).toHaveLength(2);
+    expect(batch.meta.canonical.clauses[0]?.schedule?.timeOfDay)
+      .toEqual(["08:00:00", "20:00:00"]);
+    expect(batch.meta.canonical.clauses[1]?.rawText).toBe("1 tab po at 20:00");
+    expect(batch.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+
+    const linted = lintSig(input);
+    expect(linted.count).toBe(1);
+    expect(linted.issues).toEqual([]);
+    expect(linted.result.meta.canonical.clauses[0]?.schedule?.timeOfDay)
+      .toEqual(["08:00:00", "20:00:00"]);
+    expect(linted.result.fhir.timing?.repeat?.timeOfDay)
+      .toEqual(["08:00:00", "20:00:00"]);
+
+    const rightHeadedInput = "1 tab po at 08:00 and take 1 tab po at 20:00";
+    const rightHeadedPlan = createBoundaryPlan(rightHeadedInput);
+    const rightHeadedStates = rightHeadedPlan.segments.map(segment =>
+      parseClauseState(segment.text)
+    );
+    const rightHeadedComposition = composeCoordinatedTimingAnchors(
+      rightHeadedStates,
+      rightHeadedPlan,
+      rightHeadedPlan.segments,
+      rightHeadedInput
+    );
+    expect(rightHeadedComposition.absorbed.has(1)).toBe(true);
+    expect(rightHeadedStates[0].primaryClause.method?.text).toBe("Take");
+    expect(parseSig(rightHeadedInput).fhir.method?.text).toBe("Take");
+  });
+
+  it("composes Thai clock anchors from the same typed schedule mother", async () => {
+    const input = "รับประทาน 1 เม็ด เวลา 08:00 และ รับประทาน 1 เม็ด เวลา 20:00";
+    const plan = createBoundaryPlan(input, { locale: "th" });
+    const states = plan.segments.map(segment => parseClauseState(segment.text, { locale: "th" }));
+
+    const composition = composeCoordinatedTimingAnchors(states, plan, plan.segments, input);
+
+    expect(composition.absorbed.has(1)).toBe(true);
+    expect(states[0].primaryClause.schedule?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    const batch = parseSig(input, { locale: "th" });
+    expect(batch.count).toBe(1);
+    expect(batch.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    expect(batch.longText).toContain("08:00");
+    expect(batch.longText).toContain("20:00");
+
+    const asyncBatch = await parseSigAsync(input, { locale: "th" });
+    expect(asyncBatch.count).toBe(1);
+    expect(asyncBatch.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+  });
+
+  it("composes repeated event anchors without lowering either daughter first", () => {
+    const input = "1 tab po in morning, 1 tab po in evening";
+    const batch = parseSig(input);
+
+    expect(batch.count).toBe(1);
+    expect(batch.meta.canonical.clauses[0]?.schedule?.when).toEqual(["MORN", "EVE"]);
+    expect(batch.fhir.timing?.repeat?.when).toEqual(["MORN", "EVE"]);
+  });
+
+  it("keeps differing typed sites and routes as independent dosage items", () => {
+    const sites = parseSig("1 drop OD at 08:00 and 1 drop OS at 20:00");
+    expect(sites.count).toBe(2);
+    expect(sites.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+
+    const routes = parseSig("1 tab po at 08:00 and 1 tab pr at 20:00");
+    expect(routes.count).toBe(2);
+    expect(routes.items[0].fhir.route).not.toEqual(routes.items[1].fhir.route);
+
+    const alternative = parseSig("1 tab po at 08:00 or 1 tab po at 20:00");
+    expect(alternative.count).toBe(2);
+    expect(alternative.items.map(item => item.fhir.timing?.repeat?.timeOfDay)).toEqual([
+      ["08:00:00"], ["20:00:00"]
+    ]);
+
+    const independent = parseSig("1 tab po at 08:00; 1 tab po at 20:00");
+    expect(independent.count).toBe(2);
+    expect(independent.items.map(item => item.fhir.timing?.repeat?.timeOfDay)).toEqual([
+      ["08:00:00"], ["20:00:00"]
+    ]);
+  });
+
+  it("keeps ordinary independent ocular taper phases separate", () => {
+    const batch = parseSig(
+      "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID"
+    );
+
+    expect(batch.count).toBe(4);
+    expect(batch.items.map(item => item.fhir.site?.text)).toEqual([
+      "right eye", "right eye", "left eye", "left eye"
+    ]);
+    expect(batch.items.map(item => item.fhir.sequence)).toEqual([1, 2, 1, 2]);
+  });
+
+  it("keeps a coordinated-clock mother aligned with an independent course", () => {
+    const batch = parseSig(
+      "1 tab po at 08:00 x7d and 1 tab po at 20:00 x7d then 1 tab po daily; " +
+      "2 tabs po bid x14d then 2 tabs po daily"
+    );
+
+    expect(batch.count).toBe(4);
+    expect(batch.items[0].fhir.timing?.repeat?.timeOfDay)
+      .toEqual(["08:00:00", "20:00:00"]);
+    expect(batch.fhirNext.step.map(step => step.component.length)).toEqual([2, 2, 2]);
+    expect(batch.fhirNext.step.map(step => step.end?.offsetDuration?.value))
+      .toEqual([7, 14, undefined]);
+    expect(batch.fhirNext.step[0].component.map(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value
+    )).toEqual([1, 2]);
   });
 
   it("renders short and long multi-clause instructions rather than echoing source shorthand", () => {

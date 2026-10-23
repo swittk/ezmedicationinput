@@ -271,7 +271,15 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.relative-administration', priority: 720, relation: 'coordination', constraints: [
     coordinationOrSequence, ...scheduleRight, usableLeft, constraint('left.hasOffset', f => f.left.hasOffset)
   ] },
-  { id: 'regimen.adjacent-timed-doses', priority: 760, relation: 'shared-duration', constraints: [
+  { id: 'regimen.comma-timed-administrations', priority: 760, relation: 'coordination', constraints: [
+    constraint('connector.comma', f => f.site.kind === 'comma'),
+    constraint('right.explicitUnit', f => f.explicitRightUnit),
+    constraint('left.complete', f => f.left.complete), constraint('left.hasDose', f => f.left.hasDose),
+    constraint('left.hasSchedule', f => f.left.hasSchedule), constraint('right.complete', f => f.right.complete),
+    constraint('right.hasDose', f => f.right.hasDose), constraint('right.hasSchedule', f => f.right.hasSchedule),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
+  ] },
+  { id: 'regimen.adjacent-timed-doses', priority: 760, relation: 'coordination', constraints: [
     constraint('connector.adjacent-dose', f => f.site.kind === 'adjacent-dose'),
     constraint('left.complete', f => f.left.complete), constraint('left.hasDose', f => f.left.hasDose),
     constraint('left.hasSchedule', f => f.left.hasSchedule), constraint('right.complete', f => f.right.complete),

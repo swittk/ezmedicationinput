@@ -254,7 +254,10 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     const decision = arbitrate(site, proposals);
     if (experiment.trace) { decision.rejectedRules = rejected; plan.decisions.push(decision); }
     if (decision.selected.action === 'split') {
-      const hasPredecessor = segment(site.start, decision.selected.relation === 'shared-duration');
+      const hasPredecessor = segment(
+        site.start,
+        decision.selected.rule === 'regimen.adjacent-timed-doses'
+      );
       if (hasPredecessor) {
         plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
           kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,

@@ -7,7 +7,8 @@ import { applyClinicalConstraints } from "./clinical-safety";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import {
-  applyCoordinatedCadenceScopes, scopeTrailingSharedDuration,
+  applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
+  scopeTrailingSharedDuration,
   scopeTrailingSharedNegativeInstructions
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
@@ -49,7 +50,6 @@ import {
   EzDosage,
   EzDoseAndRate,
   FhirR6DosageDetails,
-  FhirTimingRepeat,
   FormatBatchOptions,
   FormatOptions,
   LintIssue,
@@ -300,27 +300,6 @@ interface SegmentCarry {
 
 type MealDashRelation = "meal" | "ac" | "pc";
 
-const MERGEABLE_REPEAT_KEYS = new Set<keyof FhirTimingRepeat>([
-  "when",
-  "timeOfDay",
-  "dayOfWeek",
-  "boundsDuration",
-  "boundsPeriod",
-  "boundsRange",
-  "duration",
-  "durationMax",
-  "durationUnit"
-]);
-
-const MERGEABLE_SHARED_REPEAT_KEYS: Array<keyof FhirTimingRepeat> = [
-  "boundsDuration",
-  "boundsPeriod",
-  "boundsRange",
-  "duration",
-  "durationMax",
-  "durationUnit"
-];
-
 function parseMealDashValues(token: string): number[] | undefined {
   if (!/^[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?){2,3}$/.test(token)) {
     return undefined;
@@ -433,292 +412,6 @@ function toSegmentMeta(segments: ReturnType<typeof parseSigSegments>): ParseBatc
     text: segment.text,
     range: { start: segment.start, end: segment.end }
   }));
-}
-
-/**
- * Deep equality helper for plain JSON-like parser output objects.
- *
- * @param left Left-side value.
- * @param right Right-side value.
- * @returns `true` when both values are structurally equal.
- */
-function deepEqual(left: unknown, right: unknown): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (left === null || right === null) {
-    return left === right;
-  }
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right)) {
-      return false;
-    }
-    if (left.length !== right.length) {
-      return false;
-    }
-    for (let i = 0; i < left.length; i += 1) {
-      if (!deepEqual(left[i], right[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  if (typeof left !== "object" || typeof right !== "object") {
-    return false;
-  }
-
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftRecord).filter((key) => leftRecord[key] !== undefined);
-  const rightKeys = Object.keys(rightRecord).filter((key) => rightRecord[key] !== undefined);
-  if (leftKeys.length !== rightKeys.length) {
-    return false;
-  }
-  for (const key of leftKeys) {
-    if (!Object.prototype.hasOwnProperty.call(rightRecord, key)) {
-      return false;
-    }
-    if (!deepEqual(leftRecord[key], rightRecord[key])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Compares two string arrays as sets.
- *
- * @param left Left array.
- * @param right Right array.
- * @returns `true` when both arrays contain the same unique values.
- */
-function sameStringSet(left?: string[], right?: string[]): boolean {
-  const a = left ?? [];
-  const b = right ?? [];
-  if (a.length !== b.length) {
-    return false;
-  }
-  const set = new Set(a);
-  if (set.size !== b.length) {
-    return false;
-  }
-  for (const value of b) {
-    if (!set.has(value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Determines whether a repeat block only uses merge-safe anchor fields plus
- * shared course/administration duration fields. Shared fields are compared
- * separately before merging.
- *
- * @param repeat FHIR timing repeat payload.
- * @returns `true` when repeat contains only explicitly merge-safe fields.
- */
-function isMergeableAnchorRepeat(repeat?: FhirTimingRepeat): boolean {
-  if (!repeat) {
-    return true;
-  }
-  for (const key of Object.keys(repeat) as Array<keyof FhirTimingRepeat>) {
-    if (repeat[key] !== undefined && !MERGEABLE_REPEAT_KEYS.has(key)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function sameMergeableSharedRepeat(
-  left: FhirTimingRepeat | undefined,
-  right: FhirTimingRepeat | undefined
-): boolean {
-  for (const key of MERGEABLE_SHARED_REPEAT_KEYS) {
-    if (!deepEqual(left?.[key], right?.[key])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Checks whether two parsed items can be merged without changing semantics.
- *
- * @param base Existing merged item candidate.
- * @param next Incoming parsed item.
- * @returns `true` when both items differ only by timing anchors and any
- * shared duration/bounds fields are identical.
- */
-function hasPinnedDosageTextSemantics(dosage: FhirDosage): boolean {
-  const expanded = dosage as EzDosage;
-  const quantity = expanded.doseAndRate?.[0];
-  return hasMaximumDoseForDisplay(dosage) ||
-    Boolean(
-      quantity?.rateQuantity || quantity?.rateRatio || quantity?.rateRange ||
-      quantity?.doseExpression || quantity?.rateExpression ||
-      (quantity?.doseQuantity?.unit !== undefined &&
-        quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
-      expanded.condition?.length || expanded.safety || expanded.siteReference ||
-      expanded.excludedDates?.length ||
-      getDosageCondition(dosage) !== undefined ||
-      getDosageExcludedDates(dosage).length > 0 ||
-      getDosageExcludedWeekdays(dosage).length > 0
-    );
-}
-
-function canMergeTimingOnly(base: ParseResult, next: ParseResult): boolean {
-  if (hasPinnedDosageTextSemantics(base.fhir) ||
-      hasPinnedDosageTextSemantics(next.fhir)) {
-    return false;
-  }
-  const baseTiming = base.fhir.timing;
-  const nextTiming = next.fhir.timing;
-  const baseRepeat = baseTiming?.repeat;
-  const nextRepeat = nextTiming?.repeat;
-
-  if (!baseRepeat || !nextRepeat) {
-    return false;
-  }
-  if (!isMergeableAnchorRepeat(baseRepeat) || !isMergeableAnchorRepeat(nextRepeat)) {
-    return false;
-  }
-  if (!sameStringSet(baseRepeat.dayOfWeek, nextRepeat.dayOfWeek)) {
-    return false;
-  }
-  if (!sameMergeableSharedRepeat(baseRepeat, nextRepeat)) {
-    return false;
-  }
-  if (!deepEqual(baseTiming?.code, nextTiming?.code)) {
-    return false;
-  }
-  if (!deepEqual(baseTiming?.event, nextTiming?.event)) {
-    return false;
-  }
-
-  return (
-    base.fhir.sequence === next.fhir.sequence &&
-    deepEqual(base.fhir.doseAndRate, next.fhir.doseAndRate) &&
-    deepEqual(base.fhir.route, next.fhir.route) &&
-    deepEqual(base.fhir.site, next.fhir.site) &&
-    // A missing administration verb in a continuation inherits its neighbor;
-    // two explicitly different methods must never be merged.
-    (base.fhir.method === undefined || next.fhir.method === undefined ||
-      deepEqual(base.fhir.method, next.fhir.method)) &&
-    deepEqual(base.fhir.patientInstruction, next.fhir.patientInstruction) &&
-    deepEqual(base.fhir.additionalInstruction, next.fhir.additionalInstruction) &&
-    deepEqual(base.fhir.asNeeded, next.fhir.asNeeded) &&
-    deepEqual(base.fhir.asNeededFor, next.fhir.asNeededFor) &&
-    deepEqual(base.fhir.modifierExtension, next.fhir.modifierExtension) &&
-    deepEqual(base.fhir.extension, next.fhir.extension) &&
-    deepEqual(base.fhir.maxDosePerPeriod, next.fhir.maxDosePerPeriod) &&
-    deepEqual(base.fhir.maxDosePerAdministration, next.fhir.maxDosePerAdministration) &&
-    deepEqual(base.fhir.maxDosePerLifetime, next.fhir.maxDosePerLifetime)
-  );
-}
-
-/**
- * Returns a stable unique list preserving first-seen order.
- *
- * @param values Input values.
- * @returns Deduplicated values in insertion order.
- */
-function uniqueStrings<T extends string>(values: T[]): T[] {
-  const seen = new Set<T>();
-  const output: T[] = [];
-  for (const value of values) {
-    if (!seen.has(value)) {
-      seen.add(value);
-      output.push(value);
-    }
-  }
-  return output;
-}
-
-/**
- * Merges two parse results that are known to be timing-compatible.
- *
- * @param base Existing merged result.
- * @param next Next result to fold into `base`.
- * @param options Parse options used to render localized text.
- * @returns New merged parse result.
- */
-function mergeParseResults(base: ParseResult, next: ParseResult, options?: ParseOptions): ParseResult {
-  const baseRepeat = base.fhir.timing?.repeat ?? {};
-  const nextRepeat = next.fhir.timing?.repeat ?? {};
-  const mergedWhen = uniqueStrings([...(baseRepeat.when ?? []), ...(nextRepeat.when ?? [])]);
-  const mergedTimeOfDay = uniqueStrings([...(baseRepeat.timeOfDay ?? []), ...(nextRepeat.timeOfDay ?? [])]).sort();
-  const mergedRepeat: FhirTimingRepeat = {
-    ...baseRepeat,
-    ...(nextRepeat.dayOfWeek ? { dayOfWeek: nextRepeat.dayOfWeek } : {}),
-    ...(mergedWhen.length ? { when: mergedWhen } : {}),
-    ...(mergedTimeOfDay.length ? { timeOfDay: mergedTimeOfDay } : {})
-  };
-  const mergedFhir: FhirDosage = {
-    ...base.fhir,
-    ...(base.fhir.method === undefined && next.fhir.method
-      ? { method: next.fhir.method }
-      : {}),
-    timing: {
-      ...(base.fhir.timing ?? {}),
-      repeat: mergedRepeat
-    }
-  };
-
-  const shortText = formatSig(mergedFhir, "short", options);
-  const longText = formatSig(mergedFhir, "long", options);
-  mergedFhir.text = longText;
-
-  return {
-    fhir: mergedFhir,
-    shortText,
-    longText,
-    warnings: uniqueStrings([...(base.warnings ?? []), ...(next.warnings ?? [])]),
-    meta: {
-      ...base.meta,
-      consumedTokens: uniqueStrings([...(base.meta.consumedTokens ?? []), ...(next.meta.consumedTokens ?? [])]),
-      leftoverText: uniqueStrings(
-        [base.meta.leftoverText, next.meta.leftoverText].filter((value): value is string => !!value)
-      ).join(" ").trim() || undefined,
-      canonical: {
-        clauses: [...base.meta.canonical.clauses, ...next.meta.canonical.clauses]
-      },
-      siteLookups: [...(base.meta.siteLookups ?? []), ...(next.meta.siteLookups ?? [])],
-      prnReasonLookups: [...(base.meta.prnReasonLookups ?? []), ...(next.meta.prnReasonLookups ?? [])]
-    }
-  };
-}
-
-/**
- * Appends a parsed segment result to the batch, reusing the current item when
- * timing-only expansion can be represented as a single dosage element.
- *
- * @param items Accumulated batch items.
- * @param next Newly parsed segment result.
- * @param options Parse options used to format merged text.
- */
-function appendParseResult(
-  items: ParseResult[],
-  next: ParseResult,
-  options?: ParseOptions
-): void {
-  const previous = items[items.length - 1];
-  if (previous && canMergeTimingOnly(previous, next)) {
-    items[items.length - 1] = mergeParseResults(previous, next, options);
-    return;
-  }
-  items.push(next);
-}
-
-function mergeParseResultList(
-  rawResults: ParseResult[],
-  options?: ParseOptions
-): ParseResult[] {
-  const merged: ParseResult[] = [];
-  for (const result of rawResults) {
-    appendParseResult(merged, result, options);
-  }
-  return merged;
 }
 
 function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["canonical"]["clauses"] {
@@ -922,6 +615,7 @@ function expandRegimenGraphMembers(
     projectedIndices.push(indices);
   }
   return {
+    ...graph,
     phases: graph.phases.map((phase) => {
       const members: number[] = [];
       for (const member of phase.members) members.push(...(projectedIndices[member] ?? []));
@@ -929,6 +623,10 @@ function expandRegimenGraphMembers(
     }),
     sequences: graph.sequences.map((edge) => ({ ...edge }))
   };
+}
+
+function retainComposedMembers<T>(values: readonly T[], absorbed: ReadonlySet<number>): T[] {
+  return values.filter((_value, index) => !absorbed.has(index));
 }
 
 
@@ -947,13 +645,26 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
+  const timingComposition = states.length > 1
+    ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
+    : undefined;
+  const hasComposedTiming = Boolean(timingComposition?.absorbed.size);
+  const outputStates = hasComposedTiming
+    ? retainComposedMembers(states, timingComposition!.absorbed)
+    : states;
+  const outputSegments = hasComposedTiming
+    ? retainComposedMembers(segments, timingComposition!.absorbed)
+    : segments;
+  const outputRegimenGraph = hasComposedTiming
+    ? buildRegimenGraph(boundaryPlan, outputSegments)
+    : regimenGraph;
   const rawResults: ParseResult[] = [];
   const resultSegments: typeof segments = [];
   const projectionCounts: number[] = [];
 
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    const state = states[index];
+  for (let index = 0; index < outputSegments.length; index += 1) {
+    const segment = outputSegments[index];
+    const state = outputStates[index];
     const projected = buildParseResults(state, options);
     projectionCounts.push(projected.length);
     for (const result of projected) {
@@ -963,12 +674,12 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     }
   }
 
-  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
   composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
   }
-  let results = mergeParseResultList(rawResults, options);
+  let results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
   const primary = compatibilityPrimary;
@@ -991,13 +702,26 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
+  const timingComposition = states.length > 1
+    ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
+    : undefined;
+  const hasComposedTiming = Boolean(timingComposition?.absorbed.size);
+  const outputStates = hasComposedTiming
+    ? retainComposedMembers(states, timingComposition!.absorbed)
+    : states;
+  const outputSegments = hasComposedTiming
+    ? retainComposedMembers(segments, timingComposition!.absorbed)
+    : segments;
+  const outputRegimenGraph = hasComposedTiming
+    ? buildRegimenGraph(boundaryPlan, outputSegments)
+    : regimenGraph;
   const results: LintResult[] = [];
   const resultSegments: typeof segments = [];
   const projectionCounts: number[] = [];
 
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    const state = states[index];
+  for (let index = 0; index < outputSegments.length; index += 1) {
+    const segment = outputSegments[index];
+    const state = outputStates[index];
     const groups = findUnparsedTokenGroups(state);
     const recognizedIssues: LintIssue[] = groups.map((group) => {
       const shiftedRange = shiftRange(group.range, segment.start);
@@ -1028,7 +752,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
   composeRegimenPhases(lintParseResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
     const segment = resultSegments[index];
@@ -1102,13 +826,26 @@ export async function parseSigAsync(
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
+  const timingComposition = states.length > 1
+    ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
+    : undefined;
+  const hasComposedTiming = Boolean(timingComposition?.absorbed.size);
+  const outputStates = hasComposedTiming
+    ? retainComposedMembers(states, timingComposition!.absorbed)
+    : states;
+  const outputSegments = hasComposedTiming
+    ? retainComposedMembers(segments, timingComposition!.absorbed)
+    : segments;
+  const outputRegimenGraph = hasComposedTiming
+    ? buildRegimenGraph(boundaryPlan, outputSegments)
+    : regimenGraph;
   const rawResults: ParseResult[] = [];
   const resultSegments: typeof segments = [];
   const projectionCounts: number[] = [];
 
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    const state = states[index];
+  for (let index = 0; index < outputSegments.length; index += 1) {
+    const segment = outputSegments[index];
+    const state = outputStates[index];
     const projected = buildParseResults(state, options);
     projectionCounts.push(projected.length);
     for (const result of projected) {
@@ -1118,12 +855,12 @@ export async function parseSigAsync(
     }
   }
 
-  const projectedGraph = expandRegimenGraphMembers(regimenGraph, projectionCounts);
+  const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
   composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
   }
-  let results = mergeParseResultList(rawResults, options);
+  let results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
   const primary = compatibilityPrimary;

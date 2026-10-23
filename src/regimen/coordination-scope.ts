@@ -1,17 +1,24 @@
-import { selectHpsgCoordinationScopeConstruction } from '../hpsg/constructions';
+import {
+  selectHpsgCoordinationScopeConstruction,
+  selectHpsgTimingAnchorCoordinationConstruction
+} from '../hpsg/constructions';
 import { grammaticalTrailingInstructionScope } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
 import { AdvicePolarity } from '../types';
+import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from '../fhir-translations';
 import type {
   AdviceFrame,
   CanonicalAdditionalInstructionExpr,
   CanonicalEvidence,
+  CanonicalMethodExpr,
   CanonicalPrnExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
   CanonicalSourceSpan
 } from '../types';
+import type { HpsgSigSegment } from '../hpsg/segmenter';
+import { shiftCanonicalSigClauses } from '../ir';
 import type { BoundaryPlan, BoundaryRelation, CoordinationScopeFacts } from './types';
 
 export interface CoordinatedClauseState {
@@ -72,6 +79,25 @@ type GroupedScheduleField = (typeof SCHEDULE_FEATURE_GROUPS)[ScheduleFeatureGrou
 const scheduleFeatureCoverage: Exclude<ScheduleSemanticField, GroupedScheduleField> extends never
   ? true : never = true;
 void scheduleFeatureCoverage;
+
+const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
+const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
+  'duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd',
+  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit',
+  'dayOfWeek', 'calendarEvents'
+] as const satisfies readonly ScheduleSemanticField[];
+const NON_ANCHOR_SCHEDULE_FIELDS = [
+  'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
+  'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
+  'activityTiming', 'occurrenceCap'
+] as const satisfies readonly ScheduleSemanticField[];
+type CoordinatedScheduleField =
+  | (typeof COORDINATED_ANCHOR_FIELDS)[number]
+  | (typeof COORDINATED_ANCHOR_CONTEXT_FIELDS)[number]
+  | (typeof NON_ANCHOR_SCHEDULE_FIELDS)[number];
+const coordinatedScheduleCoverage:
+  Exclude<ScheduleSemanticField, CoordinatedScheduleField> extends never ? true : never = true;
+void coordinatedScheduleCoverage;
 
 function cloneScheduleField(
   schedule: CanonicalScheduleExpr,
@@ -492,6 +518,315 @@ function planSegmentIndex(
     if (segment.start >= candidate.start && segment.end <= candidate.end) return index;
   }
   return undefined;
+}
+
+function sameStringValueSet(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined
+): boolean {
+  if ((left?.length ?? 0) !== (right?.length ?? 0)) return false;
+  return (left ?? []).every(value => right?.indexOf(value) !== -1);
+}
+
+function sameDose(
+  left: CanonicalSigClause['dose'],
+  right: CanonicalSigClause['dose']
+): boolean {
+  if (!left || !right) return left === right;
+  return left.value === right.value && left.unit === right.unit &&
+    sameSemanticValue(left.range, right.range);
+}
+
+function sameSite(
+  left: CanonicalSigClause['site'],
+  right: CanonicalSigClause['site']
+): boolean {
+  if (!left || !right) return left === right;
+  const sameIdentity = left.coding?.code && right.coding?.code
+    ? left.coding.code === right.coding.code &&
+      (left.coding.system ?? '') === (right.coding.system ?? '')
+    : normalizedInstructionText(left.text) === normalizedInstructionText(right.text);
+  return Boolean(sameIdentity) &&
+    left.administrationTargetCount === right.administrationTargetCount &&
+    sameSemanticValue(left.spatialRelation, right.spatialRelation);
+}
+
+function hasOnlyTimingAnchorSemantics(clause: CanonicalSigClause): boolean {
+  return !clause.provisionalSchedule && !clause.prn?.enabled &&
+    !clause.clinicalAdjuncts && !clause.clinicalQuantity &&
+    !clause.patientInstruction && !clause.instructionGraph &&
+    !clause.additionalInstructions?.length && !clause.leftovers.length;
+}
+
+function isAnchorOnlySchedule(schedule: CanonicalScheduleExpr | undefined): boolean {
+  if (!schedule || (!schedule.when?.length && !schedule.timeOfDay?.length)) return false;
+  return !NON_ANCHOR_SCHEDULE_FIELDS.some(field =>
+    hasSemanticValue(scheduleFieldValue(schedule, field))
+  );
+}
+
+function sameAnchorScheduleContext(
+  left: CanonicalScheduleExpr,
+  right: CanonicalScheduleExpr
+): boolean {
+  for (const field of COORDINATED_ANCHOR_CONTEXT_FIELDS) {
+    if (field === 'dayOfWeek') {
+      if (!sameStringValueSet(left.dayOfWeek, right.dayOfWeek)) return false;
+      continue;
+    }
+    if (!sameSemanticValue(scheduleFieldValue(left, field), scheduleFieldValue(right, field))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function uniqueStringValues<T extends string>(values: readonly T[]): T[] {
+  const result: T[] = [];
+  for (const value of values) {
+    if (result.indexOf(value) < 0) result.push(value);
+  }
+  return result;
+}
+
+function addsTimingAnchor(
+  left: CanonicalScheduleExpr,
+  right: CanonicalScheduleExpr
+): boolean {
+  return (right.when ?? []).some(value => (left.when?.indexOf(value) ?? -1) < 0) ||
+    (right.timeOfDay ?? []).some(value => (left.timeOfDay?.indexOf(value) ?? -1) < 0);
+}
+
+function cloneMethodForRecipient(
+  method: CanonicalMethodExpr,
+  donorStart: number,
+  recipientStart: number
+): CanonicalMethodExpr {
+  return {
+    ...method,
+    _text: clonePrimitiveElement(method._text),
+    coding: method.coding ? {
+      ...method.coding,
+      _display: clonePrimitiveElement(method.coding._display),
+      i18n: cloneI18nRecord(method.coding.i18n),
+      extension: cloneExtensions(method.coding.extension)
+    } : undefined,
+    evidence: method.evidence?.map(item =>
+      shiftEvidenceToRecipient(item, donorStart, recipientStart)
+    )
+  };
+}
+
+function appendShiftedEvidence(
+  recipient: { evidence?: CanonicalEvidence[] } | undefined,
+  donor: { evidence?: CanonicalEvidence[] } | undefined,
+  donorStart: number,
+  recipientStart: number
+): void {
+  if (!recipient || !donor?.evidence?.length) return;
+  recipient.evidence = [...(recipient.evidence ?? [])];
+  for (const item of donor.evidence) {
+    appendEvidence(recipient.evidence, shiftEvidenceToRecipient(item, donorStart, recipientStart));
+  }
+}
+
+function appendDonorTokens(
+  recipient: ParserState,
+  donor: ParserState,
+  offset: number
+): void {
+  for (const token of donor.tokens) {
+    const index = recipient.tokens.length;
+    recipient.tokens.push({
+      ...token,
+      index,
+      sourceStart: token.sourceStart + offset,
+      sourceEnd: token.sourceEnd + offset,
+      surfaceIndices: [...token.surfaceIndices]
+    });
+    if (donor.consumed.has(token.index)) recipient.consumed.add(index);
+  }
+}
+
+function relationBetweenSegments(
+  plan: BoundaryPlan,
+  left: HpsgSigSegment,
+  right: HpsgSigSegment
+): { relation?: BoundaryRelation; sameSourceExpansion: boolean } {
+  const leftIndex = planSegmentIndex(plan, left);
+  const rightIndex = planSegmentIndex(plan, right);
+  const sameSourceExpansion = leftIndex !== undefined && leftIndex === rightIndex &&
+    left.start === right.start && left.end === right.end;
+  if (sameSourceExpansion || leftIndex === undefined || rightIndex === undefined) {
+    return { sameSourceExpansion };
+  }
+  return {
+    relation: plan.relations.find(candidate =>
+      candidate.from === leftIndex && candidate.to === rightIndex
+    ),
+    sameSourceExpansion: false
+  };
+}
+
+export interface TimingAnchorCompositionApplication {
+  rule: 'hpsg.cx.regimen.coordinated-timing-anchors';
+  recipient: number;
+  donor: number;
+  fields: Array<'when' | 'timeOfDay' | 'method'>;
+}
+
+export interface TimingAnchorCompositionResult {
+  absorbed: Set<number>;
+  applications: TimingAnchorCompositionApplication[];
+}
+
+/**
+ * Compose equivalent typed administration daughters before FHIR lowering.
+ * Only clock/event anchors may differ; every other schedule and administration
+ * feature must already unify, so independent routes, sites and phases survive.
+ */
+export function composeCoordinatedTimingAnchors(
+  states: readonly ParserState[],
+  plan: BoundaryPlan,
+  segments: readonly HpsgSigSegment[],
+  source: string
+): TimingAnchorCompositionResult {
+  const absorbed = new Set<number>();
+  const applications: TimingAnchorCompositionApplication[] = [];
+  let recipientIndex = 0;
+
+  for (let donorIndex = 1; donorIndex < states.length; donorIndex += 1) {
+    const recipient = states[recipientIndex];
+    const donor = states[donorIndex];
+    const recipientSegment = segments[recipientIndex];
+    const priorSegment = segments[donorIndex - 1];
+    const donorSegment = segments[donorIndex];
+    if (!recipient || !donor || !recipientSegment || !priorSegment || !donorSegment) {
+      recipientIndex = donorIndex;
+      continue;
+    }
+    const recipientClause = recipient.primaryClause;
+    const donorClause = donor.primaryClause;
+    const recipientSchedule = recipientClause.schedule;
+    const donorSchedule = donorClause.schedule;
+    const relation = relationBetweenSegments(plan, priorSegment, donorSegment);
+    const selected = selectHpsgTimingAnchorCoordinationConstruction({
+      relation: relation.relation,
+      sameSourceExpansion: relation.sameSourceExpansion,
+      adjacent: true,
+      leftComplete: findUnparsedTokenGroups(recipient).length === 0,
+      rightComplete: findUnparsedTokenGroups(donor).length === 0,
+      sameAdministration: !recipient.siteLookups.length && !donor.siteLookups.length &&
+        !recipient.prnReasonLookups.length && !donor.prnReasonLookups.length &&
+        hasOnlyTimingAnchorSemantics(recipientClause) &&
+        hasOnlyTimingAnchorSemantics(donorClause) &&
+        sameDose(recipientClause.dose, donorClause.dose) &&
+        sameRoute(recipientClause.route, donorClause.route) &&
+        sameSite(recipientClause.site, donorClause.site),
+      compatibleMethod: compatibleMethod(recipientClause.method, donorClause.method),
+      leftHasMethod: Boolean(recipientClause.method?.coding?.code || recipientClause.method?.text),
+      rightHasMethod: Boolean(donorClause.method?.coding?.code || donorClause.method?.text),
+      leftAnchorOnly: isAnchorOnlySchedule(recipientSchedule),
+      rightAnchorOnly: isAnchorOnlySchedule(donorSchedule),
+      sameScheduleContext: Boolean(recipientSchedule && donorSchedule &&
+        sameAnchorScheduleContext(recipientSchedule, donorSchedule)),
+      addsAnchor: Boolean(recipientSchedule && donorSchedule &&
+        addsTimingAnchor(recipientSchedule, donorSchedule))
+    });
+    if (!selected || !recipientSchedule || !donorSchedule) {
+      recipientIndex = donorIndex;
+      continue;
+    }
+
+    const donorOffset = donorSegment.start - recipientSegment.start;
+    const fields: TimingAnchorCompositionApplication['fields'] = [];
+    const when = uniqueStringValues([
+      ...(recipientSchedule.when ?? []),
+      ...(donorSchedule.when ?? [])
+    ]);
+    const timeOfDay = uniqueStringValues([
+      ...(recipientSchedule.timeOfDay ?? []),
+      ...(donorSchedule.timeOfDay ?? [])
+    ]).sort();
+    if (when.length) fields.push('when');
+    if (timeOfDay.length) fields.push('timeOfDay');
+    recipientClause.schedule = {
+      ...recipientSchedule,
+      ...(when.length ? { when } : {}),
+      ...(timeOfDay.length ? { timeOfDay } : {}),
+      evidence: [...(recipientSchedule.evidence ?? [])]
+    };
+    appendShiftedEvidence(
+      recipientClause.schedule,
+      donorSchedule,
+      donorSegment.start,
+      recipientSegment.start
+    );
+
+    if (!recipientClause.method && donorClause.method) {
+      recipientClause.method = cloneMethodForRecipient(
+        donorClause.method,
+        donorSegment.start,
+        recipientSegment.start
+      );
+      fields.push('method');
+    } else {
+      appendShiftedEvidence(
+        recipientClause.method,
+        donorClause.method,
+        donorSegment.start,
+        recipientSegment.start
+      );
+    }
+    appendShiftedEvidence(recipientClause.dose, donorClause.dose,
+      donorSegment.start, recipientSegment.start);
+    appendShiftedEvidence(recipientClause.route, donorClause.route,
+      donorSegment.start, recipientSegment.start);
+    appendShiftedEvidence(recipientClause.site, donorClause.site,
+      donorSegment.start, recipientSegment.start);
+
+    for (const item of donorClause.evidence) {
+      appendEvidence(recipientClause.evidence,
+        shiftEvidenceToRecipient(item, donorSegment.start, recipientSegment.start));
+    }
+    const constructionEvidence: CanonicalEvidence = {
+      rule: selected.id,
+      spans: [
+        ...(relation.relation && relation.relation.range.end > relation.relation.range.start
+          ? [{
+            start: relation.relation.range.start - recipientSegment.start,
+            end: relation.relation.range.end - recipientSegment.start,
+            text: source.slice(relation.relation.range.start, relation.relation.range.end)
+          }]
+          : []),
+        {
+          start: donorSegment.start - recipientSegment.start,
+          end: donorSegment.end - recipientSegment.start,
+          text: source.slice(donorSegment.start, donorSegment.end)
+        }
+      ],
+      note: 'Equivalent administration daughters contribute coordinated timing anchors.'
+    };
+    appendEvidence(recipientClause.schedule.evidence!, cloneEvidence(constructionEvidence));
+    appendEvidence(recipientClause.evidence, cloneEvidence(constructionEvidence));
+
+    const combinedText = source.slice(recipientSegment.start, donorSegment.end);
+    recipient.input = combinedText;
+    recipientClause.rawText = combinedText;
+    recipientClause.raw = { start: 0, end: combinedText.length, text: combinedText };
+    recipientClause.span = { start: 0, end: combinedText.length };
+    shiftCanonicalSigClauses(donor.clauses, donorOffset);
+    recipient.clauses.push(...donor.clauses);
+    appendDonorTokens(recipient, donor, donorOffset);
+    for (const warning of donor.warnings) {
+      if (recipient.warnings.indexOf(warning) < 0) recipient.warnings.push(warning);
+    }
+
+    absorbed.add(donorIndex);
+    applications.push({ rule: selected.id, recipient: recipientIndex, donor: donorIndex, fields });
+  }
+
+  return { absorbed, applications };
 }
 
 function relationPathsTo(
