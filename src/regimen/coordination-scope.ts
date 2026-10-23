@@ -358,7 +358,11 @@ function factsFor(
     leftExplicitDose: Boolean(leftClause.dose && hasEvidence(leftClause, 'hpsg.lex.dose')),
     rightExplicitDose: Boolean(rightClause.dose && hasEvidence(rightClause, 'hpsg.lex.dose')),
     leftExplicitHead: hasEvidence(leftClause, 'hpsg.lex.method'),
-    leftAdministrationContext: hasEvidence(leftClause, 'hpsg.lex.method') || inheritedAdministration,
+    // A typed dose and administration site constitute an elliptical
+    // administration even without an explicit verb ("1 drop OD"). That
+    // licenses a shared trailing cadence across coordinated site doses.
+    leftAdministrationContext: hasEvidence(leftClause, 'hpsg.lex.method') ||
+      inheritedAdministration || Boolean(leftClause.dose && leftClause.site),
     rightExplicitHead: hasEvidence(rightClause, 'hpsg.lex.method'),
     leftHasSite: Boolean(leftTarget),
     rightHasSite: Boolean(rightTarget),
@@ -969,7 +973,7 @@ export function applyCoordinatedCadenceScopes(
   const applications: CoordinationScopeApplication[] = [];
   const inheritedAdministrationSegments = new Set<number>();
   for (const relation of plan.relations) {
-    if (relation.kind === 'coordination' && relation.rule === 'regimen.dose-continuation') {
+    if (relation.kind === 'coordination' && relation.semanticLicense === 'dose-continuation') {
       inheritedAdministrationSegments.add(relation.to);
     }
   }

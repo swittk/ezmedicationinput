@@ -1141,6 +1141,9 @@ export function calendarDateListRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
     }
     if (!schedule) return [];
+    // Calendar constituent itself owns the exact typed source span. Generic
+    // HPSG projection can retain this provenance without a rule-name switch.
+    schedule.sourceRanges = [{ start: match.start, end: match.end }];
 
     return [lexicalSign({
       type: "schedule-sign",

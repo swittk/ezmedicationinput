@@ -1366,9 +1366,15 @@ function buildParseResult(
     graphUnderstoodSpans.some((span) =>
       span.start <= value.start && value.end <= span.end
     );
-  const hasUnrealizedTypedConditionSource = clause.evidence.some((item) =>
-    item.rule === "hpsg.lex.condition"
-  ) && clause.leftovers.some((leftover) => !sourceRangeUnderstoodByGraph(leftover));
+  // The typed instruction graph already owns procedural IF/UNLESS scope.
+  // Keep exact author wording when its free-standing modifier remains
+  // unrealized, without dispatching on a lexical rule's production name.
+  const hasUnrealizedTypedConditionSource = Boolean(
+    clause.instructionGraph && !clause.instructionGraph.coverage?.complete &&
+    clause.instructionGraph.relations?.some(relation =>
+      relation.kind === "if" || relation.kind === "unless"
+    ) && clause.leftovers.some(leftover => !sourceRangeUnderstoodByGraph(leftover))
+  );
   // Rich typed HPSG meaning keeps the clinician's exact wording as its primary
   // realization. No source text is reparsed to make this choice.
   const hasUnrealizedLexicalTail = Boolean(

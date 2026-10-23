@@ -163,7 +163,12 @@ export interface HpsgClinicalAdjunctFeature {
   /** Recognized adjunct boundary whose payload remains intentionally editable. */
   unresolved?: true;
   localRanges: TextRange[];
-  evidence: Array<{ rule: string; ranges: TextRange[] }>;
+  /** Lexical provenance and typed clinical role are distinct. */
+  evidence: Array<{
+    rule: string;
+    kind: "condition" | "calendar-exclusion" | "unresolved";
+    ranges: TextRange[];
+  }>;
 }
 
 export interface HpsgScopedAdministrationFeature {

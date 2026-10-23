@@ -256,11 +256,12 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     if (decision.selected.action === 'split') {
       const hasPredecessor = segment(
         site.start,
-        decision.selected.rule === 'regimen.adjacent-timed-doses'
+        decision.selected.inheritFollowingDuration === true
       );
       if (hasPredecessor) {
         plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
           kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
+          semanticLicense: decision.selected.semanticLicense,
           connectorKind: site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown',
           range: { start: site.start, end: site.end } });
       }

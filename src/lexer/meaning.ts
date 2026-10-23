@@ -1,5 +1,6 @@
 import {
   DAY_OF_WEEK_TOKENS,
+  DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
   EVENT_TIMING_TOKENS,
   FrequencyDescriptor,
@@ -216,6 +217,7 @@ export enum ConnectorRole {
 
 export enum TokenWordClass {
   AdministrationVerb = "ADMINISTRATION_VERB",
+  SiteAtom = "SITE_ATOM",
   SiteSurfaceModifier = "SITE_SURFACE_MODIFIER",
   WorkflowInstruction = "WORKFLOW_INSTRUCTION",
   ApplicationVerb = "APPLICATION_VERB",
@@ -387,9 +389,12 @@ export function annotateLexToken(token: LexToken): AnnotatedLexToken {
   }
 
   const siteCandidates = TOKEN_SITE_CANDIDATES[normalized];
-  if (siteCandidates) {
+  if (siteCandidates || DEFAULT_BODY_SITE_SNOMED[normalized]) {
     annotations = annotations || {};
-    annotations.siteCandidates = siteCandidates.slice();
+    if (siteCandidates) annotations.siteCandidates = siteCandidates.slice();
+    // One existing terminology lookup creates a typed lexical site head.
+    // HPSG's boundary construction reuses it without parsing body sites twice.
+    annotations.wordClasses = pushEnum(annotations.wordClasses, TokenWordClass.SiteAtom);
   }
 
   if (normalized === "prn" || normalized === "needed") {

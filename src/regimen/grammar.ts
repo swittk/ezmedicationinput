@@ -20,7 +20,7 @@ export interface BoundaryFacts {
   leftTargetCue: boolean; rightTargetCue: boolean;
 }
 interface Constraint { feature: string; satisfied: (facts: BoundaryFacts) => boolean }
-interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation'] }
+interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation']; acceptsAdjacentDose?: boolean; inheritFollowingDuration?: boolean; semanticLicense?: Proposal['semanticLicense'] }
 interface SemanticConstraint {
   feature: string;
   satisfied: (facts: CoordinationScopeFacts) => boolean;
@@ -89,7 +89,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
     semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
     semanticConstraint('right.complete', f => f.rightComplete),
@@ -111,7 +111,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
     semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
     semanticConstraint('right.complete', f => f.rightComplete),
@@ -134,7 +134,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
     semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.rule === 'regimen.dose-continuation'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
     semanticConstraint('right.complete', f => f.rightComplete),
@@ -223,7 +223,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.explicitUnit', f => f.explicitRightUnit),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
-  { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination', constraints: [
+  { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination',
+    semanticLicense: 'dose-continuation', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
     constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
@@ -232,7 +233,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
   ] },
-  { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence', constraints: [
+  { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence',
+    semanticLicense: 'target-transition', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
@@ -245,7 +247,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.hasTargets', f => f.right.hasTargets),
     constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets))
   ] },
-  { id: 'regimen.target-change', priority: 755, relation: 'coordination', constraints: [
+  { id: 'regimen.target-change', priority: 755, relation: 'coordination',
+    semanticLicense: 'target-transition', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
@@ -279,7 +282,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.hasSchedule', f => f.right.hasSchedule),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
-  { id: 'regimen.adjacent-timed-doses', priority: 760, relation: 'coordination', constraints: [
+  { id: 'regimen.adjacent-timed-doses', priority: 760, relation: 'coordination',
+    acceptsAdjacentDose: true, inheritFollowingDuration: true, constraints: [
     constraint('connector.adjacent-dose', f => f.site.kind === 'adjacent-dose'),
     constraint('left.complete', f => f.left.complete), constraint('left.hasDose', f => f.left.hasDose),
     constraint('left.hasSchedule', f => f.left.hasSchedule), constraint('right.complete', f => f.right.complete),
@@ -307,7 +311,7 @@ export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstr
   ].map(e => e.range ? { ...e, range: { start: e.range.start, end: e.range.end } } : e);
   const proposals: Proposal[] = [];
   for (const rule of CONSTRUCTIONS) {
-    if (f.site.kind === 'adjacent-dose' && rule.id !== 'regimen.adjacent-timed-doses') continue;
+    if (f.site.kind === 'adjacent-dose' && !rule.acceptsAdjacentDose) continue;
     const failed: string[] = [];
     for (const constraint of rule.constraints) {
       if (!constraint.satisfied(f)) {
@@ -317,7 +321,10 @@ export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstr
     }
     if (failed.length) { rejected?.push({ rule: rule.id, failedConstraints: failed }); continue; }
     proposals.push({ action: 'split', rule: rule.id, priority: rule.priority,
-      relation: f.site.kind === 'sequence' ? 'sequence' : rule.relation, evidence: describe() });
+      relation: f.site.kind === 'sequence' ? 'sequence' : rule.relation,
+      inheritFollowingDuration: rule.inheritFollowingDuration,
+      semanticLicense: rule.semanticLicense,
+      evidence: describe() });
   }
   return proposals;
 }

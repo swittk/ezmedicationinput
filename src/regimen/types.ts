@@ -31,6 +31,10 @@ export interface Proposal {
   rule: string;
   priority: number;
   relation?: RegimenRelation;
+  /** Typed boundary license to inherit a following sibling's course duration. */
+  inheritFollowingDuration?: boolean;
+  /** Typed construction license, never inferred from its display rule id. */
+  semanticLicense?: "dose-continuation" | "target-transition";
   evidence: Evidence[];
 }
 export interface BoundaryDecision {
@@ -89,6 +93,7 @@ export interface BoundaryRelation {
   kind: RegimenRelation;
   connectorKind: CoordinationConnectorKind;
   rule: string;
+  semanticLicense?: Proposal["semanticLicense"];
   range: Range;
 }
 

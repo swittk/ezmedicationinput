@@ -132,15 +132,19 @@ function findTokenByIndex(tokens: Token[], tokenIndex: number): Token | undefine
 function appendScheduleEvidence(
   state: ParserState,
   evidence: HpsgSign["evidence"][number],
-  tokens: Token[]
+  tokens: Token[],
+  schedule: HpsgScheduleFeature | undefined
 ): void {
-  if (evidence.rule !== "hpsg.lex.schedule.calendarDateList" || !evidence.tokenIndices.length) return;
+  // Evidence only owns a schedule when the typed sign already owns its source
+  // range. Never infer clinical meaning from a lexical rule's display name.
+  if (!schedule?.sourceRanges?.length || !evidence.tokenIndices.length) return;
   const owned = evidence.tokenIndices
     .map((tokenIndex) => findTokenByIndex(tokens, tokenIndex))
     .filter((token): token is Token => token !== undefined);
   if (!owned.length) return;
   const start = Math.min(...owned.map((token) => token.sourceStart));
   const end = Math.max(...owned.map((token) => token.sourceEnd));
+  if (!schedule.sourceRanges.some(range => range.start <= start && end <= range.end)) return;
   const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
   const scheduleEvidence = target.evidence ?? (target.evidence = []);
   if (scheduleEvidence.some((candidate) =>
@@ -189,7 +193,7 @@ function applyClinicalAdjunct(
 ): TextRange[] {
   const clause = state.primaryClause;
   const clinical = clause.clinicalAdjuncts ?? {};
-  const acceptedRules = new Set<string>();
+  const acceptedKinds = new Set<HpsgClinicalAdjunctFeature['evidence'][number]['kind']>();
   // An elliptical regimen phase can contain only a cadence at this stage.
   // The typed sequence will inherit its dose/site from the predecessor, so a
   // local guard attached to that cadence is still a clinical adjunct.
@@ -199,7 +203,7 @@ function applyClinicalAdjunct(
   );
   if (adjunct.condition && hasAdministration) {
     clinical.condition = adjunct.condition;
-    acceptedRules.add("hpsg.lex.clinical.condition");
+    acceptedKinds.add("condition");
   }
 
   const schedule = clause.schedule;
@@ -227,17 +231,17 @@ function applyClinicalAdjunct(
       );
       if (!schedule.calendarEvents?.length) delete schedule.calendarEvents;
     }
-    acceptedRules.add("hpsg.lex.clinical.calendar-exclusion");
+    acceptedKinds.add("calendar-exclusion");
   }
   if (adjunct.unresolved && hasAdministration) {
-    acceptedRules.add("hpsg.lex.clinical.calendar-exclusion.unresolved");
+    acceptedKinds.add("unresolved");
   }
 
   const localRanges = clinical.localRanges ?? [];
   const evidence = clinical.evidence ?? [];
   const rejectedRanges: TextRange[] = [];
   for (const item of adjunct.evidence) {
-    if (!acceptedRules.has(item.rule)) {
+    if (!acceptedKinds.has(item.kind)) {
       for (const range of item.ranges) appendRange(rejectedRanges, range);
       continue;
     }
@@ -250,12 +254,12 @@ function applyClinicalAdjunct(
       stableStructureKey(candidate.spans) === stableStructureKey(spans)
     )) evidence.push({ rule: item.rule, spans });
     for (const range of item.ranges) appendRange(localRanges, range);
-    if (item.rule === "hpsg.lex.clinical.calendar-exclusion.unresolved") {
+    if (item.kind === "unresolved") {
       // Provenance is accepted, but unresolved words remain editable/lintable.
       for (const range of item.ranges) appendRange(rejectedRanges, range);
     }
   }
-  if (acceptedRules.size) {
+  if (acceptedKinds.size) {
     clinical.localRanges = localRanges;
     clinical.evidence = evidence;
     clause.clinicalAdjuncts = clinical;
@@ -470,7 +474,7 @@ export function projectHpsgSignToState(
     if (!evidence.tokenIndices.length) {
       continue;
     }
-    if (schedule?.attachmentClass !== "procedure") appendScheduleEvidence(state, evidence, tokens);
+    if (schedule?.attachmentClass !== "procedure") appendScheduleEvidence(state, evidence, tokens, schedule);
     const startIndex = Math.min(...evidence.tokenIndices);
     const endIndex = Math.max(...evidence.tokenIndices);
     deps.recordEvidence(state, evidence.rule, startIndex, endIndex);

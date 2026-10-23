@@ -208,6 +208,7 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
       localRanges,
       evidence: [{
         rule: "hpsg.lex.clinical.condition",
+        kind: "condition",
         ranges: localRanges.map((range) => ({ ...range }))
       }]
     }, consumedTokens)];
@@ -245,6 +246,7 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
           localRanges: [range],
           evidence: [{
             rule: "hpsg.lex.clinical.calendar-exclusion.unresolved",
+            kind: "unresolved",
             ranges: [range]
           }]
         }
@@ -260,6 +262,7 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
       localRanges: [{ start: exclusion.start, end: exclusion.end }],
       evidence: [{
         rule: "hpsg.lex.clinical.calendar-exclusion",
+        kind: "calendar-exclusion",
         ranges: [{ start: exclusion.start, end: exclusion.end }]
       }]
     })];

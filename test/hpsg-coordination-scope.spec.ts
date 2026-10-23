@@ -22,6 +22,7 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
       kind: 'coordination',
       connectorKind: 'conjunction',
       rule: 'regimen.dose-continuation',
+      semanticLicense: 'dose-continuation',
       range: { start: 32, end: 35 }
     },
     adjacent: true,
@@ -93,6 +94,43 @@ describe('HPSG coordination cadence scope', () => {
     )).toBe(true);
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(lintSig(input).issues).toEqual([]);
+  });
+
+  it('owns repeated Thai bilateral target lists before timing-anchor coordination', async () => {
+    const input =
+      'หยอดตาขวาและตาซ้าย ครั้งละ 1 หยด เวลา 08:00 และ ' +
+      'หยอดตาขวาและตาซ้าย ครั้งละ 1 หยด เวลา 20:00';
+    const boundary = createBoundaryPlan(input);
+    expect(boundary.claims.filter(claim => claim.kind === 'target-list')).toHaveLength(2);
+    expect(boundary.segments).toHaveLength(2);
+    expect(boundary.relations.map(relation => relation.kind)).toEqual(['coordination']);
+
+    const check = (result: ReturnType<typeof parseSig>) => {
+      expect(result.items).toHaveLength(2);
+      expect(result.items.map(item => item.fhir.site?.text))
+        .toEqual(['right eye', 'left eye']);
+      expect(result.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+        .toEqual([1, 1]);
+      expect(result.items.map(item => item.fhir.timing?.repeat?.timeOfDay))
+        .toEqual([['08:00:00', '20:00:00'], ['08:00:00', '20:00:00']]);
+      expect(result.meta.leftoverText).toBeUndefined();
+    };
+    check(parseSig(input, { locale: 'th' }));
+    check(await parseSigAsync(input, { locale: 'th' }));
+    expect(lintSig(input, { locale: 'th' }).issues).toEqual([]);
+  });
+
+  it('does not swallow a second explicit eye dose into a site-only conjunction', () => {
+    const text = 'instill 1 drop OD and 2 drops OS BID';
+    const boundary = createBoundaryPlan(text);
+    expect(boundary.claims.filter(claim => claim.kind === 'target-list')).toHaveLength(0);
+    const parsed = parseSig(text);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency))
+      .toEqual([2, 2]);
   });
 
   it('keeps disjunctive sites typed without inventing simultaneous administrations', () => {
@@ -520,6 +558,7 @@ describe('HPSG coordination cadence scope', () => {
       relations: [{
         from: 0, to: 1, kind: 'coordination', connectorKind: 'conjunction',
         rule: 'regimen.dose-continuation',
+        semanticLicense: 'dose-continuation',
         range: { start: leftText.length + 1, end: rightStart - 1 }
       }]
     } as BoundaryPlan;
@@ -766,6 +805,17 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(false);
+  });
+
+  it('shares cadence and duration with an implicit typed eye-dose administration', () => {
+    const input = '1 drop in left eye and 2 drops in right eye twice daily x7d';
+    const parsed = parseSig(input);
+    expectBid(parsed.items);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([7, 7]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
+      .toEqual([7, 7]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
   });
 
   it('preserves an explicit left cadence instead of overriding it', () => {

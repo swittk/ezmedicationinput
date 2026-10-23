@@ -177,7 +177,7 @@ export function scopeSequentialPhaseSemantics(
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
-    const sharedMethod = edge.relation.rule.startsWith('regimen.target-') &&
+    const sharedMethod = edge.relation.semanticLicense === 'target-transition' &&
       sourceMethods[0] &&
       sourceMethods.every(method => JSON.stringify(method) === JSON.stringify(sourceMethods[0]))
       ? sourceMethods[0] : undefined;
