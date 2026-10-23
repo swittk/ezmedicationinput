@@ -1,17 +1,14 @@
-import { findMedicationDateListSpans, MedicationDateListMatch } from '../date-interpretation';
-import { lexInput } from '../lexer/lex';
-import { annotateLexTokens } from '../lexer/meaning';
+import { MedicationDateListMatch } from '../date-interpretation';
 import { lexicalRule, normalizeTokenLower } from '../hpsg/rule-context';
-import { emptySynsem, lexicalSign } from '../hpsg/signature';
+import { lexicalSign } from '../hpsg/signature';
 import type { HpsgClauseContext } from '../hpsg/rule-context';
 import type { Token } from '../parser-state';
-import type { ParseOptions, ParseResult } from '../types';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from '../hpsg/lexical-classes';
-import { removeInstructionArtifactsOwnedByTemporalRanges } from './temporal-artifact-ownership';
 import { OPEN_ENDED_WORDS } from './temporal-relation-vocabulary';
 
 interface OpenEndedMarkerMatch {
   start: number;
+  markerStart: number;
   end: number;
   date: MedicationDateListMatch;
 }
@@ -39,7 +36,6 @@ function hasBlockingBoundary(tokens: readonly Token[], start: number, end: numbe
 }
 
 function resolveMarkers(
-  input: string,
   tokens: readonly Token[],
   spans: readonly MedicationDateListMatch[]
 ): OpenEndedMarkerMatch[] {
@@ -54,27 +50,23 @@ function resolveMarkers(
     if (!date) continue;
     const surface = tokens[index].lower.replace(/^[.,;:]+|[.,;:]+$/gu, '');
     if (surface === 'ไป' && date.relation !== 'start-inclusive' && date.relation !== 'start-exclusive') continue;
-    output.push({ start: markerStart, end, date });
+    const event = date.events.length === 1 && !date.unresolved ? date.events[0] : undefined;
+    if (!event || (date.relation !== 'event' && date.relation !== 'start-inclusive')) continue;
+    output.push({ start: date.start, markerStart, end, date });
   }
   return output;
-}
-
-/** Resolve marker/date ownership for post-parse normalization with one lexical pass. */
-export function findOpenEndedMarkers(input: string, options?: ParseOptions): OpenEndedMarkerMatch[] {
-  const tokens = annotateLexTokens(lexInput(input));
-  return resolveMarkers(input, tokens, findMedicationDateListSpans(input, options));
 }
 
 const CONTEXT_MARKERS = new WeakMap<HpsgClauseContext, OpenEndedMarkerMatch[]>();
 function contextMarkers(context: HpsgClauseContext): OpenEndedMarkerMatch[] {
   const cached = CONTEXT_MARKERS.get(context);
   if (cached) return cached;
-  const markers = resolveMarkers(context.state.input, context.tokens, context.dateSpans);
+  const markers = resolveMarkers(context.tokens, context.dateSpans);
   CONTEXT_MARKERS.set(context, markers);
   return markers;
 }
 
-export function insideOpenEndedMarker(context: HpsgClauseContext, start: number): boolean {
+export function insideOpenEndedSchedule(context: HpsgClauseContext, start: number): boolean {
   const token = context.tokens[start];
   if (!token) return false;
   return contextMarkers(context).some(marker =>
@@ -82,100 +74,32 @@ export function insideOpenEndedMarker(context: HpsgClauseContext, start: number)
   );
 }
 
-export function openEndedBoundMarkerRule() {
-  return lexicalRule('hpsg.lex.schedule.openEndedMarker', (context: HpsgClauseContext, start: number) => {
+export function openEndedScheduleRule() {
+  return lexicalRule('hpsg.lex.schedule.openEndedDate', (context: HpsgClauseContext, start: number) => {
     const first = context.tokens[start];
     if (!first) return [];
     const match = contextMarkers(context).find(value => value.start === first.sourceStart);
     if (!match) return [];
     const members = context.tokens
-      .slice(start)
+      .slice(start, context.limit)
       .filter(token => token.sourceStart >= match.start && token.sourceEnd <= match.end);
-    if (!members.length) return [];
+    const event = match.date.events[0];
+    if (!members.length || !members.some(token => token.sourceStart >= match.markerStart)) return [];
     return [lexicalSign({
-      type: 'connector-sign',
-      rule: 'hpsg.lex.schedule.openEndedMarker',
+      type: 'schedule-sign',
+      rule: 'hpsg.lex.schedule.openEndedDate',
       tokens: members,
-      synsem: emptySynsem(),
-      score: 3
+      synsem: {
+        head: {
+          schedule: {
+            boundsStart: event.isoDate,
+            sourceRanges: [{ start: match.start, end: match.end }]
+          }
+        },
+        valence: {},
+        cont: { clauseKind: 'administration' }
+      },
+      score: 42 + members.length
     })];
   });
-}
-
-/**
- * A continuation marker reclassifies a bare calendar event as a start bound.
- * Dates that already have an explicit relation remain represented as parsed,
- * including unusual combinations that the clinician may want to correct.
- */
-export function normalizeOpenEndedSchedule(item: ParseResult, source: string, options?: ParseOptions): boolean {
-  const clause = item.meta.canonical.clauses[0];
-  const schedule = clause?.schedule;
-  if (!clause || !schedule) return false;
-  // Marker recognition only uses the declared open-ended words and the
-  // adjacent Thai two-word continuations. Skip a full lexical+date scan
-  // when there is no surface form that can possibly produce a marker.
-  if (!/\b(?:onwards?|forwards?)\b|ต่อไป|เป็นต้น\s*ไป|(?:^|[^ก-๙])ไป/u.test(source)) return false;
-  const markers = findOpenEndedMarkers(source, options);
-  if (!markers.length) return false;
-  let changed = removeInstructionArtifactsOwnedByTemporalRanges(
-    item,
-    markers.map(marker => ({ start: marker.start, end: marker.end }))
-  );
-
-  for (const marker of markers) {
-    const span = marker.date;
-    if (span.events.length !== 1 || span.unresolved) continue;
-    if (span.relation !== 'event') continue;
-
-    const iso = span.events[0].isoDate;
-    // Do not erase a distinct explicit start or the event that conflicts with
-    // it. Both remain useful source facts in a malformed-but-editable SIG.
-    if (schedule.boundsStart !== undefined && schedule.boundsStart !== iso) continue;
-    schedule.boundsStart = iso;
-    const calendarEvents = schedule.calendarEvents ?? [];
-    let eventIndex = calendarEvents.findIndex(event =>
-      event.isoDate === iso && event.sourceText === span.events[0].sourceText
-    );
-    if (eventIndex < 0) {
-      const matchingDates = calendarEvents
-        .map((event, index) => event.isoDate === iso ? index : -1)
-        .filter(index => index >= 0);
-      if (matchingDates.length === 1) eventIndex = matchingDates[0];
-    }
-    if (eventIndex >= 0) {
-      schedule.calendarEvents = calendarEvents.filter((_, index) => index !== eventIndex);
-      if (!schedule.calendarEvents.length) delete schedule.calendarEvents;
-    }
-    if (item.fhir.timing?.event) {
-      const eventMetadata = item.fhir.timing._event;
-      const fhirEvents = item.fhir.timing.event;
-      let fhirIndex = eventIndex < fhirEvents.length && fhirEvents[eventIndex]?.slice(0, 10) === iso
-        ? eventIndex
-        : -1;
-      if (fhirIndex < 0) {
-        const matchingDates = fhirEvents
-          .map((value, index) => value.slice(0, 10) === iso ? index : -1)
-          .filter(index => index >= 0);
-        if (matchingDates.length === 1) fhirIndex = matchingDates[0];
-      }
-      if (fhirIndex >= 0) {
-        item.fhir.timing.event = fhirEvents.filter((_, index) => index !== fhirIndex);
-        if (!item.fhir.timing.event.length) delete item.fhir.timing.event;
-        if (eventMetadata) {
-          item.fhir.timing._event = eventMetadata.filter((_, index) => index !== fhirIndex);
-          if (!item.fhir.timing._event.length) delete item.fhir.timing._event;
-        }
-      }
-    }
-    item.fhir.timing = item.fhir.timing ?? {};
-    item.fhir.timing.repeat = {
-      ...(item.fhir.timing.repeat ?? {}),
-      boundsPeriod: {
-        ...(item.fhir.timing.repeat?.boundsPeriod ?? {}),
-        start: schedule.boundsStart
-      }
-    };
-    changed = true;
-  }
-  return changed;
 }

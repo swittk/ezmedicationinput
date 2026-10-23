@@ -360,7 +360,11 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
   }
 }
 
-function finalizeClause(state: ParserState, options?: ParseOptions): void {
+function finalizeClause(
+  state: ParserState,
+  options?: ParseOptions,
+  semanticOwnershipRanges?: readonly TextRange[]
+): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
   clause.rawText = state.input;
@@ -370,7 +374,12 @@ function finalizeClause(state: ParserState, options?: ParseOptions): void {
   clause.warnings = state.warnings.length ? state.warnings.slice() : undefined;
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
-  clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
+  clause.instructionGraph = buildInstructionGraph(
+    state.input,
+    clause,
+    options,
+    semanticOwnershipRanges
+  );
   promoteGraphDirectivesToAdditionalInstructions(clause);
 }
 
@@ -438,7 +447,7 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
   const tokens = tokenize(input);
   const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
 
-  parseHpsgClause({
+  const sign = parseHpsgClause({
     state,
     tokens,
     options,
@@ -461,6 +470,11 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);
   seedKnownSiteCoding(state);
-  finalizeClause(state, options);
+  const schedule = sign?.synsem.head.schedule;
+  finalizeClause(
+    state,
+    options,
+    schedule?.attachmentClass !== "procedure" ? schedule?.sourceRanges : undefined
+  );
   return state;
 }

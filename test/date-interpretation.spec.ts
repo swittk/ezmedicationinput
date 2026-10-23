@@ -1,9 +1,45 @@
 import { describe, expect, it, vi } from "vitest";
 import { calculateTotalUnits, findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
+import { canonicalToFhir } from "../src/fhir";
+import { parseHpsgClause } from "../src/hpsg/clause-parser";
 import { lexInput } from "../src/lexer/lex";
+import { normalizeBodySiteKey } from "../src/maps";
+import { parseClauseState, tokenize } from "../src/parser";
+import { ParserState } from "../src/parser-state";
+import type { HpsgSign } from "../src/hpsg/signature";
+import type { ParseOptions } from "../src/types";
 import { parseSig } from "./helpers/r5-parser";
 
 const REFERENCE_DATE = "2026-09-27";
+
+function parseRawHpsgSign(input: string, options?: ParseOptions): {
+  sign: HpsgSign;
+  tokens: ReturnType<typeof tokenize>;
+} {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens);
+  const sign = parseHpsgClause({
+    state,
+    tokens,
+    options,
+    dateSpans: findMedicationDateListSpans(input, options),
+    limit: tokens.length,
+    clinicalCache: {},
+    deps: {
+      addDayOfWeekList: () => undefined,
+      addWhen: () => undefined,
+      isCompatibleRouteRefinement: (current, next) => current === undefined || current === next,
+      markToken: () => undefined,
+      normalizeSiteText: normalizeBodySiteKey,
+      recordEvidence: () => undefined,
+      refreshMethodSurface: () => undefined,
+      setRoute: () => undefined
+    },
+    project: false
+  });
+  if (!sign) throw new Error(`Expected a raw HPSG sign for ${input}`);
+  return { sign, tokens };
+}
 
 describe("calendar date interpretation", () => {
   it("parses mixed Thai/English Buddhist shorthand dates then transitions to weekly Sunday", () => {
@@ -921,6 +957,103 @@ describe("calendar date interpretation", () => {
       expect(result.fhir.timing?.repeat?.boundsPeriod).toEqual(item.bounds);
       expect(result.fhir.site).toBeUndefined();
     }
+  });
+
+  it("constructs one open-ended schedule sign before FHIR lowering", () => {
+    const cases: Array<{
+      input: string;
+      ownedSpan: string;
+      options: Parameters<typeof parseClauseState>[1];
+    }> = [
+      {
+        input: "take 1 tab daily on 2026-09-28 onwards",
+        ownedSpan: "on 2026-09-28 onwards",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "take 1 tab daily from 2026-09-28 onwards",
+        ownedSpan: "from 2026-09-28 onwards",
+        options: { locale: "en-GB", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน วันที่ 28/9/2569 เป็นต้นไป",
+        ownedSpan: "วันที่ 28/9/2569 เป็นต้นไป",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่28/9/69ไป",
+        ownedSpan: "ตั้งแต่28/9/69ไป",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่28/9/69 เป็นต้นไป",
+        ownedSpan: "ตั้งแต่28/9/69 เป็นต้นไป",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      },
+      {
+        input: "รับประทาน 1 เม็ด ทุกวัน ตั้งแต่28/9/69 ต่อไป",
+        ownedSpan: "ตั้งแต่28/9/69 ต่อไป",
+        options: { locale: "th", datePolicy: { referenceDate: REFERENCE_DATE } }
+      }
+    ];
+
+    for (const item of cases) {
+      const { sign, tokens } = parseRawHpsgSign(item.input, item.options);
+      expect(sign.synsem.head.schedule).toMatchObject({
+        attachmentClass: "administration",
+        boundsStart: "2026-09-28",
+        frequency: 1,
+        period: 1,
+        periodUnit: "d"
+      });
+      expect(sign.synsem.head.schedule?.calendarEvents).toBeUndefined();
+      const expectedStart = item.input.indexOf(item.ownedSpan);
+      expect(sign.synsem.head.schedule?.sourceRanges).toEqual([{
+        start: expectedStart,
+        end: expectedStart + item.ownedSpan.length
+      }]);
+      const evidence = sign.evidence.find((value) => value.rule === "hpsg.lex.schedule.openEndedDate");
+      expect(evidence).toBeDefined();
+      const ownedTokens = tokens.filter((token) => evidence?.tokenIndices.includes(token.index));
+      const ownedStart = Math.min(...ownedTokens.map((token) => token.sourceStart));
+      const ownedEnd = Math.max(...ownedTokens.map((token) => token.sourceEnd));
+      expect(item.input.slice(ownedStart, ownedEnd)).toBe(item.ownedSpan);
+
+      const state = parseClauseState(item.input, item.options);
+      const clause = state.primaryClause;
+      expect(clause.schedule).toMatchObject({
+        boundsStart: "2026-09-28",
+        frequency: 1,
+        period: 1,
+        periodUnit: "d"
+      });
+      expect(clause.schedule?.calendarEvents).toBeUndefined();
+      expect(clause.evidence).toContainEqual({
+        rule: "hpsg.lex.schedule.openEndedDate",
+        spans: [expect.objectContaining({ text: item.ownedSpan })]
+      });
+      expect(clause.instructionGraph, item.input).toBeUndefined();
+      expect(clause.leftovers).toEqual([]);
+
+      const fhir = canonicalToFhir(clause);
+      expect(fhir.timing?.event).toBeUndefined();
+      expect(fhir.timing?.repeat?.boundsPeriod).toEqual({ start: "2026-09-28" });
+    }
+  });
+
+  it("keeps a distinct explicit start editable when it conflicts with an open-ended date", () => {
+    const input = "take 1 tab daily from 2026-09-20 on 2026-09-28 onwards";
+    const state = parseClauseState(input, {
+      locale: "en-GB",
+      datePolicy: { referenceDate: REFERENCE_DATE }
+    });
+    const clause = state.primaryClause;
+    expect(clause.schedule?.boundsStart).toBe("2026-09-20");
+    expect(clause.schedule?.calendarEvents).toBeUndefined();
+    expect(clause.leftovers).toContainEqual(expect.objectContaining({
+      text: "on 2026-09-28 onwards"
+    }));
+    expect(clause.rawText).toBe(input);
   });
 
   it("preserves an existing end bound when transition propagation adds a start bound", () => {

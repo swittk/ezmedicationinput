@@ -389,6 +389,7 @@ function mergeSchedule(
   }
   return {
     attachmentClass: mergedClass,
+    sourceRanges: appendUniqueStructured(left.sourceRanges, right.sourceRanges),
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     count: mergeOptionalScalar(left.count, right.count),
     countMax: mergeOptionalScalar(left.countMax, right.countMax),

@@ -1,5 +1,5 @@
 import { cycleScheduleRule, insideCycle } from "../regimen/cycles";
-import { openEndedBoundMarkerRule, insideOpenEndedMarker } from "../regimen/open-ended";
+import { insideOpenEndedSchedule, openEndedScheduleRule } from "../regimen/open-ended";
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
@@ -61,7 +61,7 @@ function withScopeRequirements(
     type: rule.type,
     match(context, start) {
       if (rule.id !== 'hpsg.lex.schedule.finiteCycle' && insideCycle(context, start)) return [];
-      if (rule.id !== 'hpsg.lex.schedule.openEndedMarker' && insideOpenEndedMarker(context, start)) return [];
+      if (rule.id !== 'hpsg.lex.schedule.openEndedDate' && insideOpenEndedSchedule(context, start)) return [];
       const conditions = getConditionFeatures(context);
       return rule.match(context, start).map((sign) => {
         if (!sign.tokens.length || sign.type === "conditional-sign") return sign;
@@ -129,7 +129,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       doseLexicalRule(),
       cycleScheduleRule(),
       calendarDateListRule(),
-      openEndedBoundMarkerRule(),
+      openEndedScheduleRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
       cadenceFirstImplicitSingleDoseRule(),

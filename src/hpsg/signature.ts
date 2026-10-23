@@ -211,6 +211,8 @@ declare module "../types" {
 
 export interface HpsgScheduleFeature {
   attachmentClass?: "administration" | "procedure";
+  /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
+  sourceRanges?: TextRange[];
   timingCode?: string;
   count?: number;
   countMax?: number;
