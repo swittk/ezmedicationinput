@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateTotalUnits, nextDueDoses, parseSig, toDosageDetails
+  calculateTotalUnits, nextDueDoses, parseSig, toDosageDetails,
+  toFhirR5Dosages, fromFhir, FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
-import type { FhirDosage, FhirPeriodUnit } from "../src";
+import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
+import { canonicalToFhir } from "../src/fhir";
 
 const start = "2024-01-01T00:00:00Z";
 const due = {
@@ -444,6 +446,426 @@ describe("schedule/supply audit regressions", () => {
     expect(calculateTotalUnits({ ...supply, dosage })).toMatchObject({
       totalUnits: 2,
       unit: "tab"
+    });
+  });
+});
+
+function projectSchedule(schedule: CanonicalScheduleExpr): FhirDosage {
+  return canonicalToFhir({
+    kind: "administration",
+    rawText: "",
+    raw: { start: 0, end: 0, text: "" },
+    dose: { value: 1, unit: "tab" },
+    schedule,
+    leftovers: [],
+    evidence: [],
+    confidence: 1
+  });
+}
+
+const clocks = ["08:00:00", "20:00:00"];
+const origin = "2024-01-01T00:00:00Z";
+
+describe("regimen clock-frequency normalization", () => {
+  const weeklyCases: Array<{
+    name: string;
+    schedule: CanonicalScheduleExpr;
+    durationValue: number;
+    expected: string[];
+  }> = [
+    {
+      name: "an unanchored weekly cadence",
+      schedule: { period: 1, periodUnit: FhirPeriodUnit.Week, timeOfDay: clocks },
+      durationValue: 2,
+      expected: [
+        "2024-01-01T08:00:00+00:00",
+        "2024-01-01T20:00:00+00:00",
+        "2024-01-08T08:00:00+00:00",
+        "2024-01-08T20:00:00+00:00"
+      ]
+    },
+    {
+      name: "an anchored two-week cadence",
+      schedule: {
+        period: 2,
+        periodUnit: FhirPeriodUnit.Week,
+        dayOfWeek: [FhirDayOfWeek.Monday],
+        timeOfDay: clocks
+      },
+      durationValue: 4,
+      expected: [
+        "2024-01-01T08:00:00+00:00",
+        "2024-01-01T20:00:00+00:00",
+        "2024-01-15T08:00:00+00:00",
+        "2024-01-15T20:00:00+00:00"
+      ]
+    }
+  ];
+
+  it.each(weeklyCases)("preserves both clocks and the cadence for $name", ({ schedule, durationValue, expected }) => {
+    const dosage = projectSchedule(schedule);
+
+    expect(dosage.timing?.repeat).toMatchObject(schedule);
+    expect(dosage.timing?.repeat?.frequency).toBeUndefined();
+    expect(nextDueDoses(dosage, {
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      limit: 4
+    })).toEqual(expected);
+    expect(calculateTotalUnits({
+      dosage,
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      durationValue,
+      durationUnit: FhirPeriodUnit.Week
+    }).totalUnits).toBe(4);
+  });
+
+  it("preserves two monthly clocks without inventing a non-daily frequency", () => {
+    const dosage = projectSchedule({
+      period: 1,
+      periodUnit: FhirPeriodUnit.Month,
+      timeOfDay: clocks
+    });
+
+    expect(dosage.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "mo",
+      timeOfDay: clocks
+    });
+    expect(dosage.timing?.repeat?.frequency).toBeUndefined();
+    expect(nextDueDoses(dosage, {
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      limit: 4
+    })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T20:00:00+00:00",
+      "2024-02-01T08:00:00+00:00",
+      "2024-02-01T20:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      dosage,
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      durationValue: 2,
+      durationUnit: FhirPeriodUnit.Month
+    }).totalUnits).toBe(4);
+  });
+
+  it("leaves an annual multi-clock cadence explicit", () => {
+    const dosage = projectSchedule({
+      period: 1,
+      periodUnit: FhirPeriodUnit.Year,
+      timeOfDay: clocks
+    });
+
+    expect(dosage.timing?.repeat).toMatchObject({
+      period: 1,
+      periodUnit: "a",
+      timeOfDay: clocks
+    });
+    expect(dosage.timing?.repeat?.frequency).toBeUndefined();
+  });
+
+  it("derives frequency for a daily-unit cadence while retaining its period", () => {
+    const dosage = projectSchedule({
+      period: 2,
+      periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: clocks
+    });
+
+    expect(dosage.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 2,
+      periodUnit: "d",
+      timeOfDay: clocks
+    });
+    expect(nextDueDoses(dosage, {
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      limit: 4
+    })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T20:00:00+00:00",
+      "2024-01-03T08:00:00+00:00",
+      "2024-01-03T20:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      dosage,
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      durationValue: 4,
+      durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(4);
+  });
+
+  it("derives the executable frequency for an exact week with weekday anchors", () => {
+    const dosage = projectSchedule({
+      period: 1,
+      periodUnit: FhirPeriodUnit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday],
+      timeOfDay: clocks
+    });
+
+    expect(dosage.timing?.repeat).toMatchObject({
+      frequency: 4,
+      period: 1,
+      periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: clocks
+    });
+    expect(nextDueDoses(dosage, {
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      limit: 4
+    })).toEqual([
+      "2024-01-01T08:00:00+00:00",
+      "2024-01-01T20:00:00+00:00",
+      "2024-01-04T08:00:00+00:00",
+      "2024-01-04T20:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      dosage,
+      from: origin,
+      orderedAt: origin,
+      timeZone: "UTC",
+      durationValue: 1,
+      durationUnit: FhirPeriodUnit.Week
+    }).totalUnits).toBe(4);
+  });
+
+  it("does not overwrite a stated frequency", () => {
+    const dosage = projectSchedule({
+      frequency: 1,
+      period: 1,
+      periodUnit: FhirPeriodUnit.Month,
+      timeOfDay: clocks
+    });
+
+    expect(dosage.timing?.repeat?.frequency).toBe(1);
+  });
+});
+
+const base = {
+  orderedAt: "2026-10-19T08:00:00+07:00",
+  from: "2026-10-19T08:00:00+07:00",
+  timeZone: "Asia/Bangkok",
+  limit: 8
+} as const;
+
+const shapes = (source: string) => {
+  const parsed = parseSig(source);
+  return [
+    parsed, parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)
+  ];
+};
+
+describe("dose scheduling runtime guarantees", () => {
+  it("does not report zero supply for an empty regimen", () => {
+    expect(() => calculateTotalUnits({
+      dosage: [],
+      from: base.from,
+      orderedAt: base.orderedAt,
+      timeZone: base.timeZone,
+      durationValue: 1,
+      durationUnit: "d"
+    })).toThrow(/medication dosage or complete treatment course/i);
+  });
+  it("does not recursively overflow on calendar exclusions in the flat native result", () => {
+    const expected = [
+      "2026-10-19T09:00:00+07:00",
+      "2026-10-21T09:00:00+07:00",
+      "2026-10-23T09:00:00+07:00"
+    ];
+    for (const input of shapes("1 tab daily except 20/10/2026 and 22/10/2026")) {
+      expect(nextDueDoses(input, { ...base, limit: 3 })).toEqual(expected);
+    }
+  });
+
+  it("enforces normal maximum quantities instead of refusing safely computable prescriptions", () => {
+    const expected = [
+      "2026-10-19T08:00:00+07:00",
+      "2026-10-19T12:00:00+07:00",
+      "2026-10-20T08:00:00+07:00",
+      "2026-10-20T12:00:00+07:00",
+      "2026-10-21T08:00:00+07:00",
+      "2026-10-21T12:00:00+07:00"
+    ];
+    for (const input of shapes("2 tabs Q4H PRN pain max 4 tablets/day")) {
+      expect(nextDueDoses(input, { ...base, limit: 6 })).toEqual(expected);
+    }
+  });
+
+  it("does not reset a 24-hour maximum at midnight", () => {
+    const inputs = shapes("2 tabs Q4H PRN pain max 4 tablets/day");
+    for (const input of inputs) {
+      expect(nextDueDoses(input, {
+        ...base, from: "2026-10-19T20:00:00+07:00", limit: 2,
+        priorDoseTimes: [
+          "2026-10-19T08:00:00+07:00",
+          "2026-10-19T12:00:00+07:00"
+        ]
+      })).toEqual([
+        "2026-10-20T08:00:00+07:00",
+        "2026-10-20T12:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("excludes non-administered conditional doses before applying quantity maxima", () => {
+    const dose = parseSig("2 tabs Q4H PRN pain max 4 tablets/day").fhir[0];
+    dose.condition = [{
+      code: { text: "Eligible" }, text: "Eligible"
+    }];
+    expect(nextDueDoses(dose, {
+      ...base, limit: 4,
+      evaluateCondition: (_condition, at) => !at.includes("T08:00:00")
+    })).toEqual([
+      "2026-10-19T12:00:00+07:00",
+      "2026-10-19T16:00:00+07:00",
+      "2026-10-20T12:00:00+07:00",
+      "2026-10-20T16:00:00+07:00"
+    ]);
+  });
+
+  it("applies the same conditions from the strict R5 representation", () => {
+    const input = "1 tab PO BID only if BP >160, otherwise hold";
+    const parsed = parseSig(input);
+    const cases = [
+      parsed, parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)
+    ];
+    for (const value of cases) {
+      expect(nextDueDoses(value, {
+        ...base, limit: 3, evaluateCondition: () => false
+      })).toEqual([]);
+      expect(nextDueDoses(value, {
+        ...base, limit: 2, evaluateCondition: () => true
+      })).toEqual([
+        "2026-10-19T08:00:00+07:00",
+        "2026-10-19T20:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("allows body-site references and dose expressions to carry actual schedule times", () => {
+    const details: FhirR6DosageDetails = {
+      step: [{ component: [{
+        site: { reference: { reference: "BodyStructure/example" } },
+        doseAndRate: [{
+          doseExpression: {
+            language: "text/fhirpath",
+            expression: "%patient.weight * 0.5"
+          }
+        }],
+        timing: {
+          repeat: { frequency: 2, period: 1, periodUnit: "d" }
+        }
+      }] }]
+    };
+    const imported = fromFhir(details);
+    for (const input of [
+      details, imported.fhir, toFhirR5Dosages(details)
+    ]) {
+      expect(nextDueDoses(input, { ...base, limit: 2 })).toEqual([
+        "2026-10-19T08:00:00+07:00",
+        "2026-10-19T20:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("schedules a future-dated one-time administration once and agrees with supply", () => {
+    const dosage = parseSig("1 tab once").fhir[0];
+    dosage.timing!.repeat!.boundsPeriod = { start: "2026-10-25" };
+    const options = {
+      ...base,
+      from: "2026-10-21T08:00:00+07:00",
+      orderedAt: "2026-10-21T08:00:00+07:00",
+      limit: 4
+    };
+    const expected = ["2026-10-25T00:00:00+07:00"];
+    for (const input of [dosage, [dosage], toFhirR5Dosages({
+      step: [{ component: [dosage] }]
+    })]) {
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(nextDueDoses(input, {
+        ...options, from: "2026-10-26T08:00:00+07:00"
+      })).toEqual([]);
+    }
+    // Even without orderedAt, the explicit single-dose bound remains the
+    // historical anchor, rather than moving whenever the query starts.
+    expect(nextDueDoses(dosage, { ...options, orderedAt: undefined }))
+      .toEqual(expected);
+    expect(nextDueDoses(dosage, {
+      ...options, orderedAt: undefined, from: "2026-10-26T08:00:00+07:00"
+    })).toEqual([]);
+  });
+
+  it("preserves a recurring on/off cycle through flat FHIR JSON persistence", () => {
+    const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat");
+    const flat = JSON.parse(JSON.stringify(parsed.fhir));
+    expect(toDosageDetails(flat).repeatCycle).toMatchObject({
+      value: 14, unit: "d", code: "d"
+    });
+    expect(nextDueDoses(flat, { ...base, limit: 10 })).toEqual(
+      nextDueDoses(parsed.fhirNext, { ...base, limit: 10 })
+    );
+  });
+
+  it("uses calendar-day horizons across daylight-saving transitions", () => {
+    const dosage = parseSig("1 tab daily at 08:00").fhir[0];
+    expect(calculateTotalUnits({
+      dosage,
+      from: "2024-03-09T08:00:00-05:00",
+      orderedAt: "2024-03-09T08:00:00-05:00",
+      timeZone: "America/New_York",
+      durationValue: 2,
+      durationUnit: "d"
+    })).toMatchObject({ totalUnits: 2, unit: "tab" });
+  });
+
+  it("keeps ordinary schedule opportunities visible when maxima need extra clinical context", () => {
+    const source = parseSig("1 tab PO BID").fhir[0];
+    const period = {
+      ...source,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      maxDosePerPeriod: [{
+        numerator: { value: 20, unit: "mg" },
+        denominator: { value: 1, unit: "d" }
+      }]
+    };
+    expect(nextDueDoses(period, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: period, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({ quantityKind: "maximum", totalUnits: 6 });
+
+    const lifetime = { ...source, maxDosePerLifetime: { value: 4, unit: "tab" } };
+    expect(nextDueDoses(lifetime, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: lifetime, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({ quantityKind: "maximum", totalUnits: 4 });
+
+    const perAdministration = {
+      ...source, maxDosePerAdministration: { value: 0.5, unit: "tab" }
+    };
+    expect(nextDueDoses(perAdministration, base)).toHaveLength(base.limit);
+    expect(calculateTotalUnits({
+      dosage: perAdministration, from: base.from, orderedAt: base.orderedAt,
+      timeZone: base.timeZone, durationValue: 3, durationUnit: "d"
+    })).toMatchObject({
+      totalUnits: 6,
+      unit: "tab",
+      quantityKind: "maximum",
+      explanation: expect.stringContaining("unevaluable maximum-dose constraint")
     });
   });
 });

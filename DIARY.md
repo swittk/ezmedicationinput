@@ -3,6 +3,20 @@
 > **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
 
 
+## 2026-10-23 — CodeRabbit review scope and exact remaining architecture debt
+
+PR #10 had 114 changed files and 108 explicitly reviewable before this change (107 if CodeRabbit's default lockfile exclusion applies). Kept **all 55 production `src/` files, all six `fhir/` StructureDefinitions, and substantive HPSG/clinical oracle suites** eligible. Consolidated three small new related spec files (FHIR timing into `test/r6-primary.spec.ts`; clock bounds and scheduling runtime into `test/schedule-family-audit.spec.ts`) without removing a single test. Excluded six still-executed bulk/adversarial test and corpus-fixture files *from CodeRabbit review only*. Net PR: **112 GitHub paths, 99 explicitly CodeRabbit-reviewable paths** (98 if default lockfile exclusion applies). All 1,866 source tests pass, the ESM/CJS/TS declaration build passes.
+
+**Which remaining non-HPSG semantics are inherited and which were introduced by 0.2:**
+
+- **Inherited from original master:** `src/index.ts` `canMergeTimingOnly()`, `mergeParseResults()`, and `mergeParseResultList()` exist in original pre-0.2. They coalesce compatible dosage clauses for the old public interface. They are FHIR-aware compatibility/IR infrastructure, not invented safety gates. Preserve functioning public behavior; only replace after independent before/after real SIG and phone performance evidence.
+- **Introduced in 0.2 (still refactoring debt):** `src/clinical-safety.ts` `applyClinicalConstraints()` still recognizes some maximum-dose/source constraints after FHIR lowering and supplements projected maximum quantity. The upper clinical fact belongs to typed HPSG clinical-quantity/schedule features, then one FHIR lowering. No destructive quarantine should be added.
+- **Introduced in 0.2 (still refactoring debt):** `src/regimen/temporal-artifact-ownership.ts` `normalizeTemporalBoundArtifacts()` handles inclusive `up to DATE` and removes procedural graph artifacts already owned by timing. `src/regimen/open-ended.ts` `normalizeOpenEndedSchedule()` similarly reclassifies recognized open-ended dates as starts and removes duplicated event instructions. They currently update canonical/FHIR after lowering; the positive temporal semantics should move into the HPSG/date-bound lexical layer, but do not discard existing date/calendar metadata or turn unsupported dates into no result.
+- **Not architecture debt:** `canonicalToFhir()`, `composeRegimenPhases()` assignment of standard FHIR sequence indices, and purely structural persistence/realization are legitimate *projections* of already resolved typed semantics. They do not need to become HPSG grammar.
+- **Removed in HPSG cleanup:** `annotateCanonicalClinicalAdjuncts()`, `propagateTrailingSharedSafety()`, `propagateDateTransitionEventTiming()`, and post-decision `candidate-adapter` segment stitching.
+
+The remaining 0.2 helper paths were **not** left because they were deemed desirable; they were deliberately deferred from unrelated shared-scope refactoring to avoid destroying already-correct clinician suggestions, regressions to inclusive/calendar dates, and hot-path latency. They require their own real-SIG oracle tests and typed pre-projection changes, not a blanket deletion or new defensive gates.
+
 ## 2026-10-23 — HPSG semantic-ownership debt audit and cleanup
 
 Product contract: clinical SIG **suggester**; no autonomous-prescriber semantics, blanket quarantine, or data loss. Code is HPSG-first with a single downstream FHIR projection.

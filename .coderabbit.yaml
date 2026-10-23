@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # EZMedInput is a clinician-reviewed SIG suggester, NOT a prescribing safety gate.
-# Keep all production source, tests, FHIR definitions and package metadata reviewable.
+# Review all production source, FHIR definitions and substantive clinical oracle tests.
 reviews:
   profile: "chill"
   request_changes_workflow: false
   path_filters:
-    # These are instruction/documentation entry points, not clinical code.
-    # Keep the existing PR under the 100-file CodeRabbit review limit.
+    # Documentation and low-signal supporting material; production source,
+    # FHIR definitions, and core clinical/HPSG tests stay in the review.
     - "!.coderabbit.yaml"
     - "!AGENTS.md"
     - "!CLAUDE.md"
@@ -18,6 +18,15 @@ reviews:
     - "!DIARY.md"
     - "!bench/compare-r6.mjs"
     - "!experiments/boundary-planner/**"
+    # Bulk replay data and deliberately adversarial fuzz runners stay in CI,
+    # but add little incremental CodeRabbit review signal. Do not exclude
+    # grammar, core HPSG clinical-oracle tests, or FHIR definitions.
+    - "!test/real-world-fuzz-2026-cases.json"
+    - "!test/real-world-fuzz-2026-oracles.json"
+    - "!test/real-world-fuzz-2026.spec.ts"
+    - "!test/real-world-torture.spec.ts"
+    - "!test/weird-clinician-instructions.spec.ts"
+    - "!test/topical-cosmetic-dogfood.spec.ts"
   path_instructions:
     - path: "**/*"
       instructions: |
