@@ -1,5 +1,5 @@
 import { cycleScheduleRule } from "../regimen/cycles";
-import { insideOpenEndedSchedule, openEndedScheduleRule } from "../regimen/open-ended";
+import { openEndedScheduleRule } from "../regimen/open-ended";
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
@@ -61,7 +61,6 @@ function withScopeRequirements(
     id: rule.id,
     type: rule.type,
     match(context, start) {
-      if (rule.id !== 'hpsg.lex.schedule.openEndedDate' && insideOpenEndedSchedule(context, start)) return [];
       const conditions = getConditionFeatures(context);
       return rule.match(context, start).map((sign) => {
         if (!sign.tokens.length || sign.type === "conditional-sign") return sign;

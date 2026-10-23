@@ -66,14 +66,6 @@ function contextMarkers(context: HpsgClauseContext): OpenEndedMarkerMatch[] {
   return markers;
 }
 
-export function insideOpenEndedSchedule(context: HpsgClauseContext, start: number): boolean {
-  const token = context.tokens[start];
-  if (!token) return false;
-  return contextMarkers(context).some(marker =>
-    token.sourceStart >= marker.start && token.sourceEnd <= marker.end
-  );
-}
-
 export function openEndedScheduleRule() {
   return lexicalRule('hpsg.lex.schedule.openEndedDate', (context: HpsgClauseContext, start: number) => {
     const first = context.tokens[start];

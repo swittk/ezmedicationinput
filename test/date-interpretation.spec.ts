@@ -1007,6 +1007,7 @@ describe("calendar date interpretation", () => {
         periodUnit: "d"
       });
       expect(sign.synsem.head.schedule?.calendarEvents).toBeUndefined();
+      expect(sign.synsem.valence.patientInstruction).toBeUndefined();
       const expectedStart = item.input.indexOf(item.ownedSpan);
       expect(sign.synsem.head.schedule?.sourceRanges).toEqual([{
         start: expectedStart,
@@ -1034,14 +1035,16 @@ describe("calendar date interpretation", () => {
       });
       expect(clause.instructionGraph, item.input).toBeUndefined();
       expect(clause.leftovers).toEqual([]);
+      expect(clause.rawText).toBe(item.input);
 
       const fhir = canonicalToFhir(clause);
       expect(fhir.timing?.event).toBeUndefined();
       expect(fhir.timing?.repeat?.boundsPeriod).toEqual({ start: "2026-09-28" });
+      expect(parseBatch(item.input, item.options).input).toBe(item.input);
     }
   });
 
-  it("keeps a distinct explicit start editable when it conflicts with an open-ended date", () => {
+  it("preserves conflicting date facts and keeps the continuation marker editable", () => {
     const input = "take 1 tab daily from 2026-09-20 on 2026-09-28 onwards";
     const state = parseClauseState(input, {
       locale: "en-GB",
@@ -1049,9 +1052,15 @@ describe("calendar date interpretation", () => {
     });
     const clause = state.primaryClause;
     expect(clause.schedule?.boundsStart).toBe("2026-09-20");
-    expect(clause.schedule?.calendarEvents).toBeUndefined();
+    expect(clause.schedule?.calendarEvents).toEqual([
+      expect.objectContaining({ isoDate: "2026-09-28", sourceText: "2026-09-28" })
+    ]);
+    expect(clause.schedule?.evidence).toContainEqual({
+      rule: "hpsg.lex.schedule.calendarDateList",
+      spans: [expect.objectContaining({ text: "on 2026-09-28" })]
+    });
     expect(clause.leftovers).toContainEqual(expect.objectContaining({
-      text: "on 2026-09-28 onwards"
+      text: "onwards"
     }));
     expect(clause.rawText).toBe(input);
   });
