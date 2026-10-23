@@ -8,7 +8,6 @@ import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { SITE_RESTRICTION_PREDICATES_BY_LEMMA } from "./hpsg/lexical-classes";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { baseLanguageTag } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -24,7 +23,7 @@ import {
   realizeInstructionAction,
   realizeInstructionGraph
 } from "./instruction-graph";
-import { resolveBodySitePhrase } from "./body-site-grammar";
+import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
 import {
   getUniqueAdviceRelationByGrammarFeature,
   getBodySiteRelationRealization,
@@ -824,18 +823,7 @@ function appendSiteRestrictionsEnglish(
   if (!restrictions?.length) return sitePhrase;
   const parts = [sitePhrase];
   for (const restriction of restrictions) {
-    const predicate = restriction.predicate;
-    const lexicalPredicate = predicate.lemma
-      ? SITE_RESTRICTION_PREDICATES_BY_LEMMA.get(predicate.lemma)
-      : undefined;
-    const symptom = predicate.form !== "existential" && predicate.lemma
-      ? resolveSymptomDefinition(predicate.lemma)
-      : undefined;
-    const normalizedPredicate = lexicalPredicate?.i18n?.en ?? symptom?.conditionI18n?.en;
-    const relative = normalizedPredicate
-      ? `${restriction.relation} ${normalizedPredicate}`
-      : restriction.sourceText.trim() ||
-        `${restriction.relation} ${predicate.text}`.trim();
+    const relative = realizeBodySiteRestriction(restriction, "en");
     if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
       parts.push(relative);
     }

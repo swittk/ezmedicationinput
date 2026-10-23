@@ -2869,3 +2869,68 @@ variation: common BID 1.3158->1.3233 ms; eye taper 4.1819->3.8195 ms. A larger
 conjunction recheck measured 3.0969->3.1418 ms and the configured-map variant
 3.2878->3.3774 ms. These are host results, not a universal or mobile speedup claim.
 No push, merge, version change, or package publication.
+
+
+## 2026-10-23 — structured FHIR extensions and shared semantic ownership
+
+Owner rejected JSON-inside-valueString for R6-in-R5 and source preservation.
+The bridge now uses named extension children for courses/steps/components,
+conditions, safety, expressions and relative timing, with native FHIR value[x]
+datatypes. Unknown FHIR extensions retain their complete original structures;
+future native properties retain typed field/item/value children rather than an
+opaque string. R6's approximate quantity comparator is represented separately
+from its R5 Quantity instead of emitting an invalid native R5 comparator.
+
+Primary and strict-R5 edit provenance now share one writer: repeated row children
+with primitive structural/text fingerprints. No fingerprint lists, complete
+projection snapshots, source objects or condition trees are serialized to JSON.
+Simple R6 measurements/states use their native condition fields only; complex
+Boolean trees use explicit all/any/not operand extensions. Diagnostic feature
+graphs also return structured objects with reference identities. Production
+source contains ZERO JSON.stringify and ZERO JSON.parse calls; the permanent
+source audit and a parse/export/import/edit/format test enforce that boundary.
+
+This intentionally replaces the unreleased development JSON bridge format.
+Older JSON-shaped metadata is retained unchanged as source, not interpreted as
+a current structured bridge. No deployed consumer/dependency was modified and
+no package version, publication, push or merge is included in this checkpoint.
+
+Site semantics now have one predicate interpreter, one typed restriction
+constructor and one English/Thai realization implementation. Standalone anatomy
+lookup remains useful; full-SIG HPSG lexical rules use anatomy-only lookup so
+relative clauses cannot be independently reinterpreted inside lexical sites.
+The existing qualifier view derives from the shared predicate. Full-SIG source
+spans remain exact; normalized standalone phrases do not invent original offsets.
+
+Sync, async and lint share regimen/scope/timing assembly; sync and async also
+share result lowering without forcing Promise overhead onto synchronous calls.
+Course markers are constructed directly, not by exporting and discarding full
+R5 arrays. Read-only formatting projects components directly without creating
+persisted metadata. Row copies remain independently editable; the first owner
+reuses the already-detached marker while later owners receive detached copies.
+
+Three added single-purpose modules were consolidated into their proper existing
+owners (temporal vocabulary into the lexical registry, clinical quantity lowering
+into FHIR). This offsets the typed bridge, anatomical-owner change, and grouped
+source-metadata definitions: 115 raw paths / exactly 100 CodeRabbit-reviewable
+paths; no new exclusions and no test-oracle deletion.
+
+Validation: 2009/2009 source tests green, built ESM/CJS exports 4/4, both builds
+and declarations pass. Independent clinical oracles 39/39. In the 181-case,
+10889-field pre/post comparison, 180 cases are unchanged and one has exactly
+three removed redundant JSON-condition-extension fields; its native BP >160
+meaning is unchanged. Typed-extension, unknown metadata, edit isolation, source
+span, and sync/async regressions are permanent. Nine StructureDefinitions were
+updated/added; IDs, canonical roots and extension value-versus-child shape are
+checked, but no external HL7 validator/conformance certification is claimed.
+
+Balanced HP-host measurements: BID 1.3360->1.2954 ms, PRN 2.2592->2.1953 ms,
+ordinary conjunction 3.0031->2.9668 ms, custom two-sites 11.4572->10.9741 ms.
+Eye taper 3.8878->4.0404 ms (+3.9%); scalp relative cases +1.8%/+2.3%.
+The earlier pre-copy-optimization eye recheck was +6.1%; it is retained in the
+report rather than hidden. No universal or phone-performance claim. Full timing
+run preceded only the standalone normalized-offset metadata omission; clinical
+parity and final source tests cover the finished source.
+
+Evidence is in /tmp/ezmed-structured-extensions-20261023/RESULT.json and its
+referenced test/comparison reports. The original untracked probe remains untouched.

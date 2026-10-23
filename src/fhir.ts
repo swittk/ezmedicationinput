@@ -1,7 +1,7 @@
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
 } from "./dosage-course";
-import { projectHpsgClinicalQuantityToFhir } from "./hpsg/clinical-quantity-fhir";
+import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
@@ -1691,4 +1691,80 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   }
 
   return state;
+}
+
+/**
+ * Lower a resolved, typed HPSG quantity without consulting source text. This
+ * remains part of the ordinary canonical-to-FHIR lowering, not a second parser.
+ * @param dosage FHIR output currently being assembled.
+ * @param quantity Resolved typed clinical quantity.
+ */
+function projectHpsgClinicalQuantityToFhir(
+  dosage: FhirDosage,
+  quantity: HpsgClinicalQuantityFeature
+): void {
+  if (quantity.status !== "resolved") {
+    // Preserve a recognized daily total even when no per-administration split
+    // was stated. It is a rate, not an invented dose, and remains editable.
+    if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
+      const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
+      dosage.doseAndRate = [{
+        rateQuantity: {
+          value: quantity.numerator.value,
+          unit,
+          system: "http://unitsofmeasure.org",
+          code: unit
+        }
+      }];
+    }
+    return;
+  }
+  if (quantity.representation === "dose") {
+    const dose = dosage.doseAndRate?.[0]?.doseQuantity;
+    if (dose && quantity.projectedDose) {
+      dose.system = "http://unitsofmeasure.org";
+      dose.code = quantity.projectedDose.unit;
+    }
+    return;
+  }
+  if (quantity.representation === "rate-quantity") {
+    const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
+    dosage.doseAndRate = [{
+      rateQuantity: {
+        value: quantity.numerator.value,
+        unit,
+        system: "http://unitsofmeasure.org",
+        code: unit
+      }
+    }];
+    return;
+  }
+  const duration = quantity.administrationDuration;
+  const dose = quantity.projectedDose;
+  if (!duration || !dose) return;
+  const doseQuantity = {
+    value: dose.value,
+    unit: dose.unit,
+    system: "http://unitsofmeasure.org",
+    code: dose.unit
+  };
+  const rate = quantity.rateNumerator ?? dose;
+  const rateNumerator = {
+    value: rate.value,
+    unit: rate.unit,
+    system: "http://unitsofmeasure.org",
+    code: rate.unit
+  };
+  dosage.doseAndRate = [{
+    doseQuantity,
+    rateRatio: {
+      numerator: rateNumerator,
+      denominator: {
+        value: duration.value,
+        unit: duration.unit,
+        system: "http://unitsofmeasure.org",
+        code: duration.unit
+      }
+    }
+  }];
 }

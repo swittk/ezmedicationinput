@@ -9,7 +9,7 @@ import {
 import { getRouteMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
@@ -211,7 +211,7 @@ function routeTokenIsSitePrepositionBeforeResolvableSite(
       .join(" ")
       .trim();
     if (!siteText) continue;
-    const resolved = resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     if (resolved?.coding || resolved?.definition) return true;
@@ -311,7 +311,7 @@ function routeTokenIsPartitiveSiteHead(
     if (tokens.some((token) => context.state.consumed.has(token.index))) {
       return false;
     }
-    const resolved = resolveBodySitePhrase(joinTokenText(tokens), context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(joinTokenText(tokens), context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     if (resolved?.features.kind === "partitive") {
@@ -329,7 +329,7 @@ function routeFromSitePrepositionPhrase(
     return undefined;
   }
   const siteText = tokens.slice(1).map((token) => token.original).join(" ");
-  const resolved = resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+  const resolved = resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   });
   const routeHint = resolved?.definition?.routeHint ??
@@ -455,7 +455,7 @@ function matchCompoundDoseUnit(
     lowerValue &&
     (
       DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(lowerValue)] ||
-      resolveBodySitePhrase(lowerValue, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(lowerValue, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     )
@@ -682,7 +682,7 @@ export function perTargetCountDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
     ) return [];
     const siteToken = context.tokens[start - 1];
     if (!siteToken) return [];
-    const site = resolveBodySitePhrase(siteToken.original, context.options?.siteCodeMap, {
+    const site = resolveBodySiteLexeme(siteToken.original, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     const definition = site?.definition;

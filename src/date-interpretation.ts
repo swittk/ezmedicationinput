@@ -1,4 +1,4 @@
-import { TEMPORAL_DATE_RELATION_SOURCES } from "./regimen/temporal-relation-vocabulary";
+import { TEMPORAL_DATE_RELATION_SOURCES } from "./hpsg/lexical-classes";
 import { inferMedicationLocale } from "./locale-detection";
 import {
   CanonicalCalendarEventExpr,

@@ -1,3 +1,4 @@
+import { formBodySiteRestriction } from "../body-site-grammar";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import {
   HpsgDoseFeature,
@@ -771,14 +772,8 @@ function siteRelativeSynsem(
     ...base,
     cont: {
       ...base.cont,
-      siteRestriction: {
-        relation: marker.relation,
-        sourceText: context.sourceText?.(range.start, range.end) ??
-          `${marker.relation} ${predicate.text}`,
-        range,
-        markerRange: { ...marker.range },
-        predicate: { ...predicate, range: { ...predicate.range } }
-      }
+      siteRestriction: formBodySiteRestriction(predicate, marker.range,
+        context.sourceText?.(range.start, range.end))
     }
   };
 }

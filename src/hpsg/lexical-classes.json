@@ -10,12 +10,6 @@
     "ที่",
     "บริเวณ"
   ],
-  "siteRelativeMarkers": [
-    {
-      "surface": "where",
-      "relation": "where"
-    }
-  ],
   "siteRestrictionPredicateIntroducers": [
     {
       "parts": [
@@ -781,10 +775,24 @@
     "หรือ"
   ],
   "singleOccurrencePhrases": [
-    ["once", "only"],
-    ["only", "once"],
-    ["one", "time", "only"],
-    ["only", "one", "time"]
+    [
+      "once",
+      "only"
+    ],
+    [
+      "only",
+      "once"
+    ],
+    [
+      "one",
+      "time",
+      "only"
+    ],
+    [
+      "only",
+      "one",
+      "time"
+    ]
   ],
   "frequencyAdverbUnits": {
     "daily": "Day",

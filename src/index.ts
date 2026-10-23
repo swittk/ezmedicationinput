@@ -1,6 +1,6 @@
 import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
-  withDosageEditProvenance,
+  withDosageEditProvenance, fromR6Dosage,
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
@@ -658,16 +658,17 @@ function prepareCanonicalParallel(
 }
 
 
-export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
-  const boundaryPlan = createBoundaryPlan(input, options);
-  const segments = expandMealDashSegments(boundaryPlan.segments, options);
-  const states: ParserState[] = [];
-  for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
-    applyPrnReasonCoding(state, options);
-    applySiteCoding(state, options);
-    applyInstructionSemanticResolvers(state, options);
-    states.push(state);
-  }
+/** Compose already interpreted segments once, before any FHIR lowering.
+ * Sync, async and lint consumers share exactly the same semantic orchestration.
+ * @param input Original instruction for source-span provenance.
+ * @param boundaryPlan Typed constituent/boundary ownership.
+ * @param segments Segment views selected by the boundary planner.
+ * @param states Clause states after the caller's terminology resolvers complete.
+ */
+function composeParsedStates(
+  input: string, boundaryPlan: BoundaryPlan,
+  segments: ReturnType<typeof parseSigSegments>, states: ParserState[]
+) {
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
@@ -687,6 +688,22 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
   const phaseSequences = regimenMemberSequences(outputRegimenGraph);
+  return { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences };
+}
+
+/** Lower the common sync/async result after terminology resolution.
+ * @param input Original clinician instruction.
+ * @param options Terminology and rendering options.
+ * @param boundaryPlan Completed typed boundary plan.
+ * @param segments Ordered parsed segments.
+ * @param states Resolved clause states; never parsed again here.
+ */
+function finishParsedBatch(
+  input: string, options: ParseOptions | undefined, boundaryPlan: BoundaryPlan,
+  segments: ReturnType<typeof parseSigSegments>, states: ParserState[]
+): ParseBatchResult {
+  const { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences } =
+    composeParsedStates(input, boundaryPlan, segments, states);
   const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const rawResults: ParseResult[] = [];
 
@@ -701,7 +718,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   }
 
   const results = rawResults;
-  const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
+  const primary = resolvePrimaryParseResult(results, input, options);
   const parallel = canonicalParallel.kind === "resolved"
     ? projectParallelRegimen(
       canonicalParallel, results.map(result => result.longText), input, {
@@ -710,10 +727,22 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
       }
     )
     : canonicalParallel;
-  const primary = compatibilityPrimary;
 
   return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel.kind === "resolved" ? parallel : undefined);
+}
+
+export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
+  const boundaryPlan = createBoundaryPlan(input, options);
+  const segments = expandMealDashSegments(boundaryPlan.segments, options);
+  const states: ParserState[] = [];
+  for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
+    applyPrnReasonCoding(state, options);
+    applySiteCoding(state, options);
+    applyInstructionSemanticResolvers(state, options);
+    states.push(state);
+  }
+  return finishParsedBatch(input, options, boundaryPlan, segments, states);
 }
 
 export function lintSig(input: string, options?: ParseOptions): LintBatchResult {
@@ -725,25 +754,8 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     applySiteCoding(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
-  scopeTrailingSharedDuration(states, segments);
-  scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
-  const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
-  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
-  const timingComposition = states.length > 1
-    ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
-    : undefined;
-  const hasComposedTiming = Boolean(timingComposition?.absorbed.size);
-  const outputStates = hasComposedTiming
-    ? retainComposedMembers(states, timingComposition!.absorbed)
-    : states;
-  const outputSegments = hasComposedTiming
-    ? retainComposedMembers(segments, timingComposition!.absorbed)
-    : segments;
-  const outputRegimenGraph = hasComposedTiming
-    ? buildRegimenGraph(boundaryPlan, outputSegments)
-    : regimenGraph;
-  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
+  const { outputStates, outputSegments, phaseSequences } =
+    composeParsedStates(input, boundaryPlan, segments, states);
   const results: LintResult[] = [];
   const resultSegments: typeof segments = [];
 
@@ -842,52 +854,7 @@ export async function parseSigAsync(
     await applyInstructionSemanticResolversAsync(state, options);
     states.push(state);
   }
-  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
-  scopeTrailingSharedDuration(states, segments);
-  scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
-  const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
-  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
-  const timingComposition = states.length > 1
-    ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
-    : undefined;
-  const hasComposedTiming = Boolean(timingComposition?.absorbed.size);
-  const outputStates = hasComposedTiming
-    ? retainComposedMembers(states, timingComposition!.absorbed)
-    : states;
-  const outputSegments = hasComposedTiming
-    ? retainComposedMembers(segments, timingComposition!.absorbed)
-    : segments;
-  const outputRegimenGraph = hasComposedTiming
-    ? buildRegimenGraph(boundaryPlan, outputSegments)
-    : regimenGraph;
-  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
-  const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
-  const rawResults: ParseResult[] = [];
-
-  for (let index = 0; index < outputSegments.length; index += 1) {
-    const segment = outputSegments[index];
-    const state = outputStates[index];
-    const projected = buildParseResults(state, options, phaseSequences[index]);
-    for (const result of projected) {
-      rebaseParseResult(result, input, segment.start);
-      rawResults.push(result);
-    }
-  }
-
-  const results = rawResults;
-  const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
-  const parallel = canonicalParallel.kind === "resolved"
-    ? projectParallelRegimen(
-      canonicalParallel, results.map(result => result.longText), input, {
-        bodySitePostcoordination: options?.bodySitePostcoordination,
-        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
-      }
-    )
-    : canonicalParallel;
-  const primary = compatibilityPrimary;
-
-  return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
-    parallel.kind === "resolved" ? parallel : undefined);
+  return finishParsedBatch(input, options, boundaryPlan, segments, states);
 }
 
 
@@ -981,10 +948,10 @@ export function formatSig(
       return oneOrCourse.renderedInstruction;
     }
     if (oneOrCourse.step.length === 0) return "";
-    const flattened = toFhirR5Dosages(oneOrCourse);
-    let index = 0;
-    return oneOrCourse.step.map(step => joinGeneratedClauses(step.component.map(component => {
-      const recognized = formatSig(flattened[index++], style, options);
+    // Rendering needs each component's projection, not a persisted copy of
+    // the whole course plus edit markers on every component.
+    return oneOrCourse.step.map((step, index) => joinGeneratedClauses(step.component.map(component => {
+      const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
       const expressions: string[] = [];
       for (const amount of component.doseAndRate ?? []) {
         if (amount.doseExpression?.expression) {

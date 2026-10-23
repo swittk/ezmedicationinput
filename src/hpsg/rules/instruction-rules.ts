@@ -1,6 +1,6 @@
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
@@ -213,7 +213,7 @@ function workflowStartIsAnchoredSiteModifier(
     const lower = normalizeTokenLower(token);
     if (index > start && (isScheduleLead(context, index) || LIST_SEPARATORS.has(lower))) break;
     parts.push(token.original);
-    const resolved = resolveBodySitePhrase(parts.join(" "), context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(parts.join(" "), context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext,
       allowTerminalModifierInheritance: true
     });
@@ -703,7 +703,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       if (bodyTokens.length && bodyParsesAsStyleInstruction(context, bodyTokens)) {
         const lower = normalizeTokenLower(token);
-        const resolvedSite = resolveBodySitePhrase(
+        const resolvedSite = resolveBodySiteLexeme(
           token.original,
           context.options?.siteCodeMap,
           { bodySiteContext: context.options?.context?.bodySiteContext }

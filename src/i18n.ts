@@ -1,5 +1,5 @@
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
-import { resolveBodySitePhrase, type BodySiteQualifierFeatures } from "./body-site-grammar";
+import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
   getUniqueAdviceRelationByGrammarFeature,
@@ -36,7 +36,6 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_BARE_NOMINAL_PREFIX_I18N,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
-  SITE_RESTRICTION_PREDICATES_BY_LEMMA
 } from "./hpsg/lexical-classes";
 import {
   instructionGraphHasNovelNonWarningContent,
@@ -1413,23 +1412,9 @@ function appendSiteRestrictionsThai(
   const restrictions = clause.site?.restrictions;
   if (!restrictions?.length) return sitePhrase;
   let result = sitePhrase;
-  const relation = getBodySiteRelationRealization("where", "th")?.surface ?? "ที่";
   for (const restriction of restrictions) {
-    const predicate = restriction.predicate;
-    const lexicalPredicate = predicate.lemma
-      ? SITE_RESTRICTION_PREDICATES_BY_LEMMA.get(predicate.lemma)
-      : undefined;
-    const definition = predicate.lemma
-      ? resolveSymptomDefinition(predicate.lemma)
-      : undefined;
-    const localized = lexicalPredicate?.i18n?.th ??
-      definition?.conditionI18n?.th ?? definition?.i18n?.th ??
-      (/^[\u0E00-\u0E7F]/u.test(predicate.text.trim()) ? predicate.text.trim() : undefined);
-    if (!localized) continue;
-    const phrase = predicate.form === "existential"
-      ? `${relation}มี${localized}`
-      : `${relation}${localized}`;
-    if (!result.includes(phrase)) result += phrase;
+    const phrase = realizeBodySiteRestriction(restriction, "th");
+    if (phrase && !result.includes(phrase)) result += phrase;
   }
   return result;
 }

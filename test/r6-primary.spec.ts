@@ -1,3 +1,4 @@
+import { equalStructuredValues } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, fromFhir, formatSig, nextDueDoses,
@@ -127,14 +128,15 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
       extension.url.includes("medication-course-reconciliation-source")
     ) ?? [];
     expect(recoveredSources).toHaveLength(2);
-    expect(recoveredSources.some(extension => extension.valueString?.includes("{bad"))).toBe(true);
+    expect(recoveredSources.some(extension => extension.extension?.[0].extension?.[0].valueString === "{bad")).toBe(true);
 
     const conflicting = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
       ReturnType<typeof toFhirR5Dosages>;
     const second = conflicting[1].modifierExtension?.find(ext => ext.url.includes("course-details"));
-    const altered = JSON.parse(second!.extension![0].valueString!) as FhirR6DosageDetails;
-    altered.step[0].end!.offsetDuration!.value = 8;
-    second!.extension![0].valueString = JSON.stringify(altered);
+    const structured = second!.extension!.find(child => child.url === "dosageDetails")!;
+    const firstStep = structured.extension!.find(child => child.url === "step")!;
+    const end = firstStep.extension!.find(child => child.url === "end")!;
+    end.extension!.find(child => child.url === "offsetDuration")!.valueQuantity!.value = 8;
     const reconciled = toDosageDetails(conflicting);
     expect(semantics(reconciled)).toEqual(semantics(expected));
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
@@ -145,7 +147,8 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
       extension.url.includes("medication-course-reconciliation-source")
     ) ?? [];
     expect(conflictingSources).toHaveLength(2);
-    expect(new Set(conflictingSources.map(extension => extension.valueString)).size).toBe(2);
+    expect(equalStructuredValues(conflictingSources[0], conflictingSources[1])).toBe(false);
+    expect(conflictingSources.every(extension => extension.extension?.length && extension.valueString === undefined)).toBe(true);
   });
 
   it("keeps optional real R6 semantics on normal EZMED dosages", () => {

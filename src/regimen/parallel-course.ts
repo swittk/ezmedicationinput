@@ -1,8 +1,9 @@
+import { cloneStructuredValue } from "../stable-structure";
 import {
   DOSAGE_DETAILS_R5_URL,
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   toDosageDetails,
-  toFhirR5Dosages
+  createCourseDetailsExtension
 } from '../dosage-course';
 import { canonicalToFhir, type FhirProjectionOptions } from '../fhir';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -422,15 +423,14 @@ export function projectParallelRegimen(
 
   const course: EzCourseMetadata = { renderedInstruction, step: stepMetadata };
   const details = toDosageDetails(dosages, renderedInstruction, course);
-  const marker = toFhirR5Dosages(details)[0]?.modifierExtension?.find(
-    extension => extension.url === DOSAGE_DETAILS_R5_URL
-  );
+  const marker = createCourseDetailsExtension(details);
   if (marker) {
-    for (const dosage of dosages) {
+    for (let index = 0; index < dosages.length; index++) {
+      const dosage = dosages[index];
       dosage.modifierExtension = [
         ...(dosage.modifierExtension ?? []).filter(extension =>
           extension.url !== DOSAGE_DETAILS_R5_URL),
-        marker
+        index === 0 ? marker : cloneStructuredValue(marker)
       ];
     }
   }

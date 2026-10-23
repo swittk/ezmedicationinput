@@ -10,7 +10,7 @@ import type {
   FhirQuantity,
   ParseOptions
 } from '../types';
-import { CYCLE_WORDS as W } from './cycle-lexicon';
+import { CYCLE_WORDS as W } from '../hpsg/lexical-classes';
 
 declare module '../types' {
   interface CanonicalScheduleExpr {

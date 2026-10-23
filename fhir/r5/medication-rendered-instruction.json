@@ -2,14 +2,14 @@
   "resourceType": "StructureDefinition",
   "id": "medication-rendered-instruction",
   "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction",
-  "version": "0.2.0-dev",
+  "version": "0.2.0-ez.0",
   "name": "MedicationRenderedInstruction",
-  "title": "Original complete medication instruction",
+  "title": "Original instruction with structured edit-provenance rows",
   "status": "draft",
   "experimental": true,
-  "date": "2026-10-20",
+  "date": "2026-10-23",
   "publisher": "ezmedicationinput contributors",
-  "description": "Preserves the original whole-course wording together with a comparison projection of its R5 dosage rows. Consumers must discard the preserved wording when the live dosage content differs from the projection, rather than displaying stale instructions after clinical edits.",
+  "description": "Original instruction with structured edit-provenance rows. Uses named typed extensions; JSON text payloads are not emitted.",
   "fhirVersion": "5.0.0",
   "kind": "complex-type",
   "abstract": false,
@@ -29,8 +29,17 @@
         "path": "Extension",
         "min": 0,
         "max": "1",
-        "isModifier": false,
-        "short": "Original instruction with dosage-projection fingerprint"
+        "isModifier": false
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
       },
       {
         "id": "Extension.extension",
@@ -42,22 +51,28 @@
               "path": "url"
             }
           ],
-          "rules": "closed"
+          "ordered": false,
+          "rules": "open"
         },
-        "min": 2,
-        "max": "2"
+        "min": 1,
+        "max": "*"
       },
       {
         "id": "Extension.extension:instruction",
         "path": "Extension.extension",
         "sliceName": "instruction",
-        "min": 1,
+        "min": 0,
         "max": "1"
       },
       {
         "id": "Extension.extension:instruction.url",
         "path": "Extension.extension.url",
         "fixedUri": "instruction"
+      },
+      {
+        "id": "Extension.extension:instruction.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
       },
       {
         "id": "Extension.extension:instruction.value[x]",
@@ -71,20 +86,58 @@
         ]
       },
       {
-        "id": "Extension.extension:projection",
+        "id": "Extension.extension:row",
         "path": "Extension.extension",
-        "sliceName": "projection",
+        "sliceName": "row",
+        "min": 0,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:row.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "row"
+      },
+      {
+        "id": "Extension.extension:row.value[x]",
+        "path": "Extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:row.extension",
+        "path": "Extension.extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
         "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:row.extension:projectionFingerprint",
+        "path": "Extension.extension.extension",
+        "sliceName": "projectionFingerprint",
+        "min": 0,
         "max": "1"
       },
       {
-        "id": "Extension.extension:projection.url",
-        "path": "Extension.extension.url",
-        "fixedUri": "projection"
+        "id": "Extension.extension:row.extension:projectionFingerprint.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "projectionFingerprint"
       },
       {
-        "id": "Extension.extension:projection.value[x]",
-        "path": "Extension.extension.value[x]",
+        "id": "Extension.extension:row.extension:projectionFingerprint.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:row.extension:projectionFingerprint.value[x]",
+        "path": "Extension.extension.extension.value[x]",
         "min": 1,
         "max": "1",
         "type": [
@@ -94,14 +147,32 @@
         ]
       },
       {
-        "id": "Extension.url",
-        "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction"
+        "id": "Extension.extension:row.extension:textFingerprint",
+        "path": "Extension.extension.extension",
+        "sliceName": "textFingerprint",
+        "min": 0,
+        "max": "1"
       },
       {
-        "id": "Extension.value[x]",
-        "path": "Extension.value[x]",
+        "id": "Extension.extension:row.extension:textFingerprint.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "textFingerprint"
+      },
+      {
+        "id": "Extension.extension:row.extension:textFingerprint.extension",
+        "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:row.extension:textFingerprint.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
       }
     ]
   }

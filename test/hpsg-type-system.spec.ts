@@ -121,7 +121,7 @@ describe("formal HPSG typed feature structures", () => {
     expect(unified?.kind).toBe("node");
     if (!unified || unified.kind !== "node") return;
     expect(unified.features.LEFT).toBe(unified.features.RIGHT);
-    expect(canonicalFeatureStructure(unified)).toContain('"ref"');
+    expect(canonicalFeatureStructure(unified)).toMatchObject({ features: { RIGHT: { ref: 2 } } });
   });
 
   it("types headed phrase constructions with the expected inheritance", () => {
@@ -200,7 +200,13 @@ describe("formal HPSG typed feature structures", () => {
       value: 160
     });
     expect(guard ? validateFeatureStructure(guard.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
-    expect(guard ? canonicalFeatureStructure(guard.fs) : "")
+    const diagnosticTypes = (node: unknown): string[] => {
+      if (!node || typeof node !== "object") return [];
+      const record = node as Record<string, unknown>;
+      return [...(typeof record.type === "string" ? [record.type] : []),
+        ...Object.values(record).flatMap(diagnosticTypes)];
+    };
+    expect(diagnosticTypes(guard && canonicalFeatureStructure(guard.fs)))
       .toContain("clinical-adjunct-feature");
 
     const exclusion = firstLexicalMatch(

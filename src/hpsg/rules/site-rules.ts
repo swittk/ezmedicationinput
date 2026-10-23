@@ -11,10 +11,9 @@ import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning } 
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, RouteCode } from "../../types";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
-import { resolveSymptomDefinition } from "../../symptom-terminology";
 import {
   resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
@@ -49,8 +48,6 @@ import {
   SITE_DISPLAY_FILLERS,
   SITE_MULTIPLICITY_WORDS,
   SITE_RELATIVE_MARKERS,
-  SITE_RESTRICTION_PREDICATE_INTRODUCERS,
-  SITE_RESTRICTION_PREDICATES,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
   SITE_SELF_DISPLAY_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS,
@@ -101,7 +98,7 @@ function coordinatedRightSiteTokens(
     const last = tokens[tokens.length - 1];
     const lower = normalizeTokenLower(last);
     if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(lower, context))) break;
-    const resolved = resolveBodySitePhrase(joinTokenText(tokens), context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(joinTokenText(tokens), context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     if (resolved?.coding || resolved?.definition) rightTokens = tokens;
@@ -125,7 +122,7 @@ function startsSiteCoordination(
   // "left and right eyebrows") is one lexical target. A display-only alias
   // such as "groin and axilla" still licenses its two coded site daughters.
   const connectorTokens = context.tokens.slice(index, index + connectorSpan);
-  const whole = resolveBodySitePhrase(
+  const whole = resolveBodySiteLexeme(
     joinTokenText([...leftTokens, ...connectorTokens, ...rightTokens]),
     context.options?.siteCodeMap,
     { bodySiteContext: context.options?.context?.bodySiteContext }
@@ -141,7 +138,7 @@ function anchoredModifierLeadsToResolvableSite(
   for (let index = start + 1; index < maxEnd; index += 1) {
     const candidate = context.tokens.slice(index, index + 1)[0];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
-    const resolved = resolveBodySitePhrase(candidate.original, context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(candidate.original, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     if (resolved?.coding || resolved?.definition) return true;
@@ -182,7 +179,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
-  const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap, {
+  const siteLike = Boolean(resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   }));
   const actionLike = resolveMedicationInstructionAction(lower, context.options);
@@ -404,20 +401,6 @@ function sitePredicateSign(
   if (!predicateTokens.length) return undefined;
 
   const text = joinTokenText(predicateTokens);
-  const lowers = predicateTokens.map((token) => normalizeTokenLower(token));
-  const normalized = lowers.join(" ");
-  const lexicalPredicate = SITE_RESTRICTION_PREDICATES.get(normalized);
-  const introducer = SITE_RESTRICTION_PREDICATE_INTRODUCERS.find((candidate) =>
-    candidate.parts.length < predicateTokens.length &&
-    candidate.parts.every((part, index) => lowers[index] === part)
-  );
-  const focusTokens = introducer
-    ? predicateTokens.slice(introducer.parts.length)
-    : undefined;
-  const focusText = focusTokens?.length ? joinTokenText(focusTokens) : undefined;
-  const symptom = resolveSymptomDefinition(focusText ?? normalized);
-  const symptomLemma = symptom?.text?.trim().toLowerCase() ||
-    symptom?.coding?.display?.trim().toLowerCase();
   const range = rangeFromTokens(predicateTokens);
   if (!range) return undefined;
 
@@ -429,13 +412,7 @@ function sitePredicateSign(
       head: {},
       valence: {},
       cont: {
-        sitePredicate: {
-          text,
-          lemma: lexicalPredicate?.lemma ?? symptomLemma,
-          form: lexicalPredicate?.form ?? introducer?.form ?? "raw",
-          focusText,
-          range
-        }
+        sitePredicate: resolveBodySiteRestrictionPredicate(text, range)
       }
     }
   });
@@ -469,7 +446,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       !(previousRoutePhrase && DEFAULT_ROUTE_SYNONYMS[previousRoutePhrase]) &&
       !shouldSuppressEyeSiteAbbreviation(context, start, lower)
     ) {
-      const resolvedCandidate = resolveBodySitePhrase(siteCandidate.text, context.options?.siteCodeMap, {
+      const resolvedCandidate = resolveBodySiteLexeme(siteCandidate.text, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       });
       signs.push(
@@ -587,7 +564,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           ? [...displayTokens, next].map((part) => part.original).join(" ")
           : "";
         const continuedSite = continuedText
-          ? resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
+          ? resolveBodySiteLexeme(continuedText, context.options?.siteCodeMap, {
               bodySiteContext: context.options?.context?.bodySiteContext
             })
           : undefined;
@@ -626,7 +603,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {
       return signs;
     }
-    const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext,
       allowTerminalModifierInheritance: true
     });
@@ -734,7 +711,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           ? context.state.input.slice(trimmedRange.start, trimmedRange.end)
           : originalText
       ).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
-      const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+      const resolved = resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       });
       if (!resolved?.coding && !resolved?.definition) {

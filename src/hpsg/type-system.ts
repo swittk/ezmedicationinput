@@ -269,24 +269,30 @@ export function unifyFeatureStructures(
   return { value, issues };
 }
 
-/** Export diagnostic JSON with explicit reentrancy references. This wire/debug
- * representation is never used for runtime equality, hashing, or unification.
+/** A structured diagnostic view, with explicit references for reentrant nodes. */
+export type CanonicalFeatureView =
+  | { atom: string; value: unknown }
+  | { ref: number }
+  | { id: number; type: string; features: Record<string, CanonicalFeatureView> };
+
+/** Export an inspectable graph, not a serialized string. Consumers that need a
+ * wire/log format can encode it at their own I/O boundary.
  * @param value Feature graph to inspect outside the unifier.
  */
-export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
+export function canonicalFeatureStructure(value: HpsgFeatureValue): CanonicalFeatureView {
   const ids = new Map<HpsgFeatureNode, number>();
   let nextId = 1;
-  const encode = (current: HpsgFeatureValue): unknown => {
+  const encode = (current: HpsgFeatureValue): CanonicalFeatureView => {
     if (current.kind === "atom") return { atom: current.type, value: current.value };
     const existing = ids.get(current);
     if (existing) return { ref: existing };
     const id = nextId++;
     ids.set(current, id);
-    const features: Record<string, unknown> = {};
+    const features: Record<string, CanonicalFeatureView> = {};
     for (const key of Object.keys(current.features).sort()) features[key] = encode(current.features[key]);
     return { id, type: current.type, features };
   };
-  return JSON.stringify(encode(value));
+  return encode(value);
 }
 
 

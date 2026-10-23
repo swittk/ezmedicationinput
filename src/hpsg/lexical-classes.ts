@@ -5,6 +5,7 @@ import {
   ACTION_SEQUENCE_RELATION_SURFACES,
   BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES,
   BODY_SITE_LOCATIVE_LEAD_TOKENS,
+  listBodySiteRelationDefinitions,
   getAdviceRelationCanonicalSetByGrammarFeature
 } from "../relation-terminology";
 export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
@@ -190,12 +191,17 @@ export const SITE_ANCHORS = new Set([
   ...BODY_SITE_LOCATIVE_LEAD_TOKENS,
   ...BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES
 ]);
-export const SITE_RELATIVE_MARKERS = new Map<string, SiteRelativeMarkerLexeme>(
-  (source.siteRelativeMarkers as SiteRelativeMarkerLexeme[]).map((entry) => [
-    entry.surface,
-    { ...entry }
-  ])
-);
+/** Clause markers and standalone qualifiers share the relation registry. */
+export const SITE_RELATIVE_MARKERS = (() => {
+  const markers = new Map<string, SiteRelativeMarkerLexeme>();
+  for (const relation of listBodySiteRelationDefinitions()) {
+    if (relation.grammar.qualifierTarget !== "symptom" || relation.canonical !== "where") continue;
+    for (const surface of [relation.canonical, ...relation.aliases]) {
+      markers.set(surface.toLowerCase(), { surface, relation: relation.canonical });
+    }
+  }
+  return markers;
+})();
 export const SITE_RESTRICTION_PREDICATE_INTRODUCERS: SiteRestrictionPredicateIntroducer[] =
   (source.siteRestrictionPredicateIntroducers as SiteRestrictionPredicateIntroducer[])
     .map((entry) => ({ ...entry, parts: [...entry.parts] }))
@@ -455,3 +461,29 @@ export const OCULAR_ROUTE_CODES = routeCodeSet(source.ocularRouteCodes);
 export const HARD_SEGMENT_BOUNDARY_TOKENS = setOf(source.hardSegmentBoundaryTokens);
 export const CLAUSE_LEAD_WORDS = setOf(source.clauseLeadWords);
 export const LATERAL_MODIFIER_WORDS = setOf(source.lateralModifierWords);
+
+/** Explicit temporal construction vocabulary; no medication or specialty-specific dispatch. */
+export const CYCLE_WORDS = {
+  dayLead: String.raw`(?:\bon\s+days?\s+|\bdays?\s+|\bD(?=\d)|วันที่ของรอบ\s*)`,
+  dayPart: String.raw`\d{1,3}(?:\s*[-–]\s*\d{1,3})?`,
+  listSeparator: String.raw`\s*(?:,\s*(?:and\s+|และ\s*)?|and\s+|และ\s*)`,
+  periodLead: String.raw`(?:every\s+|q\s*|ทุก\s*)`,
+  periodUnit: String.raw`(?:days?\b|d\b|วัน)`,
+  startLead: String.raw`(?:starting(?:\s+on)?|from|เริ่ม(?:วันที่)?|ตั้งแต่วันที่)`,
+  repeatCount: String.raw`(?:for\s+|x\s*|จำนวน\s*)(\d{1,3})\s*(?:cycles?\b|รอบ)`
+};
+
+/** Declarative surface vocabulary for calendar-date relations for typed calendar constituents. */
+export const TEMPORAL_DATE_RELATION_SOURCES = {
+  startInclusive: String.raw`(?:\bfrom\b\s+|\bsince\b\s+|\bas\s+(?:of|from)\b\s+|\beffective(?:\s+(?:from|as\s+of))?\b\s+|\b(?:starting|beginning|commencing|commence)(?:\s+(?:on|from))?\b\s+|(?:มี\s*ผล\s*ตั้งแต่|ตั้งแต่|นับ\s*(?:ตั้งแต่|จาก|แต่)|เริ่ม(?:\s*(?:ตั้งแต่|ใช้))?)(?:\s*วัน(?:ที่)?)?\s*)`,
+  startExclusive: String.raw`(?:\bafter\b\s+|หลัง(?:\s*จาก)?(?:\s*วัน(?:ที่)?)?\s*)`,
+  endInclusive: String.raw`(?:\b(?:until|through|till)\b\s+|(?:จน\s*)?ถึง(?:\s*วัน(?:ที่)?)?\s*)`,
+  endExclusive: String.raw`(?:\bbefore\b\s+|\bprior(?:\s+to)?\b\s+|ก่อน(?:\s*ถึง)?(?:\s*วัน(?:ที่)?)?\s*)`
+} as const;
+
+export const TEMPORAL_RELATION_LEAD_WORDS = new Set([
+  'from','since','as','effective','starting','beginning','commencing','commence','after','before','prior','until','through','till',
+  'ตั้งแต่','นับ','นับตั้งแต่','นับจาก','เริ่ม','มี','หลัง','ก่อน','ถึง','จน','จนถึง'
+]);
+
+export const OPEN_ENDED_WORDS = new Set(['onward','onwards','forward','forwards','ต่อไป']);

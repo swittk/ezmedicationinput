@@ -1,11 +1,11 @@
 import { cloneStructuredValue } from "../src/stable-structure";
 import { readFileSync, readdirSync } from "node:fs";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  parseSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
+  parseSig, parseSigAsync, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
   calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
-  type FhirDosage, type FhirR6DosageDetails, type EzDosage
+  type FhirDosage, type FhirR6DosageDetails, type EzDosage, type FhirExtension
 } from "../src";
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
@@ -55,8 +55,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       ext.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
     expect(displayExtension?.extension?.find(child =>
       child.url === "instruction")?.valueString).toBe(details.renderedInstruction);
-    expect(JSON.parse(displayExtension?.extension?.find(child =>
-      child.url === "projection")?.valueString ?? "null")).toHaveLength(1);
+    expect(displayExtension?.extension?.filter(child => child.url === "row")).toHaveLength(1);
+    expect(displayExtension?.extension?.some(child => child.url === "projection")).toBe(false);
     expect(toDosageDetails(strict)).toEqual(details);
   });
 
@@ -125,16 +125,17 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const valid = getDosageCondition(component as EzDosage);
     expect(valid).toMatchObject({ kind: "measurement", name: "bp", operation: "gt", value: 160 });
     for (const invalid of [
-      '{"kind":"all"}',
-      '{"kind":"any","conditions":[]}',
-      '{"kind":"measurement","name":"bp","operation":"gt","value":"abc","text":"BP"}',
-      '{broken-json'
+      [{ url: "kind", valueCode: "all" }],
+      [{ url: "kind", valueCode: "any" }, { url: "emptyArray", valueCode: "conditions" }],
+      [{ url: "kind", valueCode: "measurement" }, { url: "name", valueString: "bp" },
+        { url: "operation", valueCode: "gt" }, { url: "value", valueString: "abc" }],
+      [{ url: "unrecognized", valueBoolean: true }]
     ]) {
-      const copy = JSON.parse(JSON.stringify(component)) as EzDosage;
+      const copy = cloneStructuredValue(component) as EzDosage;
       const condition = copy.condition?.[0];
-      expect(condition?.extension?.[0].extension?.[0].url).toBe("predicate");
-      condition!.extension![0].extension![0].valueString = invalid;
-      // Ignore the malformed JSON, not the real structured BP constraint.
+      condition!.extension = [{ url: DOSAGE_CONDITION_R6_LOGIC_URL,
+        extension: [{ url: "predicate", extension: invalid }] }];
+      // Ignore malformed extension meaning, not the real structured BP constraint.
       expect(getDosageCondition(copy)).toEqual(valid);
       const lowered = toFhirR5Dosages({ step: [{ component: [copy] }] });
       expect(getDosageCondition(lowered[0])).toEqual(valid);
@@ -208,12 +209,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       parseSig("1 tablet twice daily only if BP > 160").fhir[0];
     const modifier = dosage.modifierExtension?.find(value =>
       value.url === DOSAGE_CONDITION_R5_URL);
-    expect(modifier?.extension?.[0]?.valueString).toContain("160");
+    expect(modifier?.extension?.[0]?.extension).toContainEqual({ url: "value", valueDecimal: 160 });
     expect(getDosageCondition(dosage)).toMatchObject({ value: 160 });
-    modifier!.extension![0].valueString = JSON.stringify({
-      kind: "measurement", name: "bp", operation: "gt",
-      value: 170, text: "BP > 170"
-    });
+    const predicateFields = modifier!.extension![0].extension!;
+    predicateFields.find(field => field.url === "value")!.valueDecimal = 170;
+    predicateFields.find(field => field.url === "text")!.valueString = "BP > 170";
     expect(getDosageCondition(dosage)).toMatchObject({
       kind: "measurement", name: "bp", value: 170
     });
@@ -251,17 +251,23 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(withUpdatedText.step[0].component[0].text).toBe(edited[0].text);
   });
 
-  it("preserves both R5 and R6 conditional extension contracts without reusing their URLs", () => {
+  it("uses native R6 conditions and reserves the separate R6 logic extension for Boolean trees", () => {
     const details = parseSig("1 tab PO BID only if BP >160, otherwise hold").fhirNext;
     const condition = details.step[0].component[0].condition?.[0];
-    expect(condition).toBeDefined();
-    expect(condition?.extension?.[0].url).toBe(DOSAGE_CONDITION_R6_LOGIC_URL);
-    expect(condition?.extension?.[0].extension?.[0].url).toBe("predicate");
-    expect(condition?.extension?.[0].extension?.[0].valueString).toContain('"kind"');
+    expect(condition).toMatchObject({ operation: "gt", valueQuantity: { value: 160 } });
+    expect(condition?.extension?.some(ext => ext.url === DOSAGE_CONDITION_R6_LOGIC_URL)).not.toBe(true);
     expect(condition?.extension?.some(ext => ext.url === DOSAGE_CONDITION_R5_URL)).not.toBe(true);
     const strict = toFhirR5Dosages(details);
-    expect(strict[0].modifierExtension?.some(ext => ext.url === DOSAGE_CONDITION_R5_URL)).toBe(true);
+    const predicate = strict[0].modifierExtension?.find(ext => ext.url === DOSAGE_CONDITION_R5_URL)
+      ?.extension?.find(child => child.url === "predicate");
+    expect(predicate?.extension).toContainEqual({ url: "kind", valueCode: "measurement" });
+    expect(predicate?.extension).toContainEqual({ url: "value", valueDecimal: 160 });
+    expect(predicate?.valueString).toBeUndefined();
     expect(toDosageDetails(strict)).toEqual(details);
+    const compound = parseSig("1 tab PO BID only if BP > 160 and pulse > 60").fhirNext;
+    const logical = compound.step[0].component[0].condition?.[0].extension?.find(ext => ext.url === DOSAGE_CONDITION_R6_LOGIC_URL);
+    expect(logical?.extension?.[0].extension).toContainEqual({ url: "kind", valueCode: "all" });
+    expect(logical?.extension?.[0].extension?.filter(child => child.url === "conditions")).toHaveLength(2);
   });
 
   it("encodes edited direct excludedDates even without an original modifier", () => {
@@ -411,12 +417,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
     expect(marker?.extension?.find(child => child.url === "instruction")?.valueString)
       .toBe(source);
-    const projectionFingerprint = marker?.extension?.find(child =>
-      child.url === "projectionFingerprint")?.valueString;
-    const textFingerprint = marker?.extension?.find(child =>
-      child.url === "textFingerprint")?.valueString;
-    const projectionIdentities = JSON.parse(projectionFingerprint ?? "null") as unknown;
-    const textIdentities = JSON.parse(textFingerprint ?? "null") as unknown;
+    const rows = marker?.extension?.filter(child => child.url === "row") ?? [];
+    const projectionIdentities = rows.map(row => row.extension?.find(child => child.url === "projectionFingerprint")?.valueString);
+    const textIdentities = rows.map(row => row.extension?.find(child => child.url === "textFingerprint")?.valueString);
     expect(projectionIdentities).toHaveLength(parsed.fhir.length);
     expect(textIdentities).toHaveLength(parsed.fhir.length);
     expect(projectionIdentities).toEqual(
@@ -1060,17 +1063,8 @@ describe("FHIR projection structural comparison hygiene", () => {
 });
 
 
-it("confines library JSON serialization to declared wire and diagnostic exporters", () => {
-  const allowed = new Set([
-    "dosage-course.ts:setDosageCondition",
-    "dosage-course.ts:conditionToR6",
-    "dosage-course.ts:conditionFromR6",
-    "dosage-course.ts:withReconciliationSources",
-    "dosage-course.ts:retainedCourseStepSource",
-    "dosage-course.ts:withDosageEditProvenance",
-    "dosage-course.ts:toFhirR5Dosages",
-    "hpsg/type-system.ts:canonicalFeatureStructure"
-  ]);
+it("contains no JSON serialization in library source, including exports and unknown-data retention", () => {
+  const allowed = new Set<string>();
   const unexpected: string[] = [];
   const walk = (directory: URL, prefix = ""): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -1079,11 +1073,11 @@ it("confines library JSON serialization to declared wire and diagnostic exporter
       if (entry.isDirectory()) { walk(url, relative + "/"); continue; }
       if (!entry.name.endsWith(".ts")) continue;
       const source = readFileSync(url, "utf8");
-      if (!source.includes("JSON.stringify")) continue;
+      if (!/JSON\.(?:stringify|parse)/u.test(source)) continue;
       const file = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true);
       const visit = (node: ts.Node): void => {
         if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-            node.expression.expression.getText(file) === "JSON" && node.expression.name.text === "stringify") {
+            node.expression.expression.getText(file) === "JSON" && ["stringify", "parse"].includes(node.expression.name.text)) {
           let parent: ts.Node | undefined = node.parent;
           while (parent && !(ts.isFunctionDeclaration(parent) && parent.name)) parent = parent.parent;
           const owner = parent && ts.isFunctionDeclaration(parent) ? parent.name?.text : undefined;
@@ -1097,4 +1091,122 @@ it("confines library JSON serialization to declared wire and diagnostic exporter
   };
   walk(new URL("../src/", import.meta.url));
   expect(unexpected).toEqual([]);
+});
+
+
+describe("structured FHIR extensions without serialization", () => {
+  const inspectExtensions = (value: unknown): FhirExtension[] => {
+    if (Array.isArray(value)) return value.flatMap(inspectExtensions);
+    if (!value || typeof value !== "object") return [];
+    const record = value as Record<string, unknown>;
+    return [...(typeof record.url === "string" ? [record as unknown as FhirExtension] : []),
+      ...Object.values(record).flatMap(inspectExtensions)];
+  };
+
+  it("stores native typed course fields and respects Extension's value-versus-children rule", () => {
+    const details = parseSig(parallel).fhirNext;
+    const rows = toFhirR5Dosages(details);
+    const marker = rows[0].modifierExtension?.find(ext => ext.url === DOSAGE_DETAILS_R5_URL);
+    const course = marker?.extension?.find(child => child.url === "dosageDetails");
+    expect(course?.valueString).toBeUndefined();
+    const steps = course?.extension?.filter(child => child.url === "step");
+    expect(steps).toHaveLength(details.step.length);
+    expect(steps![0].extension?.filter(child => child.url === "component"))
+      .toHaveLength(details.step[0].component.length);
+    expect(inspectExtensions(rows)).toContainEqual(expect.objectContaining({
+      url: "doseQuantity", valueQuantity: expect.objectContaining({ value: 1, unit: "drop" })
+    }));
+    for (const extension of inspectExtensions(rows)) {
+      const values = Object.keys(extension).filter(key => key.startsWith("value") &&
+        (extension as unknown as Record<string, unknown>)[key] !== undefined);
+      expect(values.length <= 1).toBe(true);
+      expect(Boolean(extension.extension?.length)).toBe(values.length === 0);
+    }
+    expect(toDosageDetails(rows)).toEqual(details);
+  });
+
+  it("preserves unfamiliar native fields and native extensions without flattening them into strings", () => {
+    const source = {
+      renderedInstruction: "External course",
+      extension: [{ url: "urn:test:unknown-course", valueBoolean: false }],
+      step: [{
+        start: { offsetDuration: { value: 1, unit: "d" } },
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+          extension: [{ url: "urn:test:unknown-dosage", valueCodeableConcept: {
+            coding: [{ system: "urn:test", code: "known-to-other-system" }]
+          } }],
+          safety: { ifExceeded: "review", doseLimit: [{ scope: "administration" as const,
+            valueQuantity: { value: 2, comparator: "~" as const, unit: "mL" } }],
+            futureMetadata: { flags: [false, true], zero: 0, label: "opaque source", nullable: null }
+          }
+        }]
+      }]
+    };
+    const rows = toFhirR5Dosages(source);
+    const restored = toDosageDetails(rows);
+    expect(restored).toEqual(source);
+    const preserved = inspectExtensions(rows).find(ext => ext.url === "urn:test:unknown-dosage");
+    expect(preserved).toEqual(source.step[0].component[0].extension[0]);
+    expect(inspectExtensions(rows).some(ext => ext.url === "retainedField" && ext.extension?.length)).toBe(true);
+    expect(inspectExtensions(rows).some(ext => ext.url === "comparator" && ext.valueCode === "~")).toBe(true);
+    expect(source.step[0].component[0].safety.futureMetadata.zero).toBe(0);
+  });
+
+  it("parses, exports, imports, edits and formats with JSON.parse/stringify disabled", () => {
+    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("unexpected serialization"); });
+    const parse = vi.spyOn(JSON, "parse").mockImplementation(() => { throw new Error("unexpected JSON parsing"); });
+    let course: FhirR6DosageDetails;
+    let formatted: string;
+    try {
+      const parsed = parseSig("apply 1 mL to scalp where affected twice daily only if BP > 160");
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      strict[0].doseAndRate![0].doseQuantity!.value = 2;
+      course = toDosageDetails(strict);
+      formatted = formatSig(course, "long");
+      const repeated = toDosageDetails(toFhirR5Dosages(course));
+      // Access values here; assertions run after restoring the test framework's JSON functions.
+      if (repeated.step[0].component[0].doseAndRate?.[0].doseQuantity?.value !== 2) throw new Error("lost dose");
+    } finally {
+      stringify.mockRestore(); parse.mockRestore();
+    }
+    expect(course!.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(formatted!).toContain("2 mL");
+    expect(formatted!).toContain("affected");
+    expect(course!.step[0].component[0].condition?.[0].valueQuantity?.value).toBe(160);
+  });
+
+  it.each([
+    "1 tab PO BID",
+    parallel,
+    "apply 1 mL to scalp where affected and face where there is acne twice daily",
+    "1 tab BID only if BP > 160 and pulse > 60"
+  ])("keeps sync and async orchestration identical: %s", async input => {
+    expect(await parseSigAsync(input)).toEqual(parseSig(input));
+  });
+});
+
+
+it("retains unfamiliar children on recognized course and edit markers even without clinical edits", () => {
+  const rows = toFhirR5Dosages(parseSig(parallel).fhirNext);
+  const course = rows[0].modifierExtension!.find(value => value.url === DOSAGE_DETAILS_R5_URL)!;
+  course.extension!.push({ url: "externalAudit", valueBoolean: false });
+  const display = rows[0].extension!.find(value => value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)!;
+  display.extension!.push({ url: "externalSigner", valueString: "retained author" });
+  const restored = toDosageDetails(rows);
+  const source = restored.extension?.find(value => value.url.endsWith("medication-course-reconciliation-source"));
+  expect(source?.extension).toContainEqual(course);
+  const savedDisplay = restored.extension?.find(value => value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+  expect(savedDisplay?.extension).toContainEqual({ url: "externalSigner", valueString: "retained author" });
+  expect(restored.step).toEqual(parseSig(parallel).fhirNext.step);
+});
+
+
+it("keeps independent editable course markers on every projected row", () => {
+  const source = parseSig(parallel).fhirNext;
+  const rows = toFhirR5Dosages(source);
+  const marker = (index: number) => rows[index].modifierExtension!.find(value => value.url === DOSAGE_DETAILS_R5_URL)!;
+  const beforeSecond = cloneStructuredValue(marker(1));
+  marker(0).extension![0].extension!.find(value => value.url === "renderedInstruction")!.valueString = "edited first row";
+  expect(marker(1)).toEqual(beforeSecond);
+  expect(source.renderedInstruction).toBe(parallel);
 });

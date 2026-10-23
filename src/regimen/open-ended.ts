@@ -4,7 +4,7 @@ import { lexicalSign } from '../hpsg/signature';
 import type { HpsgClauseContext } from '../hpsg/rule-context';
 import type { Token } from '../parser-state';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from '../hpsg/lexical-classes';
-import { OPEN_ENDED_WORDS } from './temporal-relation-vocabulary';
+import { OPEN_ENDED_WORDS } from '../hpsg/lexical-classes';
 
 interface OpenEndedMarkerMatch {
   start: number;

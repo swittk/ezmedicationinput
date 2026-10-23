@@ -4,7 +4,7 @@ import {
   WORD_FREQUENCIES,
   normalizeBodySiteKey
 } from "../../maps";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import {
   normalizeSymptomKey,
   resolveSymptomDefinition
@@ -175,7 +175,7 @@ function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boole
     }
   }
 
-  const resolvedSite = resolveBodySitePhrase(first.original, context.options?.siteCodeMap, {
+  const resolvedSite = resolveBodySiteLexeme(first.original, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   });
   return Boolean(resolvedSite?.coding || resolvedSite?.definition);
@@ -224,7 +224,7 @@ function startsDosageSiteComplement(context: HpsgClauseContext, start: number): 
     const sourceText = joinTokenText(displayTokens).replace(/[{}]/g, "").trim();
     if (
       sourceText &&
-      resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -280,7 +280,7 @@ function createPrnReasonRequest(
     effectiveRange = { start, end };
   }
   const site = siteText
-    ? resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+    ? resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     })
     : undefined;
@@ -360,7 +360,7 @@ function parseLocatedPrnAtom(
     const siteText = joinTokenText(tokens.slice(index));
     if (
       isLocatedReasonHead(context, normalizedHead) &&
-      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -374,7 +374,7 @@ function parseLocatedPrnAtom(
     const normalizedHead = normalizePredicativeReasonText(headText);
     if (
       isLocatedReasonHead(context, normalizedHead) &&
-      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -384,7 +384,7 @@ function parseLocatedPrnAtom(
 
   if (
     previousLocatedHead &&
-    resolveBodySitePhrase(cleanDirectText, context.options?.siteCodeMap, {
+    resolveBodySiteLexeme(cleanDirectText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     })
   ) {

@@ -513,3 +513,37 @@ describe("advanced compositional follow-up", () => {
     expect(getDosageCondition(parsed.fhir)).toEqual(expectedCondition);
   });
 });
+
+
+describe("one site-relative semantic authority", () => {
+  it.each([
+    ["below right knee where hurts", "where painful"],
+    ["scalp where affected", "where affected"],
+    ["scalp where there is hair loss", "where there is hair loss"]
+  ])("shares predicate meaning between standalone and full-SIG parsing: %s", (site, realized) => {
+    const standalone = resolveBodySitePhrase(site)!;
+    const parsed = parseSig(`apply 1 mL to ${site} twice daily`);
+    const actual = parsed.meta.canonical.clauses[0].site!;
+    const expected = standalone.restrictions![0];
+    expect(actual.coding?.code).toBe(standalone.coding?.code);
+    expect(actual.restrictions?.[0].predicate).toMatchObject({
+      text: expected.predicate.text, lemma: expected.predicate.lemma, form: expected.predicate.form,
+      ...(expected.predicate.focusText ? { focusText: expected.predicate.focusText } : {})
+    });
+    expect(parsed.longText).toContain(realized);
+    expect(standalone.englishObjectText).toContain(realized);
+    expect(actual.restrictions).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].schedule?.frequency).toBe(2);
+  });
+});
+
+
+it("does not invent original-source offsets from normalized standalone anatomy text", () => {
+  const standalone = resolveBodySitePhrase("SCALP   where   affected")!;
+  expect(standalone.restrictions![0].range).toBeUndefined();
+  expect(standalone.restrictions![0].predicate.range).toBeUndefined();
+  const input = "apply 1 mL to SCALP   where   affected twice daily";
+  const restriction = parseSig(input).meta.canonical.clauses[0].site!.restrictions![0];
+  expect(input.slice(restriction.range!.start, restriction.range!.end)).toBe("where   affected");
+  expect(input.slice(restriction.predicate.range!.start, restriction.predicate.range!.end)).toBe("affected");
+});

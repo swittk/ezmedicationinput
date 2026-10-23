@@ -17,6 +17,7 @@ export interface FhirCodeableConcept {
 }
 
 export interface FhirExtension {
+  id?: string;
   url: string;
   extension?: FhirExtension[];
   valueCode?: string;
@@ -28,6 +29,18 @@ export interface FhirExtension {
   valueQuantity?: FhirQuantity;
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
+  valueUri?: string;
+  valueCanonical?: string;
+  valueDateTime?: string;
+  valueTime?: string;
+  valuePositiveInt?: number;
+  valueUnsignedInt?: number;
+  valueRange?: FhirRange;
+  valueRatio?: FhirRatio;
+  valueExpression?: FhirExpression;
+  valueReference?: NonNullable<FhirCodeableReference["reference"]>;
+  valueCodeableReference?: FhirCodeableReference;
+  valueTiming?: FhirTiming;
 }
 
 export interface FhirElement {
