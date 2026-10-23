@@ -1,4 +1,3 @@
-import { normalizeOpenEndedSchedule } from './open-ended';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { ParserState } from '../parser-state';
@@ -238,18 +237,9 @@ export function scopeSequentialPhaseSemantics(
   return applications;
 }
 
-/** Project regimen graph metadata and normalize non-transition artifacts after clause lowering. */
+/** Serialize ordered typed regimen phases. No downstream grammar or rescan. */
 export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSegment[], graph: RegimenGraph,
   options: ParseOptions | undefined, render: Render): InheritanceEvidence[] {
-  for (let index = 0; index < results.length; index++) {
-    const source = segments[index]?.text ?? '';
-    const openEndedChanged = normalizeOpenEndedSchedule(results[index], source, options);
-    if (openEndedChanged) {
-      results[index].longText = render(results[index].fhir, 'long', options);
-      results[index].shortText = render(results[index].fhir, 'short', options);
-      results[index].fhir.text = results[index].longText;
-    }
-  }
   if (results.length < 2) return [];
   // FHIR R5 Dosage.sequence represents ordered phases; coordinated administrations
   // retain the same sequence instead of being misrepresented as consecutive.

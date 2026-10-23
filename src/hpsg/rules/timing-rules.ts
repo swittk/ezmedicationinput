@@ -2135,17 +2135,23 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         }
         return signs;
       }
+      const occurrence = unitToken && !context.state.consumed.has(unitToken.index) &&
+        OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(unitToken))
+          ? unitToken : undefined;
+      // "*10 doses" is one typed count constituent, not a count followed by
+      // uninterpreted clinical text. This also avoids pinning source wording
+      // merely because the occurrence noun was left over after parsing.
       signs.push(
         lexicalSign({
           type: "schedule-sign",
           rule: "hpsg.lex.schedule.count.compact",
-          tokens: [token],
+          tokens: occurrence ? [token, occurrence] : [token],
           synsem: {
             head: { schedule: { count: parseFloat(countMatch[1]) } },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: 6
+          score: occurrence ? 7 : 6
         })
       );
     }
