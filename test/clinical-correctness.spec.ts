@@ -50,6 +50,27 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.items[1].fhir.text).toContain("20:00");
   });
 
+  it("preserves ordinary fractional tablet doses without cycle syntax", () => {
+    const parsed = parseSig("take .5 tab at 08:00");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 0.5, unit: "tab"
+    });
+    expect(parsed.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(parsed.fhir.route?.text).toBe("by mouth");
+  });
+
+  it("never substitutes a daily maximum for a separately prescribed bare dose", () => {
+    const instruction = "take 2 daily maximum 4 tablets per day";
+    const parsed = parseSig(instruction);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(parsed.fhir.maxDosePerPeriod?.[0]?.numerator?.value).toBe(4);
+    expect(parsed.fhir.maxDosePerPeriod?.[0]?.denominator).toMatchObject({
+      value: 1, code: "d"
+    });
+    expect(parsed.fhir.text).toContain(instruction);
+  });
+
   it("preserves trailing maximum-dose constraints rather than merging them away", () => {
     const parsed = parseSig("1 tab at 08:00, 1 tab at 20:00 max 1 tab/day");
     expect(parsed.items).toHaveLength(2);

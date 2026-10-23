@@ -237,19 +237,5 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
     }
   }
 
-  if (best?.synsem.head.dose && !best.synsem.head.dose.unit) {
-    let explicitDoseBest: HpsgSign | undefined;
-    for (const sign of signs) {
-      if (
-        seen.get(chartKey(sign)) === sign &&
-        sign.synsem.head.dose?.unit &&
-        isBetterSign(sign, explicitDoseBest)
-      ) {
-        explicitDoseBest = sign;
-      }
-    }
-    if (explicitDoseBest) best = explicitDoseBest;
-  }
-
   return { signs, best };
 }
