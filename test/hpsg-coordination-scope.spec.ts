@@ -226,6 +226,44 @@ describe('HPSG coordination cadence scope', () => {
     expect(linted.issues).toEqual([]);
   });
 
+  it("types shared guards and exclusions before projecting FHIR", () => {
+    for (const [input, kind] of [
+      ["instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160", "condition"],
+      ["instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday", "weekday"],
+      ["instill 1 drop in left eye and 2 drops in right eye twice daily except 2026-11-01", "date"]
+    ] as const) {
+      const parsed = parseSig(input);
+      expect(parsed.items).toHaveLength(2);
+      const [left, right] = parsed.items;
+      const leftClause = left.meta.canonical.clauses[0];
+      const rightClause = right.meta.canonical.clauses[0];
+      const inherited = leftClause.clinicalAdjuncts;
+      const local = rightClause.clinicalAdjuncts;
+      expect(inherited?.localRanges).toBeUndefined();
+      expect(local?.localRanges?.length).toBeGreaterThan(0);
+      expect(inherited?.evidence?.some(e =>
+        e.rule.startsWith("hpsg.cx.coordination."))).toBe(true);
+      if (kind === "condition") {
+        expect(inherited?.condition).toEqual(local?.condition);
+        expect(getDosageCondition(left.fhir)).toEqual(inherited?.condition);
+        expect(getDosageCondition(right.fhir)).toEqual(local?.condition);
+      } else if (kind === "weekday") {
+        expect(inherited?.excludedWeekdays).toEqual(["sun"]);
+        expect(getDosageExcludedWeekdays(left.fhir)).toEqual(
+          inherited?.excludedWeekdays
+        );
+        expect(leftClause.schedule?.dayOfWeek).toEqual(
+          rightClause.schedule?.dayOfWeek
+        );
+      } else {
+        expect(inherited?.excludedDates).toEqual(["2026-11-01"]);
+        expect(getDosageExcludedDates(left.fhir)).toEqual(
+          inherited?.excludedDates
+        );
+      }
+    }
+  });
+
   it("shares a trailing explicit-date exclusion across coordinated doses", async () => {
     const input =
       "instill 1 drop in left eye and 2 drops in right eye twice daily except 2026-11-01";

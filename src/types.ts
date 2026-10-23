@@ -1542,6 +1542,20 @@ export interface CanonicalEvidence {
   note?: string;
 }
 
+/**
+ * Clinical adjuncts are grammatical facts on a typed administration clause.
+ * Local surface recognizers produce them; HPSG constructions determine their
+ * scope; FHIR only projects the resulting semantics. Raw/source data is kept.
+ */
+export interface CanonicalClinicalAdjuncts {
+  condition?: MedicationCondition;
+  excludedDates?: string[];
+  excludedWeekdays?: FhirDayOfWeek[];
+  /** Local source spans for lint ownership, not inherited donor spans. */
+  localRanges?: TextRange[];
+  evidence?: CanonicalEvidence[];
+}
+
 export interface CanonicalSigClause {
   kind: "administration";
   rawText: string;
@@ -1561,6 +1575,7 @@ export interface CanonicalSigClause {
    */
   provisionalSchedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
+  clinicalAdjuncts?: CanonicalClinicalAdjuncts;
   patientInstruction?: string;
   instructionGraph?: CanonicalInstructionGraph;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];

@@ -7,9 +7,9 @@ import {
 import { preserveSuggestionWarning } from "./regimen/admissibility";
 import { removeInstructionArtifactsOwnedByTemporalRanges } from "./regimen/temporal-artifact-ownership";
 import { findMedicationDateListSpans, parseMedicationDateListAt } from "./date-interpretation";
-import { setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays } from "./dosage-course";
 import { parseMedicationGuard } from "./medication-condition";
 import { ParseOptions } from "./types";
+import type { ParserState } from "./parser-state";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 
 const UCUM = "http://unitsofmeasure.org";
@@ -148,6 +148,79 @@ export function matchCalendarExclusion(source: string, options?: ParseOptions): 
   return { start: cue.index, end, excluded, included, dates: [...new Set(dates)].sort() };
 }
 
+/**
+ * Produce local typed clinical adjuncts BEFORE HPSG coordination and FHIR
+ * projection. Scope belongs to HPSG; these lexical recognizers only identify
+ * the facts, without interpreting another clause or reparsing FHIR.
+ */
+export function annotateCanonicalClinicalAdjuncts(
+  state: ParserState,
+  options?: ParseOptions
+): void {
+  const source = state.input;
+  if (!CLINICAL_CONSTRAINT_SIGNAL.test(source)) return;
+  const clause = state.primaryClause;
+  const guard = (clause.dose || clause.method || clause.route || clause.site)
+    ? parseMedicationGuard(source)
+    : undefined;
+  const exclusion = EXCLUSION_CUE.test(source)
+    ? matchCalendarExclusion(source, options)
+    : undefined;
+  if (!guard && !exclusion) return;
+  const clinical = clause.clinicalAdjuncts ?? {};
+  const ranges = clinical.localRanges ?? [];
+  const evidence = clinical.evidence ?? [];
+  if (guard) {
+    clinical.condition = guard.condition;
+    ranges.push({ start: guard.start, end: guard.end });
+    if (guard.otherwise) ranges.push({ ...guard.otherwise });
+    evidence.push({
+      rule: "hpsg.lex.clinical.condition",
+      spans: [{ start: guard.start, end: guard.end,
+        text: source.slice(guard.start, guard.end) }]
+    });
+    // An explicit condition is not an implied PRN administration.
+    if (!/\b(?:prn|as\s+needed)\b|เมื่อมีอาการ/iu.test(source)) {
+      delete clause.prn;
+    }
+  }
+  if (exclusion && clause.schedule) {
+    const repeat = clause.schedule;
+    const hasCadence = Boolean(repeat.frequency !== undefined ||
+      repeat.period !== undefined || repeat.when?.length ||
+      repeat.timeOfDay?.length);
+    if (hasCadence) {
+      if (exclusion.excluded.length) {
+        const excluded = new Set(exclusion.excluded);
+        const allowed = (exclusion.included.length
+          ? exclusion.included : [...DAYS]).filter(day => !excluded.has(day));
+        if (allowed.length) {
+          repeat.dayOfWeek = allowed;
+          clinical.excludedWeekdays = exclusion.excluded;
+        }
+      }
+      if (exclusion.dates.length) {
+        clinical.excludedDates = exclusion.dates;
+        repeat.calendarEvents = repeat.calendarEvents?.filter(event =>
+          exclusion.dates.indexOf(event.isoDate) < 0);
+        if (!repeat.calendarEvents?.length) delete repeat.calendarEvents;
+      }
+      ranges.push({ start: exclusion.start, end: exclusion.end });
+      evidence.push({
+        rule: "hpsg.lex.clinical.calendar-exclusion",
+        spans: [{ start: exclusion.start, end: exclusion.end,
+          text: source.slice(exclusion.start, exclusion.end) }]
+      });
+    }
+  }
+  if (ranges.length) {
+    clinical.localRanges = ranges;
+    clinical.evidence = evidence;
+    clause.clinicalAdjuncts = clinical;
+    for (const item of evidence) clause.evidence.push(item);
+  }
+}
+
 function mergeOwnedRanges(ranges: TextRange[], source: string, offset: number): TextRange[] {
   const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
   const merged: TextRange[] = [];
@@ -246,79 +319,19 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   const offset = item.meta.canonical.clauses[0]?.raw.start ?? 0;
   const ownedRanges: TextRange[] = [];
   const own = (range: TextRange) => { ownedRanges.push(range); };
-  const exclusionCue = EXCLUSION_CUE.exec(source);
-  if (exclusionCue) {
-    const exclusion = matchCalendarExclusion(source, options);
-    const repeat = item.fhir.timing?.repeat;
-    if (exclusion && repeat &&
-      (repeat.frequency !== undefined || repeat.period !== undefined || repeat.when?.length || repeat.timeOfDay?.length)) {
-      if (exclusion.excluded.length) {
-        const excluded = new Set(exclusion.excluded);
-        const allowed = (exclusion.included.length ? exclusion.included : [...DAYS]).filter(day => !excluded.has(day));
-        if (!allowed.length) {
-          preserveSuggestionWarning(item, source, "weekdays-all-excluded");
-        } else {
-          repeat.dayOfWeek = allowed;
-          setDosageExcludedWeekdays(item.fhir, exclusion.excluded);
-          for (const clause of item.meta.canonical.clauses) {
-            if (clause.schedule) clause.schedule.dayOfWeek = [...allowed];
-          }
-        }
-      }
-      if (exclusion.dates.length) {
-        setDosageExcludedDates(item.fhir, exclusion.dates);
-        // A bare date inside an exclusion is NOT a positive FHIR Timing.event.
-        // The generic date parser can independently recognize it as one, so
-        // remove only the negative dates from the positive event list.
-        const events = item.fhir.timing?.event;
-        if (events?.length) {
-          const keep = events.map((value, index) => ({ value, index }))
-            .filter(entry => exclusion.dates.indexOf(entry.value.slice(0, 10)) < 0);
-          item.fhir.timing!.event = keep.length ? keep.map(entry => entry.value) : undefined;
-          item.fhir.timing!._event = keep.length
-            ? keep.map(entry => item.fhir.timing!._event?.[entry.index] ?? {})
-            : undefined;
-        }
-        for (const clause of item.meta.canonical.clauses) {
-          if (clause.schedule?.calendarEvents?.length) {
-            const positive = clause.schedule.calendarEvents.filter(event =>
-              exclusion.dates.indexOf(event.isoDate) < 0
-            );
-            clause.schedule.calendarEvents = positive.length ? positive : undefined;
-          }
-        }
-      }
-      own(span(source, offset, exclusion.start, exclusion.end));
-      keepOriginalText(item, source);
-    } else {
-      preserveSuggestionWarning(item, source, "unresolved-calendar-exclusion");
-    }
+  // All recognized conditions and exclusions are typed on the canonical
+  // clause before HPSG scope selection and FHIR lowering. This late pass only
+  // accounts for their local source spans in lint and preserves the author's
+  // wording; it does not reinterpret or modify FHIR semantics.
+  const localAdjunct = item.meta.canonical.clauses[0]?.clinicalAdjuncts;
+  if (EXCLUSION_CUE.test(source) &&
+      !localAdjunct?.excludedDates?.length &&
+      !localAdjunct?.excludedWeekdays?.length) {
+    preserveSuggestionWarning(item, source, "unresolved-calendar-exclusion");
   }
-
-  // Conditions are real predicates on the administration, not an ad-hoc PRN
-  // reason and not an unconditional schedule. The predicate remains available
-  // for evaluation at each candidate administration time.
-  // A procedural workflow (for example inhaler priming if unused for
-  // seven days) is not an executable medication administration. Do not
-  // attach its condition to a dosage or remove its instruction-graph action.
-  const hasAdministration = Boolean(item.fhir.doseAndRate?.length ||
-    item.fhir.timing || item.fhir.asNeeded);
-  const guard = hasAdministration ? parseMedicationGuard(source) : undefined;
-  if (guard) {
-    setDosageCondition(item.fhir, guard.condition);
-    own(span(source, offset, guard.start, guard.end));
-    if (guard.otherwise) own(span(source, offset, guard.otherwise.start, guard.otherwise.end));
-    const originalReason = item.fhir.asNeededFor?.map(reason => reason.text ?? "").join(" ").toLowerCase();
-    const explicitPrn = /\b(?:prn|as\s+needed)\b|เมื่อมีอาการ/iu.test(source);
-    // A recognized measurement/state guard is not itself an as-needed order.
-    // PRN requires an independently explicit PRN/as-needed cue; multiple
-    // measurements joined by "and" must not remain a pseudo-PRN reason.
-    if (!explicitPrn && item.fhir.asNeeded &&
-        (!originalReason || source.toLowerCase().indexOf(originalReason) >= 0 ||
-          guard.condition.kind === "all" || guard.condition.kind === "any")) {
-      delete item.fhir.asNeeded;
-      delete item.fhir.asNeededFor;
-      for (const clause of item.meta.canonical.clauses) delete clause.prn;
+  if (localAdjunct?.localRanges?.length) {
+    for (const range of localAdjunct.localRanges) {
+      own(span(source, offset, range.start, range.end));
     }
     keepOriginalText(item, source);
   }
@@ -373,8 +386,6 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
     if (ownedText(cue.index, cue[0].length)) continue;
     const knownSafetyAdvice = /^(?:do\s+not\s+exceed|max(?:imum)?|no\s+more\s+than|ไม่เกิน)$/iu.test(cue[0]) && Boolean(max);
     if (knownSafetyAdvice) continue;
-    if (/^(?:unless|only\s+if)$/iu.test(cue[0]) && guard &&
-      guard.start <= cue.index && guard.end >= cue.index + cue[0].length) continue;
     // A maximum-dose occurrence phrase is already safe to retain when the
     // HPSG grammar explicitly consumed THIS cue into a countMax or periodic
     // occurrenceCap. Use the evidence span rather than English-only words:

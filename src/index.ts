@@ -1,15 +1,14 @@
 import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   DOSAGE_DETAILS_R5_URL,
-  getDosageCondition, getDosageExcludedDates,
-  getDosageExcludedWeekdays,
-  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
+  getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
-import { applyClinicalConstraints } from "./clinical-safety";
+import { annotateCanonicalClinicalAdjuncts, applyClinicalConstraints } from "./clinical-safety";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
-import { applyCoordinatedCadenceScopes } from "./regimen/coordination-scope";
-import type { CoordinationScopeApplication } from "./regimen/coordination-scope";
+import {
+  applyCoordinatedCadenceScopes, scopeTrailingSharedDuration
+} from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
@@ -790,46 +789,11 @@ function propagateTrailingSharedSafety(results: ParseResult[], options?: ParseOp
   }
 }
 
-function propagateTrailingSharedDuration(
-  results: ParseResult[],
-  segments: ReturnType<typeof parseSigSegments>,
-  options?: ParseOptions
-): void {
-  for (let index = results.length - 2; index >= 0; index -= 1) {
-    if (!segments[index]?.inheritTrailingDurationFromNext) continue;
-    const current = results[index];
-    const next = results[index + 1];
-    const currentClause = current.meta.canonical.clauses[0];
-    const nextClause = next.meta.canonical.clauses[0];
-    const nextSchedule = nextClause?.schedule;
-    if (!currentClause || !nextSchedule?.durationUnit || nextSchedule.duration === undefined) continue;
-    if (currentClause.schedule?.duration !== undefined || currentClause.schedule?.durationUnit !== undefined) continue;
-
-    currentClause.schedule = {
-      ...(currentClause.schedule ?? {}),
-      duration: nextSchedule.duration,
-      durationMax: nextSchedule.durationMax,
-      durationUnit: nextSchedule.durationUnit
-    };
-    const nextRepeat = next.fhir.timing?.repeat;
-    if (nextRepeat?.boundsDuration || nextRepeat?.boundsRange) {
-      current.fhir.timing = current.fhir.timing ?? {};
-      current.fhir.timing.repeat = {
-        ...(current.fhir.timing.repeat ?? {}),
-        boundsDuration: nextRepeat.boundsDuration ? { ...nextRepeat.boundsDuration } : undefined,
-        boundsRange: nextRepeat.boundsRange ? {
-          ...nextRepeat.boundsRange,
-          low: nextRepeat.boundsRange.low ? { ...nextRepeat.boundsRange.low } : undefined,
-          high: nextRepeat.boundsRange.high ? { ...nextRepeat.boundsRange.high } : undefined
-        } : undefined
-      };
-    }
-    current.longText = formatSig(current.fhir, "long", options);
-    current.shortText = formatSig(current.fhir, "short", options);
-    current.fhir.text = current.longText;
-  }
-}
-
+/**
+ * The segmenter has already licensed a shared trailing duration. Attach that
+ * course bound to the canonical left daughter before any FHIR projection.
+ * This used to mutate FHIR Timing and then regenerate text after lowering.
+ */
 function nextIsoCalendarDay(value: string): string | undefined {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
   if (!match) return undefined;
@@ -1087,9 +1051,9 @@ function scopeCoordinatedSegmentStates(
   boundaryPlan: BoundaryPlan,
   segments: ReturnType<typeof parseSigSegments>,
   input: string
-): CoordinationScopeApplication[] {
-  if (!boundaryPlan.relations.length) return [];
-  return applyCoordinatedCadenceScopes(
+): void {
+  if (!boundaryPlan.relations.length) return;
+  applyCoordinatedCadenceScopes(
     states.map((state, index) => ({
       state,
       start: segments[index].start,
@@ -1101,107 +1065,6 @@ function scopeCoordinatedSegmentStates(
 }
 
 
-function propagateCoordinatedSharedConstraints(
-  results: ParseResult[],
-  applications: readonly CoordinationScopeApplication[],
-  options?: ParseOptions
-): void {
-  if (!applications.length || results.length < 2) return;
-  const outgoing = new Map<number, CoordinationScopeApplication[]>();
-  for (const application of applications) {
-    const list = outgoing.get(application.from);
-    if (list) list.push(application);
-    else outgoing.set(application.from, [application]);
-  }
-
-  for (let sourceIndex = 0; sourceIndex < results.length; sourceIndex++) {
-    const source = results[sourceIndex];
-    const condition = getDosageCondition(source.fhir);
-    const excludedDates = getDosageExcludedDates(source.fhir);
-    const excludedWeekdays = getDosageExcludedWeekdays(source.fhir);
-    if (!condition && !excludedDates.length && !excludedWeekdays.length) continue;
-
-    const queue = [sourceIndex];
-    const visited = new Set<number>([sourceIndex]);
-    while (queue.length) {
-      const from = queue.shift()!;
-      for (const application of outgoing.get(from) ?? []) {
-        const targetIndex = application.to;
-        if (visited.has(targetIndex)) continue;
-        const target = results[targetIndex];
-        let propagated = false;
-
-        if (condition && application.fields.indexOf("prn") >= 0 &&
-            !getDosageCondition(target.fhir)) {
-          setDosageCondition(target.fhir, condition);
-          delete target.fhir.asNeeded;
-          delete target.fhir.asNeededFor;
-          for (const clause of target.meta.canonical.clauses) delete clause.prn;
-          propagated = true;
-        }
-
-        if (excludedWeekdays.length && application.fields.indexOf("dayOfWeek") >= 0) {
-          const mergedExcluded = [...new Set([
-            ...getDosageExcludedWeekdays(target.fhir),
-            ...excludedWeekdays
-          ])];
-          setDosageExcludedWeekdays(target.fhir, mergedExcluded);
-          const donorDays = source.fhir.timing?.repeat?.dayOfWeek;
-          if (donorDays?.length && target.fhir.timing?.repeat) {
-            // application.fields contains dayOfWeek only when this target
-            // inherited that field from the trailing donor. Replace the
-            // pre-lowering raw exclusion weekday with the donor's final
-            // allowed-weekday set.
-            target.fhir.timing.repeat.dayOfWeek = [...donorDays];
-          }
-          const donorCanonicalDays = source.meta.canonical.clauses[0]?.schedule?.dayOfWeek;
-          for (const clause of target.meta.canonical.clauses) {
-            if (donorCanonicalDays?.length && clause.schedule) {
-              clause.schedule.dayOfWeek = [...donorCanonicalDays];
-            }
-          }
-          propagated = true;
-        }
-
-        if (excludedDates.length && application.fields.indexOf("calendarEvents") >= 0) {
-          setDosageExcludedDates(target.fhir, [...new Set([
-            ...getDosageExcludedDates(target.fhir),
-            ...excludedDates
-          ])]);
-          const donorEvents = source.fhir.timing?.event;
-          if (target.fhir.timing) {
-            target.fhir.timing.event = donorEvents?.length ? [...donorEvents] : undefined;
-            target.fhir.timing._event = source.fhir.timing?._event?.length
-              ? source.fhir.timing._event.map(event => ({ ...event }))
-              : undefined;
-          }
-          const donorCanonicalEvents =
-            source.meta.canonical.clauses[0]?.schedule?.calendarEvents;
-          for (const clause of target.meta.canonical.clauses) {
-            if (clause.schedule) {
-              clause.schedule.calendarEvents = donorCanonicalEvents?.length
-                ? donorCanonicalEvents.map(event => ({ ...event }))
-                : undefined;
-            }
-          }
-          propagated = true;
-        }
-
-        if (!propagated) continue;
-        // The target text may have been generated before the shared condition
-        // or exclusion was lowered. Regenerate from the live structured fields;
-        // exact source remains in canonical/raw and instruction-graph provenance.
-        target.fhir.text = undefined;
-        target.longText = formatSig(target.fhir, "long", options);
-        target.shortText = formatSig(target.fhir, "short", options);
-        target.fhir.text = target.longText;
-        visited.add(targetIndex);
-        queue.push(targetIndex);
-      }
-    }
-  }
-}
-
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
   const boundaryPlan = createBoundaryPlan(input, options);
   const segments = expandMealDashSegments(boundaryPlan.segments, options);
@@ -1210,11 +1073,11 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
     applyInstructionSemanticResolvers(state, options);
+    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
-  const coordinationApplications = scopeCoordinatedSegmentStates(
-    states, boundaryPlan, segments, input
-  );
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeTrailingSharedDuration(states, segments);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1225,12 +1088,10 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     rawResults.push(result);
   }
 
-  propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
-  propagateCoordinatedSharedConstraints(rawResults, coordinationApplications, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1249,11 +1110,11 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
+    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
-  const coordinationApplications = scopeCoordinatedSegmentStates(
-    states, boundaryPlan, segments, input
-  );
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeTrailingSharedDuration(states, segments);
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1284,7 +1145,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  propagateTrailingSharedDuration(lintParseResults, segments, options);
   composeRegimenPhases(lintParseResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
     const parsed = applyClinicalConstraints(lintParseResults[index], segments[index].text, options);
@@ -1302,9 +1162,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       });
     }
   }
-  propagateCoordinatedSharedConstraints(
-    lintParseResults, coordinationApplications, options
-  );
   const expandedLintResults = expandLintAdministrationTargets(results, options, formatSig);
   for (const entry of expandedLintResults) {
     for (const warning of entry.result.warnings) {
@@ -1354,11 +1211,11 @@ export async function parseSigAsync(
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
     await applyInstructionSemanticResolversAsync(state, options);
+    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
-  const coordinationApplications = scopeCoordinatedSegmentStates(
-    states, boundaryPlan, segments, input
-  );
+  scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
+  scopeTrailingSharedDuration(states, segments);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1369,12 +1226,10 @@ export async function parseSigAsync(
     rawResults.push(result);
   }
 
-  propagateTrailingSharedDuration(rawResults, segments, options);
   composeRegimenPhases(rawResults, segments, boundaryPlan, options, formatSig);
   for (let index = 0; index < rawResults.length; index++) {
     applyClinicalConstraints(rawResults[index], segments[index].text, options);
   }
-  propagateCoordinatedSharedConstraints(rawResults, coordinationApplications, options);
   let results = mergeParseResultList(rawResults, options);
   propagateTrailingSharedSafety(results, options);
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
@@ -1838,12 +1693,20 @@ function buildParseResult(
   const canonicalClauses = state.clauses;
   const clause = getPrimaryClause(canonicalClauses, state.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  const shortText = formatCanonicalClause(clause, "short", localization, options);
-  const longText = formatCanonicalClause(clause, "long", localization, options);
+  let shortText = formatCanonicalClause(clause, "short", localization, options);
+  let longText = formatCanonicalClause(clause, "long", localization, options);
   const fhir = canonicalToFhir(clause, longText, {
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
+  // Formatting inherited clinical adjuncts is a read-only realization of
+  // the already scoped canonical clause, never a FHIR-level semantic repair.
+  if (clause.clinicalAdjuncts && !clause.clinicalAdjuncts.localRanges?.length) {
+    delete fhir.text;
+    shortText = formatSig(fhir, "short", options);
+    longText = formatSig(fhir, "long", options);
+    fhir.text = longText;
+  }
 
   const graphUnderstoodSpans: TextRange[] = [];
   for (const candidate of canonicalClauses) {

@@ -341,6 +341,10 @@ function factsFor(
     rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'hpsg.lex.schedule.'),
     rightHasTrailingPrn: isTrailingEvidence(rightClause, 'hpsg.lex.prn'),
     rightHasTrailingSafetyGuard: Boolean(
+      (rightClause.clinicalAdjuncts?.condition &&
+       rightClause.clinicalAdjuncts.condition.kind !== 'not') ||
+      rightClause.clinicalAdjuncts?.excludedDates?.length ||
+      rightClause.clinicalAdjuncts?.excludedWeekdays?.length ||
       rightClause.prn?.enabled === true ||
       ((rightClause.leftovers?.length ?? 0) > 0 &&
        ((rightClause.schedule?.dayOfWeek?.length ?? 0) > 0 ||
@@ -463,7 +467,57 @@ export function applyCoordinatedCadenceScopes(
       }
       appendEvidence(targetClause.prn.evidence, cloneEvidence(connectorEvidence));
     }
-    if (!scheduleMerge.fields.length && !copyPrn) continue;
+    // Share only the clinical adjuncts licensed by the selected typed
+    // coordination construction. The donor's parsed semantics, never FHIR or
+    // a second surface regex pass, determine what the recipient inherits.
+    const donorClinical = donorClause.clinicalAdjuncts;
+    const targetClinical = targetClause.clinicalAdjuncts;
+    const positiveGuard = donorClinical?.condition &&
+      donorClinical.condition.kind !== 'not';
+    const clinicalSharing = !leading &&
+      (selected.semantic.construction.operation === 'share-trailing-adjuncts' ||
+       scheduleMerge.fields.length > 0 || copyPrn);
+    const copyCondition = Boolean(clinicalSharing && positiveGuard &&
+      !targetClinical?.condition);
+    const copyExcludedWeekdays = Boolean(clinicalSharing &&
+      donorClinical?.excludedWeekdays?.length &&
+      scheduleMerge.fields.indexOf('dayOfWeek') >= 0);
+    const copyExcludedDates = Boolean(clinicalSharing &&
+      donorClinical?.excludedDates?.length &&
+      (scheduleMerge.fields.length > 0 || copyPrn));
+    const clinicalFields: string[] = [];
+    if (copyCondition || copyExcludedDates || copyExcludedWeekdays) {
+      const scopedClinical = targetClinical ?? {};
+      if (copyCondition) {
+        scopedClinical.condition = donorClinical!.condition;
+        clinicalFields.push('condition');
+      }
+      if (copyExcludedWeekdays) {
+        scopedClinical.excludedWeekdays = [...new Set([
+          ...(scopedClinical.excludedWeekdays ?? []),
+          ...donorClinical!.excludedWeekdays!
+        ])];
+        clinicalFields.push('excludedWeekdays');
+      }
+      if (copyExcludedDates) {
+        scopedClinical.excludedDates = [...new Set([
+          ...(scopedClinical.excludedDates ?? []),
+          ...donorClinical!.excludedDates!
+        ])].sort();
+        clinicalFields.push('excludedDates');
+      }
+      const clinicalEvidence = (donorClinical!.evidence ?? []).map(item =>
+        shiftEvidenceToRecipient(item, donor.start, recipient.start)
+      );
+      scopedClinical.evidence = [
+        ...(scopedClinical.evidence ?? []),
+        ...clinicalEvidence.map(item => cloneEvidence(item)),
+        cloneEvidence(connectorEvidence)
+      ];
+      targetClause.clinicalAdjuncts = scopedClinical;
+      for (const item of clinicalEvidence) appendEvidence(targetClause.evidence, cloneEvidence(item));
+    }
+    if (!scheduleMerge.fields.length && !copyPrn && !clinicalFields.length) continue;
     for (const item of [...inheritedEvidence, ...inheritedPrnEvidence]) {
       appendEvidence(targetClause.evidence, cloneEvidence(item));
     }
@@ -472,9 +526,45 @@ export function applyCoordinatedCadenceScopes(
       rule: selected.semantic.construction.id,
       from: states.indexOf(donor),
       to: states.indexOf(recipient),
-      fields: [...scheduleMerge.fields, ...(copyPrn ? ['prn'] : [])]
+      fields: [...scheduleMerge.fields, ...(copyPrn ? ['prn'] : []), ...clinicalFields]
     });
     }
   }
   return applications;
+}
+
+
+/**
+ * Apply the segmenter's licensed trailing shared course duration directly to
+ * typed HPSG clauses. This intentionally never touches FHIR or rendered text.
+ */
+export function scopeTrailingSharedDuration(
+  states: readonly ParserState[],
+  segments: readonly {
+    start: number;
+    text: string;
+    inheritTrailingDurationFromNext?: boolean;
+  }[]
+): void {
+  for (let index = states.length - 2; index >= 0; index -= 1) {
+    if (!segments[index]?.inheritTrailingDurationFromNext) continue;
+    const current = states[index].primaryClause;
+    const next = states[index + 1].primaryClause;
+    const duration = next.schedule;
+    if (!duration?.durationUnit || duration.duration === undefined) continue;
+    if (current.schedule?.duration !== undefined ||
+        current.schedule?.durationUnit !== undefined) continue;
+    current.schedule = {
+      ...(current.schedule ?? {}),
+      duration: duration.duration,
+      durationMax: duration.durationMax,
+      durationUnit: duration.durationUnit
+    };
+    const donorStart = segments[index + 1].start - segments[index].start;
+    current.evidence.push({
+      rule: "hpsg.cx.regimen.trailing-shared-duration",
+      spans: [{ start: donorStart, end: donorStart + segments[index + 1].text.length,
+        text: segments[index + 1].text }]
+    });
+  }
 }

@@ -3,6 +3,16 @@
 > **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
 
 
+## 2026-10-23 — HPSG-first clinical scope / no downstream FHIR repair
+
+Moved local condition and exclusion recognition onto typed `CanonicalSigClause.clinicalAdjuncts` **before HPSG coordination**. The existing Boolean/clinical-calendar recognizers only supply typed local facts with source evidence; HPSG's licensed coordination construction determines which daughter receives shared condition, excluded dates or excluded weekdays. FHIR now projects those decisions once from the canonical clause. Deleted the old `propagateCoordinatedSharedConstraints()` pass that copied conditions/exclusions/weekday events between already-lowered FHIR dosages and regenerated text. Also moved licensed trailing shared-duration semantics into the typed regimen/coordination layer before projection, removing its FHIR mutation pass.
+
+This is **not** a new strict validator or quarantine: best-effort parsing still retains dose, eye, cadence, original wording and clinician-editable FHIR data. Independent `unless` remains local when HPSG doesn't license wider scope. The provenance of inherited adjuncts records both the lexical fact and HPSG construction. Ordinary R5/R6 projection and public API shape are preserved.
+
+Validation: 1,857/1,857 source tests; 4/4 distribution entry tests (before moving the unchanged duration function into its module); full build green. A 328-input old-vs-new corpus comparison found zero changes to key dosage/site/route/timing/condition/exclusion fields. Interleaved host parse benchmarks showed no meaningful common-path slowdown (ordinary BID 0.967x baseline; independent eye taper 1.016x; shared condition 0.995x; repeated shared-exclusion 0.991x). These are host, not on-device benchmarks.
+
+**Remaining architectural debt, NOT grounds for new safety gates:** `propagateTrailingSharedSafety()` still distributes certain semicolon-trailing negative advice at the FHIR level; `propagateDateTransitionEventTiming()` retains its historical cross-clause projection behavior. If changed, move their *existing* semantics to typed regimen/HPSG scope with ordinary-case equivalence and performance tests. Do not remove useful suggestions or add parser refusal behavior.
+
 ## 2026-10-23 — 0.2 permissiveness / no-guard reset
 
 Owner rejected the autonomous-validator direction. Emergency audit removed the PR-era destructive parser quarantine philosophy: partial or ambiguous SIGs must retain useful dose/site/route/timing/source data for clinician review instead of deleting timing/dose or turning parse output into a refusal. Parser/regimen/FHIR interpretation code no longer throws merely because semantic meaning is incomplete.

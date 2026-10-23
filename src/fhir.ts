@@ -1,4 +1,7 @@
 import { normalizeAnchoredBounds, normalizeClockFrequency } from "./regimen/bounds";
+import {
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
+} from "./dosage-course";
 import { projectHpsgClinicalQuantityToFhir } from "./hpsg/clinical-quantity-fhir";
 import {
   buildAdditionalInstructionFramesFromCoding,
@@ -1035,6 +1038,18 @@ export function canonicalToFhir(
         dosage.asNeededFor.push(concept);
       }
     }
+  }
+
+  // The HPSG clinical scope is already resolved in CanonicalSigClause.
+  // FHIR projects it exactly once; it must never decide which daughter
+  // receives an administration condition or calendar exclusion.
+  const adjunct = clause.clinicalAdjuncts;
+  if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition);
+  if (adjunct?.excludedDates?.length) {
+    setDosageExcludedDates(dosage, adjunct.excludedDates);
+  }
+  if (adjunct?.excludedWeekdays?.length) {
+    setDosageExcludedWeekdays(dosage, adjunct.excludedWeekdays);
   }
 
   const longText = textOverride ?? formatCanonicalClause(clause, "long");
