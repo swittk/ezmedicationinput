@@ -1538,8 +1538,16 @@ function buildParseResult(
   const canonicalClauses = state.clauses;
   const clause = getPrimaryClause(canonicalClauses, state.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  let shortText = formatCanonicalClause(clause, "short", localization, options);
-  let longText = formatCanonicalClause(clause, "long", localization, options);
+  // The typed HPSG clinical-quantity feature carries richer dose/rate units
+  // than the ordinary text realizer. Keep the prescriber's *exact* source
+  // display until a lossless rich-quantity realizer exists. No source reparse
+  // and no semantic mutation after FHIR lowering.
+  const typedRichQuantitySource = clause.clinicalQuantity && clause.rawText.trim()
+    ? clause.rawText : undefined;
+  let shortText = typedRichQuantitySource ??
+    formatCanonicalClause(clause, "short", localization, options);
+  let longText = typedRichQuantitySource ??
+    formatCanonicalClause(clause, "long", localization, options);
   const fhir = canonicalToFhir(clause, longText, {
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
