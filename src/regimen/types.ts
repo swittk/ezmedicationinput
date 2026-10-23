@@ -3,7 +3,7 @@ import type { CanonicalSigClause, ParseOptions } from '../types';
 import type { Token } from '../parser-state';
 
 export interface Range { start: number; end: number }
-export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized';
+export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause';
 export interface StructuralClaim extends Range {
   id: string;
   kind: StructureKind;

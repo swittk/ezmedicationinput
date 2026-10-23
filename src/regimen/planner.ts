@@ -1,4 +1,6 @@
 import { lexInput } from '../lexer/lex';
+import { matchCalendarExclusion } from '../clinical-safety';
+import { parseMedicationGuard } from '../medication-condition';
 import { annotateLexTokens, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { normalizeUnit } from '../unit-lexicon';
@@ -68,6 +70,43 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0, probeCacheHits: 0,
     probedTokens: 0, candidates: 0, claimedCandidates: 0 };
   const claims = recognizeStructures({ input, options, tokens });
+  // Existing lexical recognizers can claim an indivisible calendar exclusion
+  // or fronted conditional scope BEFORE HPSG boundary arbitration. Unlike the
+  // former candidate-adapter rewrite, this never merges already-decided
+  // segments or discards their relation provenance.
+  if (/\b(?:except|excluding)\b|ยกเว้น|เว้น(?=วัน)/iu.test(input)) {
+    const exclusion = matchCalendarExclusion(input, options);
+    if (exclusion) claims.push({
+      id: `clinical-calendar-exclusion:${exclusion.start}:${exclusion.end}`,
+      kind: 'calendar-exclusion',
+      start: exclusion.start, end: exclusion.end,
+      producer: 'lexical.calendar-exclusion',
+      resolved: true, policy: 'no-external-split'
+    });
+  }
+  if (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)) {
+    const guard = parseMedicationGuard(input);
+    const firstNonspace = input.search(/\S/u);
+    if (guard?.start === firstNonspace && guard.end < input.length) {
+      const comma = tokens.find(token =>
+        token.original === ',' && token.sourceStart >= guard.end &&
+        /^\s*$/u.test(input.slice(guard.end, token.sourceStart))
+      );
+      if (comma) {
+        const closing = guard.otherwise &&
+          input.slice(comma.sourceEnd, guard.otherwise.start).indexOf(';') < 0
+          ? guard.otherwise.end : comma.sourceEnd;
+        claims.push({
+          id: `fronted-conditional-clause:${guard.start}:${closing}`,
+          kind: 'fronted-conditional-clause',
+          start: guard.start, end: closing,
+          producer: 'lexical.conditional-attachment',
+          resolved: true, policy: 'no-external-split'
+        });
+      }
+    }
+  }
+  claims.sort((a, b) => a.start - b.start || b.end - a.end || a.id.localeCompare(b.id));
   const owners = new OwnershipIndex(experiment.ownership === false ? [] : claims);
   const sites = candidateSites(input, tokens, options);
   const evidence = new EvidenceContext(input, tokens, options, metrics, experiment.cache !== false);
