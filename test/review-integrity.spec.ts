@@ -707,7 +707,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     });
   });
 
-  it("retains the prescribed half-tablet, clock, and source for invalid explicit cycles", () => {
+  it("keeps invalid explicit cycle source editable without fabricating a cycle", () => {
     const cases = [
       "on days 1,8,15 every 28 days for 2 cycles",
       "on days 1,8,15 every 28 days starting 28/9/2026",
@@ -718,14 +718,14 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       const input = "take .5 tab at 08:00 " + suffix;
       const parsed = parseSig(input);
       expect(parsed.input).toBe(input);
-      expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(0.5);
+      expect(parsed.meta.canonical.clauses[0].rawText).toBe(input);
+      expect(parsed.meta.leftoverText).toBe(input);
       expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
       expect(parsed.fhir[0].route?.text).toBe("by mouth");
-      expect(nextDueDoses(parsed, { ...scheduler, limit: 3 })).toEqual([
-        "2026-10-19T08:00:00+07:00",
-        "2026-10-20T08:00:00+07:00",
-        "2026-10-21T08:00:00+07:00"
-      ]);
+      expect(parsed.fhirNext.repeatCycle).toBeUndefined();
+      expect(parsed.meta.canonical.clauses[0].evidence.some(evidence =>
+        evidence.rule === "hpsg.lex.schedule.finiteCycle"
+      )).toBe(false);
     }
   });
 

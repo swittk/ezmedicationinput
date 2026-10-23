@@ -5,6 +5,9 @@ import {
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
 import { canonicalToFhir } from "../src/fhir";
+import { parseClauseState } from "../src/parser";
+import { createBoundaryPlan } from "../src/regimen/candidate-adapter";
+import { buildRegimenGraph } from "../src/regimen/regimen";
 
 const start = "2024-01-01T00:00:00Z";
 const due = {
@@ -808,15 +811,169 @@ describe("dose scheduling runtime guarantees", () => {
     })).toEqual([]);
   });
 
-  it("preserves a recurring on/off cycle through flat FHIR JSON persistence", () => {
-    const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat");
+  it("owns recurring on/off cycle semantics before FHIR and preserves both projections", () => {
+    const input = "1 tab daily for 7 days then stop for 7 days repeat for 3 cycles";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    expect(states).toHaveLength(1);
+    expect(states[0].primaryClause.schedule).toMatchObject({
+      duration: 7,
+      durationUnit: "d",
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      repeatCount: 3
+    });
+    expect(states[0].primaryClause.schedule?.evidence?.find(evidence =>
+      evidence.rule === "hpsg.lex.schedule.finiteCycle")?.scheduleFields
+    ).toEqual(["duration", "durationUnit", "repeatCycle", "repeatCount"]);
+    expect(states[0].primaryClause.evidence.find(evidence =>
+      evidence.rule === "hpsg.lex.schedule.finiteCycle")?.scheduleFields
+    ).toEqual(["duration", "durationUnit", "repeatCycle", "repeatCount"]);
+    expect(buildRegimenGraph(plan, plan.segments, states)).toMatchObject({
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      repeatCount: 3
+    });
+
+    const parsed = parseSig(input);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      repeatCount: 3
+    });
+    expect(parsed.fhirNext).toMatchObject({
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      step: [{ count: 3 }]
+    });
     const flat = JSON.parse(JSON.stringify(parsed.fhir));
-    expect(toDosageDetails(flat).repeatCycle).toMatchObject({
-      value: 14, unit: "d", code: "d"
+    expect(toDosageDetails(flat)).toMatchObject({
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      step: [{ count: 3 }]
     });
     expect(nextDueDoses(flat, { ...base, limit: 10 })).toEqual(
       nextDueDoses(parsed.fhirNext, { ...base, limit: 10 })
     );
+
+    const unbounded = parseSig("1 tab daily for 7 days then stop for 7 days repeat");
+    expect(unbounded.meta.canonical.clauses[0].schedule?.repeatCount).toBeUndefined();
+    expect(calculateTotalUnits({
+      dosage: unbounded.fhirNext,
+      from: start,
+      orderedAt: start,
+      timeZone: "UTC",
+      durationValue: 28,
+      durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 14, unit: "tab" });
+
+    const coordinated = parseSig(
+      "instill 1 drop in left eye and 2 drops in right eye daily " +
+      "for 7 days then stop for 7 days repeat for 3 cycles"
+    );
+    expect(coordinated.items).toHaveLength(2);
+    expect(coordinated.items.map(item => item.meta.canonical.clauses[0].schedule)).toEqual([
+      expect.objectContaining({
+        duration: 7,
+        durationUnit: "d",
+        repeatCycle: expect.objectContaining({ value: 14, unit: "d" }),
+        repeatCount: 3
+      }),
+      expect.objectContaining({
+        duration: 7,
+        durationUnit: "d",
+        repeatCycle: expect.objectContaining({ value: 14, unit: "d" }),
+        repeatCount: 3
+      })
+    ]);
+    expect(coordinated.items[0].meta.canonical.clauses[0].schedule?.evidence?.some(evidence =>
+      evidence.scheduleFields?.includes("repeatCycle") &&
+      evidence.scheduleFields.includes("repeatCount")
+    )).toBe(true);
+  });
+
+  it("keeps anchored Thai cycles typed and malformed cycle source editable", () => {
+    const thai = parseSig(
+      "รับประทานครั้งละ 1 เม็ด วันละ 1 ครั้ง วันที่ของรอบ 1,8 ทุก 28 วัน เริ่ม 28/9/2569 จำนวน 2 รอบ",
+      { locale: "th" }
+    );
+    expect(thai.meta.canonical.clauses[0].schedule?.calendarEvents?.map(event => event.isoDate))
+      .toEqual(["2026-09-28", "2026-10-05", "2026-10-26", "2026-11-02"]);
+    expect(thai.fhir[0].timing?.event).toEqual(
+      ["2026-09-28", "2026-10-05", "2026-10-26", "2026-11-02"]
+    );
+    expect(thai.meta.canonical.clauses[0].schedule?.evidence?.find(evidence =>
+      evidence.rule === "hpsg.lex.schedule.finiteCycle")?.scheduleFields
+    ).toEqual(["calendarEvents"]);
+
+    const unresolved = "take .5 tab at 08:00 on days 0,8 every 28 days starting 28/9/2026 for 2 cycles";
+    const partial = parseSig(unresolved);
+    expect(partial.input).toBe(unresolved);
+    expect(partial.meta.canonical.clauses[0].rawText).toBe(unresolved);
+    expect(partial.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(partial.meta.leftoverText).toBe(unresolved);
+    expect(partial.fhirNext.repeatCycle).toBeUndefined();
+    expect(partial.meta.canonical.clauses[0].evidence.some(evidence =>
+      evidence.rule === "hpsg.lex.schedule.finiteCycle"
+    )).toBe(false);
+
+    const ordinary = "1 tab PO BID";
+    const ordinaryPlan = createBoundaryPlan(ordinary);
+    const ordinaryStates = ordinaryPlan.segments.map(segment => parseClauseState(segment.text));
+    expect(buildRegimenGraph(ordinaryPlan, ordinaryPlan.segments, ordinaryStates).repeatCycle)
+      .toBeUndefined();
+    expect(parseSig(ordinary).fhirNext.repeatCycle).toBeUndefined();
+  });
+
+  it("keeps local or conflicting cycles off the whole-course projection", () => {
+    const mixed =
+      "1 tab daily for 7 days then stop for 7 days repeat for 3 cycles; 1 puff BID";
+    const mixedPlan = createBoundaryPlan(mixed);
+    const mixedStates = mixedPlan.segments.map(segment => parseClauseState(segment.text));
+    const mixedGraph = buildRegimenGraph(mixedPlan, mixedPlan.segments, mixedStates);
+    expect(mixedGraph.phases).toHaveLength(2);
+    expect(mixedGraph.phases[0]).toMatchObject({
+      members: [0], repeatCycle: { value: 14, unit: "d" }, repeatCount: 3
+    });
+    expect(mixedGraph.phases[1].members).toEqual([1]);
+    expect(mixedGraph.phases[1].repeatCycle).toBeUndefined();
+    expect(mixedGraph.phases[1].repeatCount).toBeUndefined();
+    expect(mixedGraph.repeatCycle).toBeUndefined();
+    const mixedFinal = parseSig(mixed);
+    expect(mixedFinal.meta.segments.map(segment => segment.text)).toEqual([
+      "1 tab daily for 7 days then stop for 7 days repeat for 3 cycles",
+      "1 puff BID"
+    ]);
+    expect(mixedFinal.meta.canonical.clauses.map(clause => ({
+      source: clause.rawText,
+      cycle: clause.schedule?.repeatCycle?.value,
+      count: clause.schedule?.repeatCount
+    }))).toEqual([
+      {
+        source: "1 tab daily for 7 days then stop for 7 days repeat for 3 cycles",
+        cycle: 14,
+        count: 3
+      },
+      { source: "1 puff BID", cycle: undefined, count: undefined }
+    ]);
+    expect(mixedFinal.fhirNext.repeatCycle).toBeUndefined();
+    expect(toDosageDetails(JSON.parse(JSON.stringify(mixedFinal.fhir))).repeatCycle)
+      .toBeUndefined();
+
+    const conflicting =
+      "1 tab daily for 7 days then stop for 7 days repeat; " +
+      "1 tab daily for 5 days then stop for 5 days repeat";
+    const conflictPlan = createBoundaryPlan(conflicting);
+    const conflictStates = conflictPlan.segments.map(segment => parseClauseState(segment.text));
+    const conflictGraph = buildRegimenGraph(conflictPlan, conflictPlan.segments, conflictStates);
+    expect(conflictGraph.phases.map(phase => phase.repeatCycle?.value)).toEqual([14, 10]);
+    expect(conflictGraph.repeatCycle).toBeUndefined();
+    const conflictingFinal = parseSig(conflicting);
+    expect(conflictingFinal.meta.canonical.clauses.map(clause => ({
+      source: clause.rawText,
+      cycle: clause.schedule?.repeatCycle?.value
+    }))).toEqual([
+      { source: "1 tab daily for 7 days then stop for 7 days repeat", cycle: 14 },
+      { source: "1 tab daily for 5 days then stop for 5 days repeat", cycle: 10 }
+    ]);
+    expect(conflictingFinal.fhirNext.repeatCycle).toBeUndefined();
+    expect(toDosageDetails(JSON.parse(JSON.stringify(conflictingFinal.fhir))).repeatCycle)
+      .toBeUndefined();
   });
 
   it("uses calendar-day horizons across daylight-saving transitions", () => {

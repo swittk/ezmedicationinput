@@ -423,6 +423,15 @@ function sameOccurrenceCap(
   return left.max === right.max && left.period === right.period && left.periodUnit === right.periodUnit;
 }
 
+function sameRepeatCycle(
+  left: HpsgScheduleFeature["repeatCycle"],
+  right: HpsgScheduleFeature["repeatCycle"]
+): boolean {
+  if (!left || !right) return left === right;
+  return left.value === right.value && left.comparator === right.comparator &&
+    left.unit === right.unit && left.system === right.system && left.code === right.code;
+}
+
 function mergeSchedule(
   left: HpsgScheduleFeature | undefined,
   right: HpsgScheduleFeature | undefined
@@ -449,6 +458,8 @@ function mergeSchedule(
     !sameOptionalScalar(left.offset, right.offset) ||
     !sameOptionalScalar(left.offsetMin, right.offsetMin) ||
     !sameOptionalScalar(left.offsetMax, right.offsetMax) ||
+    !sameOptionalScalar(left.repeatCount, right.repeatCount) ||
+    (!sameRepeatCycle(left.repeatCycle, right.repeatCycle) && Boolean(left.repeatCycle && right.repeatCycle)) ||
     (!sameOccurrenceCap(left.occurrenceCap, right.occurrenceCap) && Boolean(left.occurrenceCap && right.occurrenceCap))
   ) {
     return undefined;
@@ -472,6 +483,8 @@ function mergeSchedule(
     offset: mergeOptionalScalar(left.offset, right.offset),
     offsetMin: mergeOptionalScalar(left.offsetMin, right.offsetMin),
     offsetMax: mergeOptionalScalar(left.offsetMax, right.offsetMax),
+    repeatCycle: left.repeatCycle ?? right.repeatCycle,
+    repeatCount: mergeOptionalScalar(left.repeatCount, right.repeatCount),
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),

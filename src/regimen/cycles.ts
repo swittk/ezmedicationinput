@@ -4,8 +4,31 @@ import { lexicalRule } from '../hpsg/rule-context';
 import type { HpsgClauseContext } from '../hpsg/rule-context';
 import { lexicalSign } from '../hpsg/signature';
 import { FhirPeriodUnit } from '../types';
-import type { CanonicalCalendarEventExpr, FhirQuantity, ParseOptions } from '../types';
+import type {
+  CanonicalCalendarEventExpr,
+  CanonicalScheduleSemanticField,
+  FhirQuantity,
+  ParseOptions
+} from '../types';
 import { CYCLE_WORDS as W } from './cycle-lexicon';
+
+declare module '../types' {
+  interface CanonicalScheduleExpr {
+    /** Typed whole-course interval for a recurring active/rest construction. */
+    repeatCycle?: FhirQuantity;
+    /** Explicit finite number of whole-course repetitions; absent means unbounded. */
+    repeatCount?: number;
+  }
+}
+
+declare module '../hpsg/signature' {
+  interface HpsgScheduleFeature {
+    /** Typed whole-course interval for a recurring active/rest construction. */
+    repeatCycle?: FhirQuantity;
+    /** Explicit finite number of whole-course repetitions; absent means unbounded. */
+    repeatCount?: number;
+  }
+}
 
 export interface CycleSchedule {
   start: number; end: number; sourceText: string; days: number[]; cycles: number; periodDays?: number;
@@ -14,6 +37,7 @@ export interface CycleSchedule {
   onDuration?: FhirQuantity;
   offDuration?: FhirQuantity;
   repeatCycle?: FhirQuantity;
+  repeatCount?: number;
   unbounded?: boolean;
 }
 const LIST = `${W.dayPart}(?:${W.listSeparator}${W.dayPart})*`;
@@ -88,6 +112,7 @@ function recognizeOnOffCycles(input: string): CycleSchedule[] {
       onDuration: cycleQuantity(onValue, onUnit),
       offDuration: cycleQuantity(offValue, offUnit),
       repeatCycle,
+      repeatCount,
       unbounded: repeatCount === undefined || undefined,
       error: repeatCount !== undefined && (repeatCount < 1 || repeatCount > 100)
         ? 'invalid-cycle-size' : undefined
@@ -153,18 +178,37 @@ function contextCycles(context: HpsgClauseContext): CycleSchedule[] {
 export function insideCycle(context: HpsgClauseContext, tokenIndex: number): boolean {
   const token = context.tokens[tokenIndex];
   return !!token && contextCycles(context).some(c =>
-    c.kind !== 'recurring-on-off' && !c.error && c.start <= token.sourceStart && token.sourceStart < c.end);
+    !c.error && c.start <= token.sourceStart && token.sourceStart < c.end);
 }
-/** A bounded cycle is lowered to native exact FHIR events; no executable cycle rule is hidden in free text. */
+/** Finite cycles emit exact events; recurring active/rest cycles emit their
+ * typed active duration and whole-course repeat interval on the same sign. */
 export function cycleScheduleRule() {
   return lexicalRule('hpsg.lex.schedule.finiteCycle', (context, start) => {
     const first = context.tokens[start];
     const cycle = contextCycles(context).find(c => c.start === first?.sourceStart);
-    if (!cycle || cycle.kind === 'recurring-on-off' || cycle.error) return [];
+    if (!cycle || cycle.error) return [];
     const tokens = context.tokens.slice(start).filter(t => t.sourceStart < cycle.end);
     if (!tokens.length || tokens[tokens.length - 1].sourceEnd > cycle.end) return [];
+    const schedule = cycle.kind === 'recurring-on-off'
+      ? cycle.onDuration?.value !== undefined && cycle.onDuration.code && cycle.repeatCycle
+        ? {
+          duration: cycle.onDuration.value,
+          durationUnit: cycle.onDuration.code as FhirPeriodUnit,
+          repeatCycle: { ...cycle.repeatCycle },
+          repeatCount: cycle.repeatCount
+        }
+        : undefined
+      : { calendarEvents: cycle.events };
+    if (!schedule) return [];
+    const scheduleFields: CanonicalScheduleSemanticField[] = cycle.kind === 'recurring-on-off'
+      ? ['duration', 'durationUnit', 'repeatCycle']
+      : ['calendarEvents'];
+    if (cycle.kind === 'recurring-on-off' && cycle.repeatCount !== undefined) {
+      scheduleFields.push('repeatCount');
+    }
     return [lexicalSign({ type: 'schedule-sign', rule: 'hpsg.lex.schedule.finiteCycle', tokens,
-      synsem: { head: { schedule: { calendarEvents: cycle.events } }, valence: {}, cont: { clauseKind: 'administration' } },
+      synsem: { head: { schedule }, valence: {}, cont: { clauseKind: 'administration' } },
+      scheduleFields,
       score: 40 + tokens.length })];
   });
 }

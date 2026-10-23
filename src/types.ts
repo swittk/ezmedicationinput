@@ -1503,6 +1503,9 @@ export interface CanonicalScheduleExpr {
   evidence?: CanonicalEvidence[];
 }
 
+/** Schedule fields explicitly contributed by typed grammar evidence. */
+export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence">;
+
 export interface CanonicalPrnReasonExpr {
   text?: string;
   i18n?: Record<string, string>;
@@ -1566,6 +1569,8 @@ export interface CanonicalSourceSpan extends TextRange {
 export interface CanonicalEvidence {
   rule: string;
   spans: CanonicalSourceSpan[];
+  /** Exact schedule semantics owned by this evidence, independent of rule names. */
+  scheduleFields?: CanonicalScheduleSemanticField[];
   score?: number;
   note?: string;
 }

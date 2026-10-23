@@ -8,6 +8,7 @@ import {
   CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   AdministrationTargetCoordinationKind,
+  CanonicalScheduleSemanticField,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCoding,
@@ -55,6 +56,8 @@ export interface HpsgEvidence {
   tokenIndices: number[];
   /** Lexical evidence that a schedule field is an inferred, construction-local default. */
   scheduleDefault?: "daily-frequency";
+  /** Exact typed schedule fields contributed by this lexical evidence. */
+  scheduleFields?: CanonicalScheduleSemanticField[];
 }
 
 export type HpsgConstructionKind =
@@ -344,6 +347,7 @@ export function lexicalSign(args: {
   warnings?: string[];
   score?: number;
   scheduleDefault?: HpsgEvidence["scheduleDefault"];
+  scheduleFields?: CanonicalScheduleSemanticField[];
 }): HpsgSign {
   const tokenIndices = args.tokens
     .map((token) => token.index)
@@ -353,6 +357,12 @@ export function lexicalSign(args: {
   }
   const start = Math.min(...tokenIndices);
   const end = Math.max(...tokenIndices) + 1;
+  const evidence: HpsgEvidence = {
+    rule: args.rule,
+    tokenIndices,
+    scheduleDefault: args.scheduleDefault
+  };
+  if (args.scheduleFields?.length) evidence.scheduleFields = [...args.scheduleFields];
   return {
     type: args.type,
     span: { start, end },
@@ -363,13 +373,7 @@ export function lexicalSign(args: {
       args.consumedTokenIndices ?? tokenIndices,
     siteTokenIndices: args.siteTokenIndices,
     warnings: args.warnings,
-    evidence: [
-      {
-        rule: args.rule,
-        tokenIndices,
-        scheduleDefault: args.scheduleDefault
-      }
-    ],
+    evidence: [evidence],
     score: args.score ?? 1
   };
 }

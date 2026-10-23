@@ -6,7 +6,6 @@ import {
 import {
   buildCanonicalParallelRegimen, projectParallelRegimen
 } from "./regimen/parallel-course";
-import { recognizeCycles } from "./regimen/cycles";
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
   scopeTrailingSharedDuration,
@@ -16,7 +15,8 @@ import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
 import {
-  buildRegimenGraph, regimenMemberSequences, scopeSequentialPhaseSemantics
+  buildRegimenGraph, regimenMemberSequences,
+  scopeSequentialPhaseSemantics, type RegimenGraph
 } from "./regimen/regimen";
 import {
   administrationTargetProjections,
@@ -454,33 +454,43 @@ function buildWholeCourseResult(
   results: ParseResult[],
   primary: ParseResult,
   segments: ReturnType<typeof parseSigSegments>,
+  regimenGraph: RegimenGraph,
   options?: ParseOptions,
   parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageDetails }
 ): ParseBatchResult {
   const dosageItems = results.map(item => item.fhir);
-  const fhir = parallel?.dosages ?? toEzDosages(dosageItems);
-  const fhirNext = parallel?.details ?? toDosageDetails(dosageItems, input);
-  const recurringCycle = recognizeCycles(input, options).find(frame =>
-    frame.kind === "recurring-on-off" && !frame.error && frame.repeatCycle);
-  if (recurringCycle?.repeatCycle && !fhirNext.repeatCycle) {
-    fhirNext.repeatCycle = { ...recurringCycle.repeatCycle };
-    // The flat R5/EzDosage array may be persisted independently of fhirNext.
-    // Keep every live flat field, but attach the same retained-course marker
-    // so JSON round trips can reconstruct repeatCycle instead of degrading to
-    // the first active on-phase only.
-    const projected = toFhirR5Dosages(fhirNext);
-    const retained = projected[0]?.modifierExtension?.find(extension =>
-      extension.url === DOSAGE_DETAILS_R5_URL);
-    if (retained) {
-      for (const dosage of fhir) {
-        dosage.modifierExtension = [
-          ...(dosage.modifierExtension ?? []).filter(extension =>
-            extension.url !== DOSAGE_DETAILS_R5_URL),
-          ...(cloneExtensions([retained]) ?? [])
-        ];
-      }
+  const typedRepeatCycle = regimenGraph.repeatCycle
+    ? { ...regimenGraph.repeatCycle }
+    : undefined;
+  const typedCourse: EzCourseMetadata | undefined = typedRepeatCycle
+    ? {
+      repeatCycle: typedRepeatCycle,
+      ...(regimenGraph.repeatCount !== undefined
+        ? { step: [{ sequence: 1, count: regimenGraph.repeatCount }] }
+        : {})
     }
-  }
+    : undefined;
+  const fhirNext = parallel?.details
+    ? {
+      ...parallel.details,
+      ...(typedRepeatCycle ? { repeatCycle: typedRepeatCycle } : {}),
+      ...(regimenGraph.repeatCount !== undefined
+        ? {
+          step: parallel.details.step.map((step, index) =>
+            index === 0 ? { ...step, count: regimenGraph.repeatCount } : step)
+        }
+        : {})
+    }
+    : toDosageDetails(
+      dosageItems,
+      input,
+      typedCourse
+    );
+  // A recurring-cycle course is projected as one R6 object and flattened by
+  // the established R6->R5 bridge. No source text is reparsed or injected.
+  const fhir = typedRepeatCycle
+    ? fromDosageDetails(fhirNext).dosages
+    : parallel?.dosages ?? toEzDosages(dosageItems);
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -502,7 +512,25 @@ function buildWholeCourseResult(
     items: results,
     fhir,
     fhirNext,
-    ...(parallel ? { course: parallel.course } : {}),
+    ...(parallel ? {
+      course: typedRepeatCycle
+        ? {
+          ...parallel.course,
+          repeatCycle: typedRepeatCycle,
+          ...(regimenGraph.repeatCount !== undefined
+            ? {
+              step: [
+                ...(parallel.course.step ?? []).filter(step => step.sequence !== 1),
+                {
+                  ...(parallel.course.step?.find(step => step.sequence === 1) ?? { sequence: 1 }),
+                  count: regimenGraph.repeatCount
+                }
+              ].sort((left, right) => left.sequence - right.sequence)
+            }
+            : {})
+        }
+        : parallel.course
+    } : {}),
     shortText: results.length === 1 ? primary.shortText : formatSig(displayCourse, "short", options),
     longText: results.length === 1 ? primary.longText : formatSig(displayCourse, "long", options),
     warnings: [...warnings],
@@ -518,31 +546,6 @@ function buildWholeCourseResult(
       segments: toSegmentMeta(segments)
     }
   };
-}
-
-/**
- * Invalid but explicitly framed medication cycles must not contribute their
- * day numbers as dose amounts. Keep original offsets intact by masking only
- * the invalid cycle frame while parsing the preceding administered amount.
- * The original source and all unparsed clinical text remain on the typed
- * clause even when this compatibility path masks an invalid cycle frame.
- *
- * Ordinary "on day N" text is not a cycle frame; valid explicit cycles are
- * parsed normally without this fallback.
- */
-function parseCycleSafeClauseState(text: string, options?: ParseOptions) {
-  if (!/(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(text)) {
-    return parseClauseState(text, options);
-  }
-  const invalid = recognizeCycles(text, options).filter(frame => frame.error);
-  if (!invalid.length) return parseClauseState(text, options);
-  const chars = text.split("");
-  for (const frame of invalid) {
-    for (let index = frame.start; index < frame.end; index++) {
-      if (chars[index] !== "\n") chars[index] = " ";
-    }
-  }
-  return parseClauseState(chars.join(""), options);
 }
 
 function hasSegmentCarry(carry: SegmentCarry): boolean {
@@ -573,13 +576,9 @@ function* iterateCoordinatedSegmentStates(
   let carry: SegmentCarry = {};
   for (const segment of segments) {
     if (independentStarts?.has(segment.start)) carry = {};
-    const hasInvalidCycles = /(?:\bcycles?\b|วันที่ของรอบ|\bstarting\b)/iu.test(segment.text) &&
-      recognizeCycles(segment.text, options).some(frame => frame.error);
-    const state = (!hasSegmentCarry(carry) && !hasInvalidCycles
+    const state = (!hasSegmentCarry(carry)
       ? takeBoundaryParsedState(boundaryPlan, segment.start, segment.end, segment.text)
-      : undefined) ?? (hasInvalidCycles
-        ? parseCycleSafeClauseState(segment.text, options)
-        : parseClauseState(segment.text, options));
+      : undefined) ?? parseClauseState(segment.text, options);
     applyCarryForward(state, carry);
     yield state;
     updateCarryForward(carry, state);
@@ -677,7 +676,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
-  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const timingComposition = states.length > 1
     ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
@@ -718,7 +717,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     : canonicalParallel;
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments, options,
+  return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel.kind === "resolved" ? parallel : undefined);
 }
 
@@ -734,7 +733,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
-  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const timingComposition = states.length > 1
     ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
@@ -851,7 +850,7 @@ export async function parseSigAsync(
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
-  const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
+  const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const timingComposition = states.length > 1
     ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
@@ -892,7 +891,7 @@ export async function parseSigAsync(
     : canonicalParallel;
   const primary = compatibilityPrimary;
 
-  return buildWholeCourseResult(input, results, primary, segments, options,
+  return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel.kind === "resolved" ? parallel : undefined);
 }
 

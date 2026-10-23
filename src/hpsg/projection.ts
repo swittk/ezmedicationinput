@@ -1,6 +1,14 @@
 import { stableStructureKey } from "../stable-structure";
 import { ParserState, Token } from "../parser-state";
-import { EventTiming, FhirDayOfWeek, FhirDosage, RouteCode, TextRange } from "../types";
+import {
+  EventTiming,
+  FhirDayOfWeek,
+  FhirDosage,
+  RouteCode,
+  TextRange,
+  type CanonicalEvidence,
+  type CanonicalScheduleSemanticField
+} from "../types";
 import {
   HpsgClinicalAdjunctFeature,
   HpsgClinicalQuantityFeature,
@@ -18,7 +26,13 @@ export interface HpsgProjectionDeps {
   addDayOfWeekList: (state: ParserState, days: FhirDayOfWeek[]) => void;
   addWhen: (target: EventTiming[], whenCode: EventTiming) => void;
   markToken: (state: ParserState, token: Token) => void;
-  recordEvidence: (state: ParserState, rule: string, startIndex: number, endIndex: number) => void;
+  recordEvidence: (
+    state: ParserState,
+    rule: string,
+    startIndex: number,
+    endIndex: number,
+    scheduleFields?: CanonicalScheduleSemanticField[]
+  ) => void;
   refreshMethodSurface: (state: ParserState) => void;
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
 }
@@ -50,6 +64,11 @@ function applySchedule(
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;
     if (schedule.boundsEnd !== undefined) target.boundsEnd = schedule.boundsEnd;
+  }
+  if (schedule.repeatCycle !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.repeatCycle = { ...schedule.repeatCycle };
+    if (schedule.repeatCount !== undefined) target.repeatCount = schedule.repeatCount;
   }
   if (schedule.frequency !== undefined) {
     state.frequency = schedule.frequency;
@@ -135,26 +154,32 @@ function appendScheduleEvidence(
   tokens: Token[],
   schedule: HpsgScheduleFeature | undefined
 ): void {
-  // Evidence only owns a schedule when the typed sign already owns its source
-  // range. Never infer clinical meaning from a lexical rule's display name.
-  if (!schedule?.sourceRanges?.length || !evidence.tokenIndices.length) return;
+  // Typed lexical schedule ownership, never dispatch by a rule name.
+  if (!evidence.tokenIndices.length ||
+      (!evidence.scheduleFields?.length && !schedule?.sourceRanges?.length)) return;
   const owned = evidence.tokenIndices
     .map((tokenIndex) => findTokenByIndex(tokens, tokenIndex))
     .filter((token): token is Token => token !== undefined);
   if (!owned.length) return;
   const start = Math.min(...owned.map((token) => token.sourceStart));
   const end = Math.max(...owned.map((token) => token.sourceEnd));
-  if (!schedule.sourceRanges.some(range => range.start <= start && end <= range.end)) return;
+  if (!evidence.scheduleFields?.length && !schedule?.sourceRanges?.some(range =>
+    range.start <= start && end <= range.end
+  )) return;
   const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
   const scheduleEvidence = target.evidence ?? (target.evidence = []);
   if (scheduleEvidence.some((candidate) =>
     candidate.rule === evidence.rule &&
     candidate.spans.some((span) => span.start === start && span.end === end)
   )) return;
-  scheduleEvidence.push({
+  const canonicalEvidence: CanonicalEvidence = {
     rule: evidence.rule,
     spans: [{ start, end, text: state.input.slice(start, end) }]
-  });
+  };
+  if (evidence.scheduleFields?.length) {
+    canonicalEvidence.scheduleFields = [...evidence.scheduleFields];
+  }
+  scheduleEvidence.push(canonicalEvidence);
 }
 
 function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinicalQuantityFeature {
@@ -477,6 +502,12 @@ export function projectHpsgSignToState(
     if (schedule?.attachmentClass !== "procedure") appendScheduleEvidence(state, evidence, tokens, schedule);
     const startIndex = Math.min(...evidence.tokenIndices);
     const endIndex = Math.max(...evidence.tokenIndices);
-    deps.recordEvidence(state, evidence.rule, startIndex, endIndex);
+    deps.recordEvidence(
+      state,
+      evidence.rule,
+      startIndex,
+      endIndex,
+      evidence.scheduleFields
+    );
   }
 }

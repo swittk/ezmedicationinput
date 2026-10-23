@@ -14,6 +14,7 @@ import type {
   CanonicalMethodExpr,
   CanonicalPrnExpr,
   CanonicalScheduleExpr,
+  CanonicalScheduleSemanticField,
   CanonicalSigClause,
   CanonicalSourceSpan
 } from '../types';
@@ -51,7 +52,7 @@ function hasCadence(schedule: CanonicalScheduleExpr | undefined): boolean {
   ));
 }
 
-type ScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, 'evidence'>;
+type ScheduleSemanticField = CanonicalScheduleSemanticField;
 type ScheduleFeatureGroup = keyof typeof SCHEDULE_FEATURE_GROUPS;
 
 /**
@@ -72,7 +73,8 @@ const SCHEDULE_FEATURE_GROUPS = {
   administrationDuration: [
     'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
   ],
-  calendarEvents: ['calendarEvents']
+  calendarEvents: ['calendarEvents'],
+  regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
 type GroupedScheduleField = (typeof SCHEDULE_FEATURE_GROUPS)[ScheduleFeatureGroup][number];
@@ -89,7 +91,8 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
-  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod'
+  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod',
+  'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]
@@ -217,7 +220,7 @@ function shiftEvidenceToRecipient(
   donorStart: number,
   recipientStart: number
 ): CanonicalEvidence {
-  return {
+  const shifted: CanonicalEvidence = {
     ...evidence,
     spans: evidence.spans.map(span => ({
       start: span.start + donorStart - recipientStart,
@@ -225,6 +228,8 @@ function shiftEvidenceToRecipient(
       text: span.text
     }))
   };
+  if (evidence.scheduleFields) shifted.scheduleFields = [...evidence.scheduleFields];
+  return shifted;
 }
 
 function sameSpan(left: CanonicalSourceSpan, right: CanonicalSourceSpan): boolean {
@@ -241,16 +246,29 @@ function appendEvidence(target: CanonicalEvidence[], candidate: CanonicalEvidenc
 }
 
 function cloneEvidence(evidence: CanonicalEvidence): CanonicalEvidence {
-  return {
+  const clone: CanonicalEvidence = {
     ...evidence,
     spans: evidence.spans.map(span => ({
       ...span,
       tokenIndices: span.tokenIndices ? [...span.tokenIndices] : undefined
     }))
   };
+  if (evidence.scheduleFields) clone.scheduleFields = [...evidence.scheduleFields];
+  return clone;
 }
 
-function scheduleEvidenceGroups(rule: string): readonly ScheduleFeatureGroup[] {
+function scheduleEvidenceGroups(evidence: CanonicalEvidence): readonly ScheduleFeatureGroup[] {
+  if (evidence.scheduleFields?.length) {
+    const groups: ScheduleFeatureGroup[] = [];
+    for (const group of Object.keys(SCHEDULE_FEATURE_GROUPS) as ScheduleFeatureGroup[]) {
+      const groupFields = SCHEDULE_FEATURE_GROUPS[group] as readonly ScheduleSemanticField[];
+      if (evidence.scheduleFields.some(field => groupFields.indexOf(field) >= 0)) {
+        groups.push(group);
+      }
+    }
+    return groups;
+  }
+  const rule = evidence.rule;
   if (/eventOffset|activityTiming/iu.test(rule)) return ['eventAnchor'];
   if (/administrationDuration/iu.test(rule)) return ['administrationDuration'];
   if (/duration/iu.test(rule)) return ['courseBounds'];
@@ -267,13 +285,13 @@ function sourceScheduleEvidence(
 ): CanonicalEvidence[] {
   const evidence: CanonicalEvidence[] = [];
   for (const item of clause.schedule?.evidence ?? []) {
-    if (scheduleEvidenceGroups(item.rule).some(group => copiedGroups.has(group))) {
+    if (scheduleEvidenceGroups(item).some(group => copiedGroups.has(group))) {
       appendEvidence(evidence, item);
     }
   }
   for (const item of clause.evidence) {
     if (item.rule.startsWith('hpsg.lex.schedule.') &&
-        scheduleEvidenceGroups(item.rule).some(group => copiedGroups.has(group))) {
+        scheduleEvidenceGroups(item).some(group => copiedGroups.has(group))) {
       appendEvidence(evidence, item);
     }
   }

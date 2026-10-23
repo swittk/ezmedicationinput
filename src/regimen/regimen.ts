@@ -4,16 +4,34 @@ import type { ParserState } from '../parser-state';
 import type {
   CanonicalEvidence,
   CanonicalSigClause,
-  CanonicalSourceSpan
+  CanonicalSourceSpan,
+  FhirQuantity
 } from '../types';
 
-export interface RegimenPhase { id: number; members: number[] }
+export interface RegimenPhase {
+  id: number;
+  members: number[];
+  /** Cycle agreed by every typed administration member in this phase. */
+  repeatCycle?: FhirQuantity;
+  repeatCount?: number;
+}
 export interface PhaseEdge { from: number; to: number; relation: BoundaryRelation }
-export interface RegimenGraph { phases: RegimenPhase[]; sequences: PhaseEdge[] }
+export interface RegimenGraph {
+  phases: RegimenPhase[];
+  sequences: PhaseEdge[];
+  /** Whole-course interval contributed by a typed recurring cycle sign. */
+  repeatCycle?: FhirQuantity;
+  /** Explicit finite number of whole-course repetitions. */
+  repeatCount?: number;
+}
 export interface InheritanceEvidence { rule: string; phase: number; sources: number[]; target: number; fields: string[] }
 
 /** Retain coordination as a group; sequence and independent delimiters start new groups. */
-export function buildRegimenGraph(plan: BoundaryPlan, segments: readonly HpsgSigSegment[]): RegimenGraph {
+export function buildRegimenGraph(
+  plan: BoundaryPlan,
+  segments: readonly HpsgSigSegment[],
+  states?: readonly ParserState[]
+): RegimenGraph {
   const phases: RegimenPhase[] = [], sequences: PhaseEdge[] = [];
   let original = 0;
   for (let index = 0; index < segments.length; index++) {
@@ -27,7 +45,34 @@ export function buildRegimenGraph(plan: BoundaryPlan, segments: readonly HpsgSig
     }
     phases[phases.length - 1].members.push(index);
   }
-  return { phases, sequences };
+  for (const phase of phases) {
+    const firstSchedule = states?.[phase.members[0]]?.primaryClause.schedule;
+    const firstCycle = firstSchedule?.repeatCycle;
+    if (!firstCycle || !phase.members.every(member => {
+      const schedule = states?.[member]?.primaryClause.schedule;
+      const candidate = schedule?.repeatCycle;
+      return Boolean(candidate &&
+        candidate.value === firstCycle.value &&
+        candidate.comparator === firstCycle.comparator &&
+        candidate.unit === firstCycle.unit &&
+        candidate.system === firstCycle.system &&
+        candidate.code === firstCycle.code &&
+        schedule?.repeatCount === firstSchedule.repeatCount);
+    })) continue;
+    phase.repeatCycle = { ...firstCycle };
+    phase.repeatCount = firstSchedule.repeatCount;
+  }
+  const wholeCourseCycle = phases.length === 1 ? phases[0].repeatCycle : undefined;
+  return {
+    phases,
+    sequences,
+    ...(wholeCourseCycle
+      ? {
+        repeatCycle: { ...wholeCourseCycle },
+        ...(phases[0].repeatCount !== undefined ? { repeatCount: phases[0].repeatCount } : {})
+      }
+      : {})
+  };
 }
 
 function nextDate(value: string): string | undefined {

@@ -24,6 +24,7 @@ export {
 import {
   AdvicePolarity,
   BodySiteDefinition,
+  CanonicalScheduleSemanticField,
   CanonicalSigClause,
   EventTiming,
   FhirDayOfWeek,
@@ -154,13 +155,14 @@ function recordEvidence(
   state: ParserState,
   rule: string,
   startIndex: number,
-  endIndex: number
+  endIndex: number,
+  scheduleFields?: CanonicalScheduleSemanticField[]
 ): void {
   const clause = state.primaryClause;
   if (!clause.evidence) {
     clause.evidence = [];
   }
-  clause.evidence.push({
+  const evidence = {
     rule,
     spans: [
       sourceSpan(
@@ -171,7 +173,10 @@ function recordEvidence(
         )
       )
     ]
-  });
+  };
+  clause.evidence.push(scheduleFields?.length
+    ? { ...evidence, scheduleFields: [...scheduleFields] }
+    : evidence);
 }
 
 function computeTrimmedInputRange(input: string): TextRange | undefined {
