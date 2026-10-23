@@ -131,7 +131,7 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
  * the derived start, and only anchors shared by every predecessor daughter
  * may fill an otherwise unanchored successor.
  */
-export function scopeSequentialPhaseSchedules(
+export function scopeSequentialPhaseSemantics(
   states: readonly ParserState[],
   segments: readonly HpsgSigSegment[],
   graph: RegimenGraph,
@@ -152,6 +152,13 @@ export function scopeSequentialPhaseSchedules(
       sameSet(schedule?.when, shared?.when) &&
       sameSet(schedule?.timeOfDay, shared?.timeOfDay)
     );
+    // The target-transition construction may carry an omitted administration
+    // method only when the entire predecessor phase agrees on the typed head.
+    const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
+    const sharedMethod = edge.relation.rule.startsWith('regimen.target-') &&
+      sourceMethods[0] &&
+      sourceMethods.every(method => JSON.stringify(method) === JSON.stringify(sourceMethods[0]))
+      ? sourceMethods[0] : undefined;
 
     for (const index of graph.phases[edge.to].members) {
       const clause = states[index]?.primaryClause;
@@ -159,6 +166,25 @@ export function scopeSequentialPhaseSchedules(
       if (!clause || !schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) continue;
 
       const fields: string[] = [];
+      if (sharedMethod && !clause.method) {
+        clause.method = JSON.parse(JSON.stringify(sharedMethod));
+        fields.push('method');
+      }
+      if (!hasRecurringSchedule(schedule)) {
+        if (fields.length) {
+          clause.evidence.push({
+            rule: 'hpsg.cx.regimen.shared-administration-method',
+            spans: [{ start: edge.relation.range.start - (segments[index]?.start ?? 0),
+              end: edge.relation.range.end - (segments[index]?.start ?? 0),
+              text: source.slice(edge.relation.range.start, edge.relation.range.end) }]
+          });
+          applications.push({
+            rule: 'regimen.sequence.whole-predecessor-phase',
+            phase: edge.to, sources: [...prior], target: index, fields
+          });
+        }
+        continue;
+      }
       if (!schedule.boundsStart && start) {
         schedule.boundsStart = start;
         fields.push('boundsStart');
@@ -227,7 +253,6 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
     }
   }
   if (results.length < 2) return [];
-  const evidence: InheritanceEvidence[] = [];
   // FHIR R5 Dosage.sequence represents ordered phases; coordinated administrations
   // retain the same sequence instead of being misrepresented as consecutive.
   if (graph.sequences.length > 0) {
@@ -241,34 +266,5 @@ export function composeRegimenPhases(results: ParseResult[], segments: HpsgSigSe
       }
     }
   }
-  for (const edge of graph.sequences) {
-    const prior = graph.phases[edge.from].members;
-    const priorMethods = prior.map(i => results[i]?.fhir.method).filter(Boolean);
-    const sharedMethod = priorMethods.length && priorMethods.every(method =>
-      JSON.stringify(method) === JSON.stringify(priorMethods[0]))
-      ? priorMethods[0] : undefined;
-    const sharedCanonicalMethod = prior.length && prior.every(i =>
-      JSON.stringify(results[i]?.meta.canonical.clauses[0]?.method) ===
-      JSON.stringify(results[prior[0]]?.meta.canonical.clauses[0]?.method))
-      ? results[prior[0]]?.meta.canonical.clauses[0]?.method : undefined;
-    for (const index of graph.phases[edge.to].members) {
-      const item = results[index], clause = item?.meta.canonical.clauses[0], schedule = clause?.schedule;
-      if (!item || !schedule || schedule.calendarEvents?.length) continue;
-      const fields: string[] = [];
-      if (edge.relation.rule.indexOf('regimen.target-') === 0 &&
-          !item.fhir.method && sharedMethod && !clause?.method) {
-        item.fhir.method = JSON.parse(JSON.stringify(sharedMethod));
-        if (clause && sharedCanonicalMethod) {
-          clause.method = JSON.parse(JSON.stringify(sharedCanonicalMethod));
-        }
-        fields.push('method');
-      }
-      if (!fields.length) continue;
-      item.longText = render(item.fhir, 'long', options);
-      item.shortText = render(item.fhir, 'short', options);
-      item.fhir.text = item.longText;
-      evidence.push({ rule: 'regimen.sequence.whole-predecessor-phase', phase: edge.to, sources: [...prior], target: index, fields });
-    }
-  }
-  return evidence;
+  return [];
 }

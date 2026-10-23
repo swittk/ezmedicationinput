@@ -13,7 +13,7 @@ import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/candidate-adapter";
 import {
-  buildRegimenGraph, composeRegimenPhases, scopeSequentialPhaseSchedules
+  buildRegimenGraph, composeRegimenPhases, scopeSequentialPhaseSemantics
 } from "./regimen/regimen";
 import { expandAdministrationTargets, expandLintAdministrationTargets } from "./regimen/targets";
 import { formatCanonicalClause } from "./format";
@@ -995,7 +995,7 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
-  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
+  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1034,7 +1034,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
-  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
+  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const results: LintResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -1137,7 +1137,7 @@ export async function parseSigAsync(
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments);
-  scopeSequentialPhaseSchedules(states, segments, regimenGraph, input);
+  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const rawResults: ParseResult[] = [];
 
   for (let index = 0; index < segments.length; index += 1) {
