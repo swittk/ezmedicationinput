@@ -1,36 +1,15 @@
 import {
-  FhirDayOfWeek,
   FhirPeriodUnit,
+  ParseOptions,
   ParseResult,
   TextRange
 } from "./types";
 import { preserveSuggestionWarning } from "./regimen/admissibility";
 import { removeInstructionArtifactsOwnedByTemporalRanges } from "./regimen/temporal-artifact-ownership";
-import { findMedicationDateListSpans, parseMedicationDateListAt } from "./date-interpretation";
-import { parseMedicationGuard } from "./medication-condition";
-import { ParseOptions } from "./types";
-import type { ParserState } from "./parser-state";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
+import { containsCalendarExclusionCue } from "./hpsg/rules/condition-rules";
 
 const UCUM = "http://unitsofmeasure.org";
-const DAYS = [
-  FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday, FhirDayOfWeek.Wednesday,
-  FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday,
-  FhirDayOfWeek.Sunday
-] as const;
-
-const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
-  { day: FhirDayOfWeek.Monday, en: /\bmon(?:day)?s?\b/giu, th: /(?:วัน)?จันทร์/gu },
-  { day: FhirDayOfWeek.Tuesday, en: /\btue(?:sday)?s?\b/giu, th: /(?:วัน)?อังคาร/gu },
-  { day: FhirDayOfWeek.Wednesday, en: /\bwed(?:nesday)?s?\b/giu, th: /(?:วัน)?พุธ/gu },
-  { day: FhirDayOfWeek.Thursday, en: /\bthu(?:rsday)?s?\b/giu, th: /(?:วัน)?พฤหัส(?:บดี)?/gu },
-  { day: FhirDayOfWeek.Friday, en: /\bfri(?:day)?s?\b/giu, th: /(?:วัน)?ศุกร์/gu },
-  { day: FhirDayOfWeek.Saturday, en: /\bsat(?:urday)?s?\b/giu, th: /(?:วัน)?เสาร์/gu },
-  { day: FhirDayOfWeek.Sunday, en: /\bsun(?:day)?s?\b/giu, th: /(?:วัน)?อาทิตย์/gu }
-];
-
-// ยกเว้นกรณี is a condition (unless), not a calendar exclusion.
-const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 const CRITICAL_CUE = /\b(?:except|excluding|unless|otherwise|only\s+if|skip\s+\d+\s+days?|as\s+directed|no\s+more\s+than|do\s+not\s+exceed|max(?:imum)?)\b|ยกเว้น|ไม่เกิน|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/giu;
 const MAXIMUM = /\b(?:max(?:imum)?\.?|do\s+not\s+exceed|no\s+more\s+than)\s*(\d+(?:\.\d+)?)\s*(tablets?|tabs?|capsules?|caps?|drops?|mL|mg|mcg|g|puffs?|sprays?)\s*(?:\/|per\s+|a\s+)(day|d|24\s*h(?:ou)?rs?|week|wk)\b/iu;
 const THAI_MAXIMUM = /ไม่เกิน\s*วันละ\s*(\d+(?:\.\d+)?)\s*(เม็ด|หยด|มล\.?|มิลลิลิตร)/u;
@@ -66,159 +45,6 @@ export interface ConstraintApplication {
 
 function span(source: string, offset: number, start: number, end: number): TextRange {
   return { start: start + offset, end: end + offset };
-}
-
-function uniqueDays(source: string): FhirDayOfWeek[] {
-  const values = new Set<FhirDayOfWeek>();
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    if (definition.en.test(source) || definition.th.test(source)) values.add(definition.day);
-  }
-  if (/\bweekends?\b/iu.test(source)) {
-    values.add(FhirDayOfWeek.Saturday);
-    values.add(FhirDayOfWeek.Sunday);
-  }
-  if (/\bweekdays?\b/iu.test(source)) {
-    for (const day of DAYS.slice(0, 5)) values.add(day);
-  }
-  return DAYS.filter(day => values.has(day));
-}
-
-function isOnlyWeekdays(source: string): boolean {
-  let remainder = source;
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    remainder = remainder.replace(definition.en, " ").replace(definition.th, " ");
-  }
-  remainder = remainder.replace(/\b(?:weekends?|weekdays?|and|or|on|the|every|each)\b|(?:และ|หรือ|วัน|ทุก)|[\s,\/&+]+/giu, "");
-  return remainder.length === 0;
-}
-
-export interface CalendarExclusion {
-  start: number;
-  end: number;
-  excluded: FhirDayOfWeek[];
-  included: FhirDayOfWeek[];
-  dates: string[];
-}
-
-/** Multi-weekday and independently dated omissions can coexist. */
-export function matchCalendarExclusion(source: string, options?: ParseOptions): CalendarExclusion | undefined {
-  const cue = EXCLUSION_CUE.exec(source);
-  if (!cue) return undefined;
-  const end = source.indexOf(";", cue.index) >= 0 ? source.indexOf(";", cue.index) : source.length;
-  const suffix = source.slice(cue.index + cue[0].length, end).trim();
-  if (!suffix) return undefined;
-  const excluded: FhirDayOfWeek[] = [];
-  const included = uniqueDays(source.slice(0, cue.index));
-  let residual = suffix;
-  const dates: string[] = [];
-  // A full coordinated date list (English/Thai, DMY/MDY via datePolicy,
-  // Gregorian/Buddhist) is resolved with the existing shared date parser.
-  const prefixed = "on " + suffix.replace(/^on\s+/iu, "");
-  const whole = parseMedicationDateListAt(prefixed, 0, options);
-  if (whole && !whole.unresolved && whole.end === prefixed.length && whole.events.length) {
-    for (const event of whole.events) dates.push(event.isoDate);
-    residual = "";
-  } else {
-    const found = findMedicationDateListSpans(suffix, options);
-    // The date parser may find isolated date clauses in mixed weekday/date
-    // exclusions; no overlapping or unresolved list is accepted.
-    for (const match of [...found].sort((a, b) => b.start - a.start)) {
-      if (match.unresolved || !match.events.length) return undefined;
-      for (const event of match.events) dates.push(event.isoDate);
-      residual = residual.slice(0, match.start) + " ".repeat(match.end - match.start) + residual.slice(match.end);
-    }
-  }
-  // Explicit ISO dates are already normalized FHIR dates.
-  residual = residual.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, (value) => {
-    const date = new Date(value + "T00:00:00Z");
-    if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value) {
-      dates.push(value);
-      return " ";
-    }
-    return value;
-  });
-  const weekdayValues = uniqueDays(residual);
-  if (weekdayValues.length) excluded.push(...weekdayValues);
-  if (residual.trim() && !isOnlyWeekdays(residual)) return undefined;
-  if (!excluded.length && !dates.length) return undefined;
-  return { start: cue.index, end, excluded, included, dates: [...new Set(dates)].sort() };
-}
-
-/**
- * Produce local typed clinical adjuncts BEFORE HPSG coordination and FHIR
- * projection. Scope belongs to HPSG; these lexical recognizers only identify
- * the facts, without interpreting another clause or reparsing FHIR.
- */
-export function annotateCanonicalClinicalAdjuncts(
-  state: ParserState,
-  options?: ParseOptions
-): void {
-  const source = state.input;
-  if (!CLINICAL_CONSTRAINT_SIGNAL.test(source)) return;
-  const clause = state.primaryClause;
-  const guard = (clause.dose || clause.method || clause.route || clause.site)
-    ? parseMedicationGuard(source)
-    : undefined;
-  const exclusion = EXCLUSION_CUE.test(source)
-    ? matchCalendarExclusion(source, options)
-    : undefined;
-  if (!guard && !exclusion) return;
-  const clinical = clause.clinicalAdjuncts ?? {};
-  const ranges = clinical.localRanges ?? [];
-  const evidence = clinical.evidence ?? [];
-  if (guard) {
-    clinical.condition = guard.condition;
-    ranges.push({ start: guard.start, end: guard.end });
-    if (guard.otherwise) ranges.push({ ...guard.otherwise });
-    evidence.push({
-      rule: "hpsg.lex.clinical.condition",
-      spans: [{ start: guard.start, end: guard.end,
-        text: source.slice(guard.start, guard.end) }]
-    });
-    // An explicit condition is not an implied PRN administration.
-    if (!/\b(?:prn|as\s+needed)\b|เมื่อมีอาการ/iu.test(source)) {
-      delete clause.prn;
-    }
-  }
-  if (exclusion && clause.schedule) {
-    const repeat = clause.schedule;
-    const hasCadence = Boolean(repeat.frequency !== undefined ||
-      repeat.period !== undefined || repeat.when?.length ||
-      repeat.timeOfDay?.length);
-    if (hasCadence) {
-      if (exclusion.excluded.length) {
-        const excluded = new Set(exclusion.excluded);
-        const allowed = (exclusion.included.length
-          ? exclusion.included : [...DAYS]).filter(day => !excluded.has(day));
-        if (allowed.length) {
-          repeat.dayOfWeek = allowed;
-          clinical.excludedWeekdays = exclusion.excluded;
-        }
-      }
-      if (exclusion.dates.length) {
-        clinical.excludedDates = exclusion.dates;
-        repeat.calendarEvents = repeat.calendarEvents?.filter(event =>
-          exclusion.dates.indexOf(event.isoDate) < 0);
-        if (!repeat.calendarEvents?.length) delete repeat.calendarEvents;
-      }
-      ranges.push({ start: exclusion.start, end: exclusion.end });
-      evidence.push({
-        rule: "hpsg.lex.clinical.calendar-exclusion",
-        spans: [{ start: exclusion.start, end: exclusion.end,
-          text: source.slice(exclusion.start, exclusion.end) }]
-      });
-    }
-  }
-  if (ranges.length) {
-    clinical.localRanges = ranges;
-    clinical.evidence = evidence;
-    clause.clinicalAdjuncts = clinical;
-    for (const item of evidence) clause.evidence.push(item);
-  }
 }
 
 function mergeOwnedRanges(ranges: TextRange[], source: string, offset: number): TextRange[] {
@@ -324,7 +150,7 @@ export function applyClinicalConstraints(item: ParseResult, source: string, opti
   // accounts for their local source spans in lint and preserves the author's
   // wording; it does not reinterpret or modify FHIR semantics.
   const localAdjunct = item.meta.canonical.clauses[0]?.clinicalAdjuncts;
-  if (EXCLUSION_CUE.test(source) &&
+  if (containsCalendarExclusionCue(source) &&
       !localAdjunct?.excludedDates?.length &&
       !localAdjunct?.excludedWeekdays?.length) {
     preserveSuggestionWarning(item, source, "unresolved-calendar-exclusion");

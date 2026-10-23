@@ -36,6 +36,7 @@ function countSynsemFeatures(sign: HpsgSign): number {
   if (valence.prn) count += 1;
   if (valence.instructions?.length) count += 1;
   if (valence.patientInstruction) count += 1;
+  if (cont.clinicalAdjunct) count += 1;
   if (cont.clauseKind) count += 1;
   return count;
 }

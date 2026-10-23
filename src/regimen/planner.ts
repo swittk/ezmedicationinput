@@ -1,5 +1,5 @@
 import { lexInput } from '../lexer/lex';
-import { matchCalendarExclusion } from '../clinical-safety';
+import { matchCalendarExclusion } from '../hpsg/rules/condition-rules';
 import { parseMedicationGuard } from '../medication-condition';
 import { annotateLexTokens, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';

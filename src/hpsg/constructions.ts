@@ -25,6 +25,7 @@ type SignTrait =
   | "method-specialization"
   | "complement"
   | "adjunct"
+  | "clinical-adjunct"
   | "procedure"
   | "scope-target"
   | "marked";
@@ -59,6 +60,10 @@ function signTraits(sign: HpsgSign): Set<SignTrait> {
     sign.synsem.valence.instructions?.length ||
     sign.type === "adjustment-sign"
   ) traits.add("adjunct");
+  if (sign.synsem.cont.clinicalAdjunct) {
+    traits.add("adjunct");
+    traits.add("clinical-adjunct");
+  }
   if (sign.synsem.valence.patientInstruction || sign.construction?.kind === "procedure-sequence") {
     traits.add("procedure");
   }

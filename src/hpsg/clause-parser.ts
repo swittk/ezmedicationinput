@@ -31,7 +31,12 @@ import {
   proceduralActionLexicalRule,
   workflowLexicalRule
 } from "./rules/instruction-rules";
-import { conditionLexicalRule, getConditionFeatures } from "./rules/condition-rules";
+import {
+  calendarExclusionLexicalRule,
+  conditionLexicalRule,
+  getConditionFeatures,
+  medicationGuardLexicalRule
+} from "./rules/condition-rules";
 import { sourceRangeAttachmentClass } from "./procedural-context";
 import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
@@ -104,6 +109,8 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
   return {
     lexicalRules: [
       conditionLexicalRule(),
+      medicationGuardLexicalRule(),
+      calendarExclusionLexicalRule(),
       ...[
       directiveMarkerLexicalRule(),
       methodLexicalRule(),
@@ -165,6 +172,10 @@ function hasUsefulAnalysis(sign: HpsgSign | undefined): sign is HpsgSign {
   );
 }
 
+function hasClinicalAdjunctAnalysis(sign: HpsgSign): boolean {
+  return Boolean(sign.synsem.cont.clinicalAdjunct);
+}
+
 function semanticFeatureCount(sign: HpsgSign): number {
   const { head, valence } = sign.synsem;
   let count = 0;
@@ -176,6 +187,7 @@ function semanticFeatureCount(sign: HpsgSign): number {
   if (valence.prn) count += 1;
   if (valence.instructions?.length) count += 1;
   if (valence.patientInstruction) count += 1;
+  if (sign.synsem.cont.clinicalAdjunct) count += 1;
   return count;
 }
 
@@ -191,7 +203,8 @@ function buildCompatibleSemanticCover(
 ): HpsgSign {
   let cover = best;
   const candidates = signs
-    .filter((sign) => sign !== best && hasUsefulAnalysis(sign))
+    .filter((sign) => sign !== best &&
+      (hasUsefulAnalysis(sign) || hasClinicalAdjunctAnalysis(sign)))
     .sort((left, right) => {
       const semanticDelta = semanticFeatureCount(right) - semanticFeatureCount(left);
       if (semanticDelta) return semanticDelta;

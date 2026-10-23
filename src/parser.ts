@@ -444,6 +444,7 @@ export function parseClauseState(input: string, options?: ParseOptions): ParserS
     options,
     dateSpans: findMedicationDateListSpans(input, options),
     limit: tokens.length,
+    clinicalCache: {},
     deps: {
       addDayOfWeekList,
       addWhen,

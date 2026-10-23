@@ -12,9 +12,11 @@ import {
   FhirDayOfWeek,
   FhirPeriodUnit,
   FhirPrimitiveElement,
+  MedicationCondition,
   RouteCode,
   PrnReasonLookupRequest,
-  SiteCodeLookupRequest
+  SiteCodeLookupRequest,
+  TextRange
 } from "../types";
 import { Token } from "../parser-state";
 import { signFeatureStructure } from "./feature-structure";
@@ -41,6 +43,7 @@ export type HpsgType =
   | "prn-sign"
   | "instruction-sign"
   | "conditional-sign"
+  | "clinical-adjunct-sign"
   | "adjustment-sign"
   | "connector-sign";
 
@@ -125,6 +128,20 @@ export interface HpsgConditionFeature {
   targetEnd: number;
   safety: boolean;
   frames: AdviceFrame[];
+}
+
+/**
+ * A medication-level guard or calendar omission contributed by a lexical
+ * sign. This is distinct from HpsgConditionFeature, which scopes procedural
+ * instruction programs such as "if irritation occurs, stop use".
+ */
+export interface HpsgClinicalAdjunctFeature {
+  condition?: MedicationCondition;
+  excludedDates?: string[];
+  excludedWeekdays?: FhirDayOfWeek[];
+  includedWeekdays?: FhirDayOfWeek[];
+  localRanges: TextRange[];
+  evidence: Array<{ rule: string; ranges: TextRange[] }>;
 }
 
 export interface HpsgScopedAdministrationFeature {
@@ -234,6 +251,7 @@ export interface HpsgSynsem {
   cont: {
     clauseKind?: "administration";
     condition?: HpsgConditionFeature;
+    clinicalAdjunct?: HpsgClinicalAdjunctFeature;
     scopedAdministrations?: HpsgScopedAdministrationFeature[];
     scopeClosed?: true;
   };

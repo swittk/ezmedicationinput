@@ -3,7 +3,7 @@ import {
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
-import { annotateCanonicalClinicalAdjuncts, applyClinicalConstraints } from "./clinical-safety";
+import { applyClinicalConstraints } from "./clinical-safety";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import {
@@ -914,7 +914,6 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
     applyInstructionSemanticResolvers(state, options);
-    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
@@ -953,7 +952,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   for (const state of iterateCoordinatedSegmentStates(options, boundaryPlan, segments)) {
     applyPrnReasonCoding(state, options);
     applySiteCoding(state, options);
-    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
@@ -1057,7 +1055,6 @@ export async function parseSigAsync(
     await applyPrnReasonCodingAsync(state, options);
     await applySiteCodingAsync(state, options);
     await applyInstructionSemanticResolversAsync(state, options);
-    annotateCanonicalClinicalAdjuncts(state, options);
     states.push(state);
   }
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);

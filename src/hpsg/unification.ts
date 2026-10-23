@@ -10,6 +10,7 @@ import {
   HpsgPatientInstructionFeature,
   HpsgInstructionFeature,
   HpsgConditionFeature,
+  HpsgClinicalAdjunctFeature,
   HpsgScopedAdministrationFeature,
   HpsgSynsem
 } from "./signature";
@@ -429,6 +430,26 @@ function mergeCondition(
   return sameCondition(left, right) ? left : undefined;
 }
 
+function mergeClinicalAdjunct(
+  left: HpsgClinicalAdjunctFeature | undefined,
+  right: HpsgClinicalAdjunctFeature | undefined
+): HpsgClinicalAdjunctFeature | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  if (left.condition && right.condition &&
+      stableStructureKey(left.condition) !== stableStructureKey(right.condition)) {
+    return undefined;
+  }
+  return {
+    condition: left.condition ?? right.condition,
+    excludedDates: appendUnique(left.excludedDates, right.excludedDates),
+    excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
+    includedWeekdays: appendUnique(left.includedWeekdays, right.includedWeekdays),
+    localRanges: appendUniqueStructured(left.localRanges, right.localRanges) ?? [],
+    evidence: appendUniqueStructured(left.evidence, right.evidence) ?? []
+  };
+}
+
 function mergeScopedAdministrations(
   left: HpsgScopedAdministrationFeature[] | undefined,
   right: HpsgScopedAdministrationFeature[] | undefined
@@ -491,6 +512,14 @@ function scopeSynsem(conditionSign: HpsgSign, targetSign: HpsgSign): HpsgSynsem 
     target.cont.scopedAdministrations
   );
   const scopes = mergeScopedAdministrations(existingScopes, [scoped]);
+  const clinicalAdjunct = mergeClinicalAdjunct(
+    conditionSign.synsem.cont.clinicalAdjunct,
+    target.cont.clinicalAdjunct
+  );
+  if (clinicalAdjunct === undefined &&
+      conditionSign.synsem.cont.clinicalAdjunct && target.cont.clinicalAdjunct) {
+    return undefined;
+  }
   return {
     head: {},
     valence: {
@@ -499,6 +528,7 @@ function scopeSynsem(conditionSign: HpsgSign, targetSign: HpsgSign): HpsgSynsem 
     },
     cont: {
       clauseKind: conditionSign.synsem.cont.clauseKind ?? target.cont.clauseKind,
+      clinicalAdjunct,
       scopedAdministrations: scopes,
       scopeClosed: true
     },
@@ -542,6 +572,12 @@ export function unifySynsem(
   }
   const condition = mergeCondition(left.cont.condition, right.cont.condition);
   if (condition === undefined && left.cont.condition && right.cont.condition) return undefined;
+  const clinicalAdjunct = mergeClinicalAdjunct(
+    left.cont.clinicalAdjunct,
+    right.cont.clinicalAdjunct
+  );
+  if (clinicalAdjunct === undefined &&
+      left.cont.clinicalAdjunct && right.cont.clinicalAdjunct) return undefined;
 
   return {
     head: {
@@ -562,6 +598,7 @@ export function unifySynsem(
     cont: {
       clauseKind: left.cont.clauseKind ?? right.cont.clauseKind,
       condition,
+      clinicalAdjunct,
       scopedAdministrations: mergeScopedAdministrations(
         left.cont.scopedAdministrations,
         right.cont.scopedAdministrations

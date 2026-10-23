@@ -1,7 +1,18 @@
 import { stableStructureKey } from "../stable-structure";
 import { ParserState, Token } from "../parser-state";
-import { EventTiming, FhirDayOfWeek, FhirDosage, RouteCode } from "../types";
-import { HpsgClinicalQuantityFeature, HpsgScheduleFeature, HpsgSign } from "./signature";
+import { EventTiming, FhirDayOfWeek, FhirDosage, RouteCode, TextRange } from "../types";
+import {
+  HpsgClinicalAdjunctFeature,
+  HpsgClinicalQuantityFeature,
+  HpsgScheduleFeature,
+  HpsgSign
+} from "./signature";
+
+const ALL_DAYS = [
+  FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday, FhirDayOfWeek.Wednesday,
+  FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday,
+  FhirDayOfWeek.Sunday
+] as const;
 
 export interface HpsgProjectionDeps {
   addDayOfWeekList: (state: ParserState, days: FhirDayOfWeek[]) => void;
@@ -137,6 +148,85 @@ function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolea
     schedule.when?.length ||
     schedule.timeOfDay?.length
   ));
+}
+
+function appendRange(target: TextRange[], value: TextRange): void {
+  if (!target.some((candidate) =>
+    candidate.start === value.start && candidate.end === value.end
+  )) target.push({ ...value });
+}
+
+function applyClinicalAdjunct(
+  state: ParserState,
+  adjunct: HpsgClinicalAdjunctFeature
+): TextRange[] {
+  const clause = state.primaryClause;
+  const clinical = clause.clinicalAdjuncts ?? {};
+  const acceptedRules = new Set<string>();
+  // An elliptical regimen phase can contain only a cadence at this stage.
+  // The typed sequence will inherit its dose/site from the predecessor, so a
+  // local guard attached to that cadence is still a clinical adjunct.
+  const hasAdministration = Boolean(
+    clause.dose || clause.method || clause.route || clause.site ||
+    hasRecurringSchedule(clause.schedule)
+  );
+  if (adjunct.condition && hasAdministration) {
+    clinical.condition = adjunct.condition;
+    acceptedRules.add("hpsg.lex.clinical.condition");
+  }
+
+  const schedule = clause.schedule;
+  const hasCadence = Boolean(schedule && (
+    schedule.frequency !== undefined ||
+    schedule.period !== undefined ||
+    schedule.when?.length ||
+    schedule.timeOfDay?.length
+  ));
+  if (schedule && hasCadence &&
+      (adjunct.excludedWeekdays?.length || adjunct.excludedDates?.length)) {
+    if (adjunct.excludedWeekdays?.length) {
+      const excluded = new Set(adjunct.excludedWeekdays);
+      const allowed = (adjunct.includedWeekdays?.length
+        ? adjunct.includedWeekdays : [...ALL_DAYS]).filter((day) => !excluded.has(day));
+      if (allowed.length) {
+        schedule.dayOfWeek = allowed;
+        clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
+      }
+    }
+    if (adjunct.excludedDates?.length) {
+      clinical.excludedDates = [...adjunct.excludedDates];
+      schedule.calendarEvents = schedule.calendarEvents?.filter((event) =>
+        adjunct.excludedDates!.indexOf(event.isoDate) < 0
+      );
+      if (!schedule.calendarEvents?.length) delete schedule.calendarEvents;
+    }
+    acceptedRules.add("hpsg.lex.clinical.calendar-exclusion");
+  }
+
+  const localRanges = clinical.localRanges ?? [];
+  const evidence = clinical.evidence ?? [];
+  const rejectedRanges: TextRange[] = [];
+  for (const item of adjunct.evidence) {
+    if (!acceptedRules.has(item.rule)) {
+      for (const range of item.ranges) appendRange(rejectedRanges, range);
+      continue;
+    }
+    const spans = item.ranges.map((range) => ({
+      ...range,
+      text: state.input.slice(range.start, range.end)
+    }));
+    if (!evidence.some((candidate) =>
+      candidate.rule === item.rule &&
+      stableStructureKey(candidate.spans) === stableStructureKey(spans)
+    )) evidence.push({ rule: item.rule, spans });
+    for (const range of item.ranges) appendRange(localRanges, range);
+  }
+  if (acceptedRules.size) {
+    clinical.localRanges = localRanges;
+    clinical.evidence = evidence;
+    clause.clinicalAdjuncts = clinical;
+  }
+  return rejectedRanges;
 }
 
 export function projectHpsgSignToState(
@@ -284,6 +374,10 @@ export function projectHpsgSignToState(
     if (!hasRecurringSchedule(schedule) && target.count === undefined) target.count = 1;
   }
 
+  const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct
+    ? applyClinicalAdjunct(state, sign.synsem.cont.clinicalAdjunct)
+    : [];
+
   if (sign.warnings?.length) {
     for (const warning of sign.warnings) {
       if (state.warnings.indexOf(warning) === -1) {
@@ -300,7 +394,10 @@ export function projectHpsgSignToState(
 
   for (const tokenIndex of sign.consumedTokenIndices) {
     const token = findTokenByIndex(tokens, tokenIndex);
-    if (token) {
+    const rejectedClinicalToken = token && rejectedClinicalRanges.some((range) =>
+      token.sourceStart < range.end && range.start < token.sourceEnd
+    );
+    if (token && !rejectedClinicalToken) {
       deps.markToken(state, token);
     }
   }

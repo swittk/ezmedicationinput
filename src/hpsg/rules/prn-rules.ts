@@ -58,6 +58,7 @@ import {
   normalizeTokenLower,
   rangeFromTokens,
   splitByLexicalSeparators,
+  startsMedicationGuard,
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
@@ -808,6 +809,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         break;
       }
       const lower = normalizeTokenLower(candidate);
+      if (startsMedicationGuard(context, cursor)) {
+        break;
+      }
       if (
         PRN_REASON_COORDINATORS.has(lower) &&
         PRN_BREAKING_COORDINATORS.has(lower) &&

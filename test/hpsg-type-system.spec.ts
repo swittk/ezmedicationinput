@@ -12,6 +12,45 @@ import { combineSignFeatureStructures, signFeatureStructure } from "../src/hpsg/
 import { selectHpsgConstruction } from "../src/hpsg/constructions";
 import { lexicalSign } from "../src/hpsg/signature";
 import { tokenize } from "../src/parser";
+import { ParserState } from "../src/parser-state";
+import { findMedicationDateListSpans } from "../src/date-interpretation";
+import {
+  calendarExclusionLexicalRule,
+  medicationGuardLexicalRule
+} from "../src/hpsg/rules/condition-rules";
+
+function clinicalRuleContext(input: string) {
+  const tokens = tokenize(input);
+  return {
+    state: new ParserState(input, tokens),
+    tokens,
+    dateSpans: findMedicationDateListSpans(input),
+    limit: tokens.length,
+    clinicalCache: {},
+    deps: {
+      addDayOfWeekList: () => undefined,
+      addWhen: () => undefined,
+      isCompatibleRouteRefinement: () => true,
+      markToken: () => undefined,
+      normalizeSiteText: (text: string) => text,
+      recordEvidence: () => undefined,
+      refreshMethodSurface: () => undefined,
+      setRoute: () => undefined
+    }
+  };
+}
+
+function firstLexicalMatch(
+  rule: ReturnType<typeof medicationGuardLexicalRule>,
+  input: string
+) {
+  const context = clinicalRuleContext(input);
+  for (let index = 0; index < context.limit; index += 1) {
+    const match = rule.match(context, index)[0];
+    if (match) return match;
+  }
+  return undefined;
+}
 
 describe("formal HPSG typed feature structures", () => {
   it("uses a real subtype hierarchy for signs", () => {
@@ -140,5 +179,32 @@ describe("formal HPSG typed feature structures", () => {
     });
     expect(validateFeatureStructure(fs, HPSG_TYPE_SYSTEM)).toEqual([]);
     expect(fs.features.SYNSEM?.kind).toBe("node");
+  });
+
+  it("owns medication guards and calendar exclusions on typed HPSG lexical signs", () => {
+    expect(HPSG_TYPE_SYSTEM.isSubtype("clinical-adjunct-sign", "word-sign")).toBe(true);
+
+    const guard = firstLexicalMatch(
+      medicationGuardLexicalRule(),
+      "take 1 tab BID only if BP > 160, otherwise hold"
+    );
+    expect(guard?.type).toBe("clinical-adjunct-sign");
+    expect(guard?.synsem.cont.clinicalAdjunct?.condition).toMatchObject({
+      kind: "measurement",
+      name: "bp",
+      operation: "gt",
+      value: 160
+    });
+    expect(guard ? validateFeatureStructure(guard.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
+    expect(guard ? canonicalFeatureStructure(guard.fs) : "")
+      .toContain("clinical-adjunct-feature");
+
+    const exclusion = firstLexicalMatch(
+      calendarExclusionLexicalRule(),
+      "take 1 tab daily except Sundays"
+    );
+    expect(exclusion?.type).toBe("clinical-adjunct-sign");
+    expect(exclusion?.synsem.cont.clinicalAdjunct?.excludedWeekdays).toEqual(["sun"]);
+    expect(exclusion ? validateFeatureStructure(exclusion.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
   });
 });

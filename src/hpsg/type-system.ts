@@ -292,7 +292,8 @@ export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
 
 const SIGN_TYPES = [
   "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign",
-  "prn-sign", "instruction-sign", "conditional-sign", "adjustment-sign", "connector-sign"
+  "prn-sign", "instruction-sign", "conditional-sign", "clinical-adjunct-sign",
+  "adjustment-sign", "connector-sign"
 ];
 
 export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
@@ -365,6 +366,7 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
     features: {
       CLAUSE_KIND: { valueType: "string" },
       CONDITION: { valueType: "condition-feature" },
+      CLINICAL_ADJUNCT: { valueType: "clinical-adjunct-feature" },
       SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },
       SCOPE_CLOSED: { valueType: "boolean" }
     }
@@ -378,6 +380,7 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "instruction-feature", parents: ["top"] },
   { name: "patient-instruction-feature", parents: ["top"] },
   { name: "condition-feature", parents: ["top"] },
+  { name: "clinical-adjunct-feature", parents: ["top"] },
   { name: "scoped-administration-feature", parents: ["top"] },
   {
     name: "nonlocal",

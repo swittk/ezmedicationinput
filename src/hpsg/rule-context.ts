@@ -3,6 +3,10 @@ import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
 import { ParseOptions } from "../types";
 import type { MedicationDateListMatch } from "../date-interpretation";
 import {
+  parseMedicationGuard,
+  type ParsedMedicationGuard
+} from "../medication-condition";
+import {
   ANTE_MERIDIEM_TOKENS,
   MERIDIEM_TOKENS,
   POST_MERIDIEM_TOKENS
@@ -18,7 +22,36 @@ export interface HpsgClauseContext {
   dateSpans: MedicationDateListMatch[];
   limit: number;
   deps: HpsgProjectionDeps & HpsgUnificationContext;
+  clinicalCache: {
+    medicationGuardScanned?: true;
+    medicationGuard?: ParsedMedicationGuard;
+  };
   project?: boolean;
+}
+
+export function medicationGuardForContext(
+  context: HpsgClauseContext
+): ParsedMedicationGuard | undefined {
+  if (!context.clinicalCache.medicationGuardScanned) {
+    context.clinicalCache.medicationGuard = parseMedicationGuard(context.state.input);
+    context.clinicalCache.medicationGuardScanned = true;
+  }
+  return context.clinicalCache.medicationGuard;
+}
+
+export function startsMedicationGuard(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const token = context.tokens[start];
+  if (!token ||
+      !/(?:\bonly\b|\bunless\b|\bif\b|เฉพาะ|เว้นแต่|ยกเว้น)/iu.test(token.sourceText ?? token.original)) {
+    return false;
+  }
+  const guard = medicationGuardForContext(context);
+  return Boolean(
+    guard && token.sourceStart <= guard.start && guard.start < token.sourceEnd
+  );
 }
 
 export function sourceRangeOverlapsContextDate(
