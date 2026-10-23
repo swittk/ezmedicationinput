@@ -7,7 +7,8 @@ import type {
   Proposal,
   ProbeSummary,
   RegimenSemanticConstruction,
-  RegimenSemanticSelection
+  RegimenSemanticSelection,
+  TrailingInstructionScopeFacts
 } from './types';
 
 /** Typed boundary facts are a separate signature from the production clause grammar. */
@@ -178,6 +179,36 @@ export function grammaticalCoordinationScopes(
     b.construction.priority - a.construction.priority ||
     a.construction.id.localeCompare(b.construction.id)
   );
+}
+
+const TRAILING_INSTRUCTION_SCOPE_CONSTRUCTION: RegimenSemanticConstruction = {
+  id: 'hpsg.cx.regimen.trailing-shared-negative-instruction',
+  priority: 800,
+  operation: 'share-trailing-instruction'
+};
+
+/**
+ * License a terminal negative adjunct from typed action and regimen facts.
+ * Surface recognition has already happened in HPSG; this rule only decides
+ * whether that local adjunct scopes over a related compatible administration.
+ */
+export function grammaticalTrailingInstructionScope(
+  facts: TrailingInstructionScopeFacts
+): RegimenSemanticSelection | undefined {
+  if (!facts.localNegativeAction || !facts.semicolonDelimited || !facts.related ||
+      !facts.sameRoute || !facts.compatibleMethod) return undefined;
+  return {
+    construction: TRAILING_INSTRUCTION_SCOPE_CONSTRUCTION,
+    evidence: [
+      { feature: 'instruction.polarity', value: 'negate' },
+      { feature: 'instruction.position', value: 'semicolon-terminal' },
+      ...facts.relationPath.map(relation => ({
+        feature: 'relation.rule',
+        value: relation.rule,
+        range: relation.range
+      }))
+    ]
+  };
 }
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */

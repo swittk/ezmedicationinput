@@ -121,9 +121,25 @@ export interface CoordinationScopeFacts {
   rightHasCadenceConflict: boolean;
 }
 
+/** Typed facts for a terminal negative instruction scoped over one regimen. */
+export interface TrailingInstructionScopeFacts {
+  /** HPSG parsed a local negative action after the terminal semicolon. */
+  localNegativeAction: boolean;
+  /** The terminal action is separated from the administration by grammar evidence. */
+  semicolonDelimited: boolean;
+  /** Segment relations connect this recipient to the terminal donor. */
+  related: boolean;
+  /** Route identity is shared with the terminal administration. */
+  sameRoute: boolean;
+  /** Missing methods are compatible; two explicit methods must agree. */
+  compatibleMethod: boolean;
+  relationPath: readonly BoundaryRelation[];
+}
+
 export type RegimenSemanticOperation =
   | 'share-trailing-cadence'
   | 'share-trailing-adjuncts'
+  | 'share-trailing-instruction'
   | 'share-leading-adjuncts'
   | 'preserve-disjunctive-dosages'
   | 'preserve-ambiguous-shared-guard';

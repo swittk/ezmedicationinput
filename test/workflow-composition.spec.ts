@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AdviceArgumentRole, AdviceRelation, EventTiming, formatSig } from "../src/index";
+import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, formatSig } from "../src/index";
+import { canonicalToFhir } from "../src/fhir";
 import { parseSig } from "./helpers/r5-parser";
 
 function clause(input: string) {
@@ -108,6 +109,47 @@ describe("compositional workflow and regimen scope", () => {
     expect(parsed.meta.canonical.clauses.every(clause =>
       !clause.instructionGraph?.actions.length)).toBe(true);
     expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("scopes a terminal eye-drop precaution before FHIR while retaining its local action provenance", () => {
+    const input = "instill 1 drop in left eye and 2 drops in right eye twice daily; do not touch dropper tip to eye";
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    const [left, right] = parsed.items;
+    const leftClause = left.meta.canonical.clauses[0];
+    const rightClause = right.meta.canonical.clauses[0];
+    const tailStart = input.indexOf("do not touch");
+
+    for (const item of parsed.items) {
+      expect(item.fhir.additionalInstruction).toEqual([
+        expect.objectContaining({ text: "do not touch dropper tip to eye" })
+      ]);
+      expect(item.longText).toContain("Do not touch dropper tip to eye.");
+    }
+    const inherited = leftClause.additionalInstructions?.[0];
+    const local = rightClause.additionalInstructions?.[0];
+    expect(inherited?.frames?.[0]).toMatchObject({
+      polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "touch" },
+      span: { start: tailStart, end: input.length }
+    });
+    expect(inherited?.evidence?.some(evidence =>
+      evidence.rule === "hpsg.cx.regimen.trailing-shared-negative-instruction" &&
+      evidence.spans.some(span => span.start === tailStart && span.text === input.slice(tailStart))
+    )).toBe(true);
+    expect(local?.evidence?.some(evidence =>
+      evidence.rule === "hpsg.cx.regimen.trailing-shared-negative-instruction"
+    )).toBe(false);
+    expect(rightClause.instructionGraph?.actions[0]).toMatchObject({
+      polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "touch" },
+      span: { start: tailStart, end: input.length }
+    });
+    expect(leftClause.instructionGraph?.actions.some(action =>
+      action.predicate.lemma === "touch"
+    ) ?? false).toBe(false);
+    expect(canonicalToFhir(leftClause).additionalInstruction)
+      .toEqual(left.fhir.additionalInstruction);
   });
 
   it("keeps an undelimited morning relation local to the procedural action", () => {

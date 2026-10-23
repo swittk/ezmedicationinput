@@ -1,7 +1,11 @@
 import { selectHpsgCoordinationScopeConstruction } from '../hpsg/constructions';
+import { grammaticalTrailingInstructionScope } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
+import { AdvicePolarity } from '../types';
 import type {
+  AdviceFrame,
+  CanonicalAdditionalInstructionExpr,
   CanonicalEvidence,
   CanonicalPrnExpr,
   CanonicalScheduleExpr,
@@ -366,6 +370,246 @@ function exactClauseState(
     match = item;
   }
   return match;
+}
+
+function normalizedInstructionText(value: string | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[\s,;:.()]+/gu, ' ').trim();
+}
+
+function sameRoute(
+  left: CanonicalSigClause['route'],
+  right: CanonicalSigClause['route']
+): boolean {
+  if (left?.code && right?.code) return left.code === right.code;
+  return normalizedInstructionText(left?.text) === normalizedInstructionText(right?.text);
+}
+
+function compatibleMethod(
+  left: CanonicalSigClause['method'],
+  right: CanonicalSigClause['method']
+): boolean {
+  const leftPresent = Boolean(left?.coding?.code || left?.text);
+  const rightPresent = Boolean(right?.coding?.code || right?.text);
+  if (!leftPresent || !rightPresent) return true;
+  if (left?.coding?.code && right?.coding?.code) {
+    return left.coding.code === right.coding.code &&
+      (left.coding.system ?? '') === (right.coding.system ?? '');
+  }
+  return normalizedInstructionText(left?.text) === normalizedInstructionText(right?.text);
+}
+
+function shiftedRange(range: { start: number; end: number }, offset: number) {
+  return { start: range.start + offset, end: range.end + offset };
+}
+
+function cloneAdviceFrame(frame: AdviceFrame, offset: number): AdviceFrame {
+  return {
+    ...frame,
+    predicate: {
+      ...frame.predicate,
+      i18n: frame.predicate.i18n ? { ...frame.predicate.i18n } : undefined,
+      realizerConfig: frame.predicate.realizerConfig
+        ? {
+          ...frame.predicate.realizerConfig,
+          locales: frame.predicate.realizerConfig.locales
+            ? Object.fromEntries(Object.entries(frame.predicate.realizerConfig.locales).map(
+              ([locale, config]) => [locale, { ...config }]
+            ))
+            : undefined
+        }
+        : undefined,
+      codings: frame.predicate.codings?.map(coding => ({ ...coding }))
+    },
+    args: frame.args.map(argument => ({
+      ...argument,
+      coding: argument.coding ? { ...argument.coding } : undefined,
+      codings: argument.codings?.map(coding => ({ ...coding })),
+      i18n: argument.i18n ? { ...argument.i18n } : undefined,
+      quantity: argument.quantity ? {
+        ...argument.quantity,
+        range: argument.quantity.range ? { ...argument.quantity.range } : undefined
+      } : undefined,
+      span: argument.span ? shiftedRange(argument.span, offset) : undefined
+    })),
+    span: shiftedRange(frame.span, offset),
+    coding: frame.coding ? { ...frame.coding } : undefined
+  };
+}
+
+function cloneInstruction(
+  instruction: CanonicalAdditionalInstructionExpr,
+  offset: number
+): CanonicalAdditionalInstructionExpr {
+  return {
+    ...instruction,
+    i18n: instruction.i18n ? { ...instruction.i18n } : undefined,
+    coding: instruction.coding ? { ...instruction.coding } : undefined,
+    frames: instruction.frames?.map(frame => cloneAdviceFrame(frame, offset)),
+    evidence: instruction.evidence?.map(item => shiftEvidenceToRecipient(item, offset, 0))
+  };
+}
+
+function terminalSemicolon(clause: CanonicalSigClause): CanonicalSourceSpan | undefined {
+  let selected: CanonicalSourceSpan | undefined;
+  for (const evidence of clause.evidence) {
+    if (evidence.rule !== 'hpsg.lex.connector') continue;
+    for (const span of evidence.spans) {
+      if (span.text.trim() !== ';') continue;
+      if (!selected || span.start > selected.start) selected = span;
+    }
+  }
+  return selected;
+}
+
+function trimmedTailSpan(state: ParserState, start: number): CanonicalSourceSpan | undefined {
+  let tailStart = start;
+  let tailEnd = state.input.length;
+  while (tailStart < tailEnd && /\s/u.test(state.input[tailStart])) tailStart++;
+  while (tailEnd > tailStart && /\s/u.test(state.input[tailEnd - 1])) tailEnd--;
+  if (tailStart >= tailEnd) return undefined;
+  return {
+    start: tailStart,
+    end: tailEnd,
+    text: state.input.slice(tailStart, tailEnd)
+  };
+}
+
+function planSegmentIndex(
+  plan: BoundaryPlan,
+  segment: { start: number; end: number }
+): number | undefined {
+  const exact = plan.segments.findIndex(candidate =>
+    candidate.start === segment.start && candidate.end === segment.end
+  );
+  if (exact >= 0) return exact;
+  for (let index = plan.segments.length - 1; index >= 0; index -= 1) {
+    const candidate = plan.segments[index];
+    if (segment.start >= candidate.start && segment.end <= candidate.end) return index;
+  }
+  return undefined;
+}
+
+function relationPathsTo(
+  plan: BoundaryPlan,
+  terminal: number
+): Map<number, BoundaryRelation[]> {
+  const paths = new Map<number, BoundaryRelation[]>([[terminal, []]]);
+  for (let pass = 0; pass < plan.segments.length; pass += 1) {
+    let changed = false;
+    for (let index = plan.relations.length - 1; index >= 0; index -= 1) {
+      const relation = plan.relations[index];
+      const suffix = paths.get(relation.to);
+      if (!suffix || paths.has(relation.from)) continue;
+      paths.set(relation.from, [relation, ...suffix]);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return paths;
+}
+
+/**
+ * Scope a semicolon-terminal negative instruction over compatible dosage
+ * daughters before FHIR lowering. The HPSG action licenses the adjunct, and
+ * the boundary graph supplies its regimen path; no surface text is reparsed.
+ */
+export function scopeTrailingSharedNegativeInstructions(
+  states: readonly ParserState[],
+  plan: BoundaryPlan,
+  segments: readonly { start: number; end: number }[],
+  source: string
+): void {
+  if (states.length < 2) return;
+  const donorIndex = states.length - 1;
+  const donor = states[donorIndex];
+  const donorClause = donor.primaryClause;
+  const separator = terminalSemicolon(donorClause);
+  if (!separator) return;
+  const tail = trimmedTailSpan(donor, separator.end);
+  if (!tail) return;
+  const negativeActions = (donorClause.instructionGraph?.actions ?? []).filter(action =>
+    action.polarity === AdvicePolarity.Negate && action.span.start >= separator.end
+  );
+  if (!negativeActions.length) return;
+  const tailText = normalizedInstructionText(tail.text);
+  const shared = (donorClause.additionalInstructions ?? []).filter(instruction => {
+    const text = normalizedInstructionText(instruction.text);
+    return Boolean(text && tailText.includes(text) && instruction.frames?.some(frame =>
+      frame.polarity === AdvicePolarity.Negate && frame.span.start >= separator.end
+    ));
+  });
+  if (!shared.length) return;
+
+  const localEvidence: CanonicalEvidence = {
+    rule: 'hpsg.cx.instruction.semicolon-trailing-negative-adjunct',
+    spans: [{ ...tail }]
+  };
+  for (const instruction of shared) {
+    instruction.evidence = [...(instruction.evidence ?? [])];
+    appendEvidence(instruction.evidence, cloneEvidence(localEvidence));
+  }
+
+  const terminalPlanIndex = planSegmentIndex(plan, segments[donorIndex]);
+  if (terminalPlanIndex === undefined) return;
+  const paths = relationPathsTo(plan, terminalPlanIndex);
+  for (let recipientIndex = 0; recipientIndex < donorIndex; recipientIndex += 1) {
+    const recipientPlanIndex = planSegmentIndex(plan, segments[recipientIndex]);
+    const path = recipientPlanIndex === undefined ? undefined : paths.get(recipientPlanIndex);
+    const recipient = states[recipientIndex];
+    const targetClause = recipient.primaryClause;
+    const selected = grammaticalTrailingInstructionScope({
+      localNegativeAction: true,
+      semicolonDelimited: true,
+      related: Boolean(path),
+      sameRoute: sameRoute(targetClause.route, donorClause.route),
+      compatibleMethod: compatibleMethod(targetClause.method, donorClause.method),
+      relationPath: path ?? []
+    });
+    if (!selected) continue;
+
+    const additions = shared.filter(instruction =>
+      !targetClause.additionalInstructions?.some(existing =>
+        normalizedInstructionText(existing.text) === normalizedInstructionText(instruction.text)
+      )
+    );
+    if (!additions.length) continue;
+    const donorOffset = segments[donorIndex].start - segments[recipientIndex].start;
+    const scopeEvidence: CanonicalEvidence = {
+      rule: selected.construction.id,
+      spans: [
+        ...(path ?? []).filter(relation => relation.range.end > relation.range.start).map(relation => ({
+          start: relation.range.start - segments[recipientIndex].start,
+          end: relation.range.end - segments[recipientIndex].start,
+          text: source.slice(relation.range.start, relation.range.end)
+        })),
+        {
+          start: tail.start + donorOffset,
+          end: tail.end + donorOffset,
+          text: tail.text
+        }
+      ],
+      note: 'The terminal negative instruction scopes over this related compatible dosage clause.'
+    };
+    const inherited = additions.map(instruction => {
+      const clone = cloneInstruction(instruction, donorOffset);
+      if (donorClause.instructionGraph?.sourceLocale?.toLowerCase().startsWith('th') &&
+          clone.text && /[\u0E00-\u0E7F]/u.test(clone.text)) {
+        clone.i18n = { ...(clone.i18n ?? {}), th: clone.text };
+      }
+      clone.evidence = [...(clone.evidence ?? [])];
+      appendEvidence(clone.evidence, cloneEvidence(scopeEvidence));
+      return clone;
+    });
+    targetClause.additionalInstructions = [
+      ...(targetClause.additionalInstructions ?? []),
+      ...inherited
+    ];
+    for (const instruction of inherited) {
+      for (const evidence of instruction.evidence ?? []) {
+        appendEvidence(targetClause.evidence, cloneEvidence(evidence));
+      }
+    }
+  }
 }
 
 /**
