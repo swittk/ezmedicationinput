@@ -1681,6 +1681,35 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
+  const offset = clause.schedule?.administrationOffsetMinutes;
+  if (offset !== undefined && Number.isFinite(offset)) {
+    const schedule = { ...clause.schedule, administrationOffsetMinutes: undefined };
+    const clocks = schedule.timeOfDay?.map(clock => {
+      const parts = clock.split(":").map(Number);
+      const seconds = parts[0] * 3600 + parts[1] * 60 + (parts[2] ?? 0) + offset * 60;
+      const day = Math.floor(seconds / 86400);
+      const normalized = ((seconds % 86400) + 86400) % 86400;
+      const hour = Math.floor(normalized / 3600);
+      const minute = Math.floor(normalized % 3600 / 60);
+      const second = normalized % 60;
+      return { day, clock: `${hour < 10 ? "0" : ""}${hour}:${minute < 10 ? "0" : ""}${minute}` +
+        (second ? `:${second < 10 ? "0" : ""}${second}` : "") };
+    });
+    const thai = localization?.locale.startsWith("th");
+    if (clocks?.length && !schedule.when?.length && clocks.every(value => Number.isFinite(value.day))) {
+      schedule.timeOfDay = clocks.map(value => value.clock);
+      const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+      const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
+      if (!sameDayShift) return rendered;
+      const note = sameDayShift === 1
+        ? thai ? "ในวันถัดไป" : "the following day"
+        : thai ? `หลังรอบต้นทาง ${sameDayShift} วัน` : `${sameDayShift} days later`;
+      return `${rendered.replace(/[.。]$/u, "")} (${note}).`;
+    }
+    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const note = thai ? `ช้ากว่ากำหนดต้นทางแต่ละครั้ง ${offset} นาที` : `${offset} minutes later each time`;
+    return `${rendered.replace(/[.。]$/u, "")} (${note}).`;
+  }
   let shortDefault: string | undefined;
   let longDefault: string | undefined;
 

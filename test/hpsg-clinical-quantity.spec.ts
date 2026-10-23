@@ -75,7 +75,7 @@ describe("HPSG clinical quantity grammar", () => {
     expect(state.primaryClause.schedule).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
     expect(state.primaryClause.leftovers).toEqual([]);
     expect(state.primaryClause.evidence).toContainEqual(expect.objectContaining({
-      rule: "hpsg.lex.clinicalQuantity.weightDailyDivided"
+      rule: "hpsg.lex.clinicalQuantity.divisionCount"
     }));
   });
 
@@ -133,7 +133,7 @@ describe("HPSG clinical quantity grammar", () => {
   });
 
   it("keeps unsupported weight-rate suffixes visible without erasing the typed quantity", () => {
-    for (const source of ["5 mcg/kg/24h IV", "5 mcg/kg/bolus IV"]) {
+    for (const source of ["5 mcg/kg/bolus IV"]) {
       const parsed = parseSig(source);
       expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
         status: "unsupported",
@@ -181,5 +181,56 @@ describe("HPSG clinical quantity grammar", () => {
     expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({
       value: 10, code: "mg/kg/d"
     });
+  });
+});
+
+
+describe("compositional amount, rate, and division ownership", () => {
+  it.each([
+    "Give 10 mg/kg/day PO divided into 2 doses",
+    "Give 10 mg/kg/24h PO divided into 2 doses",
+    "Give 10 mg/kg/day divided into two equal doses PO",
+    "Give 10 mg/kg/day in two equal doses orally"
+  ])("composes division across a route without turning the divisor into a dose: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 5, unit: "mg/kg" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      status: "resolved", dividedDoseCount: 2,
+      numerator: { value: 10 }, projectedDose: { value: 5, unit: "mg/kg" }
+    });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each([
+    "Administer 500 mL IV at 50 mL/hr",
+    "Infuse 250 mL at 25 mL/hr IV"
+  ])("retains the independently stated amount and rate: %s", source => {
+    const parsed = parseSig(source);
+    const expectedAmount = source.includes("500") ? 500 : 250;
+    const expectedRate = expectedAmount / 10;
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: expectedAmount, unit: "mL" },
+      rateQuantity: { value: expectedRate, code: "mL/h" }
+    });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved",
+      projectedDose: { value: expectedAmount, unit: "mL" }
+    });
+  });
+});
+
+
+it("represents the original compact 24-hour weight-total case without inventing an absolute dose", () => {
+  const source = "5 mcg/kg/24h IV";
+  const parsed = parseSig(source);
+  expect(parsed.fhir.text).toBe(source);
+  expect(parsed.fhir.route?.text).toBe("intravenous");
+  expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+  expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 5, code: "ug/kg/d" });
+  expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+    numerator: { value: 5, unit: "ug" }, dailyTotal: true, requiresPatientWeight: true
   });
 });

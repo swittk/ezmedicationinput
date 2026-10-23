@@ -10,7 +10,7 @@ import {
   relationHasGrammarFeature,
   resolveActionRelationSurface
 } from "../../relation-terminology";
-import { getProceduralFrames } from "../procedural-context";
+import { getProceduralFrames, actionEventRelationAt } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
 import {
   HpsgClauseContext,
@@ -343,6 +343,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.condition", (context, start) => {
     const lead = context.tokens[start];
     if (!lead || context.state.consumed.has(lead.index)) return [];
+    if (actionEventRelationAt(context, start)) return [];
     const relation = resolveActionRelationSurface(normalizeTokenLower(lead));
     if (!relation || !relationHasGrammarFeature(relation, "conditionalTail")) return [];
     if (relationHasGrammarFeature(relation, "symptomOnsetPrnLead") && hasSymptomOnsetPrnAt(context, start)) return [];

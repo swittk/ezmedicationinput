@@ -1,7 +1,7 @@
 import { parseInstructionActions } from "../instruction-graph";
 import { AdviceArgumentRole, AdvicePolarity, type AdviceFrame } from "../types";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
-import { relationHasGrammarFeature } from "../relation-terminology";
+import { relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
 import type { HpsgClauseContext } from "./rule-context";
 
 const PROCEDURAL_FRAME_CACHE = new WeakMap<object, AdviceFrame[]>();
@@ -81,4 +81,20 @@ export function sourceRangeAttachmentClass(
   return enclosing.args.some((arg) => arg.role === AdviceArgumentRole.Site)
     ? "administration"
     : "procedure";
+}
+
+
+/** A temporal linker between two complete action events is not an opaque condition. */
+export function actionEventRelationAt(context: HpsgClauseContext, index: number) {
+  const token = context.tokens[index];
+  if (!token) return undefined;
+  const relation = resolveActionRelationSurface(token.lower);
+  if (!relation || !relationHasSemanticClass(relation, "temporal")) return undefined;
+  const frames = getProceduralFrames(context);
+  const left = frames.find(frame => frame.span.end <= token.sourceStart &&
+    !context.state.input.slice(frame.span.end, token.sourceStart).trim());
+  const right = frames.find(frame => frame.span.start >= token.sourceEnd &&
+    !context.state.input.slice(token.sourceEnd, frame.span.start).trim());
+  if (!left || !right || !right.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity)) return undefined;
+  return relation;
 }

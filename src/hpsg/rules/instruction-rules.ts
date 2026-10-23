@@ -9,7 +9,7 @@ import {
 } from "../../relation-terminology";
 import { composeLocalizedRecords } from "../../localization";
 import { joinLocalizedTokens } from "../../locale-realization";
-import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
 import { lexInput } from "../../lexer/lex";
@@ -251,6 +251,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
+    if (actionEventRelationAt(context, cursor)) return [];
     if (sourceRangeOverlapsContextDate(context, first.sourceStart, first.sourceEnd)) return [];
     if (semanticActivityWindowStartsAt(context, cursor)) return [];
     if (workflowStartIsAnchoredSiteModifier(context, cursor)) return [];

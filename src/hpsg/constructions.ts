@@ -1,3 +1,4 @@
+import { AdviceArgumentRole, AdviceForce, AdvicePolarity, type AdviceFrame } from "../types";
 import type {
   HpsgConstruction,
   HpsgConstructionKind,
@@ -456,4 +457,28 @@ export function selectHpsgTimingAnchorCoordinationConstruction(
       rightType: "administration-clause"
     }
   };
+}
+
+
+/**
+ * A shared directive scopes over coordinated action daughters. An explicit
+ * directive on the right starts its own scope; sequencing is not coordination.
+ * A trailing duration is an adjunct of the coordinated prohibition, not a
+ * medication-course bound. This construction consumes typed action meaning.
+ */
+export function composeCoordinatedActionDirective(
+  left: AdviceFrame,
+  right: AdviceFrame,
+  coordination: "conjunction" | "disjunction" | "unknown",
+  explicitRightDirective: boolean
+): readonly [AdviceFrame, AdviceFrame] {
+  if (coordination === "unknown" || explicitRightDirective || left.polarity !== AdvicePolarity.Negate) {
+    return [left, right];
+  }
+  const scopedRight: AdviceFrame = { ...right, polarity: AdvicePolarity.Negate, polaritySource: "shared", force: AdviceForce.Warning };
+  const duration = right.args.find(arg => arg.role === AdviceArgumentRole.Duration);
+  const scopedLeft = duration && !left.args.some(arg => arg.role === AdviceArgumentRole.Duration)
+    ? { ...left, args: [...left.args, { ...duration, quantity: duration.quantity ? { ...duration.quantity } : undefined }] }
+    : left;
+  return [scopedLeft, scopedRight];
 }

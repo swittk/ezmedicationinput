@@ -1,3 +1,4 @@
+import type { MedicationDateListMatch } from "../../date-interpretation";
 import {
   DAY_OF_WEEK_TOKENS,
   EVENT_TIMING_TOKENS,
@@ -30,6 +31,9 @@ import {
 } from "../timing-lexicon";
 import {
   ADMINISTRATION_WINDOW_INSTRUCTIONS,
+  ACTION_COORDINATION_CONNECTORS,
+  ACTION_SEQUENCE_MARKERS,
+  OPEN_ENDED_WORDS,
   ALTERNATE_EVENT_CADENCES,
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
@@ -922,6 +926,7 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
     let sawCadenceContinuation = false;
     let period = 1;
     let periodUnit: FhirPeriodUnit | undefined;
+    let recurringEvent: EventTiming | undefined;
     while (cursor < context.limit) {
       const candidate = context.tokens[cursor];
       if (!candidate || context.state.consumed.has(candidate.index)) {
@@ -983,6 +988,15 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
         cursor += 1;
         continue;
       }
+      const event = EVENT_TIMING_TOKENS[candidateLower];
+      if (sawCue && event && event !== EventTiming.Immediate) {
+        // A cardinality modifying a recurring daily event is frequency,
+        // not the total number of administrations in the course.
+        recurringEvent = event;
+        periodUnit = FhirPeriodUnit.Day;
+        consumed.push(candidate);
+        break;
+      }
       const adverbUnit = mapFrequencyAdverb(candidateLower);
       if (adverbUnit) {
         sawCadenceContinuation = true;
@@ -1037,6 +1051,7 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
               frequencyMax: valueMax,
               period: normalizedPeriod.value,
               periodUnit: normalizedPeriod.unit,
+              when: recurringEvent ? [recurringEvent] : undefined,
               timingCode:
                 valueMax === undefined &&
                 value > 0 &&
@@ -1689,7 +1704,7 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
       );
     }
 
-    if (EVENT_PREPOSITIONS.has(firstLower) && secondLower) {
+    if ((EVENT_PREPOSITIONS.has(firstLower) || EVERY_INTERVAL_TOKENS.has(firstLower)) && secondLower) {
       const third = context.tokens[start + 2];
       const thirdLower = third && !context.state.consumed.has(third.index)
         ? normalizeTokenLower(third)
@@ -1852,7 +1867,20 @@ export function dayRangeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
-    const slashParts = splitByLexicalSeparators(firstLower, COMPACT_LIST_SEPARATORS);
+    const next = context.tokens[start + 1];
+    if (EVERY_INTERVAL_TOKENS.has(firstLower) && next && dayFromSurface(normalizeTokenLower(next))) {
+      return [lexicalSign({
+        type: "schedule-sign", rule: "hpsg.lex.schedule.distributiveWeekday",
+        tokens: [first, next],
+        synsem: { head: { schedule: { dayOfWeek: [dayFromSurface(normalizeTokenLower(next))!] } }, valence: {}, cont: {} },
+        score: 16
+      })];
+    }
+    const hyphenParts = firstLower.split("-");
+    // Two endpoints designate a range; three or more named weekdays are
+    // an enumeration (Mon-Wed-Fri), just like a slash-separated day list.
+    const slashParts = hyphenParts.length > 2
+      ? hyphenParts : splitByLexicalSeparators(firstLower, COMPACT_LIST_SEPARATORS);
     if (slashParts.length > 1) {
       const days = slashParts.map(dayFromSurface);
       if (days.every(Boolean)) {
@@ -2323,8 +2351,11 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
     }
     if (DURATION_LEAD_TOKENS.has(lower)) {
-      const valueToken = context.tokens[start + 1];
-      const unitToken = context.tokens[start + 2];
+      const article = context.tokens[start + 1];
+      const hasArticle = article && normalizeTokenLower(article) === "the";
+      const valueToken = context.tokens[start + (hasArticle ? 2 : 1)];
+      const unitToken = context.tokens[start + (hasArticle ? 3 : 2)];
+      const initialInterval = valueToken && normalizeTokenLower(valueToken) === "first" ? 1 : undefined;
       if (
         valueToken &&
         unitToken &&
@@ -2332,14 +2363,14 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         !context.state.consumed.has(unitToken.index) &&
         (valueToken.kind === LexKind.Number ||
           valueToken.kind === LexKind.NumberRange ||
-          FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] !== undefined)
+          FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] !== undefined || initialInterval !== undefined)
       ) {
         const durationRange = valueToken.kind === LexKind.NumberRange
           ? parseNumericRange(normalizeTokenLower(valueToken)) : undefined;
         const durationValue = durationRange?.low ??
           (valueToken.kind === LexKind.Number
             ? valueToken.value
-            : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)]);
+            : initialInterval ?? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)]);
         if (durationValue === undefined || !Number.isFinite(durationValue) || durationValue <= 0)
           return signs;
         const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
@@ -2353,7 +2384,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
               lexicalSign({
                 type: "schedule-sign",
                 rule: "hpsg.lex.schedule.duration.for",
-                tokens: [token, valueToken, unitToken],
+                tokens: hasArticle ? [token, article, valueToken, unitToken] : [token, valueToken, unitToken],
                 synsem: { head: { schedule }, valence: {}, cont: { clauseKind: "administration" } },
                 score: 8
               })
@@ -2519,4 +2550,95 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return isScheduleLead(context, index + 1);
   }
   return false;
+}
+
+
+interface OpenEndedMarkerMatch {
+  start: number;
+  markerStart: number;
+  end: number;
+  date: MedicationDateListMatch;
+}
+
+function openEndedMarkerEnd(tokens: readonly Token[], index: number): number | undefined {
+  const first = tokens[index];
+  if (!first) return undefined;
+  const surface = first.lower.replace(/^[.,;:]+|[.,;:]+$/gu, '');
+  if (OPEN_ENDED_WORDS.has(surface)) return first.sourceEnd;
+  const second = tokens[index + 1];
+  const secondSurface = second?.lower.replace(/^[.,;:]+|[.,;:]+$/gu, '');
+  if ((surface === 'เป็นต้น' || surface === 'ต่อ') && second && secondSurface === 'ไป') return second.sourceEnd;
+  const previous = tokens[index - 1];
+  const previousSurface = previous?.lower.replace(/^[.,;:]+|[.,;:]+$/gu, '');
+  if (surface === 'ไป' && previousSurface !== 'ต่อ' && previousSurface !== 'เป็นต้น') return first.sourceEnd;
+  return undefined;
+}
+
+function openEndedHasBlockingBoundary(tokens: readonly Token[], start: number, end: number): boolean {
+  return tokens.some(token => token.sourceStart >= start && token.sourceEnd <= end && (
+    ACTION_COORDINATION_CONNECTORS.has(normalizeTokenLower(token)) ||
+    ACTION_SEQUENCE_MARKERS.has(normalizeTokenLower(token)) ||
+    /[;!?]/u.test(token.original)
+  ));
+}
+
+function resolveOpenEndedMarkers(
+  tokens: readonly Token[],
+  spans: readonly MedicationDateListMatch[]
+): OpenEndedMarkerMatch[] {
+  const output: OpenEndedMarkerMatch[] = [];
+  for (let index = 0; index < tokens.length; index++) {
+    const end = openEndedMarkerEnd(tokens, index);
+    if (end === undefined) continue;
+    const markerStart = tokens[index].sourceStart;
+    const date = [...spans]
+      .filter(span => span.end <= markerStart && !openEndedHasBlockingBoundary(tokens, span.end, markerStart))
+      .sort((left, right) => right.end - left.end)[0];
+    if (!date) continue;
+    const surface = tokens[index].lower.replace(/^[.,;:]+|[.,;:]+$/gu, '');
+    if (surface === 'ไป' && date.relation !== 'start-inclusive' && date.relation !== 'start-exclusive') continue;
+    const event = date.events.length === 1 && !date.unresolved ? date.events[0] : undefined;
+    if (!event || (date.relation !== 'event' && date.relation !== 'start-inclusive')) continue;
+    output.push({ start: date.start, markerStart, end, date });
+  }
+  return output;
+}
+
+const OPEN_ENDED_CONTEXT_MARKERS = new WeakMap<HpsgClauseContext, OpenEndedMarkerMatch[]>();
+function openEndedContextMarkers(context: HpsgClauseContext): OpenEndedMarkerMatch[] {
+  const cached = OPEN_ENDED_CONTEXT_MARKERS.get(context);
+  if (cached) return cached;
+  const markers = resolveOpenEndedMarkers(context.tokens, context.dateSpans);
+  OPEN_ENDED_CONTEXT_MARKERS.set(context, markers);
+  return markers;
+}
+
+export function openEndedScheduleRule() {
+  return lexicalRule('hpsg.lex.schedule.openEndedDate', (context: HpsgClauseContext, start: number) => {
+    const first = context.tokens[start];
+    if (!first) return [];
+    const match = openEndedContextMarkers(context).find(value => value.start === first.sourceStart);
+    if (!match) return [];
+    const members = context.tokens
+      .slice(start, context.limit)
+      .filter(token => token.sourceStart >= match.start && token.sourceEnd <= match.end);
+    const event = match.date.events[0];
+    if (!members.length || !members.some(token => token.sourceStart >= match.markerStart)) return [];
+    return [lexicalSign({
+      type: 'schedule-sign',
+      rule: 'hpsg.lex.schedule.openEndedDate',
+      tokens: members,
+      synsem: {
+        head: {
+          schedule: {
+            boundsStart: event.isoDate,
+            sourceRanges: [{ start: match.start, end: match.end }]
+          }
+        },
+        valence: {},
+        cont: { clauseKind: 'administration' }
+      },
+      score: 42 + members.length
+    })];
+  });
 }

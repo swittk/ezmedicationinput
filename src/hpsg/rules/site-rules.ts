@@ -66,6 +66,7 @@ import {
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
+import { getProceduralFrames } from "../procedural-context";
 import { productRouteHint } from "./product-route";
 import {
   startsMaximumCountLead,
@@ -171,7 +172,11 @@ function coordinationStartsAction(context: HpsgClauseContext, index: number): bo
   return Boolean(
     next &&
     !context.state.consumed.has(next.index) &&
-    resolveMedicationInstructionAction(normalizeTokenLower(next), context.options)
+    (resolveMedicationInstructionAction(normalizeTokenLower(next), context.options) ||
+      // Reuse the typed procedural action inventory for multiword heads
+      // ("and let dissolve", "and lie down"), rather than treating their
+      // auxiliary words as part of the anatomical site.
+      getProceduralFrames(context).some(frame => frame.span.start === next.sourceStart))
   );
 }
 
@@ -418,6 +423,10 @@ function sitePredicateSign(
   });
 }
 
+const NON_SITE_ANCHORED_PARTS = Array.from(
+  NON_SITE_ANCHORED_PHRASES, (surface) => surface.split(" ")
+);
+
 export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.site", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -473,7 +482,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       );
     }
-    if (!SITE_ANCHORS.has(lower)) {
+    // Registered anatomical spatial relations (under, below, around, ...)
+    // are also locative heads, not stray leftovers outside site grammar.
+    if (!SITE_ANCHORS.has(lower) && !SITE_SELF_DISPLAY_ANCHORS.has(lower)) {
       return signs;
     }
     const firstAfterAnchor = context.tokens[start + 1];
@@ -500,6 +511,15 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const secondAfterAnchorLower = secondAfterAnchor && !context.state.consumed.has(secondAfterAnchor.index)
       ? normalizeTokenLower(secondAfterAnchor)
       : undefined;
+    // The registered non-anatomical phrase must be considered as a whole,
+    // BEFORE accepting a shorter uncoded site ("at same time" ≠ site "same").
+    if (firstAfterAnchorLower && NON_SITE_ANCHORED_PARTS.some((phrase) =>
+      phrase.every((word, index) => {
+        const candidate = context.tokens[start + 1 + index];
+        return candidate && !context.state.consumed.has(candidate.index) &&
+          normalizeTokenLower(candidate) === word;
+      })
+    )) return signs;
     if (
       firstAfterAnchor &&
       sourceRangeOverlapsContextDate(
@@ -686,7 +706,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const firstLower = normalizeTokenLower(first);
     if (
-      SITE_ANCHORS.has(firstLower) ||
+      (SITE_ANCHORS.has(firstLower) || SITE_SELF_DISPLAY_ANCHORS.has(firstLower)) ||
       isPunctuation(firstLower) ||
       siteBoundary(firstLower, context)
     ) {

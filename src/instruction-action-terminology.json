@@ -282,7 +282,9 @@
       "realizer": "site-relation",
       "realizerConfig": {
         "locales": {
-          "en": { "directSiteObject": true }
+          "en": {
+            "directSiteObject": true
+          }
         }
       },
       "administrationMethod": {
@@ -340,7 +342,8 @@
       },
       "aliases": [
         "dissolve",
-        "ละลาย"
+        "ละลาย",
+        "let dissolve"
       ],
       "procedural": true,
       "acceptsAmount": true,
@@ -399,7 +402,9 @@
         "cover",
         "ปิดคลุม"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
     },
     {
       "code": "leave",
@@ -479,6 +484,22 @@
       "realizer": "relation-duration"
     },
     {
+      "code": "observe",
+      "semanticClass": "observe",
+      "display": "Observe",
+      "i18n": {
+        "th": "สังเกตอาการ"
+      },
+      "aliases": [
+        "observe",
+        "monitor",
+        "สังเกตอาการ"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
       "code": "wait",
       "semanticClass": "wait",
       "display": "Wait",
@@ -523,7 +544,11 @@
       },
       "realizerConfig": {
         "locales": {
-          "th": { "suppressActivityConcepts": ["use"] }
+          "th": {
+            "suppressActivityConcepts": [
+              "use"
+            ]
+          }
         }
       }
     },
@@ -747,7 +772,9 @@
       "realizer": "prime",
       "realizerConfig": {
         "locales": {
-          "th": { "fallbackObject": "อุปกรณ์พ่น" }
+          "th": {
+            "fallbackObject": "อุปกรณ์พ่น"
+          }
         }
       },
       "continuationLicenses": [
@@ -879,8 +906,14 @@
       "realizer": "site-relation",
       "realizerConfig": {
         "locales": {
-          "en": { "directSiteObject": true },
-          "th": { "suppressSiteConcepts": ["hair"] }
+          "en": {
+            "directSiteObject": true
+          },
+          "th": {
+            "suppressSiteConcepts": [
+              "hair"
+            ]
+          }
         }
       }
     },
@@ -936,7 +969,9 @@
       },
       "realizerConfig": {
         "locales": {
-          "th": { "implicitMedicationObject": true }
+          "th": {
+            "implicitMedicationObject": true
+          }
         }
       }
     },
@@ -1036,7 +1071,9 @@
       "verbRouteHint": "26643006",
       "realizerConfig": {
         "locales": {
-          "th": { "implicitMedicationObject": true }
+          "th": {
+            "implicitMedicationObject": true
+          }
         }
       }
     },
@@ -1066,7 +1103,9 @@
       "verbRouteHint": "26643006",
       "realizerConfig": {
         "locales": {
-          "th": { "implicitMedicationObject": true }
+          "th": {
+            "implicitMedicationObject": true
+          }
         }
       }
     },
@@ -1144,6 +1183,7 @@
       },
       "aliases": [
         "inhale",
+        "inhaling",
         "สูด"
       ],
       "procedural": false,
@@ -1255,7 +1295,10 @@
       "procedural": false,
       "argumentParser": "amount-duration",
       "realizer": "amount-duration",
-      "administrationDurationIntroducers": ["in", "over"],
+      "administrationDurationIntroducers": [
+        "in",
+        "over"
+      ],
       "realizerConfig": {
         "locales": {
           "th": {
@@ -1274,14 +1317,18 @@
           "system": "http://snomed.info/sct",
           "code": "764794000",
           "display": "Infuse",
-          "i18n": { "th": "ให้ยา" }
+          "i18n": {
+            "th": "ให้ยา"
+          }
         }
       ],
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "764794000",
         "display": "Infuse",
-        "i18n": { "th": "ให้ยา" }
+        "i18n": {
+          "th": "ให้ยา"
+        }
       }
     },
     {
@@ -1999,6 +2046,8 @@
       },
       "aliases": [
         "eat food",
+        "eat",
+        "eating",
         "consume food",
         "ทานอาหาร",
         "กินอาหาร",
@@ -2024,6 +2073,95 @@
         "กินยาให้ครบ"
       ],
       "procedural": true
+    },
+    {
+      "code": "place",
+      "semanticClass": "administration",
+      "display": "Place",
+      "i18n": {
+        "th": "ใส่"
+      },
+      "aliases": [
+        "place",
+        "put"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "http://snomed.info/sct",
+        "code": "738990001",
+        "display": "Administer"
+      }
+    },
+    {
+      "code": "nebulize",
+      "semanticClass": "administration",
+      "display": "Nebulize",
+      "i18n": {
+        "th": "พ่นละอองยา"
+      },
+      "aliases": [
+        "nebulize",
+        "nebulise",
+        "nebulizing",
+        "nebulising"
+      ],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "administrationMethod": {
+        "system": "https://solublelabs.com/fhir/CodeSystem/medication-action",
+        "code": "nebulize",
+        "display": "Nebulize",
+        "i18n": {
+          "th": "พ่นละอองยา"
+        }
+      },
+      "verbRouteHint": "447694001"
+    },
+    {
+      "code": "call",
+      "semanticClass": "communicate",
+      "display": "Call",
+      "i18n": {
+        "th": "ติดต่อ"
+      },
+      "aliases": [
+        "call",
+        "contact"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
+      "code": "open",
+      "semanticClass": "prepare",
+      "display": "Open",
+      "i18n": {
+        "th": "เปิด"
+      },
+      "aliases": [
+        "open"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
+      "code": "sprinkle",
+      "semanticClass": "prepare",
+      "display": "Sprinkle",
+      "i18n": {
+        "th": "โรย"
+      },
+      "aliases": [
+        "sprinkle"
+      ],
+      "procedural": true,
+      "argumentParser": "object-amount-material",
+      "realizer": "object-amount-material"
     }
   ]
 }

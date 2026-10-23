@@ -1,3 +1,5 @@
+import { terminalAdministrationDelay } from "./grammar";
+import { EventTiming as SequenceEventTiming } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -18,6 +20,8 @@ export interface RegimenPhase {
 }
 export interface PhaseEdge { from: number; to: number; relation: BoundaryRelation }
 export interface RegimenGraph {
+  /** Per-administration dependencies within a repeating phase. */
+  administrationDependencies?: Array<{ from: number; to: number; delayMinutes: number }>;
   phases: RegimenPhase[];
   sequences: PhaseEdge[];
   /** Whole-course interval contributed by a typed recurring cycle sign. */
@@ -34,11 +38,17 @@ export function buildRegimenGraph(
   states?: readonly ParserState[]
 ): RegimenGraph {
   const phases: RegimenPhase[] = [], sequences: PhaseEdge[] = [];
+  const administrationDependencies: NonNullable<RegimenGraph["administrationDependencies"]> = [];
   let original = 0;
   for (let index = 0; index < segments.length; index++) {
     while (original + 1 < plan.segments.length && segments[index].start >= plan.segments[original + 1].start) original++;
     const sameSource = index > 0 && segments[index].start === segments[index - 1].start;
     const incoming = sameSource ? undefined : plan.relations.find(e => e.to === original);
+    if (incoming?.semanticLicense === "delayed-target" && index > 0) {
+      const donor = states?.[index - 1]?.primaryClause;
+      const delayMinutes = donor ? terminalAdministrationDelay(donor) : undefined;
+      if (delayMinutes !== undefined) administrationDependencies.push({ from: index - 1, to: index, delayMinutes });
+    }
     if (!phases.length || incoming && (incoming.kind === 'sequence' || incoming.kind === 'independent')) {
       const id = phases.length;
       phases.push({ id, members: [] });
@@ -67,6 +77,7 @@ export function buildRegimenGraph(
   return {
     phases,
     sequences,
+    administrationDependencies: administrationDependencies.length ? administrationDependencies : undefined,
     ...(wholeCourseCycle
       ? {
         repeatCycle: { ...wholeCourseCycle },
@@ -187,7 +198,7 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
     schedule.frequency !== undefined ||
     schedule.period !== undefined ||
     schedule.timingCode ||
-    schedule.when?.length ||
+    schedule.when?.some(event => event !== SequenceEventTiming.Immediate) ||
     schedule.timeOfDay?.length
   ));
 }
@@ -206,6 +217,22 @@ export function scopeSequentialPhaseSemantics(
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
   for (const state of states) materializeAnchoredScheduleWindow(state.primaryClause.schedule);
+  for (const dependency of graph.administrationDependencies ?? []) {
+    const donor = states[dependency.from]?.primaryClause;
+    const recipient = states[dependency.to]?.primaryClause;
+    if (!donor?.dose || !donor.schedule || !recipient) continue;
+    recipient.dose = cloneStructuredValue(donor.dose);
+    recipient.method = recipient.method ?? cloneStructuredValue(donor.method);
+    recipient.route = recipient.route ?? cloneStructuredValue(donor.route);
+    recipient.schedule = {
+      ...cloneStructuredValue(donor.schedule),
+      administrationOffsetMinutes: (donor.schedule.administrationOffsetMinutes ?? 0) + dependency.delayMinutes
+    };
+    appendEvidence(recipient.evidence, {
+      rule: "hpsg.regimen.delayed-target-administration", spans: [],
+      note: "The target inherits this administration's arguments and base schedule with the explicit intervening wait."
+    });
+  }
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
@@ -223,7 +250,8 @@ export function scopeSequentialPhaseSemantics(
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
-    const sharedMethod = edge.relation.semanticLicense === 'target-transition' &&
+    const sharedMethod = (edge.relation.semanticLicense === 'target-transition' ||
+      edge.relation.semanticLicense === 'dose-continuation') &&
       sourceMethods[0] &&
       sourceMethods.every(method => equalStructuredValues(method, sourceMethods[0]))
       ? sourceMethods[0] : undefined;
@@ -231,14 +259,14 @@ export function scopeSequentialPhaseSemantics(
     for (const index of graph.phases[edge.to].members) {
       const clause = states[index]?.primaryClause;
       const schedule = clause?.schedule;
-      if (!clause || !schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) continue;
+      if (!clause) continue;
 
       const fields: string[] = [];
       if (sharedMethod && !clause.method) {
         clause.method = cloneStructuredValue(sharedMethod);
         fields.push('method');
       }
-      if (!hasRecurringSchedule(schedule)) {
+      if (!schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) {
         if (fields.length) {
           clause.evidence.push({
             rule: 'hpsg.cx.regimen.shared-administration-method',
@@ -261,8 +289,11 @@ export function scopeSequentialPhaseSemantics(
       // An explicit local meal/event or clock anchor owns the whole anchor
       // group, so inherited anchors can never create a mixed local/donor pair.
       if (!schedule.when?.length && !schedule.timeOfDay?.length && sharedAnchors) {
-        if (shared?.when?.length) {
-          schedule.when = [...shared.when];
+        // A point event belongs to its administration. A successor may
+        // inherit recurring meal/day anchors, never the predecessor's "now".
+        const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);
+        if (recurringAnchors?.length) {
+          schedule.when = recurringAnchors;
           fields.push('when');
         }
         if (shared?.timeOfDay?.length) {

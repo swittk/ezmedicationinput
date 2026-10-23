@@ -1,3 +1,4 @@
+import { composeCoordinatedActionDirective } from "./hpsg/constructions";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { stripBodySiteSourceLead } from "./body-site-context-terminology";
 import { lexInput } from "./lexer/lex";
@@ -25,6 +26,7 @@ import {
 } from "./relation-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
+  coordinationConnectorKind,
   ACTION_COORDINATION_CONNECTOR_I18N,
   ACTION_DIRECTIVE_PREFIXES,
   ACTION_SEQUENCE_MARKERS,
@@ -46,7 +48,7 @@ import {
   SITE_ANCHORS,
   methodAuxiliaryVerbsForLocale
 } from "./hpsg/lexical-classes";
-import { EVERY_INTERVAL_TOKENS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
 import {
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
@@ -204,7 +206,7 @@ function actionMatchAt(
     return undefined;
   }
   const previous = parts.slice(index - 1, index)[0];
-  if (previous && Boolean(resolveActionRelationSurface(key(previous)))) return undefined;
+  const governingRelation = previous ? resolveActionRelationSurface(key(previous)) : undefined;
   const maxSpan = Math.min(4, parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
     for (const candidate of actionPhraseCandidates(parts, index, length)) {
@@ -213,6 +215,16 @@ function actionMatchAt(
           resolveMedicationInstructionAction(candidate, options)
         : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
+        if (governingRelation) {
+          const argument = parts[index + length];
+          const unit = parts[index + length + 1];
+          const explicitAdministration = !definition.procedural && definition.acceptsAmount &&
+            argument && (argument.kind === "NUMBER" || argument.kind === "NUMBER_RANGE") &&
+            unit && normalizeUnit(key(unit), options);
+          // A bare activity remains a relational argument. A medication
+          // head with its own amount is an event daughter with local valence.
+          if (!explicitAdministration) continue;
+        }
         const first = parts[index];
         const actionLocale = first
           ? baseLanguageTag(options?.locale) ?? inferMedicationLocale(first.original, "en")
@@ -660,7 +672,7 @@ function durationArgumentAt(
       normalizedValue = valueToken.original;
     }
   } else {
-    const fraction = EVENT_OFFSET_FRACTIONS.get(key(valueToken));
+    const fraction = EVENT_OFFSET_FRACTIONS.get(key(valueToken)) ?? FREQUENCY_NUMBER_WORDS[key(valueToken)];
     if (fraction !== undefined) {
       quantity = { value: fraction, unit };
       normalizedValue = fraction;
@@ -846,7 +858,8 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const amountEnd = amount?.span
     ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
     : undefined;
-  const tailStart = amountEnd !== undefined ? Math.min(segmentEnd, amountEnd)
+  const tailStart = amountEnd !== undefined
+    ? Math.min(segmentEnd, relIndex >= amountEnd ? relIndex + 1 : amountEnd)
     : relIndex >= 0 ? relIndex + 1 : segmentEnd;
   if (tailStart < segmentEnd) {
     const tail = argumentFromParts(parts, tailStart, segmentEnd, input, AdviceArgumentRole.Material, options);
@@ -1511,6 +1524,10 @@ function actionTailIsRegimenModifier(
   }
   if (definition?.argumentParser === "object-time") return false;
   if (!actionHasLocalRelationBefore(parts, actionStart, index)) return true;
+  // A recognized material/object complement is complete before the next
+  // cadence; do not consume the cadence inside the material argument. Other
+  // uses of "with" (notably negated food safety) retain their own scope.
+  if (definition?.argumentParser === "object-amount-material") return true;
   return actionHasResolvedLocativeSiteBefore(parts, actionStart, index, options);
 }
 
@@ -1587,13 +1604,23 @@ export function parseInstructionActions(
         !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition, options)
       ) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
-        end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ? index - 1 : index;
+        end = ACTION_COORDINATION_CONNECTORS.has(previousKey) || resolveActionRelationSurface(previousKey)
+          ? index - 1 : index;
         break;
       }
     }
 
-    const frame = buildActionFrame(parts, start, end, sourceText, baseOffset, sequenceIndex, options);
+    let frame = buildActionFrame(parts, start, end, sourceText, baseOffset, sequenceIndex, options);
     if (frame) {
+      const left = frames[frames.length - 1];
+      const connector = parts.slice(cursor, start);
+      if (left && connector.length === 1) {
+        const composed = composeCoordinatedActionDirective(
+          left, frame, coordinationConnectorKind(key(connector[0])), Boolean(prefixed)
+        );
+        frames[frames.length - 1] = composed[0];
+        frame = composed[1];
+      }
       const preposed = preposedActionRelation(parts, cursor, start);
       if (preposed) {
         attachPreposedActionRelation(frame, preposed, parts, sourceText, baseOffset, options);
@@ -1869,7 +1896,10 @@ function buildInstructionRelations(
       !explicitRelation &&
       (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution)
     ) continue;
-    if (explicitRelation && relationHasGrammarFeature(explicitRelation, "conditionScope")) {
+    const directEventLink = explicitRelation && relationHasSemanticClass(explicitRelation, "temporal") &&
+      resolveActionRelationSurface(trimmed.replace(/^[,;:.()\-\s]+|[,;:.()\-\s]+$/gu, "")) === explicitRelation;
+    if (explicitRelation && relationHasGrammarFeature(explicitRelation, "conditionScope") &&
+        !directEventLink) {
       const conditionTargetsCurrent = /^[,;:.()\-]/.test(trimmed);
       relations.push({
         kind: explicitRelation,
@@ -2297,6 +2327,19 @@ export function buildInstructionGraph(
   const opaqueSpans: CanonicalSourceSpan[] = [];
   const fullInputFrames = parseInstructionActions(input, 0, options);
   const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
+  const temporalEndpoints = new Set<AdviceFrame>();
+  for (const relation of buildInstructionRelations(input, fullInputFrames, [])) {
+    if (relation.fromActionIndex === undefined || !relationHasSemanticClass(relation.kind, "temporal")) continue;
+    temporalEndpoints.add(fullInputFrames[relation.fromActionIndex]);
+    temporalEndpoints.add(fullInputFrames[relation.toActionIndex]);
+  }
+  const ownsTemporalEdge = (frame: AdviceFrame): boolean => {
+    for (const endpoint of temporalEndpoints) {
+      if (endpoint && endpoint.predicate.lemma === frame.predicate.lemma &&
+          endpoint.span.start < frame.span.end && frame.span.start < endpoint.span.end) return true;
+    }
+    return false;
+  };
   for (const range of semanticSourceSpans(clause)) {
     const parsed = parseInstructionActions(input.slice(range.start, range.end), range.start, options);
     const accepted: AdviceFrame[] = [];
@@ -2343,7 +2386,8 @@ export function buildInstructionGraph(
     if (
       frameIsProcedural(frame, options) ||
       frameIsSecondaryAdministration(frame, clause, options) ||
-      frameIsPrimaryAdministrationWithExtraMeaning(frame, clause, options)
+      frameIsPrimaryAdministrationWithExtraMeaning(frame, clause, options) ||
+      ownsTemporalEdge(frame)
     ) {
       pushActionIfUnique(actions, frame);
     }
@@ -2365,9 +2409,11 @@ export function buildInstructionGraph(
       primaryActionCoveredByCanonicalClause(actions[index], actions, clause)
     );
     if (
-      redundantCanonicalAdministration ||
-      actionContainedInCanonicalSite(actions[index], clause) ||
-      actionDominatedByCanonicalMethod(actions[index], clause, options, primaryAdministrationSpan)
+      !ownsTemporalEdge(actions[index]) && (
+        redundantCanonicalAdministration ||
+        actionContainedInCanonicalSite(actions[index], clause) ||
+        actionDominatedByCanonicalMethod(actions[index], clause, options, primaryAdministrationSpan)
+      )
     ) {
       actions.splice(index, 1);
     }
@@ -3019,13 +3065,41 @@ export function realizeInstructionGraph(
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
-  const inRequestedPosition = (start: number, end: number): boolean => {
+  const primaryAction = primary ? graph.actions.findIndex(frame =>
+    frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
+  const temporalEdges = new Map<number, number[]>();
+  for (const relation of graph.relations ?? []) {
+    if (relation.fromActionIndex === undefined) continue;
+    const from = relation.kind === AdviceRelation.After ? relation.toActionIndex : relation.fromActionIndex;
+    const to = relation.kind === AdviceRelation.After ? relation.fromActionIndex : relation.toActionIndex;
+    if (relation.kind !== AdviceRelation.After && relation.kind !== AdviceRelation.Before &&
+        relation.kind !== AdviceRelation.Then) continue;
+    const targets = temporalEdges.get(from) ?? [];
+    targets.push(to); temporalEdges.set(from, targets);
+  }
+  const precedes = (from: number, to: number): boolean => {
+    const pending = [...(temporalEdges.get(from) ?? [])];
+    const visited = new Set<number>();
+    while (pending.length) {
+      const next = pending.pop()!;
+      if (next === to) return true;
+      if (visited.has(next)) continue;
+      visited.add(next); pending.push(...(temporalEdges.get(next) ?? []));
+    }
+    return false;
+  };
+  const inRequestedPosition = (start: number, end: number, actionIndex?: number): boolean => {
     if (!primary || position === "all") return true;
+    if (primaryAction >= 0 && actionIndex !== undefined && actionIndex !== primaryAction) {
+      const before = precedes(actionIndex, primaryAction);
+      const after = precedes(primaryAction, actionIndex);
+      if (before !== after) return position === "pre" ? before : after;
+    }
     if (position === "pre") return end <= primary.start;
     return start >= primary.start;
   };
   const frames = graph.actions.filter((frame) => {
-    if (!inRequestedPosition(frame.span.start, frame.span.end)) return false;
+    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) return false;
     const frameSource = normalizedInstructionSurface(frame.sourceText);
     if (frameSource && omittedSources.some((candidate) =>
       candidate === frameSource || candidate.includes(frameSource) || frameSource.includes(candidate)
@@ -3075,7 +3149,8 @@ export function realizeInstructionGraph(
     const sourceFaithful = (
       options?.preferSourceText || secondaryAdministration ||
       frame.polarity === AdvicePolarity.Negate
-    ) && targetLanguage === sourceLanguage && sourceTextCoversFrameMeaning(frame)
+    ) && frame.polaritySource !== "shared" &&
+      targetLanguage === sourceLanguage && sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)
       : undefined;
     const text = sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
@@ -3095,7 +3170,7 @@ export function realizeInstructionGraph(
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex === undefined) continue;
     if (!selectedActionIndices.has(relation.toActionIndex)) continue;
-    if (!relation.text || !relation.span || !inRequestedPosition(relation.span.start, relation.span.end)) continue;
+    if (!relation.text || !relation.span || !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
     const target = frames.find((frame) => frame.sequenceIndex === relation.toActionIndex);
     if (!target) continue;
     const normalizedRelation = normalizedInstructionSurface(relation.text);

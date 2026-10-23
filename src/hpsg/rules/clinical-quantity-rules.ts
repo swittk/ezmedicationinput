@@ -1,4 +1,4 @@
-import { LexKind, type LexToken } from "../../lexer/token-types";
+import { LexKind } from "../../lexer/token-types";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
@@ -262,7 +262,18 @@ function weightQuantity(
   };
   const suffix = parts[2];
   const perDose = suffix === "dose";
-  if (parts.length > 3 || (suffix && !perDose && suffix !== "day" && suffix !== "daily" && suffix !== "d" && !weightRatePeriodUnit(suffix))) {
+  // Compound denominator morphology (e.g. /24h or /30min) is independent of
+  // the medication, route, and placement of a division complement.
+  const timeParts = suffix?.match(/^(\d+(?:\.\d+)?)?([a-z]+)$/u);
+  let periodValue = timeParts?.[1] ? Number(timeParts[1]) : 1;
+  let periodUnit: FhirPeriodUnit | undefined = timeParts
+    ? /^(?:day|daily|d)$/u.test(timeParts[2]) ? FhirPeriodUnit.Day : weightRatePeriodUnit(timeParts[2])
+    : undefined;
+  if (periodUnit === FhirPeriodUnit.Hour && periodValue >= 24 && periodValue % 24 === 0) {
+    periodValue /= 24;
+    periodUnit = FhirPeriodUnit.Day;
+  }
+  if (parts.length > 3 || (suffix && !perDose && (!periodUnit || periodValue <= 0))) {
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weight.unsupported", indices, {
       representation: "rate-quantity",
       status: "unsupported",
@@ -273,7 +284,7 @@ function weightQuantity(
     });
   }
 
-  const rateTime = suffix ? weightRatePeriodUnit(suffix) : undefined;
+  const rateTime = periodUnit !== FhirPeriodUnit.Day || periodValue !== 1 ? periodUnit : undefined;
   if (rateTime) {
     const duration = durationAfter(context, expression.end);
     if (duration) indices.push(...duration.indices);
@@ -283,7 +294,7 @@ function weightQuantity(
       numerator,
       denominators: [
         bodyMass,
-        { value: 1, unit: rateTime, dimension: "time" }
+        { value: periodValue, unit: rateTime, dimension: "time" }
       ],
       administrationDuration: duration ? { value: duration.value, unit: duration.unit } : undefined,
       requiresPatientWeight: true
@@ -303,48 +314,6 @@ function weightQuantity(
       projectedDose: { value, unit: doseUnit },
       requiresPatientWeight: true
     }, { value, unit: doseUnit }, undefined, WEIGHT_WARNING);
-  }
-
-  const tail = context.tokens.slice(expression.end, expression.end + 5);
-  let countToken: LexToken | undefined;
-  let dosesToken: LexToken | undefined;
-  let tailLength = 0;
-  const firstTail = tail[0] ? normalizeTokenLower(tail[0]) : "";
-  if (/^(?:divided|divide)$/u.test(firstTail) && /^(?:into|in)$/u.test(tail[1] ? normalizeTokenLower(tail[1]) : "")) {
-    countToken = tail[2];
-    const maybeEqual = tail[3] && normalizeTokenLower(tail[3]) === "equal";
-    dosesToken = tail[maybeEqual ? 4 : 3];
-    tailLength = maybeEqual ? 5 : 4;
-  } else if (/^(?:into|in)$/u.test(firstTail)) {
-    countToken = tail[1];
-    const maybeEqual = tail[2] && normalizeTokenLower(tail[2]) === "equal";
-    dosesToken = tail[maybeEqual ? 3 : 2];
-    tailLength = maybeEqual ? 4 : 3;
-  }
-  const dividedDoseCount = countToken
-    ? countToken.kind === LexKind.Number && countToken.value !== undefined
-      ? countToken.value
-      : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(countToken)]
-    : undefined;
-  if (countToken && dosesToken && available(context, expression.end + tailLength - 1) &&
-      dividedDoseCount !== undefined && Number.isInteger(dividedDoseCount) && dividedDoseCount > 0 &&
-      /^(?:dose|doses)$/u.test(normalizeTokenLower(dosesToken))) {
-    for (let index = 0; index < tailLength; index++) indices.push(expression.end + index);
-    const projectedDose = { value: value / dividedDoseCount, unit: doseUnit };
-    return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightDailyDivided", indices, {
-      representation: "dose",
-      status: "resolved",
-      numerator,
-      denominators: [bodyMass, { value: 1, unit: FhirPeriodUnit.Day, dimension: "time" }],
-      projectedDose,
-      dailyTotal: true,
-      dividedDoseCount,
-      requiresPatientWeight: true
-    }, projectedDose, {
-      frequency: dividedDoseCount,
-      period: 1,
-      periodUnit: FhirPeriodUnit.Day
-    }, WEIGHT_WARNING);
   }
 
   return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightDailyIncomplete", indices, {
@@ -390,6 +359,32 @@ function fixedRate(
   });
 }
 
+/** A division complement supplies cardinality, never an administered dose. */
+function dividedDoseCountSign(context: HpsgClauseContext, start: number) {
+  const first = normalizeTokenLower(context.tokens[start]);
+  let cursor = start;
+  if (first === "divided" || first === "divide") {
+    cursor += 1;
+    const connector = context.tokens[cursor];
+    if (!connector || !/^(?:in|into)$/u.test(normalizeTokenLower(connector))) return undefined;
+  } else if (first !== "in" && first !== "into") return undefined;
+  cursor += 1;
+  const countToken = context.tokens[cursor++];
+  if (!countToken) return undefined;
+  const count = countToken.kind === LexKind.Number
+    ? countToken.value : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(countToken)];
+  if (count === undefined || !Number.isInteger(count) || count <= 0) return undefined;
+  if (context.tokens[cursor] && normalizeTokenLower(context.tokens[cursor]) === "equal") cursor += 1;
+  const doses = context.tokens[cursor];
+  if (!doses || !available(context, cursor) || !/^(?:dose|doses)$/u.test(normalizeTokenLower(doses))) return undefined;
+  return lexicalSign({
+    type: "dose-sign", rule: "hpsg.lex.clinicalQuantity.divisionCount",
+    tokens: context.tokens.slice(start, cursor + 1),
+    synsem: { head: { dose: { divisionCount: count } }, valence: {}, cont: {} },
+    score: 45
+  });
+}
+
 /**
  * Bounded lexical/construction contribution for safety-critical medication
  * quantities. It never searches the full clause and only accepts explicit
@@ -398,6 +393,8 @@ function fixedRate(
  */
 export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinicalQuantity", (context, start) => {
+    const division = dividedDoseCountSign(context, start);
+    if (division) return [division];
     const valueToken = context.tokens[start];
     if (!valueToken || valueToken.kind !== LexKind.Number || valueToken.value === undefined ||
         valueToken.value <= 0 || !available(context, start + 1)) return [];

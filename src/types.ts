@@ -796,6 +796,8 @@ export interface AdviceArgument {
 export interface AdviceFrame {
   force: AdviceForce;
   polarity?: AdvicePolarity;
+  /** Shared directive scope may differ from this action's own source wording. */
+  polaritySource?: "shared";
   modality?: AdviceModality;
   predicate: {
     lemma: string;
@@ -1507,6 +1509,8 @@ export interface CanonicalCalendarEventExpr {
 }
 
 export interface CanonicalScheduleExpr {
+  /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
+  administrationOffsetMinutes?: number;
   timingCode?: string;
   count?: number;
   countMax?: number;

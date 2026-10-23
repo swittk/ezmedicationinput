@@ -1378,4 +1378,17 @@ describe("calendar date interpretation", () => {
     });
     expect(result.longText).toContain("สัปดาห์ละ 2 ครั้ง");
   });
+  it("accepts explicit Buddhist DMY years in English clinical directions without overriding calendar policy", () => {
+    const input = "Take 1 tab daily until 25/11/2569";
+    const policy = { referenceDate: "2026-10-22" };
+    const parsed = parseSig(input, { datePolicy: policy });
+    expect(parsed.items[0]?.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-11-25");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const deliberatelyGregorian = parseSig(input, {
+      datePolicy: { ...policy, calendars: ["gregory"] }
+    });
+    expect(deliberatelyGregorian.meta.leftoverText).toContain("until 25/11/2569");
+    expect(deliberatelyGregorian.items[0]?.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+  });
+
 });

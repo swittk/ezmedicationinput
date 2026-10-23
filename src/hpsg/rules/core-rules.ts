@@ -14,7 +14,7 @@ import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode } from ".
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
-import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
 import { FREQUENCY_TIMES_WORDS, parseNumericRange } from "../timing-lexicon";
 import {
   ACTION_COORDINATION_CONNECTORS,
@@ -858,6 +858,28 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     if (numerator !== undefined && token.kind !== LexKind.Number) {
       const unit = unitAfter(context, start + 1);
+      if (!unit) {
+        const modifier = context.tokens[start + 1];
+        const modifierLower = modifier && !context.state.consumed.has(modifier.index)
+          ? normalizeTokenLower(modifier) : undefined;
+        const modifiedUnit = modifierLower && (
+          DEFAULT_ROUTE_SYNONYMS[modifierLower] || getRouteMeaning(modifier!)
+        ) ? unitAfter(context, start + 2) : undefined;
+        if (modifiedUnit) {
+          // Leave the registered product/site adjective phrase in its own
+          // daughter sign. The quantity's unit is licensed by that phrase,
+          // but the numeral remains independently composable with its route.
+          return [lexicalSign({
+            type: "dose-sign", rule: "hpsg.lex.dose.numberBeforeRouteQualifiedForm",
+            tokens: [token],
+            synsem: {
+              head: { dose: { value: numerator, unit: modifiedUnit.unit } },
+              valence: {}, cont: { clauseKind: "administration" }
+            },
+            score: 10
+          })];
+        }
+      }
       if (unit) {
         return [
           lexicalSign({
@@ -993,7 +1015,8 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
-    if (!CONNECTORS.has(lower) && !isPunctuation(lower)) {
+    const eventRelation = actionEventRelationAt(context, start);
+    if (!CONNECTORS.has(lower) && !isPunctuation(lower) && !eventRelation) {
       return [];
     }
     const following = token.original === "," ? context.tokens[start + 1] : undefined;

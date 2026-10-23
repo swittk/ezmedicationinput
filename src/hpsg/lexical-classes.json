@@ -170,7 +170,8 @@
   "nonSiteAnchoredPhrases": [
     "empty stomach",
     "least",
-    "most"
+    "most",
+    "same time"
   ],
   "routeBlockedByFollowingPartitiveHeads": [
     "top"
@@ -792,6 +793,26 @@
       "only",
       "one",
       "time"
+    ],
+    [
+      "as",
+      "a",
+      "single",
+      "dose"
+    ],
+    [
+      "as",
+      "one",
+      "dose"
+    ],
+    [
+      "a",
+      "single",
+      "dose"
+    ],
+    [
+      "single",
+      "dose"
     ]
   ],
   "frequencyAdverbUnits": {

@@ -35,7 +35,7 @@ export interface Proposal {
   /** Typed boundary license to inherit a following sibling's course duration. */
   inheritFollowingDuration?: boolean;
   /** Typed construction license, never inferred from its display rule id. */
-  semanticLicense?: "dose-continuation" | "target-transition";
+  semanticLicense?: "dose-continuation" | "target-transition" | "delayed-target";
   evidence: Evidence[];
 }
 export interface BoundaryDecision {

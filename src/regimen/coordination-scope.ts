@@ -76,6 +76,8 @@ const SCHEDULE_FEATURE_GROUPS = {
     'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
   ],
   calendarEvents: ['calendarEvents'],
+  // A derived per-administration dependency is not a lexical trailing cadence.
+  administrationDependency: ['administrationOffsetMinutes'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
@@ -96,7 +98,7 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
-  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod',
+  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
   'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =

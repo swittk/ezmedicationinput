@@ -375,7 +375,8 @@ function mergeDose(
   const preferred = preferredAttachment(left, right);
   if (preferred) return preferred;
   const mergedClass = attachmentClass(left.attachmentClass);
-  if (!sameOptionalScalar(left.value, right.value)) {
+  if (!sameOptionalScalar(left.value, right.value) ||
+      !sameOptionalScalar(left.divisionCount, right.divisionCount)) {
     return undefined;
   }
   if (!sameOptionalScalar(left.unit, right.unit)) {
@@ -388,11 +389,34 @@ function mergeDose(
   ) {
     return undefined;
   }
+  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
+  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) return undefined;
+  let value = mergeOptionalScalar(left.value, right.value);
+  let unit = mergeOptionalScalar(left.unit, right.unit);
+  const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
+  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.status !== "unsupported" &&
+      clinicalQuantity.denominators.some(term => term.dimension === "time")) {
+    const doseUnit = [clinicalQuantity.numerator.unit,
+      ...clinicalQuantity.denominators.filter(term => term.dimension !== "time").map(term => term.unit)
+    ].join("/");
+    value = clinicalQuantity.numerator.value / divisionCount;
+    unit = doseUnit;
+    clinicalQuantity = {
+      ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
+      dividedDoseCount: divisionCount, projectedDose: { value, unit }
+    };
+  } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
+    // Independently supplied volume and rate are compatible arguments of one
+    // administration. Neither may erase the other during feature unification.
+    clinicalQuantity = { ...clinicalQuantity, projectedDose: { value, unit } };
+  }
   return {
     attachmentClass: mergedClass,
-    value: mergeOptionalScalar(left.value, right.value),
+    value,
     range: mergeOptionalScalar(left.range, right.range),
-    unit: mergeOptionalScalar(left.unit, right.unit)
+    unit,
+    clinicalQuantity,
+    divisionCount
   };
 }
 
@@ -652,9 +676,20 @@ export function unifySynsem(
   if (dose === undefined && left.head.dose && right.head.dose) {
     return undefined;
   }
-  const schedule = mergeSchedule(left.head.schedule, right.head.schedule);
-  if (schedule === undefined && left.head.schedule && right.head.schedule) {
-    return undefined;
+  let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
+  if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
+  if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
+    const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
+    if (period) {
+      const dividedSchedule = {
+        frequency: dose.clinicalQuantity.dividedDoseCount,
+        period: period.value,
+        periodUnit: period.unit as HpsgScheduleFeature["periodUnit"]
+      };
+      const combined = mergeSchedule(schedule, dividedSchedule);
+      if (!combined && schedule) return undefined;
+      schedule = combined;
+    }
   }
   const site = mergeSite(left.valence.site, right.valence.site, context);
   if (site === undefined && left.valence.site && right.valence.site) {

@@ -1,3 +1,4 @@
+import { AdviceArgumentRole, AdvicePolarity, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
   BoundarySite,
@@ -208,6 +209,19 @@ export function grammaticalTrailingInstructionScope(
   };
 }
 
+/** Exact elapsed interval on a terminal wait action, already composed by HPSG. */
+export function terminalAdministrationDelay(clause: CanonicalSigClause): number | undefined {
+  const actions = clause.instructionGraph?.actions ?? [];
+  const last = actions[actions.length - 1];
+  if (!last || last.predicate.semanticClass !== "wait" || last.polarity === AdvicePolarity.Negate) return undefined;
+  const quantity = last.args.find(arg => arg.role === AdviceArgumentRole.Duration)?.quantity;
+  if (!quantity || quantity.value === undefined || quantity.range || !quantity.unit) return undefined;
+  const minutes: Readonly<Record<string, number>> = { s: 1 / 60, min: 1, h: 60, d: 1440, wk: 10080 };
+  const factor = minutes[quantity.unit];
+  const value = quantity.value * factor;
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.disjunctive-dosage-choice', priority: 900, relation: 'alternative', constraints: [
@@ -226,6 +240,24 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
     constraint('right.schedule-method-or-target', f => f.right.hasSchedule || f.right.method || f.right.hasTargets)
+  ] },
+  { id: 'regimen.delayed-target-administration', priority: 790, relation: 'coordination',
+    semanticLicense: 'delayed-target', constraints: [
+    constraint('connector.sequence', f => f.site.kind === 'sequence'),
+    constraint('left.dose-and-timing', f => f.left.hasDose && f.left.hasSchedule),
+    constraint('left.terminal-wait', f => terminalAdministrationDelay(f.left.clause) !== undefined),
+    constraint('right.target-ellipsis', f => f.right.hasTargets && !f.right.hasDose && !f.right.hasSchedule),
+    constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets)),
+    constraint('right.complete', f => f.right.complete)
+  ] },
+  { id: 'regimen.quantitative-phase-transition', priority: 775, relation: 'sequence',
+    semanticLicense: 'dose-continuation', constraints: [
+    constraint('connector.sequence', f => f.site.kind === 'sequence'),
+    constraint('left.complete', f => f.left.complete),
+    constraint('right.complete', f => f.right.complete),
+    constraint('left.dimensionalQuantity', f => Boolean(f.left.clause.clinicalQuantity)),
+    constraint('right.dimensionalQuantity', f => Boolean(f.right.clause.clinicalQuantity)),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
@@ -318,7 +350,7 @@ export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstr
     }
     if (failed.length) { rejected?.push({ rule: rule.id, failedConstraints: failed }); continue; }
     proposals.push({ action: 'split', rule: rule.id, priority: rule.priority,
-      relation: f.site.kind === 'sequence' ? 'sequence' : rule.relation,
+      relation: f.site.kind === 'sequence' && rule.semanticLicense !== 'delayed-target' ? 'sequence' : rule.relation,
       inheritFollowingDuration: rule.inheritFollowingDuration,
       semanticLicense: rule.semanticLicense,
       evidence: describe() });

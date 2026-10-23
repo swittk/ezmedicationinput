@@ -217,6 +217,8 @@ export interface HpsgDoseFeature {
    * projected through the ordinary doseQuantity path.
    */
   clinicalQuantity?: HpsgClinicalQuantityFeature;
+  /** Number of administrations dividing a stated period-total quantity. */
+  divisionCount?: number;
 }
 
 export type HpsgClinicalQuantityDimension =

@@ -69,8 +69,9 @@ export class EvidenceContext {
       start, end, clause: c,
       complete,
       hasHead: Boolean(c.method?.coding?.code || c.method?.text || c.dose?.value !== undefined || c.dose?.range ||
-        c.site?.coding?.code || c.site?.text || c.patientInstruction || c.additionalInstructions?.length),
-      hasDose: Boolean(c.dose),
+        c.clinicalQuantity || c.site?.coding?.code || c.site?.text || c.patientInstruction || c.additionalInstructions?.length),
+      // A dimensional rate is an administration quantity, not a scalar dose.
+      hasDose: Boolean(c.dose || c.clinicalQuantity),
       method: Boolean(c.method?.coding?.code || c.method?.text),
       hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
         s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||

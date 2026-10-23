@@ -423,6 +423,17 @@ function resolveDatePart(
   const enabled = configuredCalendars !== undefined
     ? configuredCalendars.map((id) => id.toLowerCase())
     : defaultCalendars(locale);
+  // A full four-digit BE year in a slash/DMY date is just as explicit as
+  // BE year-first syntax. English clinical directions can carry Thai dates;
+  // only offer the extra resolver when the caller has not fixed the calendars
+  // and the converted year is plausible for the clinical reference date.
+  if (configuredCalendars === undefined &&
+      source.yearDigits === 4 &&
+      source.year !== undefined && source.year >= 2400 && source.year <= 2999 &&
+      inferredYearPlausible(source.year - 543, context, options?.datePolicy) &&
+      enabled.indexOf("buddhist") === -1) {
+    enabled.push("buddhist");
+  }
   if (!enabled.length) return undefined;
 
   const candidates: CanonicalCalendarEventExpr[] = [];

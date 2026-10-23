@@ -1,4 +1,3 @@
-import { createTimingPrimitives } from "./regimen/scheduler-primitives";
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
 import { getDosageCondition, getDosageExcludedDates, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
@@ -35,6 +34,8 @@ import { parseStrengthIntoRatio } from "./utils/strength";
 import { getDoseUnitSemantics } from "./unit-lexicon";
 import {
   getExactTimingOffsetMinutes,
+  getAdministrationOffsetMinutes,
+  ADMINISTRATION_OFFSET_EXTENSION_URL,
   getTimingOccurrenceCap,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL
 } from "./fhir";
@@ -1861,6 +1862,25 @@ export function nextDueDoses(
     }, []).sort((a, b) => Date.parse(a) - Date.parse(b)).slice(0, Math.floor(limit));
   }
   const one = dosage as FhirDosage;
+  const administrationOffset = getAdministrationOffsetMinutes(one);
+  if (administrationOffset !== undefined) {
+    const zone = options.timeZone ?? options.config?.timeZone;
+    if (!zone) throw new Error("A timeZone is required for administration offsets");
+    const delta = administrationOffset * 60_000;
+    const shifted = (value: Date | string, amount: number) =>
+      formatZonedIso(new Date(coerceDate(value, "administration time").getTime() + amount), zone);
+    const base: FhirDosage = {
+      ...one,
+      modifierExtension: one.modifierExtension?.filter(extension => extension.url !== ADMINISTRATION_OFFSET_EXTENSION_URL)
+    };
+    return nextDueDoses(base, {
+      ...options,
+      from: shifted(options.from, -delta),
+      priorDoseTimes: options.priorDoseTimes?.map(value => shifted(value, -delta)),
+      evaluateCondition: options.evaluateCondition
+        ? (condition, at) => options.evaluateCondition!(condition, shifted(at, delta)) : undefined
+    }).map(value => shifted(value, delta));
+  }
   const singleZone = options?.timeZone ?? options?.config?.timeZone;
   if (singleZone) {
     const recurring = recurringOnOffPlan(one, singleZone);
@@ -3383,6 +3403,25 @@ function calculateTotalUnitsSingle(
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) throw new Error("timeZone is required for calculateTotalUnits");
   const from = coerceDate(options.from, "from");
+  const administrationOffset = getAdministrationOffsetMinutes(sourceDosage);
+  if (administrationOffset !== undefined) {
+    const delta = administrationOffset * 60_000;
+    const shift = (value: Date | string, amount: number) => new Date(coerceDate(value, "administration time").getTime() + amount);
+    const end = calculationHorizon(options, timeZone);
+    return calculateTotalUnitsSingle({
+      ...options,
+      dosage: {
+        ...sourceDosage,
+        modifierExtension: sourceDosage.modifierExtension?.filter(extension => extension.url !== ADMINISTRATION_OFFSET_EXTENSION_URL)
+      },
+      from: shift(from, -delta),
+      durationValue: (end.getTime() - from.getTime()) / 1000,
+      durationUnit: FhirPeriodUnit.Second,
+      priorDoseTimes: options.priorDoseTimes?.map(value => shift(value, -delta)),
+      evaluateCondition: options.evaluateCondition
+        ? (condition, at) => options.evaluateCondition!(condition, formatZonedIso(shift(at, delta), timeZone)) : undefined
+    });
+  }
   if (options.priorCount !== undefined &&
       (!Number.isFinite(options.priorCount) || options.priorCount < 0))
     throw new MedicationQuantityCalculationError("invalid-prior-count",
@@ -3757,6 +3796,7 @@ function calculateCourseTotalUnits(
   const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
   let assumedOpenTransition = false;
   let cursor = treatmentStart, dosageIndex = 0;
+  let predecessorPoint: Date | undefined;
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
     const start = step.start
@@ -3765,6 +3805,7 @@ function calculateCourseTotalUnits(
     const dosages: FhirDosage[] = [];
     const starts: Date[] = [];
     const ends: Array<Date | null> = [];
+    const pointCompletions: Array<Date | undefined> = [];
     const cadenceOrigins: Date[] = [];
     for (const _component of step.component) {
       const dosage = flattened[dosageIndex++];
@@ -3786,20 +3827,24 @@ function calculateCourseTotalUnits(
       // This stage clips administration times, but absolute-bound members
       // may have started BEFORE the stage cut. Keep their original cadence
       // anchored to the stated date rather than resetting it each time.
+      const implicitStart = successorIntervalStart(dosage, predecessorPoint, start, zone);
       const cadenceOrigin = repeat?.boundsPeriod
         ? (calendarStart ?? treatmentStart)
-        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, start);
+        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, implicitStart);
       cadenceOrigins.push(cadenceOrigin);
       // Before the first global relative cut, an independent calendar member
       // is allowed to start before orderedAt. Subsequent step cuts still
       // intersect the calendar window with the global step.
       const stageStart = index === 0 && repeat?.boundsPeriod
-        ? (calendarStart ?? start) : start;
+        ? (calendarStart ?? start) : implicitStart;
       starts.push(calendarStart && calendarStart > stageStart ? calendarStart : stageStart);
-      ends.push(earlierDate(
-        resolveRepeatDurationCapEnd(repeat, cadenceOrigin, zone),
-        calendarEnd
-      ));
+      const bound = earlierDate(resolveRepeatDurationCapEnd(repeat, cadenceOrigin, zone), calendarEnd);
+      const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone);
+      const countEnd = completion ? new Date(completion.end.getTime() + (completion.point ? 1 : 0)) : null;
+      const end = earlierDate(bound, countEnd);
+      ends.push(end);
+      pointCompletions.push(completion?.point && end?.getTime() === countEnd?.getTime()
+        ? completion.end : undefined);
     }
     const nextStep = course.step[index + 1];
     let stepEnd = step.end
@@ -3868,7 +3913,11 @@ function calculateCourseTotalUnits(
           measured.doseAndRate?.[0]?.doseQuantity?.code
       });
     }
-    if (stepEnd) cursor = stepEnd;
+    if (stepEnd) {
+      const point = pointCompletions.find(value => value && value.getTime() + 1 === stepEnd!.getTime());
+      predecessorPoint = point;
+      cursor = point ?? stepEnd;
+    }
   }
   const result = sumCourseUnits(entries, options);
   const assumptions: string[] = [];
@@ -3904,10 +3953,45 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
 }
 
-const { resolveExplicitClockEntries, clockCadenceEligible } = createTimingPrimitives({
-  expandWhenCodes, normalizeClock, inferWhenFallbackEntries, getLocalDayNumber, getLocalMonthIndex,
-  getTimeParts, addCalendarMonths, isDateAlignedToPeriodCycle
-});
+interface ClockEntry { time: string; dayShift: number }
+
+/** Occurrence enumeration, historical caps and totals use exactly the same clock defaults. */
+function resolveExplicitClockEntries(repeat: FhirTimingRepeat, config: NextDueDoseConfig, dayFiltered: boolean): ClockEntry[] {
+  const when = repeat.when ?? [], clocks = repeat.timeOfDay ?? [];
+  const entries = expandWhenCodes(when, config, repeat);
+  // "BID with food" specifies TWO administrations chosen from the meal
+  // context, not every breakfast/lunch/dinner. An exclusion weekday used
+  // to force enumeration of three C/AC/PC meal clocks and thereby inflate
+  // the prescribed BID dose count. Fall back to the exact frequency's
+  // configured clocks when an unspecific meal window has more candidates
+  // than the explicitly prescribed daily frequency.
+  if (when.length === 1 && clocks.length === 0 &&
+      (when[0] === "C" || when[0] === "AC" || when[0] === "PC") &&
+      repeat.period === 1 && repeat.periodUnit === "d" &&
+      repeat.frequency !== undefined && entries.length !== repeat.frequency) {
+    return [];
+  }
+  for (const clock of clocks) entries.push({ time: normalizeClock(clock), dayShift: 0 });
+  if (clocks.length) entries.sort((a,b)=>a.dayShift-b.dayShift || a.time.localeCompare(b.time));
+  if (!entries.length && !clocks.length && (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit))
+    entries.push(...inferWhenFallbackEntries(when, repeat));
+  return entries;
+}
+/** Clock anchors restrict time within an eligible period; they do not erase its cadence. */
+function clockCadenceEligible(day: Date, anchor: Date, repeat: FhirTimingRepeat, timeZone: string, dayFiltered: boolean): boolean {
+  if (!repeat.period || !repeat.periodUnit || repeat.periodUnit === 'd' && repeat.period <= 1) return true;
+  if (repeat.periodUnit === 'wk' && !dayFiltered) {
+    const delta = getLocalDayNumber(day,timeZone)-getLocalDayNumber(anchor,timeZone);
+    return delta >= 0 && delta % (7*repeat.period) === 0;
+  }
+  if ((repeat.periodUnit === 'mo' || repeat.periodUnit === 'a') && !dayFiltered) {
+    const months=getLocalMonthIndex(day,timeZone)-getLocalMonthIndex(anchor,timeZone);
+    const period=repeat.period*(repeat.periodUnit === 'a' ? 12 : 1);
+    if (months<0 || months%period !== 0) return false;
+    return getTimeParts(day,timeZone).day === getTimeParts(addCalendarMonths(anchor,months,timeZone),timeZone).day;
+  }
+  return isDateAlignedToPeriodCycle(day,anchor,repeat,timeZone);
+}
 
 
 /**
@@ -3919,6 +4003,44 @@ const { resolveExplicitClockEntries, clockCadenceEligible } = createTimingPrimit
  * "orderedAt" is required for relative multi-phase regimens, so a later
  * "from" query does not shift the treatment's start date.
  */
+/** An unanchored interval successor starts one interval after a point event. */
+function successorIntervalStart(
+  dosage: FhirDosage, predecessorPoint: Date | undefined, fallback: Date, zone: string
+): Date {
+  const repeat = dosage.timing?.repeat;
+  if (predecessorPoint && repeat?.period && repeat.periodUnit &&
+      !repeat.when?.length && !repeat.timeOfDay?.length && !repeat.dayOfWeek?.length &&
+      !dosage.timing?.code?.coding?.length) {
+    return createIntervalStepper({
+      period: repeat.period / (repeat.frequency ?? 1), periodUnit: repeat.periodUnit
+    }, zone)?.(predecessorPoint) ?? fallback;
+  }
+  return fallback;
+}
+
+/** Completion of a finite administration count, independent of query window. */
+function finiteAdministrationCompletion(
+  dosage: FhirDosage,
+  start: Date,
+  options: NextDueDoseOptions,
+  zone: string
+): { end: Date; point: boolean } | undefined {
+  const repeat = dosage.timing?.repeat;
+  if (!repeat) return undefined;
+  const count = repeat.count ?? (arrayIncludes(repeat.when ?? [], EventTiming.Immediate) ? 1 : undefined);
+  if (count === undefined || !Number.isInteger(count) || count <= 0 ||
+      repeat.countMax !== undefined && repeat.countMax !== count) return undefined;
+  const due = nextDueDoses(dosage, { ...options, from: start, orderedAt: start, limit: count });
+  if (due.length !== count) return undefined;
+  const last = new Date(due[due.length - 1]);
+  if (repeat.duration && repeat.durationUnit) {
+    const advance = createIntervalStepper({ period: repeat.duration, periodUnit: repeat.durationUnit }, zone);
+    const end = advance?.(last);
+    if (end) return { end, point: false };
+  }
+  return { end: last, point: true };
+}
+
 function scheduleRegimen(
   dosages: FhirDosage[],
   options: NextDueDoseOptions
@@ -3947,18 +4069,27 @@ function scheduleRegimen(
   const from = coerceDate(options.from, "from");
   let cursor = options.orderedAt !== undefined ? coerceDate(options.orderedAt, "orderedAt") : from;
   const output: RegimenDueTimes[] = [];
+  let predecessorPoint: Date | undefined;
   for (let phaseIndex = 0; phaseIndex < distinct.length; phaseIndex++) {
     const sequence = distinct[phaseIndex];
     const members = dosages.map((dosage, dosageIndex) => ({ dosage, dosageIndex }))
       .filter((_, index) => sequences[index] === sequence);
-    const memberStarts = members.map(({ dosage }) =>
-      resolveRepeatBoundsStart(dosage.timing?.repeat, zone) ?? cursor);
+    const memberStarts = members.map(({ dosage }) => {
+      const repeat = dosage.timing?.repeat;
+      const explicit = resolveRepeatBoundsStart(repeat, zone);
+      if (explicit) return explicit;
+      return successorIntervalStart(dosage, predecessorPoint, cursor, zone);
+    });
     const phaseStart = memberStarts.reduce((earliest, start) =>
       start < earliest ? start : earliest, cursor);
     for (let memberIndex = 0; memberIndex < members.length; memberIndex++) {
       const member = members[memberIndex];
       const memberStart = memberStarts[memberIndex];
-      const startWindow = from > memberStart ? from : memberStart;
+      let startWindow = from > memberStart ? from : memberStart;
+      if (predecessorPoint && startWindow <= predecessorPoint &&
+          !arrayIncludes(member.dosage.timing?.repeat?.when ?? [], EventTiming.Immediate)) {
+        startWindow = new Date(predecessorPoint.getTime() + 1);
+      }
       output.push({
         dosageIndex: member.dosageIndex,
         sequence,
@@ -3971,21 +4102,27 @@ function scheduleRegimen(
       });
     }
     if (phaseIndex + 1 >= distinct.length) continue;
-    const ends = members.map(({ dosage }, memberIndex) => {
+    const completions = members.map(({ dosage }, memberIndex) => {
       const repeat = dosage.timing?.repeat;
-      if (!repeat) return null;
+      if (!repeat) return undefined;
       const start = memberStarts[memberIndex];
-      return earlierDate(
+      const bound = earlierDate(
         resolveRepeatDurationCapEnd(repeat, start, zone),
         resolveRepeatBoundsEndExclusive(repeat, zone)
       );
+      const counted = finiteAdministrationCompletion(dosage, start, options, zone);
+      if (bound && (!counted || bound <= counted.end)) return { end: bound, point: false };
+      return counted;
     });
-    // A later sequential phase without a known transition point stays visible
-    // in the parsed regimen, but this timestamp query returns the schedulable
-    // prefix rather than rejecting the whole course or inventing a cutover.
-    if (ends.some(date => !date)) break;
-    cursor = ends.reduce<Date>((latest, date) => date && date > latest ? date : latest, phaseStart);
-    if (cursor <= phaseStart) break;
+    // Finite counts and immediate point events are genuine completion facts,
+    // just like a course duration. An actually unbounded predecessor remains
+    // visible but does not acquire a fabricated completion time.
+    if (completions.some(value => !value)) break;
+    const latest = completions.reduce((left, right) =>
+      right && (!left || right.end > left.end) ? right : left, completions[0]);
+    if (!latest || latest.end < phaseStart) break;
+    cursor = latest.end;
+    predecessorPoint = latest.point ? latest.end : undefined;
   }
   return output.sort((a, b) => a.dosageIndex - b.dosageIndex);
 }

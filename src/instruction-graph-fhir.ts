@@ -115,6 +115,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueDecimal("confidence", frame.confidence));
   add(nested, valueCode("force", frame.force));
   add(nested, valueCode("polarity", frame.polarity));
+  add(nested, valueCode("polaritySource", frame.polaritySource));
   add(nested, valueCode("modality", frame.modality));
   add(nested, valueCode("relation", frame.relation));
   add(nested, valueString("predicateLemma", frame.predicate.lemma));
@@ -294,6 +295,7 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
     confidence: child(extension, "confidence")?.valueDecimal,
     polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
+    polaritySource: child(extension, "polaritySource")?.valueCode === "shared" ? "shared" : undefined,
     modality: child(extension, "modality")?.valueCode as AdviceModality | undefined,
     relation: child(extension, "relation")?.valueCode as AdviceRelation | undefined,
     predicate: {

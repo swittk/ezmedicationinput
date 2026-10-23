@@ -64,6 +64,16 @@ import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
 export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
+/** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
+export const ADMINISTRATION_OFFSET_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-administration-offset";
+
+export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | undefined {
+  const quantity = dosage.modifierExtension?.find(extension =>
+    extension.url === ADMINISTRATION_OFFSET_EXTENSION_URL)?.valueQuantity;
+  return quantity?.value !== undefined && Number.isFinite(quantity.value) &&
+    (quantity.code ?? quantity.unit) === "min" && !quantity.comparator ? quantity.value : undefined;
+}
+
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
 export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
 export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
@@ -845,6 +855,12 @@ export function canonicalToFhir(
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
+  if (schedule?.administrationOffsetMinutes !== undefined) {
+    dosage.modifierExtension = [{
+      url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: schedule.administrationOffsetMinutes, unit: "min", code: "min", system: "http://unitsofmeasure.org" }
+    }];
+  }
 
   if (schedule?.calendarEvents?.length) {
     dosage.timing = {
@@ -1340,6 +1356,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
+      administrationOffsetMinutes: getAdministrationOffsetMinutes(dosage),
       timingCode,
       count: repeat?.count,
       countMax: repeat?.countMax,
@@ -1730,8 +1747,11 @@ function projectHpsgClinicalQuantityToFhir(
   if (quantity.representation === "rate-quantity") {
     const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
     dosage.doseAndRate = [{
+      ...(quantity.projectedDose ? {
+        doseQuantity: { ...quantity.projectedDose, system: "http://unitsofmeasure.org", code: quantity.projectedDose.unit }
+      } : {}),
       rateQuantity: {
-        value: quantity.numerator.value,
+        value: quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
         unit,
         system: "http://unitsofmeasure.org",
         code: unit

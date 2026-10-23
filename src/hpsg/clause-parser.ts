@@ -1,5 +1,5 @@
 import { cycleScheduleRule } from "../regimen/cycles";
-import { openEndedScheduleRule } from "../regimen/open-ended";
+import { openEndedScheduleRule } from "./rules/timing-rules";
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";

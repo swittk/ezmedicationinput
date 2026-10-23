@@ -12,7 +12,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
-import { buildInstructionGraph } from "./instruction-graph";
+import { buildInstructionGraph, realizeInstructionAction } from "./instruction-graph";
 import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
@@ -328,19 +328,48 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
   const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
   for (const warning of directives) {
     const sourceText = warning.sourceText.trim();
-    const text = sourceText
-      ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-      : sourceText;
+    // The shared polarity of a coordinated verb belongs to the COMPOSED
+    // typed directive. Its raw daughter source ("drink ...") has no "not".
+    const sharedNegation = warning.polaritySource === "shared";
+    const composedWording = sharedNegation;
+    const text = composedWording
+      ? realizeInstructionAction(warning, "en")
+      : sourceText
+        ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+        : sourceText;
+    const translated = composedWording ? realizeInstructionAction(warning, "th") : undefined;
     const normalized = normalizedSafetyText(text);
     if (!normalized) continue;
-    const alreadyRepresentedByFrame = instructions.some((instruction) =>
+    const representedIndex = instructions.findIndex((instruction) =>
       instruction.frames?.some((frame) =>
-        frame.span.start === warning.span.start &&
-        frame.span.end === warning.span.end &&
-        frame.polarity === warning.polarity
+        frame.predicate.lemma === warning.predicate.lemma &&
+        frame.polarity === warning.polarity &&
+        frame.span.start < warning.span.end &&
+        warning.span.start < frame.span.end
       )
     );
-    if (alreadyRepresentedByFrame) continue;
+    if (representedIndex >= 0) {
+      // A coded combined safety instruction already semantically owns the
+      // daughter action. Keep that compound meaning instead of generating a
+      // redundant "do not chew" directive beside its coded equivalent.
+      const previous = instructions[representedIndex];
+      if (composedWording && !previous.coding?.code) {
+        instructions[representedIndex] = {
+          ...previous, text,
+          i18n: { ...(previous.i18n ?? {}), ...(translated ? { th: translated } : {}) }
+        };
+      } else if (warning.modality && !previous.coding?.code &&
+          normalizedSafetyText(sourceText).length > normalizedSafetyText(previous.text ?? "").length) {
+        // The typed modal owns the fuller source phrase. Preserve its
+        // relation and condition verbatim rather than realizing the partial
+        // daughter ("take with food" instead of "should take with food").
+        instructions[representedIndex] = {
+          ...previous,
+          text: sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+        };
+      }
+      continue;
+    }
     const overlapIndex = instructions.findIndex((instruction) => {
       const existing = normalizedSafetyText(instruction.text ?? "");
       return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
@@ -359,12 +388,13 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
         normalizedSafetyText(existing.text ?? "").length < normalized.length;
       instructions[overlapIndex] = {
         ...existing,
-        ...(shouldUseWarningText ? { text } : {}),
+        ...(shouldUseWarningText || composedWording ? { text } : {}),
+        ...(composedWording && translated ? { i18n: { ...(existing.i18n ?? {}), th: translated } } : {}),
         frames
       };
       continue;
     }
-    instructions.push({ text, frames: [warning] });
+    instructions.push({ text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning] });
   }
 }
 
