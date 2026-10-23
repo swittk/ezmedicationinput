@@ -905,8 +905,10 @@ describe("dose scheduling runtime guarantees", () => {
     const partial = parseSig(unresolved);
     expect(partial.input).toBe(unresolved);
     expect(partial.meta.canonical.clauses[0].rawText).toBe(unresolved);
+    expect(partial.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+    expect(partial.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
     expect(partial.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
-    expect(partial.meta.leftoverText).toBe(unresolved);
+    expect(partial.meta.leftoverText).toContain("days 0");
     expect(partial.fhirNext.repeatCycle).toBeUndefined();
     expect(partial.meta.canonical.clauses[0].evidence.some(evidence =>
       evidence.rule === "hpsg.lex.schedule.finiteCycle"

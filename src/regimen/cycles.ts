@@ -175,11 +175,6 @@ function contextCycles(context: HpsgClauseContext): CycleSchedule[] {
   if (!list) { list = recognizeCycles(context.state.input, context.options); BY_CONTEXT.set(context, list); }
   return list;
 }
-export function insideCycle(context: HpsgClauseContext, tokenIndex: number): boolean {
-  const token = context.tokens[tokenIndex];
-  return !!token && contextCycles(context).some(c =>
-    !c.error && c.start <= token.sourceStart && token.sourceStart < c.end);
-}
 /** Finite cycles emit exact events; recurring active/rest cycles emit their
  * typed active duration and whole-course repeat interval on the same sign. */
 export function cycleScheduleRule() {
@@ -209,6 +204,6 @@ export function cycleScheduleRule() {
     return [lexicalSign({ type: 'schedule-sign', rule: 'hpsg.lex.schedule.finiteCycle', tokens,
       synsem: { head: { schedule }, valence: {}, cont: { clauseKind: 'administration' } },
       scheduleFields,
-      score: 40 + tokens.length })];
+      score: 48 + tokens.length })];
   });
 }

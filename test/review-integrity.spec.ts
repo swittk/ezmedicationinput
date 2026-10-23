@@ -719,7 +719,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       const parsed = parseSig(input);
       expect(parsed.input).toBe(input);
       expect(parsed.meta.canonical.clauses[0].rawText).toBe(input);
-      expect(parsed.meta.leftoverText).toBe(input);
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+      expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+      expect(parsed.meta.leftoverText).toMatch(/\bdays?\s+\d/iu);
       expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
       expect(parsed.fhir[0].route?.text).toBe("by mouth");
       expect(parsed.fhirNext.repeatCycle).toBeUndefined();

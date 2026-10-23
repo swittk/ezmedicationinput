@@ -31,7 +31,10 @@ function countSynsemFeatures(sign: HpsgSign): number {
   if (head.method) count += 1;
   if (head.route) count += 1;
   if (head.dose) count += 1;
-  if (head.schedule) count += 1;
+  if (head.schedule) {
+    count += 1;
+    if (head.schedule.repeatCycle) count += 1;
+  }
   if (valence.site) count += valence.site.coordination ? 3 : 1;
   if (valence.prn) count += 1;
   if (valence.instructions?.length) count += 1;
@@ -232,6 +235,20 @@ export function parseHpsgChart<TContext extends HpsgChartContext>(
     if (isBetterSign(sign, best)) {
       best = sign;
     }
+  }
+
+  if (best?.synsem.head.dose && !best.synsem.head.dose.unit) {
+    let explicitDoseBest: HpsgSign | undefined;
+    for (const sign of signs) {
+      if (
+        seen.get(chartKey(sign)) === sign &&
+        sign.synsem.head.dose?.unit &&
+        isBetterSign(sign, explicitDoseBest)
+      ) {
+        explicitDoseBest = sign;
+      }
+    }
+    if (explicitDoseBest) best = explicitDoseBest;
   }
 
   return { signs, best };
