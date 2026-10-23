@@ -403,6 +403,15 @@ function shiftedRange(range: { start: number; end: number }, offset: number) {
 }
 
 function cloneAdviceFrame(frame: AdviceFrame, offset: number): AdviceFrame {
+  // Clone the locale records without Object.entries/fromEntries (our output
+  // target includes older mobile JavaScript engines).
+  const sourceLocales = frame.predicate.realizerConfig?.locales;
+  const locales = sourceLocales ? { ...sourceLocales } : undefined;
+  if (locales) {
+    for (const locale of Object.keys(locales)) {
+      locales[locale] = { ...locales[locale] };
+    }
+  }
   return {
     ...frame,
     predicate: {
@@ -411,11 +420,7 @@ function cloneAdviceFrame(frame: AdviceFrame, offset: number): AdviceFrame {
       realizerConfig: frame.predicate.realizerConfig
         ? {
           ...frame.predicate.realizerConfig,
-          locales: frame.predicate.realizerConfig.locales
-            ? Object.fromEntries(Object.entries(frame.predicate.realizerConfig.locales).map(
-              ([locale, config]) => [locale, { ...config }]
-            ))
-            : undefined
+          locales
         }
         : undefined,
       codings: frame.predicate.codings?.map(coding => ({ ...coding }))

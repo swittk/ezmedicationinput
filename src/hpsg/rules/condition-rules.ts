@@ -99,7 +99,7 @@ export function matchCalendarExclusion(
   const leadingWhitespace = rawSuffix.search(/\S/u);
   if (leadingWhitespace < 0) return undefined;
   const suffixStart = rawStart + leadingWhitespace;
-  const suffix = rawSuffix.slice(leadingWhitespace).trimEnd();
+  const suffix = rawSuffix.slice(leadingWhitespace).replace(/\s+$/u, "");
   const excluded: FhirDayOfWeek[] = [];
   const included = uniqueDays(source.slice(0, cue.index));
   let residual = suffix;
@@ -126,7 +126,7 @@ export function matchCalendarExclusion(
         " ".repeat(match.end - match.start) + residual.slice(match.end);
     }
   }
-  residual = residual.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, (value) => {
+  residual = residual.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, (value: string) => {
     const date = new Date(value + "T00:00:00Z");
     if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value) {
       dates.push(value);

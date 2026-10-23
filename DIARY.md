@@ -3,6 +3,27 @@
 > **PRODUCT CONTRACT — READ FIRST:** [AGENTS.md](AGENTS.md). EZMedInput is a **low-latency, clinician-reviewed medication SIG parser and suggester**, not an autonomous prescriber or exhaustive safety gate. Do not add special-case hard blockers for contrived language, repeatedly validate on the phone hot path, or erase partial clinical meaning. Fix embarrassing errors in ordinary/advertised HPSG semantics; preserve raw/FHIR data; clinicians edit and approve the suggestion. Reviewers must push back on proposals that redefine this product.
 
 
+## 2026-10-23 — HPSG semantic-ownership debt audit and cleanup
+
+Product contract: clinical SIG **suggester**; no autonomous-prescriber semantics, blanket quarantine, or data loss. Code is HPSG-first with a single downstream FHIR projection.
+
+The team and coordinator removed these genuine semantic repair passes from the PR:
+- `annotateCanonicalClinicalAdjuncts()` removed. Medication conditions and calendar exclusions enter typed `clinical-adjunct-sign` lexical rules and the HPSG chart/unification/feature-structure system, including Thai `ยกเว้นกรณี` and a conditional **elliptical phase** (`then BID only if BP >160`). The canonical adjunct is projected once to FHIR. No standalone post-clause guard parsing pass remains.
+- `propagateTrailingSharedSafety()` removed. A semicolon-terminal negative action is associated through typed instruction/coordination relations before FHIR lowering.
+- `propagateDateTransitionEventTiming()` removed. Sequence edges license transition starts and inherited clocks/events through typed regimen phases, before FHIR.
+- Sequenced administration-method inheritance moved out of FHIR mutation to typed canonical clauses.
+- Clinical exclusion lists and fronted conditional scope are owned by the HPSG boundary planner *before* boundary decisions; removed `candidate-adapter` post-decision segment stitching.
+
+Preserved the existing represented clinical meaning: full source tests **1866/1866**, built distribution tests **4/4**, and ESM/CJS+TypeScript declaration build pass. An independent 328-SIG baseline differential found one difference: the old parser erroneously treated `Mondays` as an anatomical site in `1 tablet twice daily with food except on Mondays`; dose, food timing, Monday exclusion and cadence were unchanged. No previously correct clinically meaningful fields were lost in that corpus. Cheap grammar cue selection skips constructing unnecessary adjunct signs for ordinary SIGs. Interleaved host performance comparison versus pre-refactor: ordinary BID ~0.97x, independent-eye taper ~1.02x, shared conditional ~1.07x, shared exclusion ~1.09x. The latter cases have some extra HPSG scope cost; monitor on-device, but there is no blanket normal-path validation pass.
+
+**Residual architectural debt — do not hide, and do not 'fix' by deleting functionality:**
+1. `applyClinicalConstraints()` in `src/clinical-safety.ts` still recognizes scalar daily/weekly maxima from source text and mutates `fhir.maxDosePerPeriod` after lowering. Move the *recognized maxima* to an HPSG clinical-quantity/schedule feature and lower them once, avoiding double lexical work.
+2. `normalizeTemporalBoundArtifacts()` and `normalizeOpenEndedSchedule()` in `src/regimen/regimen.ts` still normalize some canonical/FHIR timing after lowering. Make their existing semantics typed before projection; preserve recurring courses, annotations and source provenance.
+3. FHIR-aware coalescing in `mergeParseResults` / `canMergeTimingOnly` remains a compatibility/IR concern. Do not rewrite solely for ideology: first prove concrete ordinary SIG regressions and benchmark mobile cost. The semantics above are already protected by canonical HPSG tests.
+4. Pure FHIR serializer helpers and formatting from already-decided clinical meaning are **not** semantic debt.
+
+No extra parser refusal or post-FHIR safety veto is warranted from this audit.
+
 ## 2026-10-23 — HPSG-first clinical scope / no downstream FHIR repair
 
 Moved local condition and exclusion recognition onto typed `CanonicalSigClause.clinicalAdjuncts` **before HPSG coordination**. The existing Boolean/clinical-calendar recognizers only supply typed local facts with source evidence; HPSG's licensed coordination construction determines which daughter receives shared condition, excluded dates or excluded weekdays. FHIR now projects those decisions once from the canonical clause. Deleted the old `propagateCoordinatedSharedConstraints()` pass that copied conditions/exclusions/weekday events between already-lowered FHIR dosages and regenerated text. Also moved licensed trailing shared-duration semantics into the typed regimen/coordination layer before projection, removing its FHIR mutation pass.

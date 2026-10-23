@@ -33,6 +33,7 @@ import {
 } from "./rules/instruction-rules";
 import {
   calendarExclusionLexicalRule,
+  containsCalendarExclusionCue,
   conditionLexicalRule,
   getConditionFeatures,
   medicationGuardLexicalRule
@@ -106,11 +107,17 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
     combine: (_context, left, right) =>
       combineSigns(left, right, context.deps, "hpsg.phrase.unify-adjacent")
   };
+  // Only install clinical-adjunct constructions when lexical surface cues
+  // occur. Ordinary BID/eye/route SIGs pay no extra sign/chart cost.
+  const source = context.state.input;
+  const hasMedicationGuardLead =
+    /\b(?:only\s+if|unless|if)\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้น\s*กรณี/iu.test(source);
+  const hasCalendarExclusion = containsCalendarExclusionCue(source);
   return {
     lexicalRules: [
       conditionLexicalRule(),
-      medicationGuardLexicalRule(),
-      calendarExclusionLexicalRule(),
+      ...(hasMedicationGuardLead ? [medicationGuardLexicalRule()] : []),
+      ...(hasCalendarExclusion ? [calendarExclusionLexicalRule()] : []),
       ...[
       directiveMarkerLexicalRule(),
       methodLexicalRule(),
