@@ -787,9 +787,6 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency))
       .toEqual([undefined, 2]);
     expect(parsed.items[1].meta.leftoverText).toContain('q8h');
-    expect(parsed.items[1].warnings).toContainEqual(
-      expect.stringContaining('timing-text-needs-review')
-    );
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(false);

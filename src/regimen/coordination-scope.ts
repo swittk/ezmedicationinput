@@ -65,7 +65,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   recurrence: [
     'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
     'period', 'periodMax', 'periodUnit', 'dayOfWeek', 'timeOfDay',
-    'occurrenceCap'
+    'occurrenceCap', 'maxDosePerPeriod'
   ],
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
   courseBounds: ['duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd'],
@@ -89,7 +89,7 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
-  'activityTiming', 'occurrenceCap'
+  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]
@@ -119,6 +119,9 @@ function cloneScheduleField(
   }
   if (field === 'calendarEvents') {
     return schedule.calendarEvents?.map(item => ({ ...item }));
+  }
+  if (field === 'maxDosePerPeriod') {
+    return schedule.maxDosePerPeriod?.map(item => ({ ...item }));
   }
   return [...value];
 }
@@ -252,7 +255,7 @@ function scheduleEvidenceGroups(rule: string): readonly ScheduleFeatureGroup[] {
   if (/administrationDuration/iu.test(rule)) return ['administrationDuration'];
   if (/duration/iu.test(rule)) return ['courseBounds'];
   if (/calendarDateList/iu.test(rule)) return ['courseBounds', 'calendarEvents'];
-  if (/occurrenceCap|count|frequency|interval|timing|clock|weekday/iu.test(rule)) {
+  if (/occurrenceCap|maximumDose|count|frequency|interval|timing|clock|weekday/iu.test(rule)) {
     return ['recurrence'];
   }
   return [];

@@ -227,7 +227,30 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
       context.options,
       context.dateSpans
     );
-    if (!exclusion || !tokenContainsOffset(context, start, exclusion.start)) return [];
+    if (!exclusion) {
+      const range = {
+        start: lead.sourceStart,
+        end: context.state.input.indexOf(";", lead.sourceStart) >= 0
+          ? context.state.input.indexOf(";", lead.sourceStart)
+          : context.state.input.length
+      };
+      const tokens = overlappingAvailableTokens(context, range.start, range.end);
+      if (!tokens.length) return [];
+      return [clinicalAdjunctSign(
+        "hpsg.lex.clinical.calendar-exclusion.unresolved",
+        context,
+        tokens,
+        {
+          unresolved: true,
+          localRanges: [range],
+          evidence: [{
+            rule: "hpsg.lex.clinical.calendar-exclusion.unresolved",
+            ranges: [range]
+          }]
+        }
+      )];
+    }
+    if (!tokenContainsOffset(context, start, exclusion.start)) return [];
     const tokens = overlappingAvailableTokens(context, exclusion.start, exclusion.end);
     if (!tokens.length) return [];
     return [clinicalAdjunctSign("hpsg.lex.clinical.calendar-exclusion", context, tokens, {

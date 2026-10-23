@@ -1425,6 +1425,14 @@ export interface CanonicalOccurrenceCapExpr {
   periodUnit: FhirPeriodUnit;
 }
 
+/** Explicit maximum medication quantity within a recurring period. */
+export interface CanonicalDosePeriodMaximumExpr {
+  amount: number;
+  unit: string;
+  period: number;
+  periodUnit: FhirPeriodUnit;
+}
+
 export interface CanonicalActivityTimingExpr {
   relation: "before" | "after";
   activity: {
@@ -1490,6 +1498,8 @@ export interface CanonicalScheduleExpr {
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
   occurrenceCap?: CanonicalOccurrenceCapExpr;
+  /** Quantity cap, distinct from occurrenceCap's maximum administration count. */
+  maxDosePerPeriod?: CanonicalDosePeriodMaximumExpr[];
   evidence?: CanonicalEvidence[];
 }
 

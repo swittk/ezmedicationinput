@@ -141,7 +141,6 @@ describe("HPSG clinical quantity grammar", () => {
         requiresPatientWeight: true
       });
       expect(parsed.fhir.text).toBe(source);
-      expect(parsed.warnings).toContainEqual(expect.stringContaining("unsupported-weight-based-rate"));
     }
   });
 

@@ -477,7 +477,8 @@ function mergeSchedule(
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
     calendarEvents: appendUniqueStructured(left.calendarEvents, right.calendarEvents),
     activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),
-    occurrenceCap: left.occurrenceCap ?? right.occurrenceCap
+    occurrenceCap: left.occurrenceCap ?? right.occurrenceCap,
+    maxDosePerPeriod: appendUniqueStructured(left.maxDosePerPeriod, right.maxDosePerPeriod)
   };
 }
 
@@ -512,6 +513,7 @@ function mergeClinicalAdjunct(
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
     includedWeekdays: appendUnique(left.includedWeekdays, right.includedWeekdays),
+    unresolved: left.unresolved || right.unresolved ? true : undefined,
     localRanges: appendUniqueStructured(left.localRanges, right.localRanges) ?? [],
     evidence: appendUniqueStructured(left.evidence, right.evidence) ?? []
   };

@@ -103,7 +103,7 @@ interface IntlDateTimeFormatOptionsExtended extends Intl.DateTimeFormatOptions {
 }
 
 interface DateTimeFormatWithParts {
-  formatToParts?: (date: Date) => DateTimeFormatPart[];
+  formatToParts?: (date?: number | Date) => DateTimeFormatPart[];
 }
 
 /** Simple zero-padding helper for numeric components. */

@@ -5,6 +5,7 @@ import {
   CanonicalAdditionalInstructionExpr,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
+  CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   AdministrationTargetCoordinationKind,
   BodySiteSpatialRelation,
@@ -159,6 +160,8 @@ export interface HpsgClinicalAdjunctFeature {
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];
   includedWeekdays?: FhirDayOfWeek[];
+  /** Recognized adjunct boundary whose payload remains intentionally editable. */
+  unresolved?: true;
   localRanges: TextRange[];
   evidence: Array<{ rule: string; ranges: TextRange[] }>;
 }
@@ -254,6 +257,7 @@ export interface HpsgScheduleFeature {
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
   occurrenceCap?: CanonicalOccurrenceCapExpr;
+  maxDosePerPeriod?: CanonicalDosePeriodMaximumExpr[];
 }
 
 export interface HpsgSynsem {

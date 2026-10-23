@@ -280,6 +280,7 @@ function cleanupClause(state: ParserState): void {
       schedule.offsetMax === undefined &&
       !schedule.activityTiming?.length &&
       schedule.occurrenceCap === undefined &&
+      !schedule.maxDosePerPeriod?.length &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&

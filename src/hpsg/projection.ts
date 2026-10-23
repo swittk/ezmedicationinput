@@ -78,6 +78,9 @@ function applySchedule(
   if (schedule.occurrenceCap !== undefined) {
     state.occurrenceCap = { ...schedule.occurrenceCap };
   }
+  if (schedule.maxDosePerPeriod?.length) {
+    state.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({ ...maximum }));
+  }
   if (schedule.activityTiming?.length) {
     const existing = state.activityTiming ? state.activityTiming.slice() : [];
     for (const item of schedule.activityTiming) {
@@ -226,6 +229,9 @@ function applyClinicalAdjunct(
     }
     acceptedRules.add("hpsg.lex.clinical.calendar-exclusion");
   }
+  if (adjunct.unresolved && hasAdministration) {
+    acceptedRules.add("hpsg.lex.clinical.calendar-exclusion.unresolved");
+  }
 
   const localRanges = clinical.localRanges ?? [];
   const evidence = clinical.evidence ?? [];
@@ -244,6 +250,10 @@ function applyClinicalAdjunct(
       stableStructureKey(candidate.spans) === stableStructureKey(spans)
     )) evidence.push({ rule: item.rule, spans });
     for (const range of item.ranges) appendRange(localRanges, range);
+    if (item.rule === "hpsg.lex.clinical.calendar-exclusion.unresolved") {
+      // Provenance is accepted, but unresolved words remain editable/lintable.
+      for (const range of item.ranges) appendRange(rejectedRanges, range);
+    }
   }
   if (acceptedRules.size) {
     clinical.localRanges = localRanges;

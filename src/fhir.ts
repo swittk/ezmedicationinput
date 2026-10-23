@@ -42,6 +42,7 @@ import {
   AdvicePolarity,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
+  CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
@@ -198,6 +199,29 @@ export function getTimingOccurrenceCap(
   const mappedUnit = periodUnit as FhirPeriodUnit;
   if (["s", "min", "h", "d", "wk", "mo", "a"].indexOf(mappedUnit) < 0) return undefined;
   return { max, period, periodUnit: mappedUnit };
+}
+
+function canonicalDosePeriodMaximums(
+  dosage: FhirDosage
+): CanonicalDosePeriodMaximumExpr[] | undefined {
+  const result: CanonicalDosePeriodMaximumExpr[] = [];
+  for (const ratio of dosage.maxDosePerPeriod ?? []) {
+    const amount = ratio.numerator?.value;
+    const unit = ratio.numerator?.unit ?? ratio.numerator?.code;
+    const period = ratio.denominator?.value;
+    const rawPeriodUnit = ratio.denominator?.code ?? ratio.denominator?.unit;
+    if (amount === undefined || !Number.isFinite(amount) || amount <= 0 || !unit ||
+        period === undefined || !Number.isFinite(period) || period <= 0 ||
+        !rawPeriodUnit ||
+        ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(rawPeriodUnit) < 0) continue;
+    result.push({
+      amount,
+      unit,
+      period,
+      periodUnit: rawPeriodUnit as FhirPeriodUnit
+    });
+  }
+  return result.length ? result : undefined;
 }
 
 function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
@@ -834,6 +858,18 @@ export function canonicalToFhir(
     hasRepeat = true;
   }
 
+  if (schedule?.maxDosePerPeriod?.length) {
+    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({
+      numerator: { value: maximum.amount, unit: maximum.unit },
+      denominator: {
+        value: maximum.period,
+        unit: maximum.periodUnit,
+        system: UCUM_SYSTEM,
+        code: maximum.periodUnit
+      }
+    }));
+  }
+
   normalizeClockFrequency(repeat);
   if (hasRepeat) {
     dosage.timing = {
@@ -1156,12 +1192,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const timingBounds = extractCanonicalTimingBounds(repeat);
   const activityTiming = parseActivityTimingExtensions(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
+  const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   if (
     timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
     occurrenceCap !== undefined ||
+    maxDosePerPeriod?.length ||
     repeat?.boundsDuration ||
     repeat?.boundsPeriod?.start ||
     repeat?.boundsPeriod?.end ||
@@ -1206,6 +1244,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offsetMax: offsetMaxExtension,
       activityTiming,
       occurrenceCap,
+      maxDosePerPeriod,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
@@ -1352,6 +1391,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  state.maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   state.siteText = getFallbackSiteText(dosage.site);

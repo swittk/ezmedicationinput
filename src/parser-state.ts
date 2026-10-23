@@ -322,6 +322,14 @@ export class ParserState {
     this.ensureSchedule().occurrenceCap = value;
   }
 
+  get maxDosePerPeriod() {
+    return this.clause.schedule?.maxDosePerPeriod;
+  }
+
+  set maxDosePerPeriod(value) {
+    this.ensureSchedule().maxDosePerPeriod = value;
+  }
+
   get timingCode(): string | undefined {
     return this.clause.schedule?.timingCode;
   }

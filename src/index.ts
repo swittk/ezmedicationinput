@@ -3,7 +3,6 @@ import {
   DOSAGE_DETAILS_R5_URL,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
-import { applyClinicalConstraints } from "./clinical-safety";
 import { projectParallelRegimen } from "./regimen/parallel-course";
 import { recognizeCycles } from "./regimen/cycles";
 import {
@@ -676,9 +675,6 @@ export function parseSig(input: string, options?: ParseOptions): ParseBatchResul
 
   const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
   composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
-  for (let index = 0; index < rawResults.length; index++) {
-    applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
-  }
   let results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
@@ -756,10 +752,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   composeRegimenPhases(lintParseResults, resultSegments, projectedGraph, options, formatSig);
   for (let index = 0; index < lintParseResults.length; index++) {
     const segment = resultSegments[index];
-    const parsed = applyClinicalConstraints(lintParseResults[index], segment.text, options);
-    results[index].issues = results[index].issues.filter(issue =>
-      !issue.range || !parsed.ownedRanges.some(range => range.start <= issue.range!.start && range.end >= issue.range!.end)
-    );
     for (const warning of lintParseResults[index].warnings) {
       if (!warning.startsWith("Unresolved schedule")) continue;
       if (results[index].issues.some(issue => issue.message === warning)) continue;
@@ -857,9 +849,6 @@ export async function parseSigAsync(
 
   const projectedGraph = expandRegimenGraphMembers(outputRegimenGraph, projectionCounts);
   composeRegimenPhases(rawResults, resultSegments, projectedGraph, options, formatSig);
-  for (let index = 0; index < rawResults.length; index++) {
-    applyClinicalConstraints(rawResults[index], resultSegments[index].text, options);
-  }
   let results = rawResults;
   const compatibilityPrimary = resolvePrimaryParseResult(results, input, options);
   const parallel = projectParallelRegimen(results, resultSegments, boundaryPlan, input);
@@ -1325,34 +1314,6 @@ function buildParseResult(
   );
   const clause = getPrimaryClause(canonicalClauses, state.input);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
-  // The typed HPSG clinical-quantity feature carries richer dose/rate units
-  // than the ordinary text realizer. Keep the prescriber's *exact* source
-  // display until a lossless rich-quantity realizer exists. No source reparse
-  // and no semantic mutation after FHIR lowering.
-  const hasUnrealizedLexicalTail = Boolean(
-    clause.leftovers?.length && !clause.instructionGraph?.actions.length
-  );
-  const typedRichQuantitySource = (clause.clinicalQuantity ||
-    clause.clinicalAdjuncts?.localRanges?.length ||
-    hasUnrealizedLexicalTail) && clause.rawText.trim()
-    ? clause.rawText : undefined;
-  let shortText = typedRichQuantitySource ??
-    formatCanonicalClause(clause, "short", localization, options);
-  let longText = typedRichQuantitySource ??
-    formatCanonicalClause(clause, "long", localization, options);
-  const fhir = canonicalToFhir(clause, longText, {
-    bodySitePostcoordination: options?.bodySitePostcoordination,
-    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
-  });
-  // Formatting inherited clinical adjuncts is a read-only realization of
-  // the already scoped canonical clause, never a FHIR-level semantic repair.
-  if (clause.clinicalAdjuncts && !clause.clinicalAdjuncts.localRanges?.length) {
-    delete fhir.text;
-    shortText = formatSig(fhir, "short", options);
-    longText = formatSig(fhir, "long", options);
-    fhir.text = longText;
-  }
-
   const graphUnderstoodSpans: TextRange[] = [];
   for (const candidate of canonicalClauses) {
     const graph = candidate.instructionGraph;
@@ -1362,10 +1323,52 @@ function buildParseResult(
       if (relation.span) graphUnderstoodSpans.push(relation.span);
     }
   }
-  const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
+  const sourceRangeUnderstoodByGraph = (value: { start: number; end: number }): boolean =>
     graphUnderstoodSpans.some((span) =>
-      span.start <= value.sourceStart && value.sourceEnd <= span.end
+      span.start <= value.start && value.end <= span.end
     );
+  const hasUnrealizedTypedConditionSource = clause.evidence.some((item) =>
+    item.rule === "hpsg.lex.condition"
+  ) && clause.leftovers.some((leftover) => !sourceRangeUnderstoodByGraph(leftover));
+  // Rich typed HPSG meaning keeps the clinician's exact wording as its primary
+  // realization. No source text is reparsed to make this choice.
+  const hasUnrealizedLexicalTail = Boolean(
+    clause.leftovers?.length && !clause.instructionGraph?.actions.length
+  );
+  const useOriginalText = Boolean(
+    clause.clinicalQuantity ||
+    clause.clinicalAdjuncts?.localRanges?.length ||
+    clause.schedule?.maxDosePerPeriod?.length ||
+    hasUnrealizedTypedConditionSource ||
+    hasUnrealizedLexicalTail
+  );
+  let shortText = useOriginalText
+    ? clause.rawText
+    : formatCanonicalClause(clause, "short", localization, options);
+  let longText = useOriginalText
+    ? clause.rawText
+    : formatCanonicalClause(clause, "long", localization, options);
+  // An adjunct inherited by a typed coordination construction has no local
+  // source span in this daughter. Realize that already-resolved meaning before
+  // the one FHIR projection instead of deleting and regenerating Dosage.text.
+  if (clause.clinicalAdjuncts && !clause.clinicalAdjuncts.localRanges?.length) {
+    const condition = clause.clinicalAdjuncts.condition;
+    if (condition) {
+      shortText = appendMedicationConditionText(shortText, condition, options);
+      longText = appendMedicationConditionText(longText, condition, options);
+    }
+    const excludedDates = clause.clinicalAdjuncts.excludedDates ?? [];
+    if (excludedDates.length) {
+      shortText = appendMedicationExcludedDatesText(shortText, excludedDates, options);
+      longText = appendMedicationExcludedDatesText(longText, excludedDates, options);
+    }
+  }
+  const fhir = canonicalToFhir(clause, longText, {
+    bodySitePostcoordination: options?.bodySitePostcoordination,
+    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+  });
+  const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
+    sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];
   const leftoverParts: string[] = [];
   for (const token of state.tokens) {

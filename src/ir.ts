@@ -210,6 +210,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) ||
     schedule.occurrenceCap !== undefined ||
+    Boolean(schedule.maxDosePerPeriod?.length) ||
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||

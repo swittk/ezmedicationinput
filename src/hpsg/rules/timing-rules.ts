@@ -1979,6 +1979,125 @@ function occurrenceCapPeriodAt(
   return undefined;
 }
 
+function maximumDosePeriodAt(
+  context: HpsgClauseContext,
+  start: number
+): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
+  const defined = occurrenceCapPeriodAt(context, start);
+  if (defined) return defined;
+
+  const connector = context.tokens[start];
+  const unitToken = context.tokens[start + 1];
+  if (!connector || !unitToken ||
+      context.state.consumed.has(connector.index) ||
+      context.state.consumed.has(unitToken.index)) return undefined;
+  const connectorLower = normalizeTokenLower(connector);
+  if (connectorLower !== "/" && connectorLower !== "per" && connectorLower !== "a") {
+    return undefined;
+  }
+  const unitLower = normalizeTokenLower(unitToken);
+  if (/^(?:day|d)$/u.test(unitLower)) {
+    return { tokens: [connector, unitToken], period: 1, periodUnit: FhirPeriodUnit.Day };
+  }
+  if (/^(?:week|wk)$/u.test(unitLower)) {
+    return { tokens: [connector, unitToken], period: 1, periodUnit: FhirPeriodUnit.Week };
+  }
+  if (unitLower !== "24") return undefined;
+  const hourToken = context.tokens[start + 2];
+  if (!hourToken || context.state.consumed.has(hourToken.index) ||
+      !/^(?:h|hr|hrs|hour|hours)$/u.test(normalizeTokenLower(hourToken))) return undefined;
+  return {
+    tokens: [connector, unitToken, hourToken],
+    period: 1,
+    periodUnit: FhirPeriodUnit.Day
+  };
+}
+
+/**
+ * A maximum medication quantity is a typed schedule adjunct, not another
+ * administration dose. The full lexical sign owns its source span so a
+ * trailing cap cannot be reparsed from Dosage.text after FHIR projection.
+ */
+export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.maximumDosePerPeriod", (context, start) => {
+    const first = context.tokens[start];
+    if (!first || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(first))) return [];
+    const lead = maximumCountLeadAt(context, start);
+    if (!lead) return [];
+
+    let cursor = start + lead.length;
+    const matched = [...lead];
+    const punctuation = context.tokens[cursor];
+    if (punctuation && !context.state.consumed.has(punctuation.index) &&
+        punctuation.original === ".") {
+      matched.push(punctuation);
+      cursor += 1;
+    }
+
+    const leadingPeriod = occurrenceCapPeriodAt(context, cursor);
+    const periodFirst = leadingPeriod?.tokens.length === 1
+      ? leadingPeriod
+      : undefined;
+    if (periodFirst) {
+      matched.push(...periodFirst.tokens);
+      cursor += periodFirst.tokens.length;
+    }
+
+    const valueToken = context.tokens[cursor];
+    const unitToken = context.tokens[cursor + 1];
+    if (!valueToken || valueToken.kind !== LexKind.Number ||
+        valueToken.value === undefined || !Number.isFinite(valueToken.value) ||
+        valueToken.value <= 0 || !unitToken ||
+        context.state.consumed.has(valueToken.index) ||
+        context.state.consumed.has(unitToken.index)) return [];
+    const unitSurface = normalizeTokenLower(unitToken);
+    // `tablets/day` remains one lossless lexical token; split only this
+    // explicitly bounded dimensional suffix inside the maximum construction.
+    const compactUnitPeriod = unitSurface.match(
+      /^(.+?)\/(day|d|week|wk|24h|24hr|24hrs|24hour|24hours)$/u
+    );
+    if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return [];
+    const unit = normalizeUnit(compactUnitPeriod?.[1] ?? unitSurface, context.options);
+    if (!unit) return [];
+    matched.push(valueToken, unitToken);
+    cursor += 2;
+
+    const compactPeriod = compactUnitPeriod
+      ? {
+          tokens: [] as Token[],
+          period: 1,
+          periodUnit: /^(?:week|wk)$/u.test(compactUnitPeriod[2])
+            ? FhirPeriodUnit.Week
+            : FhirPeriodUnit.Day
+        }
+      : undefined;
+    const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
+    if (!period) return [];
+    if (!periodFirst) matched.push(...period.tokens);
+
+    return [lexicalSign({
+      type: "schedule-sign",
+      rule: "hpsg.lex.schedule.maximumDosePerPeriod",
+      tokens: matched,
+      synsem: {
+        head: {
+          schedule: {
+            maxDosePerPeriod: [{
+              amount: valueToken.value,
+              unit,
+              period: period.period,
+              periodUnit: period.periodUnit
+            }]
+          }
+        },
+        valence: {},
+        cont: { clauseKind: "administration" }
+      },
+      score: 35 + matched.length
+    })];
+  });
+}
+
 export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.limit", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];

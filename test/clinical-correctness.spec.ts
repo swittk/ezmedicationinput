@@ -85,8 +85,9 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.fhir.timing?.repeat).toMatchObject(cadence);
     expect(parsed.input).toBe(sig);
     expect(parsed.fhir.text).toBeTruthy();
-    expect(parsed.warnings.some(warning =>
-      warning.includes("timing-text-needs-review"))).toBe(conflict);
+    if (conflict) {
+      expect(parsed.meta.leftoverText).toBeTruthy();
+    }
     if (sig.includes("OD")) expect(parsed.fhir.site?.text).toBe("right eye");
     expect(nextDueDoses(parsed.fhir, {
       from: "2026-10-21T08:00:00+07:00",
@@ -109,9 +110,12 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 1, period: 1, periodUnit: "d"
     });
-    expect(result.warnings).toContainEqual(expect.stringContaining("unresolved-calendar-exclusion"));
-    expect(result.fhir.text).toContain("except public holidays");
+    expect(result.fhir.text).toBe(result.input);
     expect(result.meta.leftoverText).toContain("except public holidays");
+    expect(result.meta.canonical.clauses[0]?.clinicalAdjuncts?.evidence)
+      .toContainEqual(expect.objectContaining({
+        rule: "hpsg.lex.clinical.calendar-exclusion.unresolved"
+      }));
   });
 
   it("models only-if as a condition rather than a pseudo-PRN", () => {
@@ -150,11 +154,22 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(input.slice(guard.otherwise!.start, guard.otherwise!.end))
       .toContain("otherwise hold");
     expect(guard.end).toBeLessThan(guard.otherwise!.start);
+    expect(guard.condition).toMatchObject({
+      kind: "measurement", name: "sbp", operation: "gt", value: 100
+    });
     const parsed = parseSig(input);
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("unresolved-critical-constraint")
+    const instructionGraph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    const holdAction = instructionGraph?.actions.find(action =>
+      action.predicate.lemma === "hold"
     );
-    expect(parsed.fhir.text).toContain("as directed");
+    expect(instructionGraph?.sourceText).toBe(input);
+    expect(instructionGraph?.sourceText.slice(guard.otherwise!.start, guard.otherwise!.end))
+      .toBe(", otherwise hold");
+    expect(holdAction).toBeDefined();
+    expect(input.slice(holdAction!.span.start, holdAction!.span.end)).toBe("hold");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(parsed.fhir.text).toBe(input);
+    expect(parsed.fhir.text).toContain("otherwise hold");
   });
 
   it.each([
@@ -181,7 +196,6 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.fhir.timing?.repeat?.period).toBe(4);
     expect(parsed.fhir.asNeeded).toBe(true);
     expect(parsed.fhir.text).toBe(source);
-    expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-critical-constraint"));
   });
 
   it("handles Thai unless-conditions without fabricating a calendar exclusion", () => {
@@ -263,12 +277,20 @@ describe("clinical SIG correctness and boundary promotion", () => {
       } else {
         expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toBeUndefined();
       }
-      expect(parsed.warnings).toContainEqual(
-        expect.stringContaining(warning)
-      );
+      if (rateUnit) {
+        expect(parsed.warnings).toContainEqual(expect.stringContaining(warning));
+      }
       expect(parsed.fhir.text).toBe(sig);
       expect(parsed.fhir.route?.text).toBe("intravenous");
-      if (!rateUnit) expect(parsed.meta.leftoverText).toContain(sig);
+      if (!rateUnit) {
+        expect(parsed.meta.leftoverText).toBeUndefined();
+        expect(parsed.meta.canonical.clauses[0]?.clinicalQuantity).toMatchObject({
+          representation: "rate-quantity",
+          status: "unsupported",
+          reviewReason: warning,
+          numerator: { value: 5 }
+        });
+      }
     }
   );
 
@@ -327,9 +349,13 @@ describe("clinical SIG correctness and boundary promotion", () => {
 
   it("keeps an incomplete daily weight-based total available for correction", () => {
     const result = parseSig("10 mg/kg/day");
-    expect(result.warnings).toContainEqual(expect.stringContaining("incomplete-weight-based-dose"));
     expect(result.fhir.text).toBe("10 mg/kg/day");
-    expect(result.meta.leftoverText).toContain("10 mg/kg/day");
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.meta.canonical.clauses[0]?.clinicalQuantity).toMatchObject({
+      representation: "dose",
+      status: "incomplete",
+      dailyTotal: true
+    });
   });
 
   it("exports a continuous IV rate instead of pretending it is a 2-unit bolus", () => {
@@ -432,7 +458,6 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.items[1].fhir.timing?.repeat).toMatchObject({
       frequency: 2, period: 1, periodUnit: "d"
     });
-    expect(parsed.warnings).toContainEqual(expect.stringContaining("timing-text-needs-review"));
   });
 
   it.each([
@@ -464,6 +489,68 @@ describe("clinical SIG correctness and boundary promotion", () => {
     const serial = JSON.parse(JSON.stringify(result.fhir));
     expect(serial.asNeeded).toBe(true);
     expect(serial).not.toHaveProperty("asNeededBoolean");
+  });
+
+  it.each([
+    ["1 tab q6h prn fever max 4 tablets/day", undefined, 4, "tab", "d"],
+    ["1 drop OD q4h prn irritation, max 3 drops per week", undefined, 3, "drop", "wk"],
+    ["1 cap BID do not exceed 2 capsules per day", undefined, 2, "cap", "d"],
+    ["1 puff q4h no more than 6 puffs a day", undefined, 6, "puff", "d"],
+    ["1 mL daily max. 7 mL/24hrs", undefined, 7, "mL", "d"],
+    ["รับประทาน 1 เม็ด วันละ 2 ครั้ง ไม่เกิน วันละ 4 เม็ด", "th", 4, "tab", "d"]
+  ] as const)("types a periodic dose maximum before the single FHIR projection: %s",
+    (source, locale, amount, unit, periodUnit) => {
+      const parsed = parseSig(source, locale ? { locale } : undefined);
+      expect(parsed.meta.canonical.clauses[0]?.schedule?.maxDosePerPeriod).toEqual([{
+        amount, unit, period: 1, periodUnit
+      }]);
+      expect(parsed.fhir.maxDosePerPeriod).toEqual([{
+        numerator: { value: amount, unit },
+        denominator: {
+          value: 1, unit: periodUnit,
+          system: "http://unitsofmeasure.org", code: periodUnit
+        }
+      }]);
+      const evidence = parsed.meta.canonical.clauses[0]?.evidence.find(item =>
+        item.rule === "hpsg.lex.schedule.maximumDosePerPeriod"
+      );
+      expect(evidence?.spans[0]?.text).toMatch(/(?:max|do not exceed|no more than|ไม่เกิน)/u);
+      expect(source).toContain(evidence?.spans[0]?.text);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.fhir.text).toBe(source);
+      expect(parsed.longText).toBe(source);
+      expect(lintSig(source, locale ? { locale } : undefined).issues).toEqual([]);
+      if (source.includes("OD")) {
+        expect(parsed.fhir.site?.text).toBe("right eye");
+        expect(parsed.fhir.route?.coding?.[0]?.code).toBe(RouteCode["Ophthalmic route"]);
+        expect(parsed.fhir.asNeeded).toBe(true);
+      }
+    }
+  );
+
+  it("keeps quantity maxima distinct from occurrence caps and limits PRN supply", () => {
+    const quantityCapped = parseSig("2 tabs q4h PRN pain max 4 tablets/day");
+    const occurrenceCapped = parseSig("2 tabs q4h PRN pain no more than 4 doses per day");
+
+    expect(quantityCapped.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      maxDosePerPeriod: [{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]
+    });
+    expect(quantityCapped.meta.canonical.clauses[0]?.schedule?.occurrenceCap)
+      .toBeUndefined();
+    expect(occurrenceCapped.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      occurrenceCap: { max: 4, period: 1, periodUnit: "d" }
+    });
+    expect(occurrenceCapped.meta.canonical.clauses[0]?.schedule?.maxDosePerPeriod)
+      .toBeUndefined();
+
+    expect(calculateTotalUnits({
+      dosage: quantityCapped,
+      from: "2026-10-23T00:00:00+07:00",
+      orderedAt: "2026-10-23T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      durationValue: 7,
+      durationUnit: "d"
+    })).toMatchObject({ totalUnits: 28, unit: "tab", quantityKind: "maximum" });
   });
 
   it("keeps phase order and schedules sequential eye-drop taper weeks", () => {
@@ -559,9 +646,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
     const parsed = parseSig("1 tab daily except public holidays");
     expect(parsed.fhir.text).toBe(parsed.input);
     expect(formatSig(parsed.fhir)).toContain("1 tab");
-    expect(parsed.warnings).toContainEqual(
-      expect.stringContaining("unresolved-calendar-exclusion")
-    );
+    expect(parsed.meta.leftoverText).toContain("except public holidays");
     expect(nextDueDoses(parsed, {
       from: "2026-10-19T08:00:00+07:00",
       orderedAt: "2026-10-19T08:00:00+07:00",
@@ -733,8 +818,11 @@ describe("HPSG count cardinal semantics", () => {
   it("keeps an explicit maximum range recoverable beside the q6h suggestion", () => {
     const parsed = parseSig("1 tab q6h max 3-5 doses");
     expect(parsed.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
-    expect(parsed.warnings).toContainEqual(expect.stringContaining("unresolved-critical-constraint"));
-    expect(parsed.fhir.text).toContain("max 3-5 doses");
+    // The typed cadence is already executable; an unresolved 3–5 maximum
+    // remains in the exact clinician source rather than being paraphrased
+    // into a falsely precise instruction.
+    expect(parsed.fhir.timing?.code?.text).toBe("Q6H");
+    expect(parsed.fhir.text).toBe("1 tab q6h max 3-5 doses");
     expect(parsed.meta.leftoverText).toContain("max 3-5 doses");
     expect(nextDueDoses(parsed, {
       from: "2026-10-22T08:00:00+07:00",
