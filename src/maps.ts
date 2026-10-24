@@ -621,6 +621,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "302538001", display: "Entire upper arm" },
         text: "arm",
+        i18n: { th: "แขน" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -629,6 +630,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "368208006", display: "Left upper arm structure" },
         text: "left arm",
+        i18n: { th: "แขนซ้าย" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -637,12 +639,14 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "368209003", display: "Right upper arm" },
         text: "right arm",
+        i18n: { th: "แขนขวา" },
         routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["both arms", "bilateral arms"],
-      definition: { coding: { code: "69273007", display: "Both arms" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "69273007", display: "Both arms" },
+        text: "both arms", i18n: { th: "แขนทั้งสองข้าง" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["shoulder", "shoulders"],
@@ -658,15 +662,18 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     },
     {
       names: ["forearm"],
-      definition: { coding: { code: "14975008", display: "Forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "14975008", display: "Forearm" },
+        text: "forearm", i18n: { th: "ปลายแขน" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left forearm"],
-      definition: { coding: { code: "66480008", display: "Left forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "66480008", display: "Left forearm" },
+        text: "left forearm", i18n: { th: "ปลายแขนซ้าย" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right forearm"],
-      definition: { coding: { code: "64262003", display: "Right forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "64262003", display: "Right forearm" },
+        text: "right forearm", i18n: { th: "ปลายแขนขวา" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["elbow"],
@@ -700,6 +707,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" },
         text: "leg",
+        i18n: { th: "ขา" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -708,6 +716,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "213384005", display: "Entire left lower leg" },
         text: "left leg",
+        i18n: { th: "ขาซ้าย" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -716,12 +725,26 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "213289002", display: "Entire right lower leg" },
         text: "right leg",
+        i18n: { th: "ขาขวา" },
         routeHint: RouteCode["Topical route"]
       }
     },
     {
-      names: ["both legs", "bilateral legs"],
-      definition: { coding: { code: "40927001", display: "Both legs" }, routeHint: RouteCode["Topical route"] }
+      names: ["both legs", "bilateral legs", "legs"],
+      definition: { coding: { code: "40927001", display: "Both legs" },
+        text: "both legs", i18n: { th: "ขาทั้งสองข้าง" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["calf", "น่อง"],
+      definition: { text: "calf", i18n: { th: "น่อง" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["left calf", "น่องซ้าย"],
+      definition: { text: "left calf", i18n: { th: "น่องซ้าย" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["right calf", "น่องขวา"],
+      definition: { text: "right calf", i18n: { th: "น่องขวา" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["thigh", "ต้นขา"],

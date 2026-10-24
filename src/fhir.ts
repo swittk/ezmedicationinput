@@ -1190,7 +1190,12 @@ export function canonicalToFhir(
   if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation ||
       clause.site?.restrictions?.length) {
     const siteCoding = selectCanonicalSiteCoding(clause.site, options);
-    const siteTextElement = options?.includeTranslationExtensions
+    // A typed site coordination carries its own bilingual constituent meaning.
+    // Keep that meaning in the standard FHIR primitive translation extension
+    // even when the caller did not request additional translation metadata:
+    // FHIR has only one Dosage.site and cannot encode disjunction via codings.
+    const siteTextElement = options?.includeTranslationExtensions ||
+      (clause.administrationTargetGroup && clause.site?.i18n)
       ? buildTranslationPrimitiveElement(clause.site.i18n ?? siteCoding?.i18n)
       : undefined;
     const siteTargetCount =
@@ -1246,11 +1251,17 @@ export function canonicalToFhir(
     text: string;
     i18n?: Record<string, string>;
     coding?: { system?: string; code?: string; display?: string };
+    hasTypedEvidence?: boolean;
   }> = [];
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
     if (!text) continue;
-    additionalInstructions.push({ text, i18n: instruction.i18n, coding: instruction.coding });
+    additionalInstructions.push({
+      text,
+      i18n: instruction.i18n,
+      coding: instruction.coding,
+      hasTypedEvidence: Boolean(instruction.evidence?.length)
+    });
   }
   for (const action of clause.instructionGraph?.actions ?? []) {
     if (action.polarity !== AdvicePolarity.Negate) continue;
@@ -1266,7 +1277,13 @@ export function canonicalToFhir(
   if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
     for (const instruction of additionalInstructions) {
-      const textElement = options?.includeTranslationExtensions
+      // A typed, source-evidenced/coded adjunct carries authoritative localized
+      // meaning even without a locale request. Preserve its standard FHIR
+      // translation on default export. Loose untyped advice can contain an
+      // incomplete machine-composed label; keep that original text-only unless
+      // the caller explicitly requests translation extensions.
+      const textElement = (options?.includeTranslationExtensions ||
+        instruction.coding?.code || instruction.hasTypedEvidence) && instruction.i18n
         ? buildTranslationPrimitiveElement(instruction.i18n)
         : undefined;
       dosage.additionalInstruction.push({

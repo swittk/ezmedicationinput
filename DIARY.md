@@ -3155,3 +3155,52 @@ included. External HL7 validation and remote review are not claimed.
 Local evidence: /tmp/ezmed-finalfix-freeze-20261024.json,
 /tmp/ezmed-finalfix-perf-20261024.json, and the three final worker handoffs.
 No package version change, push, merge, publication, or consumer deployment.
+
+
+### 2026-10-24 16:49 +0700 — evidence-backed Thai locale realization through FHIR and typed sites
+
+This bounded completion repairs the prior local checkpoint 5b4d897 without new
+clinical execution semantics. Two read-only GPT-5.6 Sol / xhigh auditors independently
+confirmed the failure classes and posted to the existing shared BB.
+
+The HPSG already composed Thai abdomen-or-thigh and preserved anatomical OR,
+but default FHIR Dosage.site omitted the composed primitive translation when
+no parse locale was requested. The standard FHIR _text translation is now kept
+for typed site coordination by default, including strict R5 and R6 reload.
+The body-site lexicon gained properly localized arm/forearm/leg bilateral and
+laterality entries, allowing existing typed site coordination to distinguish
+either arm OR leg (one site choice, not simultaneous administrations), both
+arms AND legs (two separately coded site targets), and left forearm AND right
+calf (right calf kept deliberately **uncoded**, never equated to lower leg).
+The original clinical quantity, timings, and exact source remain intact.
+
+The Thai instruction renderer now falls back atomically to the complete
+source action only when a **nominal Object/Theme remains genuinely opaque**
+to existing argument localization; it does not splice a Thai verb onto an
+English opaque complement (e.g. 'rotate which site each night'). Typed
+quantity/manner/time/activity terms still translate normally. An initially
+overbroad fallback caused five real regressions in swallow-whole, chew, and
+tablet-manner cases; it was narrowed and all original controls recovered.
+
+Typed source-evidenced or coded clinical advice, such as 'until itching
+resolves', now retains its proper Thai translation through default FHIR
+additionalInstruction._text and strict round-trips. Unstructured free-form
+advice does not acquire a fabricated incomplete Thai translation extension,
+so 'use caution in storms' keeps its old exact text-only shape. The expression
+'stop unless rash returns' remains a complete editable unstructured English
+clause, not an invented executable symptom evaluator or half-translation.
+Likewise unsupported forehead/eyelid negatives remain source-preserved.
+
+Permanent regression oracles were added **only to already CodeRabbit-reviewed
+test files** (body-site grammar, instruction graph, advanced composition).
+Initial four site tests and one opaque-action test were RED before changes
+and GREEN after; final source suite **2476/2476** across 45 test files PASS
+(process proc-ecbca4a9-52db-4066-ac65-b21b32e19e2d).
+Latest npm run test:dist (process proc-153c154e-ea30-4f83-8665-3a564d036152)
+PASS: ESM/CJS, tsc declarations and packaged **4/4**.
+Direct rebuilt-package Thai formatting checked through default R5, R6,
+strict R5 conversion for sites and conditional course-end advice.
+CodeRabbit raw115 minus existing15 exclusions = **100 reviewable files**;
+no new review paths/exclusions. No src JSON.parse/JSON.stringify;
+no unrelated untracked diagnostic probe staged or edited.
+No push, merge, publication, deployment, or version bump.

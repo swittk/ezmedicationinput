@@ -1560,7 +1560,11 @@ describe("source-ordered course-end counseling", () => {
       fromFhirDosage(parsed.fhir, { locale: "th" }).longText
     ];
     for (const text of texts) {
-      const adjunct = text.search(/itching resolves|อาการคัน/u);
+      // The outcome adjunct was already typed and translated at HPSG time;
+      // saving to default R5 must not throw away that translation.
+      expect(text).toContain("ใช้ยาจนกว่าอาการคันจะหาย");
+      expect(text).not.toContain("itching resolves");
+      const adjunct = text.search(/อาการคัน/u);
       const action = text.search(/stop|หยุด/iu);
       expect(adjunct).toBeGreaterThanOrEqual(0);
       expect(action).toBeGreaterThan(adjunct);

@@ -751,3 +751,24 @@ describe("procedural instruction graph", () => {
   });
 
 });
+
+
+it("preserves a complete opaque complement instead of producing hybrid Thai action text", () => {
+  const source = "Apply 0.5 g to either arm or leg, not both; rotate which site each night.";
+  const parsed = parseSig(source);
+  const th = formatSig(parsed.fhir, "long", { locale: "th" });
+  expect(th).toContain("Rotate which site each night");
+  expect(th).not.toContain("สลับwhich");
+  const fromR5 = fromFhirDosage(parsed.fhir).meta.normalized;
+  expect(fromR5.instructionGraph?.actions[0]?.sourceText).toBe("rotate which site each night");
+  expect(formatSig(parsed.fhirNext, "long", { locale: "th" }))
+    .toContain("Rotate which site each night");
+
+  // Fully typed instructions continue to translate, rather than suddenly
+  // falling back to English as a response to an unrelated opaque object.
+  const translated = parseSig("Shake bottle before use, then rinse with water.");
+  expect(formatSig(translated.fhir, "long", { locale: "th" }))
+    .toContain("เขย่าขวดก่อนใช้");
+  expect(formatSig(translated.fhir, "long", { locale: "th" }))
+    .toContain("ล้างด้วยน้ำ");
+});

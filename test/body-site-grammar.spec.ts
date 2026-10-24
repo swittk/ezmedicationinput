@@ -12,6 +12,7 @@ import {
   type HpsgFeatureValue
 } from "../src/hpsg/type-system";
 import { parseSig } from "./helpers/r5-parser";
+import { formatSig, fromFhirDosage, toDosageDetails, toFhirR5Dosages } from "../src/index";
 
 function featureGraphHasType(
   value: HpsgFeatureValue,
@@ -170,4 +171,75 @@ it("localizes a symptom-qualified known body site without borrowing its SNOMED",
   const site = resolveBodySitePhrase("painful rash");
   expect(site?.coding).toBeUndefined();
   expect(site?.siteI18n?.th).toBe("บริเวณผื่นที่ปวด");
+});
+
+
+describe("typed site coordination Thai realization", () => {
+  it("retains typed disjunction translation across default R5 and R6 without a locale option", () => {
+    const source = "ฉีดอินซูลิน 5 ยูนิตใต้ผิวหนังที่หน้าท้องหรือต้นขา สลับตำแหน่งทุกครั้ง ห้ามฉีดบริเวณที่ช้ำ";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0]?.administrationTargetGroup).toMatchObject({
+      coordination: "disjunction",
+      targets: [
+        { coding: { code: "302553009" } },
+        { coding: { code: "68367000" } }
+      ]
+    });
+    expect(parsed.fhir.site?.coding).toBeUndefined();
+    expect(parsed.fhir.site?.text).toBe("abdomen or thigh");
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ท้องหรือต้นขา");
+    expect(formatSig(parsed.fhirNext, "long", { locale: "th" })).toContain("ท้องหรือต้นขา");
+    const strictR5 = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+    expect(strictR5).toHaveLength(1);
+    expect(strictR5[0].site?.coding).toBeUndefined();
+    expect(formatSig(strictR5[0], "long", { locale: "th" })).toContain("ท้องหรือต้นขา");
+    expect(formatSig(fromFhirDosage(parsed.fhir).fhir, "long", { locale: "th" }))
+      .toContain("ท้องหรือต้นขา");
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toContain("หน้าท้องหรือต้นขา");
+  });
+
+  it("realizes either-site choice with Thai clinical nouns without making simultaneous doses", () => {
+    const parsed = parseSig("Apply 0.5 g to either arm or leg at bedtime.");
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0]?.administrationTargetGroup?.coordination)
+      .toBe("disjunction");
+    expect(parsed.fhir.site?.coding).toBeUndefined();
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("แขนหรือขา");
+    expect(formatSig(parsed.fhirNext, "long", { locale: "th" })).toContain("แขนหรือขา");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(0.5);
+  });
+
+  it("keeps bilateral coordinated anatomical targets distinct and translates them", () => {
+    const parsed = parseSig("Apply 0.5 g to both arms and legs nightly.");
+    expect(parsed.meta.canonical.clauses[0]?.administrationTargetGroup).toMatchObject({
+      coordination: "conjunction",
+      targets: [{ text: "both arms" }, { text: "both legs" }]
+    });
+    expect(parsed.items).toHaveLength(2);
+    const th = parsed.items.map(item => formatSig(item.fhir, "long", { locale: "th" }));
+    expect(th[0]).toContain("แขนทั้งสองข้าง");
+    expect(th[1]).toContain("ขาทั้งสองข้าง");
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([0.5, 0.5]);
+    const strictR5 = toFhirR5Dosages(toDosageDetails(parsed.items.map(item => item.fhir)));
+    expect(strictR5.map(row => row.site?.coding?.[0]?.code)).toEqual(["69273007", "40927001"]);
+    expect(strictR5.map(row => formatSig(row, "long", { locale: "th" })))
+      .toEqual(th);
+  });
+
+  it("recognizes laterality on the forearm while retaining an uncoded calf rather than fabricating SNOMED", () => {
+    const parsed = parseSig("Apply 1 mL to the left forearm and right calf at bedtime.");
+    expect(parsed.meta.canonical.clauses[0]?.administrationTargetGroup).toMatchObject({
+      coordination: "conjunction",
+      targets: [{ text: "left forearm" }, { text: "right calf" }]
+    });
+    expect(parsed.items).toHaveLength(2);
+    const th = parsed.items.map(item => formatSig(item.fhir, "long", { locale: "th" }));
+    expect(th[0]).toContain("ปลายแขนซ้าย");
+    expect(th[1]).toContain("น่องขวา");
+    expect(parsed.items[0]?.fhir.site?.coding?.[0]?.code).toBe("66480008");
+    expect(parsed.items[1]?.fhir.site?.coding).toBeUndefined();
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1]);
+  });
 });

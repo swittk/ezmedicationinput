@@ -3266,6 +3266,32 @@ function translatedArgumentConcept(arg: AdviceArgument, locale: string): string 
   return localizedValue(arg.i18n, locale) ?? arg.normalized ?? arg.text;
 }
 
+/**
+ * A partly understood complement cannot be rendered as if all of its
+ * constituents were localized. Preserve the entire editable source action
+ * instead of combining a translated verb with untranslated opaque fragments.
+ * Only the Thai cross-locale case needs this check; English source and
+ * recognized argument translations keep the normal fast realization.
+ */
+function hasUntranslatedThaiArgument(frame: AdviceFrame, locale: string): boolean {
+  if (baseLanguageTag(locale) !== "th") return false;
+  return frame.args.some((arg) => {
+    // Only an opaque nominal complement requires atomic source fallback.
+    // Typed manner/time/activity arguments can be realized compositionally
+    // by their existing specialized realizer even without per-argument i18n.
+    if (arg.role !== AdviceArgumentRole.Object &&
+        arg.role !== AdviceArgumentRole.Theme) return false;
+    if (arg.quantity || localizedValue(arg.i18n, locale)) return false;
+    const source = (arg.text ?? arg.normalized ?? "").trim();
+    if (!source || !/[A-Za-z]/u.test(source) ||
+        inferMedicationLocale(source, "en") === "th") return false;
+    // The existing quantity grammar can localize "2 tablets" from an
+    // unannotated object; it is not an unresolved English complement.
+    const realized = translatedArgument(arg, locale);
+    return realized === (arg.normalized ?? arg.text);
+  });
+}
+
 function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
   const definition = getMedicationInstructionAction(frame.predicate.lemma);
   return (roundtripSafe ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
@@ -3414,6 +3440,13 @@ const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, Acti
 };
 
 function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
+  // Never discard inherited prohibition or modality: its governing words may
+  // occur outside this frame's exact source span.
+  if (frame.sourceText && !frame.modality &&
+      frame.polarity !== AdvicePolarity.Negate && frame.polaritySource !== "shared" &&
+      hasUntranslatedThaiArgument(frame, locale)) {
+    return trimSemanticText(frame.sourceText);
+  }
   const first = (role: AdviceArgumentRole): string | undefined => {
     const arg = frame.args.filter((candidate) => candidate.role === role).slice(0, 1)[0];
     return arg ? translatedArgument(arg, locale) : undefined;
