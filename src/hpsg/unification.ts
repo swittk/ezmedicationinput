@@ -576,8 +576,11 @@ function mergeClinicalAdjunct(
       !equalStructuredValues(left.condition, right.condition)) {
     return undefined;
   }
+  if (left.conditionTarget && right.conditionTarget &&
+      !equalStructuredValues(left.conditionTarget, right.conditionTarget)) return undefined;
   return {
     condition: left.condition ?? right.condition,
+    conditionTarget: left.conditionTarget ?? right.conditionTarget,
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
     includedWeekdays: appendUnique(left.includedWeekdays, right.includedWeekdays),

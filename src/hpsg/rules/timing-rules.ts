@@ -32,6 +32,7 @@ import {
 import {
   ADMINISTRATION_WINDOW_INSTRUCTIONS,
   ACTION_COORDINATION_CONNECTORS,
+  coordinationConnectorKind,
   ACTION_SEQUENCE_MARKERS,
   OPEN_ENDED_WORDS,
   OPEN_ENDED_COURSE_END_CONDITIONS,
@@ -1275,6 +1276,17 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
+      // The same immediate lexeme cannot simultaneously schedule the whole
+      // medication STAT and modify an explicit relative event. A typed
+      // before/after + event daughter owns that atom compositionally.
+      if (when === EventTiming.Immediate) {
+        const relationToken = context.tokens[start + 1];
+        if (relationToken &&
+            mealRelationFromToken(normalizeTokenLower(relationToken)) &&
+            resolveEventTimingExpression(eventExpressionPartsAt(context, start + 2).parts)) {
+          return [];
+        }
+      }
       if (sourceRangeAttachmentClass(context, token.sourceStart, token.sourceEnd) === "procedure") {
         return [];
       }
@@ -1544,9 +1556,43 @@ function zeroEventOffsetSign(context: HpsgClauseContext, start: number): HpsgSig
   const timing = event && mealTimingForRelation(relation, event.timing);
   if (!event || !timing) return undefined;
   const tokens = [immediate, relationToken, ...expression.members.slice(0, event.length)];
+  const events: EventTiming[] = [timing];
+  let cursor = start + 2 + event.length;
+  while (cursor + 1 < context.limit) {
+    const connective = context.tokens[cursor];
+    if (!connective || context.state.consumed.has(connective.index)) break;
+    const connector = normalizeTokenLower(connective);
+    if (!LIST_SEPARATORS.has(connector) ||
+        coordinationConnectorKind(connector) === "disjunction") break;
+    // Homogeneous coordinated event daughters inherit the leading exact
+    // zero offset. Their event anchors remain individually typed; OR remains
+    // a choice and is NOT flattened into multiple simultaneous events.
+    let tailStart = cursor + 1;
+    const firstTail = context.tokens[tailStart];
+    if (!firstTail || context.state.consumed.has(firstTail.index)) break;
+    const firstKey = normalizeTokenLower(firstTail);
+    const explicitImmediacy = EVENT_TIMING_TOKENS[firstKey] === EventTiming.Immediate;
+    if (explicitImmediacy) {
+      const secondTail = context.tokens[tailStart + 1];
+      if (!secondTail || context.state.consumed.has(secondTail.index) ||
+          mealRelationFromToken(normalizeTokenLower(secondTail)) !== relation) break;
+      tailStart += 2;
+    } else if (mealRelationFromToken(firstKey) === relation) {
+      tailStart += 1;
+    }
+    const tailExpression = eventExpressionPartsAt(context, tailStart);
+    const tailEvent = resolveEventTimingExpression(tailExpression.parts);
+    const tailTiming = tailEvent && mealTimingForRelation(relation, tailEvent.timing);
+    if (!tailEvent || !tailTiming) break;
+    const prefixes = context.tokens.slice(cursor + 1, tailStart);
+    if (prefixes.some(token => context.state.consumed.has(token.index))) break;
+    tokens.push(connective, ...prefixes, ...tailExpression.members.slice(0, tailEvent.length));
+    events.push(tailTiming);
+    cursor = tailStart + tailEvent.length;
+  }
   return lexicalSign({
     type: "schedule-sign", rule: "hpsg.lex.schedule.eventOffset.immediate",
-    tokens, synsem: { head: { schedule: { when: [timing], offset: 0 } },
+    tokens, synsem: { head: { schedule: { when: events, offset: 0 } },
       valence: {}, cont: { clauseKind: "administration" } },
     score: 42 + tokens.length
   });
@@ -2712,11 +2758,14 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
         valence: { instructions: [{
           text: definition.display,
           i18n: { ...definition.i18n },
-          coding: {
+          // Clinical state changes without an independently established
+          // terminology identity remain typed, editable, and source-backed.
+          // Never borrow a code for a different clinical improvement concept.
+          ...(definition.code ? { coding: {
             system: 'http://snomed.info/sct',
             code: definition.code,
             display: definition.display
-          }
+          } } : {})
         }] },
         cont: { clauseKind: 'administration' }
       },

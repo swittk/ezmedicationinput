@@ -7,6 +7,9 @@ import { grammaticalTrailingInstructionScope } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
 import { AdvicePolarity } from '../types';
+import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
+import { resolveEventTimingExpression } from '../event-timing-expression';
+import { EVENT_TIMING_TOKENS } from '../maps';
 import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from '../fhir-translations';
 import type {
   AdviceFrame,
@@ -23,6 +26,92 @@ import type {
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import { shiftCanonicalSigClauses } from '../ir';
 import type { BoundaryPlan, BoundaryRelation, CoordinationScopeFacts } from './types';
+
+/**
+ * A bare event complement of a LICENSED event-timing-ellipsis construction
+ * inherits the omitted preposition/offset from its governing left event.
+ *
+ * This unifies typed event features, not surface words. A right constituent
+ * with its own relation or offset is already complete and must remain intact:
+ * "15 minutes BEFORE breakfast OR immediately AFTER dinner" must not acquire
+ * the left offset or BEFORE relation.
+ */
+function inheritEllipticEventAnchor(
+  donor: CanonicalScheduleExpr | undefined,
+  recipient: CanonicalScheduleExpr | undefined,
+  donorTokens: ParserState["tokens"],
+  recipientTokens: ParserState["tokens"]
+): ScheduleSemanticField[] {
+  if (!donor || !recipient || donor.when?.length !== 1 || recipient.when?.length !== 1) {
+    return [];
+  }
+  // Direct eventTiming is the open-class noun daughter; eventPhrase, relative
+  // offset, and event preposition signs are explicitly bound and never inherit.
+  const directlyNamedEventRules = new Set([
+    'hpsg.lex.schedule.eventTiming',
+    'hpsg.lex.schedule.eventPhrase.fixed'
+  ]);
+  const bareEvent = recipient.evidence?.some(item =>
+    directlyNamedEventRules.has(item.rule) &&
+    item.scheduleFields?.indexOf('when') !== -1
+  ) && !recipient.evidence?.some(item =>
+    !directlyNamedEventRules.has(item.rule) &&
+    item.scheduleFields?.indexOf('when') !== -1
+  );
+  if (!bareEvent) return [];
+  const left = donor.when[0];
+  const bare = recipient.when[0];
+  for (const [relation, eventMap] of MEAL_TIMING_BY_RELATION) {
+    if (relation === 'with') continue;
+    let donorBase: typeof bare | undefined;
+    for (const [sourceEvent, targetEvent] of eventMap) {
+      if (targetEvent === left) {
+        donorBase = sourceEvent;
+        break;
+      }
+    }
+    if (donorBase === undefined) continue;
+    let mapped = eventMap.get(bare);
+    if (!mapped) {
+      // The right daughter may be a bare daypart in an omitted shared
+      // nominal head, e.g. Thai meal-[morning OR evening]. Reuse the exact
+      // open-class EVENT EXPRESSION lexicon already used by HPSG, not a
+      // language/surface-specific evening-to-dinner conversion.
+      const donorWords = donorTokens.map(token => token.canonical ?? token.lower);
+      for (let index = 0; index < donorWords.length; index += 1) {
+        const governingEvent = resolveEventTimingExpression(donorWords, index);
+        if (!governingEvent || governingEvent.length < 2 ||
+            governingEvent.timing !== donorBase) continue;
+        const sharedHead = donorWords.slice(index, index + governingEvent.length - 1);
+        for (const token of recipientTokens) {
+          const word = token.canonical ?? token.lower;
+          if (EVENT_TIMING_TOKENS[word] !== bare) continue;
+          const composite = resolveEventTimingExpression([...sharedHead, word]);
+          if (composite?.length !== sharedHead.length + 1) continue;
+          const candidate = eventMap.get(composite.timing);
+          if (!candidate) continue;
+          mapped = candidate;
+          break;
+        }
+        if (mapped) break;
+      }
+    }
+    if (!mapped || mapped === bare) continue;
+    recipient.when = [mapped];
+    const inherited: ScheduleSemanticField[] = ['when'];
+    if (recipient.offset === undefined &&
+        recipient.offsetMin === undefined && recipient.offsetMax === undefined) {
+      for (const field of ['offset', 'offsetMin', 'offsetMax'] as const) {
+        const value = donor[field];
+        if (value === undefined) continue;
+        recipient[field] = value;
+        inherited.push(field);
+      }
+    }
+    return inherited;
+  }
+  return [];
+}
 
 export interface CoordinatedClauseState {
   state: ParserState;
@@ -967,6 +1056,71 @@ export function scopeTrailingSharedNegativeInstructions(
 }
 
 /**
+ * Bind a typed medication-dose nominal reference to its related administration
+ * daughters. The HPSG conditional has already supplied predicate, polarity,
+ * quantifier and event membership; this construction never reads source words,
+ * production-rule names, FHIR rows, or rendered text to decide clinical scope.
+ * An unspecified object stays local; an explicit daypart selects matching
+ * daughters; a universal/both quantifier scopes only over the connected regimen.
+ */
+export function scopeMedicationConditionTargets(
+  states: readonly ParserState[],
+  plan: BoundaryPlan,
+  segments: readonly { start: number; end: number }[]
+): void {
+  for (let donorIndex = 0; donorIndex < states.length; donorIndex += 1) {
+    const donor = states[donorIndex];
+    const clinical = donor.primaryClause.clinicalAdjuncts;
+    const target = clinical?.conditionTarget;
+    const predicate = clinical?.condition;
+    if (!target || !predicate) continue;
+    const explicitTarget = Boolean(target.when?.length || target.quantifier);
+    const terminal = planSegmentIndex(plan, segments[donorIndex]);
+    const paths = explicitTarget && terminal !== undefined
+      ? relationPathsTo(plan, terminal) : undefined;
+    const selected: number[] = [];
+    for (let index = 0; index <= donorIndex; index += 1) {
+      if (!explicitTarget && index !== donorIndex) continue;
+      if (index !== donorIndex) {
+        const member = planSegmentIndex(plan, segments[index]);
+        if (member === undefined || !paths?.has(member)) continue;
+      }
+      const clause = states[index].primaryClause;
+      if (!clause.dose && !clause.method && !clause.schedule) continue;
+      if (target.when?.length && !clause.schedule?.when?.some(event =>
+        target.when!.indexOf(event) >= 0
+      )) continue;
+      selected.push(index);
+    }
+    if (!selected.length || target.quantifier === 'both' && selected.length !== 2) {
+      // The nominal reference has no unique binding in the available regimen.
+      // Keep the original instruction and target reference available for
+      // editing, but do not claim an executable predicate on the wrong daughter.
+      clinical.condition = { kind: 'text', text: donor.input };
+      const note = 'Unresolved medication-condition target: confirm which administration the instruction refers to.';
+      if (donor.warnings.indexOf(note) < 0) donor.warnings.push(note);
+      continue;
+    }
+    delete clinical.condition;
+    delete clinical.conditionTarget;
+    for (const index of selected) {
+      const recipient = states[index].primaryClause;
+      const adjunct = recipient.clinicalAdjuncts ?? (recipient.clinicalAdjuncts = {});
+      const prior = adjunct.condition;
+      adjunct.condition = prior && !equalStructuredValues(prior, predicate)
+        ? { kind: 'all', conditions: [prior, cloneStructuredValue(predicate)] }
+        : cloneStructuredValue(predicate);
+      if (index === donorIndex) continue;
+      const evidence = (clinical.evidence ?? []).map(item =>
+        shiftEvidenceToRecipient(item, segments[donorIndex].start, segments[index].start)
+      );
+      adjunct.evidence = [...(adjunct.evidence ?? [])];
+      for (const item of evidence) appendEvidence(adjunct.evidence, item);
+    }
+  }
+}
+
+/**
  * Apply licensed coordination scope to canonical clause semantics. FHIR is
  * intentionally absent here: every downstream representation is lowered from
  * the resulting canonical schedule/PRN semantics, making this the single
@@ -1012,9 +1166,13 @@ export function applyCoordinatedCadenceScopes(
       if (pass.direction !== 'leading') continue;
       const donor = left.state.primaryClause;
       const recipient = right.state.primaryClause;
-      // The typed right daughter owns its entire event schedule/offset. Only
-      // the omitted administration head is inherited; copying timing here
-      // would turn before15 OR after0 into an incorrect shared offset15.
+      // A right daughter with its own explicit relation and timing is
+      // complete. A BARE event noun, however, inherits its omitted relation
+      // and dependent offset from the left event under this licensed
+      // event-timing-ellipsis construction.
+      const scopedEventFields = inheritEllipticEventAnchor(
+        donor.schedule, recipient.schedule, left.state.tokens, right.state.tokens
+      );
       if (donor.method && !hasEvidence(recipient, 'method')) {
         recipient.method = cloneMethodForRecipient(donor.method, left.start, right.start);
       }
@@ -1024,15 +1182,24 @@ export function applyCoordinatedCadenceScopes(
       if (donor.route && !recipient.route?.code && !recipient.route?.text) {
         recipient.route = cloneStructuredValue(donor.route);
       }
-      appendEvidence(recipient.evidence, {
+      const scopeEvidence: CanonicalEvidence = {
         rule: selected.semantic.construction.id,
         spans: [{ start: relation.range.start - right.start,
           end: relation.range.end - right.start,
           text: source.slice(relation.range.start, relation.range.end) }],
-        note: 'Omitted administration inherits its typed left head; event timing remains right-local.'
-      });
+        scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
+        note: scopedEventFields.length
+          ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
+          : 'Omitted administration inherits its typed left head; explicit event timing remains right-local.'
+      };
+      appendEvidence(recipient.evidence, scopeEvidence);
+      if (scopedEventFields.length && recipient.schedule) {
+        recipient.schedule.evidence = [...(recipient.schedule.evidence ?? [])];
+        appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
+      }
       applications.push({ rule: selected.semantic.construction.id,
-        from: states.indexOf(left), to: states.indexOf(right), fields: ['method', 'dose', 'route'] });
+        from: states.indexOf(left), to: states.indexOf(right),
+        fields: ['method', 'dose', 'route', ...scopedEventFields] });
       continue;
     }
     const alternative = selected.semantic.construction.operation ===
@@ -1098,7 +1265,7 @@ export function applyCoordinatedCadenceScopes(
     const donorClinical = donorClause.clinicalAdjuncts;
     const targetClinical = targetClause.clinicalAdjuncts;
     const positiveGuard = donorClinical?.condition &&
-      donorClinical.condition.kind !== 'not';
+      !donorClinical.conditionTarget && donorClinical.condition.kind !== 'not';
     const clinicalSharing = !leading &&
       (selected.semantic.construction.operation === 'share-trailing-adjuncts' ||
        scheduleMerge.fields.length > 0 || copyPrn);

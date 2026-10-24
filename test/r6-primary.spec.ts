@@ -1129,3 +1129,165 @@ describe("dimensioned infusion carrier noun phrase composition", () => {
       /pause|hold/iu.test(value.text ?? ""))).toBe(true);
   });
 });
+
+
+describe("hydration advice is entailed, not guessed from the word water", () => {
+  const hydrationCode = "419303009";
+  const hasPlentyCode = (source: string): boolean => parseSig(source).fhir.some(dosage =>
+    dosage.additionalInstruction?.some(instruction =>
+      instruction.coding?.some(coding => coding.system === "http://snomed.info/sct" &&
+        coding.code === hydrationCode)
+    )
+  );
+  it.each([
+    "Do not drink water for 30 minutes",
+    "Drink water, then take one tablet",
+    "Take 1 tablet with water",
+    "Do not take 1 tablet with plenty of water"
+  ])("does not assert affirmative plentiful-water instructions without entailment: %s", source => {
+    expect(hasPlentyCode(source)).toBe(false);
+  });
+  it.each([
+    "Drink plenty of water",
+    "Drink lots of water",
+    "Take 1 tablet with plenty of water",
+    "ดื่มน้ำตามมากๆ"
+  ])("retains positively specified plentiful-water counseling in the typed FHIR advice: %s", source => {
+    expect(hasPlentyCode(source)).toBe(true);
+    const parsed = parseSig(source);
+    const strictR5 = toFhirR5Dosages(toDosageDetails(parsed.fhir));
+    expect(strictR5.some(dosage => dosage.additionalInstruction?.some(item =>
+      item.coding?.some(coding => coding.code === hydrationCode)
+    ))).toBe(true);
+    if (!/tablet/u.test(source)) {
+      expect(parsed.fhir.every(dosage => dosage.doseAndRate?.[0]?.doseQuantity?.value === undefined)).toBe(true);
+    }
+  });
+  it.each([
+    "Drink plenty of water",
+    "ดื่มน้ำตามมากๆ",
+    "ดื่มน้ำตามมาก ๆ",
+    "ดื่มน้ำเยอะๆ"
+  ])("keeps hydration-only counseling outside medication dose/method/route: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.every(dosage =>
+      dosage.doseAndRate?.[0]?.doseQuantity?.value === undefined &&
+      dosage.method === undefined && dosage.route === undefined &&
+      !(dosage.timing?.repeat?.when ?? []).includes("IMD")
+    )).toBe(true);
+    const actions = parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []
+    );
+    expect(actions.some(action =>
+      action.predicate.lemma === "drink" &&
+      action.polarity !== "negate" &&
+      action.args.some(arg => arg.role === "substance" &&
+        arg.conceptId === "plenty-of-water")
+    )).toBe(true);
+    const strictR5 = toFhirR5Dosages(toDosageDetails(parsed.fhir));
+    expect(strictR5[0]?.additionalInstruction?.some(item =>
+      item.coding?.some(coding => coding.code === hydrationCode)
+    )).toBe(true);
+    const en = formatSig(parsed.fhir, "long", { locale: "en" }).toLowerCase();
+    const th = formatSig(parsed.fhir, "long", { locale: "th" });
+    expect(en).toMatch(/drink.*water/u);
+    expect(en).not.toMatch(/drink the medication|take the medication orally/u);
+    expect(th).toContain("น้ำ");
+  });
+  it("keeps true oral medicine administration separate from accompanying plentiful water", () => {
+    const parsed = parseSig("Take 1 tablet with plenty of water twice daily");
+    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir[0]?.timing?.repeat?.frequency).toBe(2);
+    expect(parsed.fhir[0]?.additionalInstruction?.some(item =>
+      item.coding?.some(coding => coding.code === hydrationCode)
+    )).toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("keeps the negative drinking action negative when hydration advice is prohibited", () => {
+    const parsed = parseSig("Do not drink water for 30 minutes");
+    expect(parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: expect.objectContaining({ lemma: "drink" }), polarity: "negate" })
+    ]));
+    expect(parsed.fhir[0]?.text?.toLowerCase()).toContain("do not drink");
+  });
+});
+
+
+describe("complete bilingual medication counseling composes once", () => {
+  it("retains one executable dose and independent typed counseling through R5/R6", () => {
+    const source = "Take 1 tablet orally twice daily after breakfast and dinner. " +
+      "กินหลังอาหารทันที ดื่มน้ำตามมากๆ ไม่ควรนอนราบทันทีหลังกินยา กินต่อเนื่องจนหมด";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 1, unit: "tab"
+    });
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "d",
+      when: ["PCM", "PCV"], offset: 0
+    });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const actions = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? []);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: expect.objectContaining({ lemma: "drink" }) }),
+      expect.objectContaining({ predicate: expect.objectContaining({ lemma: "lie-down" }),
+        polarity: "negate", relation: "after", modality: "should" }),
+      expect.objectContaining({ predicate: expect.objectContaining({ lemma: "continue-treatment" }),
+        relation: "until" })
+    ]));
+    const strict = toFhirR5Dosages(toDosageDetails(parsed.fhir));
+    expect(strict).toHaveLength(1);
+    expect(strict[0]?.timing?.repeat).toMatchObject({ when: ["PCM", "PCV"], offset: 0 });
+    const en = formatSig(parsed.fhir, "long", {locale: "en"});
+    const th = formatSig(parsed.fhir, "long", {locale: "th"});
+    expect(en).toContain("immediately after breakfast");
+    expect(en.toLowerCase()).toContain("drink plenty of water");
+    expect(th).toContain("หลังอาหารเช้าทันที");
+    expect(th).toContain("ดื่มน้ำตามมากๆ");
+  });
+});
+
+describe("clinical counseling remains procedural and event-scoped across languages", () => {
+  it.each([
+    "Should not lie down immediately after taking medication",
+    "ไม่ควรนอนราบทันทีหลังกินยา"
+  ])("keeps post-medication positional advice negative and out of stat dosing: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.every(dosage => !(dosage.timing?.repeat?.when ?? []).includes("IMD"))).toBe(true);
+    expect(parsed.fhir.every(dosage => dosage.doseAndRate?.[0]?.doseQuantity?.value === undefined)).toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const lie = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? [])
+      .find(a => a.predicate.lemma === "lie-down");
+    expect(lie).toMatchObject({ polarity: "negate", modality: "should", relation: "after" });
+    expect(lie?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "time", conceptId: "immediacy" }),
+      expect.objectContaining({ role: "activity", conceptId: "medication-administration" })
+    ]));
+    expect(parsed.input).toBe(source);
+  });
+  it.each([
+    "continue taking medication until finished",
+    "กินต่อเนื่องจนหมด",
+    "รับประทานยาต่อเนื่องจนหมด"
+  ])("retains treatment continuation until supply is used without fabricating a duration: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.every(dosage =>
+      dosage.timing?.repeat?.count === undefined &&
+      dosage.timing?.repeat?.duration === undefined &&
+      dosage.doseAndRate?.[0]?.doseQuantity?.value === undefined
+    )).toBe(true);
+    const continueAction = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? [])
+      .find(a => a.predicate.lemma === "continue-treatment");
+    expect(continueAction?.relation).toBe("until");
+    expect(continueAction?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "result", conceptId: "supply-exhausted" })
+    ]));
+    expect(continueAction?.predicate.codings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ system: "http://snomed.info/sct", code: "306806004" })
+    ]));
+  });
+});

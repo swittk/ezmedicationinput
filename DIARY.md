@@ -3038,3 +3038,61 @@ event alternatives5.961->3.169(-46.8%). This resolves the measured avoidable
 compound-guard regression; it is not a claim that every case is faster or that
 mobile behavior has been benchmarked. Both pre/post optimization reports are
 retained under /tmp/ezmed-final-performance[-optimized]-20261024.json.
+
+
+### 2026-10-24 14:26 — scoped conditions, counseling recovery and integrated checkpoint
+
+Recovered the October 17 counseling semantics through the current typed
+pipeline instead of importing its superseded parser: auxiliary hydration,
+relative medication-event timing, and source-backed course completion remain
+separate from the prescribed dose. Integrated the collaborators' qualified-site
+localization, procedural material/manner preservation, and English/Thai
+negation fixes. A semicolon, full stop or THEN closes the prior prohibition;
+a later AND cannot reverse independently affirmative actions. Malformed cycle
+day ordinals retain typed unresolved source and cannot overwrite an explicit
+0.5-tablet (or other unit-bearing) dose.
+
+Conditional withholding is an explicit lexical argument-grammar effect, not a
+match on arbitrary action names or a blanket interpretation of `retain`.
+Affirmative HOLD/OMIT/SKIP/WITHHOLD and a newly configured DEFER verb compose
+through the same HPSG rule. Negative withholding and physical holding do not
+become medication guards. Prefix and postfix IF share the same typed effect;
+nominal morning/evening/all/both targets bind to the related regimen daughters
+before FHIR lowering. R5/R6 preserve the condition and scheduling evaluates the
+selected dose only. An unbound reference remains source-backed and reviewable
+rather than becoming an executable predicate on the wrong administration.
+The existing numeric comparison grammar now supplies both guard recognition
+and measurement operators, retaining the original text while normalizing the
+copula. Its source range owns 'no more than' as a comparison, not a dosage cap.
+
+Frozen source snapshot at 14:21 was verified unchanged after all validation:
+- canonical npm test: 45 suites, 2450/2450 passed;
+- npm run test:dist: ESM/CJS, TypeScript declarations and 4/4 exports passed;
+- git diff --check clean; no JSON.stringify/JSON.parse under src;
+- 115 changed paths minus the existing 15 review exclusions = 100 reviewed.
+The unrelated pre-existing untracked test/__tmp_open_semantic_probe.ts remains
+outside the staged path set. No version change, publication, merge or push.
+
+Independent compatibility smoke compared 521 literal examples extracted from
+origin/master 0.1.67 tests with current source. It reported no new throws, lost
+previously populated clinical fields or lost administration rows. Ten changed
+results were reviewed, predominantly additional inherited method coding and
+more explicit coordinated targets. One shared-timing inheritance case remains
+a follow-up. This is not certification of all deployed 0.1.x versions or APIs.
+
+Latest interleaved HP-host benchmark against frozen 779a8bc, 18 clinical cases,
+3 warmups and 11 measured rounds: simple BID 3.82->3.81ms, routine oral
+5.46->5.62ms, Thai taper 19.17->12.27ms. More complex supported paths cost more:
+scoped insulin 12.63->16.50ms, Thai negated procedure 3.14->4.68ms, outcome/stop
+counseling 8.21->12.49ms. These absolute/relative regressions are recorded,
+not hidden by the green suite. Measurements are host-only, not mobile evidence.
+
+Release scope is a clinician-reviewed suggester, not universal clinical NLP.
+Unsupported clauses may remain explicit editable advice/source without invented
+coding, dose, timing or opposite directives. No symptom-outcome evaluator or
+arbitrary discourse expansion is required for this checkpoint. Remaining
+architecture follow-up: event-timing ellipsis still inspects lexical provenance
+rule names and reconstructs event expressions outside the primary chart;
+replace that with typed event features in a focused change, without weakening
+its existing functional tests. External HL7 profile validation and remote
+CodeRabbit review have not been performed for this local checkpoint.

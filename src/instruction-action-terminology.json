@@ -360,6 +360,11 @@
       "procedural": true,
       "acceptsAmount": true,
       "definesDose": true,
+      "argumentParser": "mix-substance",
+      "realizer": "mix-substance",
+      "argumentParserConfig": {
+        "primaryConcepts": ["water", "clean-water"]
+      },
       "externalCodings": [
         {
           "system": "http://snomed.info/sct",
@@ -1080,6 +1085,10 @@
       "procedural": false,
       "acceptsAmount": true,
       "definesDose": true,
+      "argumentParserConfig": {
+        "implicitMatchedConcept": "medication-administration",
+        "implicitMatchedRole": "activity"
+      },
       "externalCodings": [
         {
           "system": "http://snomed.info/sct",
@@ -1573,6 +1582,19 @@
       "procedural": true
     },
     {
+      "code": "withhold-administration",
+      "semanticClass": "withhold-administration",
+      "display": "Withhold administration",
+      "i18n": { "th": "งดการให้ยา" },
+      "aliases": [
+        "omit", "skip", "withhold", "งดให้ยา", "ไม่ต้องให้ยา"
+      ],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "argumentParserConfig": { "medicationConditionEffect": "withhold" },
+      "realizer": "object-duration"
+    },
+    {
       "code": "hold",
       "semanticClass": "retain",
       "display": "Hold",
@@ -1585,6 +1607,7 @@
       ],
       "procedural": true,
       "argumentParser": "object-duration",
+      "argumentParserConfig": { "medicationConditionEffect": "withhold" },
       "realizer": "object-duration"
     },
     {
@@ -1951,6 +1974,25 @@
       "realizer": "relation-duration"
     },
     {
+      "code": "continue-treatment",
+      "semanticClass": "course",
+      "display": "Continue taking medication",
+      "i18n": { "th": "กินต่อเนื่อง" },
+      "aliases": [
+        "continue treatment", "continue taking medication",
+        "continue taking medicine", "continue medication",
+        "กินต่อเนื่อง", "รับประทานต่อเนื่อง", "รับประทานยาต่อเนื่อง"
+      ],
+      "procedural": true,
+      "argumentParser": "result",
+      "realizer": "result",
+      "externalCodings": [{
+        "system": "http://snomed.info/sct",
+        "code": "306806004",
+        "display": "Recommendation to continue with drug treatment"
+      }]
+    },
+    {
       "code": "lie-down",
       "semanticClass": "position",
       "display": "Lie down",
@@ -1963,8 +2005,8 @@
         "นอนราบ"
       ],
       "procedural": true,
-      "argumentParser": "duration",
-      "realizer": "duration"
+      "argumentParser": "duration-activity",
+      "realizer": "duration-activity"
     },
     {
       "code": "blow-nose",

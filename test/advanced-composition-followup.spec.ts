@@ -148,13 +148,13 @@ const CASES = [
   ],
   [
     "dissolve in water then drink, may cause vomiting",
-    "Dissolve water; then drink the medication. May cause vomiting.",
-    "ละลายน้ำ จากนั้นดื่ม. อาจทำให้เกิดอาเจียน."
+    "Dissolve in water; then drink the medication. May cause vomiting.",
+    "ละลายในน้ำ จากนั้นดื่ม. อาจทำให้เกิดอาเจียน."
   ],
   [
     "dissolve in water before drinking, may cause vomiting",
-    "Dissolve water before drinking. May cause vomiting.",
-    "ละลายน้ำก่อนดื่ม. อาจทำให้เกิดอาเจียน."
+    "Dissolve in water before drinking. May cause vomiting.",
+    "ละลายในน้ำก่อนการดื่ม. อาจทำให้เกิดอาเจียน."
   ],
   [
     "apply to right armpit",
@@ -245,13 +245,30 @@ describe("advanced compositional follow-up", () => {
     const graph = before.meta.canonical.clauses[0]?.instructionGraph;
     expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["dissolve"]);
     expect(graph?.actions[0]).toMatchObject({
-      relation: AdviceRelation.Before,
+      relation: AdviceRelation.In,
       args: expect.arrayContaining([
         expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "water" }),
-        expect.objectContaining({ role: AdviceArgumentRole.Activity, text: "drinking" })
+        expect.objectContaining({
+          role: AdviceArgumentRole.Activity,
+          conceptId: "drinking-activity",
+          relation: AdviceRelation.Before,
+          text: "drinking"
+        })
       ])
     });
-    expect(before.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBeUndefined();
+    const reread = fromFhirDosage(before.fhir,{locale:"en"});
+    expect(reread.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
+      relation: AdviceRelation.In,
+      args: expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "water" }),
+        expect.objectContaining({
+          role: AdviceArgumentRole.Activity, conceptId: "drinking-activity",
+          relation: AdviceRelation.Before
+        })
+      ])
+    });
+    expect(before.fhir.additionalInstruction?.flatMap(row =>
+      row.coding?.map(coding => coding.code) ?? [])).not.toContain("417995008");
     expect(before.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.frames?.[0]?.args?.[0]?.coding?.code)
       .toBe("422400008");
   });
@@ -903,7 +920,16 @@ describe("typed avoidance complements and Thai lexical selection", () => {
     const clause = parsed.meta.canonical.clauses[0];
     expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
     expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
-    expect(parsed.longText).toContain("Take with plenty of water");
+    expect(parsed.longText).toContain("Take with water");
+    expect(parsed.longText).not.toMatch(/plenty of water/i);
+    const hydrationCodes = parsed.fhir.additionalInstruction?.flatMap((entry) =>
+      entry.coding?.map((coding) => coding.code) ?? []) ?? [];
+    expect(hydrationCodes).not.toContain("419303009");
+    expect(clause.additionalInstructions?.some((instruction) =>
+      instruction.frames?.some((frame) => frame.args.some((arg) =>
+        arg.role === AdviceArgumentRole.Substance && arg.conceptId === "water"
+      ))
+    )).toBe(true);
     expect(clause.leftovers).toEqual([]);
   });
 });
@@ -1183,5 +1209,323 @@ describe("shared prohibition duration with event-relative anchoring", () => {
     const th=formatSig(parsed.fhir,"long",{locale:"th"});
     expect(th).toMatch(/ห้ามกลืน.*30 นาที/);
     expect(th).toMatch(/ห้ามบ้วนทิ้ง.*30 นาทีหลัง/);
+  });
+});
+
+describe("hydration counseling as an auxiliary action rather than a medication dose", () => {
+  it.each([
+    "Drink plenty of water",
+    "ดื่มน้ำตามมากๆ",
+    "ดื่มน้ำตามมาก ๆ",
+    "ดื่มน้ำเยอะๆ"
+  ])("structures plentiful-water counseling without inventing medication administration: %s", (source) => {
+    const locale = /[\u0e00-\u0e7f]/u.test(source) ? "th" : "en";
+    const parsed=parseSig(source,{locale});
+    const clause=parsed.meta.canonical.clauses[0];
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    expect(parsed.fhir.method).toBeUndefined();
+    expect(parsed.fhir.route).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(clause.instructionGraph?.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate:expect.objectContaining({lemma:"drink"}),
+        args:expect.arrayContaining([
+          expect.objectContaining({role:AdviceArgumentRole.Substance,conceptId:"plenty-of-water"})
+        ])
+      })
+    ]));
+    expect(parsed.fhir.additionalInstruction?.flatMap(x=>x.coding?.map(y=>y.code)??[]))
+      .toContain("419303009");
+    const loaded=fromFhirDosage(parsed.fhir,{locale});
+    expect(loaded.meta.canonical.clauses[0].instructionGraph?.actions.some(a=>
+      a.predicate.lemma==="drink" && a.args.some(b=>b.conceptId==="plenty-of-water")
+    )).toBe(true);
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    const th=formatSig(parsed.fhir,"long",{locale:"th"});
+    expect(en).toMatch(/drink plenty of water/i);
+    expect(th).toMatch(/ดื่ม.*น้ำ/);
+  });
+
+  it("keeps the actual oral medication dose and hydrated accompaniment distinct in Thai",()=>{
+    const parsed=parseSig("รับประทานยา 1 เม็ด พร้อมน้ำมากๆ",{locale:"th"});
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({value:1,unit:"tab"});
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("26643006");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir.additionalInstruction?.flatMap(x=>x.coding?.map(y=>y.code)??[]))
+      .toContain("419303009");
+    expect(formatSig(parsed.fhir,"long",{locale:"en"})).toMatch(/plenty of water/i);
+    expect(formatSig(parsed.fhir,"long",{locale:"th"})).toMatch(/น้ำ.*มาก/);
+  });
+
+  it("keeps a Thai water prohibition negated and never codes affirmative hydration",()=>{
+    const parsed=parseSig("ห้ามดื่มน้ำ 30 นาที",{locale:"th"});
+    expect(parsed.fhir.additionalInstruction?.flatMap(x=>x.coding?.map(y=>y.code)??[]))
+      .not.toContain("419303009");
+    expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions.some(a=>
+      a.predicate.lemma==="drink" && a.polarity==="negate"
+    )).toBe(true);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+  });
+});
+
+describe("reconstitution advice requires affirmative material and temporal entailment",()=>{
+  const code="417995008";
+  const codings=(source:string):string[]=>{
+    const parsed=parseSig(source,{locale:"en"});
+    return parsed.fhir.additionalInstruction?.flatMap(i=>i.coding?.map(c=>c.code)??[])??[];
+  };
+  it.each([
+    "Do not mix powder with water before taking",
+    "Do not dissolve tablet in water before taking",
+    "Mix powder without water",
+    "Mix powder with water",
+    "Mix powder with water after taking",
+    "Dissolve tablet in water after taking"
+  ])("must not emit positive BEFORE-taking reconstitution code unless entailed: %s",source=>{
+    const parsed=parseSig(source,{locale:"en"});
+    expect(codings(source)).not.toContain(code);
+    const action=parsed.meta.canonical.clauses[0].instructionGraph?.actions.find(a=>
+      ["mix","dissolve"].includes(a.predicate.lemma)
+    );
+    if(source.startsWith("Do not")) expect(action?.polarity).toBe("negate");
+    expect(formatSig(parsed.fhir,"long",{locale:"en"})).not.toMatch(/Dissolve or mix with water before taking/iu);
+  });
+  it("preserves WITHOUT as a negative material relation instead of WITH plus affirmative code",()=>{
+    const parsed=parseSig("Mix powder without water",{locale:"en"});
+    const mix=parsed.meta.canonical.clauses[0].instructionGraph?.actions.find(a=>a.predicate.lemma==="mix");
+    expect(mix?.relation).toBe(AdviceRelation.Without);
+    expect(mix?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Substance,conceptId:"water"})
+    ]));
+    expect(codings("Mix powder without water")).not.toContain(code);
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    expect(en).toMatch(/mix.*powder without water/iu);
+    expect(en).not.toMatch(/without with water/iu);
+  });
+  it.each([
+    "Mix powder with water before taking",
+    "Dissolve tablet in water before taking"
+  ])("codes only genuinely composed positive water-preparation before medication: %s",source=>{
+    const parsed=parseSig(source,{locale:"en"});
+    expect(codings(source)).toContain(code);
+    expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions[0]?.polarity).not.toBe("negate");
+    const restored=fromFhirDosage(parsed.fhir,{locale:"en"});
+    expect(restored.fhir.additionalInstruction?.flatMap(i=>i.coding?.map(c=>c.code)??[])).toContain(code);
+  });
+});
+
+describe("application-action result versus site/manner valence", () => {
+  it.each([
+    ["Rub thinly on painful rash", "thinly", "painful rash"],
+    ["Rub gently on affected rash", "gently", "affected rash"],
+    ["ถูบางๆ บริเวณผื่นที่ปวด", "thinly", "บริเวณผื่นที่ปวด"]
+  ])("uses typed manner + site rather than fabricating a result state: %s", (source, manner, site) => {
+    const locale=/[\u0e00-\u0e7f]/u.test(source)?"th":"en";
+    const parsed=parseSig(source,{locale});
+    const clause=parsed.meta.canonical.clauses[0];
+    const action=clause.instructionGraph?.actions.find(a=>a.predicate.lemma==="rub");
+    expect(action).toBeDefined();
+    expect(action?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Manner,normalized:manner}),
+      expect.objectContaining({role:AdviceArgumentRole.Site,text:site})
+    ]));
+    expect(action?.args.some(a=>a.role===AdviceArgumentRole.Result)).toBe(false);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    const reread=fromFhirDosage(parsed.fhir,{locale});
+    expect(reread.meta.canonical.clauses[0].instructionGraph?.actions.find(a=>
+      a.predicate.lemma==="rub"
+    )?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Manner,normalized:manner}),
+      expect.objectContaining({role:AdviceArgumentRole.Site,text:site})
+    ]));
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    expect(en).toMatch(/rub (thinly|gently)/i);
+    expect(en).not.toMatch(/to form (thinly|gently)/i);
+    const th=formatSig(parsed.fhir,"long",{locale:"th"});
+    expect(th).not.toMatch(/ให้เกิด(?:thinly|gently)/i);
+    if(locale==="th")expect(th).toMatch(/ถูบาง/);
+  });
+
+  it.each(["Rub to form foam","Rub until foam forms"])("preserves true RESULT versus topical MANNER: %s",(source)=>{
+    const parsed=parseSig(source);
+    const rub=parsed.meta.canonical.clauses[0].instructionGraph?.actions.find(a=>a.predicate.lemma==="rub");
+    expect(rub?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Result,conceptId:"foam"})
+    ]));
+    expect(rub?.args.some(a=>a.role===AdviceArgumentRole.Site)).toBe(false);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    expect(en).toMatch(/rub (to form|until) foam/i);
+  });
+});
+
+describe("typed avoided skin qualifiers rather than positive site or untranslated object", () => {
+  it.each([
+    ["Avoid broken skin", "en"],
+    ["Avoid damaged skin", "en"],
+    ["หลีกเลี่ยงบริเวณผิวหนังที่มีแผล", "th"]
+  ])("preserves negative anatomical target semantics through strict R5 and bilingual output: %s", (input, locale) => {
+    const parsed = parseSig(input, {locale});
+    for (const result of [parsed, fromFhirDosage(parsed.fhir, {locale})]) {
+      const clause=result.meta.canonical.clauses[0];
+      const avoided=clause.instructionGraph?.actions.find(a=>a.predicate.lemma==="avoid");
+      expect(avoided).toBeDefined();
+      expect(avoided?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          role:AdviceArgumentRole.Site,
+          conceptId:"broken-skin",
+          i18n:expect.objectContaining({ th:"ผิวหนังที่มีแผล" })
+        })
+      ]));
+      expect(clause.site).toBeUndefined();
+      expect(clause.route).toBeUndefined();
+      expect(clause.dose).toBeUndefined();
+    }
+    expect(formatSig(parsed.fhir,"long",{locale:"th"}))
+      .toContain("หลีกเลี่ยงบริเวณผิวหนังที่มีแผล");
+    expect(formatSig(parsed.fhir,"long",{locale:"en"})).toMatch(/avoid broken skin/i);
+    expect(parsed.meta.canonical.clauses[0].leftovers).toEqual([]);
+  });
+
+  it("does not confuse the avoided skin with the actual application target",()=>{
+    const parsed=parseSig("Apply 1 g to the cheek and avoid broken skin",{locale:"en"});
+    const clause=parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({value:1,unit:"g"});
+    expect(clause.site?.coding?.code).toBe("60819002");
+    expect(clause.instructionGraph?.actions.find(a=>a.predicate.lemma==="avoid")?.args)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({role:AdviceArgumentRole.Site,conceptId:"broken-skin"})
+      ]));
+    expect(formatSig(parsed.fhir,"long",{locale:"th"}))
+      .toContain("หลีกเลี่ยงบริเวณผิวหนังที่มีแผล");
+    expect(clause.leftovers).toEqual([]);
+  });
+
+  it("keeps water as an avoided substance, not an anatomical site",()=>{
+    const parsed=parseSig("Avoid water",{locale:"en"});
+    const action=parsed.meta.canonical.clauses[0].instructionGraph?.actions.find(a=>a.predicate.lemma==="avoid");
+    expect(action?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Substance,conceptId:"water"})
+    ]));
+    expect(action?.args.some(a=>a.role===AdviceArgumentRole.Site)).toBe(false);
+    expect(formatSig(parsed.fhir,"long",{locale:"th"})).not.toContain("หลีกเลี่ยงบริเวณ");
+  });
+});
+
+describe("clinical polarity and whole-manner composition in bilingual SIGs", () => {
+  it.each([
+    "ห้ามบด เคี้ยว หรือกลืนยาเม็ด",
+    "Do not crush chew or swallow the tablets"
+  ])("keeps a comma-free list under its original negation: %s", (source) => {
+    const locale = /[\u0E00-\u0E7F]/u.test(source) ? "th" : "en";
+    const parsed = parseSig(source,{locale});
+    const recovered = fromFhirDosage(parsed.fhir,{locale});
+    for(const result of [parsed,recovered]) {
+      const actions=result.meta.canonical.clauses[0].instructionGraph?.actions??[];
+      for(const lemma of ["crush","chew","swallow"]){
+        expect(actions.find(a=>a.predicate.lemma===lemma)?.polarity).toBe("negate");
+      }
+    }
+    const codes=parsed.fhir.additionalInstruction?.flatMap(x=>x.coding?.map(y=>y.code)??[])??[];
+    expect(codes).not.toContain("418991002");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    const english=formatSig(parsed.fhir,"long",{locale:"en"});
+    expect(english).toMatch(/do not chew/i);
+    expect(english).toMatch(/do not swallow/i);
+  });
+
+  it.each([
+    ["Swallow 2 tablets whole without chewing every morning",2,"MORN"],
+    ["Swallow 2 tablets whole before breakfast without chewing",2,"ACM"],
+    ["Swallow tablets whole without chewing",undefined,undefined]
+  ])("renders owned whole-swallow and negative-chew meaning without duplicate positive imperatives: %s",
+    (source,count,event) => {
+      const parsed=parseSig(source,{locale:"en"});
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(count);
+      if(event) expect(parsed.fhir.timing?.repeat?.when).toContain(event);
+      const actions=parsed.meta.canonical.clauses[0].instructionGraph?.actions??[];
+      expect(actions.find(x=>x.predicate.lemma==="swallow")?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({role:AdviceArgumentRole.Manner,conceptId:"whole"})
+      ]));
+      expect(actions.find(x=>x.predicate.lemma==="chew")?.polarity).toBe("negate");
+      const en=formatSig(parsed.fhir,"long",{locale:"en"});
+      const th=formatSig(parsed.fhir,"long",{locale:"th"});
+      expect(en).not.toMatch(/take without chewing/i);
+      expect(en).toMatch(/do not chew/i);
+      expect((en.match(/swallow\b/gi)??[]).length).toBe(1);
+      expect(th).not.toMatch(/\b(?:whole|chewing)\b/iu);
+      const reopened=fromFhirDosage(parsed.fhir,{locale:"th"});
+      expect(reopened.meta.canonical.clauses[0].dose?.value).toBe(count);
+    }
+  );
+
+  it("keeps independent positive commands positive across a genuine sequence", () => {
+    const p=parseSig("Do not crush; chew one tablet and then swallow",{locale:"en"});
+    const a=p.meta.canonical.clauses[0].instructionGraph?.actions??[];
+    expect(a.find(x=>x.predicate.lemma==="crush")?.polarity).toBe("negate");
+    expect(a.find(x=>x.predicate.lemma==="chew")?.polarity).not.toBe("negate");
+  });
+});
+
+describe("composed solid dosage-form manner and subordinate prohibition", () => {
+  it.each([
+    ["Take 2 capsules whole without crushing",false],
+    ["Take 2 capsules whole without crushing or chewing twice daily",true]
+  ])("retains one administration and both clinical prohibitions: %s", (source, secondWarning) => {
+    const parsed=parseSig(source,{locale:"en"});
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({value:2,unit:"cap"});
+    const actions=parsed.meta.canonical.clauses[0].instructionGraph?.actions??[];
+    expect(actions.find(x=>x.predicate.lemma==="take")?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({role:AdviceArgumentRole.Manner,conceptId:"whole"})
+    ]));
+    expect(actions.find(x=>x.predicate.lemma==="crush")?.polarity).toBe("negate");
+    if(secondWarning) expect(actions.find(x=>x.predicate.lemma==="chew")?.polarity).toBe("negate");
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    const th=formatSig(parsed.fhir,"long",{locale:"th"});
+    expect((en.match(/take 2 capsules/gi)??[]).length).toBe(1);
+    expect(en).not.toMatch(/take without crushing/i);
+    expect(en).toMatch(/do not crush/i);
+    expect(th).toContain("ทั้งแคปซูล");
+    expect(th).not.toMatch(/\b(?:whole|crushing|chewing)\b/iu);
+    const reloaded=fromFhirDosage(parsed.fhir,{locale:"th"});
+    expect(reloaded.meta.canonical.clauses[0].dose?.value).toBe(2);
+  });
+});
+
+describe("clinical negation scope across directive boundaries", () => {
+  it.each([
+    "Do not take if heart rate below 60 or systolic BP below 100; hold and call clinic",
+    "Do not take if HR below 60; hold and call clinic",
+    "Do not take. Hold and call clinic",
+    "Do not take, then hold and call clinic",
+    "ห้ามกินยาเมื่อ SBP <90 and HR<60; hold and call clinic"
+  ])("does not turn post-semicolon HOLD/CALL into prohibited commands: %s", (source) => {
+    const locale=/[\u0E00-\u0E7F]/u.test(source)?"th":"en";
+    const parsed=parseSig(source,{locale});
+    for(const result of [parsed,fromFhirDosage(parsed.fhir,{locale})]){
+      const actions=result.meta.canonical.clauses[0].instructionGraph?.actions??[];
+      expect(actions.find(x=>x.predicate.lemma==="take")?.polarity).toBe("negate");
+      expect(actions.find(x=>x.predicate.lemma==="hold")?.polarity).not.toBe("negate");
+      expect(actions.find(x=>x.predicate.lemma==="call")?.polarity).not.toBe("negate");
+    }
+    const en=formatSig(parsed.fhir,"long",{locale:"en"});
+    expect(en).not.toMatch(/do not (?:hold|call)/i);
+    expect(en).toMatch(/call clinic/i);
+  });
+
+  it("keeps explicitly repeated negative directives negative on both sides of the semicolon", () => {
+    const parsed=parseSig("Do not take if HR below 60; do not hold and do not call clinic",{locale:"en"});
+    const actions=parsed.meta.canonical.clauses[0].instructionGraph?.actions??[];
+    for(const name of ["take","hold","call"]){
+      expect(actions.find(x=>x.predicate.lemma===name)?.polarity).toBe("negate");
+    }
+  });
+
+  it("retains negation for a genuinely coordinated within-clause object list", () => {
+    const parsed=parseSig("Do not crush, chew, or swallow the tablets",{locale:"en"});
+    const actions=parsed.meta.canonical.clauses[0].instructionGraph?.actions??[];
+    for(const name of ["crush","chew","swallow"]){
+      expect(actions.find(x=>x.predicate.lemma===name)?.polarity).toBe("negate");
+    }
   });
 });

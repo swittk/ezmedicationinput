@@ -61,6 +61,9 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ทุก": "every",
   "และ": "and",
   "หรือ": "or",
+  // Bare Thai temporal linker maps to the already declared Until relation;
+  // relation semantics stay owned by the shared relation grammar.
+  "จน": "until",
   "บางๆ": "thinly",
   "ห้าม": "avoid",
   "ควร": "should",
@@ -375,24 +378,28 @@ function mergeSourceSpan(
 
 const THAI_GRAMMAR_PREFIXES = getRelationSplitPrefixes("th");
 
+/** Intermediate locale passes reuse unchanged readonly lexical objects.
+ * Only final normalization emits independently owned tokens before reindexing;
+ * avoiding repeated spreads is safe because no intermediate pass mutates them.
+ */
 function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
   const result: LexToken[] = [];
   for (const token of tokens) {
     if (token.kind !== LexKind.Word || isKnownThaiDomainTerm(token.lower)) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const prefix = THAI_GRAMMAR_PREFIXES.find((candidate) =>
       token.lower.startsWith(candidate) && token.lower.length > candidate.length
     );
     if (!prefix) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const remainder = token.lower.slice(prefix.length);
     const remainderCanonical = canonicalLocaleLexeme(remainder);
     if (!isKnownThaiDomainTerm(remainder) && !remainderCanonical) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const splitAt = token.sourceStart + prefix.length;
@@ -424,13 +431,13 @@ function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[
   const result: LexToken[] = [];
   for (const token of tokens) {
     if (token.kind !== LexKind.Word || !token.lower.startsWith("ละ") || token.lower.length <= 2) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const unitSurface = token.lower.slice(2);
     const canonicalUnit = canonicalLocaleLexeme(unitSurface);
     if (!canonicalUnit || !DOSE_UNIT_CANONICALS.has(canonicalUnit.toLowerCase())) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const splitAt = token.sourceStart + 2;
@@ -475,11 +482,14 @@ function knownDomainCompoundAt(
     if (
       !current ||
       current.kind !== LexKind.Word ||
-      previous.sourceEnd !== current.sourceStart
+      (previous.sourceEnd !== current.sourceStart &&
+       !(current.original === "ๆ" &&
+         /^\s*$/u.test(input.slice(previous.sourceEnd, current.sourceStart))))
     ) {
       break;
     }
-    const sourceText = input.slice(first.sourceStart, current.sourceEnd);
+    const sourceText = input.slice(first.sourceStart, current.sourceEnd)
+      .replace(/\s+ๆ/gu, "ๆ");
     if (isKnownThaiDomainTerm(sourceText)) {
       bestEnd = end;
     }
@@ -487,7 +497,8 @@ function knownDomainCompoundAt(
   if (bestEnd < 0) {
     return undefined;
   }
-  const sourceText = input.slice(first.sourceStart, tokens[bestEnd].sourceEnd).toLowerCase();
+  const sourceText = input.slice(first.sourceStart, tokens[bestEnd].sourceEnd)
+    .replace(/\s+ๆ/gu, "ๆ").toLowerCase();
   return {
     token: mergeSourceSpan(
       tokens,
@@ -617,7 +628,7 @@ function splitTokensAtRecognizedThaiDateBoundaries(
       cuts.add(start + match[0].length);
     }
   }
-  if (!cuts.size) return tokens.map((token, index) => ({ ...token, index }));
+  if (!cuts.size) return tokens.slice();
 
   const output: LexToken[] = [];
   for (const token of tokens) {

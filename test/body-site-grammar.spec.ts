@@ -165,3 +165,9 @@ describe("typed site-relative restrictions", () => {
     expect(recovered.site?.restrictions?.[0]?.predicate).not.toHaveProperty("coding");
   });
 });
+
+it("localizes a symptom-qualified known body site without borrowing its SNOMED", () => {
+  const site = resolveBodySitePhrase("painful rash");
+  expect(site?.coding).toBeUndefined();
+  expect(site?.siteI18n?.th).toBe("บริเวณผื่นที่ปวด");
+});

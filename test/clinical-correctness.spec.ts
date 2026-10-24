@@ -1907,3 +1907,332 @@ describe("Boolean condition constituents own their internal coordination boundar
     expect(parsed.items.every(item => getDosageAlternativeChoice(item.fhir)?.groupId === "choice-1")).toBe(true);
   });
 });
+
+
+describe("procedure-local immediacy does not create a medication stat dose", () => {
+  it.each([
+    "Should not lie down immediately after taking medication",
+    "Lie down immediately",
+    "Do not drink water immediately after taking medication"
+  ])("attaches the adverb to its procedural action, not the regimen: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.timing?.repeat?.when ?? []).not.toContain("IMD");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.fhir.text).toBeTruthy();
+  });
+  it("retains an explicitly immediate medication administration", () => {
+    const parsed = parseSig("Take 1 tablet immediately");
+    expect(parsed.fhir.timing?.repeat?.when).toContain("IMD");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({value: 1, unit: "tab"});
+  });
+});
+
+describe("open-ended patient outcome conditions remain typed without invented calendar dates", () => {
+  it.each([
+    ["Take one tablet daily until itching resolves, then stop unless rash returns", "Until itching resolves"],
+    ["Take one tablet daily until the rash resolves", "Until rash resolves"],
+    ["Apply cream daily until redness improves", "Until redness improves"]
+  ])("retains the independently unknown clinical course end: %s", (source, expected) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(1);
+    expect(parsed.fhir.additionalInstruction?.some(item =>
+      item.text === expected && !(item.coding?.length)
+    )).toBe(true);
+    expect(parsed.fhir.site?.text).not.toBe("rash");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const strict = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+    expect(strict[0]?.additionalInstruction?.some(item =>
+      item.text === expected && !(item.coding?.length)
+    )).toBe(true);
+    expect(strict[0]?.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+  });
+});
+
+describe("clinical execution adversarial source keeps patient intent and dose identity", () => {
+  it("never schedules a second evening insulin injection from a HOLD-only daypart object", () => {
+    const source = "Inject 5 units before breakfast and 8 units before dinner; " +
+      "hold only the evening dose if glucose below 70.";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([5, 8]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when))
+      .toEqual([["ACM"], ["ACV"]]);
+    const actual = nextDueDoses(parsed, {
+      from: "2026-10-24T06:00:00+07:00",
+      orderedAt: "2026-10-24T06:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      eventClock: { ACM: "07:30", ACV: "18:30", EVE: "20:00" },
+      limit: 4
+    });
+    expect(actual).toEqual([
+      "2026-10-24T07:30:00+07:00",
+      "2026-10-24T18:30:00+07:00",
+      "2026-10-25T07:30:00+07:00",
+      "2026-10-25T18:30:00+07:00"
+    ]);
+    expect(parsed.items[1].meta.canonical.clauses[0]?.rawText)
+      .toContain("hold only the evening dose");
+    expect(parsed.items[0].meta.canonical.clauses[0]?.rawText)
+      .not.toContain("glucose");
+    expect(getDosageCondition(parsed.items[0].fhir)).toBeUndefined();
+    expect(getDosageCondition(parsed.items[1].fhir)).toMatchObject({
+      kind: "not", condition: {
+        kind: "measurement", name: "glucose", operation: "lt", value: 70
+      }
+    });
+    expect(nextDueDoses(parsed.items[1].fhir, {
+      from: "2026-10-24T06:00:00+07:00",
+      orderedAt: "2026-10-24T06:00:00+07:00",
+      timeZone: "Asia/Bangkok", eventClock: { ACV: "18:30" },
+      evaluateCondition: () => false, limit: 2
+    })).toEqual([]);
+    const strict = toFhirR5Dosages(toDosageDetails(parsed.items.map(item => item.fhir)));
+    expect(strict.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
+    expect(getDosageCondition(strict[1])).toEqual(getDosageCondition(parsed.items[1].fhir));
+  });
+
+  it.each([
+    ["hold only the evening dose", "glucose below 70", "lt"],
+    ["hold the evening dose", "glucose below 70", "lt"],
+    ["hold evening dose", "glucose <70", "lt"],
+    ["hold evening dose", "glucose <=70", "le"],
+    ["omit evening dose", "glucose below 70", "lt"],
+    ["skip evening dose", "glucose below 70", "lt"],
+    ["withhold evening dose", "glucose below 70", "lt"]
+  ] as const)("composes a typed withholding action as the inverse evening-only guard: %s if %s",
+    (verb, measurement, operator) => {
+      const parsed = parseSig(
+        "Inject 5 units before breakfast and 8 units before dinner; " + verb + " if " + measurement
+      );
+      expect(parsed.items).toHaveLength(2);
+      const [morning, evening] = parsed.items.map(item => item.fhir);
+      expect([morning, evening].map(row =>
+        row.doseAndRate?.[0]?.doseQuantity?.value
+      )).toEqual([5, 8]);
+      expect([morning, evening].map(row =>
+        row.timing?.repeat?.when
+      )).toEqual([["ACM"], ["ACV"]]);
+      expect(getDosageCondition(morning)).toBeUndefined();
+      const guard = getDosageCondition(evening);
+      expect(guard).toMatchObject({
+        kind: "not", condition: {
+          kind: "measurement", name: "glucose",
+          operation: operator, value: 70
+        }
+      });
+      expect(getDosageCondition(
+        toFhirR5Dosages(toDosageDetails([morning, evening]))[1]
+      )).toEqual(guard);
+      const opts = {
+        from: "2026-10-24T06:00:00+07:00",
+        orderedAt: "2026-10-24T06:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        eventClock: { ACV: "18:30" },
+        limit: 2
+      } as const;
+      expect(nextDueDoses(evening, {
+        ...opts,
+        evaluateCondition: condition =>
+          evaluateMedicationCondition(condition, { glucose: 60 })
+      })).toEqual([]);
+      expect(nextDueDoses(evening, {
+        ...opts,
+        evaluateCondition: condition =>
+          evaluateMedicationCondition(condition, { glucose: 100 })
+      })).toHaveLength(2);
+    }
+  );
+
+  it.each([
+    ["Take 1 tablet every morning; hold if fasting blood glucose <70 mg/dL", "fasting blood glucose", "lt", "MORN"],
+    ["Give 2 mg IV daily; hold if ANC below 1000", "anc", "lt", undefined],
+    ["Take 1 tab BID; omit if blood glucose below 70", "blood glucose", "lt", undefined],
+    ["Take 1 tab daily; withhold if glucose below 70", "glucose", "lt", undefined]
+  ] as const)("licenses an omitted medication-dose object under HPSG action valence: %s",
+    (source, name, operation, daypart) => {
+      const parsed = parseSig(source);
+      expect(parsed.items).toHaveLength(1);
+      const [dosage] = parsed.items.map(item => item.fhir);
+      expect(dosage.doseAndRate?.[0]?.doseQuantity?.value).toBeGreaterThan(0);
+      if (daypart) expect(dosage.timing?.repeat?.when).toEqual([daypart]);
+      const condition = getDosageCondition(dosage);
+      expect(condition).toMatchObject({
+        kind: "not", condition: {
+          kind: "measurement", name, operation
+        }
+      });
+      expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([dosage]))[0]))
+        .toEqual(condition);
+    }
+  );
+
+  it("keeps a physical hold object outside the executable medication guard", () => {
+    const parsed = parseSig("Hold your breath if blood pressure below 80");
+    expect(parsed.items).toHaveLength(1);
+    expect(getDosageCondition(parsed.items[0].fhir)).toBeUndefined();
+    expect(parsed.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].rawText)
+      .toContain("Hold your breath");
+  });
+
+  it.each([
+    "Take 1 tablet daily; do not withhold the dose if glucose below 70",
+    "Take 1 tablet daily; do not hold the dose if glucose below 70",
+    "Take 1 tablet daily; keep the dose if glucose below 70",
+    "Take 1 tablet daily; hold your breath if pulse below 60",
+    "Take 1 tablet daily; hold the inhaler if glucose below 70"
+  ])("does not turn negative or physical retention into a medication-withholding guard: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    const row = parsed.items[0].fhir;
+    expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(getDosageCondition(row)).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
+  });
+
+  it("reuses typed withholding valence for a newly configured action without a surface rule", () => {
+    const parsed = parseSig("Take 1 tablet daily; defer if pulse below 55", {
+      instructionActionMap: {
+        defer: {
+          code: "institution-defer-dose",
+          semanticClass: "course",
+          display: "Defer",
+          procedural: true,
+          argumentParser: "object-duration",
+          realizer: "object-duration",
+          argumentParserConfig: { medicationConditionEffect: "withhold" }
+        }
+      }
+    });
+    expect(parsed.items).toHaveLength(1);
+    const condition = getDosageCondition(parsed.items[0].fhir);
+    expect(condition).toMatchObject({
+      kind: "not", condition: {
+        kind: "measurement", name: "pulse", operation: "lt", value: 55
+      }
+    });
+    expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([parsed.items[0].fhir]))[0]))
+      .toEqual(condition);
+  });
+
+  it.each([
+    ["blood sugar is under 70", "blood sugar", "lt", 70],
+    ["pulse is no less than 55", "pulse", "ge", 55],
+    ["ANC is no more than 1000", "anc", "le", 1000]
+  ] as const)("shares the complete comparison grammar in a conditional withholding action: %s",
+    (comparison, name, operation, value) => {
+      const parsed = parseSig("Take 1 tablet daily; hold if " + comparison);
+      expect(parsed.items).toHaveLength(1);
+      const condition = getDosageCondition(parsed.items[0].fhir);
+      expect(condition).toMatchObject({
+        kind: "not", condition: { kind: "measurement", name, operation, value }
+      });
+      expect(parsed.items[0].fhir.timing?.repeat)
+        .toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    }
+  );
+
+  it.each(["hold", "omit", "skip", "withhold"])(
+    "composes a fronted conditional with the withholding action daughter: %s", verb => {
+      const source = "Take 1 tablet daily; if pulse below 55, " + verb + " the dose";
+      const parsed = parseSig(source);
+      expect(parsed.items).toHaveLength(1);
+      const row = parsed.items[0].fhir;
+      expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(getDosageCondition(row)).toMatchObject({
+        kind: "not", condition: { kind: "measurement", name: "pulse", operation: "lt", value: 55 }
+      });
+    }
+  );
+
+  it.each([
+    ["hold only the morning dose", [true, false]],
+    ["hold only the evening dose", [false, true]],
+    ["withhold both doses", [true, true]],
+    ["omit all doses", [true, true]]
+  ] as const)("binds the withholding condition to its explicit dosage target: %s", (instruction, guarded) => {
+    const source = "Inject 5 units before breakfast and 8 units before dinner; " +
+      instruction + " if glucose below 70";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 8]);
+    expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
+    expect(rows.map(row => Boolean(getDosageCondition(row)))).toEqual([...guarded]);
+    rows.forEach((row, index) => {
+      if (guarded[index]) expect(getDosageCondition(row)).toMatchObject({
+        kind: "not", condition: { kind: "measurement", name: "glucose", operation: "lt", value: 70 }
+      });
+    });
+    const roundtrip = toFhirR5Dosages(toDosageDetails(rows));
+    expect(roundtrip.map(getDosageCondition)).toEqual(rows.map(getDosageCondition));
+  });
+
+  it("keeps explicit positive-only-if dosing positive instead of reversing it", () => {
+    const parsed = parseSig(
+      "Inject 5 units before breakfast and 8 units before dinner only if glucose above 70"
+    );
+    expect(parsed.items).toHaveLength(2);
+    expect(getDosageCondition(parsed.items[0].fhir)).toBeUndefined();
+    expect(getDosageCondition(parsed.items[1].fhir)).toMatchObject({
+      kind: "measurement", name: "glucose", operation: "gt", value: 70
+    });
+  });
+
+  it("does not silently stop a right-eye q2h taper after 4 doses or lose the subsequent QID stage", () => {
+    const source = "หยอดตาขวา 1 หยดทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง; " +
+      "ตาซ้ายหยอด 1 หยดวันละ 2 ครั้ง";
+    const parsed = parseSig(source, { locale: "th" });
+    expect(parsed.items).toHaveLength(3);
+    const [first, second, left] = parsed.items.map(item => item.fhir);
+    expect([first.site?.text, second.site?.text, left.site?.text])
+      .toEqual(["right eye", "right eye", "left eye"]);
+    expect([first, second, left].map(row => row.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1, 1]);
+    expect(first.timing?.repeat).toMatchObject({
+      period: 2, periodUnit: "h", boundsDuration: { value: 7, code: "d" }
+    });
+    expect(first.timing?.repeat?.count).toBeUndefined();
+    expect(second.timing?.repeat).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
+    expect(left.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    const strict = toFhirR5Dosages(toDosageDetails([first, second, left]));
+    // Whole-course R5 serializes parallel stages in effective stage order:
+    // left-eye BID begins concurrently with OD q2h, while OD QID starts
+    // later. Assert site/cadence identity, not incidental array ordering.
+    expect(strict.filter(row => row.site?.text === "right eye")
+      .map(row => row.timing?.repeat?.frequency)).toEqual([undefined, 4]);
+    expect(strict.filter(row => row.site?.text === "left eye")
+      .map(row => row.timing?.repeat?.frequency)).toEqual([2]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("does not reinterpret unanchored cycle DAY ORDINALS as additional medication doses", () => {
+    for (const source of [
+      "1 tablet on days 1, 8 and 15 of every 28-day cycle",
+      "Administer 1 tablet on days 1, 8 and 15 of each 28-day cycle; " +
+        "hold on day 8 if neutrophils below threshold."
+    ]) {
+      const parsed = parseSig(source);
+      expect(parsed.items).toHaveLength(1);
+      expect(parsed.items[0]?.fhir.doseAndRate?.[0]?.doseQuantity)
+        .toMatchObject({ value: 1, unit: "tab" });
+      expect(parsed.items[0]?.fhir.doseAndRate?.length).toBe(1);
+      expect(parsed.items[0]?.fhir.text).toContain("days 1, 8 and 15");
+      // Without a supplied cycle anchor these ordinal days are NOT separate
+      // executable doses. Preserve the clinically useful original wording.
+      expect(parsed.items[0]?.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
+      expect(parsed.items[0]?.fhir.additionalInstruction?.some(advice =>
+        /days 1, 8 and 15/u.test(advice.text ?? "")
+      )).toBe(true);
+      expect(parsed.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining("Unresolved schedule: cycle")
+      ]));
+      const issues = lintSig(source).issues;
+      expect(issues?.some(issue => issue.message.startsWith("Unresolved schedule: cycle"))).toBe(true);
+    }
+  });
+});

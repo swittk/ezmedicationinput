@@ -41,7 +41,7 @@ export interface CycleSchedule {
   unbounded?: boolean;
 }
 const LIST = `${W.dayPart}(?:${W.listSeparator}${W.dayPart})*`;
-const FRAME = `${W.dayLead}(${LIST})(?:\\s+${W.periodLead}(\\d{1,3})\\s*${W.periodUnit})?`;
+const FRAME = `${W.dayLead}(${LIST})(?:\\s+(?:of\\s+)?${W.periodLead}(\\d{1,3})\\s*[-–]?\\s*${W.periodUnit}(?:\\s+cycles?\\b)?)?`;
 const ON_OFF_DURATION = String.raw`(\d+(?:\.\d+)?)\s*(days?|d\b|weeks?|wks?\b|wk\b|months?|mos?\b|mo\b)`;
 const ON_OFF_FRAME = String.raw`\bfor\s+${ON_OFF_DURATION}\s+then\s+(?:stop|off)(?:\s+for)?\s+${ON_OFF_DURATION}\s+(?:and\s+)?repeat\b(?:\s+(?:for\s+)?(\d{1,3})\s+cycles?\b)?`;
 
@@ -181,9 +181,34 @@ export function cycleScheduleRule() {
   return lexicalRule('hpsg.lex.schedule.finiteCycle', (context, start) => {
     const first = context.tokens[start];
     const cycle = contextCycles(context).find(c => c.start === first?.sourceStart);
-    if (!cycle || cycle.error) return [];
+    if (!cycle) return [];
     const tokens = context.tokens.slice(start).filter(t => t.sourceStart < cycle.end);
     if (!tokens.length || tokens[tokens.length - 1].sourceEnd > cycle.end) return [];
+    // Every recognizable but non-executable cycle is a SINGLE typed
+    // calendar-ordinal constituent, even if its anchor/count is invalid.
+    // Its day ordinals are NEVER medication doses; preserve the source
+    // for correction while retaining the independent prescribed quantity.
+    // Executable cycles still produce real calendar events below.
+    if (cycle.error) {
+      return [lexicalSign({
+        type: 'instruction-sign',
+        rule: 'hpsg.lex.instruction.unanchoredCycle',
+        tokens,
+        synsem: {
+          head: {},
+          // Multiple independent counseling actions can follow this cycle.
+          // Use the repeatable typed instruction valence, not the singular
+          // patientInstruction slot that a subsequent HOLD could overwrite.
+          valence: { instructions: [{ text: cycle.sourceText }] },
+          cont: { clauseKind: 'administration' }
+        },
+        warnings: [
+`Unresolved schedule: cycle day offsets cannot execute (${cycle.error}); confirm or correct the cycle while retaining the prescribed dose.`
+        ],
+        score: 30 + tokens.length
+      })];
+    }
+    if (cycle.error) return [];
     const schedule = cycle.kind === 'recurring-on-off'
       ? cycle.onDuration?.value !== undefined && cycle.onDuration.code && cycle.repeatCycle
         ? {

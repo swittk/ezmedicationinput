@@ -37,6 +37,7 @@ import {
   METHOD_NOUN_LEFT_CONTEXT,
   POSITIVE_DIRECTIVE_MARKERS,
   MEDICATION_OBJECT_FILLERS,
+  PHASE_ADJUSTMENT_LEAD_SEQUENCES,
   MILLION_DOSE_MULTIPLIER_TOKENS,
   PERCENT_BODY_AREA_UNITS,
   RANGE_CONNECTORS,
@@ -106,6 +107,33 @@ function methodTokenBelongsToNegatedDirective(
     frame.span.start <= item.sourceStart &&
     item.sourceEnd <= frame.span.end
   );
+}
+
+/**
+ * Resultative phase adjustment (reduce/decrease/taper TO a new frequency).
+ * This is one open-class HPSG connective daughter, not an additional dose or
+ * a separate parser. The following ordinary schedule sign supplies frequency
+ * and the regimen SEQUENCE supplies the phase transition.
+ */
+export function phaseAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.regimen.phaseAdjustment", (context, start) => {
+    for (const parts of PHASE_ADJUSTMENT_LEAD_SEQUENCES) {
+      const tokens = tokensAvailable(context, start, parts.length);
+      if (!tokens || tokens.some((token, i) => normalizeTokenLower(token) !== parts[i])) continue;
+      const right = context.tokens[start + parts.length];
+      if (!right || context.state.consumed.has(right.index) || isPunctuation(normalizeTokenLower(right))) {
+        continue;
+      }
+      return [lexicalSign({
+        type: "connector-sign",
+        rule: "hpsg.lex.regimen.phaseAdjustment",
+        tokens,
+        synsem: emptySynsem(),
+        score: 8 + tokens.length
+      })];
+    }
+    return [];
+  });
 }
 
 export function directiveMarkerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {

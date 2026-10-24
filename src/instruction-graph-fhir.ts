@@ -75,6 +75,7 @@ function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
+  add(nested, valueCode("relation", argument.relation));
   add(nested, valueString("text", argument.text));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
@@ -207,6 +208,7 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
   const argument: AdviceArgument = {
     role,
     text,
+    relation: child(extension, "relation")?.valueCode as AdviceRelation | undefined,
     normalized: child(extension, "normalized")?.valueString,
     conceptId: child(extension, "conceptId")?.valueString,
     coding: readCoding(child(extension, "coding")?.valueCoding),

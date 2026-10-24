@@ -28,6 +28,7 @@ export interface MedicationInstructionConceptCodeSystem {
 interface ConceptSource {
   code: string;
   role: AdviceArgumentRole;
+  impliedArgument?: MedicationInstructionConceptDefinition["impliedArgument"];
   display: string;
   i18n?: Record<string, string>;
   aliases?: string[];
@@ -91,6 +92,7 @@ function cloneDefinition(
   return {
     code: definition.code,
     role: definition.role,
+    impliedArgument: definition.impliedArgument ? { ...definition.impliedArgument } : undefined,
     display: definition.display,
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
@@ -104,6 +106,7 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
   return {
     code: sourceDefinition.code,
     role: sourceDefinition.role,
+    impliedArgument: sourceDefinition.impliedArgument ? { ...sourceDefinition.impliedArgument } : undefined,
     display: sourceDefinition.display,
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
@@ -120,6 +123,7 @@ function normalizeCustomDefinition(
   return {
     code: input.code?.trim() || normalizedSurface.replace(/\s+/g, "-"),
     role: input.role ?? AdviceArgumentRole.Free,
+    impliedArgument: input.impliedArgument ? { ...input.impliedArgument } : undefined,
     display: input.display?.trim() || surface.trim() || normalizedSurface,
     i18n: input.i18n ? { ...input.i18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),

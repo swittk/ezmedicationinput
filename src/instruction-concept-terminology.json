@@ -2,6 +2,87 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
   "concepts": [
     {
+      "code": "medication-dose",
+      "role": "object",
+      "display": "medication dose",
+      "i18n": { "th": "ขนาดยาที่ให้" },
+      "aliases": [
+        "dose", "doses", "dosage", "drug dose", "medication dose",
+        "ขนาดยา", "ยามื้อนี้"
+      ]
+    },
+    {
+      "code": "broken-skin",
+      "role": "site",
+      "display": "broken skin",
+      "i18n": { "th": "ผิวหนังที่มีแผล" },
+      "aliases": [
+        "broken skin", "damaged skin",
+        "ผิวหนังที่มีแผล", "ผิวหนังมีแผล",
+        "บริเวณผิวหนังที่มีแผล"
+      ]
+    },
+    {
+      "code": "thin-application-manner",
+      "role": "manner",
+      "display": "thinly",
+      "i18n": { "th": "บางๆ" },
+      "aliases": ["thinly", "บางๆ", "บาง ๆ"]
+    },
+    {
+      "code": "first-use",
+      "role": "activity",
+      "display": "first use",
+      "i18n": { "th": "การใช้ครั้งแรก" },
+      "aliases": ["first use", "ใช้ครั้งแรก", "การใช้ครั้งแรก"]
+    },
+    {
+      "code": "drinking-activity",
+      "role": "activity",
+      "display": "drinking",
+      "i18n": { "th": "การดื่ม" },
+      "aliases": ["drinking", "การดื่ม"]
+    },
+    {
+      "code": "immediacy",
+      "role": "time",
+      "display": "immediately",
+      "i18n": { "th": "ทันที" },
+      "aliases": ["immediately", "immediate", "ทันที"]
+    },
+    {
+      "code": "medication-administration",
+      "role": "activity",
+      "display": "taking medication",
+      "i18n": { "th": "การรับประทานยา" },
+      "aliases": [
+        "taking medication", "taking medicine", "taking", "take medication",
+        "take this medication", "taking this medication", "taking product",
+        "take product", "การกินยา", "การรับประทานยา"
+      ]
+    },
+    {
+      "code": "supply-exhausted",
+      "role": "result",
+      "display": "all medication is taken",
+      "i18n": { "th": "ยาหมด" },
+      "aliases": [
+        "finished", "used up", "all taken", "supply exhausted",
+        "all medication is taken", "ยาใช้หมด", "ยาหมด", "หมด"
+      ]
+    },
+    {
+      "code": "plenty-of-water",
+      "role": "substance",
+      "display": "plenty of water",
+      "i18n": { "th": "น้ำดื่มจำนวนมาก" },
+      "aliases": [
+        "plenty of water", "lots of water", "ample water",
+        "น้ำมากๆ", "น้ำมาก ๆ", "น้ำเยอะๆ", "น้ำเยอะ ๆ",
+        "น้ำตามมากๆ", "น้ำตามมาก ๆ", "น้ำตามเยอะๆ"
+      ]
+    },
+    {
       "code": "medication-tablet",
       "role": "object",
       "display": "tablet",
@@ -560,6 +641,11 @@
     {
       "code": "before_first_use",
       "role": "material",
+      "impliedArgument": {
+        "role": "activity",
+        "conceptId": "first-use",
+        "relation": "before"
+      },
       "display": "before first use",
       "i18n": {
         "th": "ก่อนใช้ครั้งแรก"

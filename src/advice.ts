@@ -17,6 +17,7 @@ import {
 import { normalizeLoosePhraseKey } from "./utils/text";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import { composeLocalizedRecords, localizedValue } from "./localization";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { joinLocalizedTokens } from "./locale-realization";
@@ -118,6 +119,8 @@ interface AdviceFrameTemplateSource {
 interface AdviceArgConceptMatcher {
   conceptIds: string[];
   role?: AdviceArgumentRole;
+  /** Relationship of this particular argument, independent of head relation. */
+  relations?: AdviceRelation[];
 }
 
 interface AdviceFrameMatcher {
@@ -141,6 +144,7 @@ interface AdviceFrameMatcherSource {
 interface AdviceArgConceptMatcherSource {
   conceptIds: string[];
   role?: string;
+  relations?: string[];
 }
 
 interface AdviceMatcherAllOf {
@@ -481,9 +485,13 @@ function buildAdviceFrameTemplate(source: AdviceFrameTemplateSource): AdviceFram
 }
 
 function buildAdviceArgConceptMatcher(source: AdviceArgConceptMatcherSource): AdviceArgConceptMatcher {
+  const relations = (source.relations ?? [])
+    .map(mapAdviceRelation)
+    .filter((relation): relation is AdviceRelation => Boolean(relation));
   return {
     conceptIds: source.conceptIds.slice(),
-    role: source.role ? mapAdviceArgumentRole(source.role) : undefined
+    role: source.role ? mapAdviceArgumentRole(source.role) : undefined,
+    relations: relations.length ? relations : undefined
   };
 }
 
@@ -579,6 +587,9 @@ function frameHasArgConcept(frame: AdviceFrame, matcher: AdviceArgConceptMatcher
     if (matcher.role && arg.role !== matcher.role) {
       continue;
     }
+    if (matcher.relations?.length && (
+      !arg.relation || matcher.relations.indexOf(arg.relation) < 0
+    )) continue;
     for (const conceptId of matcher.conceptIds) {
       if (arg.conceptId === conceptId) {
         return true;
@@ -1190,7 +1201,25 @@ function classifyArgument(text: string): AdviceArgument {
     return createArgument(AdviceArgumentRole.Free, cleaned, normalized);
   }
 
+  // The main typed argument vocabulary owns exact clinical material
+  // compounds, including qualitative quantity. Prefer it over the older
+  // advice-only substring lexicon to avoid erasing a meaningful modifier.
+  const shared = resolveMedicationInstructionConcept(cleaned) ??
+    resolveMedicationInstructionConcept(normalized);
   const concept = findContainedConcept(normalized);
+  // Existing advice meal-state/clinical roles outrank a generic shared noun.
+  // Within the SAME typed role, prefer the exact shared lexical concept,
+  // which preserves a qualified material instead of collapsing it to water.
+  const sharedIsSpecific = Boolean(shared && (!concept ||
+    shared.role === mapSemanticClassToRole(concept.semanticClass) &&
+      shared.code !== concept.conceptId));
+  if (shared && sharedIsSpecific) return {
+    role: shared.role,
+    text: cleaned,
+    normalized: shared.display,
+    conceptId: shared.code,
+    i18n: { en: shared.display, ...(shared.i18n ?? {}) }
+  };
   if (concept) {
     return createArgument(
       mapSemanticClassToRole(concept.semanticClass),
@@ -1380,8 +1409,17 @@ function parseAdviceRelation(value: string | undefined): AdviceRelation | undefi
 
 function normalizeWords(text: string): string[] {
   const normalized = normalizeAdditionalInstructionKey(text);
-  if (!normalized) {
-    return [];
+  if (!normalized) return [];
+  // Thai has no obligatory word spaces. Reuse the SAME locale lexicon that
+  // supplies HPSG daughters instead of treating an entire Thai directive as
+  // one unknown word. Preserve the actual lexical surfaces for source-backed
+  // arguments; this advice layer must not invent a different segmentation.
+  if (/[฀-๿]/u.test(text)) {
+    const tokens = lexInput(text);
+    const words = tokens
+      .map((token) => token.original.toLowerCase().trim())
+      .filter(Boolean);
+    if (words.length > normalized.split(" ").length) return words;
   }
   return normalized.split(" ");
 }

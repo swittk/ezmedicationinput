@@ -1,5 +1,8 @@
-import { parseInstructionActions } from "../instruction-graph";
-import { AdviceArgumentRole, AdvicePolarity, type AdviceFrame } from "../types";
+import {
+  parseInstructionActions, isSupplementalHydrationInstruction
+} from "../instruction-graph";
+import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
+import { EVENT_TIMING_TOKENS } from "../maps";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
 import type { HpsgClauseContext } from "./rule-context";
@@ -27,16 +30,49 @@ export function sourceRangeAttachmentClass(
   start: number,
   end: number
 ): HpsgAttachmentClass {
-  const enclosing = getProceduralFrames(context)
+  const frames = getProceduralFrames(context);
+  const enclosing = frames
     .filter((frame) => frame.span.start <= start && end <= frame.span.end)
     .sort((left, right) =>
       (left.span.end - left.span.start) - (right.span.end - right.span.start)
     )[0];
-  if (!enclosing) return "administration";
+  if (!enclosing) {
+    // A bare cadence such as "daily" scopes the medication, even when a
+    // preceding auxiliary covering step is locally procedural. Only an
+    // exact immediate EVENT lexical daughter can attach across a short gap
+    // without an explicit source action range.
+    const standaloneEvent = context.tokens.some(token =>
+      token.sourceStart <= start && end <= token.sourceEnd &&
+      EVENT_TIMING_TOKENS[token.canonical ?? token.lower] === EventTiming.Immediate
+    );
+    if (!standaloneEvent) return "administration";
+    // A temporal adverb may be the next daughter of a scoped procedural
+    // predicate even when the action frame's own source span ends at its verb.
+    // The closest preceding HPSG action owns it when no other clause or
+    // unrelated text intervenes. "Take 1 tab immediately" remains a regimen
+    // event, while "do not lie down immediately" modifies the prohibition.
+    let nearest: AdviceFrame | undefined;
+    for (const frame of frames) {
+      if (frame.span.end > start || frame.span.start >= start ||
+          context.state.input.slice(frame.span.end, start).trim()) continue;
+      if (!nearest || frame.span.end > nearest.span.end) nearest = frame;
+    }
+    if (nearest) {
+      const definition = resolveMedicationInstructionAction(
+        nearest.predicate.lemma, context.options
+      );
+      if (nearest.polarity === AdvicePolarity.Negate ||
+          (definition?.procedural && !definition.primaryAdministrationHead)) {
+        return "procedure";
+      }
+    }
+    return "administration";
+  }
   if (enclosing.polarity === AdvicePolarity.Negate) return "procedure";
   const definition = resolveMedicationInstructionAction(enclosing.predicate.lemma, context.options);
   if (definition?.semanticClass === "administration_pattern") return "administration";
-  if (definition && !definition.procedural) return "administration";
+  if (definition && !definition.procedural &&
+      !isSupplementalHydrationInstruction(enclosing)) return "administration";
 
   const relationCanAttachLocally = relationHasGrammarFeature(enclosing.relation, "activityFallback");
   const priorAdministrationCandidate = relationCanAttachLocally && getProceduralFrames(context).some((frame) => {

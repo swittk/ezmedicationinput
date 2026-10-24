@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateTotalUnits, nextDueDoses, parseSig, toDosageDetails,
+  calculateTotalUnits, lintSig, nextDueDoses, parseSig, toDosageDetails,
   toFhirR5Dosages, fromFhir, FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
@@ -908,7 +908,25 @@ describe("dose scheduling runtime guarantees", () => {
     // Malformed "days 0" remains editable; never force an interpretation
     // at the cost of corrupting ordinary maximum-dose prescriptions.
     expect(partial.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
-    expect(partial.meta.leftoverText).toContain("cycles");
+    // A recognized but invalid cycle is an editable, explicitly unresolved
+    // typed instruction, not necessarily a leftover lexical fragment. Most
+    // importantly, its day ordinal cannot replace the prescribed drug dose.
+    expect(partial.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 0.5, unit: "tab"
+    });
+    expect(partial.fhir[0].additionalInstruction?.some(item =>
+      item.text?.includes("days 0,8 every 28 days")
+    )).toBe(true);
+    expect(partial.fhir[0].timing?.repeat?.period).toBeUndefined();
+    expect(partial.warnings?.some(warning =>
+      warning.includes("Unresolved schedule") &&
+      warning.includes("invalid-cycle-day-range")
+    )).toBe(true);
+    expect(lintSig(unresolved).issues.some(issue =>
+      issue.message.includes("invalid-cycle-day-range")
+    )).toBe(true);
+    expect(toFhirR5Dosages(toDosageDetails([partial.fhir[0]]))[0]
+      .doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
     expect(partial.fhirNext.repeatCycle).toBeUndefined();
     expect(partial.meta.canonical.clauses[0].evidence.some(evidence =>
       evidence.rule === "hpsg.lex.schedule.finiteCycle"

@@ -2,6 +2,7 @@ import {
   AdviceFrame,
   AdviceRelation,
   CanonicalDoseRange,
+  CanonicalClinicalAdjuncts,
   CanonicalAdditionalInstructionExpr,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
@@ -183,6 +184,7 @@ export interface HpsgConditionFeature {
  */
 export interface HpsgClinicalAdjunctFeature {
   condition?: MedicationCondition;
+  conditionTarget?: CanonicalClinicalAdjuncts["conditionTarget"];
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];
   includedWeekdays?: FhirDayOfWeek[];

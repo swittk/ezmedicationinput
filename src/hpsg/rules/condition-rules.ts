@@ -1,10 +1,12 @@
-import { AdvicePolarity, FhirDayOfWeek, ParseOptions } from "../../types";
+import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
 import {
   findMedicationDateListSpans,
   MedicationDateListMatch,
   parseMedicationDateListAt
 } from "../../date-interpretation";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
+import { parseMedicationGuard } from "../../medication-condition";
 import {
   ACTION_SEQUENCE_RELATION_SURFACES,
   relationHasGrammarFeature,
@@ -12,7 +14,8 @@ import {
 } from "../../relation-terminology";
 import { getProceduralFrames, actionEventRelationAt } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
-import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS } from "../lexical-classes";
+import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_EVENT_MEMBERS } from "../lexical-classes";
+import { EVENT_TIMING_TOKENS } from "../../maps";
 import {
   HpsgClauseContext,
   lexicalRule,
@@ -198,6 +201,126 @@ function clinicalAdjunctSign(
   });
 }
 
+/** Exact nominal source ownership. A medication noun in some other argument
+ * (e.g. an AFTER-taking activity) does not make the held object a drug dose. */
+function tokenInActionArgument(
+  context: HpsgClauseContext, start: number, end: number,
+  frame: AdviceFrame, argument: AdviceFrame["args"][number]
+): boolean {
+  const argumentStart = argument.span?.start ?? context.state.input.indexOf(argument.text, frame.span.start);
+  const argumentEnd = argument.span?.end ?? argumentStart + argument.text.length;
+  return argumentStart >= frame.span.start && argumentEnd <= frame.span.end &&
+    start >= argumentStart && end <= argumentEnd;
+}
+
+/**
+ * A conditional withhold action contributes the inverse administration
+ * guard, not a positive permission to administer when the HOLD predicate is
+ * true.  Its object daughter must resolve to a medication-dose noun; holding
+ * one's breath or retaining a physical object is a different lexical sense.
+ * Predicate and object semantics are already part of the HPSG action frames.
+ */
+function withholdsMedicationAdministration(
+  context: HpsgClauseContext,
+  frame: AdviceFrame
+): boolean {
+  const action = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  if (frame.polarity === AdvicePolarity.Negate ||
+      action?.argumentParserConfig?.medicationConditionEffect !== "withhold") {
+    return false;
+  }
+  // A bare "hold/omit/skip" is an elliptical medication-dose object under
+  // this action's valence. It only becomes executable after the HPSG sign
+  // unifies with a real administration head: applyClinicalAdjunct refuses
+  // orphan predicates without a dose, method, site, or cadence. A physical
+  // "hold your breath" has an explicit, nonmedication object and is excluded.
+  if (!frame.args.length) return true;
+  return frame.args.some((argument) =>
+    argument.role === AdviceArgumentRole.Object && (
+      argument.conceptId === "medication-dose" ||
+      context.tokens.some((token) =>
+        tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument) &&
+        resolveMedicationInstructionConcept(
+          normalizeTokenLower(token), context.options
+        )?.code === "medication-dose"
+      )
+    )
+  );
+}
+
+/** Return an inverse condition only when the selected conditional construction
+ * relates a typed withholding action to a medication-dose argument. */
+function localWithholdingGuard(
+  context: HpsgClauseContext,
+  sourceStart: number,
+  frame: AdviceFrame,
+  sourceEnd?: number
+) {
+  const cached = medicationGuardForContext(context);
+  if (!cached || cached.start !== sourceStart || !withholdsMedicationAdministration(context, frame)) {
+    return undefined;
+  }
+  // A prefixed procedural condition ends at its typed action daughter even
+  // without punctuation. Reuse the same Boolean lexical grammar on that
+  // bounded constituent; do not let the action become part of a measurement.
+  const guard = sourceEnd !== undefined && sourceEnd < cached.end
+    ? parseMedicationGuard(context.state.input.slice(sourceStart, sourceEnd))
+    : cached;
+  if (!guard) return undefined;
+  return guard.condition.kind === "not"
+    ? guard.condition.condition
+    : { kind: "not" as const, condition: guard.condition };
+}
+
+/** Resolve the nominal target inside a withholding action. Event words here
+ * qualify the dose noun; they are not additional administration occurrences. */
+function withholdingDoseTarget(
+  context: HpsgClauseContext, frame: AdviceFrame
+): NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> {
+  const target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> = {};
+  for (const argument of frame.args) {
+    if (argument.role !== AdviceArgumentRole.Object) continue;
+    // Exact source anchoring only: the grammatical tokens are reused, not
+    // reparsed from a rendered phrase or interpreted by a second parser.
+    for (const token of context.tokens) {
+      if (!tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument)) continue;
+      const word = normalizeTokenLower(token);
+      const quantifier = DOSE_TARGET_QUANTIFIERS.get(word);
+      if (quantifier) target.quantifier = quantifier;
+      const event = EVENT_TIMING_TOKENS[word];
+      if (!event) continue;
+      const members = DOSE_TARGET_EVENT_MEMBERS.get(event) ?? [event];
+      target.when = [...new Set([...(target.when ?? []), ...members])];
+    }
+  }
+  return target;
+}
+
+/** One typed effect shared by prefix/postfix IF constructions and the
+ * medication adjunct sign. The condition owner and nominal target survive
+ * until the related regimen daughters have been composed. */
+function withholdingAdjunct(
+  context: HpsgClauseContext,
+  range: { start: number; end: number },
+  frames: readonly AdviceFrame[]
+): HpsgClinicalAdjunctFeature | undefined {
+  for (const frame of frames) {
+    const condition = localWithholdingGuard(context, range.start, frame, range.end);
+    if (!condition) continue;
+    return {
+      condition,
+      conditionTarget: withholdingDoseTarget(context, frame),
+      localRanges: [range],
+      evidence: [{
+        rule: "hpsg.cx.medication-withholding-conditional",
+        kind: "condition",
+        ranges: [range]
+      }]
+    };
+  }
+  return undefined;
+}
+
 /** Medication guards are lexical adjuncts, separate from procedural IF scope. */
 export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinical.condition", (context, start) => {
@@ -219,8 +342,15 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     ).filter((token) => localRanges.some((range) =>
       token.sourceStart < range.end && range.start < token.sourceEnd
     ));
+    // The procedural conditional construction owns which action this IF
+    // modifies, for both prefix and postfix order. Its matcher calls the
+    // pure frame helper, never this discovery function, so no recursion.
+    const scoped = getConditionFeatures(context).find(feature => feature.sourceStart === guard.start);
+    const withheld = scoped && withholdingAdjunct(context,
+      { start: scoped.sourceStart, end: scoped.sourceEnd }, scoped.frames);
     return [clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
-      condition: guard.condition,
+      condition: withheld?.condition ?? guard.condition,
+      ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
       localRanges,
       evidence: [{
         rule: "hpsg.lex.clinical.condition",
@@ -340,14 +470,29 @@ function conditionTokens(
 }
 
 
+/** Numeric comparisons own their operator phrases, including surface forms
+ * that also introduce dosage caps in another grammatical position. */
+function isQuantifiedCondition(condition: MedicationCondition): boolean {
+  if (condition.kind === "measurement") return true;
+  if (condition.kind === "not") return isQuantifiedCondition(condition.condition);
+  if (condition.kind === "all" || condition.kind === "any") {
+    return condition.conditions.length > 0 && condition.conditions.every(isQuantifiedCondition);
+  }
+  return false;
+}
+
 function postfixConditionEnd(context: HpsgClauseContext, start: number): number {
   const first = context.tokens[start];
   if (!first) return 0;
+  const guard = medicationGuardForContext(context);
+  const comparisonEnd = guard?.start === first.sourceStart && isQuantifiedCondition(guard.condition)
+    ? guard.end : first.sourceStart;
   let end = context.state.input.length;
   for (let index = start + 1; index < context.limit; index += 1) {
     const current = context.tokens[index];
     if (!current) break;
-    if (/^[.;!?]$/u.test(current.original.trim()) || startsMaximumCountLead(context, index)) {
+    if (/^[.;!?]$/u.test(current.original.trim()) ||
+        current.sourceStart >= comparisonEnd && startsMaximumCountLead(context, index)) {
       end = current.sourceStart;
       break;
     }
@@ -384,6 +529,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         frame.polarity === AdvicePolarity.Negate ||
         medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
       ));
+      const sourceRange = { start: lead.sourceStart, end: conditionEnd };
+      const withheld = withholdingAdjunct(context, sourceRange, program);
       return [lexicalSign({
         type: "conditional-sign",
         rule: "hpsg.lex.condition",
@@ -403,7 +550,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               targetEnd,
               safety,
               frames: program
-            }
+            },
+            ...(withheld ? { clinicalAdjunct: withheld } : {})
           }
         },
         score: 34 + tokens.length + program.length * 3
@@ -427,6 +575,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
     const safety = previous.polarity === AdvicePolarity.Negate ||
       medicationInstructionActionIsSafetyScopeTarget(previous.predicate.lemma, context.options);
+    const sourceRange = { start: lead.sourceStart, end: sourceEnd };
+    const withheld = withholdingAdjunct(context, sourceRange, [previous]);
     return [lexicalSign({
       type: "conditional-sign",
       rule: "hpsg.lex.condition",
@@ -446,7 +596,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             targetEnd: previous.span.end,
             safety,
             frames: [previous]
-          }
+          },
+          ...(withheld ? { clinicalAdjunct: withheld } : {})
         }
       },
       score: 34 + tokens.length

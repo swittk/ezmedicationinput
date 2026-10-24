@@ -44,6 +44,7 @@ import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
   connectorLexicalRule,
   directiveMarkerLexicalRule,
+  phaseAdjustmentLexicalRule,
   doseLexicalRule,
   perTargetCountDoseRule,
   fillerLexicalRule,
@@ -119,6 +120,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       ...(hasCalendarExclusion ? [calendarExclusionLexicalRule()] : []),
       ...[
       directiveMarkerLexicalRule(),
+      phaseAdjustmentLexicalRule(),
       methodLexicalRule(),
       routeLexicalRule(),
       productLexicalRule(),

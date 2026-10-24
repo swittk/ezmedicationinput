@@ -2,7 +2,6 @@ import { MedicationCondition } from "./types";
 
 // Bare "if" is a guard when its clause contains an explicit numeric
 // measurement comparison. Bare "if pain" retains the existing PRN grammar.
-const NUMERIC_IF_GUARD = /\bif\b(?=\s+[^,;]*?(?:>=|<=|>|<|\b(?:above|below|greater\s+than|less\s+than|at\s+least|at\s+most)\b)\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+))/iu;
 const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี(?:ที่)?/iu;
 // A no-dose consequent may be followed by another coordinated instruction.
 // Only the hold/skip constituent belongs to the guard's source ownership;
@@ -11,6 +10,11 @@ const OTHERWISE_HOLD = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\s+(?:hold|do\s+not\s
 const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
 const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d+)?|\.\d+)`;
 const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
+// The guard lead and its measurement daughter share one comparison grammar.
+// Otherwise a valid operator (e.g. "under") can be consumed as mere advice.
+const NUMERIC_IF_GUARD = new RegExp(
+  String.raw`\bif\b(?=\s+[^,;]*?${OPERATOR}\s*${NUMBER})`, "iu"
+);
 const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(%|mmhg|mg/dl|mmol/l|bpm|°c|c|องศา)?$`, "iu");
 const SEPARATOR_OR = /\s+or\s+|\s*หรือ\s*/iu;
 const SEPARATOR_AND = /\s+and\s+|\s*และ\s*/iu;
@@ -37,7 +41,7 @@ function parseAtom(input: string): MedicationCondition {
   if (numeric && numeric[1].trim() && Number.isFinite(Number(numeric[3]))) {
     return {
       kind: "measurement",
-      name: numeric[1].trim().replace(/\s+/gu, " ").toLowerCase(),
+      name: numeric[1].trim().replace(/\s+(?:is|are)$/iu, "").replace(/\s+/gu, " ").toLowerCase(),
       operation: canonicalOperator(numeric[2]),
       value: Number(numeric[3]),
       ...(numeric[4] ? { unit: numeric[4] } : {}),

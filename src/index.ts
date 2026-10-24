@@ -11,7 +11,7 @@ import {
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
   scopeTrailingSharedDuration,
-  scopeTrailingSharedNegativeInstructions
+  scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
 import type { BoundaryPlan } from "./regimen/types";
@@ -678,6 +678,7 @@ function composeParsedStates(
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
+  scopeMedicationConditionTargets(states, boundaryPlan, segments);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
   scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
   const timingComposition = states.length > 1

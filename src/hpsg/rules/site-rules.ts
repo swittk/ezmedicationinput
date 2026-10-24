@@ -797,7 +797,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 text: displayText,
                 i18n: !resolved.coding && resolved.definition?.text === "affected area"
                   ? siteI18nWithSourceText(sourceText, resolved.definition?.i18n, context)
-                  : resolved.definition?.i18n,
+                  : resolved.siteI18n ?? resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,
                 spatialRelation: resolved.spatialRelation,

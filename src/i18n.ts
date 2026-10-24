@@ -9,7 +9,6 @@ import {
   relationHasSemanticClass,
   resolveActionRelationSurface
 } from "./relation-terminology";
-import { resolveEventTimingExpression } from "./event-timing-expression";
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   medicationInstructionActionLocaleRealizerConfig,
@@ -41,6 +40,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
   instructionGraphCoversTypedWarnings,
@@ -1279,6 +1279,10 @@ function formatActivityTimingThai(schedule: CanonicalScheduleExpr | undefined): 
       result.push(`${relation}${activity}`);
       continue;
     }
+    if (value === 0 && timing.offset !== undefined) {
+      result.push(`${relation}${activity}ทันที`);
+      continue;
+    }
     const quantity = formatEventOffsetQuantityThai(value);
     const bound = timing.offsetMin !== undefined ? "อย่างน้อย "
       : timing.offsetMax !== undefined ? "ไม่เกิน " : "";
@@ -1293,6 +1297,7 @@ function formatEventOffsetThai(
 ): string {
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
+  if (value === 0 && schedule.offset !== undefined) return `${eventText}ทันที`;
   const quantity = formatEventOffsetQuantityThai(value);
   if (schedule.offsetMin !== undefined) return `${eventText}อย่างน้อย ${quantity}`;
   if (schedule.offsetMax !== undefined) return `${eventText}ไม่เกิน ${quantity}`;
@@ -2187,16 +2192,8 @@ function formatLongThai(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
   const richPrimaryCoversSingleEvent = Boolean(
-    richPrimaryGraphAction && schedule?.when?.length === 1 &&
-    richPrimaryGraphAction.args.some((arg) => {
-      if (arg.role !== AdviceArgumentRole.Time) return false;
-      if (arg.normalized?.toUpperCase() === schedule.when?.[0]) return true;
-      const parts = (arg.normalized ?? arg.text).toLowerCase().split(/\s+/).filter((part) => part && part !== "the");
-      for (let index = 0; index < parts.length; index += 1) {
-        if (resolveEventTimingExpression(parts, index)?.timing === schedule.when?.[0]) return true;
-      }
-      return false;
-    })
+    richPrimaryGraphAction &&
+    instructionGraphActionCoversSingleScheduledEvent(richPrimaryGraphAction, clause)
   );
   const richPrimaryDefinition = richPrimaryGraphAction
     ? resolveMedicationInstructionAction(richPrimaryGraphAction.predicate.lemma)
@@ -2372,6 +2369,12 @@ function formatLongThai(
       instructionGraphRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
       clause.instructionGraph.coverage?.complete === true
     )
+  ) || Boolean(
+    clause.patientInstruction && clause.instructionGraph &&
+    !canonicalClauseHasAdministrationSemantics(clause) &&
+    instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
+      text: clause.patientInstruction, frames: []
+    })
   );
   const fallbackPatientInstruction = formatPatientInstructionSentence(
     patientSourceRepresented ? undefined : clause.patientInstruction

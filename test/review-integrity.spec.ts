@@ -3,8 +3,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
-  parseSig, parseSigAsync, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
+  parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
   calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
+  getDosageAlternativeChoice,
   type FhirDosage, type FhirR6DosageDetails, type EzDosage, type FhirExtension
 } from "../src";
 import {
@@ -905,7 +906,19 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       // do not impose a special parser guard or chart dose override to fix it.
       // The malformed cycle is still editable through authoritative input
       // and typed rawText; exact leftover tokenization is not a contract.
-      expect(parsed.meta.leftoverText).toBeTruthy();
+      expect(parsed.fhir).toHaveLength(1);
+      // Source-local dose identity is stronger than a superficially valid
+      // chart cover: ordinal cycle-day 0/1/8/15 is NEVER a new drug amount.
+      expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity)
+        .toMatchObject({ value: 0.5, unit: "tab" });
+      expect(parsed.meta.canonical.clauses[0].evidence.find(evidence =>
+        evidence.rule === "hpsg.lex.dose.numeric")?.spans.map(span => span.text))
+        .toContain(".5 tab");
+      // A rejected cycle may retain the independently specified 08:00 clock,
+      // but cannot acquire a bogus every-28-days executable recurrence.
+      expect(parsed.fhir[0].timing?.repeat?.period).toBeUndefined();
+      expect(lintSig(input).issues.some(issue =>
+        /Unrecognized text|Unresolved schedule/iu.test(issue.message))).toBe(true);
       expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
       expect(parsed.fhir[0].route?.text).toBe("by mouth");
       expect(parsed.fhirNext.repeatCycle).toBeUndefined();
@@ -1221,4 +1234,688 @@ it("keeps independent editable course markers on every projected row", () => {
   marker(0).extension![0].extension!.find(value => value.url === "renderedInstruction")!.valueString = "edited first row";
   expect(marker(1)).toEqual(beforeSecond);
   expect(source.renderedInstruction).toBe(parallel);
+});
+
+// Cross-layer clinical entailment controls from the October 2026 bilingual
+// counseling cases. These require the SAME typed action meaning before and
+// after a strict R5/R6 save/reload, rather than merely recognizing all words.
+describe("independent counseling entailment conservation in R5/R6", () => {
+  const conserved = (source: string) => {
+    const original = parseSig(source);
+    const rows = toFhirR5Dosages(original.fhirNext);
+    const fromStrictR5 = fromFhirDosage(rows[0]);
+    const fromRoundtripR6 = fromFhir(toDosageDetails(rows));
+    return { original, rows, fromStrictR5, fromRoundtripR6 };
+  };
+  const actions = (result: ReturnType<typeof parseSig>) =>
+    result.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+  const canonicalActions = (result: ReturnType<typeof fromFhir> | ReturnType<typeof fromFhirDosage>) =>
+    result.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+  const adviceCodes = (dosage: FhirDosage) =>
+    dosage.additionalInstruction?.flatMap(value =>
+      value.coding?.map(coding => coding.code) ?? []) ?? [];
+
+  it.each([
+    "Drink plenty of water",
+    "Drink lots of water",
+    "ดื่มน้ำตามมากๆ",
+    "ดื่มน้ำตามมาก ๆ",
+    "ดื่มน้ำเยอะๆ"
+  ])("keeps affirmative water counseling, rather than fabricating a medication administration: %s", source => {
+    const { original, rows, fromStrictR5, fromRoundtripR6 } = conserved(source);
+    expect(original.fhir).toHaveLength(1);
+    expect(original.fhir[0].doseAndRate).toBeUndefined();
+    expect(original.fhir[0].method).toBeUndefined();
+    expect(original.fhir[0].route).toBeUndefined();
+    expect(original.fhir[0].timing?.repeat).toBeUndefined();
+    expect(original.meta.leftoverText).toBeUndefined();
+    expect(adviceCodes(original.fhir[0])).toContain("419303009");
+    const frame = expect.objectContaining({
+      predicate: expect.objectContaining({ lemma: "drink" }),
+      args: expect.arrayContaining([
+        expect.objectContaining({ role: "substance", conceptId: "plenty-of-water" })
+      ])
+    });
+    expect(actions(original)).toEqual(expect.arrayContaining([frame]));
+    for (const [roundtripped, dosage] of [
+      [fromStrictR5, fromStrictR5.fhir],
+      [fromRoundtripR6, fromRoundtripR6.fhir[0]]
+    ] as const) {
+      expect(dosage.doseAndRate).toBeUndefined();
+      expect(dosage.method).toBeUndefined();
+      expect(dosage.route).toBeUndefined();
+      expect(dosage.timing?.repeat).toBeUndefined();
+      expect(canonicalActions(roundtripped)).toEqual(expect.arrayContaining([frame]));
+      expect(adviceCodes(dosage)).toContain("419303009");
+    }
+    const en = formatSig(toDosageDetails(rows), "long", { locale: "en" });
+    const th = formatSig(toDosageDetails(rows), "long", { locale: "th" });
+    expect(en).toMatch(/drink.*water/iu);
+    expect(en).not.toMatch(/(?:take|use) the medication/iu);
+    expect(th).toContain("ดื่ม");
+    expect(th).not.toMatch(/[A-Za-z]/u);
+  });
+
+  it.each([
+    "Do not drink water for 30 minutes",
+    "Do not drink water",
+    "Avoid drinking water",
+    "ห้ามดื่มน้ำ",
+    "Take 1 tablet without water"
+  ])("does not emit affirmative hydration SNOMED against source polarity: %s", source => {
+    const { original, rows, fromStrictR5, fromRoundtripR6 } = conserved(source);
+    for (const dosage of [original.fhir[0], rows[0],
+      fromStrictR5.fhir, fromRoundtripR6.fhir[0]]) {
+      expect(adviceCodes(dosage)).not.toContain("419303009");
+    }
+    if (source.toLowerCase().includes("drink") || source.includes("ดื่ม")) {
+      expect(actions(original)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          predicate: expect.objectContaining({ lemma: "drink" }),
+          polarity: "negate"
+        })
+      ]));
+      expect(canonicalActions(fromRoundtripR6)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          predicate: expect.objectContaining({ lemma: "drink" }),
+          polarity: "negate"
+        })
+      ]));
+    }
+    expect(rows[0].text).toBeTruthy();
+  });
+
+  it.each([
+    "Take 1 tablet with water",
+    "Drink water",
+    "Drink water then take 1 tablet"
+  ])("does not upgrade ordinary water to an invented plentiful quantity: %s", source => {
+    const { original, rows, fromRoundtripR6 } = conserved(source);
+    expect(adviceCodes(original.fhir[0])).not.toContain("419303009");
+    expect(adviceCodes(rows[0])).not.toContain("419303009");
+    expect(adviceCodes(fromRoundtripR6.fhir[0])).not.toContain("419303009");
+    expect(rows[0].text).toBeTruthy();
+  });
+
+  it("preserves a positive plenty-of-water adjunct without duplicating the executable dose", () => {
+    const { original, rows, fromStrictR5, fromRoundtripR6 } =
+      conserved("Take 1 tablet with plenty of water twice daily");
+    for (const dosage of [
+      original.fhir[0], rows[0], fromStrictR5.fhir, fromRoundtripR6.fhir[0]
+    ]) {
+      expect(dosage.doseAndRate?.[0].doseQuantity).toMatchObject({
+        value: 1, unit: "tab"
+      });
+      expect(dosage.timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: "d"
+      });
+      expect(adviceCodes(dosage)).toContain("419303009");
+    }
+    expect(fromRoundtripR6.fhirNext.step[0].component).toHaveLength(1);
+    expect(formatSig(toDosageDetails(rows), "long", { locale: "en" }))
+      .toMatch(/water/iu);
+  });
+
+  it("keeps a prescribed oral liquid dose distinct from supplemental drinking advice", () => {
+    const { original, rows, fromRoundtripR6 } =
+      conserved("Drink 5 mL oral solution twice daily");
+    for (const dosage of [original.fhir[0], rows[0], fromRoundtripR6.fhir[0]]) {
+      expect(dosage.doseAndRate?.[0].doseQuantity).toMatchObject({
+        value: 5, unit: "mL"
+      });
+      expect(dosage.timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: "d"
+      });
+      expect(adviceCodes(dosage)).not.toContain("419303009");
+    }
+  });
+
+  it.each([
+    "Should not lie down immediately after taking medication",
+    "ไม่ควรนอนราบทันทีหลังกินยา"
+  ])("keeps the procedure-local immediacy and AFTER relation out of dosage timing: %s", source => {
+    const { original, rows, fromStrictR5, fromRoundtripR6 } = conserved(source);
+    for (const dosage of [
+      original.fhir[0], rows[0], fromStrictR5.fhir, fromRoundtripR6.fhir[0]
+    ]) {
+      expect(dosage.timing?.repeat?.when ?? []).not.toContain("IMD");
+      expect(dosage.doseAndRate).toBeUndefined();
+    }
+    const clause = original.meta.canonical.clauses[0];
+    const target = expect.objectContaining({
+      predicate: expect.objectContaining({ lemma: "lie-down" }),
+      polarity: "negate",
+      modality: "should",
+      relation: "after",
+      args: expect.arrayContaining([
+        expect.objectContaining({ role: "time", conceptId: "immediacy" }),
+        expect.objectContaining({
+          role: "activity", conceptId: "medication-administration"
+        })
+      ])
+    });
+    expect(clause.instructionGraph?.actions).toEqual(expect.arrayContaining([target]));
+    expect(canonicalActions(fromStrictR5)).toEqual(expect.arrayContaining([target]));
+    expect(canonicalActions(fromRoundtripR6)).toEqual(expect.arrayContaining([target]));
+    expect(original.meta.leftoverText).toBeUndefined();
+    expect(formatSig(fromRoundtripR6.fhirNext, "long", { locale: "en" }))
+      .toMatch(/not lie down.*after taking medication/iu);
+  });
+
+  it.each([
+    "Continue taking medication until finished",
+    "กินต่อเนื่องจนหมด",
+    "รับประทานยาต่อเนื่องจนหมด"
+  ])("keeps continuing medication until supply exhaustion as a condition, not a finite duration: %s", source => {
+    const { original, rows, fromStrictR5, fromRoundtripR6 } = conserved(source);
+    const expected = expect.objectContaining({
+      predicate: expect.objectContaining({ lemma: "continue-treatment" }),
+      relation: "until",
+      args: expect.arrayContaining([
+        expect.objectContaining({ role: "result", conceptId: "supply-exhausted" })
+      ])
+    });
+    expect(actions(original)).toEqual(expect.arrayContaining([expected]));
+    expect(canonicalActions(fromStrictR5)).toEqual(expect.arrayContaining([expected]));
+    expect(canonicalActions(fromRoundtripR6)).toEqual(expect.arrayContaining([expected]));
+    expect(original.meta.leftoverText).toBeUndefined();
+    for (const dosage of [
+      original.fhir[0], rows[0], fromStrictR5.fhir, fromRoundtripR6.fhir[0]
+    ]) {
+      expect(dosage.doseAndRate).toBeUndefined();
+      expect(dosage.timing?.repeat?.duration).toBeUndefined();
+      expect(dosage.timing?.repeat?.count).toBeUndefined();
+    }
+  });
+
+  it("does not confuse procedure-local immediacy with the explicit main STAT dose", () => {
+    const { original, rows, fromRoundtripR6 } = conserved("Take 1 tablet immediately");
+    for (const dosage of [original.fhir[0], rows[0], fromRoundtripR6.fhir[0]]) {
+      expect(dosage.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+      expect(dosage.timing?.repeat?.when).toContain("IMD");
+    }
+  });
+});
+
+
+// A positive "mix with water before taking" instruction is not entailed by
+// negated mixing, WITHOUT-water mixing, or an unspecified preparation time.
+// Coding must follow the complete typed predicate with its material/time scope.
+describe("reconstitution counseling polarity and material scope survive strict R5/R6", () => {
+  const code = "417995008";
+  const hydrate = (text: string) => {
+    const parsed = parseSig(text);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const imported = fromFhir(toDosageDetails(strict));
+    return { parsed, strict, imported };
+  };
+  const hasCode = (dose: FhirDosage) =>
+    dose.additionalInstruction?.some(instruction =>
+      instruction.coding?.some(item => item.code === code)) ?? false;
+  const frames = (result: ReturnType<typeof parseSig> | ReturnType<typeof fromFhir>) =>
+    result.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+  const expects = (source: string, shouldCode: boolean) => {
+    const { parsed, strict, imported } = hydrate(source);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(strict).toHaveLength(1);
+    for (const dosage of [parsed.fhir[0], strict[0], imported.fhir[0]]) {
+      expect(hasCode(dosage)).toBe(shouldCode);
+    }
+    expect(parsed.fhir[0].text).toBeTruthy();
+    expect(imported.fhirNext.step[0].component).toHaveLength(1);
+    return { parsed, strict, imported };
+  };
+
+  it.each([
+    "Do not mix powder with water before taking",
+    "Do not dissolve tablet in water before taking",
+    "ห้ามผสมผงยากับน้ำก่อนรับประทาน"
+  ])("never adds affirmative reconstitution SNOMED to negated instructions: %s", source => {
+    const { parsed, imported } = expects(source, false);
+    expect(frames(parsed)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: expect.stringMatching(/^(?:mix|dissolve)$/u) }),
+        polarity: "negate"
+      })
+    ]));
+    expect(frames(imported)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ polarity: "negate" })
+    ]));
+  });
+
+  it("distinguishes WITH water from explicitly WITHOUT water in source and realized instruction", () => {
+    const { parsed, imported } = expects("Mix powder without water", false);
+    const withAbsent = expect.objectContaining({
+      predicate: expect.objectContaining({ lemma: "mix" }),
+      relation: "without"
+    });
+    expect(frames(parsed)).toEqual(expect.arrayContaining([withAbsent]));
+    expect(frames(imported)).toEqual(expect.arrayContaining([withAbsent]));
+    expect(formatSig(imported.fhirNext, "long", { locale: "en" }))
+      .toMatch(/without water/iu);
+  });
+
+  it.each([
+    "Mix powder with water",
+    "Mix powder with water after taking",
+    "Dissolve tablet in water"
+  ])("does not silently invent a BEFORE-taking instruction from water alone: %s", source => {
+    const { parsed, imported } = expects(source, false);
+    expect(frames(parsed)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: expect.stringMatching(/^(?:mix|dissolve)$/u) })
+      })
+    ]));
+    expect(imported.fhir[0].text).toBeTruthy();
+  });
+
+  it.each([
+    "Mix powder with water before taking",
+    "Dissolve tablet in water before taking",
+    "ผสมผงยากับน้ำก่อนรับประทาน"
+  ])("retains the positive coded preparation when source really says before taking: %s", source => {
+    const { parsed, imported } = expects(source, true);
+    expect(frames(parsed)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: expect.stringMatching(/^(?:mix|dissolve)$/u) })
+      })
+    ]));
+    expect(frames(parsed).some(a =>
+      /^(?:mix|dissolve)$/u.test(a.predicate.lemma) && a.polarity === "negate"
+    )).toBe(false);
+    expect(imported.fhir[0].additionalInstruction?.some(a =>
+      a.coding?.some(c => c.code === code))).toBe(true);
+  });
+});
+
+
+/**
+ * Small reusable clinical-code contrast matrix.
+ * Add a semantic signature and a few deliberately changed feature axes when
+ * adding new terminology rules. A code is licensed by composed meaning,
+ * not by encountering one remembered word. Source, strict R5 and R6 imports
+ * must agree even when an otherwise familiar constituent is negated or absent.
+ */
+describe("typed clinical terminology entailment contrast properties", () => {
+  type Contrast = {
+    family: string;
+    axis: string;
+    source: string;
+    code: string;
+    entailed: boolean;
+  };
+  const hydrating = [
+    { axis: "plentiful", negated: false, quantity: "plenty of ", entailed: true },
+    { axis: "unquantified", negated: false, quantity: "", entailed: false },
+    { axis: "negated plenty", negated: true, quantity: "plenty of ", entailed: false },
+    { axis: "negated plain", negated: true, quantity: "", entailed: false }
+  ].map((v): Contrast => ({
+    family: "affirmative quantified hydration",
+    axis: v.axis,
+    source: (v.negated ? "Do not " : "") + "Drink " + v.quantity + "water",
+    code: "419303009",
+    entailed: v.entailed
+  }));
+  const thinness = [
+    { axis: "thin film", verb: "Apply", width: "thin", negated: false, entailed: true },
+    { axis: "thick film", verb: "Apply", width: "thick", negated: false, entailed: false },
+    { axis: "negated thin", verb: "Apply", width: "thin", negated: true, entailed: false },
+    { axis: "spread thin", verb: "Spread", width: "thin", negated: false, entailed: true }
+  ].map((v): Contrast => ({
+    family: "topical thin-layer manner",
+    axis: v.axis,
+    source: (v.negated ? "Do not " : "") + v.verb + " a " + v.width + " film of cream",
+    code: "420162004",
+    entailed: v.entailed
+  }));
+  const preparation = [
+    { verb: "Mix", object: "powder", relation: "with", material: "water" },
+    { verb: "Dissolve", object: "tablet", relation: "in", material: "water" }
+  ].flatMap((v): Contrast[] => {
+    const subject = v.verb + " " + v.object + " " + v.relation + " " + v.material;
+    return [
+      { family: "reconstitution before administration", axis: v.verb + " before",
+        source: subject + " before taking", code: "417995008", entailed: true },
+      { family: "reconstitution before administration", axis: v.verb + " negated",
+        source: "Do not " + v.verb.toLowerCase() + " " + v.object + " " +
+          v.relation + " " + v.material + " before taking",
+        code: "417995008", entailed: false },
+      { family: "reconstitution before administration", axis: v.verb + " timing absent",
+        source: subject, code: "417995008", entailed: false },
+      { family: "reconstitution before administration", axis: v.verb + " after instead",
+        source: subject + " after taking", code: "417995008", entailed: false }
+    ];
+  });
+  const extraPreparation: Contrast[] = [
+    { family: "reconstitution material", axis: "without water",
+      source: "Mix powder without water before taking",
+      code: "417995008", entailed: false },
+    { family: "reconstitution material", axis: "different material",
+      source: "Mix powder with juice before taking",
+      code: "417995008", entailed: false }
+  ];
+  const all = [...hydrating, ...thinness, ...preparation, ...extraPreparation];
+  const emitted = (dosage: FhirDosage, code: string): boolean =>
+    dosage.additionalInstruction?.some(instruction =>
+      instruction.coding?.some(coding => coding.code === code)) === true;
+
+  it.each(all)("$family — $axis: $source", ({ source, code, entailed }) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir).toHaveLength(1);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(strict).toHaveLength(1);
+    const loaded = fromFhir(toDosageDetails(strict));
+    expect(loaded.fhir).toHaveLength(1);
+    for (const dosage of [parsed.fhir[0], strict[0], loaded.fhir[0]]) {
+      expect(emitted(dosage, code), "Unlicensed clinical code " + code + " for " + source)
+        .toBe(entailed);
+    }
+    expect(strict[0].text).toBeTruthy();
+  });
+
+  it.each([
+    "กินยา 1 เม็ด ทุกวัน",
+    "รับประทานยา 1 เม็ด ทุกวัน",
+    "กิน 1 เม็ด ทุกวัน",
+    "กินยา 1 เม็ด ทุกวันยกเว้นวันอาทิตย์"
+  ])("does not let a newly added Thai activity NOUN shadow executable medication verbs: %s", source => {
+    const parsed = parseSig(source);
+    const dose = parsed.fhir[0];
+    expect(dose.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(dose.method?.text).toBe("Take");
+    expect(dose.route?.text).toBe("by mouth");
+    expect(dose.timing?.repeat?.frequency).toBe(1);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(fromFhir(toDosageDetails(toFhirR5Dosages(parsed.fhirNext))).fhir[0]
+      .doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+  });
+
+  it("preserves a nominal medicine-taking activity after a NEGATED positional action", () => {
+    const parsed = parseSig("ไม่ควรนอนราบทันทีหลังกินยา");
+    const frames = parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+    expect(frames).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: expect.objectContaining({ lemma: "lie-down" }),
+        polarity: "negate",
+        relation: "after",
+        args: expect.arrayContaining([
+          expect.objectContaining({
+            role: "activity", conceptId: "medication-administration"
+          })
+        ])
+      })
+    ]));
+    expect(parsed.fhir[0].doseAndRate).toBeUndefined();
+    expect(parsed.fhir[0].timing?.repeat?.when ?? []).not.toContain("IMD");
+  });
+});
+
+
+/**
+ * An action with WATER + BEFORE has two independent semantic relations:
+ * material accompaniment and relative medication activity. Tests the typed
+ * valence directly, including native graph serialization, not just a code
+ * accidentally emitted from adjacent words or source spelling.
+ */
+describe("orthogonal material and clinical event valence survives strict FHIR", () => {
+  const signatures = [
+    { source: "Mix powder with water before taking",
+      verb: "mix", material: "with", event: "before", entailed: true },
+    { source: "Dissolve tablet in water before taking",
+      verb: "dissolve", material: "in", event: "before", entailed: true },
+    { source: "ผสมผงยากับน้ำก่อนรับประทาน",
+      verb: "mix", material: "with", event: "before", entailed: true },
+    { source: "Mix powder with water after taking",
+      verb: "mix", material: "with", event: "after", entailed: false },
+    { source: "Mix powder with water",
+      verb: "mix", material: "with", event: undefined, entailed: false },
+    { source: "Mix powder without water before taking",
+      verb: "mix", material: "without", event: "before", entailed: false }
+  ] as const;
+  const code = "417995008";
+  const specified = (dosage: FhirDosage): boolean =>
+    dosage.additionalInstruction?.some(value =>
+      value.coding?.some(coding => coding.code === code)) === true;
+
+  it.each(signatures)("$source", ({ source, verb, material, event, entailed }) => {
+    const parsed = parseSig(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const imported = fromFhir(toDosageDetails(strict));
+    for (const sourceVersion of [parsed, imported]) {
+      const action = sourceVersion.meta.canonical.clauses.flatMap(clause =>
+        clause.instructionGraph?.actions ?? []).find(frame =>
+        frame.predicate.lemma === verb);
+      expect(action).toBeDefined();
+      const fluid = action?.args.find(argument =>
+        argument.role === "substance" && argument.conceptId === "water");
+      expect(fluid).toBeDefined();
+      // Either the head relation or an explicitly scoped argument relation
+      // may own a material complement. Both are typed evidence; temporal
+      // BEFORE is a separate activity daughter and MUST NOT replace material.
+      expect(fluid?.relation ?? action?.relation).toBe(material);
+      const events = action?.args.filter(argument =>
+        argument.role === "activity" &&
+        argument.conceptId === "medication-administration") ?? [];
+      if (event) {
+        expect(events).toEqual(expect.arrayContaining([
+          expect.objectContaining({ relation: event })
+        ]));
+      } else {
+        expect(events).toHaveLength(0);
+      }
+    }
+    for (const dosage of [parsed.fhir[0], strict[0], imported.fhir[0]]) {
+      expect(specified(dosage)).toBe(entailed);
+    }
+    expect(strict[0].text).toBeTruthy();
+  });
+});
+
+
+/**
+ * Nonce substances are deliberately absent from the material terminology.
+ * Typed valence is licensed by a WITH/IN complement, not by knowing "water".
+ * Unknown material must remain editable and the independent event-relative
+ * BEFORE must not vanish from patient-facing EN/TH realization.
+ */
+describe("unseen clinical materials preserve typed valence and event scope", () => {
+  const examples = [
+    { source: "Mix powder with zorvex liquid before taking", action: "mix",
+      material: "zorvex liquid", relation: "with", locale: "en" },
+    { source: "Dissolve tablet in asterwax solution before taking", action: "dissolve",
+      material: "asterwax solution", relation: "in", locale: "en" },
+    { source: "ผสมผงยากับสารละลายชนิดใหม่ก่อนรับประทาน", action: "mix",
+      material: "สารละลายชนิดใหม่", relation: "with", locale: "th" }
+  ] as const;
+  it.each(examples)("$source", ({ source, action, material, relation, locale }) => {
+    const parsed = parseSig(source);
+    const rows = toFhirR5Dosages(parsed.fhirNext);
+    const reloaded = fromFhir(toDosageDetails(rows));
+    for (const version of [parsed, reloaded]) {
+      const frame = version.meta.canonical.clauses.flatMap(clause =>
+        clause.instructionGraph?.actions ?? []).find(value =>
+        value.predicate.lemma === action);
+      expect(frame).toBeDefined();
+      const fluid = frame?.args.find(argument =>
+        argument.role === "material" && argument.text === material);
+      expect(fluid).toBeDefined();
+      expect(fluid?.relation ?? frame?.relation).toBe(relation);
+      expect(frame?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          role: "activity", conceptId: "medication-administration",
+          relation: "before"
+        })
+      ]));
+    }
+    for (const dosage of [parsed.fhir[0], rows[0], reloaded.fhir[0]]) {
+      expect(dosage.additionalInstruction?.some(value =>
+        value.coding?.some(coding => coding.code === "417995008"))).not.toBe(true);
+    }
+    const shown = formatSig(reloaded.fhirNext, "long", { locale });
+    expect(shown).toContain(material);
+    expect(shown).toMatch(/before|ก่อน/iu);
+  });
+
+  it("does not turn an unknown WITHOUT solvent into a positive WITH instruction", () => {
+    const original = parseSig("Mix powder without zorvex liquid");
+    const loaded = fromFhir(toDosageDetails(toFhirR5Dosages(original.fhirNext)));
+    for (const version of [original, loaded]) {
+      const frame = version.meta.canonical.clauses.flatMap(clause =>
+        clause.instructionGraph?.actions ?? []).find(action =>
+        action.predicate.lemma === "mix");
+      const missingFluid = frame?.args.find(argument =>
+        argument.role === "material" && argument.text === "zorvex liquid");
+      expect(missingFluid).toBeDefined();
+      expect(missingFluid?.relation ?? frame?.relation).toBe("without");
+      expect(frame?.args.some(argument =>
+        argument.role === "substance" && argument.conceptId === "water")).not.toBe(true);
+    }
+    expect(formatSig(loaded.fhirNext, "long", { locale: "en" }))
+      .toMatch(/without zorvex liquid/iu);
+  });
+});
+
+
+/**
+ * Thai may elide the repeated meal head: "หลังอาหารเช้าหรือเย็น" is
+ * after [meal breakfast OR meal dinner], not after breakfast OR at evening.
+ * The bare "เช้าหรือเย็น" lacks that head and must remain time-of-day.
+ * This exercises coordination ownership, not a dictionary substitution
+ * for the word "เย็น".
+ */
+describe("Thai coordinated meal-head ellipsis preserves event type and scoped offset", () => {
+  const cases = [
+    { source: "กินยา 1 เม็ด ทันทีหลังอาหารเช้าหรือเย็น",
+      when: [["PCM"], ["PCV"]], offsets: [0, 0],
+      display: "หลังอาหารเย็น" },
+    { source: "กินยา 1 เม็ด 15 นาทีก่อนอาหารเช้าหรือเย็น",
+      when: [["ACM"], ["ACV"]], offsets: [15, 15],
+      display: "ก่อนอาหารเย็น" },
+    { source: "กินยา 1 เม็ด เช้าหรือเย็น",
+      when: [["MORN"], ["EVE"]], offsets: [undefined, undefined],
+      display: "ตอนเย็น" }
+  ] as const;
+  it.each(cases)("$source", ({ source, when, offsets, display }) => {
+    const parsed = parseSig(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const fromRows = fromFhir(toDosageDetails(strict));
+    for (const version of [parsed, fromRows]) {
+      expect(version.fhir).toHaveLength(2);
+      expect(version.fhir.map(row => row.timing?.repeat?.when)).toEqual(when);
+      expect(version.fhir.map(row => row.timing?.repeat?.offset)).toEqual(offsets);
+      expect(version.fhir.map(row =>
+        row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 1]);
+      const choices = version.fhir.map(row => getDosageAlternativeChoice(row));
+      expect(choices[0]?.selectionBehavior).toBe("exactly-one");
+      expect(choices[0]?.groupId).toBe(choices[1]?.groupId);
+      expect(choices[0]?.branchId).not.toBe(choices[1]?.branchId);
+    }
+    expect(strict).toHaveLength(2);
+    const shown = formatSig(fromRows.fhirNext, "long", { locale: "th" });
+    expect(shown).toContain(display);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+/**
+ * A discourse adjunct explaining an already typed choice cannot retroactively
+ * turn OR into AND, share offsets, or invent a course duration. The grammar
+ * should retain an unresolved suffix as source-backed counseling if its exact
+ * semantics are not otherwise modeled.
+ */
+describe("trailing choice-disambiguating language does not mutate executable alternatives", () => {
+  const examples = [
+    { base: "Inject 5 units 15 minutes before meals OR immediately after meals",
+      suffix: ", whichever is possible" },
+    { base: "Inject 5 units 15 minutes before meals OR immediately after meals",
+      suffix: ", whichever works" },
+    { base: "Inject 5 units 15 minutes before meals OR immediately after meals",
+      suffix: ", not both" },
+    { base: "Take 1 tablet 15 minutes before breakfast OR immediately after dinner",
+      suffix: ", whichever is possible" }
+  ] as const;
+  const semanticCore = (rows: readonly FhirDosage[]) => rows.map(row => ({
+    when: row.timing?.repeat?.when,
+    offset: row.timing?.repeat?.offset,
+    dose: row.doseAndRate?.[0]?.doseQuantity,
+    selectionBehavior: getDosageAlternativeChoice(row)?.selectionBehavior,
+    boundsDuration: row.timing?.repeat?.boundsDuration
+  }));
+
+  it.each(examples)("$base + $suffix", ({ base, suffix }) => {
+    const reference = parseSig(base);
+    const extended = parseSig(base + suffix);
+    expect(reference.fhir).toHaveLength(2);
+    expect(reference.fhir.map(row =>
+      getDosageAlternativeChoice(row)?.selectionBehavior)).toEqual([
+      "exactly-one", "exactly-one"
+    ]);
+    const referenceFacts = semanticCore(reference.fhir);
+    expect(referenceFacts.map(row => row.offset)).toEqual([15, 0]);
+    expect(referenceFacts.map(row => row.boundsDuration)).toEqual([undefined, undefined]);
+    // No discourse adjunct may reinterpret either executable choice branch.
+    expect(semanticCore(extended.fhir)).toEqual(referenceFacts);
+    const strict = toFhirR5Dosages(extended.fhirNext);
+    expect(semanticCore(strict)).toEqual(referenceFacts);
+    const loaded = fromFhir(toDosageDetails(strict));
+    expect(semanticCore(loaded.fhir)).toEqual(referenceFacts);
+    expect(loaded.fhirNext.renderedInstruction).toBe(base + suffix);
+  });
+});
+
+
+/**
+ * Cross-unit source-provenance regression: day ordinals inside a recognized
+ * but INVALID calendar cycle must remain calendar constituents, not unitless
+ * administration doses. This checks source -> strict R5 -> R6 persistence.
+ */
+describe("unresolved calendar-cycle ordinal numbers never replace an explicit drug dose", () => {
+  const quantities = [
+    { surface: "0.5 tab", value: 0.5, unit: "tab" },
+    { surface: "2 tabs", value: 2, unit: "tab" },
+    { surface: "0.5 mL", value: 0.5, unit: "mL" },
+    { surface: "3 mg", value: 3, unit: "mg" }
+  ] as const;
+  const invalidCycles = [
+    { descriptor: "day outside 28-day cycle",
+      source: "on days 1,29 every 28 days starting 28/9/2026 for 2 cycles",
+      error: "day-outside-cycle" },
+    { descriptor: "day zero in cycle",
+      source: "on days 0,8 every 28 days starting 28/9/2026 for 2 cycles",
+      error: "invalid-cycle-day-range" }
+  ] as const;
+  const scenarios = quantities.flatMap(quantity =>
+    invalidCycles.map(cycle => ({ ...quantity, ...cycle }))
+  );
+  it.each(scenarios)("$surface, $descriptor", ({ surface, value, unit, source, error }) => {
+    const input = "Take " + surface + " at 08:00 " + source;
+    const parsed = parseSig(input);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const restored = fromFhir(toDosageDetails(strict));
+    for (const version of [parsed, restored]) {
+      expect(version.fhir).toHaveLength(1);
+      const row = version.fhir[0];
+      expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value, unit });
+      expect(row.timing?.repeat?.period).toBeUndefined();
+      expect(row.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+      // Sentence capitalization during realization does not change the
+      // original clinical cycle wording or its editable source span.
+      expect(row.text?.toLowerCase()).toContain(source.toLowerCase());
+    }
+    // A strict R5 import preserves the typed dose and source text, but its
+    // canonical provenance is not a freshly parsed lexical evidence chart.
+    const originalDose = parsed.meta.canonical.clauses[0]?.evidence.find(
+      evidence => evidence.rule === "hpsg.lex.dose.numeric"
+    );
+    expect(originalDose?.spans.map(span => span.text)).toContain(surface);
+    expect(strict[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value, unit });
+    expect(parsed.warnings?.some(warning => warning.includes(error))).toBe(true);
+    expect(lintSig(input).issues.some(issue =>
+      issue.message.includes("Unresolved schedule"))).toBe(true);
+  });
 });

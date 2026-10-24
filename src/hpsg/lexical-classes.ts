@@ -333,6 +333,15 @@ export const FREQUENCY_SIMPLE_WORDS_DATA = numberRecord(source.frequencySimpleWo
 export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWords);
 /** Coded course-end events remain advisory until an actual bound is known. */
 export const OPEN_ENDED_COURSE_END_CONDITIONS = source.openEndedCourseEndConditions;
+/** Nominal quantifiers and event membership for typed medication-dose references. */
+export const DOSE_TARGET_QUANTIFIERS = new Map<string, "all" | "both">(
+  Object.keys(source.doseTargetQuantifiers).map(key => [key,
+    (source.doseTargetQuantifiers as Record<string, "all" | "both">)[key]])
+);
+export const DOSE_TARGET_EVENT_MEMBERS = new Map<EventTiming, readonly EventTiming[]>(
+  Object.keys(source.doseTargetEventMembers).map(key => [key as EventTiming,
+    (source.doseTargetEventMembers as Record<string, EventTiming[]>)[key]])
+);
 export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
 export const FREQUENCY_CONNECTOR_WORDS_DATA = setOf(source.frequencyConnectorWords);
@@ -353,6 +362,10 @@ export const POST_MERIDIEM_TOKENS = setOf(source.postMeridiemTokens);
 export const MERIDIEM_TOKENS = setOf(source.meridiemTokens);
 export const LIST_SEPARATORS = setOf(source.listSeparators);
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
+/** Typed resultative adjustment leads; the following cadence owns the new phase. */
+export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
+  source.phaseAdjustmentLeadSequences.map(parts => [...parts]);
+
 export const CLOCK_LEAD_TOKENS = setOf(source.clockLeadTokens);
 export const EVENT_PREPOSITIONS = setOf(source.eventPrepositions);
 export const EVENT_ARTICLE_TOKENS = setOf(source.eventArticleTokens);
@@ -476,7 +489,7 @@ export const CYCLE_WORDS = {
   dayLead: String.raw`(?:\bon\s+days?\s+|\bdays?\s+|\bD(?=\d)|วันที่ของรอบ\s*)`,
   dayPart: String.raw`\d{1,3}(?:\s*[-–]\s*\d{1,3})?`,
   listSeparator: String.raw`\s*(?:,\s*(?:and\s+|และ\s*)?|and\s+|และ\s*)`,
-  periodLead: String.raw`(?:every\s+|q\s*|ทุก\s*)`,
+  periodLead: String.raw`(?:each\s+|every\s+|q\s*|ทุก\s*)`,
   periodUnit: String.raw`(?:days?\b|d\b|วัน)`,
   startLead: String.raw`(?:starting(?:\s+on)?|from|เริ่ม(?:วันที่)?|ตั้งแต่วันที่)`,
   repeatCount: String.raw`(?:for\s+|x\s*|จำนวน\s*)(\d{1,3})\s*(?:cycles?\b|รอบ)`

@@ -1,4 +1,10 @@
 {
+  "doseTargetQuantifiers": { "all": "all", "both": "both", "ทุก": "all", "ทั้งสอง": "both" },
+  "doseTargetEventMembers": {
+    "MORN": ["MORN", "MORN.early", "MORN.late", "CM", "ACM", "PCM"],
+    "NOON": ["NOON", "CD", "ACD", "PCD"],
+    "EVE": ["EVE", "EVE.early", "EVE.late", "CV", "ACV", "PCV"]
+  },
   "siteAnchors": [
     "to",
     "in",
@@ -794,6 +800,30 @@
       "code": "1287353006",
       "display": "Until symptoms improve",
       "i18n": { "th": "ใช้ยาจนกว่าอาการจะดีขึ้น" }
+    },
+    {
+      "kind": "state-change",
+      "subjects": ["itching"],
+      "predicates": ["resolves", "resolve", "subsides"],
+      "code": null,
+      "display": "Until itching resolves",
+      "i18n": { "th": "ใช้ยาจนกว่าอาการคันจะหาย" }
+    },
+    {
+      "kind": "state-change",
+      "subjects": ["rash"],
+      "predicates": ["resolves", "resolve", "subsides"],
+      "code": null,
+      "display": "Until rash resolves",
+      "i18n": { "th": "ใช้ยาจนกว่าผื่นจะหาย" }
+    },
+    {
+      "kind": "state-change",
+      "subjects": ["redness"],
+      "predicates": ["improves", "resolves", "subsides"],
+      "code": null,
+      "display": "Until redness improves",
+      "i18n": { "th": "ใช้ยาจนกว่ารอยแดงจะดีขึ้น" }
     }
   ],
   "frequencyTimesWords": [
@@ -918,6 +948,14 @@
   "listSeparators": [
     ",",
     "and"
+  ],
+  "phaseAdjustmentLeadSequences": [
+    ["reduce", "to"],
+    ["decrease", "to"],
+    ["lower", "to"],
+    ["taper", "to"],
+    ["ลด", "เหลือ"],
+    ["ลด", "ลง", "เหลือ"]
   ],
   "medicationObjectFillers": [
     "medication",

@@ -4,7 +4,7 @@ import type { Token } from '../parser-state';
 import type { MedicationDateListMatch } from '../date-interpretation';
 
 export interface Range { start: number; end: number }
-export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause' | 'procedural-argument' | 'clinical-condition';
+export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause' | 'procedural-argument' | 'clinical-condition' | 'event-timing-list';
 export interface StructuralClaim extends Range {
   id: string;
   kind: StructureKind;

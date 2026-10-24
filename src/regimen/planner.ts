@@ -4,26 +4,128 @@ import { parseMedicationGuard } from '../medication-condition';
 import { findMedicationDateListSpans } from '../date-interpretation';
 import {
   annotateLexTokens,
+  getDayOfWeekMeaning,
   hasEventTimingMeaning,
   hasSiteMeaningCandidate,
   hasTimingAbbreviationMeaning
 } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
+import { EVENT_TIMING_TOKENS } from '../maps';
+import { parseClockToken } from '../hpsg/rule-context';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
-import { AdviceForce, type ParseOptions, type AdviceFrame } from '../types';
+import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
 import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { BoundaryPlan, BoundarySite, PlannerOptions, PlannerMetrics, Proposal, ProbeSummary, Range } from './types';
-import { recognizeStructures, OwnershipIndex, clockEnd, lexeme } from './structures';
+import type { BoundaryPlan, BoundarySite, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from './types';
 import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { parseAdditionalInstructions } from '../advice';
 import { grammaticalProposals, arbitrate } from './grammar';
+import { recognizeCycles } from './cycles';
 import type { RejectedConstruction } from './grammar';
+
+/** Use the existing locale normalizer; grammar never maintains Thai connector spellings. */
+function lexeme(token: Token | undefined): string {
+  return token ? (token.canonical ?? token.lower).replace(/^[.,;:]+|[.,;:]+$/g, '') : '';
+}
+
+/** Recognize typed clock atoms, including a numeral followed by a shared meridiem token. */
+function clockEnd(tokens: Token[], index: number): number | undefined {
+  const parsed = parseClockToken(tokens[index], tokens[index + 1]);
+  return parsed ? index + parsed.tokens.length : undefined;
+}
+
+function listConnector(token: Token | undefined): boolean {
+  return Boolean(token && (token.original === ',' || ACTION_COORDINATION_CONNECTORS.has(lexeme(token))));
+}
+
+/** Claims prevent only external segmentation; all internal tokens still reach clause HPSG. */
+function recognizeStructures(context: PlanningInput): StructuralClaim[] {
+  const { input, options, tokens } = context;
+  const claims: StructuralClaim[] = [];
+  const add = (kind: StructuralClaim['kind'], start: number, end: number, producer: string, resolved = true) => {
+    if (end > start) claims.push({ id: `${kind}:${start}:${end}`, kind, start, end, producer, resolved, policy: 'no-external-split' });
+  };
+  for (const span of context.dateSpans ?? findMedicationDateListSpans(input, options)) {
+    // A structural proposal is not authority to swallow a typed dose. Numeric date
+    // regexes can overrun `until 30/9 and 1/2 tab`; let the quantity/unit constituent
+    // bound the proposal before it becomes an ownership claim. No separator-language exception.
+    let end = span.end;
+    for (let i = 0; i + 1 < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.sourceStart <= span.start || t.sourceStart >= end) continue;
+      if ((t.kind !== LexKind.Number && t.kind !== LexKind.NumberRange) || !normalizeUnit(lexeme(tokens[i + 1]), options)) continue;
+      const previous = tokens[i - 1];
+      end = previous && listConnector(previous) ? previous.sourceStart : t.sourceStart;
+      break;
+    }
+    add('calendar-date-list', span.start, end, 'findMedicationDateListSpans', !span.unresolved);
+  }
+  for (const cycle of recognizeCycles(input, options)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
+  // List constructions compose typed atoms and canonical coordinators, not medication phrases.
+  for (const kind of ['clock-list', 'weekday-list'] as const) {
+    const atomEnd = (index: number): number | undefined => kind === 'clock-list'
+      ? clockEnd(tokens, index)
+      : getDayOfWeekMeaning(tokens[index])?.length ? index + 1 : undefined;
+    for (let start = 0; start < tokens.length; start++) {
+      let end = atomEnd(start);
+      if (end === undefined) continue;
+      let members = 1;
+      while (listConnector(tokens[end])) {
+        let next = end + 1;
+        if (tokens[end]?.original === ',' && ACTION_COORDINATION_CONNECTORS.has(lexeme(tokens[next]))) next++;
+        const after = atomEnd(next);
+        if (after === undefined) break;
+        members++; end = after;
+      }
+      if (members > 1) {
+        add(kind, tokens[start].sourceStart, tokens[end - 1].sourceEnd, `structure.${kind}.coordination`);
+        start = end - 1;
+      }
+    }
+  }
+  for (const token of tokens) {
+    if (token.kind === LexKind.NumberRange ||
+        token.kind === LexKind.Number && (token.sourceText ?? token.original).includes('/')) {
+      add('numeric-quantity', token.sourceStart, token.sourceEnd, 'lexInput.numeric-span');
+    }
+  }
+  const parens: number[] = [];
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === '(') parens.push(i);
+    else if (input[i] === ')' && parens.length) {
+      const start = parens.pop()!;
+      if (!parens.length) add('parenthesized', start, i + 1, 'structure.balanced-parentheses');
+    }
+  }
+  // Match the existing unmatched-parenthesis scope without swallowing text before the opener.
+  if (parens.length) add('parenthesized', parens[0], input.length, 'structure.open-parenthesis', false);
+  return claims.sort((a, b) => a.start - b.start || b.end - a.end || a.id.localeCompare(b.id));
+}
+
+/** Immutable interval index with prefix maxima: queries work for overlapping and nested claims. */
+class OwnershipIndex {
+  private readonly maxEnd: number[] = [];
+  constructor(readonly claims: StructuralClaim[]) {
+    let max = -1;
+    for (const claim of claims) { max = Math.max(max, claim.end); this.maxEnd.push(max); }
+  }
+  owner(offset: number): StructuralClaim | undefined {
+    let lo = 0, hi = this.claims.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (this.claims[mid].start < offset) lo = mid + 1; else hi = mid; }
+    let best: StructuralClaim | undefined;
+    for (let i = lo - 1; i >= 0 && this.maxEnd[i] > offset; i--) {
+      const claim = this.claims[i];
+      if (claim.end > offset && (!best || claim.end - claim.start > best.end - best.start)) best = claim;
+    }
+    return best;
+  }
+}
+
 
 function connectorKind(token: Token | undefined): 'coordination' | 'sequence' | undefined {
   const text = lexeme(token);
@@ -259,29 +361,82 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       resolved: true, policy: 'no-external-split'
     });
   }
+  // A selected HPSG relative-event sign owns its internal coordination.
+  // Without the claim below, the independent regimen planner can split a
+  // valid "immediately after breakfast AND dinner" timing constituent into
+  // separate prescriptions. Reuse the SAME selected clause sign as evidence
+  // instead of maintaining a duplicate surface-language timing parser.
+  // Ordinary SIGs have no such event seam and perform no extra chart work.
+  for (const site of sites) {
+    if (site.kind !== 'coordination' ||
+        coordinationConnectorKind(lexeme(tokens[site.tokenIndex])) !== 'conjunction' ||
+        !hasEventTimingMeaning(tokens[site.tokenIndex - 1])) continue;
+    let rightEndIndex = site.rightIndex;
+    if (!hasEventTimingMeaning(tokens[rightEndIndex])) continue;
+    if (EVENT_TIMING_TOKENS[lexeme(tokens[rightEndIndex])] === EventTiming.Immediate) {
+      rightEndIndex += 2;
+      if (!hasEventTimingMeaning(tokens[rightEndIndex])) continue;
+    }
+    const rightEnd = tokens[rightEndIndex]?.sourceEnd;
+    if (rightEnd === undefined) continue;
+    let immediateStart: number | undefined;
+    for (let index = site.tokenIndex - 2; index >= 0; index -= 1) {
+      if (EVENT_TIMING_TOKENS[lexeme(tokens[index])] === EventTiming.Immediate) {
+        immediateStart = tokens[index].sourceStart;
+        break;
+      }
+      if (tokens[index].original === ';' || tokens[index].original === '.') break;
+    }
+    if (immediateStart === undefined) continue;
+    const offsetStart = immediateStart;
+    const probe = evidence.probe(offsetStart, rightEnd);
+    const ownsConnector = probe.clause.schedule?.offset === 0 &&
+      (probe.clause.schedule.when?.length ?? 0) >= 2 &&
+      probe.clause.evidence.some(item =>
+        item.rule === 'hpsg.lex.schedule.eventOffset.immediate' &&
+        item.spans.some(span =>
+          offsetStart + span.start <= site.start &&
+          offsetStart + span.end >= site.end
+        ));
+    if (!ownsConnector) continue;
+    claims.push({
+      id: `event-timing-list:${offsetStart}:${rightEnd}`,
+      kind: 'event-timing-list', start: offsetStart, end: rightEnd,
+      producer: 'hpsg.lex.schedule.eventOffset.immediate',
+      resolved: true, policy: 'no-external-split'
+    });
+  }
   // Procedural argument structures are already composed into typed action
   // frames. A comma inside one such action (e.g. "before food, drink, ...")
   // is a nominal/list boundary, NOT permission to create another medication.
   // Only inspect cases actually containing an ambiguous comma, and reuse the
   // existing per-input action scan/cache. This preserves full-source spans.
   if (sites.some(site => site.kind === 'comma')) {
-    for (const frame of evidence.actions(0, input.length)) {
-      const internal = sites.some(site => site.kind === 'comma' &&
+    const actionFrames = evidence.actions(0, input.length);
+    for (const site of sites) {
+      if (site.kind !== 'comma' ||
+          explicitDoseAt(tokens, site.rightIndex, options)) continue;
+      const internal = actionFrames.some(frame =>
         frame.span.start < site.start && site.end < frame.span.end &&
-        // A fresh, explicitly counted dose MUST remain eligible to start
-        // another administration, even if an overbroad procedural frame
-        // initially swallowed the comma into its temporal arguments.
-        !explicitDoseAt(tokens, site.rightIndex, options) &&
-        frame.args.some(arg =>
-          arg.role !== 'amount' && arg.role !== 'duration' &&
-          arg.text.includes(',')
-        ));
+        frame.args.some(arg => {
+          if (arg.role === 'amount' || arg.role === 'duration' ||
+              !arg.text.includes(',')) return false;
+          // Prefer exact typed argument provenance when available. Some
+          // composed multiword nominal arguments retain source as text until
+          // projected, but never grant the WHOLE action an ownership claim.
+          return !arg.span ||
+            arg.span.start <= site.start && arg.span.end >= site.end;
+        })
+      );
       if (!internal) continue;
+      // Ownership is local to the licensed internal comma, NOT the frame's
+      // entire lexical span. A frame with an overbroad tail argument must
+      // never swallow an earlier independently licensed medication OR seam.
       claims.push({
-        id: 'procedural-argument:' + frame.span.start + ':' + frame.span.end,
+        id: 'procedural-argument:' + site.start + ':' + site.end,
         kind: 'procedural-argument',
-        start: frame.span.start,
-        end: frame.span.end,
+        start: Math.max(0, site.start - 1),
+        end: site.end + 1,
         producer: 'typed.action.valence',
         resolved: true,
         policy: 'no-external-split'

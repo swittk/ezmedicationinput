@@ -298,8 +298,8 @@
           "args": [
             {
               "role": "substance",
-              "text": "water",
-              "conceptId": "water"
+              "text": "plenty of water",
+              "conceptId": "plenty-of-water"
             }
           ]
         }
@@ -314,14 +314,15 @@
               "argConcepts": [
                 {
                   "conceptIds": [
-                    "water"
+                    "plenty-of-water"
                   ],
                   "role": "substance"
                 }
               ],
               "predicateLemmas": [
                 "take"
-              ]
+              ],
+              "polarity": "affirm"
             }
           },
           {
@@ -329,10 +330,11 @@
               "predicateLemmas": [
                 "drink"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
-                    "water"
+                    "plenty-of-water"
                   ],
                   "role": "substance"
                 }
@@ -373,12 +375,19 @@
             "dissolve",
             "mix"
           ],
+          "polarity": "affirm",
+          "relations": ["with", "in"],
           "argConcepts": [
             {
               "conceptIds": [
                 "water"
               ],
               "role": "substance"
+            },
+            {
+              "conceptIds": ["medication-administration"],
+              "role": "activity",
+              "relations": ["before"]
             }
           ]
         }
@@ -1085,16 +1094,15 @@
           },
           {
             "frame": {
-              "predicateSemanticClasses": [
-                "apply"
-              ],
+              "predicateLemmas": ["apply", "spread"],
               "polarity": "affirm",
               "argConcepts": [
                 {
                   "role": "manner",
                   "conceptIds": [
                     "thin layer",
-                    "thin_layer"
+                    "thin_layer",
+                    "thin-application-manner"
                   ]
                 }
               ]

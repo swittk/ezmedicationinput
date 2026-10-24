@@ -249,6 +249,10 @@ function applyClinicalAdjunct(
   );
   if (adjunct.condition && hasAdministration) {
     clinical.condition = adjunct.condition;
+    if (adjunct.conditionTarget) clinical.conditionTarget = {
+      ...adjunct.conditionTarget,
+      when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined
+    };
     acceptedKinds.add("condition");
   }
 

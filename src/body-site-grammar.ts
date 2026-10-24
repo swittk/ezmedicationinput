@@ -101,6 +101,10 @@ export interface ResolvedBodySitePhrase {
   definition?: BodySiteDefinition;
   features: BodySiteFeatureStructure;
   englishObjectText: string;
+  /** Composed localization of clinical qualifier + known nominal head.
+   * It deliberately grants no code to a qualified site merely because its
+   * unqualified anatomy is coded. */
+  siteI18n?: Record<string, string>;
   restrictions?: BodySiteRestriction[];
   preferredPreposition?: "to" | "at" | "in" | "into";
 }
@@ -250,6 +254,39 @@ function longestTerminalBodySiteDefinition(
     const suffix = words.slice(start).join(" ");
     const definition = lookupDefinitionForCanonical(suffix, customSiteMap);
     if (definition?.coding?.code || definition?.routeHint) return { canonical: suffix, definition };
+  }
+  return undefined;
+}
+
+/**
+ * Interpret an open-class clinical modifier as an adjunct of a registered
+ * nominal site, not as an alias for the bare anatomy's SNOMED code.
+ * The symptom/predicate lexicons own the modifier meaning and locale; the
+ * body-site lexicon owns the nominal head. Unknown modifiers stay source-only.
+ */
+function composeClinicalAttributiveSite(
+  normalized: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): Record<string, string> | undefined {
+  const words = normalized.split(/\s+/u).filter(Boolean);
+  if (words.length < 2) return undefined;
+  for (let start = 1; start < words.length; start += 1) {
+    const noun = words.slice(start).join(" ");
+    const definition = lookupDefinitionForCanonical(noun, customSiteMap);
+    const headThai = definition?.i18n?.th;
+    if (!headThai) continue;
+    const qualifiers: string[] = [];
+    let licensed = true;
+    for (const word of words.slice(0, start)) {
+      const predicate = SITE_RESTRICTION_PREDICATES.get(word);
+      const symptom = resolveSymptomDefinition(word);
+      const thai = predicate?.i18n?.th ?? symptom?.conditionI18n?.th;
+      if (!thai) { licensed = false; break; }
+      qualifiers.push(thai);
+    }
+    if (licensed && qualifiers.length) {
+      return { en: normalized, th: `${headThai}ที่${qualifiers.join("และ")}` };
+    }
   }
   return undefined;
 }
@@ -934,6 +971,8 @@ export function resolveBodySiteLexeme(
   const displaySourceText = contextualCanonical ?? trimmed;
   const displayText = normalizeSiteDisplayText(displaySourceText, customSiteMap);
   const canonical = normalizeBodySiteKey(displayText);
+  const siteI18n = lookupDefinitionForCanonical(lookupCanonical, customSiteMap)
+    ? undefined : composeClinicalAttributiveSite(canonical, customSiteMap);
   const directDefinition =
     lookupBodySiteDefinition(customSiteMap, lookupCanonical) ??
     (contextualCanonical
@@ -975,6 +1014,7 @@ export function resolveBodySiteLexeme(
     definition,
     features,
     englishObjectText: renderBodySiteObject(features),
+    siteI18n,
     preferredPreposition: inferPreferredPreposition(
       normalizeBodySiteKey(finalDisplayText) || canonical,
       features,

@@ -780,6 +780,9 @@ export enum AdviceArgumentRole {
 export interface AdviceArgument {
   role: AdviceArgumentRole;
   text: string;
+  /** Independent typed relation from this action to its argument.
+   * Permits material WITH and event BEFORE to coexist on one action. */
+  relation?: AdviceRelation;
   normalized?: string;
   conceptId?: string;
   coding?: FhirCoding;
@@ -1094,6 +1097,9 @@ export interface MedicationInstructionActionDefinition {
   /** Declarative realization family used by English/Thai graph generation. */
   realizer?: MedicationInstructionActionRealizer;
   argumentParserConfig?: {
+    /** Semantic effect of an affirmative conditional action on its medication-dose complement.
+     * Physical retention and negated instructions do not imply withholding. */
+    medicationConditionEffect?: "withhold";
     primaryConcepts?: string[];
     secondaryConcepts?: string[];
     implicitMatchedConcept?: string;
@@ -1146,6 +1152,14 @@ export interface MedicationInstructionActionInput
 export interface MedicationInstructionConceptDefinition {
   code: string;
   role: AdviceArgumentRole;
+  /** A registered compound noun may entail a second independently typed
+   * argument, e.g. a temporal material "before first use" also supplies
+   * its explicit first-use event. Not a free-form text rewrite. */
+  impliedArgument?: {
+    role: AdviceArgumentRole;
+    conceptId: string;
+    relation: AdviceRelation;
+  };
   display: string;
   i18n?: Record<string, string>;
   aliases?: string[];
@@ -1633,6 +1647,12 @@ export interface CanonicalEvidence {
  */
 export interface CanonicalClinicalAdjuncts {
   condition?: MedicationCondition;
+  /** Typed nominal reference of a conditional administration instruction.
+   * Resolved across related regimen daughters before any FHIR lowering. */
+  conditionTarget?: {
+    when?: EventTiming[];
+    quantifier?: "all" | "both";
+  };
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];
   /** Local source spans for lint ownership, not inherited donor spans. */
