@@ -750,6 +750,150 @@ describe("clinical SIG correctness and boundary promotion", () => {
   });
 });
 
+describe("final-cleanup independent clinical oracles", () => {
+  it.each([
+    {
+      source: "ฉีดอินซูลิน 5 ยูนิตใต้ผิวหนังที่หน้าท้องหรือต้นขา " +
+        "สลับตำแหน่งทุกครั้ง ห้ามฉีดบริเวณที่ช้ำ",
+      site: /abdomen.*thigh/iu,
+      prohibition: "ห้ามฉีดบริเวณที่ช้ำ",
+      excludedSite: /ช้ำ|bruis/iu,
+      rotates: true
+    },
+    {
+      source: "ฉีดอินซูลิน 5 ยูนิตใต้ผิวหนังที่หน้าท้อง ห้ามฉีดบริเวณที่เป็นแผล",
+      site: /abdomen/iu,
+      prohibition: "ห้ามฉีดบริเวณที่เป็นแผล",
+      excludedSite: /แผล|wound/iu,
+      rotates: false
+    }
+  ])("retains the complete negated injection-site exclusion: $prohibition", ({
+    source, site, prohibition, excludedSite, rotates
+  }) => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 5, unit: "U" });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("34206005");
+    expect(parsed.fhir.site?.text).toMatch(site);
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+
+    const actions = parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+    expect(actions).toContainEqual(expect.objectContaining({
+      polarity: AdvicePolarity.Negate,
+      sourceText: prohibition,
+      predicate: expect.objectContaining({ lemma: "inject" })
+    }));
+    expect(actions.some(action => action.predicate.lemma === "rotate")).toBe(rotates);
+    expect(parsed.fhir.additionalInstruction).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: prohibition })
+    ]));
+
+    for (const rendered of [
+      parsed.longText,
+      formatSig(parsed.fhirNext, "long", { locale: "en" })
+    ]) {
+      expect(rendered).toMatch(excludedSite);
+    }
+
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(strict[0]?.additionalInstruction).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: prohibition })
+    ]));
+    const loaded = fromFhir(toDosageDetails(strict));
+    expect(loaded.fhir[0]?.additionalInstruction).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: prohibition })
+    ]));
+  });
+
+  it("keeps both sequential infusion amounts and their own administration durations", () => {
+    const source = "Infuse 50 mL over 30 min, then 25 mL over 60 min; " +
+      "do not combine as one rate.";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toMatchObject([{ value: 50, code: "mL" }, { value: 25, code: "mL" }]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.rateRatio))
+      .toMatchObject([
+        { numerator: { value: 50, code: "mL" }, denominator: { value: 30, code: "min" } },
+        { numerator: { value: 25, code: "mL" }, denominator: { value: 60, code: "min" } }
+      ]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat)).toMatchObject([
+      { count: 1, duration: 30, durationUnit: "min" },
+      { count: 1, duration: 60, durationUnit: "min" }
+    ]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration))
+      .toEqual([undefined, undefined]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule)).toMatchObject([
+      { count: 1, administrationDuration: 30, administrationDurationUnit: "min" },
+      { count: 1, administrationDuration: 60, administrationDurationUnit: "min" }
+    ]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.duration))
+      .toEqual([undefined, undefined]);
+    expect(parsed.fhir.additionalInstruction?.some(item =>
+      /do not combine as one rate/iu.test(item.text ?? "")
+    )).toBe(true);
+
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const loaded = fromFhir(toDosageDetails(strict));
+    for (const rows of [strict, loaded.fhir]) {
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([50, 25]);
+      expect(rows.map(row => row.doseAndRate?.[0]?.rateRatio?.denominator?.value))
+        .toEqual([30, 60]);
+      expect(rows.map(row => row.timing?.repeat?.duration)).toEqual([30, 60]);
+      expect(rows.map(row => row.timing?.repeat?.durationUnit)).toEqual(["min", "min"]);
+      expect(rows.map(row => row.timing?.repeat?.boundsDuration)).toEqual([undefined, undefined]);
+    }
+  });
+
+  it("keeps a course duration distinct from a single infusion duration", () => {
+    const infusion = parseSig("Infuse 50 mL over 30 minutes IV").fhir.timing?.repeat;
+    expect(infusion).toMatchObject({ count: 1, duration: 30, durationUnit: "min" });
+    expect(infusion?.boundsDuration).toBeUndefined();
+
+    const course = parseSig("Take 1 tablet daily for 7 days").fhir.timing?.repeat;
+    expect(course).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      boundsDuration: { value: 7, code: "d" }
+    });
+    expect(course?.duration).toBeUndefined();
+  });
+
+  it("keeps an unknown symptom course as ordered source-backed advice, not an executable end", () => {
+    const source = "Take one tablet daily until itching resolves, then stop unless rash returns.";
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(getDosageCondition(parsed.fhir)).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    const advice = parsed.fhir.additionalInstruction?.map(item => item.text ?? "") ?? [];
+    expect(advice.some(text => /until itching resolves/iu.test(text))).toBe(true);
+    expect(advice.some(text => /stop unless rash returns/iu.test(text))).toBe(true);
+
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const loaded = fromFhir(toDosageDetails(strict));
+    for (const rendered of [
+      parsed.longText,
+      formatSig(parsed.fhirNext, "long", { locale: "en" }),
+      loaded.longText
+    ]) {
+      const normalized = rendered.toLowerCase();
+      expect(normalized).toContain("until itching resolves");
+      expect(normalized).toContain("stop unless rash returns");
+      expect(normalized.indexOf("until itching resolves"))
+        .toBeLessThan(normalized.indexOf("stop unless rash returns"));
+      expect(normalized.match(/rash returns/gu)).toHaveLength(1);
+    }
+  });
+});
+
 describe("HPSG count cardinal semantics", () => {
   it.each([
     ["left eye", "1290031003"],

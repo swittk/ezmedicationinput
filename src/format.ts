@@ -1380,8 +1380,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     });
     return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
       instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
+      // Raw source coverage can include unresolved relation/opaque text; it
+      // does not by itself license replacing the complete editable advice.
       instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning || !instruction.frames?.length ||
+      representedByWarning ||
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
         instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||

@@ -3096,3 +3096,62 @@ rule names and reconstructs event expressions outside the primary chart;
 replace that with typed event features in a focused change, without weakening
 its existing functional tests. External HL7 profile validation and remote
 CodeRabbit review have not been performed for this local checkpoint.
+
+
+### 2026-10-24 15:29 — bounded final clinical rendering and infusion corrections
+
+Completed a focused three-worker cleanup with coordinator integration against
+fb860f2. This is a local implementation checkpoint, not a new release or a
+claim of universal clinical-language understanding.
+
+- Qualified Thai prohibition targets retain the complete bruised-site or
+  open-wound restriction. The existing site-relative lexical ambiguity and
+  BodySiteRestriction machinery supply typed arguments and bilingual wording;
+  an unknown relative qualifier stays one complete source-backed argument.
+  A noun between a primary administration head and its matching amount no
+  longer becomes an invented later procedure. Raw source and editable leftovers
+  remain available; this does not introduce medication-name recognition.
+- An exact volume-over-elapsed-time constituent can be selected by an omitted
+  inherited administration head in a later infusion stage. The 50 mL/30 min
+  then 25 mL/60 min case now retains two per-administration durations and rate
+  ratios through R5/R6. Separately owned course duration remains independent.
+  A coordinator review corrected optional schedule-field ownership handling;
+  dedicated projection oracles distinguish absent evidence from a true course.
+- Noncalendar course-end instructions retain lexical source provenance and
+  their position before subsequent actions. Formatting cannot replace complete
+  editable advice merely because a graph covers its source text. English and
+  Thai save/reload preserve order without duplicating the conditional phrase
+  or appending a redundant standalone stopping instruction. No automatic
+  symptom-end evaluator or synthetic executable condition was added.
+
+Twenty-one permanent tests were added in four existing test files, including
+independent intended clinical oracles, nearby ordinary controls, and public
+R5/R6 formatting/reload checks. No original assertions were removed or weakened.
+Final Node 22 validation after the last localization correction:
+45 source suites, 2471/2471 tests PASS; ESM/CJS build, TypeScript declarations,
+and 4/4 packaged export tests PASS. Source/test snapshot drift is checked
+before commit. Runtime source still has zero JSON.parse/JSON.stringify calls;
+whitespace checks pass. Whole PR remains 115 raw paths minus the same 15
+existing exclusions = exactly 100 CodeRabbit-reviewable paths. No new excluded
+files or test paths. The old untracked diagnostic probe remains uncommitted.
+
+Paired warmed host benchmark versus the original fb860f2 bundle (Node 22,
+9 alternating rounds of 20 parses; milliseconds per parse):
+- simple BID: 1.463 -> 1.481 (+1.2%).
+- Thai prohibition: 17.793 -> 16.911 (-5.0%).
+- topical prohibition: 11.243 -> 11.765 (+4.6%).
+- sequential infusion: 9.242 -> 8.418 (-8.9%).
+- course counseling: 14.789 -> 15.989 (+8.1%).
+- independent eyes: 8.035 -> 8.006 (-0.4%).
+These are host-only measurements, not mobile latency evidence. The counseling
+case's approximately 1.2 ms overhead is recorded rather than hidden behind the
+green tests. Unsupported advice is retained verbatim; some cross-language
+output, including compound site wording, remains mixed-language rather than
+being claimed fully translated. Unanchored multi-stage execution utilities
+still require suitable phase anchors; both editable stages remain in the
+parser/FHIR outputs. No unrelated scheduling or broad grammar redesign was
+included. External HL7 validation and remote review are not claimed.
+
+Local evidence: /tmp/ezmed-finalfix-freeze-20261024.json,
+/tmp/ezmed-finalfix-perf-20261024.json, and the three final worker handoffs.
+No package version change, push, merge, publication, or consumer deployment.

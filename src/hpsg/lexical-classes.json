@@ -48,6 +48,22 @@
         "en": "irritated",
         "th": "ระคายเคือง"
       }
+    },
+    "bruised": {
+      "lemma": "bruised",
+      "form": "state",
+      "i18n": {
+        "en": "there is bruising",
+        "th": "ช้ำ"
+      }
+    },
+    "ช้ำ": {
+      "lemma": "bruised",
+      "form": "state",
+      "i18n": {
+        "en": "there is bruising",
+        "th": "ช้ำ"
+      }
     }
   },
   "siteFillers": [

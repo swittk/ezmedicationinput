@@ -602,4 +602,152 @@ describe("procedural instruction graph", () => {
     );
   });
 
+  it("keeps a Thai bruised-site injection prohibition complete and bilingual through R5", () => {
+    const source = "ฉีดอินซูลิน 5 ยูนิตใต้ผิวหนังที่หน้าท้องหรือต้นขา สลับตำแหน่งทุกครั้ง ห้ามฉีดบริเวณที่ช้ำ";
+    const parsed = parseSig(source, { locale: "th" });
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause?.instructionGraph;
+    const prohibition = graph?.actions.find((action) =>
+      action.predicate.lemma === "inject" && action.polarity === "negate"
+    );
+
+    expect(clause?.dose).toEqual({ value: 5, unit: "U" });
+    expect(clause?.route?.code).toBe("34206005");
+    expect(clause?.administrationTargetGroup).toMatchObject({
+      coordination: "disjunction",
+      targets: [
+        { coding: { code: "302553009" } },
+        { coding: { code: "68367000" } }
+      ]
+    });
+    expect(prohibition).toMatchObject({
+      sourceText: "ห้ามฉีดบริเวณที่ช้ำ",
+      args: [{
+        role: "site",
+        text: "บริเวณที่ช้ำ",
+        i18n: {
+          en: "the area where there is bruising",
+          th: "บริเวณที่ช้ำ"
+        }
+      }]
+    });
+    expect(realizeInstructionGraph(graph!, "en")).toContain(
+      "Do not inject on the area where there is bruising"
+    );
+    expect(realizeInstructionGraph(graph!, "th")).toContain("ห้ามฉีดบริเวณที่ช้ำ");
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain(
+      "Do not inject on the area where there is bruising"
+    );
+    expect(parsed.fhir.text).toContain("ห้ามฉีดบริเวณที่ช้ำ");
+    expect(parsed.fhir.text).not.toContain("จากนั้นอินซูลิน");
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized;
+    const restoredProhibition = restored.instructionGraph?.actions.find((action) =>
+      action.predicate.lemma === "inject" && action.polarity === "negate"
+    );
+    expect(restoredProhibition).toMatchObject({
+      args: [{
+        role: "site",
+        text: "บริเวณที่ช้ำ",
+        i18n: {
+          en: "the area where there is bruising",
+          th: "บริเวณที่ช้ำ"
+        }
+      }]
+    });
+    expect(restored.instructionGraph?.sourceText).toBe(source);
+  });
+
+  it("keeps an ordinary Thai open-wound topical prohibition typed and localized", () => {
+    const source = "ทาครีมบางๆ ที่ผื่น วันละ 2 ครั้ง ห้ามทาบริเวณแผลเปิด";
+    const parsed = parseSig(source, { locale: "th" });
+    const clause = parsed.meta.canonical.clauses[0];
+    const prohibition = clause?.instructionGraph?.actions.find((action) =>
+      action.predicate.lemma === "apply" && action.polarity === "negate"
+    );
+
+    expect(clause?.route?.code).toBe("6064005");
+    expect(clause?.site).toMatchObject({ text: "rash" });
+    expect(clause?.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(prohibition).toMatchObject({
+      sourceText: "ห้ามทาบริเวณแผลเปิด",
+      args: [{
+        role: "site",
+        text: "บริเวณแผลเปิด",
+        conceptId: "open-wound",
+        i18n: { en: "open wounds", th: "แผลเปิด" }
+      }]
+    });
+    expect(realizeInstructionGraph(clause!.instructionGraph!, "en")).toBe(
+      "Do not apply to open wounds"
+    );
+    expect(realizeInstructionGraph(clause!.instructionGraph!, "th")).toBe("ห้ามทาบริเวณแผลเปิด");
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain("Do not apply to open wounds");
+    expect(parsed.fhir.text).toContain("ห้ามทาบริเวณแผลเปิด");
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.actions[0]?.args[0]).toMatchObject({
+      role: "site",
+      text: "บริเวณแผลเปิด",
+      conceptId: "open-wound",
+      i18n: { en: "open wounds", th: "แผลเปิด" }
+    });
+  });
+
+  it("uses the typed site-relative construction for a nearby Thai bruised-site phrase", () => {
+    const source = "ทาครีมบางๆ ที่ต้นขาที่ช้ำ วันละ 2 ครั้ง";
+    const parsed = parseSig(source, { locale: "th" });
+    const clause = parsed.meta.canonical.clauses[0];
+
+    expect(clause?.route?.code).toBe("6064005");
+    expect(clause?.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(clause?.site).toMatchObject({
+      text: "thigh",
+      coding: { code: "68367000" },
+      restrictions: [{
+        relation: "where",
+        sourceText: "ที่ช้ำ",
+        predicate: { text: "ช้ำ", lemma: "bruised", form: "state" }
+      }]
+    });
+    expect(parsed.fhir.site?.extension).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        extension: expect.arrayContaining([
+          expect.objectContaining({ url: "predicateLemma", valueString: "bruised" })
+        ])
+      })
+    ]));
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain(
+      "the thigh where there is bruising"
+    );
+    expect(parsed.fhir.text).toContain("ต้นขาที่ช้ำ");
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized;
+    expect(restored.site?.restrictions?.[0]).toMatchObject({
+      sourceText: "ที่ช้ำ",
+      predicate: { text: "ช้ำ", lemma: "bruised", form: "state" }
+    });
+  });
+
+  it("preserves an unknown qualified prohibition site as one complete editable argument", () => {
+    const source = "ฉีด 5 ยูนิตใต้ผิวหนัง ห้ามฉีดบริเวณที่มีรอยสักใหม่";
+    const parsed = parseSig(source, { locale: "th" });
+    const prohibition = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions.find((action) =>
+      action.predicate.lemma === "inject" && action.polarity === "negate"
+    );
+
+    expect(prohibition?.sourceText).toBe("ห้ามฉีดบริเวณที่มีรอยสักใหม่");
+    expect(prohibition?.args).toEqual([
+      expect.objectContaining({
+        role: "site",
+        text: "บริเวณที่มีรอยสักใหม่",
+        normalized: "บริเวณที่มีรอยสักใหม่"
+      })
+    ]);
+    expect(realizeInstructionGraph(parsed.meta.canonical.clauses[0].instructionGraph!, "en"))
+      .toContain("บริเวณที่มีรอยสักใหม่");
+    expect(parsed.fhir.text).toContain("ห้ามฉีดบริเวณที่มีรอยสักใหม่");
+    expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.sourceText).toBe(source);
+  });
+
 });

@@ -2253,8 +2253,9 @@ function formatLongThai(
       });
     return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
       instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
+      // Source coverage is not semantic ownership of unresolved advice.
       instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning || !instruction.frames?.length ||
+      representedByWarning ||
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
         instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
@@ -2361,7 +2362,14 @@ function formatLongThai(
   const graphInstructionText = rawGraphInstructionText && graphContinuesWithThen
     ? `${sequenceSurface}${rawGraphInstructionText}`
     : rawGraphInstructionText;
+  const patientSource = clause.patientInstruction?.trim();
   const patientSourceRepresented = Boolean(
+    // Complete direct advice already owns these exact graph action sources.
+    // Do not re-emit the shorter patient fragment after its full instruction.
+    patientSource && directInstruction && additionalSemanticSourceTexts.some((source) =>
+      source.toLowerCase() === patientSource.toLowerCase()
+    )
+  ) || Boolean(
     clause.patientInstruction &&
     clause.instructionGraph &&
     (preGraphInstruction || graphInstruction || richPrimaryGraphText) &&

@@ -196,7 +196,13 @@ export const SITE_RELATIVE_MARKERS = (() => {
   const markers = new Map<string, SiteRelativeMarkerLexeme>();
   for (const relation of listBodySiteRelationDefinitions()) {
     if (relation.grammar.qualifierTarget !== "symptom" || relation.canonical !== "where") continue;
-    for (const surface of [relation.canonical, ...relation.aliases]) {
+    for (const surface of [
+      relation.canonical,
+      ...relation.aliases,
+      relation.realization.en?.surface,
+      relation.realization.th?.surface
+    ]) {
+      if (!surface) continue;
       markers.set(surface.toLowerCase(), { surface, relation: relation.canonical });
     }
   }

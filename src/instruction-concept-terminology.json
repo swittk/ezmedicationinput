@@ -23,6 +23,16 @@
       ]
     },
     {
+      "code": "open-wound",
+      "role": "site",
+      "display": "open wounds",
+      "i18n": { "th": "แผลเปิด" },
+      "aliases": ["open wound", "open wounds"],
+      "localeAliases": {
+        "th": ["แผลเปิด", "บริเวณแผลเปิด"]
+      }
+    },
+    {
       "code": "thin-application-manner",
       "role": "manner",
       "display": "thinly",

@@ -366,7 +366,10 @@ function siteRelativeMarkerSign(
   token: Token,
   lower: string
 ): HpsgSign | undefined {
-  const marker = SITE_RELATIVE_MARKERS.get(lower);
+  // Relation normalization must preserve ambiguity until the selecting
+  // construction is known. Thai `ที่` is commonly normalized to locative
+  // AT, but in a site-relative daughter its original surface licenses WHERE.
+  const marker = SITE_RELATIVE_MARKERS.get(token.lower) ?? SITE_RELATIVE_MARKERS.get(lower);
   if (!marker) return undefined;
   return lexicalSign({
     type: "site-relative-marker-sign",
@@ -428,7 +431,10 @@ function sitePredicateSign(
   start: number
 ): HpsgSign | undefined {
   const previous = context.tokens[start - 1];
-  if (!previous || !SITE_RELATIVE_MARKERS.has(normalizeTokenLower(previous))) {
+  if (!previous || !(
+    SITE_RELATIVE_MARKERS.has(previous.lower) ||
+    SITE_RELATIVE_MARKERS.has(normalizeTokenLower(previous))
+  )) {
     return undefined;
   }
   const predicateTokens: Token[] = [];

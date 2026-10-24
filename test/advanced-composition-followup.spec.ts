@@ -1529,3 +1529,50 @@ describe("clinical negation scope across directive boundaries", () => {
     }
   });
 });
+
+
+describe("source-ordered course-end counseling", () => {
+  it.each([
+    ["Take one tablet daily until itching resolves, then stop unless rash returns.", "until itching resolves", "stop unless rash returns"],
+    ["Take 1 tablet daily until next appointment; then stop.", "until next appointment", "stop"]
+  ])("keeps the course-end adjunct before its subsequent action: %s", (input, adjunct, action) => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod).toBeUndefined();
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(getDosageCondition(parsed.fhir)).toBeUndefined();
+    const reopened = fromFhirDosage(parsed.fhir, { locale: "en" });
+    for (const text of [parsed.fhir.text, formatSig(parsed.fhir, "long", { locale: "en" }), reopened.longText]) {
+      const lower = (text ?? "").toLowerCase();
+      expect(lower).toContain(adjunct);
+      expect(lower).toContain(action);
+      expect(lower.indexOf(adjunct)).toBeLessThan(lower.indexOf(action));
+    }
+  });
+
+  it("retains ordered complete counseling when formatting Thai after save and reload", () => {
+    const parsed = parseSig("Take one tablet daily until itching resolves, then stop unless rash returns.");
+    const texts = [
+      formatSig(parsed.fhir, "long", { locale: "th" }),
+      formatSig(parsed.dosageDetails, "long", { locale: "th" }),
+      fromFhirDosage(parsed.fhir, { locale: "th" }).longText
+    ];
+    for (const text of texts) {
+      const adjunct = text.search(/itching resolves|อาการคัน/u);
+      const action = text.search(/stop|หยุด/iu);
+      expect(adjunct).toBeGreaterThanOrEqual(0);
+      expect(action).toBeGreaterThan(adjunct);
+      expect(text.match(/rash returns/giu)).toHaveLength(1);
+      expect(text.match(/stop|หยุด/giu)).toHaveLength(1);
+    }
+  });
+
+  it("does not turn a calendar course end into unstructured outcome advice", () => {
+    const parsed = parseSig("Take 1 tablet daily until 2026-11-25.");
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-11-25");
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(1);
+    expect(getDosageCondition(parsed.fhir)).toBeUndefined();
+  });
+});

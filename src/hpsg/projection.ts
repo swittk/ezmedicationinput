@@ -7,6 +7,7 @@ import {
   RouteCode,
   TextRange,
   type CanonicalAdministrationTargetGroup,
+  type CanonicalAdditionalInstructionExpr,
   type CanonicalSigClause,
   type CanonicalSiteExpr,
   type CanonicalEvidence,
@@ -40,6 +41,23 @@ export interface HpsgProjectionDeps {
   ) => void;
   refreshMethodSurface: (state: ParserState) => void;
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
+}
+
+/**
+ * Locate an instruction by its typed lexical evidence or procedural frames.
+ * @param instruction The source-backed instruction whose relative order is needed.
+ */
+function instructionSourceStart(instruction: CanonicalAdditionalInstructionExpr): number | undefined {
+  let start: number | undefined;
+  for (const evidence of instruction.evidence ?? []) {
+    for (const span of evidence.spans) {
+      if (start === undefined || span.start < start) start = span.start;
+    }
+  }
+  for (const frame of instruction.frames ?? []) {
+    if (start === undefined || frame.span.start < start) start = frame.span.start;
+  }
+  return start;
 }
 
 function applySchedule(
@@ -439,12 +457,20 @@ export function projectHpsgSignToState(
           candidate.coding?.code === instruction.coding?.code
         )
       ) {
-        existing.push({
+        const projected: CanonicalAdditionalInstructionExpr = {
           text: instruction.text,
           i18n: instruction.i18n ? { ...instruction.i18n } : undefined,
           coding: instruction.coding,
-          frames: instruction.frames
+          frames: instruction.frames,
+          evidence: instruction.evidence
+        };
+        const sourceStart = instructionSourceStart(projected);
+        const following = sourceStart === undefined ? -1 : existing.findIndex((candidate) => {
+          const candidateStart = instructionSourceStart(candidate);
+          return candidateStart !== undefined && candidateStart > sourceStart;
         });
+        if (following === -1) existing.push(projected);
+        else existing.splice(following, 0, projected);
       }
     }
     state.additionalInstructions = existing;
@@ -496,9 +522,19 @@ export function projectHpsgSignToState(
     target.administrationDurationUnit = clinicalDuration.unit;
     // Duration qualifies each infusion. It is never regimen boundsDuration;
     // a single-occurrence count is only appropriate without a recurrence.
-    delete target.duration;
-    delete target.durationMax;
-    delete target.durationUnit;
+    // Keep a separately owned course duration (for example, daily for three
+    // days). Only the overlapping timing artifact without typed schedule-field
+    // ownership belongs to the clinical quantity's elapsed-time daughter.
+    const hasCourseDurationEvidence = sign.evidence.some(item =>
+      item.scheduleFields?.some(field =>
+        field === "duration" || field === "durationMax" || field === "durationUnit"
+      )
+    );
+    if (!hasCourseDurationEvidence) {
+      delete target.duration;
+      delete target.durationMax;
+      delete target.durationUnit;
+    }
     if (!hasRecurringSchedule(schedule) && target.count === undefined) target.count = 1;
   }
 

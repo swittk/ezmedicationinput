@@ -4,8 +4,16 @@ import {
   matchComposedAdviceCodings,
   adviceCodingNeedsComposedScope
 } from "./advice";
-import { resolveBodySitePhrase } from "./body-site-grammar";
-import { stripBodySiteSourceLead } from "./body-site-context-terminology";
+import {
+  formBodySiteRestriction,
+  realizeBodySiteRestriction,
+  resolveBodySitePhrase,
+  resolveBodySiteRestrictionPredicate
+} from "./body-site-grammar";
+import {
+  BODY_SITE_SOURCE_LEAD_PREFIXES,
+  stripBodySiteSourceLead
+} from "./body-site-context-terminology";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
@@ -53,6 +61,7 @@ import {
   RANGE_CONNECTORS,
   ROUTE_SITE_PREPOSITIONS,
   SITE_ANCHORS,
+  SITE_RELATIVE_MARKERS,
   methodAuxiliaryVerbsForLocale
 } from "./hpsg/lexical-classes";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
@@ -377,6 +386,86 @@ function timeArgumentFromParts(
   };
 }
 
+function siteRelativeMarkerAt(part: Lexeme | undefined): boolean {
+  return Boolean(part && (
+    SITE_RELATIVE_MARKERS.has(part.lower) || SITE_RELATIVE_MARKERS.has(key(part))
+  ));
+}
+
+/**
+ * Composes a site head with its source-backed relative predicate before the
+ * generic action-relation parser can split the two daughters. This is the
+ * instruction-valence view of the same BodySiteRestriction used by HPSG site
+ * phrases; it never grants the qualified site its head's anatomical coding.
+ */
+function qualifiedSiteArgumentFromParts(
+  parts: Lexeme[],
+  start: number,
+  endExclusive: number,
+  input: string,
+  options?: ParseOptions,
+  outerRelationIndex = -1
+): AdviceArgument | undefined {
+  for (let markerIndex = start + 1; markerIndex + 1 < endExclusive; markerIndex += 1) {
+    if (!siteRelativeMarkerAt(parts[markerIndex])) continue;
+    const baseStart = outerRelationIndex >= start && outerRelationIndex < markerIndex &&
+      !siteRelativeMarkerAt(parts[outerRelationIndex])
+      ? outerRelationIndex + 1
+      : start;
+    let nominalStart = baseStart;
+    while (nominalStart < markerIndex && EVENT_ARTICLE_TOKENS.has(key(parts[nominalStart]))) {
+      nominalStart += 1;
+    }
+    if (nominalStart >= markerIndex) continue;
+    const baseText = trimSemanticText(sourceFor(parts, baseStart, markerIndex, input));
+    const baseCanonical = parts.slice(nominalStart, markerIndex).map(key).filter(Boolean).join(" ");
+    const genericAreaHead = BODY_SITE_SOURCE_LEAD_PREFIXES.some((prefix) =>
+      normalizeActionSurface(prefix) === normalizeActionSurface(baseText)
+    ) ? internalArgument("area", baseText, options) : undefined;
+    const base = internalArgument(baseText, baseText, options) ??
+      internalArgument(baseCanonical, baseText, options) ??
+      genericAreaHead ??
+      codingFromSite(baseText, options);
+    if (base?.role !== AdviceArgumentRole.Site) continue;
+
+    const predicateText = trimSemanticText(sourceFor(parts, markerIndex + 1, endExclusive, input));
+    const text = trimSemanticText(sourceFor(parts, baseStart, endExclusive, input));
+    if (!predicateText || !text) continue;
+    const predicate = resolveBodySiteRestrictionPredicate(predicateText);
+    const restriction = formBodySiteRestriction(
+      predicate,
+      undefined,
+      trimSemanticText(sourceFor(parts, markerIndex, endExclusive, input))
+    );
+    if (!predicate.lemma) {
+      const sourceLocale = baseLanguageTag(inferMedicationLocale(text, "en")) ?? "en";
+      return {
+        role: AdviceArgumentRole.Site,
+        text,
+        normalized: text,
+        i18n: { [sourceLocale]: text }
+      };
+    }
+
+    const relativeEn = realizeBodySiteRestriction(restriction, "en");
+    const relativeTh = realizeBodySiteRestriction(restriction, "th");
+    const baseEn = localizedValue(base.i18n, "en") ?? base.normalized ?? base.text;
+    const baseTh = localizedValue(base.i18n, "th") ?? base.text;
+    const en = relativeEn ? joinLocalizedTokens("en", [baseEn, relativeEn]) : undefined;
+    const th = relativeTh ? joinLocalizedTokens("th", [baseTh, relativeTh]) : undefined;
+    return {
+      role: AdviceArgumentRole.Site,
+      text,
+      normalized: en ?? text,
+      i18n: {
+        ...(en ? { en } : {}),
+        ...(th ? { th } : {})
+      }
+    };
+  }
+  return undefined;
+}
+
 function argumentFromParts(
   parts: Lexeme[],
   start: number,
@@ -402,7 +491,13 @@ function argumentFromParts(
     if (currentKey) canonicalParts.push(currentKey);
   }
   const canonical = canonicalParts.join(" ");
-  const direct = internalArgument(canonical, text, options);
+  const qualifiedSite = qualifiedSiteArgumentFromParts(
+    parts, start, endExclusive, input, options
+  );
+  if (qualifiedSite) return qualifiedSite;
+  const direct = text === canonical
+    ? internalArgument(canonical, text, options)
+    : internalArgument(text, text, options) ?? internalArgument(canonical, text, options);
   if (direct) {
     // A terminology entry's typed role is stronger evidence than a
     // constructional fallback. The fallback is only for opaque/free text.
@@ -860,6 +955,10 @@ function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgumen
 const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, offset, options, relation, relIndex,
     relationTargetEnd, conditionalTail, duration, separableParticleIndex } = c;
+  const qualifiedSite = qualifiedSiteArgumentFromParts(
+    parts, argumentStart, segmentEnd, input, options, relIndex
+  );
+  if (qualifiedSite) return { args: [qualifiedSite] };
   let objectEnd = separableParticleIndex !== undefined
     ? separableParticleIndex
     : relIndex >= 0 ? relIndex : segmentEnd;
@@ -2964,6 +3063,37 @@ export function buildInstructionGraph(
   const fullInputFrames = parseInstructionActions(input, 0, options);
   reconcileComposedAdviceCoding(clause, fullInputFrames);
   const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
+  // A source noun between the typed administration head and its matching
+  // amount belongs to that primary action's object slot. It is still retained
+  // verbatim by clause.rawText and graph.sourceText, but must not be promoted
+  // into an independent later instruction merely because medication identity
+  // is outside Dosage semantics.
+  const primaryObjectGap = (() => {
+    if (!primaryAdministrationSpan || !clause.dose) return undefined;
+    let owner: AdviceFrame | undefined;
+    let amount: AdviceArgument | undefined;
+    for (const frame of fullInputFrames) {
+      if (frame.polarity === AdvicePolarity.Negate ||
+          !actionMatchesCanonicalMethod(frame, clause) ||
+          frame.span.start > primaryAdministrationSpan.start ||
+          primaryAdministrationSpan.end > frame.span.end) continue;
+      const candidateAmount = frame.args.find((arg) =>
+        arg.span && quantityCoveredByDose(arg, clause.dose)
+      );
+      if (!candidateAmount) continue;
+      if (!owner || frame.span.start < owner.span.start ||
+          frame.span.start === owner.span.start && frame.span.end < owner.span.end) {
+        owner = frame;
+        amount = candidateAmount;
+      }
+    }
+    if (!owner || !amount?.span || amount.span.start < primaryAdministrationSpan.end) return undefined;
+    return {
+      start: primaryAdministrationSpan.end,
+      end: amount.span.start,
+      owner
+    };
+  })();
   const temporalEndpoints = new Set<AdviceFrame>();
   for (const relation of buildInstructionRelations(input, fullInputFrames, [])) {
     if (relation.fromActionIndex === undefined || !relationHasSemanticClass(relation.kind, "temporal")) continue;
@@ -2999,6 +3129,11 @@ export function buildInstructionGraph(
     }
   }
   for (const span of clause.leftovers) {
+    if (primaryObjectGap &&
+        primaryObjectGap.start <= span.start && span.end <= primaryObjectGap.end &&
+        primaryObjectGap.owner.span.start <= span.start && span.end <= primaryObjectGap.owner.span.end) {
+      continue;
+    }
     const accepted: AdviceFrame[] = [];
     for (const frame of proceduralFramesFromSpan(input, span, options)) {
       if (pushActionIfUnique(actions, frame)) accepted.push(frame);

@@ -2758,6 +2758,14 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
         valence: { instructions: [{
           text: definition.display,
           i18n: { ...definition.i18n },
+          evidence: [{
+            rule: 'hpsg.lex.instruction.openEndedCourseCondition',
+            spans: [{
+              start: lead.sourceStart,
+              end: tokens[tokens.length - 1].sourceEnd,
+              text: context.state.input.slice(lead.sourceStart, tokens[tokens.length - 1].sourceEnd)
+            }]
+          }],
           // Clinical state changes without an independently established
           // terminology identity remain typed, editable, and source-backed.
           // Never borrow a code for a different clinical improvement concept.

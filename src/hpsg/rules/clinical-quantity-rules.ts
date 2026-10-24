@@ -270,9 +270,14 @@ function fixedVolumeOverTime(
   const numerator = volumeOrMassTerm(value, normalizeTokenLower(unitToken));
   const durationValue = clinicalDurationNumber(durationToken);
   const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
+  const durationLead = normalizeTokenLower(overToken);
   if (!numerator || numerator.dimension !== "volume" ||
       durationValue === undefined || !durationUnit ||
-      !hasAdministrationCue(context, start)) return undefined;
+      // `volume over elapsed-time` is itself a bounded dimensional
+      // constituent. It can therefore be the complement of an inherited
+      // administration head in a later regimen phase. In contrast, `for`
+      // remains ambiguous with course duration and requires a local head.
+      durationLead !== "over" && !hasAdministrationCue(context, start)) return undefined;
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
     status: "resolved",

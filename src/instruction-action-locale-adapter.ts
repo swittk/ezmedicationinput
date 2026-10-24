@@ -384,6 +384,9 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
     const object = c.site ?? c.theme ?? c.substance ?? c.material;
     const relationTarget = c.activity ?? c.time;
     const prefix = (c.frame.modality && EN_NEGATED_MODALITY_PREFIX[c.frame.modality]) ?? "Do not ";
+    if (c.site && !c.frame.relation && c.definition?.applicationVerb) {
+      return `${prefix}${c.label.toLowerCase()} to ${c.site}`;
+    }
     if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
       return `${prefix}${c.label.toLowerCase()} ${relation} ${object}`;
