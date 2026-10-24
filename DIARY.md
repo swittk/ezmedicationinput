@@ -3419,3 +3419,59 @@ exclusions = 100 reviewable files. No new exclusions. Whitespace clean;
 existing untracked test/__tmp_open_semantic_probe.ts remains outside the
 commit. No remote push, merge, publication, deployment or downstream UI
 migration is claimed by this local validation checkpoint.
+
+
+### 2026-10-25 — Parkinson-style phase and execution semantic correction
+
+Independent clinically reasonable multi-dose/taper examples exposed wrong
+week-labelled adjustments, finite-duration ownership, optional additions,
+same-times anaphora, waking-hour limits and some meal/clock combinations.
+Follow-up implementation and formal regression coverage now distinguish:
+- source-licensed ADD versus REPLACE operations on regimen phases; ADD carries
+  explicitly prior scheduled doses forward and adds only the new dose after
+  the stated boundary, while REPLACE does not accidentally retain old doses
+- labelled English and Thai week phases, explicit starting week, per-dose
+  clock times and inherited "at the same times" from a preceding typed phase;
+  unresolved "same time" without an antecedent remains reviewable advice,
+  never an invented exact clock
+- the full predecessor regimen's shared course end, including mixed WAKE and
+  bedtime administrations, not merely the last dosage component's end
+- a recurring daily waking-hours window distinct from a punctual WAKE event;
+  structured start WAKE/end HS clinical event codes are carried through
+  the HPSG signature, canonical schedule, typed FHIR extension and scheduler.
+  The scheduler never infers event windows from free text and uses explicitly
+  configured patient/event clocks; without provided wake and sleep clocks no
+  fixed waking times are fabricated
+- nonuniform doses at independent absolute clocks, meal-relative events and
+  bedtime; secondary 0.5-tablet doses, PRN conditional counsel and quantity
+  maxima remain distinct from the baseline dose, including "an extra half"
+- source-faithful Thai second-dose relative instructions; first 2-tablet dose
+  no longer disappears. "At least one week" remains a minimum/not a fabricated
+  exact seven-day appointment. Negated "never add" must not add a dosage.
+
+Independent clinical executable oracles compare actual day-one/second-week/
+third-week administrations, per-dose amounts and supply (21-,14-,7-day windows)
+for native R6, strict R5 and FHIR roundtrips. Formerly failing Parkinsonian
+cases including three daily clocks -> four starting week two, an added 0.5tab
+at 22:00, continued waking+bedtime with added noon from second week, and
+half-to-whole dose at the same times are now green. The original 521-example
+backward-compatibility smoke found and resolved the Thai primary-dose loss.
+The HPSG test suite includes negative cases for prohibited additions, unequal
+preceding amounts and original source preservation.
+
+Verified SNOMED CT **422106007**, "Add - dosing instruction fragment
+(qualifier value)" is present as an external coding alongside the existing
+local typed ADD instruction action. Clinical action graph and direct/strict
+R5 import/export roundtrips retain both codings. This external dosing-action
+qualifier does not purport to encode calendar boundaries, relative time,
+conditional source clauses or patient-specific medication semantics. Do not
+invent anatomical or timing SNOMED concepts where none is warranted.
+
+Final independent Node22 source test on committed implementation 276b0fa:
+44 suites, 2861/2861 PASS (including the new standard ADD coding
+direct/strict-R5 import/export oracle). ESM/CJS builds, TypeScript
+declarations and packaged 4/4 distribution tests PASS.
+The 100-file CodeRabbit review cap is unchanged (115 raw paths less the same
+15 existing configured exclusions). Original untracked diagnostic probe
+remains untouched and unstaged. No remote push, publication, merge or
+deployment performed.
