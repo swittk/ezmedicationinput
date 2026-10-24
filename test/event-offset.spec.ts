@@ -1,8 +1,160 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, getDosageAlternativeChoice, nextDueDoses, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL } from "../src";
+import {
+  formatSig,
+  fromFhirDosage,
+  getDosageAlternativeChoice,
+  nextDueDoses,
+  TIMING_OFFSET_EXACT_EXTENSION_URL,
+  TIMING_OFFSET_MIN_EXTENSION_URL,
+  toDosageDetails,
+  toFhirR5Dosages
+} from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 describe("relative event-offset grammar", () => {
+  it.each([
+    {
+      source: "กินยา 1 เม็ด เช้าเย็นหลังอาหาร 7 วัน",
+      when: ["PCM", "PCV"]
+    },
+    {
+      source: "กินยา 1 เม็ด วันละ 2 ครั้ง หลังอาหาร 7 วัน",
+      when: ["PC"]
+    }
+  ])("keeps a Thai seven-day course outside the meal event offset: $source", ({ source, when }) => {
+    const parsed = parseSig(source, { locale: "th" });
+    const clause = parsed.meta.canonical.clauses[0];
+
+    expect(clause?.rawText).toBe(source);
+    expect(clause?.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause?.schedule).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d",
+      duration: 7,
+      durationUnit: "d",
+      when
+    });
+    expect(clause?.schedule?.offset).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d",
+      boundsDuration: { value: 7, code: "d" },
+      when
+    });
+    expect(parsed.fhir.timing?.repeat?.offset).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    const restoredR6 = toDosageDetails(strictR5);
+    for (const repeat of [
+      strictR5[0]?.timing?.repeat,
+      restoredR6.step[0]?.component[0]?.timing?.repeat
+    ]) {
+      expect(repeat).toMatchObject({
+        frequency: 2,
+        period: 1,
+        periodUnit: "d",
+        boundsDuration: { value: 7, code: "d" },
+        when
+      });
+      expect(repeat?.offset).toBeUndefined();
+    }
+    const reopened = fromFhirDosage(parsed.fhir);
+    expect(reopened.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      frequency: 2,
+      duration: 7,
+      durationUnit: "d",
+      when
+    });
+    expect(reopened.meta.canonical.clauses[0]?.schedule?.offset).toBeUndefined();
+
+    const english = formatSig(parsed.fhirNext, "long", { locale: "en" });
+    const thai = formatSig(parsed.fhirNext, "long", { locale: "th" });
+    expect(english).toMatch(/twice daily/iu);
+    expect(english).toMatch(/after (?:breakfast.*dinner|meals)/iu);
+    expect(english).toMatch(/for 7 days/iu);
+    expect(thai).toMatch(/วันละ 2 ครั้ง/u);
+    expect(thai).toMatch(/หลังอาหาร/u);
+    expect(thai).toMatch(/7 วัน/u);
+    if (when.length === 2) {
+      expect(nextDueDoses(parsed.fhir, {
+        timeZone: "UTC",
+        eventClock: { PCM: "08:30", PCV: "19:00" },
+        orderedAt: "2024-01-01T06:00:00Z",
+        from: "2024-01-01T06:00:00Z",
+        limit: 3
+      })).toEqual([
+        "2024-01-01T08:30:00+00:00",
+        "2024-01-01T19:00:00+00:00",
+        "2024-01-02T08:30:00+00:00"
+      ]);
+    }
+  });
+
+  it.each([
+    ["กินยา 1 เม็ด เช้าและเย็นก่อนอาหาร 3 วัน", 2, ["ACM", "ACV"], 3],
+    ["กินยา 1 เม็ด เช้ากลางวันเย็นหลังอาหาร 5 วัน", 3, ["PCM", "PCD", "PCV"], 5],
+    ["Take 1 tablet morning and evening after meals for 7 days", 2, ["PCM", "PCV"], 7]
+  ] as const)("scopes a shared meal relation over typed dayparts: %s",
+    (source, frequency, when, duration) => {
+      const parsed = parseSig(source, { locale: /[ก-๙]/u.test(source) ? "th" : "en" });
+      expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+        frequency, period: 1, periodUnit: "d", when, duration, durationUnit: "d"
+      });
+      expect(parsed.fhir.timing?.repeat?.offset).toBeUndefined();
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    });
+
+  it("keeps explicit meal and non-meal offsets distinct from course duration", () => {
+    const afterMeal = parseSig("กินยา 1 เม็ด หลังอาหาร 30 นาที", { locale: "th" });
+    expect(afterMeal.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      when: ["PC"], offset: 30
+    });
+    expect(afterMeal.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+
+    const beforeMeal = parseSig("กินยา 1 เม็ด ก่อนอาหารครึ่งชั่วโมง", { locale: "th" });
+    expect(beforeMeal.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      when: ["AC"], offset: 30
+    });
+    expect(beforeMeal.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+
+    for (const [source, field] of [
+      ["Take after meals at least 1 day", "offsetMin"],
+      ["Take after meals at most 1 day", "offsetMax"]
+    ] as const) {
+      const boundedMealDay = parseSig(source);
+      expect(boundedMealDay.meta.canonical.clauses[0]?.schedule).toMatchObject({
+        when: ["PC"], [field]: 1440
+      });
+      expect(boundedMealDay.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+      expect(boundedMealDay.meta.leftoverText).toBeUndefined();
+    }
+
+    const nonMealDayOffset = parseSig("Take 1 tablet 2 days before exercise");
+    expect(nonMealDayOffset.meta.canonical.clauses[0]?.schedule?.activityTiming?.[0])
+      .toMatchObject({ relation: "before", activity: { text: "exercise" }, offset: 2880 });
+    expect(nonMealDayOffset.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+    expect(nonMealDayOffset.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each([
+    "Take 1 tablet daily for an additional 7 days",
+    "กินยา 1 เม็ด วันละครั้ง อีก 7 วัน"
+  ])("keeps a preposed quantity modifier inside its duration constituent: %s", source => {
+    const parsed = parseSig(source, { locale: /[ก-๙]/u.test(source) ? "th" : "en" });
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d",
+      duration: 7,
+      durationUnit: "d"
+    });
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toMatchObject({ value: 7, code: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
   it.each([
     ["Take before meals at least half an hour", "offsetMin", 30],
     ["take before meals at least half hour", "offsetMin", 30],
@@ -181,5 +333,41 @@ describe("relative event-offset grammar", () => {
       expect(parsed.fhir.site).toBeUndefined();
       expect(parsed.meta.leftoverText).toBeUndefined();
     }
+  });
+});
+
+
+describe("indefinite singular course quantities", () => {
+  it.each([["a day", "d"], ["a week", "wk"], ["a month", "mo"]] as const)(
+    "binds for %s as an explicit one-unit course", (phrase, unit) => {
+      const parsed = parseSig("Take 1 tablet twice daily for " + phrase);
+      expect(parsed.items).toHaveLength(1);
+      const row = parsed.items[0].fhir;
+      expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: "d",
+        boundsDuration: { value: 1, code: unit }
+      });
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(row.asNeeded).not.toBe(true);
+      expect(row.asNeededFor).toBeUndefined();
+      expect(toFhirR5Dosages(toDosageDetails([row]))[0].timing?.repeat?.boundsDuration)
+        .toMatchObject({ value: 1, code: unit });
+      expect(fromFhirDosage(row).meta.canonical.clauses[0]?.schedule)
+        .toMatchObject({ duration: 1, durationUnit: unit });
+    }
+  );
+
+  it("keeps a subsequent eye-dose phase when its duration uses an indefinite article", () => {
+    const parsed = parseSig("1 drop OD q2h for 7 days then QID for a week");
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.site?.text)).toEqual(["right eye", "right eye"]);
+    expect(rows[0].timing?.repeat).toMatchObject({ period: 2, periodUnit: "h", boundsDuration: { value: 7, code: "d" } });
+    expect(rows[1].timing?.repeat).toMatchObject({ frequency: 4, boundsDuration: { value: 1, code: "wk" } });
+    expect(rows.map(row => row.asNeeded)).toEqual([undefined, undefined]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const strict = toFhirR5Dosages(toDosageDetails(rows));
+    expect(strict.map(row => row.timing?.repeat?.boundsDuration?.code)).toEqual(["d", "wk"]);
   });
 });

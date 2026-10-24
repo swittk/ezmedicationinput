@@ -68,6 +68,21 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('right.omits-dose-head', f => !f.rightExplicitDose && !f.rightExplicitHead)
   ]
 }, {
+  id: 'hpsg.cx.coordination.dosed-head-ellipsis',
+  priority: 940,
+  operation: 'inherit-administration-head',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.available-administration-method', f => f.leftHasMethod),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.cadence', f => f.leftHasCadence),
+    semanticConstraint('right.cadence', f => f.rightHasCadence),
+    semanticConstraint('right.omits-head', f => !f.rightExplicitHead)
+  ]
+}, {
   id: 'hpsg.cx.coordination.disjunctive-dosage-choice',
   priority: 900,
   operation: 'preserve-disjunctive-dosages',
@@ -353,6 +368,21 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('left.complete', f => f.left.complete), constraint('left.hasDose', f => f.left.hasDose),
     constraint('left.hasSchedule', f => f.left.hasSchedule), constraint('right.complete', f => f.right.complete),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.hasSchedule', f => f.right.hasSchedule),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
+  ] },
+  { id: 'regimen.adjacent-independent-administrations', priority: 780, relation: 'independent',
+    acceptsAdjacentDose: true, constraints: [
+    constraint('connector.adjacent-dose', f => f.site.kind === 'adjacent-dose'),
+    constraint('left.complete', f => f.left.complete),
+    constraint('right.complete', f => f.right.complete),
+    constraint('left.hasDose', f => f.left.hasDose),
+    constraint('right.hasDose', f => f.right.hasDose),
+    constraint('left.hasSchedule', f => f.left.hasSchedule),
+    constraint('right.hasSchedule', f => f.right.hasSchedule),
+    constraint('left.hasTargets', f => f.left.hasTargets),
+    constraint('right.hasTargets', f => f.right.hasTargets),
+    constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets)),
+    constraint('right.explicitUnit', f => f.explicitRightUnit),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
   { id: 'regimen.adjacent-timed-doses', priority: 760, relation: 'coordination',

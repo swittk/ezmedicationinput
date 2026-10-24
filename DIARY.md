@@ -3204,3 +3204,77 @@ CodeRabbit raw115 minus existing15 exclusions = **100 reviewable files**;
 no new review paths/exclusions. No src JSON.parse/JSON.stringify;
 no unrelated untracked diagnostic probe staged or edited.
 No push, merge, publication, deployment, or version bump.
+
+
+### 2026-10-24 — Supported clinical Thai/English near-neighbor HPSG completion
+
+User requested genuinely embarrassing in-scope clinical errors be fixed before
+full bilingual SIG persistence. Earlier GPT-5.6 Sol/xhigh coordinator and
+specialist workers integrated source-backed lexical/HPSG/regimen corrections
+for Thai written/fractional/Unicode numbers, compact dayparts/frequency,
+course-versus-meal offsets, independent undelimited OD/OS dose boundaries,
+independent Thai ocular/topical follow-up phases and dose-local conditions.
+Product remains a fast clinician-reviewed suggester, not autonomous prescribing
+or universal clinical NLP. Unsupported instructions remain editable/source-backed.
+
+Independent current-SOURCE clinical audit, not stale dist, passed 1195/1195
+asserted checks: all 54 original realistic close variants, 55 additional
+clinical inputs, and 16 independent near-neighbors including correct dose,
+site, time, condition, PRN cap, alternatives and direct/strict R5/R6 parity.
+The simple 54-case packaged runner has two false oracle REDs: an after-breakfast
+plus after-dinner schedule correctly uses PCM+PCV without a redundant
+frequency field; an English night-time administration correctly uses NIGHT.
+Its clinically intended 54/54 behavior was independently verified.
+
+Other bounded corrections:
+- A registered administration-site noun phrase preempts a shorter product-form
+  interpretation. Alternate injection sites no longer fabricates IV; real
+  products (e.g. nasal spray) retain the correct route.
+- a/an/one/1 procedural-duration quantity and explicit FOR lead are owned by a
+  typed source-backed Duration, independent of treatment-course bounds or
+  medication dose. Exact-head HPSG ownership is suppressed only when the
+  quantified procedural Duration truly owns the phrase; old coordinated
+  crush/chew and avoid-broken-skin advice continue unchanged.
+- A final coordinator RED-first correction of ordinary mouthwash/rinse
+  instructions distinguishes elapsed FOR one/a/two minutes from a physical
+  rinsing Substance. It removes duplicate partial Rinse for and false PRN
+  reason a using existing typed Duration in HPSG instruction/PRN source
+  ownership and the existing bilingual site-relation realizer. Rinse with
+  water remains a distinct Substance. Added seven permanent tests including
+  direct and FHIR-reloaded EN/TH procedural output, non-medication duration,
+  and no accidental PRN/cap. No surface literal patch/FHIR meaning repair.
+
+Integrity: the old 17 whole-course quantity/supply tests with 58 expectations
+were migrated byte-for-byte from test/whole-course-quantity.spec.ts lines8-291
+into test/schedule-family-audit.spec.ts lines1054-1337, and are GREEN once,
+not deleted or duplicated. The original test path is intentionally absent.
+Three independent GPT-5.6 Sol/xhigh read-only reviewers signed off on current
+clinical semantics, retained tests and HPSG architecture. No original
+assertions were weakened and no new skip/todo was introduced.
+
+Final tracked-source gates after the last rinse correction:
+- Node22 source test proc-cf9269b2-038c-44db-8d81-6e69358320a3:
+  44 suites 2623/2623 PASS.
+- Final npm run test:dist proc-b85d40d1-f347-4b76-be00-c52276dbda53:
+  ESM/CJS build, TypeScript declarations and packaged 4/4 PASS.
+- Final packaged 54 close variants / 55 real-world smoke checked; zero throws
+  and all previously identified supported-domain semantic failures corrected.
+- Actual PR10 base 0d096a4cc913565c0344025d92ce2f96a8cedc42:
+  115 raw changed paths less 15 unchanged configured CodeRabbit exclusions =
+  EXACT100 reviewable files. No new runtime src JSON.parse/JSON.stringify or
+  classes. Original untracked test/__tmp_open_semantic_probe.ts untouched.
+- Paired warmed host baseline0615241 versus current Node22, in
+  /tmp/ezmed-realworld-final-perf-20261024.json:
+  routine English BID2.519 -> 2.669ms, routine Thai numeric2.816->2.900,
+  Thai spelled cadence5.531->4.754, undelimited eyes3.335->3.040,
+  Thai phase13.915->7.097, established eye taper4.026->4.002,
+  Thai condition10.607->10.405, article course3.187->3.196.
+  These timings are host medians, not phone guarantees.
+
+Remaining known non-blocking rough presentation: a source-backed Thai duration
+lead นาน may remain as a leftover beside a correct topical taper; unsupported
+counseling may retain its exact untranslated Thai/English source. No additional
+incorrect executable dose, eye/site, timing, phase, condition, PRN or FHIR
+roundtrip was reproduced in the bounded realistic checks. First-class
+clinician-approved complete EN/TH instruction storage remains separate.
+No push, merge, registry publication, or Shinebright deployment performed.

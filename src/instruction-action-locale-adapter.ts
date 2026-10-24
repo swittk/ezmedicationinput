@@ -174,8 +174,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         return `${c.label}${target}${manner} ${relation} ${relationTarget}`;
       }
       const result = c.result ? ` until ${c.result}` : "";
-      if (object) return `${c.label} ${object}${manner}${c.substance ? ` with ${c.substance}` : ""}${result}`;
-      return `${c.label}${manner}${c.substance ? ` with ${c.substance}` : ""}${result}`;
+      const elapsed = c.duration ? ` for ${c.duration}` : "";
+      if (object) return `${c.label} ${object}${manner}${elapsed}${c.substance ? ` with ${c.substance}` : ""}${result}`;
+      return `${c.label}${manner}${elapsed}${c.substance ? ` with ${c.substance}` : ""}${result}`;
     }
     case "object-amount-material": {
       const object = c.theme ?? c.container;
@@ -314,8 +315,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         return `${c.label}${target}${manner}${relation}${relationTarget}`;
       }
       const result = c.result ? `ให้${c.result}` : "";
-      if (object) return `${c.label}${object}${manner}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
-      return `${c.label}${manner}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
+      const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
+      if (object) return `${c.label}${object}${manner}${elapsed}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
+      return `${c.label}${manner}${elapsed}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
     }
     case "object-amount-material": {
       const object = c.theme ?? c.container;

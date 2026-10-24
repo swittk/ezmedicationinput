@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
-import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph } from "../src/index";
+import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 describe("procedural instruction graph", () => {
@@ -142,6 +142,48 @@ describe("procedural instruction graph", () => {
       relation: "in"
     });
     expect(rinseAction?.args[0]).toMatchObject({ role: "time", normalized: "the morning" });
+  });
+
+  it.each([
+    ["a minute", "for a minute", { start: 26, end: 38 }],
+    ["one minute", "for one minute", { start: 26, end: 40 }],
+    ["1 minute", "for 1 minute", { start: 26, end: 38 }]
+  ] as const)("keeps wait-for %s as a one-minute procedural duration", (duration, sourceText, span) => {
+    const source = `Take 1 tablet daily; wait for ${duration} before drinking`;
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause?.instructionGraph;
+    const wait = graph?.actions.find((action) => action.predicate.lemma === "wait");
+    const proceduralDuration = wait?.args.find((arg) => arg.role === "duration");
+
+    expect(parsed.items).toHaveLength(1);
+    expect(clause?.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause?.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause?.schedule?.duration).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(wait?.sourceText).toBe(`wait for ${duration} before drinking`);
+    expect(proceduralDuration).toMatchObject({
+      role: "duration",
+      text: sourceText,
+      quantity: { value: 1, unit: "min" },
+      span
+    });
+    expect(wait?.args.some((arg) => arg.role === "amount")).toBe(false);
+    expect(realizeInstructionGraph(graph!, "en")).toBe("Wait 1 minute before drinking");
+    expect(parsed.longText).toContain("Wait 1 minute before drinking.");
+    expect(parsed.longText).not.toContain("Wait for.");
+
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized;
+    const restoredWait = restored.instructionGraph?.actions.find(
+      (action) => action.predicate.lemma === "wait"
+    );
+    expect(restored.schedule?.duration).toBeUndefined();
+    expect(restoredWait?.args).toContainEqual(expect.objectContaining({
+      role: "duration",
+      quantity: { value: 1, unit: "min" },
+      span
+    }));
   });
 
   it("exposes the package-owned action CodeSystem vocabulary and exact external mappings", () => {
@@ -771,4 +813,112 @@ it("preserves a complete opaque complement instead of producing hybrid Thai acti
     .toContain("เขย่าขวดก่อนใช้");
   expect(formatSig(translated.fhir, "long", { locale: "th" }))
     .toContain("ล้างด้วยน้ำ");
+});
+
+
+describe("nominal medication-slot omission valence", () => {
+  it.each([
+    ["งดมื้อเย็น", [false, true]],
+    ["งดมื้อเช้า", [true, false]],
+    ["งดยามื้อเย็น", [false, true]],
+    ["avoid the evening dose", [false, true]]
+  ] as const)("binds a selected medication-slot reference to only its matching dose: %s", (action, target) => {
+    const input = "ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " + action + " หากน้ำตาลต่ำกว่า 70";
+    const parsed = parseSig(input);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 8]);
+    expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
+    expect(rows.map(row => Boolean(getDosageCondition(row)))).toEqual([...target]);
+    rows.forEach((row, index) => {
+      if (target[index]) expect(getDosageCondition(row)).toMatchObject({
+        kind: "not", condition: { kind: "measurement", name: "glucose", operation: "lt", value: 70 }
+      });
+    });
+    expect(toFhirR5Dosages(toDosageDetails(rows)).map(getDosageCondition))
+      .toEqual(rows.map(getDosageCondition));
+    expect(parsed.meta.canonical.clauses.map(clause => clause.rawText).join(" "))
+      .toContain(action);
+  });
+
+  it.each([
+    "งดอาหารเย็น", "งดอาหารมื้อเย็น", "งดน้ำ", "avoid dinner", "hold your breath"
+  ])("does not reinterpret a non-medication avoidance object as withholding: %s", action => {
+    const input = "Inject 5 units before breakfast and 8 units before dinner; " + action + " if glucose below 70";
+    const parsed = parseSig(input);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(getDosageCondition)).toEqual([undefined, undefined]);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 8]);
+  });
+});
+
+
+describe("source-backed duration valence for procedural rinsing", () => {
+  it.each([
+    ["one minute", 1],
+    ["a minute", 1],
+    ["1 minute", 1],
+    ["two minutes", 2]
+  ] as const)("resolves quantified rinse duration as a procedural argument: %s", (phrase, duration) => {
+    const source = `Take 1 tablet daily; rinse for ${phrase} then spit`;
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const rinse = clause.instructionGraph?.actions.find(action => action.predicate.lemma === "rinse");
+    const quantity = rinse?.args.find(arg => arg.role === "duration");
+
+    expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.schedule?.duration).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(clause.prn).toBeUndefined();
+    expect(quantity).toMatchObject({
+      role: "duration",
+      text: `for ${phrase}`,
+      quantity: { value: duration, unit: "min" }
+    });
+    expect(clause.additionalInstructions?.some(instruction =>
+      /^rinse for\.?$/i.test(instruction.text ?? "")
+    )).not.toBe(true);
+    const english = formatSig(parsed.fhir, "long", { locale: "en" });
+    expect(english).toMatch(new RegExp(`Rinse(?: the mouth)? for (?:${duration} (?:min|minute)|${phrase})`, "i"));
+    expect(english).toMatch(/then spit/i);
+    expect(english).not.toMatch(/Rinse for\. Rinse/i);
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized;
+    expect(restored.instructionGraph?.actions.find(a => a.predicate.lemma === "rinse")
+      ?.args.some(a => a.role === "duration" && a.quantity?.value === duration))
+      .toBe(true);
+  });
+
+  it("keeps rinse-with substance separate from quantified duration", () => {
+    const parsed = parseSig("Take 1 tablet daily; rinse with water then spit");
+    const rinse = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions
+      .find(action => action.predicate.lemma === "rinse");
+    expect(rinse?.args.some(arg => arg.role === "duration")).toBe(false);
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toMatch(/rinse with water/i);
+  });
+
+  it.each([
+    ["Rinse for one minute then spit", "rinse", "Rinse for 1 minute", "ล้างเป็นเวลา 1 นาที"],
+    ["Rinse mouth for one minute then spit", "rinse_mouth", "Rinse mouth for 1 minute", "บ้วนปาก นาน 1 นาที"]
+  ] as const)("keeps separate non-dosed rinse and mouth-rinse duration: %s", (source, lemma, english, thai) => {
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const action = clause.instructionGraph?.actions.find(frame => frame.predicate.lemma === lemma);
+    expect(clause.rawText).toBe(source);
+    expect(parsed.fhir.doseAndRate).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(action?.args).toContainEqual(expect.objectContaining({
+      role: "duration",
+      text: "for one minute",
+      quantity: { value: 1, unit: "min" }
+    }));
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toContain(english);
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);
+    expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.actions
+      .find(frame => frame.predicate.lemma === lemma)?.args.some(arg =>
+        arg.role === "duration" && arg.quantity?.value === 1)).toBe(true);
+  });
 });

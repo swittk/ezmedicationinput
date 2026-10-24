@@ -124,6 +124,59 @@ describe("HPSG clinical quantity grammar", () => {
     });
   });
 
+  it.each([
+    ["over", "an hour"],
+    ["for", "an hour"],
+    ["over", "one hour"],
+    ["for", "1 hour"]
+  ])("treats %s %s as a one-hour administration quantity", (lead, duration) => {
+    const source = `Infuse 25 mL ${lead} ${duration}`;
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const dosage = parsed.fhir[0];
+
+    expect(parsed.items).toHaveLength(1);
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "dose-with-rate-ratio",
+      status: "resolved",
+      numerator: { value: 25, unit: "mL", dimension: "volume" },
+      denominators: [{ value: 1, unit: "h", dimension: "time" }],
+      administrationDuration: { value: 1, unit: "h" }
+    });
+    expect(clause.schedule).toMatchObject({
+      count: 1,
+      administrationDuration: 1,
+      administrationDurationUnit: "h"
+    });
+    expect(clause.schedule?.duration).toBeUndefined();
+    expect(dosage.timing?.repeat).toMatchObject({ count: 1, duration: 1, durationUnit: "h" });
+    expect(dosage.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(dosage.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: 25, code: "mL" },
+      rateRatio: {
+        numerator: { value: 25, code: "mL" },
+        denominator: { value: 1, code: "h" }
+      }
+    });
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext)[0];
+    const r6 = parsed.fhirNext.step[0]?.component[0];
+    for (const projected of [strictR5, r6]) {
+      expect(projected?.timing?.repeat).toMatchObject({ count: 1, duration: 1, durationUnit: "h" });
+      expect(projected?.timing?.repeat?.boundsDuration).toBeUndefined();
+      expect(projected?.doseAndRate?.[0]?.rateRatio).toMatchObject({
+        numerator: { value: 25, code: "mL" },
+        denominator: { value: 1, code: "h" }
+      });
+    }
+
+    const sign = parseClauseSign(source);
+    const durationSource = `${lead} ${duration}`;
+    expect(sign?.synsem.head.schedule?.sourceRanges).toContainEqual({
+      start: source.indexOf(durationSource),
+      end: source.indexOf(durationSource) + durationSource.length
+    });
+  });
+
   describe("sequential infusion duration semantics", () => {
     it.each([
       "Infuse 50 mL over 30 min, then 25 mL over 60 min",
@@ -285,6 +338,55 @@ describe("HPSG clinical quantity grammar", () => {
         boundsDuration: { value: 7, code: "d" }
       });
       expect(oralCourse.fhir[0].timing?.repeat?.duration).toBeUndefined();
+    });
+
+    it("keeps an indefinite administration hour separate from a repeated infusion course", () => {
+      const source = "Infuse 25 mL over an hour once daily for 3 days";
+      const infusion = parsePublicSig(source);
+      const clause = infusion.meta.canonical.clauses[0];
+
+      expect(clause.clinicalQuantity).toMatchObject({
+        representation: "dose-with-rate-ratio",
+        numerator: { value: 25, unit: "mL", dimension: "volume" },
+        denominators: [{ value: 1, unit: "h", dimension: "time" }],
+        administrationDuration: { value: 1, unit: "h" }
+      });
+      expect(clause.schedule).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        administrationDuration: 1,
+        administrationDurationUnit: "h",
+        duration: 3,
+        durationUnit: "d"
+      });
+      expect(infusion.fhir[0].timing?.repeat).toMatchObject({
+        frequency: 1,
+        period: 1,
+        periodUnit: "d",
+        duration: 1,
+        durationUnit: "h",
+        boundsDuration: { value: 3, code: "d" }
+      });
+      expect(infusion.fhir[0].doseAndRate?.[0]?.rateRatio).toMatchObject({
+        numerator: { value: 25, code: "mL" },
+        denominator: { value: 1, code: "h" }
+      });
+      const strictR5 = toFhirR5Dosages(infusion.fhirNext)[0];
+      const r6 = infusion.fhirNext.step[0]?.component[0];
+      for (const projected of [strictR5, r6]) {
+        expect(projected?.timing?.repeat).toMatchObject({
+          frequency: 1,
+          period: 1,
+          periodUnit: "d",
+          duration: 1,
+          durationUnit: "h",
+          boundsDuration: { value: 3, code: "d" }
+        });
+        expect(projected?.doseAndRate?.[0]?.rateRatio?.denominator).toMatchObject({
+          value: 1, code: "h"
+        });
+      }
     });
 
     it("does not universally reinterpret for-duration as infusion duration", () => {

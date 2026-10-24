@@ -455,6 +455,7 @@ function factsFor(
     leftExplicitDose: Boolean(leftClause.dose && hasEvidence(leftClause, 'dose')),
     rightExplicitDose: Boolean(rightClause.dose && hasEvidence(rightClause, 'dose')),
     leftExplicitHead: hasEvidence(leftClause, 'method'),
+    leftHasMethod: Boolean(leftClause.method?.coding?.code || leftClause.method?.text),
     // A typed dose and administration site constitute an elliptical
     // administration even without an explicit verb ("1 drop OD"). That
     // licenses a shared trailing cadence across coordinated site doses.
@@ -1162,26 +1163,36 @@ export function applyCoordinatedCadenceScopes(
       inheritedAdministrationSegments.has(relation.from)
     ));
     if (!selected) continue;
-    if (selected.semantic.construction.operation === 'inherit-event-timing-administration') {
+    const eventEllipsis = selected.semantic.construction.operation === 'inherit-event-timing-administration';
+    const headEllipsis = selected.semantic.construction.operation === 'inherit-administration-head';
+    if (eventEllipsis || headEllipsis) {
       if (pass.direction !== 'leading') continue;
       const donor = left.state.primaryClause;
       const recipient = right.state.primaryClause;
-      // A right daughter with its own explicit relation and timing is
-      // complete. A BARE event noun, however, inherits its omitted relation
-      // and dependent offset from the left event under this licensed
-      // event-timing-ellipsis construction.
-      const scopedEventFields = inheritEllipticEventAnchor(
-        donor.schedule, recipient.schedule, left.state.tokens, right.state.tokens
-      );
-      if (donor.method && !hasEvidence(recipient, 'method')) {
+      // Only a licensed EVENT ellipsis inherits an omitted event relation.
+      // A right daughter with its own dose inherits the administration head,
+      // never the left daughter's event, offset, dose, or clinical condition.
+      const scopedEventFields = eventEllipsis
+        ? inheritEllipticEventAnchor(
+            donor.schedule, recipient.schedule, left.state.tokens, right.state.tokens
+          )
+        : [];
+      const copiedFields: string[] = [...scopedEventFields];
+      if (donor.method && !hasEvidence(recipient, 'method') &&
+          !equalStructuredValues(recipient.method, donor.method)) {
         recipient.method = cloneMethodForRecipient(donor.method, left.start, right.start);
+        copiedFields.push('method');
       }
-      if (donor.dose && !hasEvidence(recipient, 'dose')) {
+      if (eventEllipsis && donor.dose && !hasEvidence(recipient, 'dose') &&
+          !equalStructuredValues(recipient.dose, donor.dose)) {
         recipient.dose = cloneStructuredValue(donor.dose);
+        copiedFields.push('dose');
       }
       if (donor.route && !recipient.route?.code && !recipient.route?.text) {
         recipient.route = cloneStructuredValue(donor.route);
+        copiedFields.push('route');
       }
+      if (!copiedFields.length) continue;
       const scopeEvidence: CanonicalEvidence = {
         rule: selected.semantic.construction.id,
         spans: [{ start: relation.range.start - right.start,
@@ -1190,7 +1201,7 @@ export function applyCoordinatedCadenceScopes(
         scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
         note: scopedEventFields.length
           ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
-          : 'Omitted administration inherits its typed left head; explicit event timing remains right-local.'
+          : 'Omitted administration inherits its typed left head; explicit dose, event timing, and conditions remain right-local.'
       };
       appendEvidence(recipient.evidence, scopeEvidence);
       if (scopedEventFields.length && recipient.schedule) {
@@ -1198,8 +1209,7 @@ export function applyCoordinatedCadenceScopes(
         appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
       }
       applications.push({ rule: selected.semantic.construction.id,
-        from: states.indexOf(left), to: states.indexOf(right),
-        fields: ['method', 'dose', 'route', ...scopedEventFields] });
+        from: states.indexOf(left), to: states.indexOf(right), fields: copiedFields });
       continue;
     }
     const alternative = selected.semantic.construction.operation ===

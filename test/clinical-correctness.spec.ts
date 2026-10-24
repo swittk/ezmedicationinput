@@ -750,6 +750,434 @@ describe("clinical SIG correctness and boundary promotion", () => {
   });
 });
 
+describe("real-world Thai clinical meaning stays independent across source, canonical, R5 and R6", () => {
+  type ProjectedClinicalRow = {
+    doseAndRate?: Array<{ doseQuantity?: { value?: number; unit?: string } }>;
+    timing?: { repeat?: {
+      count?: number;
+      frequency?: number;
+      period?: number;
+      periodUnit?: string;
+      offset?: number;
+      when?: string[];
+      boundsDuration?: { value?: number; code?: string; unit?: string };
+    } };
+    route?: { text?: string };
+    method?: { text?: string };
+    site?: unknown;
+    sequence?: number;
+  };
+
+  const dose = (row: ProjectedClinicalRow) => row.doseAndRate?.[0]?.doseQuantity;
+  const repeat = (row: ProjectedClinicalRow) => row.timing?.repeat;
+  const site = (row: ProjectedClinicalRow) => {
+    const value = row.site as { text?: string; concept?: { text?: string } } | undefined;
+    return value?.concept?.text ?? value?.text;
+  };
+  const r6Rows = (parsed: ReturnType<typeof parseSig>) =>
+    parsed.fhirNext.step.flatMap(step => step.component);
+  const projections = (parsed: ReturnType<typeof parseSig>) => [
+    parsed.items.map(item => item.fhir),
+    toFhirR5Dosages(parsed.fhirNext),
+    r6Rows(parsed)
+  ] as const;
+  const expectSourceBacked = (source: string, parsed: ReturnType<typeof parseSig>) => {
+    expect(parsed.input).toBe(source);
+    expect(parsed.items.length).toBeGreaterThan(0);
+    for (const item of parsed.items) {
+      const clause = item.meta.canonical.clauses[0];
+      expect(clause?.rawText).toBeTruthy();
+      expect(source).toContain(clause!.rawText);
+      expect(clause?.raw.text).toBe(clause?.rawText);
+    }
+    expect(formatSig(parsed.fhirNext, "long")).toBeTruthy();
+    expect(formatSig(parsed.fhirNext, "long", { locale: "th" })).toBeTruthy();
+  };
+
+  it.each([
+    ["รับประทาน ครึ่งเม็ดตอนเช้า และ 1 เม็ดตอนเย็น", "EVE", "by mouth"],
+    ["รับประทาน 1/2 เม็ดตอนเช้า และ 1 เม็ดตอนเย็น", "EVE", "by mouth"],
+    ["กินครึ่งเม็ดเช้าและหนึ่งเม็ดเย็น", "EVE", "by mouth"],
+    ["กินครึ่งเม็ดเช้า 1 เม็ดเย็น", "EVE", "by mouth"],
+    ["กินยา ครึ่งเม็ด ตอนเช้า และหนึ่งเม็ดตอนเย็น", "EVE", "by mouth"],
+    ["take half a tablet in the morning and 1 tablet at night", "NIGHT", "by mouth"],
+    ["รับประทาน 0.5 เม็ดเช้า 1 เม็ดเย็น", "EVE", "by mouth"],
+    ["ครึ่งเม็ดตอนเช้า 1 เม็ดตอนเย็น", "EVE", undefined],
+    ["กินยา 1/2 เม็ดเช้า และ 1 เม็ดเย็น", "EVE", "by mouth"]
+  ] as const)("keeps half a tablet in the morning distinct from one tablet later: %s",
+    (source, later, expectedRoute) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+        .toEqual([{ value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.when))
+        .toEqual([["MORN"], [later]]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+        .toEqual([expectedRoute, expectedRoute]);
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(2);
+        expect(rows.map(row => dose(row))).toEqual([
+          { value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }
+        ]);
+        expect(rows.map(row => repeat(row)?.when)).toEqual([["MORN"], [later]]);
+        expect(rows.map(row => row.route?.text)).toEqual([expectedRoute, expectedRoute]);
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(formatSig(strict, "long")).toMatch(/0\.5[\s\S]*1 tablet/iu);
+      expect(formatSig(strict, "long", { locale: "th" }))
+        .toMatch(/0\.5[\s\S]*1 เม็ด/u);
+    }
+  );
+
+  it.each([
+    ["หยอดตาทั้งสองข้างครั้งละ 1 หยด วันละสองครั้ง", 2],
+    ["หยอดตาทั้งสองข้างครั้งละ 1 หยด วันละ 2 ครั้ง", 2],
+    ["หยอดตาทั้งสองข้างครั้งละ 1 หยด วันละ ๒ ครั้ง", 2],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละสองครั้ง", 2],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละ 2 ครั้ง", 2],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละ สอง ครั้ง", 2],
+    ["หยอดตาทั้งสองข้าง 1 หยด สองครั้งต่อวัน", 2],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละสามครั้ง", 3],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละ 3 ครั้ง", 3],
+    ["หยอดตาทั้งสองข้าง 1 หยด วันละ ๓ ครั้ง", 3],
+    ["หยอดตาทั้งสองข้างครั้งละ ๑ หยด วันละ ๓ ครั้ง", 3],
+    ["1 drop OU BID", 2]
+  ] as const)("uses the supplied Thai numeral as the bilateral-eye daily frequency: %s",
+    (source, frequency) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(1);
+      const clause = parsed.items[0].meta.canonical.clauses[0];
+      expect(clause?.dose).toEqual({ value: 1, unit: "drop" });
+      expect(clause?.site).toMatchObject({
+        text: "both eyes", coding: { code: "40638003" }
+      });
+      expect(clause?.schedule).toMatchObject({ frequency, period: 1, periodUnit: "d" });
+      expect(clause?.schedule?.count).toBeUndefined();
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(1);
+        expect(dose(rows[0])).toEqual({ value: 1, unit: "drop" });
+        expect(site(rows[0])).toBe("both eyes");
+        expect(rows[0].route?.text).toBe("ophthalmic");
+        expect(repeat(rows[0])).toMatchObject({ frequency, period: 1, periodUnit: "d" });
+        expect(repeat(rows[0])?.count).toBeUndefined();
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(formatSig(strict, "long")).toContain("both eyes");
+      expect(formatSig(strict, "long", { locale: "th" })).toContain("ตาทั้งสองข้าง");
+    }
+  );
+
+  it.each([
+    ["กินยา 1 เม็ด เช้าเย็นหลังอาหาร 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด เช้า เย็น หลังอาหาร 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด เช้าและเย็นหลังอาหาร 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด วันละ 2 ครั้ง หลังอาหาร 7 วัน", ["PC"]],
+    ["รับประทาน 1 เม็ด วันละ 2 ครั้ง หลังอาหาร 7 วัน", ["PC"]],
+    ["กินยา 1 เม็ด หลังอาหารเช้าและเย็น 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด เช้าเย็นหลังอาหาร นาน 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด เช้าเย็นหลังอาหาร เป็นเวลา 7 วัน", ["PCM", "PCV"]],
+    ["กินยา 1 เม็ด วันละสองครั้ง หลังอาหาร 7 วัน", ["PC"]],
+    ["1 tab po BID pc x 7d", ["PC"]]
+  ] as const)("keeps seven days as the course and meal relation as two daily opportunities: %s",
+    (source, expectedWhen) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(1);
+      const clause = parsed.items[0].meta.canonical.clauses[0];
+      expect(clause?.dose).toEqual({ value: 1, unit: "tab" });
+      expect(clause?.route?.text).toBe("by mouth");
+      expect(clause?.schedule).toMatchObject({
+        duration: 7, durationUnit: "d", when: expectedWhen
+      });
+      expect(clause?.schedule?.offset).toBeUndefined();
+      expect(clause?.schedule?.count).toBeUndefined();
+      if (expectedWhen.length === 1) {
+        expect(clause?.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      } else if (clause?.schedule?.frequency !== undefined) {
+        expect(clause.schedule.frequency).toBe(2);
+      }
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(1);
+        expect(dose(rows[0])).toEqual({ value: 1, unit: "tab" });
+        expect(rows[0].route?.text).toBe("by mouth");
+        expect(repeat(rows[0])?.when).toEqual(expectedWhen);
+        expect(repeat(rows[0])?.offset).toBeUndefined();
+        expect(repeat(rows[0])?.count).toBeUndefined();
+        expect(repeat(rows[0])?.boundsDuration).toMatchObject({ value: 7, code: "d" });
+        if (expectedWhen.length === 1) expect(repeat(rows[0])?.frequency).toBe(2);
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(formatSig(strict, "long")).toMatch(/after (?:breakfast|meals)/iu);
+      expect(formatSig(strict, "long", { locale: "th" })).toContain("หลังอาหาร");
+    }
+  );
+
+  it.each([
+    ["หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน ตาซ้าย 1 หยดวันละ 2 ครั้ง", true],
+    ["หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน; ตาซ้าย 1 หยดวันละ 2 ครั้ง", true],
+    ["หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน. ตาซ้าย 1 หยดวันละ 2 ครั้ง", true],
+    ["หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน และหยอดตาซ้าย 1 หยดวันละ 2 ครั้ง", true],
+    ["หยอดตาขวา 1 หยดวันละ 4 ครั้ง, ตาซ้าย 1 หยดวันละ 2 ครั้ง", false],
+    ["หยอดตาขวา 1 หยด วันละ 4 ครั้ง ตาซ้าย 1 หยด วันละ 2 ครั้ง", false],
+    ["หยอดตาขวา 1 หยด วันละ 4 ครั้ง 7 วัน; ตาซ้าย 1 หยด วันละ 2 ครั้ง", true],
+    ["OD 1 drop QID for 7 days; OS 1 drop BID", true],
+    ["Right eye 1 drop QID for 7 days left eye 1 drop BID", true],
+    ["OD 1 drop QID x7d OS 1 drop BID", true]
+  ] as const)("does not merge independently dosed right- and left-eye instructions: %s",
+    (source, rightHasCourse) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.site?.text))
+        .toEqual(["right eye", "left eye"]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+        .toEqual([{ value: 1, unit: "drop" }, { value: 1, unit: "drop" }]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.frequency))
+        .toEqual([4, 2]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+        .toEqual(["ophthalmic", "ophthalmic"]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.count))
+        .toEqual([undefined, undefined]);
+      expect(parsed.items[0].meta.canonical.clauses[0]?.schedule?.duration)
+        .toBe(rightHasCourse ? 7 : undefined);
+      expect(parsed.items[1].meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(2);
+        const right = rows.find(row => site(row) === "right eye");
+        const left = rows.find(row => site(row) === "left eye");
+        expect(right).toBeDefined();
+        expect(left).toBeDefined();
+        expect(dose(right!)).toEqual({ value: 1, unit: "drop" });
+        expect(dose(left!)).toEqual({ value: 1, unit: "drop" });
+        expect(repeat(right!)).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
+        expect(repeat(left!)).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+        expect(repeat(right!)?.count).toBeUndefined();
+        expect(repeat(left!)?.count).toBeUndefined();
+        expect(repeat(right!)?.boundsDuration?.value).toBe(rightHasCourse ? 7 : undefined);
+        expect(repeat(left!)?.boundsDuration).toBeUndefined();
+        expect([right!.route?.text, left!.route?.text]).toEqual(["ophthalmic", "ophthalmic"]);
+      }
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      const defaultDisplay = formatSig(strict, "long");
+      expect(defaultDisplay).toContain("right eye");
+      expect(defaultDisplay).toContain("left eye");
+      const thaiDisplay = formatSig(strict, "long", { locale: "th" });
+      expect(thaiDisplay).toContain("ตาขวา");
+      expect(thaiDisplay).toContain("ตาซ้าย");
+    }
+  );
+
+  it("keeps a compact period between complete OD and OS doses without splitting the decimal", () => {
+    const source = "OD 0.5 drop BID.OS 1 drop QID";
+    const parsed = parseSig(source);
+    expectSourceBacked(source, parsed);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+      .toEqual([{ value: 0.5, unit: "drop" }, { value: 1, unit: "drop" }]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.site?.text))
+      .toEqual(["right eye", "left eye"]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.frequency))
+      .toEqual([2, 4]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+      .toEqual(["ophthalmic", "ophthalmic"]);
+    for (const rows of projections(parsed)) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => dose(row))).toEqual([
+        { value: 0.5, unit: "drop" }, { value: 1, unit: "drop" }
+      ]);
+      expect(rows.map(row => site(row))).toEqual(["right eye", "left eye"]);
+      expect(rows.map(row => repeat(row)?.frequency)).toEqual([2, 4]);
+      expect(rows.map(row => repeat(row)?.count)).toEqual([undefined, undefined]);
+      expect(rows.map(row => row.route?.text)).toEqual(["ophthalmic", "ophthalmic"]);
+    }
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(formatSig(strict, "long")).toMatch(/right eye[\s\S]*left eye/iu);
+    expect(formatSig(strict, "long", { locale: "th" })).toMatch(/ตาขวา[\s\S]*ตาซ้าย/u);
+  });
+
+  it.each([
+    ["หยอดตาขวา 1 หยด ทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง อีก 7 วัน", true],
+    ["หยอดตาขวา 1 หยดทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง", false],
+    ["หยอดตาขวา 1 หยดทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง อีก 7 วัน", true],
+    ["หยอดตาขวา 1 หยด ทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง 7 วัน", true],
+    ["หยอดตาขวา 1 หยดทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้งเป็นเวลา 7 วัน", true],
+    ["OD 1 drop q2h x 7d then QID x7d", true],
+    ["หยอดตาขวา 1 หยด ทุก 2 ชั่วโมง 7 วัน แล้ววันละ 4 ครั้ง อีก 7 วัน", true],
+    ["หยอดตาขวา 1 หยด ทุก 2 ชั่วโมงเป็นเวลา 7 วัน แล้วลดเหลือวันละ 4 ครั้งอีก 7 วัน", true]
+  ] as const)("keeps the q2h course and later QID course as two right-eye phases: %s",
+    (source, secondHasCourse) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.fhirNext.step).toHaveLength(2);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+        .toEqual([{ value: 1, unit: "drop" }, { value: 1, unit: "drop" }]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.site?.text))
+        .toEqual(["right eye", "right eye"]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+        .toEqual(["ophthalmic", "ophthalmic"]);
+      const canonicalSchedules = parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule);
+      expect(canonicalSchedules[0]).toMatchObject({
+        period: 2, periodUnit: "h", duration: 7, durationUnit: "d"
+      });
+      expect(canonicalSchedules[0]?.count).toBeUndefined();
+      expect(canonicalSchedules[1]).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
+      expect(canonicalSchedules[1]?.count).toBeUndefined();
+      expect(canonicalSchedules[1]?.duration).toBe(secondHasCourse ? 7 : undefined);
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(2);
+        expect(rows.map(row => dose(row))).toEqual([
+          { value: 1, unit: "drop" }, { value: 1, unit: "drop" }
+        ]);
+        expect(rows.map(row => site(row))).toEqual(["right eye", "right eye"]);
+        expect(rows.map(row => row.route?.text)).toEqual(["ophthalmic", "ophthalmic"]);
+        expect(repeat(rows[0])).toMatchObject({
+          period: 2, periodUnit: "h", boundsDuration: { value: 7, code: "d" }
+        });
+        expect(repeat(rows[0])?.count).toBeUndefined();
+        expect(repeat(rows[1])).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
+        expect(repeat(rows[1])?.count).toBeUndefined();
+        expect(repeat(rows[1])?.boundsDuration?.value).toBe(secondHasCourse ? 7 : undefined);
+      }
+      expect(toFhirR5Dosages(parsed.fhirNext).map(row => row.sequence)).toEqual([1, 2]);
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(formatSig(strict, "long")).toMatch(/every 2 hours[\s\S]*four times daily/iu);
+      expect(formatSig(strict, "long", { locale: "th" }))
+        .toMatch(/ทุก 2 ชั่วโมง[\s\S]*วันละ 4 ครั้ง/u);
+    }
+  );
+
+  it.each([
+    "ทาที่ผื่นวันละ 2 ครั้ง 7 วัน แล้วลดเหลือวันละครั้งอีก 7 วัน",
+    "ทาที่ผื่นวันละ 2 ครั้ง 7 วัน แล้วลดเหลือวันละครั้ง อีก 7 วัน",
+    "ทาที่ผื่นวันละ 2 ครั้ง 7 วัน แล้วลดเหลือวันละ 1 ครั้ง อีก 7 วัน",
+    "ทาที่ผื่นวันละ 2 ครั้งเป็นเวลา 7 วัน แล้วลดเหลือวันละครั้ง อีก 7 วัน",
+    "ทาครีมที่ผื่นวันละ 2 ครั้ง 7 วัน แล้ววันละ 1 ครั้งอีก 7 วัน",
+    "apply to rash BID for 7 days then QD for 7 days",
+    "ทาบริเวณผื่น วันละ 2 ครั้ง นาน 7 วัน จากนั้น วันละ 1 ครั้ง อีก 7 วัน"
+  ])("keeps topical BID then QD as two seven-day rash phases: %s", source => {
+    const parsed = parseSig(source);
+    expectSourceBacked(source, parsed);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.site?.text))
+      .toEqual(["rash", "rash"]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+      .toEqual(["topical", "topical"]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule)).toEqual([
+      expect.objectContaining({ frequency: 2, period: 1, periodUnit: "d", duration: 7, durationUnit: "d" }),
+      expect.objectContaining({ frequency: 1, period: 1, periodUnit: "d", duration: 7, durationUnit: "d" })
+    ]);
+    for (const rows of projections(parsed)) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => site(row))).toEqual(["rash", "rash"]);
+      expect(rows.map(row => row.route?.text)).toEqual(["topical", "topical"]);
+      expect(rows.map(row => repeat(row)?.frequency)).toEqual([2, 1]);
+      expect(rows.map(row => repeat(row)?.boundsDuration?.value)).toEqual([7, 7]);
+      expect(rows.map(row => repeat(row)?.count)).toEqual([undefined, undefined]);
+    }
+    expect(toFhirR5Dosages(parsed.fhirNext).map(row => row.sequence)).toEqual([1, 2]);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(formatSig(strict, "long")).toMatch(/twice daily[\s\S]*once daily/iu);
+    expect(formatSig(strict, "long", { locale: "th" }))
+      .toMatch(/วันละ 2 ครั้ง[\s\S]*วันละ(?: 1)?ครั้ง/u);
+  });
+
+  it.each([
+    ["รับประทาน 1 เม็ดตอนเช้า และ 2 เม็ดตอนเย็น", "tab", "by mouth", "Take"],
+    ["ฉีด 5 ยูนิตใต้ผิวหนังก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น", "U", "subcutaneous", "Inject"]
+  ] as const)("inherits an explicit route across a Thai dose-and-daypart conjunction: %s",
+    (source, unit, expectedRoute, expectedMethod) => {
+    const parsed = parseSig(source);
+    expectSourceBacked(source, parsed);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+      .toEqual([{ value: unit === "tab" ? 1 : 5, unit }, { value: unit === "tab" ? 2 : 8, unit }]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.when))
+      .toEqual(unit === "tab" ? [["MORN"], ["EVE"]] : [["ACM"], ["ACV"]]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.route?.text))
+      .toEqual([expectedRoute, expectedRoute]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.method?.text))
+      .toEqual([expectedMethod, expectedMethod]);
+    for (const rows of projections(parsed)) {
+      expect(rows.map(row => dose(row)?.value)).toEqual(unit === "tab" ? [1, 2] : [5, 8]);
+      expect(rows.map(row => repeat(row)?.when))
+        .toEqual(unit === "tab" ? [["MORN"], ["EVE"]] : [["ACM"], ["ACV"]]);
+      expect(rows.map(row => row.route?.text)).toEqual([expectedRoute, expectedRoute]);
+      expect(rows.map(row => row.method?.text)).toEqual([expectedMethod, expectedMethod]);
+    }
+  });
+
+  it.each([
+    ["ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " +
+      "งดอาหารเย็นหากน้ำตาลต่ำกว่า 70", "งดอาหารเย็น"],
+    ["ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " +
+      "งดอาหารมื้อเย็นหากน้ำตาลต่ำกว่า 70", "งดอาหารมื้อเย็น"],
+    ["ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " +
+      "งดอาหารหากน้ำตาลต่ำกว่า 70", "งดอาหาร"],
+    ["ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " +
+      "งดน้ำหากน้ำตาลต่ำกว่า 70", "งดน้ำ"],
+    ["Inject 5 units before breakfast and 8 units before dinner; " +
+      "avoid dinner if glucose below 70", "avoid dinner"]
+  ] as const)("does not turn food or water avoidance into a medication guard: %s",
+    (source, avoidanceText) => {
+      const parsed = parseSig(source);
+      expectSourceBacked(source, parsed);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+        .toEqual([{ value: 5, unit: "U" }, { value: 8, unit: "U" }]);
+      expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.when))
+        .toEqual([["ACM"], ["ACV"]]);
+      expect(parsed.items[1].meta.canonical.clauses[0]?.rawText).toContain(avoidanceText);
+      expect(parsed.items[1].meta.canonical.clauses[0]?.instructionGraph?.actions)
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            predicate: expect.objectContaining({ semanticClass: "avoidance" })
+          })
+        ]));
+      for (const rows of projections(parsed)) {
+        expect(rows).toHaveLength(2);
+        expect(rows.map(row => dose(row)?.value)).toEqual([5, 8]);
+        expect(rows.map(row => repeat(row)?.when)).toEqual([["ACM"], ["ACV"]]);
+        expect(getDosageCondition(rows[0])).toBeUndefined();
+        expect(getDosageCondition(rows[1])).toBeUndefined();
+      }
+    }
+  );
+
+  it("binds a Thai dinner-only withholding condition to the before-dinner dose", () => {
+    const source = "ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น " +
+      "งดมื้อเย็นหากน้ำตาลต่ำกว่า 70";
+    const parsed = parseSig(source);
+    expectSourceBacked(source, parsed);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.dose))
+      .toEqual([{ value: 5, unit: "U" }, { value: 8, unit: "U" }]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0]?.schedule?.when))
+      .toEqual([["ACM"], ["ACV"]]);
+    expect(parsed.items[0].meta.canonical.clauses[0]?.clinicalAdjuncts?.condition)
+      .toBeUndefined();
+    expect(parsed.items[1].meta.canonical.clauses[0]?.clinicalAdjuncts?.condition)
+      .toMatchObject({
+        kind: "not", condition: {
+          kind: "measurement", name: "glucose", operation: "lt", value: 70
+        }
+      });
+    for (const rows of projections(parsed)) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => dose(row)?.value)).toEqual([5, 8]);
+      expect(rows.map(row => repeat(row)?.when)).toEqual([["ACM"], ["ACV"]]);
+      expect(getDosageCondition(rows[0])).toBeUndefined();
+      expect(getDosageCondition(rows[1])).toMatchObject({
+        kind: "not", condition: {
+          kind: "measurement", name: "glucose", operation: "lt", value: 70
+        }
+      });
+    }
+  });
+});
+
 describe("final-cleanup independent clinical oracles", () => {
   it.each([
     {

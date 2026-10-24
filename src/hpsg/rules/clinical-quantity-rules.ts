@@ -2,7 +2,7 @@ import { LexKind } from "../../lexer/token-types";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
-import { MEDICATION_OBJECT_FILLERS } from "../lexical-classes";
+import { DOSE_NUMBER_WORDS, MEDICATION_OBJECT_FILLERS } from "../lexical-classes";
 import {
   HpsgClinicalQuantityFeature,
   HpsgDimensionalQuantityTerm,
@@ -84,7 +84,8 @@ function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | und
   if (!token) return undefined;
   const value = token.kind === LexKind.Number
     ? token.value
-    : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(token)];
+    : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token)) ??
+      FREQUENCY_NUMBER_WORDS[normalizeTokenLower(token)];
   return value !== undefined && value > 0 ? value : undefined;
 }
 

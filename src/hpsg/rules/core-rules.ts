@@ -15,6 +15,7 @@ import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode } from ".
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
 import { FREQUENCY_TIMES_WORDS, parseNumericRange } from "../timing-lexicon";
 import {
@@ -412,6 +413,10 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.product", (context, start) => {
     const signs: HpsgSign[] = [];
     const maxSpan = Math.min(4, context.limit - start);
+    // Only a product-like leading word needs nominal-compound arbitration.
+    // The exact registered constituent (e.g. an administration-site noun)
+    // owns its words before a shorter product reading can infer a route.
+    const leadingProduct = productRouteHint(normalizeTokenLower(context.tokens[start]));
     for (let span = maxSpan; span >= 1; span -= 1) {
       const tokens = tokensAvailable(context, start, span);
       if (!tokens) {
@@ -427,6 +432,8 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const productPhrase = semanticParts.join(" ");
       const route = productRouteHint(productPhrase);
       if (!route) {
+        if (leadingProduct && span > 1 &&
+            resolveMedicationInstructionConcept(phrase, context.options)) return signs;
         continue;
       }
       const previous = context.tokens[start - 1];

@@ -48,6 +48,7 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   AS_NEEDED_LEAD_PHRASES,
   COMPOUND_DOSE_UNITS,
+  DOSE_NUMBER_WORDS,
   DURATION_LEAD_TOKENS,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -796,6 +797,14 @@ function durationArgumentAt(
   offset: number
 ): AdviceArgument | undefined {
   let cursor = start;
+  // A licensed duration lead belongs to the same source-backed constituent
+  // as its numeric daughter. Keeping `for` with article, word-number, and
+  // numeric quantities prevents regimen timing from reclaiming only part of
+  // a procedural duration.
+  const durationLead = parts[cursor];
+  if (durationLead && DURATION_LEAD_TOKENS.has(key(durationLead))) {
+    cursor += 1;
+  }
   const lead = parts[cursor];
   if (lead && INSTRUCTION_DURATION_APPROXIMATION_LEADS.has(key(lead))) {
     cursor += 1;
@@ -842,7 +851,9 @@ function durationArgumentAt(
       normalizedValue = valueToken.original;
     }
   } else {
-    const fraction = EVENT_OFFSET_FRACTIONS.get(key(valueToken)) ?? FREQUENCY_NUMBER_WORDS[key(valueToken)];
+    const fraction = EVENT_OFFSET_FRACTIONS.get(key(valueToken)) ??
+      DOSE_NUMBER_WORDS.get(key(valueToken)) ??
+      FREQUENCY_NUMBER_WORDS[key(valueToken)];
     if (fraction !== undefined) {
       quantity = { value: fraction, unit };
       normalizedValue = fraction;
@@ -1374,7 +1385,15 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     if (localTarget?.coding?.code || localTarget?.conceptId) pushArgument(args, localTarget);
     else pushArgument(args, argumentFromParts(parts, argumentStart, relIndex, input, undefined, options));
   }
-  if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
+  // An explicit temporal FOR complement has a typed elapsed-duration value,
+  // not the material used for rinsing. Reuse the same source-backed duration
+  // daughter as wait/infusion rather than turning "one minute" into a substance.
+  const elapsed = relIndex >= 0 && relIndex < semanticEnd &&
+    DURATION_LEAD_TOKENS.has(key(parts[relIndex]))
+      ? durationArgumentAt(parts, relIndex, semanticEnd, input, c.offset)
+      : undefined;
+  if (elapsed) pushArgument(args, elapsed);
+  else if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
     parts, relIndex + 1, semanticEnd, input, preferredRinseRole(relation), options));
   else pushArgument(args, argumentFromParts(
     parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));

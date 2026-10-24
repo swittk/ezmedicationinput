@@ -13,7 +13,7 @@ import { LexKind } from "../../lexer/token-types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { getProceduralFrames } from "../procedural-context";
 import { Token } from "../../parser-state";
-import { AdvicePolarity, PrnReasonLookupRequest } from "../../types";
+import { AdviceArgumentRole, AdvicePolarity, PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -782,6 +782,19 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const nextLower = next && !context.state.consumed.has(next.index)
         ? normalizeTokenLower(next)
         : undefined;
+      // A procedural Duration already owns its elapsed-time FOR constituent,
+      // including indefinite/word/numeric quantities. Do not reinterpret the
+      // article ("for a minute") as a medication's PRN reason.
+      const durationOwnedByProcedure = leadLower === "for" &&
+        getProceduralFrames(context).some(frame =>
+          frame.span.start < lead.sourceStart && frame.args.some(arg =>
+            arg.role === AdviceArgumentRole.Duration &&
+            arg.quantity && arg.span &&
+            arg.span.start <= lead.sourceStart &&
+            arg.span.end > lead.sourceEnd
+          )
+        );
+      if (durationOwnedByProcedure) return [];
       // A spelled duration ("for five days") is not a PRN reason.
       // The timing construction owns both the cardinal and its time unit.
       const durationUnitToken = context.tokens[start + 2];

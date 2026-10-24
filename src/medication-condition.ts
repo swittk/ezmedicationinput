@@ -1,4 +1,10 @@
 import { MedicationCondition } from "./types";
+import lexicalSource from "./hpsg/lexical-classes.json";
+
+const MEASUREMENT_NAME_ALIASES = new Map<string, string>(
+  Object.keys(lexicalSource.measurementNameAliases).map(name =>
+    [name, (lexicalSource.measurementNameAliases as Record<string, string>)[name]])
+);
 
 // Bare "if" is a guard when its clause contains an explicit numeric
 // measurement comparison. Bare "if pain" retains the existing PRN grammar.
@@ -13,7 +19,7 @@ const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\
 // The guard lead and its measurement daughter share one comparison grammar.
 // Otherwise a valid operator (e.g. "under") can be consumed as mere advice.
 const NUMERIC_IF_GUARD = new RegExp(
-  String.raw`\bif\b(?=\s+[^,;]*?${OPERATOR}\s*${NUMBER})`, "iu"
+  String.raw`(?:\bif\b\s+|หาก\s*|ถ้า\s*|เมื่อ\s*)(?=[^,;]*?${OPERATOR}\s*${NUMBER})`, "iu"
 );
 const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(%|mmhg|mg/dl|mmol/l|bpm|°c|c|องศา)?$`, "iu");
 const SEPARATOR_OR = /\s+or\s+|\s*หรือ\s*/iu;
@@ -39,9 +45,10 @@ function parseAtom(input: string): MedicationCondition {
   const text = input.trim();
   const numeric = text.match(MEASUREMENT);
   if (numeric && numeric[1].trim() && Number.isFinite(Number(numeric[3]))) {
+    const rawName = numeric[1].trim().replace(/\s+(?:is|are)$/iu, "").replace(/\s+/gu, " ").toLowerCase();
     return {
       kind: "measurement",
-      name: numeric[1].trim().replace(/\s+(?:is|are)$/iu, "").replace(/\s+/gu, " ").toLowerCase(),
+      name: MEASUREMENT_NAME_ALIASES.get(rawName) ?? rawName,
       operation: canonicalOperator(numeric[2]),
       value: Number(numeric[3]),
       ...(numeric[4] ? { unit: numeric[4] } : {}),

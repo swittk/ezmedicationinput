@@ -1972,6 +1972,7 @@ export interface ProductFormHint {
 }
 
 export const PRODUCT_FORM_HINTS: Record<string, ProductFormHint> = {
+  "nasal spray": { routeHint: RouteCode["Nasal route"] },
   inhaler: { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
   "metered dose inhaler": { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
   patch: { routeHint: RouteCode["Transdermal route"] },

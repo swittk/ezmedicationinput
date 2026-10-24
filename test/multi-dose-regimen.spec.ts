@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig } from "../src/index";
+import { formatSig, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
@@ -219,5 +219,112 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(procedural.count).toBe(1);
     const timingList = parseSig("take 1 tab at 09:00 and 12:00", { context: TABLET_CONTEXT });
     expect(timingList.count).toBe(1);
+  });
+
+  it.each([
+    "หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน ตาซ้าย 1 หยดวันละ 2 ครั้ง",
+    "หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน. ตาซ้าย 1 หยดวันละ 2 ครั้ง",
+    "OD 1 drop QID x7d OS 1 drop BID",
+    "OD one drop QID x7d OS one drop BID",
+    "หยอดตาขวาหนึ่งหยดวันละสี่ครั้ง 7 วัน ตาซ้ายหนึ่งหยดวันละสองครั้ง",
+    "Right eye 1 drop QID for 7 days left eye 1 drop BID"
+  ])("keeps complete independently dosed ocular heads across an implicit boundary: %s", (input) => {
+    const parsed = parseSig(input, { locale: input.includes("ตา") ? "th" : "en" });
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 1]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([4, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([7, undefined]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.count)).toEqual([undefined, undefined]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(dosage => dosage.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(strictR5.map(dosage => dosage.timing?.repeat?.frequency)).toEqual([4, 2]);
+    expect(toDosageDetails(strictR5)).toEqual(parsed.fhirNext);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0]?.component).toHaveLength(2);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("keeps a compound ocular target under one shared dose construction", () => {
+    const input = "OD and OS 1 drop BID";
+    const parsed = parseSig(input);
+    expect(parsed.meta.segments).toHaveLength(1);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 1]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([2, 2]);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0]?.component).toHaveLength(2);
+  });
+
+  it("keeps connectorless independently timed Thai doses as separate heads", () => {
+    const input = "ครึ่งเม็ดตอนเช้า 1 เม็ดตอนเย็น";
+    const parsed = parseSig(input, { locale: "th" });
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when))
+      .toEqual([["MORN"], ["EVE"]]);
+    expect(parsed.items.map(item => item.fhir.route?.text)).toEqual([undefined, undefined]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(dosage => dosage.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([0.5, 1]);
+    expect(strictR5.map(dosage => dosage.timing?.repeat?.when)).toEqual([["MORN"], ["EVE"]]);
+    expect(toDosageDetails(strictR5)).toEqual(parsed.fhirNext);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("keeps a decimal dose intact while exposing a compact sentence boundary", () => {
+    const input = "OD 0.5 drop BID.OS 1 drop QID";
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([0.5, 1]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([2, 4]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(dosage => dosage.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([0.5, 1]);
+    expect(toDosageDetails(strictR5)).toEqual(parsed.fhirNext);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    [
+      "หยอดตาขวา 1 หยด ทุก 2 ชั่วโมง 7 วัน แล้วลดเหลือวันละ 4 ครั้ง อีก 7 วัน",
+      "right eye",
+      [undefined, 4],
+      [2, 1],
+      ["h", "d"]
+    ],
+    [
+      "ทาที่ผื่นวันละ 2 ครั้ง 7 วัน แล้วลดเหลือวันละครั้งอีก 7 วัน",
+      "rash",
+      [2, 1],
+      [1, 1],
+      ["d", "d"]
+    ]
+  ] as const)("assigns each Thai taper duration to its typed phase: %s", (
+    input, site, frequencies, periods, periodUnits
+  ) => {
+    const parsed = parseSig(input, { locale: "th" });
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual([site, site]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency)).toEqual([...frequencies]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.period)).toEqual([...periods]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.periodUnit)).toEqual([...periodUnits]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value)).toEqual([7, 7]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.code)).toEqual(["d", "d"]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.count)).toEqual([undefined, undefined]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(dosage => dosage.timing?.repeat?.boundsDuration?.value)).toEqual([7, 7]);
+    expect(strictR5.map(dosage => dosage.sequence)).toEqual([1, 2]);
+    expect(toDosageDetails(strictR5)).toEqual(parsed.fhirNext);
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([1, 1]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
 });

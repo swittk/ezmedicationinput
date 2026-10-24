@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, fromFhirDosage,
-  getDosageCondition
+  getDosageCondition, toDosageDetails, toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
@@ -1578,5 +1578,138 @@ describe("source-ordered course-end counseling", () => {
     expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-11-25");
     expect(parsed.fhir.timing?.repeat?.frequency).toBe(1);
     expect(getDosageCondition(parsed.fhir)).toBeUndefined();
+  });
+});
+
+
+describe("typed independently timed dose head inheritance", () => {
+  it.each([
+    "Inject 5 units before breakfast and 8 units before dinner",
+    "Inject insulin 5 units before breakfast and 8 units before dinner",
+    "ฉีด 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น",
+    "ฉีดอินซูลิน 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารเย็น"
+  ])("retains the explicit administration method on each headless coordinated dose: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 8]);
+    expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
+    expect(rows.map(row => row.method?.coding?.[0]?.code)).toEqual(["740685003", "740685003"]);
+    expect(rows.map(row => row.route?.coding?.[0]?.code)).toEqual([undefined, undefined]);
+    expect(rows[1].text).toMatch(/^Inject 8 U/u);
+    expect(formatSig(rows[1], "long", { locale: "th" })).toContain("ฉีด");
+    expect(toFhirR5Dosages(toDosageDetails(rows)).map(row => row.method?.coding?.[0]?.code))
+      .toEqual(["740685003", "740685003"]);
+    for (const row of rows) expect(getDosageCondition(row)).toBeUndefined();
+  });
+
+  it.each([
+    "Inject 5 units before breakfast and 8 units before lunch and 10 units before dinner",
+    "ฉีด 5 ยูนิตก่อนอาหารเช้า และ 8 ยูนิตก่อนอาหารกลางวัน และ 10 ยูนิตก่อนอาหารเย็น"
+  ])("carries the same typed head through a three-dose coordination chain: %s", input => {
+    const parsed = parseSig(input);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(3);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 8, 10]);
+    expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACD"], ["ACV"]]);
+    expect(rows.map(row => row.method?.coding?.[0]?.code))
+      .toEqual(["740685003", "740685003", "740685003"]);
+  });
+
+  it("inherits only the head, not a preceding meal relation or offset, when the next dose is explicit", () => {
+    const parsed = parseSig("Take 1 tablet 30 minutes before breakfast twice daily and 2 tablets dinner twice daily");
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(rows[0].timing?.repeat).toMatchObject({ when: ["ACM"], offset: 30 });
+    expect(rows[1].timing?.repeat).toMatchObject({ when: ["CV"], frequency: 2 });
+    expect(rows[1].timing?.repeat?.offset).toBeUndefined();
+    expect(rows[1].method?.text).toBe("Take");
+    const strict = toFhirR5Dosages(toDosageDetails(rows));
+    expect(strict[1].timing?.repeat?.when).toEqual(["CV"]);
+    expect(strict[1].timing?.repeat?.offset).toBeUndefined();
+  });
+
+  it("does not invent head-inheritance evidence when both ocular administrations omit their head", () => {
+    const parsed = parseSig("OD 1 drop BID and OS 2 drops BID");
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    for (const clause of parsed.meta.canonical.clauses) {
+      expect(clause.evidence.some(item => item.rule === "hpsg.cx.coordination.dosed-head-ellipsis"))
+        .toBe(false);
+    }
+  });
+
+  it("keeps an explicit alternative head authoritative instead of inheriting the preceding verb", () => {
+    const parsed = parseSig("Inject 5 units before breakfast and take 1 tablet at bedtime");
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows[0].method?.coding?.[0]?.code).toBe("740685003");
+    expect(rows[1].method?.text).toBe("Take");
+    expect(rows[1].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(rows[1].timing?.repeat?.when).toEqual(["HS"]);
+  });
+
+  it("inherits the method without moving an evening-only withholding predicate to breakfast", () => {
+    const parsed = parseSig("Inject 5 units before breakfast and 8 units before dinner; hold only the evening dose if glucose below 70");
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.method?.coding?.[0]?.code)).toEqual(["740685003", "740685003"]);
+    expect(getDosageCondition(rows[0])).toBeUndefined();
+    expect(getDosageCondition(rows[1])).toMatchObject({ kind: "not", condition: {
+      kind: "measurement", name: "glucose", operation: "lt", value: 70
+    } });
+  });
+});
+
+
+describe("preparatory sentence remains part of its medication", () => {
+  it.each([
+    "Shake bottle before use. Take 5 mL orally twice daily.",
+    "Shake well; measure 5 mL with oral syringe. Take 5 mL by mouth twice daily.",
+    "เขย่าขวดก่อนใช้. รับประทาน 5 มิลลิลิตร วันละ 2 ครั้ง"
+  ])("keeps preparation and the following complete dose in one instruction: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("26643006");
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions.some(action => action.predicate.lemma === "shake"))
+      .toBe(true);
+  });
+});
+
+
+it("keeps untimed but independently dosed administrations distinct across a sentence", () => {
+  const parsed = parseSig("Instill 1 drop in the left eye. Instill 2 drops in the right eye twice daily.");
+  expect(parsed.items).toHaveLength(2);
+  expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["left eye", "right eye"]);
+  expect(parsed.items[0].fhir.timing).toBeUndefined();
+  expect(parsed.items[1].fhir.timing?.repeat?.frequency).toBe(2);
+});
+
+
+describe("registered nominal compounds own product-like words", () => {
+  it.each([
+    "Alternate injection sites nightly.",
+    "Rotate injection sites nightly.",
+    "Inspect injection sites daily."
+  ])("does not infer an intravenous administration from the noun injection sites: %s", input => {
+    const parsed = parseSig(input);
+    for (const item of parsed.items) {
+      expect(item.fhir.route).toBeUndefined();
+      expect(item.fhir.doseAndRate).toBeUndefined();
+    }
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(input);
+  });
+
+  it("retains actual product-route and alternating-day dosage interpretations", () => {
+    const nasal = parseSig("Use nasal spray 1 puff twice daily");
+    expect(nasal.fhir.route?.coding?.[0]?.code).toBe("46713006");
+    expect(nasal.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    const topical = parseSig("Apply cream to scalp twice daily");
+    expect(topical.fhir.route?.coding?.[0]?.code).toBe("6064005");
+    const everyOther = parseSig("Take 1 tablet every other day");
+    expect(everyOther.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "d" });
   });
 });

@@ -1098,8 +1098,9 @@ export interface MedicationInstructionActionDefinition {
   realizer?: MedicationInstructionActionRealizer;
   argumentParserConfig?: {
     /** Semantic effect of an affirmative conditional action on its medication-dose complement.
-     * Physical retention and negated instructions do not imply withholding. */
-    medicationConditionEffect?: "withhold";
+     * The selected-dose form requires an explicit medication object or a typed dose-slot target;
+     * it never treats a bare avoidance verb, food object, or negation as withholding. */
+    medicationConditionEffect?: "withhold" | "withhold-selected-dose";
     primaryConcepts?: string[];
     secondaryConcepts?: string[];
     implicitMatchedConcept?: string;

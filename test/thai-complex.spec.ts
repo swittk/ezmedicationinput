@@ -25,6 +25,32 @@ describe("Thai clinician free-text parsing", () => {
     }
   });
 
+  it("exposes compact clause periods without splitting decimals or dotted abbreviations", () => {
+    const input = "OD 0.5 drop BID.OS 1 drop QID";
+    const tokens = scanSurfaceTokens(input);
+    expect(tokens.map((token) => token.original)).toEqual([
+      "OD", "0.5", "drop", "BID", ".", "OS", "1", "drop", "QID"
+    ]);
+    for (const token of tokens) {
+      expect(input.slice(token.start, token.end)).toBe(token.original);
+    }
+
+    expect(scanSurfaceTokens("1 gtt O.D. b.i.d. I.U. 0.5 mL")
+      .map((token) => token.original)).toEqual([
+      "1", "gtt", "O.D.", "b.i.d.", "I.U.", "0.5", "mL"
+    ]);
+
+    const dottedCadence = "OD 1 drop b.i.d.OS 1 drop QID";
+    expect(scanSurfaceTokens(dottedCadence).map((token) => token.original)).toEqual([
+      "OD", "1", "drop", "b.i.d", ".", "OS", "1", "drop", "QID"
+    ]);
+    const parsed = parseSig(dottedCadence);
+    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1]);
+    expect(parsed.items.map((item) => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(parsed.items.map((item) => item.fhir.timing?.repeat?.frequency)).toEqual([2, 4]);
+  });
+
   it("recomposes existing Thai domain compounds before grammar lookup", () => {
     const tokens = lexInput("คันตา หนังศีรษะ วันธรรมดา เม็ดถั่วเขียว");
 
@@ -91,6 +117,129 @@ describe("Thai clinician free-text parsing", () => {
       periodUnit: "d"
     });
     expect(three.fhir.timing?.repeat?.when).toEqual(["MORN", "NOON", "EVE"]);
+
+    const postposed = parseSig("หยอดตาทั้งสองข้าง 1 หยด สองครั้งต่อวัน", { locale: "th" });
+    expect(postposed.fhir.timing?.repeat).toMatchObject({
+      frequency: 2,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(postposed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(postposed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("keeps Thai lexical quantities on their exact original source spans", () => {
+    const input = "รับประทานครึ่งเม็ด วันละสองครั้ง และ ๒ เม็ด";
+    const tokens = lexInput(input);
+
+    for (const [source, canonical] of [
+      ["ครึ่ง", "half"],
+      ["สอง", "two"]
+    ] as const) {
+      const token = tokens.find((candidate) => candidate.sourceText === source);
+      expect(token).toMatchObject({ original: source, canonical, kind: "WORD" });
+      expect(input.slice(token?.sourceStart, token?.sourceEnd)).toBe(source);
+    }
+
+    const thaiDigit = tokens.find((candidate) => candidate.sourceText === "๒");
+    expect(thaiDigit).toMatchObject({ original: "๒", kind: "NUMBER", value: 2 });
+    expect(input.slice(thaiDigit?.sourceStart, thaiDigit?.sourceEnd)).toBe("๒");
+
+    const productName = lexInput("วิตามินบี12");
+    expect(productName.some((token) => token.kind === "NUMBER")).toBe(false);
+    expect(productName.map((token) => token.sourceText).join("")).toBe("วิตามินบี12");
+
+    const durationInput = "อีก๓วัน";
+    const durationTokens = lexInput(durationInput);
+    expect(durationTokens.map((token) => ({
+      source: token.sourceText,
+      canonical: token.canonical,
+      kind: token.kind,
+      value: token.value
+    }))).toEqual([
+      { source: "อีก", canonical: "additional", kind: "WORD", value: undefined },
+      { source: "๓", canonical: undefined, kind: "NUMBER", value: 3 },
+      { source: "วัน", canonical: "day", kind: "WORD", value: undefined }
+    ]);
+    for (const token of durationTokens) {
+      expect(durationInput.slice(token.sourceStart, token.sourceEnd)).toBe(token.sourceText);
+    }
+
+    const decimalInput = "๐.๕ เม็ด";
+    const thaiDecimal = lexInput(decimalInput).find((token) => token.value === 0.5);
+    expect(thaiDecimal).toMatchObject({
+      original: "๐.๕",
+      sourceText: "๐.๕",
+      kind: "NUMBER",
+      value: 0.5
+    });
+    expect(decimalInput.slice(thaiDecimal?.sourceStart, thaiDecimal?.sourceEnd)).toBe("๐.๕");
+  });
+
+  it("keeps different Thai morning and evening quantities independent", () => {
+    const input = "รับประทาน ครึ่งเม็ดตอนเช้า และ 1 เม็ดตอนเย็น";
+    const parsed = parseSig(input, { locale: "th" });
+
+    expect(parsed.count).toBe(2);
+    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+      { value: 0.5, unit: "tab" },
+      { value: 1, unit: "tab" }
+    ]);
+    expect(parsed.items.map((item) => item.fhir.timing?.repeat?.when)).toEqual([
+      ["MORN"],
+      ["EVE"]
+    ]);
+    expect(parsed.items.map((item) => item.meta.canonical.clauses[0]?.rawText)).toEqual([
+      "รับประทาน ครึ่งเม็ดตอนเช้า",
+      "1 เม็ดตอนเย็น"
+    ]);
+    expect(parsed.items.map((item) => item.meta.leftoverText)).toEqual([undefined, undefined]);
+  });
+
+  it.each([
+    ["หนึ่ง", 1],
+    ["สอง", 2],
+    ["สาม", 3],
+    ["สี่", 4],
+    ["๒", 2],
+    ["2", 2],
+    ["3", 3]
+  ] as const)("parses compact Thai daily cardinal %s as frequency %i", (cardinal, frequency) => {
+    const input = `หยอดตาทั้งสองข้างครั้งละ 1 หยด วันละ${cardinal}ครั้ง`;
+    const parsed = parseSig(input, { locale: "th" });
+
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("uses the same dose quantity for Thai half, decimal, and slash fraction", () => {
+    const variants = ["ครึ่งเม็ด", "0.5 เม็ด", "1/2 เม็ด", "๐.๕ เม็ด"];
+    const parsed = variants.map((dose) => parseSig(`รับประทาน ${dose}`, { locale: "th" }));
+
+    expect(parsed.map((result) => result.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+      { value: 0.5, unit: "tab" },
+      { value: 0.5, unit: "tab" },
+      { value: 0.5, unit: "tab" },
+      { value: 0.5, unit: "tab" }
+    ]);
+    expect(parsed.map((result) => result.meta.leftoverText)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    ]);
+
+    for (const [cardinal, value] of [
+      ["หนึ่ง", 1], ["สอง", 2], ["สาม", 3], ["สี่", 4], ["๒", 2]
+    ] as const) {
+      expect(parseSig(`รับประทาน${cardinal}เม็ด`, { locale: "th" })
+        .fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value, unit: "tab" });
+    }
   });
 
   it("parses natural Thai distributive doses and symptom conditions compositionally", () => {

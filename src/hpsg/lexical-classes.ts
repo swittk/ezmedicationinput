@@ -340,6 +340,7 @@ export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWo
 /** Coded course-end events remain advisory until an actual bound is known. */
 export const OPEN_ENDED_COURSE_END_CONDITIONS = source.openEndedCourseEndConditions;
 /** Nominal quantifiers and event membership for typed medication-dose references. */
+export const DOSE_TARGET_SLOT_HEADS = setOf(source.doseTargetSlotHeads);
 export const DOSE_TARGET_QUANTIFIERS = new Map<string, "all" | "both">(
   Object.keys(source.doseTargetQuantifiers).map(key => [key,
     (source.doseTargetQuantifiers as Record<string, "all" | "both">)[key]])

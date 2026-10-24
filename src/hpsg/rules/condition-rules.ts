@@ -14,7 +14,7 @@ import {
 } from "../../relation-terminology";
 import { getProceduralFrames, actionEventRelationAt } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
-import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_EVENT_MEMBERS } from "../lexical-classes";
+import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import {
   HpsgClauseContext,
@@ -225,27 +225,35 @@ function withholdsMedicationAdministration(
   frame: AdviceFrame
 ): boolean {
   const action = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-  if (frame.polarity === AdvicePolarity.Negate ||
-      action?.argumentParserConfig?.medicationConditionEffect !== "withhold") {
-    return false;
-  }
+  const effect = action?.argumentParserConfig?.medicationConditionEffect;
+  if (frame.polarity === AdvicePolarity.Negate || !effect) return false;
   // A bare "hold/omit/skip" is an elliptical medication-dose object under
   // this action's valence. It only becomes executable after the HPSG sign
   // unifies with a real administration head: applyClinicalAdjunct refuses
   // orphan predicates without a dose, method, site, or cadence. A physical
   // "hold your breath" has an explicit, nonmedication object and is excluded.
-  if (!frame.args.length) return true;
-  return frame.args.some((argument) =>
-    argument.role === AdviceArgumentRole.Object && (
-      argument.conceptId === "medication-dose" ||
-      context.tokens.some((token) =>
-        tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument) &&
-        resolveMedicationInstructionConcept(
-          normalizeTokenLower(token), context.options
-        )?.code === "medication-dose"
-      )
-    )
-  );
+  if (!frame.args.length) return effect === "withhold";
+  return frame.args.some((argument) => {
+    if (argument.role !== AdviceArgumentRole.Object) return false;
+    if (argument.conceptId === "medication-dose") return true;
+    const words = context.tokens.filter((token) =>
+      tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument)
+    ).map(normalizeTokenLower);
+    if (words.some((word) => resolveMedicationInstructionConcept(
+      word, context.options
+    )?.code === "medication-dose")) return true;
+
+    // A selected dose slot is a nominal head plus its event modifier, not a
+    // food object. The typed conditionTarget below must subsequently bind to
+    // an actual compatible administration daughter before it is executable.
+    // Every object token must belong to that constituent: an explicit food
+    // noun outside the slot head keeps its ordinary avoidance interpretation.
+    return words.some((word) => DOSE_TARGET_SLOT_HEADS.has(word)) &&
+      words.some((word) => DOSE_TARGET_EVENT_MEMBERS.has(EVENT_TIMING_TOKENS[word])) &&
+      words.every((word) => DOSE_TARGET_SLOT_HEADS.has(word) ||
+        DOSE_TARGET_EVENT_MEMBERS.has(EVENT_TIMING_TOKENS[word]) || DOSE_TARGET_QUANTIFIERS.has(word) ||
+        resolveMedicationInstructionConcept(word, context.options)?.code === "product");
+  });
 }
 
 /** Return an inverse condition only when the selected conditional construction

@@ -14,7 +14,8 @@ import { EVENT_TIMING_TOKENS } from '../maps';
 import { parseClockToken } from '../hpsg/rule-context';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
+  DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS, HARD_SEGMENT_BOUNDARY_TOKENS,
+  LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
 import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
 import type { ParserState, Token } from '../parser-state';
@@ -136,7 +137,11 @@ function isHard(token: Token): boolean {
 }
 function explicitDoseAt(tokens: Token[], i: number, options?: ParseOptions): boolean {
   const token = tokens[i];
-  return Boolean(token && (token.kind === LexKind.Number || token.kind === LexKind.NumberRange) &&
+  const lower = lexeme(token);
+  return Boolean(token && (
+    token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
+    DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)
+  ) &&
     tokens[i + 1] && normalizeUnit(lexeme(tokens[i + 1]), options));
 }
 
@@ -548,7 +553,70 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const keep = (rule: string, priority: number, feature: string, value: string | boolean): Proposal =>
     ({ action: 'keep', rule, priority, evidence: [{ feature, value }] });
 
-  for (const site of sites) {
+  /** A juxtaposed independent administration is first visible at its numeric
+   * dose candidate, but a leading SITE-NP belongs to that right daughter. Find
+   * the nearest bounded typed seam for which both daughters are already
+   * complete dosed schedules with distinct administration targets. Ordinary
+   * one-dose inputs never enter this path. */
+  const adjacentAdministrationHead = (
+    candidate: BoundarySite,
+    hasPriorDose: boolean
+  ): { site: BoundarySite; left: ProbeSummary; right: ProbeSummary; end: number } | undefined => {
+    if (candidate.kind !== 'adjacent-dose' || !hasPriorDose) return undefined;
+    const end = probeEnd(candidate.rightIndex);
+    for (let distance = 1; distance <= 4; distance += 1) {
+      const tokenIndex = candidate.tokenIndex - distance;
+      const head = tokens[tokenIndex];
+      if (!head || head.sourceStart <= start || /[.,;:!?]/u.test(head.original) ||
+          connectorKind(head)) break;
+      const seam = head.sourceStart;
+      if (owners.owner(seam)) continue;
+      const left = evidence.probe(start, seam);
+      if (!left.complete || !left.hasDose || !left.hasSchedule || !left.hasTargets) continue;
+      const right = evidence.probe(seam, end);
+      const targetsDiffer = left.targets.length !== right.targets.length ||
+        left.targets.some(target => right.targets.indexOf(target) < 0);
+      if (!right.complete || !right.hasDose || !right.hasSchedule || !right.hasTargets ||
+          !targetsDiffer) continue;
+      return {
+        site: {
+          ...candidate,
+          start: seam,
+          end: seam,
+          tokenIndex,
+          lastTokenIndex: tokenIndex,
+          rightIndex: tokenIndex,
+          surface: ''
+        },
+        left,
+        right,
+        end
+      };
+    }
+    return undefined;
+  };
+
+  let seenDoseCandidate = false;
+  let doseScanStart = start;
+  let doseScanIndex = 0;
+  for (const candidateSite of sites) {
+    if (doseScanStart !== start) {
+      doseScanStart = start;
+      seenDoseCandidate = false;
+      while (doseScanIndex < tokens.length && tokens[doseScanIndex].sourceStart < start) doseScanIndex++;
+    }
+    while (doseScanIndex < candidateSite.tokenIndex) {
+      if (tokens[doseScanIndex].sourceStart >= start && explicitDoseAt(tokens, doseScanIndex, options)) {
+        seenDoseCandidate = true;
+      }
+      doseScanIndex++;
+    }
+    const hadPriorDoseCandidate = seenDoseCandidate;
+    const adjacentHead = candidateSite.start >= start
+      ? adjacentAdministrationHead(candidateSite, hadPriorDoseCandidate)
+      : undefined;
+    if (candidateSite.kind === 'adjacent-dose') seenDoseCandidate = true;
+    const site = adjacentHead?.site ?? candidateSite;
     if (site.start < start) continue;
     metrics.candidates++;
     const proposals: Proposal[] = [];
@@ -561,11 +629,11 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         { feature: 'owner.producer', value: owner.producer }, { feature: 'owner.resolved', value: owner.resolved }
       ] });
     } else if (site.kind === 'punctuation') {
-      // A semicolon is an independent instruction boundary ONLY when the
+      // A sentence/semicolon mark is an independent instruction boundary ONLY when the
       // succeeding constituent is a complete, independently dosed
       // administration. Keep punctuation inside a procedure or one dosage.
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
-      if (site.surface === ';' && rightStart < input.length) {
+      if ((site.surface === ';' || site.surface === '.') && rightStart < input.length) {
         const rightEnd = probeEnd(site.rightIndex);
         // A separately dosed administration must have both dose and timing
         // evidence. Pure procedure/precaution continuations may mention
@@ -582,9 +650,22 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         if (rightHasTiming && hasUnit(site.rightIndex, rightEnd)) {
           const right = evidence.probe(rightStart, rightEnd);
           if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
-          proposals.push({ action: 'split', rule: 'regimen.separate-administration',
-            priority: 720, relation: 'independent',
-            evidence: [{ feature: 'right.complete-dosed-administration', value: true }] });
+            // Preparation is not a preceding medication administration:
+            // "Shake bottle. Take 5 mL BID" remains one dosed instruction.
+            // Reuse the bounded typed clause probe only after a complete RHS
+            // is established; ordinary one-dose input never incurs this work.
+            const left = evidence.probe(start, site.start);
+            const establishedLeft =
+              left.hasDose && (left.method || left.hasTargets) ||
+              left.hasSchedule && (left.method || left.hasDose || inheritedAdministration);
+            if (establishedLeft) {
+              proposals.push({ action: 'split', rule: 'regimen.separate-administration',
+                priority: 720, relation: 'independent',
+                evidence: [
+                  { feature: 'left.established-administration', value: true },
+                  { feature: 'right.complete-dosed-administration', value: true }
+                ] });
+            }
           }
         }
       }
@@ -596,12 +677,13 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           evidence: [{ feature: 'delimiter', value: site.surface }] });
       }
     } else {
-      const end = probeEnd(site.rightIndex);
+      const end = adjacentHead?.end ?? probeEnd(site.rightIndex);
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
       const rightUnit = hasUnit(site.rightIndex, end);
       const priorTiming = tokens.some(t => t.sourceStart >= start && t.sourceEnd <= site.start &&
-        (hasEventTimingMeaning(t) || t.kind === LexKind.TimeLike));
-      const canProbe = site.kind !== 'adjacent-dose' || priorTiming;
+        (hasEventTimingMeaning(t) || hasTimingAbbreviationMeaning(t) || t.kind === LexKind.TimeLike));
+      const canProbe = site.kind !== 'adjacent-dose' || Boolean(adjacentHead) ||
+        hadPriorDoseCandidate && priorTiming;
       const procedural = site.kind === 'comma' && evidence.proceduralBridge(site);
       if (procedural) proposals.push(keep('regimen.procedural-coordination', 900, 'actionFrames.bridge', true));
 
@@ -618,7 +700,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         };
         // Lazy typed evidence lets each construction reject on cheap facts before running HPSG.
         // No negative vocabulary guess can suppress a licensed grammatical construction.
-        let leftValue: ProbeSummary | undefined, rightValue: ProbeSummary | undefined;
+        let leftValue: ProbeSummary | undefined = adjacentHead?.left;
+        let rightValue: ProbeSummary | undefined = adjacentHead?.right;
         let actionValue: AdviceFrame[] | undefined;
         const rightActions = () => actionValue ?? (actionValue = evidence.actions(rightStart, end));
         proposals.push(...grammaticalProposals({

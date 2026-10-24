@@ -45,7 +45,7 @@ export function startsMedicationGuard(
 ): boolean {
   const token = context.tokens[start];
   if (!token ||
-      !/(?:\bonly\b|\bunless\b|\bif\b|เฉพาะ|เว้นแต่|ยกเว้น)/iu.test(token.sourceText ?? token.original)) {
+      !/(?:\bonly\b|\bunless\b|\bif\b|เฉพาะ|เว้นแต่|ยกเว้น|หาก|ถ้า|เมื่อ)/iu.test(token.sourceText ?? token.original)) {
     return false;
   }
   const guard = medicationGuardForContext(context);

@@ -40,6 +40,7 @@ import {
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
   DAY_RANGE_CONNECTORS,
+  DOSE_TARGET_EVENT_MEMBERS,
   DURATION_LEAD_TOKENS,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -1335,6 +1336,141 @@ function mealRelationFromToken(lower: string): "before" | "after" | "with" | und
   return MEAL_RELATION_BY_TOKEN.get(lower);
 }
 
+const BASE_MEAL_EVENTS = new Set<EventTiming>([
+  EventTiming.Breakfast,
+  EventTiming.Lunch,
+  EventTiming.Dinner
+]);
+const MEAL_ANCHOR_BY_DAYPART = new Map<EventTiming, EventTiming>();
+for (const [daypart, members] of DOSE_TARGET_EVENT_MEMBERS) {
+  const meal = members.find((member) => BASE_MEAL_EVENTS.has(member));
+  if (!meal) continue;
+  for (const member of members) {
+    if (member === daypart || member.startsWith(`${daypart}.`)) {
+      MEAL_ANCHOR_BY_DAYPART.set(member, meal);
+    }
+  }
+}
+
+function mealAnchorForDaypart(timing: EventTiming): EventTiming | undefined {
+  return MEAL_ANCHOR_BY_DAYPART.get(timing);
+}
+
+/**
+ * Thai commonly places a shared meal relation after its daypart daughters:
+ * `เช้า เย็น หลังอาหาร`. The dayparts select breakfast/dinner and the shared
+ * relation scopes over both, so they are two related meal events rather than
+ * three independent administrations (MORN + EVE + PC).
+ */
+function daypartMealRelationSign(
+  context: HpsgClauseContext,
+  start: number
+): HpsgSign | undefined {
+  const previous = context.tokens[start - 1];
+  const beforePrevious = context.tokens[start - 2];
+  const previousEvent = previous && !context.state.consumed.has(previous.index)
+    ? EVENT_TIMING_TOKENS[normalizeTokenLower(previous)]
+    : undefined;
+  const previousConnectorKind = previous
+    ? coordinationConnectorKind(normalizeTokenLower(previous))
+    : "unknown";
+  const beforePreviousEvent = beforePrevious && !context.state.consumed.has(beforePrevious.index)
+    ? EVENT_TIMING_TOKENS[normalizeTokenLower(beforePrevious)]
+    : undefined;
+  if (
+    (previousEvent && mealAnchorForDaypart(previousEvent)) ||
+    (
+      previous &&
+      (
+        LIST_SEPARATORS.has(normalizeTokenLower(previous)) ||
+        previousConnectorKind !== "unknown"
+      ) &&
+      beforePreviousEvent && mealAnchorForDaypart(beforePreviousEvent)
+    )
+  ) return undefined;
+
+  const tokens: Token[] = [];
+  const mealAnchors: EventTiming[] = [];
+  let cursor = start;
+
+  while (cursor < context.limit) {
+    const token = context.tokens[cursor];
+    if (!token || context.state.consumed.has(token.index)) break;
+    const event = EVENT_TIMING_TOKENS[normalizeTokenLower(token)];
+    const mealAnchor = event ? mealAnchorForDaypart(event) : undefined;
+    if (!mealAnchor || mealAnchors.indexOf(mealAnchor) !== -1) break;
+    tokens.push(token);
+    mealAnchors.push(mealAnchor);
+    cursor += 1;
+
+    const separator = context.tokens[cursor];
+    const next = context.tokens[cursor + 1];
+    const nextEvent = next && !context.state.consumed.has(next.index)
+      ? EVENT_TIMING_TOKENS[normalizeTokenLower(next)]
+      : undefined;
+    const separatorKind = separator
+      ? coordinationConnectorKind(normalizeTokenLower(separator))
+      : "unknown";
+    const joinsDayparts = Boolean(separator && (
+      LIST_SEPARATORS.has(normalizeTokenLower(separator)) ||
+      separatorKind === "conjunction"
+    ));
+    if (
+      separatorKind === "disjunction" && nextEvent && mealAnchorForDaypart(nextEvent)
+    ) return undefined;
+    if (
+      separator && !context.state.consumed.has(separator.index) &&
+      joinsDayparts &&
+      nextEvent && mealAnchorForDaypart(nextEvent)
+    ) {
+      tokens.push(separator);
+      cursor += 1;
+    }
+  }
+  if (!mealAnchors.length) return undefined;
+
+  const relationToken = context.tokens[cursor];
+  if (!relationToken || context.state.consumed.has(relationToken.index)) return undefined;
+  const relation = mealRelationFromToken(normalizeTokenLower(relationToken));
+  if (!relation) return undefined;
+  const relatedExpression = eventExpressionPartsAt(context, cursor + 1);
+  const relatedEvent = resolveEventTimingExpression(relatedExpression.parts);
+  if (!relatedEvent || relatedEvent.timing !== EventTiming.Meal) return undefined;
+
+  const when: EventTiming[] = [];
+  for (const meal of mealAnchors) {
+    const timing = mealTimingForRelation(relation, meal);
+    if (!timing) return undefined;
+    when.push(timing);
+  }
+  const frequency = when.length;
+  const matched = [
+    ...tokens,
+    relationToken,
+    ...relatedExpression.members.slice(0, relatedEvent.length)
+  ];
+  return lexicalSign({
+    type: "schedule-sign",
+    rule: "hpsg.lex.schedule.eventPhrase.daypartMealRelation",
+    tokens: matched,
+    synsem: {
+      head: {
+        schedule: {
+          frequency,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day,
+          timingCode: timingCodeForDailyFrequency(frequency),
+          when
+        }
+      },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    // Prefer the maximal scoped construction over independent bare dayparts.
+    score: 34 + matched.length
+  });
+}
+
 function eventExpressionPartsAt(
   context: HpsgClauseContext,
   start: number
@@ -1729,6 +1865,13 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
     const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
     if (!unit) return [];
+    // A whole-day constituent following a recurring meal anchor is an
+    // ordinary course adjunct (`หลังอาหาร 7 วัน`), not a displacement from
+    // every meal. Fractional-day meal offsets remain explicit offsets, and
+    // quantity-first event/activity offsets retain day-scale support.
+    if (!qualifierLength && unit === FhirPeriodUnit.Day && Number.isInteger(value) && value >= 1) {
+      return [];
+    }
     const minutes = eventOffsetMinutes(value, unit);
     if (minutes === undefined) return [];
 
@@ -1790,6 +1933,10 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
           score: 13 + fixedPhrase.length
         })
       );
+    }
+    if (fixedPhrase && mealAnchorForDaypart(fixedPhrase.timing)) {
+      const daypartMealRelation = daypartMealRelationSign(context, start);
+      if (daypartMealRelation) signs.push(daypartMealRelation);
     }
 
     if ((EVENT_PREPOSITIONS.has(firstLower) || EVERY_INTERVAL_TOKENS.has(firstLower)) && secondLower) {
@@ -2295,6 +2442,78 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           score: 18 + matched.length
         }));
         return signs;
+      }
+    }
+    // Quantity modifiers head an ordinary duration NP in forms such as
+    // `for an additional 7 days` and Thai `อีก 7 วัน`.
+    // The modifier belongs to the course-duration constituent; leaving it as
+    // opaque text would make an otherwise complete subsequent phase fail.
+    let modifierCursor = start;
+    const durationLead = DURATION_LEAD_TOKENS.has(lower) ? token : undefined;
+    if (durationLead) modifierCursor += 1;
+    const possibleArticle = context.tokens[modifierCursor];
+    const article = possibleArticle && !context.state.consumed.has(possibleArticle.index) &&
+      EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(possibleArticle))
+      ? possibleArticle
+      : undefined;
+    if (article) modifierCursor += 1;
+    const durationModifier = context.tokens[modifierCursor];
+    // An indefinite article is the singular quantity of a headed duration
+    // phrase (for a week / for an hour), not a free-standing numeric dose.
+    const singularUnit = durationLead && article && durationModifier &&
+      !context.state.consumed.has(durationModifier.index)
+      ? mapIntervalUnit(normalizeTokenLower(durationModifier)) : undefined;
+    if (singularUnit && durationLead && article && durationModifier &&
+        !timingRangeIsProcedureLocalDuration(
+          context, durationLead.sourceStart, durationModifier.sourceEnd
+        )) {
+      const schedule = buildDurationScheduleFeature(1, singularUnit);
+      if (schedule) return [lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.duration.indefiniteQuantity",
+        tokens: [durationLead, article, durationModifier],
+        synsem: { head: { schedule }, valence: {}, cont: { clauseKind: "administration" } },
+        score: 21
+      })];
+    }
+    if (
+      durationModifier && !context.state.consumed.has(durationModifier.index) &&
+      OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(durationModifier))
+    ) {
+      const valueToken = context.tokens[modifierCursor + 1];
+      const unitToken = context.tokens[modifierCursor + 2];
+      const value = frequencyCardinalValue(valueToken);
+      const unit = unitToken && !context.state.consumed.has(unitToken.index)
+        ? mapIntervalUnit(normalizeTokenLower(unitToken))
+        : undefined;
+      if (
+        valueToken && !context.state.consumed.has(valueToken.index) &&
+        value !== undefined && value > 0 && unitToken && unit &&
+        !timingRangeIsProcedureLocalDuration(
+          context, durationModifier.sourceStart, unitToken.sourceEnd
+        )
+      ) {
+        const schedule = buildDurationScheduleFeature(value, unit);
+        if (schedule) {
+          const matched = [
+            ...(durationLead ? [durationLead] : []),
+            ...(article ? [article] : []),
+            durationModifier,
+            valueToken,
+            unitToken
+          ];
+          return [lexicalSign({
+            type: "schedule-sign",
+            rule: "hpsg.lex.schedule.duration.quantityModified",
+            tokens: matched,
+            synsem: {
+              head: { schedule },
+              valence: {},
+              cont: { clauseKind: "administration" }
+            },
+            score: 18 + matched.length
+          })];
+        }
       }
     }
     const trailingOccurrenceToken = context.tokens[start + 1];

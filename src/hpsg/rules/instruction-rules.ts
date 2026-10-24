@@ -125,22 +125,23 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   );
 }
 
+function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
+  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
+    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
+  return !(
+    (!definition?.procedural && !scopedDirective) ||
+    (definition?.primaryAdministrationHead && !scopedDirective) ||
+    (WORKFLOW_START_WORDS.has(frame.predicate.lemma) && !scopedDirective)
+  );
+}
+
 function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
-  return getProceduralFrames(context).filter((frame) => {
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-    const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
-      medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
-    if (
-      (!definition?.procedural && !scopedDirective) ||
-      (definition?.primaryAdministrationHead && !scopedDirective) ||
-      (WORKFLOW_START_WORDS.has(frame.predicate.lemma) && !scopedDirective)
-    ) {
-      return false;
-    }
-    // Argument coordination belongs to the selected procedural head.
-    // Unknown nominal members remain editable in that typed argument slot.
-    return true;
-  });
+  // Argument coordination belongs to the selected procedural head. Unknown
+  // nominal members remain editable in that typed argument slot.
+  return getProceduralFrames(context).filter((frame) =>
+    isProceduralInstructionFrame(context, frame)
+  );
 }
 
 function frameTokens(context: HpsgClauseContext, frame: AdviceFrame): Token[] {
@@ -376,7 +377,23 @@ function instructionStartIsLicensed(
 ): boolean {
   const token = tokensAvailable(context, start, 1)?.pop();
   const lower = token ? normalizeTokenLower(token) : "";
-  const enclosedByProcedure = Boolean(token && getProceduralFrames(context).some((frame) => {
+  const frames = getProceduralFrames(context);
+  const ownedByProcedure = Boolean(token && frames.some((frame) =>
+    frame.span.start === token.sourceStart && token.sourceEnd <= frame.span.end &&
+    frame.args.some(argument => argument.role === AdviceArgumentRole.Duration && argument.quantity) &&
+    (isProceduralInstructionFrame(context, frame) ||
+      // Workflow verbs can still own a complete *quantified* Duration.
+      // Their partial generic heads must not compete with that full typed
+      // constituent. Unquantified ordinary advice keeps its old pathway.
+      (WORKFLOW_START_WORDS.has(frame.predicate.lemma) &&
+        resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true))
+  ));
+  // A procedural quantity constituent owns its action head and duration.
+  // Generic fallback must not take only that head/lead while an ambiguous
+  // number-word is analyzed separately as medication timing. Ordinary advice
+  // without a quantity retains the existing coordinated-warning pathway.
+  if (ownedByProcedure) return false;
+  const enclosedByProcedure = Boolean(token && frames.some((frame) => {
     if (frame.span.start >= token.sourceStart || token.sourceEnd > frame.span.end) return false;
     if (frame.polarity === AdvicePolarity.Negate) return false;
     return resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;

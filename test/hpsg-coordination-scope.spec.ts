@@ -34,6 +34,7 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
     leftExplicitDose: true,
     rightExplicitDose: true,
     leftExplicitHead: true,
+    leftHasMethod: true,
     leftAdministrationContext: true,
     rightExplicitHead: false,
     leftHasSite: true,
@@ -367,7 +368,15 @@ describe('HPSG coordination cadence scope', () => {
       relation: { ...scopeFacts().relation, kind: 'sequence' }
     }))).toBeUndefined();
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightExplicitHead: true }))).toBeUndefined();
-    expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ leftHasCadence: true }))).toBeUndefined();
+    expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ leftHasCadence: true })))
+      .toMatchObject({
+        semantic: {
+          construction: {
+            id: 'hpsg.cx.coordination.dosed-head-ellipsis',
+            operation: 'inherit-administration-head'
+          }
+        }
+      });
     expect(selectHpsgCoordinationScopeConstruction(scopeFacts({ rightComplete: false }))).toBeUndefined();
   });
 
@@ -706,7 +715,8 @@ describe('HPSG coordination cadence scope', () => {
       { state: right, start: rightStart, end: source.length }
     ], plan, source);
     expect(applied.map(item => item.rule)).toEqual([
-      'hpsg.cx.coordination.trailing-shared-cadence'
+      'hpsg.cx.coordination.trailing-shared-cadence',
+      'hpsg.cx.coordination.dosed-head-ellipsis'
     ]);
 
     const scoped = left.primaryClause.schedule!;
@@ -716,6 +726,7 @@ describe('HPSG coordination cadence scope', () => {
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(true);
     expect(right.primaryClause.schedule).toMatchObject({ frequency: 2, periodUnit: 'd' });
+    expect(right.primaryClause.method?.text).toBe('Instill');
     expect(priorSchedule).not.toBe(scoped);
 
     const fhir = canonicalToFhir(left.primaryClause);
@@ -930,6 +941,64 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(true);
+  });
+
+  it.each([
+    {
+      input: 'หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน ตาซ้าย 1 หยดวันละ 2 ครั้ง',
+      rule: 'regimen.adjacent-independent-administrations',
+      segments: [
+        'หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน',
+        'ตาซ้าย 1 หยดวันละ 2 ครั้ง'
+      ]
+    },
+    {
+      input: 'OD 1 drop QID x7d OS 1 drop BID',
+      rule: 'regimen.adjacent-independent-administrations',
+      segments: ['OD 1 drop QID x7d', 'OS 1 drop BID']
+    },
+    {
+      input: 'OD one drop QID x7d OS one drop BID',
+      rule: 'regimen.adjacent-independent-administrations',
+      segments: ['OD one drop QID x7d', 'OS one drop BID']
+    },
+    {
+      input: 'หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน. ตาซ้าย 1 หยดวันละ 2 ครั้ง',
+      rule: 'regimen.separate-administration',
+      segments: [
+        'หยอดตาขวา 1 หยดวันละ 4 ครั้ง 7 วัน',
+        'ตาซ้าย 1 หยดวันละ 2 ครั้ง'
+      ]
+    }
+  ])('licenses an independent boundary between complete dosage heads: $input', ({ input, rule, segments }) => {
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments.map(segment => segment.text)).toEqual(segments);
+    expect(plan.relations).toEqual([
+      expect.objectContaining({
+        kind: 'independent',
+        rule
+      })
+    ]);
+  });
+
+  it('does not treat a coordinated SITE-NP followed by one dose as two dosage heads', () => {
+    const input = 'OD and OS 1 drop BID';
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments.map(segment => segment.text)).toEqual([input]);
+    expect(plan.relations).toEqual([]);
+    expect(plan.claims).toContainEqual(expect.objectContaining({ kind: 'target-list' }));
+  });
+
+  it('receives a compact sentence period without splitting the decimal dose', () => {
+    const input = 'OD 0.5 drop BID.OS 1 drop QID';
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments.map(segment => segment.text)).toEqual([
+      'OD 0.5 drop BID',
+      'OS 1 drop QID'
+    ]);
+    expect(plan.relations).toEqual([
+      expect.objectContaining({ kind: 'independent', rule: 'regimen.separate-administration' })
+    ]);
   });
 
   it.each([

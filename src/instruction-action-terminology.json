@@ -10,6 +10,7 @@
       "procedural": true,
       "safetyScopeTarget": true,
       "argumentParser": "object-duration",
+      "argumentParserConfig": { "medicationConditionEffect": "withhold-selected-dose" },
       "realizer": "default"
     },
     {

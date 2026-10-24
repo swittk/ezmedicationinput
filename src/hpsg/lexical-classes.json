@@ -1,4 +1,6 @@
 {
+  "measurementNameAliases": { "น้ำตาล": "glucose", "ระดับน้ำตาล": "glucose", "น้ำตาลในเลือด": "glucose" },
+  "doseTargetSlotHeads": ["มื้อ"],
   "doseTargetQuantifiers": { "all": "all", "both": "both", "ทุก": "all", "ทั้งสอง": "both" },
   "doseTargetEventMembers": {
     "MORN": ["MORN", "MORN.early", "MORN.late", "CM", "ACM", "PCM"],

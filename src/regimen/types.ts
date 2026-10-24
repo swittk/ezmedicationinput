@@ -117,6 +117,8 @@ export interface CoordinationScopeFacts {
   leftExplicitDose: boolean;
   rightExplicitDose: boolean;
   leftExplicitHead: boolean;
+  /** An available typed method, whether explicit or inherited from an earlier daughter. */
+  leftHasMethod: boolean;
   leftAdministrationContext: boolean;
   rightExplicitHead: boolean;
   leftHasSite: boolean;
@@ -158,6 +160,7 @@ export type RegimenSemanticOperation =
   | 'share-leading-adjuncts'
   | 'preserve-disjunctive-dosages'
   | 'inherit-event-timing-administration'
+  | 'inherit-administration-head'
   | 'preserve-ambiguous-shared-guard';
 
 export interface RegimenSemanticConstruction {
