@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import * as structuredValues from "../src/stable-structure";
 import { parseHpsgChart } from "../src/hpsg/chart";
+import { productLexicalRule } from "../src/hpsg/rules/core-rules";
+import { parseSig } from "./helpers/r5-parser";
 import {
   HPSG_TYPE_SYSTEM,
   HpsgTypeSystem,
@@ -339,5 +341,26 @@ describe("HPSG structural equality hygiene", () => {
     expect(result!.signs.map(sign => sign.synsem.head.dose?.value).sort()).toEqual([1, 2]);
     expect(result!.signs).toContain(equivalent);
     expect(result!.signs).not.toContain(one);
+  });
+});
+
+
+describe("bounded medication lexical complement ownership", () => {
+  it("returns no product sign at or beyond the source token boundary", () => {
+    const context = clinicalRuleContext("take half tablet");
+    const rule = productLexicalRule();
+    expect(rule.match(context, context.limit)).toEqual([]);
+    expect(rule.match(context, context.limit + 1)).toEqual([]);
+  });
+
+  it.each([
+    "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00; take an extra half tablet at bedtime if symptoms worsen.",
+    "Take 1 tablet at 07:00, 11:00 and 15:00; take an extra tablet at bedtime if symptoms worsen.",
+    "Take 1 tablet at 07:00 and 11:00; take half a tablet at bedtime if needed."
+  ])("does not crash on ordinary Parkinsonian rescue-dose complements: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.input).toBe(input);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    expect(parsed.items.length).toBeGreaterThan(0);
   });
 });

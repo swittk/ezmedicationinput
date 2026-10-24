@@ -374,6 +374,12 @@ export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
   source.phaseAdjustmentLeadSequences.map(parts => [...parts]);
+export const PHASE_ADDITION_LEAD_SEQUENCES = source.phaseAdditionLeadSequences;
+
+/** Lexically marked reference to clock/event anchors of a preceding phase. */
+export const TIMING_ANAPHORA_PHRASES =
+  source.timingAnaphoraPhrases.map(parts => [...parts])
+    .sort((left, right) => right.length - left.length);
 
 export const CLOCK_LEAD_TOKENS = setOf(source.clockLeadTokens);
 export const EVENT_PREPOSITIONS = setOf(source.eventPrepositions);
@@ -492,7 +498,14 @@ export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowIn
     offsetOnly: (entry as { offsetOnly?: boolean }).offsetOnly === true,
     i18n: entry.i18n ? { ...entry.i18n } : undefined,
     relation: entry.relation as "before" | "after" | undefined,
-    activity: entry.activity as string | undefined
+    activity: entry.activity as string | undefined,
+    eventWindow: (
+      (entry as { when?: keyof typeof EventTiming }).when &&
+      (entry as { windowEnd?: keyof typeof EventTiming }).windowEnd
+    ) ? {
+      start: EventTiming[(entry as { when: keyof typeof EventTiming }).when],
+      end: EventTiming[(entry as { windowEnd: keyof typeof EventTiming }).windowEnd]
+    } : undefined
   }))
   .sort((left, right) => right.parts.length - left.parts.length);
 export const SITE_TRAILING_INSTRUCTION_WORDS = setOf(source.siteTrailingInstructionWords);

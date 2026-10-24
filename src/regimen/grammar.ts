@@ -1,4 +1,4 @@
-import { AdviceArgumentRole, AdvicePolarity, type CanonicalSigClause } from "../types";
+import { AdviceArgumentRole, AdvicePolarity, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
   BoundarySite,
@@ -21,7 +21,7 @@ export interface BoundaryFacts {
   leftTargetCue: boolean; rightTargetCue: boolean;
 }
 interface Constraint { feature: string; satisfied: (facts: BoundaryFacts) => boolean }
-interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation']; acceptsAdjacentDose?: boolean; inheritFollowingDuration?: boolean; semanticLicense?: Proposal['semanticLicense'] }
+interface Construction { id: string; priority: number; constraints: readonly Constraint[]; relation: Proposal['relation']; acceptsAdjacentDose?: boolean; inheritFollowingDuration?: boolean; preserveRelationAtSequenceSurface?: boolean; semanticLicense?: Proposal['semanticLicense'] }
 interface SemanticConstraint {
   feature: string;
   satisfied: (facts: CoordinationScopeFacts) => boolean;
@@ -44,6 +44,36 @@ const scheduleRight = [
 const targetSetsDiffer = (left: readonly string[], right: readonly string[]) =>
   left.length !== right.length || left.some(value => right.indexOf(value) < 0);
 const clocksDiffer = (a: readonly string[], b: readonly string[]) => a.length !== b.length || a.some((v, i) => v !== b[i]);
+const hasSameDayAnchor = (clause: CanonicalSigClause) => Boolean(
+  clause.schedule?.timeOfDay?.length ||
+  clause.schedule?.eventWindow ||
+  clause.schedule?.when?.some(event => event !== EventTiming.Immediate)
+);
+const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
+  clause.schedule && (
+    clause.schedule.duration !== undefined || clause.schedule.durationMax !== undefined ||
+    clause.schedule.durationUnit !== undefined || clause.schedule.boundsStart !== undefined ||
+    clause.schedule.boundsEnd !== undefined || clause.schedule.calendarEvents?.length ||
+    clause.schedule.count !== undefined || clause.schedule.countMax !== undefined ||
+    clause.schedule.occurrenceCap ||
+    clause.schedule.administrationOffsetMinutes !== undefined
+  )
+);
+
+const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
+    constraint('connector.sequence', f => f.site.kind === 'sequence'),
+    constraint('left.complete', f => f.left.complete),
+    constraint('right.complete', f => f.right.complete),
+    constraint('left.hasDose', f => f.left.hasDose),
+    constraint('right.hasDose', f => f.right.hasDose),
+    constraint('right.explicitUnit', f => f.explicitRightUnit),
+    constraint('left.hasSameDayAnchor', f => hasSameDayAnchor(f.left.clause)),
+    constraint('right.hasSameDayAnchor', f => hasSameDayAnchor(f.right.clause)),
+    constraint('left.omitsPhaseBoundary', f => !hasPhaseBoundary(f.left.clause)),
+    constraint('right.omitsPhaseBoundary', f => !hasPhaseBoundary(f.right.clause)),
+    constraint('right.not-procedural', f => !f.rightHasProcedure),
+    constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration)
+];
 
 const semanticConstraint = (
   feature: string,
@@ -292,6 +322,14 @@ export function terminalAdministrationDelay(clause: CanonicalSigClause): number 
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
+  { id: 'regimen.explicit-phase-adjustment', priority: 810, relation: 'sequence',
+    semanticLicense: 'dose-continuation', constraints: [
+      constraint('connector.sequence', f => f.site.kind === 'sequence'),
+      constraint('left.established-dose', f => f.left.hasDose && f.left.hasSchedule),
+      constraint('right.typed-adjustment', f => Boolean(f.right.clause.regimenAdjustment)),
+      constraint('right.complete', f => f.right.complete),
+      constraint('right.timed', f => f.right.hasSchedule)
+    ] },
   { id: 'regimen.disjunctive-event-timing', priority: 895, relation: 'alternative',
     semanticLicense: 'event-timing-ellipsis', constraints: [
     constraint('connector.coordination', f => f.site.kind === 'coordination'),
@@ -360,6 +398,21 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.dimensionalQuantity', f => Boolean(f.right.clause.clinicalQuantity)),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
+  { id: 'regimen.window-interval-origin', priority: 786, relation: 'coordination',
+    preserveRelationAtSequenceSurface: true, semanticLicense: 'interval-origin', constraints: [
+    ...SAME_DAY_DOSE_CONSTRAINTS,
+    constraint('left.event-is-right-window-origin', f => {
+      const left = f.left.clause.schedule;
+      const right = f.right.clause.schedule;
+      return Boolean(left?.when?.length === 1 && !left.timeOfDay?.length &&
+        right?.eventWindow && left.when[0] === right.eventWindow.start &&
+        !right.when?.length && !right.timeOfDay?.length && right.period &&
+        (right.periodUnit === 'h' || right.periodUnit === 'min' || right.periodUnit === 's'));
+    })
+  ] },
+  { id: 'regimen.same-day-scheduled-doses', priority: 785, relation: 'coordination',
+    preserveRelationAtSequenceSurface: true, semanticLicense: 'dose-continuation', constraints: [...SAME_DAY_DOSE_CONSTRAINTS
+  ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
     constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
   ] },
@@ -404,7 +457,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.relative-administration', priority: 720, relation: 'coordination', constraints: [
     coordinationOrSequence, ...scheduleRight, usableLeft, constraint('left.hasOffset', f => f.left.hasOffset)
   ] },
-  { id: 'regimen.comma-timed-administrations', priority: 760, relation: 'coordination', constraints: [
+  { id: 'regimen.comma-timed-administrations', priority: 760, relation: 'coordination',
+    semanticLicense: 'dose-continuation', constraints: [
     constraint('connector.comma', f => f.site.kind === 'comma'),
     constraint('right.explicitUnit', f => f.explicitRightUnit),
     constraint('left.complete', f => f.left.complete), constraint('left.hasDose', f => f.left.hasDose),
@@ -466,7 +520,8 @@ export function grammaticalProposals(f: BoundaryFacts, rejected?: RejectedConstr
     }
     if (failed.length) { rejected?.push({ rule: rule.id, failedConstraints: failed }); continue; }
     proposals.push({ action: 'split', rule: rule.id, priority: rule.priority,
-      relation: f.site.kind === 'sequence' && rule.semanticLicense !== 'delayed-target' ? 'sequence' : rule.relation,
+      relation: f.site.kind === 'sequence' && rule.semanticLicense !== 'delayed-target' &&
+        !rule.preserveRelationAtSequenceSurface ? 'sequence' : rule.relation,
       inheritFollowingDuration: rule.inheritFollowingDuration,
       semanticLicense: rule.semanticLicense,
       evidence: describe() });

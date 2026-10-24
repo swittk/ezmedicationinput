@@ -68,6 +68,14 @@ function applySchedule(
   if (schedule.timingCode !== undefined) {
     state.timingCode = schedule.timingCode;
   }
+  if (schedule.treatmentStartOffsetDays !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.treatmentStartOffsetDays = schedule.treatmentStartOffsetDays;
+  }
+  if (schedule.timingReference !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.timingReference = schedule.timingReference;
+  }
   if (schedule.count !== undefined) {
     state.count = schedule.count;
   }
@@ -126,6 +134,10 @@ function applySchedule(
   }
   if (schedule.maxDosePerPeriod?.length) {
     state.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({ ...maximum }));
+  }
+  if (schedule.eventWindow) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.eventWindow = { ...schedule.eventWindow };
   }
   if (schedule.activityTiming?.length) {
     const existing = state.activityTiming ? state.activityTiming.slice() : [];
@@ -347,6 +359,9 @@ export function projectHpsgSignToState(
   tokens: Token[],
   deps: HpsgProjectionDeps
 ): void {
+  if (sign.synsem.cont.regimenAdjustment) {
+    state.primaryClause.regimenAdjustment = sign.synsem.cont.regimenAdjustment;
+  }
   const method = sign.synsem.head.method;
   if (method && method.headClass !== "procedure") {
     state.methodVerb = method.verb;

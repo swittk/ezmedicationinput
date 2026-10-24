@@ -270,6 +270,8 @@ function cleanupClause(state: ParserState): void {
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
     if (!schedule.calendarEvents?.length) delete schedule.calendarEvents;
     if (
+      schedule.timingReference === undefined &&
+      schedule.treatmentStartOffsetDays === undefined &&
       schedule.count === undefined &&
       schedule.countMax === undefined &&
       schedule.duration === undefined &&
@@ -287,6 +289,7 @@ function cleanupClause(state: ParserState): void {
       schedule.offsetMin === undefined &&
       schedule.offsetMax === undefined &&
       !schedule.activityTiming?.length &&
+      schedule.eventWindow === undefined &&
       schedule.occurrenceCap === undefined &&
       !schedule.maxDosePerPeriod?.length &&
       schedule.timingCode === undefined &&

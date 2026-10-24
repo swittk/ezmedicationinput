@@ -1,3 +1,5 @@
+import lexicalClasses from "../lexical-classes.json";
+import { timingLexicalRule, timeOfDayRule } from "./timing-rules";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -11,7 +13,7 @@ import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
-import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode } from "../../types";
+import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode, type ParseOptions } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
@@ -25,12 +27,16 @@ import {
 } from "../timing-lexicon";
 import {
   ACTION_COORDINATION_CONNECTORS,
+  ACTION_DIRECTIVE_PREFIXES,
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
+  COUNT_CONNECTOR_WORDS_DATA,
+  DOSE_ADDITIVE_QUANTITY_CONNECTORS,
+  DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_FRACTION_WORDS,
   DOSE_NUMBER_WORDS,
@@ -44,6 +50,7 @@ import {
   POSITIVE_DIRECTIVE_MARKERS,
   MEDICATION_OBJECT_FILLERS,
   PHASE_ADJUSTMENT_LEAD_SEQUENCES,
+  PHASE_ADDITION_LEAD_SEQUENCES,
   MILLION_DOSE_MULTIPLIER_TOKENS,
   PERCENT_BODY_AREA_UNITS,
   RANGE_CONNECTORS,
@@ -115,30 +122,83 @@ function methodTokenBelongsToNegatedDirective(
   );
 }
 
-/**
- * Resultative phase adjustment (reduce/decrease/taper TO a new frequency).
- * This is one open-class HPSG connective daughter, not an additional dose or
- * a separate parser. The following ordinary schedule sign supplies frequency
- * and the regimen SEQUENCE supplies the phase transition.
+const PHASE_ADJUSTMENTS_BY_FIRST = new Map<string, Array<{
+  kind: "replace" | "add"; parts: readonly string[];
+}>>();
+for (const inventory of [
+  { kind: "replace" as const, sequences: PHASE_ADJUSTMENT_LEAD_SEQUENCES },
+  { kind: "add" as const, sequences: PHASE_ADDITION_LEAD_SEQUENCES }
+]) {
+  for (const parts of inventory.sequences) {
+    const bucket = PHASE_ADJUSTMENTS_BY_FIRST.get(parts[0]) ?? [];
+    bucket.push({ kind: inventory.kind, parts });
+    PHASE_ADJUSTMENTS_BY_FIRST.set(parts[0], bucket);
+  }
+}
+
+/** Bounded lexical recognition shared by chart and boundary candidacy.
+ * @param tokens Source tokens with the existing locale normalization.
+ * @param start Candidate head index; never searches arbitrary later text.
+ * @param limit Exclusive end of the current constituent.
  */
+export function phaseAdjustmentAt(tokens: readonly Token[], start: number, limit = tokens.length) {
+  const first = tokens[start];
+  if (!first || start >= limit) return undefined;
+  const candidates = PHASE_ADJUSTMENTS_BY_FIRST.get(normalizeTokenLower(first));
+  if (!candidates) return undefined;
+  for (const { kind, parts } of candidates) {
+    if (start + parts.length >= limit) continue;
+    if (parts.every((part, index) => tokens[start + index] &&
+      normalizeTokenLower(tokens[start + index]) === part)) {
+      // A negated adjustment is procedural advice, not a phase operation.
+      const negated = ACTION_DIRECTIVE_PREFIXES.some(prefix =>
+        prefix.polarity === AdvicePolarity.Negate && start >= prefix.parts.length &&
+        prefix.parts.every((part, index) =>
+          normalizeTokenLower(tokens[start - prefix.parts.length + index]) === part));
+      if (negated) return undefined;
+      return { kind, end: start + parts.length };
+    }
+  }
+  return undefined;
+}
+
+/** A typed ADD/REPLACE operator composes with ordinary dose/time daughters. */
 export function phaseAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.regimen.phaseAdjustment", (context, start) => {
-    for (const parts of PHASE_ADJUSTMENT_LEAD_SEQUENCES) {
-      const tokens = tokensAvailable(context, start, parts.length);
-      if (!tokens || tokens.some((token, i) => normalizeTokenLower(token) !== parts[i])) continue;
-      const right = context.tokens[start + parts.length];
-      if (!right || context.state.consumed.has(right.index) || isPunctuation(normalizeTokenLower(right))) {
-        continue;
+    const match = phaseAdjustmentAt(context.tokens, start, context.limit);
+    if (!match) return [];
+    const tokens = tokensAvailable(context, start, match.end - start);
+    if (!tokens) return [];
+    if (match.kind === "add") {
+      let cursor = match.end;
+      if (context.tokens[cursor] && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+      const time = context.tokens[cursor];
+      if (time) {
+        const rule = time.kind === LexKind.TimeLike ? timeOfDayRule() : timingLexicalRule();
+        for (const timing of rule.match(context, cursor)) {
+          const noun = context.tokens[cursor + timing.tokens.length];
+          if (!noun || lexicalClasses.phaseDoseNouns.indexOf(normalizeTokenLower(noun)) < 0) continue;
+          const members = tokensAvailable(context, start, cursor + timing.tokens.length + 1 - start);
+          if (!members) continue;
+          return [lexicalSign({
+            type: "adjustment-sign", rule: "hpsg.lex.regimen.ellipticDoseAddition", tokens: members,
+            synsem: { head: { schedule: timing.synsem.head.schedule }, valence: {},
+              cont: { regimenAdjustment: "add" } },
+            score: 25 + members.length
+          })];
+        }
       }
-      return [lexicalSign({
-        type: "connector-sign",
-        rule: "hpsg.lex.regimen.phaseAdjustment",
-        tokens,
-        synsem: emptySynsem(),
-        score: 8 + tokens.length
-      })];
     }
-    return [];
+    return [lexicalSign({
+      type: "adjustment-sign",
+      rule: "hpsg.lex.regimen.phaseAdjustment",
+      tokens,
+      synsem: {
+        head: {}, valence: {},
+        cont: { regimenAdjustment: match.kind }
+      },
+      score: 8 + tokens.length
+    })];
   });
 }
 
@@ -426,6 +486,10 @@ export function fillerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.product", (context, start) => {
     const signs: HpsgSign[] = [];
+    // Nullable complements at an instruction boundary are not lexical signs.
+    // Matchers must be total when a preceding determiner consumed the last
+    // token; never dereference a hypothetical product beyond the chart limit.
+    if (start < 0 || start >= context.limit || !context.tokens[start]) return signs;
     const maxSpan = Math.min(4, context.limit - start);
     // Only a product-like leading word needs nominal-compound arbitration.
     // The exact registered constituent (e.g. an administration-site noun)
@@ -674,6 +738,196 @@ function doseNumeratorValue(token: Token, lower: string): number | undefined {
   return DOSE_NUMBER_WORDS.get(lower);
 }
 
+// These prenominal modifiers already belong to the shared count-connector
+// vocabulary. Their intersection is intentionally narrow: other count words
+// such as `maximum`, `total`, and `more` have different scope constructions.
+const SUPPLEMENTAL_DOSE_MODIFIERS = new Set(
+  ["additional", "extra"].filter(word => COUNT_CONNECTOR_WORDS_DATA.has(word))
+);
+
+interface SupplementalDosePrefix {
+  quantityStart: number;
+}
+
+/** Maximal source prefix for a supplemental scalar dose NP. */
+function supplementalDosePrefixAt(
+  tokens: readonly Token[],
+  start: number,
+  limit: number
+): SupplementalDosePrefix | undefined {
+  const first = tokens[start];
+  if (!first || start < 0 || start >= limit) return undefined;
+  let modifierIndex = start;
+  if (DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(first))) modifierIndex += 1;
+  const modifier = tokens[modifierIndex];
+  if (!modifier || modifierIndex >= limit ||
+      !SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
+  // `an extra ...` is one maximal daughter; do not also license a shorter
+  // daughter beginning at `extra`, which would strand its article.
+  if (modifierIndex === start) {
+    const previous = tokens[start - 1];
+    if (previous && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(previous))) return undefined;
+  }
+  return { quantityStart: modifierIndex + 1 };
+}
+
+function quantityHasSupplementalPrefix(tokens: readonly Token[], start: number): boolean {
+  const modifier = tokens[start - 1];
+  return Boolean(modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(modifier)));
+}
+
+function supplementalDoseAfter(
+  context: HpsgClauseContext,
+  start: number
+): HpsgSign | undefined {
+  const prefix = supplementalDosePrefixAt(context.tokens, start, context.limit);
+  if (!prefix) return undefined;
+  const quantityToken = context.tokens[prefix.quantityStart];
+  if (!quantityToken || context.state.consumed.has(quantityToken.index)) return undefined;
+  const quantityLower = normalizeTokenLower(quantityToken);
+  if (isClockDoseContext(context, prefix.quantityStart, quantityLower) ||
+      numericTokenIsProcedureLocalQuantity(context, quantityToken) ||
+      sourceRangeOverlapsContextDate(context, quantityToken.sourceStart, quantityToken.sourceEnd)) {
+    return undefined;
+  }
+
+  let value = DOSE_FRACTION_WORDS.get(quantityLower);
+  let unitStart = prefix.quantityStart + 1;
+  if (value === undefined) {
+    const numerator = doseNumeratorValue(quantityToken, quantityLower);
+    if (numerator === undefined) return undefined;
+    const denominatorToken = context.tokens[unitStart];
+    const denominator = denominatorToken && !context.state.consumed.has(denominatorToken.index)
+      ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(denominatorToken))
+      : undefined;
+    value = denominator === undefined ? numerator : numerator * denominator;
+    if (denominator !== undefined) unitStart += 1;
+  }
+  const unit = unitAfter(context, unitStart);
+  if (!unit) return undefined;
+  const end = unitStart + unit.tokens.length;
+  const tokens = tokensAvailable(context, start, end - start);
+  if (!tokens) return undefined;
+  return lexicalSign({
+    type: "dose-sign",
+    rule: "hpsg.lex.dose.supplementalQuantity",
+    tokens,
+    synsem: {
+      head: { dose: { value, unit: unit.unit } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 14 + tokens.length
+  });
+}
+
+function explicitScalarDoseLexicalEnd(
+  tokens: readonly Token[],
+  start: number,
+  options: ParseOptions | undefined,
+  limit: number
+): number | undefined {
+  const token = tokens[start];
+  if (!token || start < 0 || start >= limit) return undefined;
+  const lower = normalizeTokenLower(token).replace(/^[.,;:]+|[.,;:]+$/gu, "");
+  const fraction = DOSE_FRACTION_WORDS.has(lower);
+  const numeratorValue = doseNumeratorValue(token, lower);
+  const numerator = numeratorValue !== undefined;
+  if (!fraction && !numerator && token.kind !== LexKind.NumberRange) return undefined;
+
+  for (let wholeIndex = Math.max(0, start - 4); wholeIndex + 1 < start; wholeIndex += 1) {
+    const whole = tokens[wholeIndex];
+    const connector = tokens[wholeIndex + 1];
+    const wholeValue = doseNumeratorValue(whole, normalizeTokenLower(whole));
+    if (wholeValue === undefined || !Number.isInteger(wholeValue) || wholeValue <= 0 ||
+        !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(normalizeTokenLower(connector))) continue;
+    let withinAdditiveFraction = true;
+    for (let index = wholeIndex + 2; index < start; index += 1) {
+      const candidate = tokens[index];
+      const candidateLower = normalizeTokenLower(candidate);
+      if (!DOSE_FRACTION_ARTICLES.has(candidateLower) &&
+          !DOSE_FRACTION_WORDS.has(candidateLower) &&
+          !DOSE_FRACTION_DENOMINATOR_WORDS.has(candidateLower) &&
+          doseNumeratorValue(candidate, candidateLower) === undefined) {
+        withinAdditiveFraction = false;
+        break;
+      }
+    }
+    if (withinAdditiveFraction) return undefined;
+  }
+  const previous = tokens[start - 1];
+  const previousLower = previous
+    ? normalizeTokenLower(previous).replace(/^[.,;:]+|[.,;:]+$/gu, "")
+    : "";
+  if (DOSE_FRACTION_ARTICLES.has(lower) && DOSE_FRACTION_WORDS.has(previousLower)) {
+    return undefined;
+  }
+
+  let cursor = start + 1;
+  const additiveConnector = tokens[cursor];
+  if (numeratorValue !== undefined && Number.isInteger(numeratorValue) && numeratorValue > 0 &&
+      additiveConnector && DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(
+        normalizeTokenLower(additiveConnector)
+      )) {
+    cursor += 1;
+    if (cursor < limit && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(tokens[cursor]))) {
+      cursor += 1;
+    }
+    const additiveFraction = tokens[cursor];
+    const additiveLower = additiveFraction ? normalizeTokenLower(additiveFraction) : "";
+    if (DOSE_FRACTION_WORDS.has(additiveLower)) {
+      cursor += 1;
+    } else {
+      const denominator = tokens[cursor + 1];
+      if (!additiveFraction || doseNumeratorValue(additiveFraction, additiveLower) === undefined ||
+          !denominator || !DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(denominator))) {
+        return undefined;
+      }
+      cursor += 2;
+    }
+  } else if (numerator && cursor < limit) {
+    const denominator = tokens[cursor];
+    const denominatorLower = denominator
+      ? normalizeTokenLower(denominator).replace(/^[.,;:]+|[.,;:]+$/gu, "")
+      : "";
+    if (DOSE_FRACTION_DENOMINATOR_WORDS.has(denominatorLower)) cursor += 1;
+  }
+  while (cursor < limit) {
+    const connector = tokens[cursor];
+    const connectorLower = connector
+      ? normalizeTokenLower(connector).replace(/^[.,;:]+|[.,;:]+$/gu, "")
+      : "";
+    if (!DOSE_UNIT_CONNECTORS.has(connectorLower)) break;
+    cursor += 1;
+  }
+  if (cursor >= limit) return undefined;
+  const unitToken = tokens[cursor];
+  const unitLower = normalizeTokenLower(unitToken).replace(/^[.,;:]+|[.,;:]+$/gu, "");
+  return normalizeUnit(unitLower, options) ? cursor + 1 : undefined;
+}
+
+/**
+ * Return the end of a bounded, explicit scalar-dose head for regimen boundary
+ * candidacy. This uses the same HPSG quantity lexemes as `doseLexicalRule`;
+ * it does not assign a dose or authorize a split. The boundary grammar still
+ * has to parse complete typed daughters before accepting the candidate.
+ *
+ * Keeping the optional fraction article inside this constituent is important:
+ * in `half a tablet`, `a` is a determiner of the unit, not a second one-tablet
+ * dose head.
+ */
+export function explicitDoseLexicalEnd(
+  tokens: readonly Token[],
+  start: number,
+  options?: ParseOptions,
+  limit = tokens.length
+): number | undefined {
+  const prefix = supplementalDosePrefixAt(tokens, start, limit);
+  if (prefix) return explicitScalarDoseLexicalEnd(tokens, prefix.quantityStart, options, limit);
+  if (quantityHasSupplementalPrefix(tokens, start)) return undefined;
+  return explicitScalarDoseLexicalEnd(tokens, start, options, limit);
+}
+
 function percentBodyAreaDoseAfter(
   context: HpsgClauseContext,
   start: number,
@@ -725,7 +979,9 @@ function numericTokenIsProcedureLocalQuantity(
     for (const arg of frame.args) {
       if (!arg.span || token.sourceStart < arg.span.start || token.sourceEnd > arg.span.end) continue;
       if (arg.role === AdviceArgumentRole.Duration) return true;
-      if (arg.role === AdviceArgumentRole.Amount && !definition?.definesDose) return true;
+      if (arg.role === AdviceArgumentRole.Amount && (!definition?.definesDose ||
+          frame.args.some(complement => complement.role === AdviceArgumentRole.Time &&
+            complement.conceptId === "after-first-administration"))) return true;
     }
   }
   return false;
@@ -770,6 +1026,9 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!tokens || !token) {
       return [];
     }
+    const supplementalDose = supplementalDoseAfter(context, start);
+    if (supplementalDose) return [supplementalDose];
+    if (quantityHasSupplementalPrefix(context.tokens, start)) return [];
     const lower = normalizeTokenLower(token);
     if (isClockDoseContext(context, start, lower)) {
       return [];

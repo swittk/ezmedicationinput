@@ -11,6 +11,7 @@ import {
   toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
+import { EventTiming } from "../src/types";
 
 describe("HPSG clinical quantity grammar", () => {
   it("lowers resolved quantities directly from typed canonical semantics, without a post-parse clinical resolver", () => {
@@ -627,5 +628,120 @@ describe("additive dose quantities and conditional measurement ownership", () =>
       unit: "kg"
     });
     expect(parsed.input).toBe(source);
+  });
+});
+
+
+describe("prenominal supplemental dose quantities", () => {
+  it.each([
+    ["take an extra half tablet HS", 0.5, true],
+    ["take an additional 0.5 tablet HS", 0.5, true],
+    ["take extra one tablet", 1, false]
+  ] as const)("keeps the supplemental modifier inside one typed dose: %s",
+    (source, expectedDose, hasBedtime) => {
+      const sign = parseClauseSign(source);
+      const state = parseClauseState(source);
+      const parsed = parsePublicSig(source);
+
+      expect(sign?.synsem.head.dose).toMatchObject({ value: expectedDose, unit: "tab" });
+      expect(sign?.evidence).toContainEqual(expect.objectContaining({
+        rule: "hpsg.lex.dose.supplementalQuantity"
+      }));
+      expect(state.primaryClause.dose).toEqual({ value: expectedDose, unit: "tab" });
+      expect(state.primaryClause.evidence).toContainEqual(expect.objectContaining({
+        rule: "hpsg.lex.dose.supplementalQuantity"
+      }));
+      expect(state.primaryClause.leftovers).toEqual([]);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+        value: expectedDose,
+        unit: "tab"
+      });
+      expect(parsed.fhir[0].timing?.repeat?.when).toEqual(hasBedtime ? ["HS"] : undefined);
+      expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+      expect(parsed.input).toBe(source);
+    });
+
+  it("does not turn an ordinary modified object into a medication dose", () => {
+    const source = "an extra cleaning tissue";
+    const sign = parseClauseSign(source);
+    const state = parseClauseState(source);
+    const parsed = parsePublicSig(source);
+
+    expect(sign?.synsem.head.dose).toBeUndefined();
+    expect(state.primaryClause.dose).toBeUndefined();
+    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps the full modifier phrase on the right of a fixed-clock boundary", () => {
+    const source = "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00; take an extra half tablet at bedtime if symptoms worsen";
+    const parsed = parsePublicSig(source);
+    const regular = parsed.fhir.find(row =>
+      row.doseAndRate?.[0]?.doseQuantity?.value === 1
+    );
+    const supplemental = parsed.fhir.find(row =>
+      row.doseAndRate?.[0]?.doseQuantity?.value === 0.5
+    );
+
+    expect(parsed.fhir).toHaveLength(2);
+    expect(regular?.timing?.repeat?.timeOfDay).toEqual([
+      "07:00:00", "11:00:00", "15:00:00", "19:00:00"
+    ]);
+    expect(supplemental?.timing?.repeat?.when).toEqual(["HS"]);
+    expect(getDosageCondition(regular!)).toBeUndefined();
+    expect(supplemental?.asNeeded === true || Boolean(getDosageCondition(supplemental!))).toBe(true);
+    expect(parsed.meta.canonical.clauses[0]?.rawText.toLowerCase()).not.toContain("extra");
+    expect(parsed.meta.canonical.clauses[1]?.rawText.toLowerCase())
+      .toMatch(/^take an extra half tablet/u);
+    expect(parsed.meta.canonical.clauses[1]?.leftovers).toEqual([]);
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps a conditional supplemental bedtime dose independent of the waking-hours base", () => {
+    const source = "Take 1 tablet every 4 hours while awake; take an extra half tablet at bedtime only if symptoms persist.";
+    const parsed = parsePublicSig(source);
+    const regular = parsed.fhir.find(row =>
+      row.doseAndRate?.[0]?.doseQuantity?.value === 1
+    );
+    const supplemental = parsed.fhir.find(row =>
+      row.doseAndRate?.[0]?.doseQuantity?.value === 0.5
+    );
+
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0]?.component).toHaveLength(2);
+    expect(regular?.timing?.repeat).toMatchObject({ period: 4, periodUnit: "h" });
+    expect(regular?.timing?.repeat?.when).toBeUndefined();
+    expect(regular?.asNeeded).not.toBe(true);
+    expect(getDosageCondition(regular!)).toBeUndefined();
+    expect(supplemental?.timing?.repeat?.when).toEqual(["HS"]);
+    expect(supplemental?.asNeeded === true || Boolean(getDosageCondition(supplemental!))).toBe(true);
+    expect(parsed.meta.canonical.clauses[1]?.rawText).toContain("an extra half tablet");
+    expect(parsed.meta.canonical.clauses[1]?.leftovers).toEqual([]);
+    expect(parsed.input).toBe(source);
+
+    const orderedAt = "2026-11-02T00:00:00+07:00";
+    const schedule = {
+      orderedAt,
+      from: orderedAt,
+      timeZone: "Asia/Bangkok",
+      eventClock: {
+        [EventTiming.Wake]: "06:30",
+        [EventTiming["Before Sleep"]]: "22:00"
+      },
+      limit: 5
+    } as const;
+    const expectedTimes = ["06:30", "10:30", "14:30", "18:30", "22:00"];
+    for (const regimen of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(regimen, schedule).map(value => value.slice(11, 16)))
+        .toEqual(expectedTimes);
+      expect(calculateTotalUnits({
+        dosage: regimen,
+        ...schedule,
+        durationValue: 7,
+        durationUnit: "d"
+      })).toMatchObject({ totalUnits: 31.5, unit: "tab", quantityKind: "maximum" });
+    }
   });
 });

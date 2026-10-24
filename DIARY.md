@@ -3348,3 +3348,74 @@ mutation. Release scope remains fast clinician-reviewed suggestions with
 editable unsupported counseling, not universal clinical NLP or autonomous
 ordering. Whole-course clinician-approved EN/TH bilingual persistence is
 a separate follow-up.
+
+
+## 2026-10-25 — Typed multiweek regimen and administration execution checkpoint
+
+Completed the realistic mixed-dose/titration audit through source parsing,
+actual administration execution, supply calculation and downstream schema
+round-trips. This checkpoint extends the earlier 4c1f7e7 baseline; it does
+not claim unrestricted clinical language coverage.
+
+- Labelled weeks, fronted finite-course phases and independently timed
+  fractional doses retain source-owned phase boundaries and dose amounts.
+  Same-day THEN is distinct from a true multiweek treatment transition.
+- Waking-hour interval execution uses a typed event window, not a WAKE point
+  event. Caller-provided waking/sleep clocks control the window. The original
+  unrestricted interval and independent calendar/parallel-track tests remain.
+- Previous-time references are contributed by the existing timing-anaphora
+  lexicon and resolved against agreed predecessor recurrence. They do not
+  copy the previous finite course. An unresolved same-time preference remains
+  visible editable advice rather than inventing clocks or disappearing.
+- ADD versus REPLACE is a typed source regimen operation in formal HPSG
+  content, unification and canonical projection. ADD continues the previous
+  phase before the single FHIR projection, while replacement does not retain
+  obsolete administrations. Ordinal treatment-relative onsets prevent a
+  week-two addition from occurring in week one. Equal antecedent doses can
+  license an omitted amount; unequal antecedents do not license a guess.
+- Existing event-preposition grammar now understands upon waking, allowing
+  the existing shared trailing-duration construction to cover both waking
+  and bedtime doses. No partial-FHIR-component endpoint inference is used.
+- Positive adjustment operations cannot escape a negated directive. Negative
+  ADD objects/event complements remain advice and cannot create a positive
+  bedtime dosage. ADD retains its local predicate and exact published SNOMED
+  dosing-fragment code 422106007; phase relationships are not clinical events.
+- Supplemental nominal quantities such as an extra half tablet remain
+  distinct from the standing regimen and carry their own conditional scope.
+  The old Thai primary-two-tablet plus secondary-relative-one-tablet control
+  is retained: a secondary amount owned by after-first-administration must
+  not outscore or overwrite the primary dose. Minimum delay is not made exact.
+
+Final official Node 22 source gate: 44 suites, 2861/2861 PASS
+(proc-85953e48-f74e-4bae-9ad5-a025b1eeef3f). Final ESM/CJS build and TypeScript
+declaration generation PASS (proc-bd3efb92-acd3-4d70-9c7c-f339ef574308), built
+exports 4/4 PASS (proc-0ba5eb2e-ca53-45bf-b797-5c274231b722). All original
+parallel-regimen, Thai-relative-instruction and clinical correctness assertions
+are retained; no acceptance gate was weakened to make these results green.
+
+Actual final built package -> downstream dosage converters -> schema
+validation -> FHIR reload: six/six source cases PASS, including original
+source retention, exact day-one/day-eight/day-fifteen next administrations,
+and supply parity with native R6. Three week-two additions produce expected
+77, 56 and 70 tablets over 21 days; a finite noon addition gives 31.5 tablets
+and stops after day 14; same-time replacement gives 35 tablets over 21 days;
+a waking interval plus optional extra bedtime dose gives maximum 31.5 tablets
+over seven days. Downstream adapter fixture suite 28/28 PASS. The downstream
+worktree was not modified by these checks.
+
+Interleaved shared-host Node 22 medians against immutable 4c1f7e7 bundle,
+50 warmups then nine alternating trials of 60 parses, with explicit GC:
+- 1 tab PO BID: 1.160873 -> 1.166286 ms (1.0047x).
+- 1 drop OD QID: 1.239772 -> 1.223577 ms (0.9869x).
+- Asymmetric morning/bedtime seven-day course: 15.360208 -> 15.820321 ms
+  (1.0300x).
+- Thai BID after-meal instruction: 5.825081 -> 5.780783 ms (0.9924x).
+These are host samples, not phone latency guarantees. Phase lexical
+inventories are indexed once instead of allocating per token. Reused the
+existing timing-anaphora inventory rather than maintaining duplicate data.
+
+Review limit remains 115 raw paths minus the same 15 existing configured
+exclusions = 100 reviewable files. No new exclusions. Whitespace clean;
+existing untracked test/__tmp_open_semantic_probe.ts remains outside the
+commit. No remote push, merge, publication, deployment or downstream UI
+migration is claimed by this local validation checkpoint.

@@ -1984,8 +1984,10 @@ function actionTailIsRegimenModifier(
   // OBJECT, not schedule an unrelated medication. "Do not skip meals"
   // therefore keeps the complete source-backed counseling action instead
   // of creating medication timing WITH MEALS.
-  if (negatedAction && definition?.procedural &&
-      !definition.primaryAdministrationHead && EVENT_TIMING_TOKENS[token]) {
+  if (negatedAction && definition && EVENT_TIMING_TOKENS[token]) {
+    // Negation scopes this action even when its positive lexical use is an
+    // administration or regimen adjustment. Its object/event cannot become
+    // an unrelated positive medication schedule ("never add a bedtime dose").
     return false;
   }
   // A time-like adjective can modify an explicitly typed presentation noun

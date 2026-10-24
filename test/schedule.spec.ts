@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits } from "../src/index";
+import { nextDueDoses, calculateTotalUnits, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming, FhirDosage, NextDueDoseOptions, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
+import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import {
+  EventTiming, FhirDosage, FhirR6DosageDetails, NextDueDoseOptions,
+  FhirPeriodUnit, FhirDayOfWeek
+} from "../src/types";
 
 const EVENT_CLOCK = {
   [EventTiming.Morning]: "08:00",
@@ -1245,5 +1249,226 @@ describe("calculateTotalUnits", () => {
     });
     expect(res.totalUnits).toBe(50);
     expect(res.totalContainers).toBe(2);
+  });
+});
+
+
+describe("mixed event and fixed-clock quantities remain distinct across R5/R6", () => {
+  it("executes and counts a before-meal whole dose plus an independently measured bedtime half dose", () => {
+    const dosages: FhirDosage[] = [
+      {
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { when: [EventTiming["Before Meal"]] } }
+      },
+      {
+        doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }],
+        timing: { repeat: { timeOfDay: ["22:00:00"] } }
+      }
+    ];
+    const course = toDosageDetails(dosages);
+    const representations = [dosages, course, toFhirR5Dosages(course)];
+    const opts = {
+      timeZone: "Asia/Bangkok",
+      from: "2026-11-02T00:00:00+07:00",
+      orderedAt: "2026-11-02T00:00:00+07:00",
+      eventClock: {
+        [EventTiming.Breakfast]: "08:00",
+        [EventTiming.Lunch]: "12:30",
+        [EventTiming.Dinner]: "18:30"
+      },
+      mealOffsets: { [EventTiming["Before Meal"]]: -30 }
+    };
+    for (const regimen of representations) {
+      expect(nextDueDoses(regimen, { ...opts, limit: 4 })).toEqual([
+        "2026-11-02T07:30:00+07:00",
+        "2026-11-02T12:00:00+07:00",
+        "2026-11-02T18:00:00+07:00",
+        "2026-11-02T22:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({
+        dosage: regimen, ...opts,
+        durationValue: 21, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(73.5);
+    }
+  });
+});
+
+
+describe("typed step addition without changing the baseline administrations", () => {
+  it("executes an explicit week-two added dose with the baseline continued, in R6 and strict R5", () => {
+    const relativeDay = (day: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event",
+        code: "treatment-start", display: "Start of Treatment"
+      }] },
+      offsetDuration: { value: day, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
+    });
+    const component = (value: number, clocks: string[]) => ({
+      timing: { repeat: { timeOfDay: clocks.map(clock => clock + ":00") } },
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
+    });
+    const course: FhirR6DosageDetails = {
+      step: [
+        {
+          end: relativeDay(7),
+          component: [component(1, ["08:00", "20:00"])]
+        },
+        {
+          start: relativeDay(7), end: relativeDay(14),
+          component: [
+            component(1, ["08:00", "20:00"]),
+            component(0.5, ["14:00"])
+          ]
+        }
+      ]
+    };
+    const representations = [
+      course,
+      toFhirR5Dosages(course),
+      toDosageDetails(toFhirR5Dosages(course))
+    ];
+    const orderedAt = "2026-11-02T00:00:00+07:00";
+    for (const dosage of representations) {
+      const dueOn = (date: string) => nextDueDoses(dosage, {
+        timeZone: "Asia/Bangkok", orderedAt,
+        from: date + "T00:00:00+07:00", limit: 12
+      }).filter(value => value.startsWith(date)).map(value => value.slice(11, 16));
+      expect(dueOn("2026-11-02")).toEqual(["08:00", "20:00"]);
+      expect(dueOn("2026-11-09")).toEqual(["08:00", "14:00", "20:00"]);
+      expect(dueOn("2026-11-16")).toEqual([]);
+      expect(calculateTotalUnits({
+        dosage, timeZone: "Asia/Bangkok",
+        from: orderedAt, orderedAt,
+        durationValue: 21, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(31.5);
+    }
+  });
+});
+
+
+describe("typed waking-hours baseline and independent optional bedtime administration", () => {
+  it("keeps a separate optional bedtime half-tablet out of the waking-hour base condition", () => {
+    const course: FhirR6DosageDetails = {
+      step: [{ component: [
+        {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: {
+            period: 4, periodUnit: FhirPeriodUnit.Hour,
+            extension: [{
+              url: TIMING_EVENT_WINDOW_EXTENSION_URL,
+              extension: [
+                { url: "start", valueCode: EventTiming.Wake },
+                { url: "end", valueCode: EventTiming["Before Sleep"] }
+              ]
+            }]
+          } }
+        },
+        {
+          doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }],
+          timing: { repeat: { when: [EventTiming["Before Sleep"]] } },
+          asNeeded: true,
+          asNeededFor: [{ text: "symptoms persist" }]
+        }
+      ] }]
+    };
+    const start = "2026-11-02T00:00:00+07:00";
+    for (const dosage of [
+      course,
+      toFhirR5Dosages(course),
+      toDosageDetails(toFhirR5Dosages(course))
+    ]) {
+      expect(nextDueDoses(dosage, {
+        orderedAt: start, from: start, timeZone: "Asia/Bangkok",
+        eventClock: {
+          [EventTiming.Wake]: "06:30",
+          [EventTiming["Before Sleep"]]: "22:00"
+        },
+        limit: 5
+      })).toEqual([
+        "2026-11-02T06:30:00+07:00",
+        "2026-11-02T10:30:00+07:00",
+        "2026-11-02T14:30:00+07:00",
+        "2026-11-02T18:30:00+07:00",
+        "2026-11-02T22:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({
+        dosage, orderedAt: start, from: start,
+        timeZone: "Asia/Bangkok",
+        eventClock: {
+          [EventTiming.Wake]: "06:30",
+          [EventTiming["Before Sleep"]]: "22:00"
+        },
+        durationValue: 7,
+        durationUnit: FhirPeriodUnit.Day
+      })).toMatchObject({
+        totalUnits: 31.5, unit: "tab", quantityKind: "maximum"
+      });
+    }
+  });
+});
+
+
+describe("finite waking and bedtime phase followed by an added noon administration", () => {
+  it("executes a second-week noon event without dropping the original waking and bedtime doses", () => {
+    const relativeDay = (day: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] },
+      offsetDuration: { value: day, unit: "d" }
+    });
+    const oneTablet = (event: EventTiming) => ({
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [event] } }
+    });
+    const course: FhirR6DosageDetails = {
+      step: [
+        {
+          end: relativeDay(7),
+          component: [
+            oneTablet(EventTiming.Wake),
+            oneTablet(EventTiming["Before Sleep"])
+          ]
+        },
+        {
+          start: relativeDay(7),
+          component: [
+            oneTablet(EventTiming.Wake),
+            oneTablet(EventTiming.Noon),
+            oneTablet(EventTiming["Before Sleep"])
+          ]
+        }
+      ]
+    };
+    const start = "2026-11-02T00:00:00+07:00";
+    for (const dosage of [
+      course,
+      toFhirR5Dosages(course),
+      toDosageDetails(toFhirR5Dosages(course))
+    ]) {
+      const times = (date: string) => nextDueDoses(dosage, {
+        orderedAt: start,
+        from: date + "T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        eventClock: {
+          [EventTiming.Wake]: "06:30",
+          [EventTiming.Noon]: "12:00",
+          [EventTiming["Before Sleep"]]: "22:00"
+        },
+        limit: 12
+      }).filter(time => time.startsWith(date)).map(time => time.slice(11, 16));
+      expect(times("2026-11-02")).toEqual(["06:30", "22:00"]);
+      expect(times("2026-11-09")).toEqual(["06:30", "12:00", "22:00"]);
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt: start,
+        timeZone: "Asia/Bangkok",
+        eventClock: {
+          [EventTiming.Wake]: "06:30",
+          [EventTiming.Noon]: "12:00",
+          [EventTiming["Before Sleep"]]: "22:00"
+        },
+        durationValue: 14,
+        durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(35);
+    }
   });
 });

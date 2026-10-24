@@ -487,6 +487,12 @@ function sameRepeatCycle(
     left.unit === right.unit && left.system === right.system && left.code === right.code;
 }
 
+function sameEventWindow(
+  left: HpsgScheduleFeature["eventWindow"], right: HpsgScheduleFeature["eventWindow"]
+): boolean {
+  return !left || !right || left.start === right.start && left.end === right.end;
+}
+
 function mergeSchedule(
   left: HpsgScheduleFeature | undefined,
   right: HpsgScheduleFeature | undefined
@@ -498,6 +504,8 @@ function mergeSchedule(
   const mergedClass = attachmentClass(left.attachmentClass);
   if (
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
+    !sameOptionalScalar(left.timingReference, right.timingReference) ||
+    !sameOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays) ||
     !sameOptionalScalar(left.count, right.count) ||
     !sameOptionalScalar(left.countMax, right.countMax) ||
     !sameOptionalScalar(left.duration, right.duration) ||
@@ -516,6 +524,7 @@ function mergeSchedule(
     !sameOptionalScalar(left.offsetMax, right.offsetMax) ||
     !sameOptionalScalar(left.repeatCount, right.repeatCount) ||
     (!sameRepeatCycle(left.repeatCycle, right.repeatCycle) && Boolean(left.repeatCycle && right.repeatCycle)) ||
+    !sameEventWindow(left.eventWindow, right.eventWindow) ||
     (!sameOccurrenceCap(left.occurrenceCap, right.occurrenceCap) && Boolean(left.occurrenceCap && right.occurrenceCap))
   ) {
     return undefined;
@@ -524,6 +533,8 @@ function mergeSchedule(
     attachmentClass: mergedClass,
     sourceRanges: appendUniqueStructured(left.sourceRanges, right.sourceRanges),
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
+    timingReference: mergeOptionalScalar(left.timingReference, right.timingReference),
+    treatmentStartOffsetDays: mergeOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays),
     count: mergeOptionalScalar(left.count, right.count),
     countMax: mergeOptionalScalar(left.countMax, right.countMax),
     duration: mergeOptionalScalar(left.duration, right.duration),
@@ -549,6 +560,7 @@ function mergeSchedule(
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
     calendarEvents: appendUniqueStructured(left.calendarEvents, right.calendarEvents),
     activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),
+    eventWindow: left.eventWindow ?? right.eventWindow,
     occurrenceCap: left.occurrenceCap ?? right.occurrenceCap,
     maxDosePerPeriod: appendUniqueStructured(left.maxDosePerPeriod, right.maxDosePerPeriod)
   };
@@ -725,6 +737,8 @@ export function unifySynsem(
   if (prn === undefined && left.valence.prn && right.valence.prn) {
     return undefined;
   }
+  if (!sameOptionalScalar(left.cont.regimenAdjustment, right.cont.regimenAdjustment)) return undefined;
+  const regimenAdjustment = mergeOptionalScalar(left.cont.regimenAdjustment, right.cont.regimenAdjustment);
   const condition = mergeCondition(left.cont.condition, right.cont.condition);
   if (condition === undefined && left.cont.condition && right.cont.condition) return undefined;
   const clinicalAdjunct = mergeClinicalAdjunct(
@@ -774,6 +788,7 @@ export function unifySynsem(
     },
     cont: {
       clauseKind: left.cont.clauseKind ?? right.cont.clauseKind,
+      regimenAdjustment,
       condition,
       clinicalAdjunct,
       scopedAdministrations: mergeScopedAdministrations(

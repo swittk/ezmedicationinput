@@ -57,6 +57,17 @@ describe("OPD clinician dogfood grammar", () => {
     const parsed = parseSig(source);
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.eventWindow)
+      .toEqual({ start: "WAKE", end: "HS" });
+    expect(parsed.fhir.timing?.repeat?.extension).toContainEqual(
+      expect.objectContaining({
+        url: expect.stringContaining("/medication-timing-event-window"),
+        extension: [
+          { url: "start", valueCode: "WAKE" },
+          { url: "end", valueCode: "HS" }
+        ]
+      })
+    );
     expect(parsed.meta.canonical.clauses[0]?.additionalInstructions).toContainEqual(
       expect.objectContaining({ text })
     );

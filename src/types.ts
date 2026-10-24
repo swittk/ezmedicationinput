@@ -1509,6 +1509,15 @@ export interface CanonicalActivityTimingExpr {
   offsetMax?: number;
 }
 
+/** Caller-resolved daily administration window. Unlike a WHEN anchor, this
+ * bounds recurring opportunities rather than defining one administration.
+ * Both endpoints are clinical EventTiming codes, never inferred clock times.
+ */
+export interface CanonicalEventWindowExpr {
+  start: EventTiming;
+  end: EventTiming;
+}
+
 export interface CanonicalCalendarEventExpr {
   /** Gregorian ISO calendar date used for date-only FHIR Timing.event values and display. */
   isoDate: string;
@@ -1527,6 +1536,11 @@ export interface CanonicalCalendarEventExpr {
 }
 
 export interface CanonicalScheduleExpr {
+  /** Source-anaphoric timing (e.g. "at the same times") awaiting a licensed
+   * previous regimen daughter. Resolved within HPSG/regimen, never by FHIR. */
+  timingReference?: "previous";
+  /** Source-relative phase onset, in elapsed days from treatment start. */
+  treatmentStartOffsetDays?: number;
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
   administrationOffsetMinutes?: number;
   timingCode?: string;
@@ -1557,6 +1571,8 @@ export interface CanonicalScheduleExpr {
   dayOfWeek?: FhirDayOfWeek[];
   when?: EventTiming[];
   timeOfDay?: string[];
+  /** Typed recurring window, distinct from an instantaneous WHEN event. */
+  eventWindow?: CanonicalEventWindowExpr;
   /** Explicit calendar occurrences, projected to FHIR Timing.event. */
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
@@ -1666,6 +1682,8 @@ export interface CanonicalClinicalAdjuncts {
 
 export interface CanonicalSigClause {
   kind: "administration";
+  /** Source-backed phase operation; resolved by the typed regimen graph. */
+  regimenAdjustment?: "replace" | "add";
   rawText: string;
   span?: TextRange;
   raw: CanonicalSourceSpan;

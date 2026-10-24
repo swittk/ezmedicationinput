@@ -4,7 +4,7 @@ import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthCom
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
 import { createBoundaryPlan } from "../src/regimen/planner";
-import { getDosageAlternativeChoice, setDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, fromFhir } from "../src";
+import { getDosageAlternativeChoice, setDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, fromFhir, fromFhirDosage, parseSig as parseBatch } from "../src";
 
 describe("clinical SIG correctness and boundary promotion", () => {
   it.each([
@@ -2978,5 +2978,300 @@ describe("clinical execution adversarial source keeps patient intent and dose id
       const issues = lintSig(source).issues;
       expect(issues?.some(issue => issue.message.startsWith("Unresolved schedule: cycle"))).toBe(true);
     }
+  });
+});
+
+
+describe("Parkinson movement-disorder dosing near-neighbors", () => {
+  it("keeps a fixed daytime regimen and a separate optional bedtime half-dose", () => {
+    const source = "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00; take an extra half tablet at bedtime if symptoms worsen.";
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    const dosages = parsed.items.map(item => item.fhir);
+    expect(dosages.some(dosage => {
+      const quantity = dosage.doseAndRate?.[0]?.doseQuantity;
+      return quantity?.value === 1 && quantity.unit === "tab" &&
+        ["07:00:00", "11:00:00", "15:00:00", "19:00:00"]
+          .every(clock => dosage.timing?.repeat?.timeOfDay?.includes(clock));
+    })).toBe(true);
+    expect(dosages.some(dosage => {
+      const quantity = dosage.doseAndRate?.[0]?.doseQuantity;
+      return quantity?.value === 0.5 && quantity.unit === "tab" &&
+        dosage.timing?.repeat?.when?.includes("HS") &&
+        (dosage.asNeeded === true || Boolean(getDosageCondition(dosage)));
+    })).toBe(true);
+  });
+});
+
+
+describe("Parkinson week-phase and real administration execution oracles", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const base = {
+    timeZone: "Asia/Bangkok",
+    orderedAt,
+    eventClock: {
+      WAKE: "06:30", MORN: "08:00", NOON: "12:00",
+      EVE: "18:00", HS: "22:00",
+      CM: "08:00", CD: "12:30", CV: "18:30"
+    },
+    // Institution-configured postmeal delays. Event clocks are meal times,
+    // not pre-offset administration times; avoid a false 08:00/12:30 oracle.
+    mealOffsets: { PCM: 30, PCD: 30, PCV: 30, PC: 30 }
+  };
+  const dueTimes = (parsed: ReturnType<typeof parseBatch>, date: string): string[] =>
+    nextDueDoses(parsed, {
+      ...base, from: date + "T00:00:00+07:00", limit: 16
+    }).filter(timestamp => timestamp.slice(0, 10) === date)
+      .map(timestamp => timestamp.slice(11, 16));
+  const total = (parsed: ReturnType<typeof parseBatch>, days: number): number =>
+    calculateTotalUnits({
+      ...base, from: orderedAt, dosage: parsed,
+      durationValue: days, durationUnit: "d"
+    }).totalUnits;
+
+  it.each([
+    {
+      input: "Take 1 tablet at 07:00, 11:00 and 15:00 for week 1; add a 19:00 dose from week 2.",
+      first: ["07:00", "11:00", "15:00"],
+      later: ["07:00", "11:00", "15:00", "19:00"],
+      total21: 77
+    },
+    {
+      input: "Take 1 tablet upon waking and 1 tablet at bedtime for a week, then add a noon dose.",
+      first: ["06:30", "22:00"],
+      later: ["06:30", "12:00", "22:00"],
+      total21: 56
+    },
+    {
+      input: "Take 1 tablet three times daily at 07:00, 13:00 and 19:00, but add half a tablet at 22:00 only from the second week.",
+      first: ["07:00", "13:00", "19:00"],
+      later: ["07:00", "13:00", "19:00", "22:00"],
+      total21: 70
+    }
+  ])("only activates added Parkinson doses from the prescribed second week: $input", ({
+    input, first, later, total21
+  }) => {
+    const parsed = parseBatch(input);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.input).toBe(input);
+    for (const regimen of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const day = (date: string) => nextDueDoses(regimen, { ...base,
+        from: date + "T00:00:00+07:00", limit: 16
+      }).filter(timestamp => timestamp.startsWith(date))
+        .map(timestamp => timestamp.slice(11, 16));
+      expect(day("2026-11-02")).toEqual(first);
+      expect(day("2026-11-09")).toEqual(later);
+      expect(day("2026-11-16")).toEqual(later);
+      const total = calculateTotalUnits({
+        dosage: regimen, ...base, from: orderedAt,
+        durationValue: 21, durationUnit: "d"
+      });
+      expect(total.totalUnits).toBe(total21);
+    }
+  });
+
+  it("executes distinct week 1, week 2 and week 3 dose/clock regimens", () => {
+    const parsed = parseBatch("Week 1: take half a tablet at 08:00 and 20:00. Week 2: take 1 tablet at 08:00 and 20:00. Week 3 onwards: take 1 tablet at 08:00, 14:00 and 20:00.");
+    expect(parsed.fhirNext.step).toHaveLength(3);
+    expect(parsed.fhir.map(item => item.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([0.5, 1, 1]);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["08:00", "20:00"]);
+    expect(dueTimes(parsed, "2026-11-09")).toEqual(["08:00", "20:00"]);
+    expect(dueTimes(parsed, "2026-11-16")).toEqual(["08:00", "14:00", "20:00"]);
+    expect(total(parsed, 21)).toBe(42);
+  });
+
+  it("retains the half-tablet bedtime administration on each ordinary day", () => {
+    const parsed = parseBatch("Take 1 tablet after breakfast and lunch, then half a tablet at bedtime.");
+    expect(parsed.fhir.some(item => item.doseAndRate?.[0]?.doseQuantity?.value === 0.5 &&
+      item.timing?.repeat?.when?.includes("HS"))).toBe(true);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["08:30", "13:00", "22:00"]);
+    expect(dueTimes(parsed, "2026-11-09")).toEqual(["08:30", "13:00", "22:00"]);
+    expect(total(parsed, 7)).toBe(17.5);
+  });
+
+  it("attaches the smaller afternoon dose to the afternoon clock", () => {
+    const parsed = parseBatch("Take 1 tablet 30 minutes before breakfast, half a tablet at 15:00 and 1 tablet at bedtime.");
+    expect(parsed.fhir.some(item => item.doseAndRate?.[0]?.doseQuantity?.value === 0.5 &&
+      item.timing?.repeat?.timeOfDay?.includes("15:00:00"))).toBe(true);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["07:30", "15:00", "22:00"]);
+    expect(total(parsed, 7)).toBe(17.5);
+  });
+
+  it("ends both morning and bedtime courses after their two seven-day phases", () => {
+    const parsed = parseBatch("Take half a tablet in the morning and one tablet at bedtime for 7 days, then one tablet in the morning and one tablet at bedtime for 7 days.");
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["08:00", "22:00"]);
+    expect(dueTimes(parsed, "2026-11-09")).toEqual(["08:00", "22:00"]);
+    expect(dueTimes(parsed, "2026-11-16")).toEqual([]);
+    expect(total(parsed, 21)).toBe(24.5);
+  });
+
+  it("keeps a later conditional half-tablet bedtime dose independent of a scheduled waking-hours interval", () => {
+    const input = "Take 1 tablet every 4 hours while awake; take an extra half tablet at bedtime only if symptoms persist.";
+    const parsed = parseBatch(input);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhir).toHaveLength(2);
+    const regular = parsed.fhir.find(row => row.doseAndRate?.[0]?.doseQuantity?.value === 1);
+    const extra = parsed.fhir.find(row => row.doseAndRate?.[0]?.doseQuantity?.value === 0.5);
+    expect(regular?.timing?.repeat).toMatchObject({ period: 4, periodUnit: "h" });
+    expect(regular?.timing?.repeat?.extension).toContainEqual(
+      expect.objectContaining({ url: expect.stringContaining("/medication-timing-event-window") })
+    );
+    expect(regular?.asNeeded).not.toBe(true);
+    expect(regular?.timing?.repeat?.when).toBeUndefined();
+    expect(extra?.timing?.repeat?.when).toContain("HS");
+    expect(extra?.asNeeded === true || Boolean(getDosageCondition(extra!))).toBe(true);
+    const expected = ["06:30", "10:30", "14:30", "18:30", "22:00"];
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const regimen of [parsed.fhirNext, strict]) {
+      expect(nextDueDoses(regimen, { ...base, from: orderedAt, limit: 5 })
+        .map(timestamp => timestamp.slice(11, 16))).toEqual(expected);
+      const total = calculateTotalUnits({
+        dosage: regimen, ...base, from: orderedAt,
+        durationValue: 7, durationUnit: "d"
+      });
+      expect(total.totalUnits).toBe(31.5);
+      expect(total.quantityKind).toBe("maximum");
+    }
+    expect(parsed.input).toBe(input);
+  });
+
+  it("round-trips a typed waking-hour interval without turning the window into a single WAKE dose", () => {
+    const input = "Take 1 tablet every 3 hours while awake.";
+    const parsed = parseBatch(input);
+    const direct = parsed.fhir[0];
+    expect(direct.timing?.repeat?.when).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.eventWindow)
+      .toEqual({ start: "WAKE", end: "HS" });
+    const windowExtension = direct.timing?.repeat?.extension?.find(part =>
+      part.url.endsWith("/medication-timing-event-window")
+    );
+    expect(windowExtension?.extension).toEqual([
+      { url: "start", valueCode: "WAKE" },
+      { url: "end", valueCode: "HS" }
+    ]);
+    expect(fromFhirDosage(direct).meta.canonical.clauses[0]?.schedule?.eventWindow)
+      .toEqual({ start: "WAKE", end: "HS" });
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(fromFhirDosage(strict[0]).meta.canonical.clauses[0]?.schedule?.eventWindow)
+      .toEqual({ start: "WAKE", end: "HS" });
+    expect(dueTimes(parsed, "2026-11-02"))
+      .toEqual(["06:30", "09:30", "12:30", "15:30", "18:30", "21:30"]);
+    expect(nextDueDoses(strict, { ...base,
+      from: "2026-11-02T00:00:00+07:00", limit: 6
+    }).map(ts => ts.slice(11, 16))).toEqual([
+      "06:30", "09:30", "12:30", "15:30", "18:30", "21:30"
+    ]);
+    expect(total(parsed, 7)).toBe(42);
+    expect(parsed.input).toBe(input);
+  });
+
+  it("keeps a punctual waking-time dose distinct from a recurring waking-hours window", () => {
+    const parsed = parseBatch("Take 1 tablet on waking.");
+    expect(parsed.fhir[0]?.timing?.repeat?.when).toEqual(["WAKE"]);
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.eventWindow).toBeUndefined();
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["06:30"]);
+  });
+
+  it("keeps an awake-window eye-drop phase separate from a subsequent unrestricted QID phase", () => {
+    const parsed = parseBatch("1 drop od q2h while awake x2d then qid x5d");
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[0]?.component[0]?.timing?.repeat).toMatchObject({
+      period: 2, periodUnit: "h"
+    });
+    expect(parsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.extension)
+      .toContainEqual(expect.objectContaining({
+        url: expect.stringContaining("/medication-timing-event-window")
+      }));
+    expect(parsed.fhirNext.step[1]?.component[0]?.timing?.repeat).toMatchObject({
+      frequency: 4, period: 1, periodUnit: "d"
+    });
+    expect(parsed.fhirNext.step[1]?.component[0]?.timing?.repeat?.extension
+      ?.some(item => item.url.endsWith("/medication-timing-event-window")))
+      .not.toBe(true);
+    for (const regimen of [parsed.fhirNext, strictR5]) {
+      const day = (date: string) => nextDueDoses(regimen, { ...base,
+        from: date + "T00:00:00+07:00", limit: 12
+      }).filter(time => time.startsWith(date)).map(time => time.slice(11, 16));
+      expect(day("2026-11-02")).toEqual([
+        "06:30", "08:30", "10:30", "12:30", "14:30", "16:30", "18:30", "20:30"
+      ]);
+      expect(day("2026-11-04")).toEqual(["08:00", "12:00", "16:00", "20:00"]);
+      expect(day("2026-11-09")).toEqual([]);
+      expect(calculateTotalUnits({
+        dosage: regimen, ...base, from: orderedAt,
+        durationValue: 8, durationUnit: "d"
+      }).totalUnits).toBe(36);
+    }
+  });
+
+  it("executes q3h only inside configured waking hours, not overnight", () => {
+    const parsed = parseBatch("Take 1 tablet every 3 hours while awake.");
+    expect(dueTimes(parsed, "2026-11-02"))
+      .toEqual(["06:30", "09:30", "12:30", "15:30", "18:30", "21:30"]);
+    expect(total(parsed, 7)).toBe(42);
+  });
+
+  it("keeps Thai explicitly labelled weeks distinct without doubling doses", () => {
+    const parsed = parseBatch("สัปดาห์ที่ 1 กินครึ่งเม็ดเวลา 07:00 และ 19:00 สัปดาห์ที่ 2 กิน 1 เม็ดเวลา 07:00 และ 19:00");
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhir.map(item => item.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([0.5, 1]);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["07:00", "19:00"]);
+    expect(dueTimes(parsed, "2026-11-09")).toEqual(["07:00", "19:00"]);
+    expect(total(parsed, 14)).toBe(21);
+  });
+
+  it("interprets Thai thirty minutes as pre-meal offset, not total course", () => {
+    const parsed = parseBatch("รับประทาน 1 เม็ดก่อนอาหารเช้า กลางวัน และเย็น 30 นาที");
+    expect(parsed.fhir[0]?.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(dueTimes(parsed, "2026-11-02"))
+      .toEqual(["07:30", "12:00", "18:00"]);
+  });
+
+  it("keeps independently labelled week-one and week-two fixed-clock plans", () => {
+    const parsed = parseBatch("Week 1: take 1 tablet at 07:00, 12:00 and 17:00. Week 2: take 1 tablet at 07:00, 11:00, 15:00 and 19:00.");
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(dueTimes(parsed, "2026-11-02")).toEqual(["07:00", "12:00", "17:00"]);
+    expect(dueTimes(parsed, "2026-11-09")).toEqual(["07:00", "11:00", "15:00", "19:00"]);
+  });
+
+  it("preserves the already correct clear numeric weekly taper", () => {
+    const parsed = parseBatch("Take 0.5 tablet once daily for 7 days, then 0.5 tablet twice daily for 7 days, then 1 tablet twice daily.");
+    expect(dueTimes(parsed, "2026-11-02")).toHaveLength(1);
+    expect(dueTimes(parsed, "2026-11-09")).toHaveLength(2);
+    expect(dueTimes(parsed, "2026-11-16")).toHaveLength(2);
+    expect(total(parsed, 21)).toBe(24.5);
+  });
+});
+
+describe("Thai sequential first dose cannot silently disappear", () => {
+  it.each([
+    "ทาน 2 เม็ด หลังจากนั้นทานอีก 1 เม็ดหลังครั้งแรกอย่างน้อย 1 สัปดาห์",
+    "ทาน 2 เม็ด แล้วทานอีก 1 เม็ดหลังครั้งแรก 7 วัน"
+  ])("preserves both independently stated quantities without inventing a precise minimum-delay date: %s", source => {
+    const parsed = parseBatch(source);
+    // The first administered amount must remain executable. The additional
+    // after-first dose may be a separately structured dosage when executable,
+    // or a typed conditional/relative action awaiting clinician review when
+    // only a minimum delay is known. Do not manufacture an exact schedule.
+    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 2, unit: "tab" });
+    expect(parsed.fhir[0]?.timing?.repeat?.boundsDuration).toBeUndefined();
+    const typedSecondDose = parsed.fhir.some(row =>
+      row.doseAndRate?.[0]?.doseQuantity?.value === 1
+    ) || parsed.meta.canonical.clauses.some(clause =>
+      clause.instructionGraph?.actions.some(action =>
+        action.predicate.lemma === "take" &&
+        action.args.some(arg => arg.role === "amount" && arg.quantity?.value === 1)
+      )
+    );
+    expect(typedSecondDose).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(toFhirR5Dosages(parsed.fhirNext)[0]?.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 2, unit: "tab" });
+    expect(parsed.input).toBe(source);
   });
 });

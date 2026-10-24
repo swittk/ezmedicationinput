@@ -37,11 +37,14 @@ export interface HpsgTimingAnchorCoordinationFacts {
   rightAnchorOnly: boolean;
   sameScheduleContext: boolean;
   addsAnchor: boolean;
+  /** The left event is already the first equal-dose occurrence of the right interval. */
+  originOfRightInterval?: boolean;
 }
 
 export interface HpsgTimingAnchorCoordinationSelection
   extends HpsgConstructionSelection {
-  id: "hpsg.cx.regimen.coordinated-timing-anchors";
+  id: "hpsg.cx.regimen.coordinated-timing-anchors" | "hpsg.cx.regimen.interval-origin";
+  scheduleComposition: "union-anchors" | "right-interval";
 }
 
 type SignTrait =
@@ -440,16 +443,19 @@ export function selectHpsgTimingAnchorCoordinationConstruction(
   const relationLicensed = facts.sameSourceExpansion || Boolean(
     facts.relation?.kind === "coordination"
   );
+  const intervalOrigin = facts.relation?.semanticLicense === "interval-origin" &&
+    facts.originOfRightInterval === true;
   if (!relationLicensed || !facts.adjacent ||
       !facts.leftComplete || !facts.rightComplete ||
       !facts.sameAdministration || !facts.compatibleMethod ||
-      !facts.leftAnchorOnly || !facts.rightAnchorOnly ||
-      !facts.sameScheduleContext || !facts.addsAnchor) {
+      !facts.leftAnchorOnly || !facts.sameScheduleContext ||
+      (!intervalOrigin && (!facts.rightAnchorOnly || !facts.addsAnchor))) {
     return undefined;
   }
 
   return {
-    id: "hpsg.cx.regimen.coordinated-timing-anchors",
+    id: intervalOrigin ? "hpsg.cx.regimen.interval-origin" : "hpsg.cx.regimen.coordinated-timing-anchors",
+    scheduleComposition: intervalOrigin ? "right-interval" : "union-anchors",
     motherType: "coordination-phrase",
     construction: {
       kind: "coordination",

@@ -12,8 +12,10 @@ import {
 import { LexKind } from '../lexer/token-types';
 import { EVENT_TIMING_TOKENS } from '../maps';
 import { parseClockToken } from '../hpsg/rule-context';
+import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
+import { ordinalWeekStageSequence, followingCourseDurationHeaderAt } from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
-import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
+import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS,
@@ -142,16 +144,6 @@ function semanticConnectorKind(site: BoundarySite): CoordinationConnectorKind {
 function isHard(token: Token): boolean {
   return HARD_SEGMENT_BOUNDARY_TOKENS.has(token.original.trim().toLowerCase()) || token.original === '\n' || token.original === '\r';
 }
-function explicitDoseAt(tokens: Token[], i: number, options?: ParseOptions): boolean {
-  const token = tokens[i];
-  const lower = lexeme(token);
-  return Boolean(token && (
-    token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
-    DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)
-  ) &&
-    tokens[i + 1] && normalizeUnit(lexeme(tokens[i + 1]), options));
-}
-
 /** Cheap gate for the rare additive quantity construction. The selected HPSG
  * dose sign remains the authority that may claim the connector. */
 function possibleAdditiveDoseSeam(tokens: Token[], site: BoundarySite): boolean {
@@ -173,6 +165,24 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
   const sites: BoundarySite[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
+    // The addition predicate supplies a source phase boundary; modifiers
+    // such as BUT/THEN remain provenance on that boundary, not a dosage.
+    if (i > 0 && phaseAdjustmentAt(tokens, i)?.kind === 'add') {
+      let begin = i;
+      while (begin > 0 && i - begin < 3) {
+        const previous = tokens[begin - 1];
+        if ([';', ',', '.'].indexOf(previous.original) < 0 &&
+            !ACTION_SEQUENCE_MARKERS.has(lexeme(previous)) &&
+            !ACTION_DISCOURSE_CONNECTORS.has(lexeme(previous))) break;
+        begin--;
+      }
+      const boundaryStart = tokens[begin].sourceStart;
+      while (sites.length && sites[sites.length - 1].start >= boundaryStart) sites.pop();
+      sites.push({ start: boundaryStart, end: token.sourceStart,
+        tokenIndex: i, lastTokenIndex: i - 1, rightIndex: i,
+        kind: 'sequence', surface: input.slice(boundaryStart, token.sourceStart) });
+      continue;
+    }
     let kind = connectorKind(token);
     if (token.original === ',' && connectorKind(tokens[i + 1])) {
       const end = tokens[i + 1].sourceEnd;
@@ -182,7 +192,7 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     }
     const punctuation = token.original === '.' || token.original === ';' || token.original === '!' || token.original === '?';
     const slash = token.original === '/' && !(tokens[i - 1]?.kind === LexKind.Number && tokens[i + 1]?.kind === LexKind.Number);
-    const adjacent = i > 0 && explicitDoseAt(tokens, i, options);
+    const adjacent = i > 0 && explicitDoseLexicalEnd(tokens, i, options) !== undefined;
     const boundaryKind = kind ?? (token.original === ',' ? 'comma' : isHard(token) ? 'hard' : slash ? 'slash' :
       punctuation ? 'punctuation' : adjacent ? 'adjacent-dose' : undefined);
     if (!boundaryKind) continue;
@@ -191,6 +201,51 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
       rightIndex: boundaryKind === 'adjacent-dose' ? i : i + 1, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
   }
   return sites;
+}
+
+/**
+ * Consecutive ordinal-week headers license treatment-phase seams. A lone
+ * `week N` remains ordinary text: the construction requires a source-initial
+ * Week 1 daughter followed by monotonically consecutive labelled daughters.
+ */
+function withOrdinalWeekStageBoundaries(
+  input: string,
+  tokens: Token[],
+  sites: readonly BoundarySite[]
+): BoundarySite[] {
+  const headers = ordinalWeekStageSequence(tokens);
+  if (!headers.length) return [...sites];
+  const boundaries: BoundarySite[] = [];
+  const replacedSiteIndices = new Set<number>();
+  for (let index = 1; index < headers.length; index += 1) {
+    const header = headers[index];
+    const previousToken = tokens[header.tokenStart - 1];
+    const precedingPunctuation = previousToken &&
+      (previousToken.original === '.' || previousToken.original === ';') &&
+      /^\s*$/u.test(input.slice(previousToken.sourceEnd, header.start))
+      ? previousToken
+      : undefined;
+    const boundaryStart = precedingPunctuation?.sourceStart ?? header.start;
+    sites.forEach((site, siteIndex) => {
+      if (site.start >= boundaryStart && site.end <= header.start) {
+        replacedSiteIndices.add(siteIndex);
+      }
+    });
+    boundaries.push({
+      start: boundaryStart,
+      end: header.start,
+      tokenIndex: header.tokenStart,
+      lastTokenIndex: Math.max(0, header.tokenStart - 1),
+      rightIndex: header.tokenStart,
+      kind: 'sequence',
+      surface: input.slice(boundaryStart, header.start)
+    });
+  }
+  return sites.filter((_site, index) => !replacedSiteIndices.has(index))
+    .concat(boundaries)
+    .sort((left, right) =>
+      left.start - right.start || left.end - right.end || left.tokenIndex - right.tokenIndex
+    );
 }
 
 function medicationGuardWithMultipleDoseCandidates(
@@ -313,7 +368,8 @@ class EvidenceContext {
       hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
         s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||
         s.boundsEnd !== undefined || s.count !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
-        s.timeOfDay?.length || s.calendarEvents?.length || s.administrationOffsetMinutes !== undefined)),
+        s.timeOfDay?.length || s.calendarEvents?.length || s.timingReference !== undefined ||
+        s.administrationOffsetMinutes !== undefined)),
       hasRecurringCadence: Boolean(s && (s.timingCode || s.frequency !== undefined || s.period !== undefined || s.dayOfWeek?.length)),
       hasDates: Boolean(s?.calendarEvents?.length), hasClocks: Boolean(s?.timeOfDay?.length),
       clocks: [...(s?.timeOfDay ?? [])].sort(),
@@ -406,7 +462,14 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0,
     siteCoordinationProbes: 0, probeCacheHits: 0,
     probedTokens: 0, candidates: 0, claimedCandidates: 0 };
-  let sites = candidateSites(input, tokens, options);
+  let sites = withOrdinalWeekStageBoundaries(
+    input,
+    tokens,
+    candidateSites(input, tokens, options)
+  );
+  const ordinalWeekStageByToken = new Map(
+    ordinalWeekStageSequence(tokens).slice(1).map(header => [header.tokenStart, header] as const)
+  );
   // The conditional grammar is the sole producer of ELSE scope. Ask for it
   // only when the lexical scan already found a plausible multi-clause seam.
   const hasCoordinationCandidate = sites.some(site => site.kind === 'coordination');
@@ -431,6 +494,54 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     input, tokens, options, metrics, experiment.cache !== false, customSiteHints
   );
   const claims = recognizeStructures({ input, options, tokens, dateSpans });
+  // A selected relation-scoped event list owns its internal commas and
+  // conjunctions. Probe only seams whose immediate daughters are already
+  // annotated event terms, then retain the exact HPSG evidence span.
+  const eventListSites = sites.filter(site => {
+    if (site.kind !== 'coordination' && site.kind !== 'comma') return false;
+    const left = tokens[site.tokenIndex - 1];
+    const right = tokens[site.rightIndex];
+    return Boolean(left && right && hasEventTimingMeaning(left) && hasEventTimingMeaning(right));
+  });
+  const strongBoundary = (site: BoundarySite) =>
+    site.kind === 'sequence' || site.kind === 'alternative' || site.kind === 'punctuation' ||
+    site.kind === 'hard' || site.kind === 'slash';
+  for (const site of eventListSites) {
+    let windowStart = 0;
+    let windowEnd = input.length;
+    for (const boundary of sites) {
+      if (!strongBoundary(boundary)) continue;
+      if (boundary.end <= site.start && boundary.end > windowStart) windowStart = boundary.end;
+      if (boundary.start >= site.end && boundary.start < windowEnd) windowEnd = boundary.start;
+    }
+    const summary = evidence.probe(windowStart, windowEnd);
+    const scheduleEvidence = [
+      ...(summary.clause.schedule?.evidence ?? []),
+      ...summary.clause.evidence
+    ];
+    let ownedSpan: Range | undefined;
+    for (const item of scheduleEvidence) {
+      if (item.scheduleFields?.indexOf('when') === -1) continue;
+      ownedSpan = item.spans.find(span =>
+        summary.start + span.start <= site.start && summary.start + span.end >= site.end
+      );
+      if (ownedSpan) break;
+    }
+    if (!ownedSpan) continue;
+    const start = summary.start + ownedSpan.start;
+    const end = summary.start + ownedSpan.end;
+    if (claims.some(claim => claim.kind === 'event-timing-list' &&
+        claim.start === start && claim.end === end)) continue;
+    claims.push({
+      id: `event-timing-list:${start}:${end}`,
+      kind: 'event-timing-list',
+      start,
+      end,
+      producer: 'hpsg.schedule.coordinated-event-list',
+      resolved: true,
+      policy: 'no-external-split'
+    });
+  }
   // A complete registered NON-administration procedure owns its own nominal
   // arguments. A numeric object inside "repeat 1 tablet after 2 hours" is
   // not an independent medication-order boundary, even when that object has
@@ -580,7 +691,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     const actionFrames = evidence.actions(0, input.length);
     for (const site of sites) {
       if (site.kind !== 'comma' ||
-          explicitDoseAt(tokens, site.rightIndex, options)) continue;
+          explicitDoseLexicalEnd(tokens, site.rightIndex, options) !== undefined) continue;
       const internal = actionFrames.some(frame =>
         frame.span.start < site.start && site.end < frame.span.end &&
         frame.args.some(arg => {
@@ -766,7 +877,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       while (doseScanIndex < tokens.length && tokens[doseScanIndex].sourceStart < start) doseScanIndex++;
     }
     while (doseScanIndex < candidateSite.tokenIndex) {
-      if (tokens[doseScanIndex].sourceStart >= start && explicitDoseAt(tokens, doseScanIndex, options)) {
+      if (tokens[doseScanIndex].sourceStart >= start &&
+          explicitDoseLexicalEnd(tokens, doseScanIndex, options) !== undefined) {
         seenDoseCandidate = true;
       }
       doseScanIndex++;
@@ -781,6 +893,22 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     metrics.candidates++;
     const proposals: Proposal[] = [];
     const rejected: RejectedConstruction[] | undefined = experiment.trace ? [] : undefined;
+    const ordinalWeekStage = site.kind === 'sequence'
+      ? ordinalWeekStageByToken.get(site.rightIndex)
+      : undefined;
+    if (ordinalWeekStage) {
+      proposals.push({
+        action: 'split',
+        rule: 'regimen.ordinal-week-stage',
+        priority: 920,
+        relation: 'sequence',
+        evidence: [
+          { feature: 'right.stage.ordinal', value: ordinalWeekStage.ordinal,
+            range: { start: ordinalWeekStage.start, end: ordinalWeekStage.end } },
+          { feature: 'right.stage.openEnded', value: ordinalWeekStage.openEnded }
+        ]
+      });
+    }
     const owner = owners.owner(site.start);
     if (owner) {
       metrics.claimedCandidates++;
@@ -794,7 +922,10 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       // administration. Keep punctuation inside a procedure or one dosage.
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
       if ((site.surface === ';' || site.surface === '.') && rightStart < input.length) {
-        const rightEnd = probeEnd(site.rightIndex);
+        const followingCourse = followingCourseDurationHeaderAt(tokens, site.rightIndex);
+        // The comma after a fronted duration is internal to that adjunct;
+        // probe the administration after it, not just the isolated header.
+        const rightEnd = probeEnd(followingCourse?.tokenEnd ?? site.rightIndex);
         // A separately dosed administration must have both dose and timing
         // evidence. Pure procedure/precaution continuations may mention
         // quantities ("re-prime with 2 sprays") without a repeat schedule;
@@ -807,7 +938,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             token.kind === LexKind.TimeLike ||
             /^(?:daily|nightly|weekly|monthly|once|twice|thrice)$/iu.test(lexeme(token)))
         );
-        if (rightHasTiming && hasUnit(site.rightIndex, rightEnd)) {
+        const adjustment = phaseAdjustmentAt(tokens, site.rightIndex);
+        if ((rightHasTiming || adjustment) && hasUnit(site.rightIndex, rightEnd)) {
           const right = evidence.probe(rightStart, rightEnd);
           if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
             // Preparation is not a preceding medication administration:
@@ -819,8 +951,11 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
               left.hasDose && (left.method || left.hasTargets) ||
               left.hasSchedule && (left.method || left.hasDose || inheritedAdministration);
             if (establishedLeft) {
-              proposals.push({ action: 'split', rule: 'regimen.separate-administration',
-                priority: 720, relation: 'independent',
+              const phaseChange = followingCourse || right.clause.regimenAdjustment;
+              proposals.push({ action: 'split', rule: phaseChange
+                  ? 'regimen.fronted-course-continuation' : 'regimen.separate-administration',
+                priority: 720, relation: phaseChange ? 'sequence' : 'independent',
+                semanticLicense: phaseChange ? 'dose-continuation' : undefined,
                 evidence: [
                   { feature: 'left.established-administration', value: true },
                   { feature: 'right.complete-dosed-administration', value: true }

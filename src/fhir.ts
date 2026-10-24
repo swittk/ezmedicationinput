@@ -78,6 +78,25 @@ export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/Str
 export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
 export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
 export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
+/** Recurring administration opportunity window; distinct from a punctual
+ * FHIR Timing.repeat.when WAKE or HS administration. */
+export const TIMING_EVENT_WINDOW_EXTENSION_URL =
+  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-window";
+
+/** Read an explicitly encoded daily event window without examining SIG text. */
+export function getTimingEventWindow(
+  repeat: FhirTimingRepeat | undefined
+): { start: EventTiming; end: EventTiming } | undefined {
+  const extension = repeat?.extension?.find(part => part.url === TIMING_EVENT_WINDOW_EXTENSION_URL);
+  if (!extension) return undefined;
+  const start = extension.extension?.find(part => part.url === "start")?.valueCode;
+  const end = extension.extension?.find(part => part.url === "end")?.valueCode;
+  const allowed = objectValues(EventTiming);
+  if (!start || !end || allowed.indexOf(start as EventTiming) < 0 ||
+      allowed.indexOf(end as EventTiming) < 0) return undefined;
+  return { start: start as EventTiming, end: end as EventTiming };
+}
+
 export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
 export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
@@ -1095,6 +1114,16 @@ export function canonicalToFhir(
     repeat.timeOfDay = [...schedule.timeOfDay];
     hasRepeat = true;
   }
+  if (schedule?.eventWindow) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_EVENT_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueCode: schedule.eventWindow.start },
+        { url: "end", valueCode: schedule.eventWindow.end }
+      ] }
+    ];
+    hasRepeat = true;
+  }
   if (schedule?.activityTiming?.length) {
     repeat.extension = [
       ...(repeat.extension ?? []),
@@ -1465,6 +1494,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   const timingBounds = extractCanonicalTimingBounds(repeat);
   const activityTiming = parseActivityTimingExtensions(repeat);
+  const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
@@ -1474,6 +1504,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
+    eventWindow !== undefined ||
     occurrenceCap !== undefined ||
     maxDosePerPeriod?.length ||
     repeat?.boundsDuration ||
@@ -1520,6 +1551,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offsetMin: offsetMinExtension,
       offsetMax: offsetMaxExtension,
       activityTiming,
+      eventWindow,
       occurrenceCap,
       maxDosePerPeriod,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
@@ -1670,6 +1702,12 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.offsetMin = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
+  const eventWindow = getTimingEventWindow(dosage.timing?.repeat);
+  if (eventWindow) {
+    state.primaryClause.schedule = {
+      ...(state.primaryClause.schedule ?? {}), eventWindow
+    };
+  }
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
   state.maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   state.routeText = dosage.route?.text;

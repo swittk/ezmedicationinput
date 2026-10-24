@@ -4,7 +4,8 @@ import {
   parseSig, parseSigAsync, fromFhir, formatSig, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageDetails, type FhirExtension, type EzDosage
+  type FhirR6DosageDetails, type FhirExtension, type EzDosage,
+  EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
   canonicalFromFhir, parserStateFromFhir,
@@ -1290,4 +1291,127 @@ describe("clinical counseling remains procedural and event-scoped across languag
       expect.objectContaining({ system: "http://snomed.info/sct", code: "306806004" })
     ]));
   });
+});
+
+
+describe("Parkinsonian staged clock-cadence compatibility", () => {
+  it.each([
+    "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00 for 7 days, then three times daily for 7 days.",
+    "รับประทาน 1 เม็ดเวลา 07:00 11:00 15:00 19:00 เป็นเวลา 7 วัน แล้วลดเหลือวันละสามครั้งอีก 7 วัน"
+  ])("does not transfer four explicit predecessor clocks to a new three-dose phase: %s", input => {
+    const result = parseSig(input);
+    expect(result.fhir).toHaveLength(2);
+    expect(result.fhir[0].timing?.repeat?.timeOfDay).toHaveLength(4);
+    expect(result.fhir[1].timing?.repeat?.frequency).toBe(3);
+    expect(result.fhir[1].timing?.repeat?.timeOfDay).toBeUndefined();
+    const strict = toFhirR5Dosages(result.fhirNext);
+    expect(strict).toHaveLength(2);
+    expect(strict[1].timing?.repeat?.frequency).toBe(3);
+    expect(strict[1].timing?.repeat?.timeOfDay).toBeUndefined();
+    expect(result.fhirNext.step[1].component[0].timing?.repeat?.timeOfDay).toBeUndefined();
+    expect(result.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("keeps inherited clocks when the next phase explicitly retains the same cadence", () => {
+    const result = parseSig(
+      "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00 for 7 days, then four times daily for 7 days."
+    );
+    expect(result.fhir).toHaveLength(2);
+    expect(result.fhir[1].timing?.repeat).toMatchObject({
+      frequency: 4,
+      timeOfDay: ["07:00:00", "11:00:00", "15:00:00", "19:00:00"]
+    });
+  });
+
+  it("keeps new explicit clock anchors instead of donor's four clocks", () => {
+    const result = parseSig(
+      "Take 1 tablet four times daily at 07:00, 11:00, 15:00 and 19:00 for 2 weeks, then take 1 tablet three times daily at 07:00, 13:00 and 19:00."
+    );
+    expect(result.fhir).toHaveLength(2);
+    expect(result.fhir[1].timing?.repeat?.timeOfDay)
+      .toEqual(["07:00:00", "13:00:00", "19:00:00"]);
+  });
+});
+
+
+describe("typed within-phase duration sharing for Parkinsonian schedules", () => {
+  it("bounds both concurrent doses in the final seven-day phase", () => {
+    const input = "Take half a tablet in the morning and one tablet at bedtime for 7 days, then one tablet in the morning and one tablet at bedtime for 7 days.";
+    const result = parseSig(input);
+    expect(result.fhirNext.step).toHaveLength(2);
+    expect(result.input).toBe(input);
+    // Equal-dose daughters may lower as one component with two event anchors,
+    // so expand the typed anchors to assert each actual administration amount.
+    expect(result.fhirNext.step.map(step => step.component.flatMap(component =>
+      (component.timing?.repeat?.when ?? []).map(when => ({
+        when,
+        dose: component.doseAndRate?.[0]?.doseQuantity?.value
+      }))
+    ))).toEqual([
+      [{ when: EventTiming.Morning, dose: 0.5 }, { when: EventTiming["Before Sleep"], dose: 1 }],
+      [{ when: EventTiming.Morning, dose: 1 }, { when: EventTiming["Before Sleep"], dose: 1 }]
+    ]);
+    const secondPhase = result.meta.canonical.clauses.find(clause =>
+      clause.span.start === input.indexOf("one tablet in the morning", 70) &&
+      clause.schedule?.when?.length === 2
+    );
+    expect(secondPhase?.schedule).toMatchObject({ duration: 7, durationUnit: "d" });
+    expect(secondPhase?.evidence).toContainEqual(expect.objectContaining({
+      rule: "hpsg.cx.coordination.dosed-head-ellipsis-with-trailing-course-duration",
+      spans: [{ start: 103, end: 106, text: "and" }],
+      scheduleFields: ["duration", "durationUnit"]
+    }));
+
+    const strict = toFhirR5Dosages(result.fhirNext);
+    expect(strict.every(d => d.timing?.repeat?.boundsDuration?.value === 7)).toBe(true);
+    const eventClock = {
+      [EventTiming.Morning]: "08:00",
+      [EventTiming["Before Sleep"]]: "22:00"
+    };
+    for (const dosage of [result.fhirNext, strict]) {
+      const orderedAt = "2026-11-02T00:00:00+07:00";
+      const common = { orderedAt, timeZone: "Asia/Bangkok", eventClock };
+      const dueOn = (date: string) => nextDueDoses(dosage, {
+        ...common, from: `${date}T00:00:00+07:00`, limit: 8
+      }).filter(timestamp => timestamp.slice(0, 10) === date);
+      expect(dueOn("2026-11-02")).toEqual([
+        "2026-11-02T08:00:00+07:00", "2026-11-02T22:00:00+07:00"
+      ]);
+      expect(dueOn("2026-11-09")).toEqual([
+        "2026-11-09T08:00:00+07:00", "2026-11-09T22:00:00+07:00"
+      ]);
+      expect(dueOn("2026-11-16")).toEqual([]);
+      expect(calculateTotalUnits({
+        dosage, ...common, from: orderedAt, durationValue: 21,
+        durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(24.5);
+    }
+  });
+
+  it.each(["and", "; instill"])(
+    "does not overwrite explicit per-eye course lengths across %s tracks",
+    connector => {
+      const input = "Instill 1 drop in the right eye four times daily for 14 days " +
+        `${connector} 1 drop in the left eye twice daily for 7 days.`;
+      const result = parseSig(input);
+      expect(result.input).toBe(input);
+      expect(result.fhir.map(dosage => ({
+        site: dosage.site?.text,
+        duration: dosage.timing?.repeat?.boundsDuration?.value
+      }))).toEqual([
+        { site: "right eye", duration: 14 },
+        { site: "left eye", duration: 7 }
+      ]);
+      expect(result.fhirNext.step.flatMap(step => step.component).map(dosage => ({
+        site: dosage.site?.concept?.text,
+        duration: dosage.timing?.repeat?.boundsDuration?.value
+      }))).toEqual([
+        { site: "right eye", duration: 14 },
+        { site: "left eye", duration: 7 }
+      ]);
+      expect(toFhirR5Dosages(result.fhirNext).map(dosage =>
+        dosage.timing?.repeat?.boundsDuration?.value
+      )).toEqual([14, 7]);
+    }
+  );
 });

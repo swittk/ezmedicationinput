@@ -375,6 +375,7 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
     parents: ["top"],
     features: {
       CLAUSE_KIND: { valueType: "string" },
+      REGIMEN_ADJUSTMENT: { valueType: "string" },
       CONDITION: { valueType: "condition-feature" },
       CLINICAL_ADJUNCT: { valueType: "clinical-adjunct-feature" },
       SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },

@@ -1,9 +1,9 @@
 import { terminalAdministrationDelay } from "./grammar";
-import { EventTiming as SequenceEventTiming } from '../types';
+import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { ParserState } from '../parser-state';
+import { ParserState } from '../parser-state';
 import type {
   CanonicalEvidence,
   CanonicalSigClause,
@@ -233,8 +233,46 @@ export function scopeSequentialPhaseSemantics(
       note: "The target inherits this administration's arguments and base schedule with the explicit intervening wait."
     });
   }
+  const relativePhaseStarts = new Map<number, number>();
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
+    const next = graph.phases[edge.to].members;
+    const priorStart = relativePhaseStarts.get(edge.from) ?? 0;
+    const explicitStarts = next.map(index => states[index]?.primaryClause.schedule?.treatmentStartOffsetDays)
+      .filter((value): value is number => value !== undefined);
+    const typedChange = next.some(index => Boolean(states[index]?.primaryClause.regimenAdjustment));
+    const explicitStart = typedChange && explicitStarts.length &&
+      explicitStarts.every(value => value === explicitStarts[0]) ? explicitStarts[0] : undefined;
+    if (explicitStart !== undefined && explicitStart > priorStart) {
+      // An explicit source-relative ADD/REPLACE onset closes the preceding
+      // phase. Never derive this from unrelated lowered parallel members.
+      for (const member of prior) {
+        const clause = states[member]?.primaryClause;
+        const schedule = clause?.schedule;
+        if (!clause || !schedule || schedule.duration !== undefined ||
+            schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length) continue;
+        schedule.duration = explicitStart - priorStart;
+        schedule.durationUnit = FhirPeriodUnit.Day;
+        clause.evidence.push({ rule: 'hpsg.regimen.relative-adjustment-onset',
+          spans: [], scheduleFields: ['duration', 'durationUnit'],
+          note: 'The next source-typed phase starts at its explicit treatment-relative offset.' });
+      }
+      relativePhaseStarts.set(edge.to, explicitStart);
+      for (const member of next) {
+        const schedule = states[member]?.primaryClause.schedule;
+        if (schedule?.treatmentStartOffsetDays === explicitStart) delete schedule.treatmentStartOffsetDays;
+      }
+    } else {
+      const lengths = prior.map(index => {
+        const schedule = states[index]?.primaryClause.schedule;
+        return schedule?.duration !== undefined &&
+          (schedule.durationUnit === 'd' || schedule.durationUnit === 'wk')
+          ? schedule.duration * (schedule.durationUnit === 'wk' ? 7 : 1) : undefined;
+      });
+      if (lengths.length && lengths.every((value): value is number => value !== undefined)) {
+        relativePhaseStarts.set(edge.to, priorStart + Math.max(...lengths));
+      }
+    }
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
     const endpoints = schedules.map(phaseEndExclusive);
     // All coordinated daughters must be finite. An unbounded sibling prevents
@@ -266,6 +304,28 @@ export function scopeSequentialPhaseSemantics(
         clause.method = cloneStructuredValue(sharedMethod);
         fields.push('method');
       }
+      if (schedule?.timingReference === "previous" && sharedAnchors && shared) {
+        // The anaphor contributes recurrence, not the preceding phase's
+        // duration or dates. Explicit local cadence/anchors remain local.
+        const recurrence = {
+          frequency: shared.frequency, frequencyMax: shared.frequencyMax,
+          period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
+          timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
+          when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
+          timeOfDay: shared.timeOfDay, eventWindow: shared.eventWindow,
+          offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
+        };
+        Object.assign(schedule, { ...cloneStructuredValue(recurrence), ...schedule });
+        delete schedule.timingReference;
+        // Only remove the exact typed reference advice after it is resolved.
+        // Without a predecessor the source preference stays readable/editable.
+        if (clause.additionalInstructions?.length) {
+          clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
+            !instruction.evidence?.some(item =>
+              (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
+        }
+        fields.push('timingReference');
+      }
       if (!schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) {
         if (fields.length) {
           clause.evidence.push({
@@ -296,7 +356,18 @@ export function scopeSequentialPhaseSemantics(
           schedule.when = recurringAnchors;
           fields.push('when');
         }
-        if (shared?.timeOfDay?.length) {
+        // A newly explicit cadence cannot inherit an incompatible number
+        // of exact clock anchors from the preceding phase. In particular,
+        // QID -> TID does not license guessing which three of four times to
+        // keep. The original source still accompanies the editable schedule.
+        const donorClockCount = shared?.timeOfDay?.length ?? 0;
+        const matchesSuccessorCadence = schedule.frequency === undefined || (
+          schedule.frequency === donorClockCount &&
+          (schedule.period === undefined || schedule.period === 1) &&
+          (schedule.periodUnit === undefined || schedule.periodUnit === 'd') &&
+          (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
+        );
+        if (shared?.timeOfDay?.length && matchesSuccessorCadence) {
           schedule.timeOfDay = [...shared.timeOfDay];
           fields.push('timeOfDay');
         }
@@ -351,4 +422,82 @@ export function regimenMemberSequences(graph: RegimenGraph): number[] {
     for (const member of phase.members) members[member] = phaseSequence[phase.id];
   }
   return members;
+}
+
+
+/** Materialize an explicit ADD phase over its preceding typed regimen.
+ * Source-only operation resolution runs before FHIR; ordinary parses return
+ * their original arrays and unrelated parallel tracks are never inspected.
+ * @param states Interpreted source clause states.
+ * @param segments Source ranges corresponding to those states.
+ * @param graph Source-licensed phase relations before wire projection.
+ */
+export function expandAdditiveRegimenPhases(
+  states: ParserState[], segments: HpsgSigSegment[], graph: RegimenGraph
+): { states: ParserState[]; segments: HpsgSigSegment[]; graph: RegimenGraph } {
+  if (!states.some(state => state.primaryClause.regimenAdjustment === "add")) {
+    return { states, segments, graph };
+  }
+  const outputStates: ParserState[] = [];
+  const outputSegments: HpsgSigSegment[] = [];
+  const phases: RegimenPhase[] = [];
+  for (const phase of graph.phases) {
+    const members: number[] = [];
+    const additions = phase.members.filter(index => states[index]?.primaryClause.regimenAdjustment === "add");
+    const preceding = graph.sequences.find(edge => edge.to === phase.id);
+    const prior = preceding ? phases[preceding.from] : undefined;
+    const target = additions.length ? states[additions[0]]?.primaryClause : undefined;
+    if (target && prior) {
+      const previous = prior.members.map(index => outputStates[index]);
+      const sharedDose = previous[0]?.primaryClause.dose;
+      const explicitDose = target.evidence.some(item => item.lexicalCategory === "dose" &&
+        item.spans.some(span => span.start >= 0 && span.end <= target.rawText.length));
+      if (!explicitDose && !target.clinicalQuantity) {
+        const agreedDose = sharedDose && previous.every(state =>
+          equalStructuredValues(state.primaryClause.dose, sharedDose));
+        if (agreedDose) target.dose = cloneStructuredValue(sharedDose);
+        else {
+          // An omitted amount has no unique antecedent. Keep the clinician's
+          // source instruction editable rather than choose the last dose.
+          delete target.dose;
+          target.patientInstruction = target.patientInstruction ?? target.rawText;
+        }
+      }
+      if (target.dose) for (const donorIndex of prior.members) {
+        const donor = outputStates[donorIndex];
+        const clone = new ParserState(donor.input, donor.tokens, donor.customSiteHints);
+        Object.assign(clone.primaryClause, cloneStructuredValue(donor.primaryClause));
+        clone.consumed = new Set(donor.consumed);
+        clone.methodVerb = donor.methodVerb;
+        clone.productFormKey = donor.productFormKey;
+        clone.warnings = [...donor.warnings];
+        delete clone.primaryClause.regimenAdjustment;
+        const schedule = clone.primaryClause.schedule;
+        if (schedule) {
+          // The new phase keeps prior recurrence but has its own course window.
+          delete schedule.duration; delete schedule.durationMax; delete schedule.durationUnit;
+          delete schedule.boundsStart; delete schedule.boundsEnd; delete schedule.calendarEvents;
+          if (target.schedule?.duration !== undefined) {
+            schedule.duration = target.schedule.duration;
+            schedule.durationUnit = target.schedule.durationUnit;
+            schedule.durationMax = target.schedule.durationMax;
+          }
+          if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
+          if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;
+        }
+        clone.primaryClause.evidence.push({
+          rule: "hpsg.regimen.explicit-addition-continuation", spans: [],
+          note: "The typed ADD operation continues this preceding administration in the new phase."
+        });
+        members.push(outputStates.length);
+        outputStates.push(clone); outputSegments.push(outputSegments[donorIndex]);
+      }
+    }
+    for (const index of phase.members) {
+      members.push(outputStates.length);
+      outputStates.push(states[index]); outputSegments.push(segments[index]);
+    }
+    phases.push({ ...phase, members });
+  }
+  return { states: outputStates, segments: outputSegments, graph: { ...graph, phases } };
 }

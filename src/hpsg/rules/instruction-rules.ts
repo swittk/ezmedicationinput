@@ -111,6 +111,11 @@ function startsTypedAdministrationComplement(context: HpsgClauseContext, start: 
   // search beyond this complement into a condition or locative adjunct.
   if (first.kind === LexKind.Number || first.kind === LexKind.NumberRange ||
     DOSE_NUMBER_WORDS.has(lower) || EVENT_ARTICLE_TOKENS.has(lower)) cursor += 1;
+  // A complete standalone quantity at the clause boundary has no product
+  // daughter. Do not invoke the product lexical rule beyond the chart limit:
+  // otherwise ordinary "an extra half tablet ..." can crash during boundary
+  // probing rather than preserving its valid medication instruction.
+  if (cursor >= context.limit || !context.tokens[cursor]) return false;
   return PRODUCT_COMPLEMENT_RULE.match(context, cursor).length > 0;
 }
 
@@ -620,7 +625,12 @@ function administrationWindowInstructionAt(
       rule: "hpsg.lex.instruction.administrationWindow",
       tokens,
       synsem: {
-        head: {},
+        // A recurring daily window is a bounded activity, not the punctual
+        // WAKE event. Retain the patient instruction alongside the typed
+        // schedule contribution instead of making a wake-only dose.
+        head: definition.eventWindow
+          ? { schedule: { eventWindow: { ...definition.eventWindow } } }
+          : {},
         valence: {
           instructions: [{
             text: definition.text,

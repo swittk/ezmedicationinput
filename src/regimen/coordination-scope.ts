@@ -10,6 +10,7 @@ import { AdviceArgumentRole, AdvicePolarity, FhirPeriodUnit } from '../types';
 import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
 import { resolveEventTimingExpression } from '../event-timing-expression';
 import { EVENT_TIMING_TOKENS } from '../maps';
+import { ordinalWeekStageHeaderAt } from '../hpsg/rules/timing-rules';
 import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from '../fhir-translations';
 import type {
   AdviceFrame,
@@ -157,7 +158,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   recurrence: [
     'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
     'period', 'periodMax', 'periodUnit', 'dayOfWeek', 'timeOfDay',
-    'occurrenceCap', 'maxDosePerPeriod'
+    'occurrenceCap', 'maxDosePerPeriod', 'eventWindow'
   ],
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
   courseBounds: ['duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd'],
@@ -167,6 +168,10 @@ const SCHEDULE_FEATURE_GROUPS = {
   calendarEvents: ['calendarEvents'],
   // A derived per-administration dependency is not a lexical trailing cadence.
   administrationDependency: ['administrationOffsetMinutes'],
+  // A source anaphor is a typed request to the regimen donor, not an
+  // executable inherited recurrence. Resolve before lowering to FHIR.
+  sourceTimingReference: ['timingReference'],
+  sourcePhaseStart: ['treatmentStartOffsetDays'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
@@ -187,8 +192,8 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
-  'activityTiming', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
-  'repeatCycle', 'repeatCount'
+  'activityTiming', 'eventWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
+  'timingReference', 'treatmentStartOffsetDays', 'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]
@@ -428,6 +433,48 @@ function hasCourseDuration(schedule: CanonicalScheduleExpr | undefined): boolean
   return Boolean(schedule?.duration !== undefined && schedule.durationUnit);
 }
 
+/**
+ * Materialize the one-week bound only after the planner has licensed a
+ * consecutive ordinal-week treatment sequence. The lexical header remains
+ * source-typed on its own, but a lone `Week N` never fabricates a course.
+ */
+function materializeOrdinalWeekStageDurations(
+  states: readonly CoordinatedClauseState[],
+  plan: BoundaryPlan
+): void {
+  const members = new Set<number>();
+  for (const relation of plan.relations) {
+    if (relation.rule !== 'regimen.ordinal-week-stage' || relation.kind !== 'sequence') continue;
+    members.add(relation.from);
+    members.add(relation.to);
+  }
+  for (const index of members) {
+    const clauseState = states[index];
+    const clause = clauseState?.state.primaryClause;
+    if (!clauseState || !clause || hasCourseDuration(clause.schedule)) continue;
+    const header = ordinalWeekStageHeaderAt(clauseState.state.tokens, 0);
+    if (!header || header.openEnded) continue;
+    const evidence: CanonicalEvidence = {
+      rule: 'hpsg.cx.regimen.ordinal-week-stage-duration',
+      spans: [{
+        start: header.start,
+        end: header.end,
+        text: clauseState.state.input.slice(header.start, header.end)
+      }],
+      scheduleFields: ['duration', 'durationUnit'],
+      note: 'A bounded daughter in a consecutive ordinal-week regimen contributes one week of treatment.'
+    };
+    clause.schedule = {
+      ...(clause.schedule ?? {}),
+      duration: 1,
+      durationUnit: FhirPeriodUnit.Week,
+      evidence: [...(clause.schedule?.evidence ?? [])]
+    };
+    appendEvidence(clause.schedule.evidence!, cloneEvidence(evidence));
+    appendEvidence(clause.evidence, evidence);
+  }
+}
+
 function instructionDurationUnit(unit: string | undefined): FhirPeriodUnit | undefined {
   switch (unit) {
     case FhirPeriodUnit.Second:
@@ -545,7 +592,8 @@ function factsFor(
     leftExplicitDose: Boolean(leftClause.dose && hasEvidence(leftClause, 'dose')),
     rightExplicitDose: Boolean(rightClause.dose && hasEvidence(rightClause, 'dose')),
     leftExplicitHead: hasEvidence(leftClause, 'method'),
-    leftHasMethod: Boolean(leftClause.method?.coding?.code || leftClause.method?.text),
+    leftHasMethod: inheritedAdministration ||
+      Boolean(leftClause.method?.coding?.code || leftClause.method?.text),
     // A typed dose and administration site constitute an elliptical
     // administration even without an explicit verb ("1 drop OD"). That
     // licenses a shared trailing cadence across coordinated site doses.
@@ -748,11 +796,11 @@ function sameSite(
     equalStructuredValues(left.spatialRelation, right.spatialRelation);
 }
 
-function hasOnlyTimingAnchorSemantics(clause: CanonicalSigClause): boolean {
+function hasOnlyTimingAnchorSemantics(clause: CanonicalSigClause, retainAdvice = false): boolean {
   return !clause.provisionalSchedule && !clause.prn?.enabled &&
     !clause.clinicalAdjuncts && !clause.clinicalQuantity &&
     !clause.patientInstruction && !clause.instructionGraph &&
-    !clause.additionalInstructions?.length && !clause.leftovers.length;
+    (retainAdvice || !clause.additionalInstructions?.length) && !clause.leftovers.length;
 }
 
 function isAnchorOnlySchedule(schedule: CanonicalScheduleExpr | undefined): boolean {
@@ -866,15 +914,50 @@ function relationBetweenSegments(
 }
 
 export interface TimingAnchorCompositionApplication {
-  rule: 'hpsg.cx.regimen.coordinated-timing-anchors';
+  rule: 'hpsg.cx.regimen.coordinated-timing-anchors' | 'hpsg.cx.regimen.interval-origin';
   recipient: number;
   donor: number;
-  fields: Array<'when' | 'timeOfDay' | 'method'>;
+  fields: Array<ScheduleSemanticField | 'method'>;
 }
 
 export interface TimingAnchorCompositionResult {
   absorbed: Set<number>;
   applications: TimingAnchorCompositionApplication[];
+}
+
+/**
+ * A sequential phase may inherit predecessor anchors only while its local
+ * recurrence leaves them compatible. If a successor explicitly changes the
+ * daily frequency, a differently sized predecessor clock list is no longer
+ * a valid ellipsis. The predecessor retains its clocks and source evidence;
+ * only the derived recipient copy is withdrawn.
+ */
+function removeConflictingInheritedClockLists(states: readonly ParserState[]): void {
+  for (const state of states) {
+    const clause = state.primaryClause;
+    const schedule = clause.schedule;
+    if (!schedule?.timeOfDay?.length || schedule.frequency === undefined ||
+        schedule.frequency === schedule.timeOfDay.length) continue;
+    const inheritedBySequence = schedule.evidence?.some(item =>
+      item.rule === 'regimen.sequence.whole-predecessor-phase'
+    );
+    if (!inheritedBySequence) continue;
+    const localClockEvidence = schedule.evidence?.some(item =>
+      item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
+      item.spans.some(span => span.start >= 0 && span.end <= state.input.length)
+    );
+    if (localClockEvidence) continue;
+    delete schedule.timeOfDay;
+    schedule.evidence = schedule.evidence?.filter(item =>
+      !(item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
+        item.spans.every(span => span.end <= 0 || span.start >= state.input.length))
+    );
+    appendEvidence(schedule.evidence ?? (schedule.evidence = []), {
+      rule: 'hpsg.cx.regimen.explicit-frequency-resets-inherited-clocks',
+      spans: [],
+      note: 'The successor explicit frequency conflicts with the predecessor clock count, so the derived clock-list ellipsis is not licensed.'
+    });
+  }
 }
 
 /**
@@ -888,6 +971,7 @@ export function composeCoordinatedTimingAnchors(
   segments: readonly HpsgSigSegment[],
   source: string
 ): TimingAnchorCompositionResult {
+  removeConflictingInheritedClockLists(states);
   const absorbed = new Set<number>();
   const applications: TimingAnchorCompositionApplication[] = [];
   let recipientIndex = 0;
@@ -907,6 +991,15 @@ export function composeCoordinatedTimingAnchors(
     const recipientSchedule = recipientClause.schedule;
     const donorSchedule = donorClause.schedule;
     const relation = relationBetweenSegments(plan, priorSegment, donorSegment);
+    const originOfRightInterval = Boolean(
+      relation.relation?.semanticLicense === 'interval-origin' &&
+      recipientSchedule?.when?.length === 1 && donorSchedule?.eventWindow &&
+      recipientSchedule.when[0] === donorSchedule.eventWindow.start &&
+      !donorSchedule.when?.length && !donorSchedule.timeOfDay?.length &&
+      donorSchedule.period && donorSchedule.period > 0 &&
+      (donorSchedule.periodUnit === 'h' || donorSchedule.periodUnit === 'min' ||
+       donorSchedule.periodUnit === 's')
+    );
     const selected = selectHpsgTimingAnchorCoordinationConstruction({
       relation: relation.relation,
       sameSourceExpansion: relation.sameSourceExpansion,
@@ -916,7 +1009,7 @@ export function composeCoordinatedTimingAnchors(
       sameAdministration: !recipient.siteLookups.length && !donor.siteLookups.length &&
         !recipient.prnReasonLookups.length && !donor.prnReasonLookups.length &&
         hasOnlyTimingAnchorSemantics(recipientClause) &&
-        hasOnlyTimingAnchorSemantics(donorClause) &&
+        hasOnlyTimingAnchorSemantics(donorClause, originOfRightInterval) &&
         sameDose(recipientClause.dose, donorClause.dose) &&
         sameRoute(recipientClause.route, donorClause.route) &&
         sameSite(recipientClause.site, donorClause.site),
@@ -928,7 +1021,8 @@ export function composeCoordinatedTimingAnchors(
       sameScheduleContext: Boolean(recipientSchedule && donorSchedule &&
         sameAnchorScheduleContext(recipientSchedule, donorSchedule)),
       addsAnchor: Boolean(recipientSchedule && donorSchedule &&
-        addsTimingAnchor(recipientSchedule, donorSchedule))
+        addsTimingAnchor(recipientSchedule, donorSchedule)),
+      originOfRightInterval
     });
     if (!selected || !recipientSchedule || !donorSchedule) {
       recipientIndex = donorIndex;
@@ -937,22 +1031,33 @@ export function composeCoordinatedTimingAnchors(
 
     const donorOffset = donorSegment.start - recipientSegment.start;
     const fields: TimingAnchorCompositionApplication['fields'] = [];
-    const when = uniqueStringValues([
-      ...(recipientSchedule.when ?? []),
-      ...(donorSchedule.when ?? [])
-    ]);
-    const timeOfDay = uniqueStringValues([
-      ...(recipientSchedule.timeOfDay ?? []),
-      ...(donorSchedule.timeOfDay ?? [])
-    ]).sort();
-    if (when.length) fields.push('when');
-    if (timeOfDay.length) fields.push('timeOfDay');
-    recipientClause.schedule = {
-      ...recipientSchedule,
-      ...(when.length ? { when } : {}),
-      ...(timeOfDay.length ? { timeOfDay } : {}),
-      evidence: [...(recipientSchedule.evidence ?? [])]
-    };
+    if (selected.scheduleComposition === 'right-interval') {
+      // The first event is already an occurrence of this exact interval.
+      // Compose source semantics once; do not deduplicate unrelated doses
+      // in the executor or fabricate a second waking administration.
+      recipientClause.schedule = cloneStructuredValue(donorSchedule);
+      recipientClause.schedule.evidence = [...(recipientSchedule.evidence ?? [])];
+      recipientClause.additionalInstructions = donorClause.additionalInstructions
+        ? cloneStructuredValue(donorClause.additionalInstructions) : undefined;
+      fields.push('period', 'periodUnit', 'eventWindow');
+    } else {
+      const when = uniqueStringValues([
+        ...(recipientSchedule.when ?? []),
+        ...(donorSchedule.when ?? [])
+      ]);
+      const timeOfDay = uniqueStringValues([
+        ...(recipientSchedule.timeOfDay ?? []),
+        ...(donorSchedule.timeOfDay ?? [])
+      ]).sort();
+      if (when.length) fields.push('when');
+      if (timeOfDay.length) fields.push('timeOfDay');
+      recipientClause.schedule = {
+        ...recipientSchedule,
+        ...(when.length ? { when } : {}),
+        ...(timeOfDay.length ? { timeOfDay } : {}),
+        evidence: [...(recipientSchedule.evidence ?? [])]
+      };
+    }
     appendShiftedEvidence(
       recipientClause.schedule,
       donorSchedule,
@@ -1226,12 +1331,13 @@ export function applyCoordinatedCadenceScopes(
   source: string
 ): CoordinationScopeApplication[] {
   const applications: CoordinationScopeApplication[] = [];
+  materializeOrdinalWeekStageDurations(states, plan);
   for (const item of states) {
     materializeTypedContinueCourseDuration(item.state.primaryClause);
   }
   const inheritedAdministrationSegments = new Set<number>();
   for (const relation of plan.relations) {
-    if (relation.kind === 'coordination' && relation.semanticLicense === 'dose-continuation') {
+    if (relation.semanticLicense === 'dose-continuation') {
       inheritedAdministrationSegments.add(relation.to);
     }
   }
@@ -1265,52 +1371,56 @@ export function applyCoordinatedCadenceScopes(
     const headEllipsis = selected.semantic.construction.operation === 'inherit-administration-head' ||
       headAndCourseEllipsis;
     if (eventEllipsis || headEllipsis) {
-      if (pass.direction !== 'leading') continue;
-      const donor = left.state.primaryClause;
-      const recipient = right.state.primaryClause;
-      // Only a licensed EVENT ellipsis inherits an omitted event relation.
-      // A right daughter with its own dose inherits the administration head,
-      // never the left daughter's event, offset, dose, or clinical condition.
-      const scopedEventFields = eventEllipsis
-        ? inheritEllipticEventAnchor(
-            donor.schedule, recipient.schedule, left.state.tokens, right.state.tokens
-          )
-        : [];
-      const copiedFields: string[] = [...scopedEventFields];
-      if (donor.method && !hasEvidence(recipient, 'method') &&
-          !equalStructuredValues(recipient.method, donor.method)) {
-        recipient.method = cloneMethodForRecipient(donor.method, left.start, right.start);
-        copiedFields.push('method');
-      }
-      if (eventEllipsis && donor.dose && !hasEvidence(recipient, 'dose') &&
-          !equalStructuredValues(recipient.dose, donor.dose)) {
-        recipient.dose = cloneStructuredValue(donor.dose);
-        copiedFields.push('dose');
-      }
-      if (donor.route && !recipient.route?.code && !recipient.route?.text) {
-        recipient.route = cloneStructuredValue(donor.route);
-        copiedFields.push('route');
-      }
-      if (copiedFields.length) {
-        const scopeEvidence: CanonicalEvidence = {
-          rule: selected.semantic.construction.id,
-          spans: [{ start: relation.range.start - right.start,
-            end: relation.range.end - right.start,
-            text: source.slice(relation.range.start, relation.range.end) }],
-          scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
-          note: scopedEventFields.length
-            ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
-            : 'Omitted administration inherits its typed left head; explicit dose, event timing, and conditions remain right-local.'
-        };
-        appendEvidence(recipient.evidence, scopeEvidence);
-        if (scopedEventFields.length && recipient.schedule) {
-          recipient.schedule.evidence = [...(recipient.schedule.evidence ?? [])];
-          appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
+      // Heads flow left-to-right; a shared right-edge course flows right-to-left.
+      // Keep these independent so an N-way dose list inherits its final bound
+      // through every licensed daughter, not only the last adjacent pair.
+      if (pass.direction === 'leading') {
+        const donor = left.state.primaryClause;
+        const recipient = right.state.primaryClause;
+        // Only a licensed EVENT ellipsis inherits an omitted event relation.
+        // A right daughter with its own dose inherits the administration head,
+        // never the left daughter's event, offset, dose, or clinical condition.
+        const scopedEventFields = eventEllipsis
+          ? inheritEllipticEventAnchor(
+              donor.schedule, recipient.schedule, left.state.tokens, right.state.tokens
+            )
+          : [];
+        const copiedFields: string[] = [...scopedEventFields];
+        if (donor.method && !hasEvidence(recipient, 'method') &&
+            !equalStructuredValues(recipient.method, donor.method)) {
+          recipient.method = cloneMethodForRecipient(donor.method, left.start, right.start);
+          copiedFields.push('method');
         }
-        applications.push({ rule: selected.semantic.construction.id,
-          from: states.indexOf(left), to: states.indexOf(right), fields: copiedFields });
+        if (eventEllipsis && donor.dose && !hasEvidence(recipient, 'dose') &&
+            !equalStructuredValues(recipient.dose, donor.dose)) {
+          recipient.dose = cloneStructuredValue(donor.dose);
+          copiedFields.push('dose');
+        }
+        if (donor.route && !recipient.route?.code && !recipient.route?.text) {
+          recipient.route = cloneStructuredValue(donor.route);
+          copiedFields.push('route');
+        }
+        if (copiedFields.length) {
+          const scopeEvidence: CanonicalEvidence = {
+            rule: selected.semantic.construction.id,
+            spans: [{ start: relation.range.start - right.start,
+              end: relation.range.end - right.start,
+              text: source.slice(relation.range.start, relation.range.end) }],
+            scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
+            note: scopedEventFields.length
+              ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
+              : 'Omitted administration inherits its typed left head; explicit dose, event timing, and conditions remain right-local.'
+          };
+          appendEvidence(recipient.evidence, scopeEvidence);
+          if (scopedEventFields.length && recipient.schedule) {
+            recipient.schedule.evidence = [...(recipient.schedule.evidence ?? [])];
+            appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
+          }
+          applications.push({ rule: selected.semantic.construction.id,
+            from: states.indexOf(left), to: states.indexOf(right), fields: copiedFields });
+        }
       }
-      if (headAndCourseEllipsis) {
+      if (headAndCourseEllipsis && pass.direction === 'trailing') {
         const durationDonor = right.state.primaryClause;
         const durationRecipient = left.state.primaryClause;
         const durationMerge = mergeScheduleFeatureGroups(

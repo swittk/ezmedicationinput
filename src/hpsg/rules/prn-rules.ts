@@ -62,7 +62,7 @@ import {
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
-import { isScheduleLead } from "./timing-rules";
+import { isScheduleLead, followingCourseDurationHeaderAt } from "./timing-rules";
 import { productRouteHint } from "./product-route";
 
 function startsDoseComplement(context: HpsgClauseContext, start: number): boolean {
@@ -801,6 +801,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           )
         );
       if (durationOwnedByProcedure) return [];
+      // A complete following-course duration owns its modifier and quantity;
+      // the prefix is not an incomplete PRN reason ("for next").
+      if (followingCourseDurationHeaderAt(context.tokens, start)) return [];
       // A spelled duration ("for five days") is not a PRN reason.
       // The timing construction owns both the cardinal and its time unit.
       const durationUnitToken = context.tokens[start + 2];

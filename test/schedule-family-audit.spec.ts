@@ -3,7 +3,7 @@ import {
   calculateTotalUnits, lintSig, nextDueDoses, parseSig, parseSigAsync, suggestSig, toDosageDetails,
   MedicationQuantityCalculationError,
   toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
-  FhirDayOfWeek, FhirPeriodUnit
+  EventTiming, FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
 import { canonicalToFhir } from "../src/fhir";
@@ -1276,6 +1276,316 @@ describe("whole-course numeric supply and API parity", () => {
       });
     }
   });
+
+const parkinsonEventClock = {
+  [EventTiming.Wake]: "06:30",
+  [EventTiming.Morning]: "08:00",
+  [EventTiming["Before Sleep"]]: "22:00",
+  [EventTiming.Noon]: "12:00",
+  [EventTiming.Breakfast]: "08:00",
+  [EventTiming.Lunch]: "12:30",
+  [EventTiming.Dinner]: "18:30"
+};
+
+const parkinsonDue = {
+  orderedAt: "2026-11-02T00:00:00+07:00",
+  from: "2026-11-02T00:00:00+07:00",
+  timeZone: "Asia/Bangkok",
+  eventClock: parkinsonEventClock,
+  mealOffsets: {
+    [EventTiming["Before Meal"]]: -30,
+    [EventTiming["After Meal"]]: 30,
+    [EventTiming["After Breakfast"]]: 30,
+    [EventTiming["After Lunch"]]: 30,
+    [EventTiming["After Dinner"]]: 30
+  },
+  limit: 64
+} as const;
+
+function executableParkinsonRepresentations(source: string) {
+  const parsed = parseSig(source);
+  return {
+    parsed,
+    executable: [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)] as const
+  };
+}
+
+function dueOn(
+  dosage: FhirR6DosageDetails | readonly FhirDosage[],
+  localDate: string
+): string[] {
+  return nextDueDoses(dosage, {
+    ...parkinsonDue,
+    from: `${localDate}T00:00:00+07:00`
+  }).filter(timestamp => timestamp.startsWith(localDate));
+}
+
+function totalUnitsOver21Days(
+  dosage: FhirR6DosageDetails | readonly FhirDosage[]
+) {
+  return calculateTotalUnits({
+    dosage,
+    from: parkinsonDue.from,
+    orderedAt: parkinsonDue.orderedAt,
+    timeZone: parkinsonDue.timeZone,
+    eventClock: parkinsonDue.eventClock,
+    mealOffsets: parkinsonDue.mealOffsets,
+    durationValue: 21,
+    durationUnit: FhirPeriodUnit.Day
+  });
+}
+
+describe("Parkinson wake, clock, meal and finite-phase execution", () => {
+  it("executes a typed waking-hours interval only inside caller-configured clocks", () => {
+    const source = "รับประทาน 1 เม็ดทุก 4 ชั่วโมงเฉพาะเวลาตื่นนอน";
+    const { parsed, executable } = executableParkinsonRepresentations(source);
+    expect(parsed.fhirNext.step[0]?.component[0]?.timing?.repeat).toMatchObject({
+      period: 4,
+      periodUnit: "h",
+      when: [EventTiming.Wake]
+    });
+
+    const expected = [
+      "2026-11-02T06:30:00+07:00",
+      "2026-11-02T10:30:00+07:00",
+      "2026-11-02T14:30:00+07:00",
+      "2026-11-02T18:30:00+07:00"
+    ];
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual(expected);
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(84);
+      expect(() => nextDueDoses(dosage, {
+        ...parkinsonDue,
+        eventClock: { [EventTiming.Wake]: "06:30" },
+        limit: 1
+      })).toThrow(/waking-hours interval.*WAKE.*HS/i);
+      expect(() => calculateTotalUnits({
+        dosage,
+        from: parkinsonDue.from,
+        orderedAt: parkinsonDue.orderedAt,
+        timeZone: parkinsonDue.timeZone,
+        eventClock: { [EventTiming.Wake]: "06:30" },
+        durationValue: 1,
+        durationUnit: FhirPeriodUnit.Day
+      })).toThrow(/waking-hours interval.*WAKE.*HS/i);
+    }
+
+    const unrestricted: FhirDosage = {
+      timing: { repeat: { period: 4, periodUnit: "h" } }
+    };
+    expect(nextDueDoses(unrestricted, {
+      ...parkinsonDue,
+      limit: 6
+    })).toEqual([
+      "2026-11-02T00:00:00+07:00",
+      "2026-11-02T04:00:00+07:00",
+      "2026-11-02T08:00:00+07:00",
+      "2026-11-02T12:00:00+07:00",
+      "2026-11-02T16:00:00+07:00",
+      "2026-11-02T20:00:00+07:00"
+    ]);
+  });
+
+  it("executes an English while-awake interval from its typed WAKE restriction", () => {
+    const { parsed, executable } = executableParkinsonRepresentations(
+      "Take 1 tablet every 3 hours while awake."
+    );
+    const intervalRepeat = parsed.fhirNext.step[0]?.component[0]?.timing?.repeat;
+    expect(intervalRepeat).toMatchObject({ period: 3, periodUnit: "h" });
+    // A window is not an instantaneous wake-up administration.
+    expect(intervalRepeat?.when).toBeUndefined();
+    expect(intervalRepeat?.extension).toContainEqual(
+      expect.objectContaining({
+        url: expect.stringContaining("/medication-timing-event-window"),
+        extension: [
+          { url: "start", valueCode: "WAKE" },
+          { url: "end", valueCode: "HS" }
+        ]
+      })
+    );
+    const expected = ["06:30", "09:30", "12:30", "15:30", "18:30", "21:30"]
+      .map(clock => `2026-11-02T${clock}:00+07:00`);
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual(expected);
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(126);
+    }
+  });
+
+  it("executes the waking dose followed by q4h while-awake doses on the same day", () => {
+    const { parsed, executable } = executableParkinsonRepresentations(
+      "Take 1 tablet on waking, then 1 tablet every 4 hours while awake."
+    );
+    // A waking dose is the first opportunity in the identical recurring
+    // waking-hours series. One typed interval component or equivalent
+    // source-coordinated daughters may represent it; never demand duplicate
+    // 06:30 administrations merely because the doctor mentioned WAKE twice.
+    const components = parsed.fhirNext.step.flatMap(step => step.component);
+    expect(components.length).toBeGreaterThan(0);
+    expect(components.every(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value === 1)).toBe(true);
+    expect(components.some(component =>
+      component.timing?.repeat?.period === 4 &&
+      component.timing?.repeat?.periodUnit === "h" &&
+      component.timing.repeat.extension?.some(extension =>
+        extension.url.endsWith("/medication-timing-event-window"))
+    )).toBe(true);
+    const expected = [
+      "2026-11-02T06:30:00+07:00",
+      "2026-11-02T10:30:00+07:00",
+      "2026-11-02T14:30:00+07:00",
+      "2026-11-02T18:30:00+07:00"
+    ];
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual(expected);
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(84);
+    }
+  });
+
+  it("keeps explicit and event clocks together without inventing extra administrations", () => {
+    const exact = executableParkinsonRepresentations(
+      "Take 1 tablet at 06:00, 10:00, 14:00 and 18:00 every day."
+    );
+    const mixed = executableParkinsonRepresentations(
+      "Take 1 tablet at 07:00, noon, 17:00 and bedtime."
+    );
+    for (const dosage of exact.executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual([
+        "2026-11-02T06:00:00+07:00",
+        "2026-11-02T10:00:00+07:00",
+        "2026-11-02T14:00:00+07:00",
+        "2026-11-02T18:00:00+07:00"
+      ]);
+    }
+    for (const dosage of mixed.executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual([
+        "2026-11-02T07:00:00+07:00",
+        "2026-11-02T12:00:00+07:00",
+        "2026-11-02T17:00:00+07:00",
+        "2026-11-02T22:00:00+07:00"
+      ]);
+    }
+  });
+
+  it.each([
+    "Take 1 tablet 30 minutes before breakfast, lunch and dinner.",
+    "รับประทาน 1 เม็ดก่อนอาหารเช้า กลางวัน และเย็น 30 นาที"
+  ])("applies the encoded offset to all configured meal clocks: %s", source => {
+    const { executable } = executableParkinsonRepresentations(source);
+    const expected = [
+      "2026-11-02T07:30:00+07:00",
+      "2026-11-02T12:00:00+07:00",
+      "2026-11-02T18:00:00+07:00"
+    ];
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual(expected);
+    }
+  });
+
+  it.each([
+    {
+      source: "Take 1 tablet 30 minutes before breakfast, half a tablet at 15:00 and 1 tablet at bedtime.",
+      doses: [1, 0.5, 1], clocks: ["07:30", "15:00", "22:00"], total: 52.5
+    },
+    {
+      source: "Take 1 tablet 30 minutes before meals, plus half a tablet at 22:00.",
+      doses: [1, 0.5], clocks: ["07:30", "12:00", "18:00", "22:00"], total: 73.5
+    },
+    {
+      source: "Take 1 tablet after breakfast and lunch, then half a tablet at bedtime.",
+      doses: [1, 0.5], clocks: ["08:30", "13:00", "22:00"], total: 52.5
+    },
+    {
+      source: "รับประทาน 1 เม็ดหลังอาหารเช้าและเที่ยง ครึ่งเม็ดก่อนนอน",
+      doses: [1, 0.5], clocks: ["08:30", "13:00", "22:00"], total: 52.5
+    }
+  ])("keeps each mixed dose on its actual daily administration: $source", ({
+    source, doses, clocks, total
+  }) => {
+    const { parsed, executable } = executableParkinsonRepresentations(source);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component.map(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value)).toEqual(doses);
+    const expected = clocks.map(clock => `2026-11-02T${clock}:00+07:00`);
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual(expected);
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(total);
+    }
+  });
+
+  it("ends every member of a finite parallel phase at the shared phase boundary", () => {
+    const source = "Take half a tablet in the morning and one tablet at bedtime for 7 days, " +
+      "then one tablet in the morning and one tablet at bedtime for 7 days.";
+    const { parsed, executable } = executableParkinsonRepresentations(source);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[0].component.map(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([0.5, 1]);
+    // Equal morning/bedtime amounts may be represented by one component
+    // with two WHEN events instead of duplicating the dosage component.
+    const secondPhase = parsed.fhirNext.step[1].component.flatMap(component =>
+      (component.timing?.repeat?.when ?? []).map(when => ({
+        when, amount: component.doseAndRate?.[0]?.doseQuantity?.value
+      }))
+    ).sort((left, right) => left.when.localeCompare(right.when));
+    expect(secondPhase).toEqual([
+      { when: "HS", amount: 1 },
+      { when: "MORN", amount: 1 }
+    ]);
+
+    for (const dosage of executable) {
+      expect(dueOn(dosage, "2026-11-02")).toEqual([
+        "2026-11-02T08:00:00+07:00",
+        "2026-11-02T22:00:00+07:00"
+      ]);
+      expect(dueOn(dosage, "2026-11-09")).toEqual([
+        "2026-11-09T08:00:00+07:00",
+        "2026-11-09T22:00:00+07:00"
+      ]);
+      expect(dueOn(dosage, "2026-11-16")).toEqual([]);
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(24.5);
+    }
+  });
+
+  it.each([
+    {
+      source: "Take 0.5 tablet once daily for 7 days, then 0.5 tablet twice daily for 7 days, then 1 tablet twice daily.",
+      doses: [[0.5], [0.5], [1]],
+      total: 24.5,
+      days: [["09:00"], ["08:00", "20:00"], ["08:00", "20:00"]]
+    },
+    {
+      source: "Take 0.25 mg at bedtime for 1 week, then 0.5 mg at bedtime for 1 week, then 1 mg at bedtime.",
+      doses: [[0.25], [0.5], [1]],
+      total: 12.25,
+      days: [["22:00"], ["22:00"], ["22:00"]]
+    },
+    {
+      source: "Take 2 tablets three times daily for 7 days, then 1 tablet three times daily for 7 days, then half tablet three times daily for 7 days.",
+      doses: [[2], [1], [0.5]],
+      total: 73.5,
+      days: [["08:00", "14:00", "20:00"], ["08:00", "14:00", "20:00"], ["08:00", "14:00", "20:00"]]
+    },
+    {
+      source: "Take 1 tablet four times daily at 07:00, 11:00, 15:00 and 19:00 for 2 weeks, then take 1 tablet three times daily at 07:00, 13:00 and 19:00.",
+      doses: [[1], [1]],
+      total: 77,
+      days: [["07:00", "11:00", "15:00", "19:00"], ["07:00", "11:00", "15:00", "19:00"], ["07:00", "13:00", "19:00"]]
+    }
+  ])("preserves finite taper boundaries, timestamps and per-phase dose amounts: $source", ({
+    source, doses, total, days
+  }) => {
+    const { parsed, executable } = executableParkinsonRepresentations(source);
+    expect(parsed.fhirNext.step.map(step => step.component.map(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value))).toEqual(doses);
+    const dates = ["2026-11-02", "2026-11-09", "2026-11-16"];
+    for (const dosage of executable) {
+      expect(dates.map(date => dueOn(dosage, date))).toEqual(
+        dates.map((date, index) => days[index].map(clock =>
+          `${date}T${clock}:00+07:00`))
+      );
+      expect(totalUnitsOver21Days(dosage).totalUnits).toBe(total);
+    }
+  });
+});
 
   it("sums 30-day and 45-day site-specific transitions, never multiplying all phases by the full horizon", () => {
     const parsed = parseSig(eyeCourse);

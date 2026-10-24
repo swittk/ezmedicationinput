@@ -37,6 +37,7 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.cont.sitePredicate ? "V" : "",
     synsem.cont.siteRestriction ? "J" : "",
     synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
+    synsem.cont.regimenAdjustment ?? "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
 }
@@ -72,6 +73,9 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
   const contentFeatures: Record<string, HpsgFeatureNode | ReturnType<typeof featureAtom>> = {};
   if (synsem.cont.clauseKind) {
     contentFeatures.CLAUSE_KIND = featureAtom(synsem.cont.clauseKind);
+  }
+  if (synsem.cont.regimenAdjustment) {
+    contentFeatures.REGIMEN_ADJUSTMENT = featureAtom(synsem.cont.regimenAdjustment);
   }
   if (synsem.cont.condition) contentFeatures.CONDITION = featureNode("condition-feature");
   if (synsem.cont.clinicalAdjunct) {

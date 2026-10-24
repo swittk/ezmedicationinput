@@ -7,6 +7,9 @@ import {
 import { parseSig } from "./helpers/r5-parser";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
 import { parseClauseSign } from "../src/parser";
+import { lexInput } from "../src/lexer/lex";
+import { annotateLexTokens } from "../src/lexer/meaning";
+import { explicitDoseLexicalEnd } from "../src/hpsg/rules/core-rules";
 import type { BodySiteRestriction } from "../src/types";
 import { HPSG_TYPE_SYSTEM, type HpsgFeatureNode } from "../src/hpsg/type-system";
 import {
@@ -1664,6 +1667,167 @@ describe("typed independently timed dose head inheritance", () => {
     expect(getDosageCondition(rows[1])).toMatchObject({ kind: "not", condition: {
       kind: "measurement", name: "glucose", operation: "lt", value: 70
     } });
+  });
+});
+
+
+describe("typed mixed-dose clock ownership", () => {
+  const doseValue = (row: { doseAndRate?: Array<{ doseQuantity?: { value?: number } }> }) =>
+    row.doseAndRate?.[0]?.doseQuantity?.value;
+
+  it.each([
+    ["half a tablet", 3],
+    ["a tablet", 2],
+    ["0.5 tablet", 2],
+    ["one and a half tablets", 5],
+    ["ครึ่งเม็ด", 2]
+  ] as const)("keeps the complete scalar dose as one lexical boundary head: %s", (source, end) => {
+    const tokens = annotateLexTokens(lexInput(source));
+    expect(explicitDoseLexicalEnd(tokens, 0)).toBe(end);
+    for (let index = 1; index < end; index += 1) {
+      expect(explicitDoseLexicalEnd(tokens, index)).toBeUndefined();
+    }
+  });
+
+  it("keeps each PD11 amount with its own meal, clock, or bedtime anchor", () => {
+    const source = "Take 1 tablet 30 minutes before breakfast, half a tablet at 15:00 and 1 tablet at bedtime.";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual([1, 0.5, 1]);
+    expect(parsed.fhir.map(row => row.timing?.repeat)).toEqual([
+      expect.objectContaining({ when: [EventTiming["Before Breakfast"]], offset: 30 }),
+      expect.objectContaining({ timeOfDay: ["15:00:00"] }),
+      expect.objectContaining({ when: [EventTiming["Before Sleep"]] })
+    ]);
+    expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toBeUndefined();
+    expect(parsed.fhir[1].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component.map(doseValue)).toEqual([1, 0.5, 1]);
+
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(strict.map(doseValue)).toEqual([1, 0.5, 1]);
+    expect(toDosageDetails(strict).step).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses.map(clause => source.slice(clause.span.start, clause.span.end)))
+      .toEqual(parsed.meta.canonical.clauses.map(clause => clause.rawText));
+    expect(parsed.meta.canonical.clauses.map(clause =>
+      clause.evidence.find(item => item.lexicalCategory === "dose")?.spans[0]?.text
+    )).toEqual(["1 tablet", "half a tablet", "1 tablet"]);
+  });
+
+  it("keeps the PD29 bedtime clock on the explicit half-tablet daughter", () => {
+    const source = "Take 1 tablet 30 minutes before meals, plus half a tablet at 22:00.";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual([1, 0.5]);
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject({
+      when: [EventTiming["Before Meal"]], offset: 30
+    });
+    expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toBeUndefined();
+    expect(parsed.fhir[1].timing?.repeat).toMatchObject({ timeOfDay: ["22:00:00"] });
+    expect(parsed.fhir[1].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component.map(doseValue)).toEqual([1, 0.5]);
+    expect(toFhirR5Dosages(parsed.fhirNext).map(doseValue)).toEqual([1, 0.5]);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses.map(clause =>
+      clause.evidence.find(item => item.lexicalCategory === "dose")?.spans[0]?.text
+    )).toEqual(["1 tablet", "half a tablet"]);
+  });
+
+  it("treats PD08 meal and bedtime doses as one same-day regimen, not unbounded phases", () => {
+    const source = "Take 1 tablet after breakfast and lunch, then half a tablet at bedtime.";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual([1, 0.5]);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.when)).toEqual([
+      [EventTiming["After Breakfast"], EventTiming["After Lunch"]],
+      [EventTiming["Before Sleep"]]
+    ]);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component.map(doseValue)).toEqual([1, 0.5]);
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step).toHaveLength(1);
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps the PD25 half-dose week before the full-dose same-clock phase", () => {
+    const source = "Take half a tablet at 07:00, noon and 19:00 for 7 days; increase to one tablet at the same times thereafter.";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual([0.5, 1]);
+    expect(parsed.fhir.map(row => row.site)).toEqual([undefined, undefined]);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.boundsDuration?.value))
+      .toEqual([7, undefined]);
+    expect(parsed.fhir.map(row => ({
+      when: row.timing?.repeat?.when,
+      timeOfDay: row.timing?.repeat?.timeOfDay
+    }))).toEqual([
+      { when: [EventTiming.Noon], timeOfDay: ["07:00:00", "19:00:00"] },
+      { when: [EventTiming.Noon], timeOfDay: ["07:00:00", "19:00:00"] }
+    ]);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step.map(step => step.component.map(doseValue))).toEqual([[0.5], [1]]);
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step).toHaveLength(2);
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps the PD26 second-week 22:00 half-dose separate from the baseline clocks", () => {
+    const source = "Take 1 tablet three times daily at 07:00, 13:00 and 19:00, but add half a tablet at 22:00 only from the second week.";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toContain(0.5);
+    expect(parsed.fhir).toContainEqual(expect.objectContaining({
+      doseAndRate: [expect.objectContaining({
+        doseQuantity: expect.objectContaining({ value: 1, unit: "tab" })
+      })],
+      timing: expect.objectContaining({ repeat: expect.objectContaining({
+        timeOfDay: ["07:00:00", "13:00:00", "19:00:00"]
+      }) })
+    }));
+    const bedtime = parsed.fhir.find(row => doseValue(row) === 0.5);
+    expect(bedtime?.timing?.repeat?.timeOfDay).toEqual(["22:00:00"]);
+    expect(parsed.fhir.some(row =>
+      doseValue(row) === 1 && row.timing?.repeat?.timeOfDay?.includes("22:00:00")
+    )).toBe(false);
+    expect(toFhirR5Dosages(parsed.fhirNext).some(row =>
+      doseValue(row) === 0.5 && row.timing?.repeat?.timeOfDay?.includes("22:00:00")
+    )).toBe(true);
+    expect(parsed.meta.canonical.clauses.find(clause => clause.dose?.value === 0.5)
+      ?.evidence.find(item => item.lexicalCategory === "dose")?.spans[0]?.text)
+      .toBe("half a tablet");
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps the Thai breakfast-and-lunch dose apart from the bedtime half-dose", () => {
+    const source = "รับประทาน 1 เม็ดหลังอาหารเช้าและเที่ยง ครึ่งเม็ดก่อนนอน";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual([1, 0.5]);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.when)).toEqual([
+      [EventTiming["After Breakfast"], EventTiming["After Lunch"]],
+      [EventTiming["Before Sleep"]]
+    ]);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component.map(doseValue)).toEqual([1, 0.5]);
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step).toHaveLength(1);
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each([
+    [
+      "Take 1 tablet at 06:00, 0.5 tablet at 10:00, 1 tablet at 14:00, and 0.5 tablet at 18:00 daily.",
+      [1, 0.5, 1, 0.5],
+      [["06:00:00"], ["10:00:00"], ["14:00:00"], ["18:00:00"]]
+    ],
+    [
+      "Take 1 tablet at 07:00, 1 tablet at 11:00, 0.5 tablet at 15:00, and 1 tablet at 19:00.",
+      [1, 0.5, 1],
+      [["07:00:00", "11:00:00"], ["15:00:00"], ["19:00:00"]]
+    ],
+    [
+      "กินครึ่งเม็ดตอนเช้า 1 เม็ดตอนเที่ยง และครึ่งเม็ดตอนเย็น",
+      [0.5, 1, 0.5],
+      [undefined, undefined, undefined]
+    ]
+  ] as const)("preserves an already-correct nonuniform-dose control: %s", (source, doses, clocks) => {
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir.map(doseValue)).toEqual(doses);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.timeOfDay)).toEqual(clocks);
+    expect(parsed.fhir.some(row => doseValue(row) === 0)).toBe(false);
+    expect(parsed.input).toBe(source);
   });
 });
 

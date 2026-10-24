@@ -270,6 +270,9 @@ declare module "../types" {
 }
 
 export interface HpsgScheduleFeature {
+  timingReference?: "previous";
+  /** Source-relative phase onset, in elapsed days from treatment start. */
+  treatmentStartOffsetDays?: number;
   attachmentClass?: "administration" | "procedure";
   /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
   sourceRanges?: TextRange[];
@@ -296,6 +299,7 @@ export interface HpsgScheduleFeature {
   timeOfDay?: string[];
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
+  eventWindow?: { start: EventTiming; end: EventTiming };
   occurrenceCap?: CanonicalOccurrenceCapExpr;
   maxDosePerPeriod?: CanonicalDosePeriodMaximumExpr[];
 }
@@ -314,6 +318,8 @@ export interface HpsgSynsem {
     patientInstruction?: HpsgPatientInstructionFeature;
   };
   cont: {
+    /** Source operation on the preceding regimen, resolved before projection. */
+    regimenAdjustment?: "replace" | "add";
     clauseKind?: "administration";
     condition?: HpsgConditionFeature;
     clinicalAdjunct?: HpsgClinicalAdjunctFeature;

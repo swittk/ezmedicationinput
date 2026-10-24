@@ -18,7 +18,7 @@ import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
   buildRegimenGraph, regimenMemberSequences,
-  scopeSequentialPhaseSemantics, type RegimenGraph
+  scopeSequentialPhaseSemantics, expandAdditiveRegimenPhases, type RegimenGraph
 } from "./regimen/regimen";
 import {
   administrationTargetProjections,
@@ -774,8 +774,10 @@ function composeParsedStates(
   const outputRegimenGraph = hasComposedTiming
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
-  const phaseSequences = regimenMemberSequences(outputRegimenGraph);
-  return { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences };
+  const expanded = expandAdditiveRegimenPhases(outputStates, outputSegments, outputRegimenGraph);
+  const phaseSequences = regimenMemberSequences(expanded.graph);
+  return { regimenGraph, outputStates: expanded.states, outputSegments: expanded.segments,
+    outputRegimenGraph: expanded.graph, phaseSequences };
 }
 
 /**

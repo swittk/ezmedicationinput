@@ -37,6 +37,7 @@ import {
   getAdministrationOffsetMinutes,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
   getTimingOccurrenceCap,
+  getTimingEventWindow,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL
 } from "./fhir";
 
@@ -2059,6 +2060,94 @@ export function nextDueDoses(
   return nextDueDosesSingle(one, options);
 }
 
+/** A window of recurring opportunities is distinct from one punctual
+ * WAKE dose. Typed FHIR event-window extensions are the authority; an existing
+ * WAKE+subday interval is retained for legacy structured representations.
+ */
+function intervalEventWindow(
+  repeat: FhirTimingRepeat | undefined
+): { start: EventTiming; end: EventTiming } | undefined {
+  if (!repeat || (repeat.timeOfDay?.length ?? 0) !== 0 ||
+      !usesIntervalCadence(repeat) ||
+      (repeat.periodUnit !== FhirPeriodUnit.Second &&
+       repeat.periodUnit !== FhirPeriodUnit.Minute &&
+       repeat.periodUnit !== FhirPeriodUnit.Hour)) return undefined;
+  const typed = getTimingEventWindow(repeat);
+  if (typed) return typed;
+  const when = repeat.when;
+  return when?.length === 1 && when[0] === EventTiming.Wake
+    ? { start: EventTiming.Wake, end: EventTiming["Before Sleep"] }
+    : undefined;
+}
+
+function isWakingHoursInterval(repeat: FhirTimingRepeat | undefined): boolean {
+  return intervalEventWindow(repeat) !== undefined;
+}
+
+/** Execute WAKE as the daily recurrence origin and HS as the exclusive end of
+ * the caller's configured waking window. Absent clocks are never guessed. */
+function generateWakingHoursIntervalSeries(
+  repeat: FhirTimingRepeat,
+  config: NextDueDoseConfig,
+  from: Date,
+  orderedAt: Date | null,
+  courseEnd: Date | null,
+  timeZone: string,
+  limit: number,
+  dayFilter: Set<string>,
+  enforceDayFilter: boolean,
+  monthlyOrdinal: MonthlyWeekdayOrdinal | undefined
+): string[] | undefined {
+  const window = intervalEventWindow(repeat);
+  if (!window) return undefined;
+  const wakeValue = config.eventClock?.[window.start];
+  const sleepValue = config.eventClock?.[window.end];
+  if (!wakeValue || !sleepValue) {
+    throw new Error(
+      "Cannot execute a waking-hours interval without configured WAKE and HS event clocks"
+    );
+  }
+  const wakeClock = normalizeClock(wakeValue);
+  const sleepClock = normalizeClock(sleepValue);
+  const advance = createIntervalStepper(repeat, timeZone);
+  if (!advance) return undefined;
+
+  const results: string[] = [];
+  let currentDay = startOfLocalDay(from, timeZone);
+  let dayIterations = 0;
+  const maxDays = calendarScanLimit(currentDay, courseEnd, limit);
+  while (results.length < limit && dayIterations < maxDays &&
+      (!courseEnd || currentDay < courseEnd)) {
+    if (matchesCalendarDay(
+      currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone
+    )) {
+      const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
+      const sleep = makeZonedDateFromDay(currentDay, timeZone, sleepClock);
+      if (!wake || !sleep || sleep <= wake) {
+        throw new Error(
+          "Cannot execute a waking-hours interval unless configured WAKE precedes HS"
+        );
+      }
+      let candidate = wake;
+      let intervalIterations = 0;
+      while (candidate < sleep && intervalIterations < 10_000) {
+        if (candidate >= from && (!orderedAt || candidate >= orderedAt) &&
+            (!courseEnd || candidate < courseEnd)) {
+          results.push(formatZonedIso(candidate, timeZone));
+          if (results.length >= limit) break;
+        }
+        const next = advance(candidate);
+        if (!next || next <= candidate) break;
+        candidate = next;
+        intervalIterations += 1;
+      }
+    }
+    currentDay = addLocalDays(currentDay, 1, timeZone);
+    dayIterations += 1;
+  }
+  return results;
+}
+
 function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): string[] {
   if (!options || typeof options !== "object") {
     throw new Error("Options argument is required for nextDueDoses");
@@ -2252,6 +2341,20 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   const enforceDayFilter = dayFilter.size > 0;
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
   const monthlyOrdinal = resolveMonthlyWeekdayOrdinal(dosage, repeat, baseTime, timeZone);
+
+  const wakingHours = generateWakingHoursIntervalSeries(
+    repeat,
+    config,
+    from,
+    orderedAt,
+    courseEnd,
+    timeZone,
+    effectiveLimit,
+    dayFilter,
+    enforceDayFilter,
+    monthlyOrdinal
+  );
+  if (wakingHours) return wakingHours;
 
   const whenCodes = repeat.when ?? [];
   const timeOfDayEntries = repeat.timeOfDay ?? [];
@@ -3642,7 +3745,8 @@ function calculateTotalUnitsSingle(
   );
 
   const needsFilteredEnumeration = conditional || excludedDates.length || excludedWeekdays.length ||
-    !!dosage.maxDosePerPeriod?.length || !!getTimingOccurrenceCap(repeat);
+    !!dosage.maxDosePerPeriod?.length || !!getTimingOccurrenceCap(repeat) ||
+    isWakingHoursInterval(repeat);
   let count: number;
   if (endDay <= countFrom) {
     count = 0;

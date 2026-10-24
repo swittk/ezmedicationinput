@@ -2,6 +2,23 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action",
   "actions": [
     {
+      "code": "add",
+      "semanticClass": "regimen-adjustment",
+      "display": "Add",
+      "externalCodings": [{
+        "system": "http://snomed.info/sct",
+        "code": "422106007",
+        "display": "Add - dosing instruction fragment (qualifier value)"
+      }],
+      "i18n": { "th": "เพิ่ม" },
+      "aliases": ["add"],
+      "procedural": false,
+      "acceptsAmount": true,
+      "definesDose": true,
+      "argumentParser": "object-duration",
+      "realizer": "default"
+    },
+    {
       "code": "avoid",
       "semanticClass": "avoidance",
       "display": "Avoid",
