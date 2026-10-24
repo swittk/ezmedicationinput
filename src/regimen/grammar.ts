@@ -68,6 +68,26 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('right.omits-dose-head', f => !f.rightExplicitDose && !f.rightExplicitHead)
   ]
 }, {
+  id: 'hpsg.cx.coordination.dosed-head-ellipsis-with-trailing-course-duration',
+  priority: 945,
+  operation: 'inherit-administration-head-and-share-trailing-course-duration',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.complete', f => f.leftComplete),
+    semanticConstraint('right.complete', f => f.rightComplete),
+    semanticConstraint('left.available-administration-method', f => f.leftHasMethod),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.cadence', f => f.leftHasCadence),
+    semanticConstraint('right.cadence', f => f.rightHasCadence),
+    semanticConstraint('right.omits-head', f => !f.rightExplicitHead),
+    semanticConstraint('left.omitsCourseDuration', f => !f.leftHasCourseDuration),
+    semanticConstraint('right.hasCourseDuration', f => f.rightHasCourseDuration),
+    semanticConstraint('right.hasTrailingCourseDuration', f => f.rightHasTrailingCourseDuration),
+  ]
+}, {
   id: 'hpsg.cx.coordination.dosed-head-ellipsis',
   priority: 940,
   operation: 'inherit-administration-head',
@@ -130,6 +150,27 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('targets.distinct', f => f.targetsDistinct),
     semanticConstraint('left.omitsCadence', f => !f.leftHasCadence),
     semanticConstraint('right.hasCadence', f => f.rightHasCadence),
+  ]
+}, {
+  id: 'hpsg.cx.coordination.trailing-shared-course-duration',
+  priority: 795,
+  operation: 'share-trailing-course-duration',
+  constraints: [
+    semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
+    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
+    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.complete', f => f.leftComplete),
+    semanticConstraint('right.complete', f => f.rightComplete),
+    semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
+    semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
+    semanticConstraint('left.explicit-or-inherited-administration-head', f => f.leftAdministrationContext),
+    semanticConstraint('right.omitsAdministrationHead', f => !f.rightExplicitHead),
+    semanticConstraint('left.hasCadence', f => f.leftHasCadence),
+    semanticConstraint('right.hasCadence', f => f.rightHasCadence),
+    semanticConstraint('left.omitsCourseDuration', f => !f.leftHasCourseDuration),
+    semanticConstraint('right.hasCourseDuration', f => f.rightHasCourseDuration),
+    semanticConstraint('right.hasTrailingCourseDuration', f => f.rightHasTrailingCourseDuration),
   ]
 }, {
   id: 'hpsg.cx.coordination.trailing-shared-adjuncts',
@@ -282,7 +323,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
   { id: 'regimen.disjunctive-dosage-choice', priority: 900, relation: 'alternative', constraints: [
-    constraint('connector.coordination', f => f.site.kind === 'coordination'),
+    constraint('connector.coordination-or-typed-alternative', f =>
+      f.site.kind === 'coordination' || f.site.kind === 'alternative'),
     constraint('connector.disjunction', f => f.connectorKind === 'disjunction'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),

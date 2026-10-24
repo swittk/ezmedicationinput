@@ -361,7 +361,10 @@ export function buildCanonicalParallelRegimen(
 const TREATMENT_START_CODE = 'treatment-start';
 export const TREATMENT_START_SYSTEM = 'http://hl7.org/fhir/evidence-variable-event';
 
-function relativeTime(position: RegimenPosition) {
+/** Shared pure lowering of an already-typed treatment-relative position. */
+export function relativeTime(position: RegimenPosition | {
+  unit: "s" | "min" | "h" | "wk" | "a"; value: number
+}) {
   return {
     contextCode: {
       coding: [{

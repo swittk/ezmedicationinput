@@ -503,6 +503,7 @@ function mergeSchedule(
     !sameOptionalScalar(left.duration, right.duration) ||
     !sameOptionalScalar(left.durationMax, right.durationMax) ||
     !sameOptionalScalar(left.durationUnit, right.durationUnit) ||
+    !sameOptionalScalar(left.administrationOffsetMinutes, right.administrationOffsetMinutes) ||
     !sameOptionalScalar(left.boundsStart, right.boundsStart) ||
     !sameOptionalScalar(left.boundsEnd, right.boundsEnd) ||
     !sameOptionalScalar(left.frequency, right.frequency) ||
@@ -528,6 +529,9 @@ function mergeSchedule(
     duration: mergeOptionalScalar(left.duration, right.duration),
     durationMax: mergeOptionalScalar(left.durationMax, right.durationMax),
     durationUnit: mergeOptionalScalar(left.durationUnit, right.durationUnit),
+    administrationOffsetMinutes: mergeOptionalScalar(
+      left.administrationOffsetMinutes, right.administrationOffsetMinutes
+    ),
     boundsStart: mergeOptionalScalar(left.boundsStart, right.boundsStart),
     boundsEnd: mergeOptionalScalar(left.boundsEnd, right.boundsEnd),
     frequency: mergeOptionalScalar(left.frequency, right.frequency),

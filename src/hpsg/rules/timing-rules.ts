@@ -8,7 +8,7 @@ import {
 import { getDayOfWeekMeaning, TokenWordClass } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
-import { AdviceArgumentRole, EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "../../types";
+import { AdviceArgumentRole, AdviceRelation, EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "../../types";
 import {
   MAX_EVENT_TIMING_EXPRESSION_PARTS,
   resolveEventTimingExpression
@@ -42,6 +42,7 @@ import {
   DAY_RANGE_CONNECTORS,
   DOSE_TARGET_EVENT_MEMBERS,
   DURATION_LEAD_TOKENS,
+  compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
@@ -60,6 +61,7 @@ import {
   MAXIMUM_PERIOD_PREPOSITIONS,
   MAXIMUM_PERIOD_MODIFIERS,
   RANGE_CONNECTORS,
+  RELATIVE_INTERVAL_TRAILING_RELATIONS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
   SINGLE_OCCURRENCE_PHRASES,
   SLEEP_EVENT_ALIASES,
@@ -69,6 +71,7 @@ import {
   HpsgClauseContext,
   isAmPmLower,
   isClockLikeLower,
+  isPunctuation,
   lexicalRule,
   normalizeTokenLower,
   parseClockToken,
@@ -80,6 +83,7 @@ import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-c
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
+import { resolveActionRelationSurface } from "../../relation-terminology";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
   switch (value) {
@@ -906,6 +910,10 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!token) {
       return [];
     }
+    // A complete leading relation + interval sign owns its cardinal and unit.
+    // The suffix must not also become a recurring frequency (for example,
+    // `after twelve hours` must not mean twelve times per hour).
+    if (precedingLeadingRelativeAdministrationInterval(context, start)) return [];
     const lower = normalizeTokenLower(token);
     // "Every four hours" is one occurrence per four-hour interval, not
     // four occurrences each hour. Only the interval construction may own it.
@@ -2383,6 +2391,101 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function fixedIntervalMinutes(value: number, unit: FhirPeriodUnit): number | undefined {
+  const factor = unit === FhirPeriodUnit.Second ? 1 / 60
+    : unit === FhirPeriodUnit.Minute ? 1
+    : unit === FhirPeriodUnit.Hour ? 60
+    : unit === FhirPeriodUnit.Day ? 24 * 60
+    : unit === FhirPeriodUnit.Week ? 7 * 24 * 60
+    : undefined;
+  if (factor === undefined || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.round(value * factor * 1_000_000) / 1_000_000;
+}
+
+function precedingMethodOwnsAdministrationDuration(
+  context: HpsgClauseContext,
+  start: number,
+  relation: string
+): boolean {
+  for (let index = start - 1; index >= 0 && index >= start - 6; index -= 1) {
+    const candidate = context.tokens[index];
+    if (!candidate) break;
+    const lower = normalizeTokenLower(candidate);
+    if (isPunctuation(lower) || ACTION_SEQUENCE_MARKERS.has(lower)) break;
+    const definition = resolveMedicationInstructionAction(lower, context.options);
+    const introducers = definition?.administrationDurationIntroducers;
+    if (introducers && introducers.indexOf(relation) !== -1) return true;
+  }
+  return false;
+}
+
+/** A relation plus a fixed interval denotes a delayed administration, not
+ * the length of treatment. The lexical sign owns the complete constituent so
+ * generic connector, site and bare-duration analyses cannot split it apart. */
+function relativeAdministrationIntervalSign(
+  context: HpsgClauseContext,
+  start: number,
+  first: Token,
+  firstLower: string
+): HpsgSign | undefined {
+  const isPossibleLeadingRelation = firstLower === AdviceRelation.After ||
+    firstLower === AdviceRelation.In;
+  const relation = isPossibleLeadingRelation
+    ? resolveActionRelationSurface(firstLower, ["temporal"])
+    : undefined;
+  const hasLeadingRelation = relation === AdviceRelation.After || relation === AdviceRelation.In;
+  if (hasLeadingRelation && precedingMethodOwnsAdministrationDuration(
+    context, start, firstLower
+  )) return undefined;
+  const trailing = hasLeadingRelation ? undefined : context.tokens[start + 2];
+  const trailingRelation = trailing
+    ? RELATIVE_INTERVAL_TRAILING_RELATIONS.get(normalizeTokenLower(trailing))
+    : undefined;
+  if (!hasLeadingRelation && (!trailing || context.state.consumed.has(trailing.index) ||
+      trailingRelation !== AdviceRelation.After)) {
+    return undefined;
+  }
+  const valueToken = hasLeadingRelation ? context.tokens[start + 1] : first;
+  const unitToken = context.tokens[start + (hasLeadingRelation ? 2 : 1)];
+  if (!valueToken || !unitToken || context.state.consumed.has(valueToken.index) ||
+      context.state.consumed.has(unitToken.index)) return undefined;
+  const value = frequencyCardinalValue(valueToken);
+  const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
+  const minutes = value !== undefined && unit ? fixedIntervalMinutes(value, unit) : undefined;
+  if (minutes === undefined) return undefined;
+  if (timingRangeIsProcedureLocalDuration(
+    context,
+    valueToken.sourceStart,
+    unitToken.sourceEnd
+  )) return undefined;
+  const tokens = hasLeadingRelation
+    ? [first, valueToken, unitToken]
+    : [valueToken, unitToken, trailing!];
+  const schedule: HpsgScheduleFeature = { administrationOffsetMinutes: minutes };
+  return lexicalSign({
+    type: "schedule-sign",
+    rule: "hpsg.lex.schedule.administrationOffset.relativeInterval",
+    tokens,
+    synsem: {
+      head: { schedule },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 32 + tokens.length
+  });
+}
+
+function precedingLeadingRelativeAdministrationInterval(
+  context: HpsgClauseContext,
+  start: number
+): boolean {
+  const relationToken = context.tokens[start - 1];
+  if (!relationToken || context.state.consumed.has(relationToken.index)) return false;
+  const lower = normalizeTokenLower(relationToken);
+  if (lower !== AdviceRelation.After && lower !== AdviceRelation.In) return false;
+  return Boolean(relativeAdministrationIntervalSign(context, start - 1, relationToken, lower));
+}
+
 export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.limit", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -2391,6 +2494,34 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
+    const relativeInterval = relativeAdministrationIntervalSign(context, start, token, lower);
+    if (relativeInterval) return [relativeInterval];
+    // A common zero-space duration NP is still one source-backed lexical
+    // constituent: declared duration lead + positive number + known time unit.
+    // This grammar sign owns the original contiguous span; neither a generic
+    // scanner rewrite nor an additional parser pass is required.
+    const compactPrefixedDuration = compactDurationParts(lower);
+    if (compactPrefixedDuration) {
+      const unit = mapIntervalUnit(compactPrefixedDuration.unitSurface);
+      const schedule = unit
+        ? buildDurationScheduleFeature(compactPrefixedDuration.value, unit)
+        : undefined;
+      if (schedule && !timingRangeIsProcedureLocalDuration(
+        context, token.sourceStart, token.sourceEnd
+      )) {
+        return [lexicalSign({
+          type: "schedule-sign",
+          rule: "hpsg.lex.schedule.duration.compactQuantity",
+          tokens: [token],
+          synsem: { head: { schedule }, valence: {}, cont: { clauseKind: "administration" } },
+          score: 20
+        })];
+      }
+    }
+    // The relation-led construction owns this suffix when it is valid. An
+    // infusion method such as `drip in 30 minutes` rejects that construction,
+    // so its ordinary administration-duration daughter remains available.
+    if (precedingLeadingRelativeAdministrationInterval(context, start)) return signs;
     const maximumLead = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
       ? maximumCountLeadAt(context, start)
       : undefined;
@@ -2704,17 +2835,26 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         if (durationValue === undefined || !Number.isFinite(durationValue) || durationValue <= 0)
           return signs;
         const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
-        if (unit && !hasCountModifier) {
+        if (unit) {
           if (timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken.sourceEnd)) return signs;
           const schedule = durationRange && durationRange.high >= durationRange.low
             ? { duration: durationRange.low, durationMax: durationRange.high, durationUnit: unit }
             : buildDurationScheduleFeature(durationValue, unit);
           if (schedule) {
+            const tokens = [
+              token,
+              ...(hasArticle ? [article] : []),
+              valueToken,
+              ...(hasCountModifier ? [modifier] : []),
+              unitToken
+            ];
             signs.push(
               lexicalSign({
                 type: "schedule-sign",
-                rule: "hpsg.lex.schedule.duration.for",
-                tokens: hasArticle ? [token, article, valueToken, unitToken] : [token, valueToken, unitToken],
+                rule: hasCountModifier
+                  ? "hpsg.lex.schedule.duration.postQuantityModified"
+                  : "hpsg.lex.schedule.duration.for",
+                tokens,
                 synsem: { head: { schedule }, valence: {}, cont: { clauseKind: "administration" } },
                 score: 8
               })

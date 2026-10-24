@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, toDosageDetails, toFhirR5Dosages } from "../src/index";
+import {
+  formatSig,
+  getDosageAlternativeChoice,
+  getDosageCondition,
+  toDosageDetails,
+  toFhirR5Dosages
+} from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
@@ -325,6 +331,172 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(strictR5.map(dosage => dosage.sequence)).toEqual([1, 2]);
     expect(toDosageDetails(strictR5)).toEqual(parsed.fhirNext);
     expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([1, 1]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+});
+
+describe("typed delayed loading and phase continuations", () => {
+  it.each([
+    ["Take 2 tablets now, then 1 tablet after 12 hours", 12],
+    ["Take 2 tablets immediately, then 1 tablet in 12 hours", 12],
+    ["Take 2 tablets now, then 1 tablet 1 hour later", 1],
+    ["Take 2 tablets immediately, then after 1 hour take 1 tablet", 1],
+    ["Take 2 tablets now, then 1 tablet after twelve hours", 12],
+    ["Take 2 tablets immediately, then 1 tablet in twelve hours", 12],
+    ["Take 2 tablets now, then 1 tablet twelve hours later", 12]
+  ] as const)("keeps a one-time delayed oral loading dose: %s", (input, hours) => {
+    const parsed = parseSig(input, { context: TABLET_CONTEXT });
+
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+    expect(parsed.items[0]?.fhir.timing?.repeat?.when).toEqual(["IMD"]);
+    expect(parsed.items.map(item => item.fhir.route?.coding?.[0]?.code))
+      .toEqual(["26643006", "26643006"]);
+    expect(parsed.items[1]?.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.items[1]?.fhir.timing?.repeat?.frequency).toBeUndefined();
+    expect(parsed.items[1]?.fhir.timing?.repeat?.period).toBeUndefined();
+    expect(parsed.items[1]?.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
+      .toBe(hours * 60);
+    expect(parsed.items[1]?.meta.canonical.clauses[0]?.evidence.some(item =>
+      item.rule === "hpsg.lex.schedule.administrationOffset.relativeInterval"
+    )).toBe(true);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[1]?.start?.offsetDuration).toMatchObject({
+      value: hours,
+      code: "h"
+    });
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("keeps a more-days ocular cadence as a second phase before the independent eye regimen", () => {
+    const input = "OD 1 drop q2h for 2 days, then BID for 5 more days. OS 1 drop nightly for 7 days.";
+    const parsed = parseSig(input);
+
+    expect(parsed.items).toHaveLength(3);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(["right eye", "right eye", "left eye"]);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([
+        { value: 1, unit: "drop" },
+        { value: 1, unit: "drop" },
+        { value: 1, unit: "drop" }
+      ]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency))
+      .toEqual([undefined, 2, undefined]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.period))
+      .toEqual([2, 1, undefined]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.periodUnit))
+      .toEqual(["h", "d", undefined]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when))
+      .toEqual([undefined, undefined, ["NIGHT"]]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([2, 5, 7]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.code))
+      .toEqual(["d", "d", "d"]);
+    // The independent OS course persists in parallel across both sequential
+    // OD phases, so R6 has two steps with two components rather than three
+    // serial steps.
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 2]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+});
+
+describe("typed shared course bounds", () => {
+  it.each([
+    ["Take 1 tab qAM and 2 tabs qPM for 7 days", undefined, 7, "d"],
+    ["Take 0.5 tablet each morning and 1.5 tablets each evening for 14 days", undefined, 14, "d"],
+    ["รับประทาน ครึ่งเม็ดเช้า และ 1 เม็ดเย็น 2 สัปดาห์", "th", 2, "wk"]
+  ] as const)("scopes one terminal duration over both coordinated dose slots: %s", (
+    input, locale, value, code
+  ) => {
+    const parsed = parseSig(input, {
+      ...(locale ? { locale } : {}),
+      context: TABLET_CONTEXT
+    });
+
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration))
+      .toEqual([
+        expect.objectContaining({ value, code }),
+        expect.objectContaining({ value, code })
+      ]);
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(item => item.timing?.repeat?.boundsDuration))
+      .toEqual(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration));
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("does not replace either dose slot's explicit local duration", () => {
+    const parsed = parseSig(
+      "Take 1 tab qAM for 3 days and 2 tabs qPM for 7 days",
+      { context: TABLET_CONTEXT }
+    );
+
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([3, 7]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.code))
+      .toEqual(["d", "d"]);
+  });
+});
+
+describe("typed additive doses", () => {
+  it.each([
+    ["Take 1 and a half tablets each morning", 1.5, "MORN"],
+    ["Take 2 and three quarters tablets nightly", 2.75, "NIGHT"]
+  ] as const)("keeps one additive quantity daughter across its conjunction: %s", (
+    input, value, event
+  ) => {
+    const parsed = parseSig(input, { context: TABLET_CONTEXT });
+
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0]?.fhir.doseAndRate?.[0]?.doseQuantity)
+      .toEqual({ value, unit: "tab" });
+    expect(parsed.items[0]?.fhir.timing?.repeat?.when).toEqual([event]);
+    expect(parsed.items[0]?.meta.canonical.clauses[0]?.evidence.some(item =>
+      item.rule === "hpsg.lex.clinicalQuantity.additiveFractionDose"
+    )).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+});
+
+describe("typed conditional dosage alternatives", () => {
+  it.each([
+    "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg; otherwise take 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg, otherwise take 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg otherwise 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily.",
+    "Take 2 tablets daily if weight above 70kg, otherwise take 1 tablet daily."
+  ])("retains both branches of an explicit ELSE dosage choice: %s", input => {
+    const parsed = parseSig(input, { context: TABLET_CONTEXT });
+
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+    expect(parsed.items.some(item => item.fhir.asNeeded === true)).toBe(false);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
+      .not.toContainEqual(expect.objectContaining({ value: 70, unit: "kg" }));
+    expect(getDosageCondition(parsed.items[0].fhir)).toMatchObject({
+      kind: "measurement",
+      name: "weight",
+      operation: "gt",
+      value: 70,
+      unit: "kg"
+    });
+    expect(getDosageCondition(parsed.items[1].fhir)).toBeUndefined();
+    const choices = parsed.items.map(item => getDosageAlternativeChoice(item.fhir));
+    expect(choices).toEqual([
+      expect.objectContaining({ selectionBehavior: "exactly-one" }),
+      expect.objectContaining({ selectionBehavior: "exactly-one" })
+    ]);
+    expect(choices[0]?.groupId).toBe(choices[1]?.groupId);
+    expect(choices[0]?.branchId).not.toBe(choices[1]?.branchId);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0]?.component).toHaveLength(2);
+    expect(toFhirR5Dosages(parsed.fhirNext).map(getDosageAlternativeChoice))
+      .toEqual(choices);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
 });

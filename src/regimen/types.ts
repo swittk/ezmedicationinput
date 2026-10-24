@@ -12,7 +12,7 @@ export interface StructuralClaim extends Range {
   producer: string;
   resolved: boolean;
 }
-export type BoundaryKind = 'coordination' | 'sequence' | 'comma' | 'hard' | 'slash' | 'adjacent-dose' | 'punctuation';
+export type BoundaryKind = 'coordination' | 'alternative' | 'sequence' | 'comma' | 'hard' | 'slash' | 'adjacent-dose' | 'punctuation';
 export type CoordinationConnectorKind = 'conjunction' | 'disjunction' | 'unknown';
 export type RegimenRelation = 'sequence' | 'coordination' | 'alternative' | 'shared-duration' | 'independent';
 export interface BoundarySite extends Range {
@@ -128,11 +128,14 @@ export interface CoordinationScopeFacts {
   rightHasSchedule: boolean;
   leftHasCadence: boolean;
   rightHasCadence: boolean;
+  leftHasCourseDuration: boolean;
+  rightHasCourseDuration: boolean;
   leftHasPrn: boolean;
   rightHasPrn: boolean;
   leftHasFrontedSchedule: boolean;
   leftHasFrontedPrn: boolean;
   rightHasTrailingSchedule: boolean;
+  rightHasTrailingCourseDuration: boolean;
   rightHasTrailingPrn: boolean;
   /** A typed, exact trailing clinical predicate/exclusion whose mother scope is unresolved. */
   rightHasTrailingSafetyGuard: boolean;
@@ -156,11 +159,13 @@ export interface TrailingInstructionScopeFacts {
 export type RegimenSemanticOperation =
   | 'share-trailing-cadence'
   | 'share-trailing-adjuncts'
+  | 'share-trailing-course-duration'
   | 'share-trailing-instruction'
   | 'share-leading-adjuncts'
   | 'preserve-disjunctive-dosages'
   | 'inherit-event-timing-administration'
   | 'inherit-administration-head'
+  | 'inherit-administration-head-and-share-trailing-course-duration'
   | 'preserve-ambiguous-shared-guard';
 
 export interface RegimenSemanticConstruction {

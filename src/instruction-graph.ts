@@ -40,6 +40,7 @@ import {
 } from "./relation-terminology";
 import {
   ACTION_COORDINATION_CONNECTORS,
+  ACTION_DISCOURSE_CONNECTORS,
   coordinationConnectorKind,
   ACTION_COORDINATION_CONNECTOR_I18N,
   ACTION_DIRECTIVE_PREFIXES,
@@ -50,6 +51,7 @@ import {
   COMPOUND_DOSE_UNITS,
   DOSE_NUMBER_WORDS,
   DURATION_LEAD_TOKENS,
+  compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
@@ -796,6 +798,16 @@ function durationArgumentAt(
   input: string,
   offset: number
 ): AdviceArgument | undefined {
+  const compactToken = parts[start];
+  const compact = compactToken ? compactDurationParts(key(compactToken)) : undefined;
+  const compactUnit = compact ? durationUnitFromKey(compact.unitSurface) : undefined;
+  if (compact && compactToken && compactUnit) return {
+    role: AdviceArgumentRole.Duration,
+    text: sourceFor(parts, start, start + 1, input),
+    normalized: `${compact.value} ${compactUnit}`,
+    quantity: { value: compact.value, unit: compactUnit },
+    span: { start: offset + compactToken.sourceStart, end: offset + compactToken.sourceEnd }
+  };
   let cursor = start;
   // A licensed duration lead belongs to the same source-backed constituent
   // as its numeric daughter. Keeping `for` with article, word-number, and
@@ -1113,11 +1125,20 @@ const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const durationIndex = duration?.span ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset) : undefined;
   let objectEnd = durationIndex !== undefined ? durationIndex : segmentEnd;
   if (relIndex >= argumentStart && relIndex < objectEnd) objectEnd = relIndex;
+  // Temporal relation daughters belong to the same action. When an opaque
+  // day/calendar qualifier is not executable, keep it as an editable Time
+  // argument rather than rendering an unconditional withholding directive.
+  const localTime = relIndex >= argumentStart && relIndex + 1 < segmentEnd &&
+    !duration && !c.conditionalTail &&
+    relationHasGrammarFeature(c.relation, "timeComplement")
+      ? argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Time, options)
+      : undefined;
   return { args: parsedArgs(
     objectEnd > argumentStart
       ? argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options)
       : undefined,
-    duration
+    duration,
+    localTime
   ) };
 };
 function configuredConceptIndex(parts: Lexeme[], start: number, end: number,
@@ -1347,9 +1368,14 @@ const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     }
   }
   if (resultIndex < 0) return {
-    args: parsedArgs(argumentFromParts(
-      parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
-    ))
+    // A source-backed quantified duration is a different valence daughter
+    // from the outcome/result of a procedure. Do not relabel its elapsed
+    // time as an opaque "result", nor lose an already-composed duration.
+    args: c.duration?.quantity
+      ? [c.duration]
+      : parsedArgs(argumentFromParts(
+        parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
+      ))
   };
   const part = parts[resultIndex];
   return { args: parsedArgs(internalArgument(key(part), part.sourceText ?? part.original, options)) };
@@ -1943,7 +1969,8 @@ function actionTailIsRegimenModifier(
   index: number,
   definition: ActionDefinition | undefined,
   input: string,
-  options?: ParseOptions
+  options?: ParseOptions,
+  negatedAction = false
 ): boolean {
   const token = key(parts[index]);
   if (!token) return false;
@@ -1951,6 +1978,14 @@ function actionTailIsRegimenModifier(
   // become a second global medication administration event.
   if (definition?.argumentParser === "duration-activity" &&
       resolveMedicationInstructionConcept(token, options)?.role === AdviceArgumentRole.Time) {
+    return false;
+  }
+  // A negated procedural directive may take a meal/event lexeme as its
+  // OBJECT, not schedule an unrelated medication. "Do not skip meals"
+  // therefore keeps the complete source-backed counseling action instead
+  // of creating medication timing WITH MEALS.
+  if (negatedAction && definition?.procedural &&
+      !definition.primaryAdministrationHead && EVENT_TIMING_TOKENS[token]) {
     return false;
   }
   // A time-like adjective can modify an explicitly typed presentation noun
@@ -2113,7 +2148,9 @@ export function parseInstructionActions(
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
       const currentKey = key(parts.slice(index, index + 1)[0]);
-      if (actionTailIsRegimenModifier(parts, actionStart, index, startingMatch?.definition, sourceText, options)) {
+      if (actionTailIsRegimenModifier(
+        parts, actionStart, index, startingMatch?.definition, sourceText, options, negative
+      )) {
         end = index;
         break;
       }
@@ -2465,6 +2502,27 @@ function pushOpaqueSpan(target: CanonicalSourceSpan[], span: CanonicalSourceSpan
   target.push({ ...span, tokenIndices: span.tokenIndices?.slice() });
 }
 
+function trailingDiscourseConnectorSpan(
+  input: string,
+  start: number,
+  end: number
+): CanonicalSourceSpan | undefined {
+  if (end <= start) return undefined;
+  const source = input.slice(start, end);
+  const parts = lexInput(source);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (!ACTION_DISCOURSE_CONNECTORS.has(key(part))) continue;
+    if (!/^[\s,()\-]*$/u.test(source.slice(part.sourceEnd))) return undefined;
+    return {
+      start: start + part.sourceStart,
+      end: start + part.sourceEnd,
+      text: input.slice(start + part.sourceStart, start + part.sourceEnd)
+    };
+  }
+  return undefined;
+}
+
 function doseSourceRange(clause: CanonicalSigClause): TextRange | undefined {
   for (const evidence of clause.evidence) {
     if (!evidence.rule.startsWith("hpsg.lex.dose")) continue;
@@ -2666,6 +2724,36 @@ function actionSemanticScore(frame: AdviceFrame): number {
   return score;
 }
 
+function sourceBackedTimeExtension(
+  existing: AdviceFrame,
+  candidate: AdviceFrame
+): boolean {
+  if (
+    existing.span.start !== candidate.span.start ||
+    candidate.span.end <= existing.span.end ||
+    existing.relation !== candidate.relation ||
+    !candidate.sourceText.startsWith(existing.sourceText)
+  ) return false;
+  const existingTime = existing.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  const candidateTime = candidate.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  if (!existingTime || !candidateTime) return false;
+  const existingSurface = normalizedInstructionSurface(existingTime.text ?? existingTime.normalized ?? "");
+  const candidateSurface = normalizedInstructionSurface(candidateTime.text ?? candidateTime.normalized ?? "");
+  if (!existingSurface || !candidateSurface.startsWith(`${existingSurface} `)) return false;
+  return existing.args.every((arg) => {
+    if (arg === existingTime) return true;
+    const surface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
+    return candidate.args.some((next) =>
+      next.role === arg.role &&
+      normalizedInstructionSurface(next.text ?? next.normalized ?? "") === surface &&
+      next.quantity?.value === arg.quantity?.value &&
+      next.quantity?.unit === arg.quantity?.unit &&
+      next.quantity?.range?.low === arg.quantity?.range?.low &&
+      next.quantity?.range?.high === arg.quantity?.range?.high
+    );
+  });
+}
+
 function actionAddsStructuredMeaning(frame: AdviceFrame): boolean {
   return frame.args.some((arg) =>
     Boolean(
@@ -2801,7 +2889,10 @@ function pushActionIfUnique(
     }
     const existingScore = actionSemanticScore(existing);
     const nextScore = actionSemanticScore(frame);
-    if (nextScore > existingScore) target[existingIndex] = frame;
+    if (
+      nextScore > existingScore ||
+      nextScore === existingScore && sourceBackedTimeExtension(existing, frame)
+    ) target[existingIndex] = frame;
     return false;
   }
   target.push(frame);
@@ -3217,6 +3308,24 @@ export function buildInstructionGraph(
   if (!actions.length && !opaqueSpans.length) return undefined;
   promoteDoseFromDefiningAction(clause, actions, options);
   attachDoseToNearestAction(actions, clause, input, options);
+  // HPSG evidence can own the entire ", but <instruction>" span while the
+  // action frame correctly begins at the verb. Retain the closed-class
+  // discourse daughter separately so graph realization does not turn
+  // contrast into temporal sequence. This bounded scan runs only when a
+  // surviving post-administration action exists.
+  if (primaryAdministrationSpan) {
+    const ordered = actions.slice().sort((left, right) => left.span.start - right.span.start);
+    let floor = primaryAdministrationSpan.end;
+    for (const action of ordered) {
+      if (action.span.start < primaryAdministrationSpan.end) {
+        floor = Math.max(floor, action.span.end);
+        continue;
+      }
+      const connector = trailingDiscourseConnectorSpan(input, floor, action.span.start);
+      if (connector) pushOpaqueSpan(opaqueSpans, connector);
+      floor = Math.max(floor, action.span.end);
+    }
+  }
   const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions);
   if (!clause.method && actions.length) {
     const firstStart = Math.min(...actions.map((action) => action.span.start));
@@ -3350,9 +3459,15 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
 
   const relationTargetArg = objectArgs.length > 1 ? objectArgs[1] : undefined;
   const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
-  const materialArgument = relationTargetArg &&
-    (relationTargetArg.role === AdviceArgumentRole.Substance ||
-      relationTargetArg.role === AdviceArgumentRole.Material);
+  const materialArgument = relationTargetArg && (
+    relationTargetArg.role === AdviceArgumentRole.Substance ||
+    relationTargetArg.role === AdviceArgumentRole.Material ||
+    // An uncoded but source-backed second Object remains the accompaniment
+    // of WITH (e.g. wipe excess with clean tissue). Treat its existing
+    // semantic relation as the licence; do not silently discard it.
+    (relationTargetArg.role === AdviceArgumentRole.Object &&
+      relationHasSemanticClass(c.frame.relation, "accompaniment"))
+  );
   const withTarget = materialArgument && c.frame.relation &&
     (relationHasSemanticClass(c.frame.relation, "accompaniment") ||
       relationHasSemanticClass(c.frame.relation, "locative"))
@@ -3428,6 +3543,12 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
       : profile.resultFormationPrefix;
     text = joinLocalizedTokens(c.locale, [
       text, joinLocalizedTokens(c.locale, [lead, c.result])
+    ]);
+  }
+  if (c.duration) {
+    text = joinLocalizedTokens(c.locale, [
+      text,
+      joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration])
     ]);
   }
   return text;
@@ -3704,7 +3825,7 @@ export function instructionGraphFullyOwnsAdvice(
   if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return false;
   const end = start + phrase.length;
   const actions = graph.actions.filter((action) =>
-    action.span.start >= start && action.span.end <= end
+    action.span.start < end && start < action.span.end
   );
   if (!actions.length) return false;
   return lexInput(graph.sourceText.slice(start, end)).every((token) => {
@@ -3714,8 +3835,30 @@ export function instructionGraphFullyOwnsAdvice(
       action.span.start <= localStart && localEnd <= action.span.end
     )) return true;
     const normalized = key(token);
-    return normalized === "," || ACTION_COORDINATION_CONNECTORS.has(normalized);
+    return normalized === "," ||
+      ACTION_COORDINATION_CONNECTORS.has(normalized) ||
+      ACTION_DISCOURSE_CONNECTORS.has(normalized);
   });
+}
+
+/** Exact source-backed discourse connector that introduces the first action
+ * after the canonical administration. This lets realization preserve contrast
+ * without pretending that it is the temporal THEN relation. */
+export function instructionGraphPostAdministrationDiscourseConnector(
+  graph: CanonicalInstructionGraph
+): CanonicalSourceSpan | undefined {
+  const primary = graph.primaryAdministrationSpan;
+  if (!primary) return undefined;
+  const firstPostAction = graph.actions
+    .filter((action) => action.span.start >= primary.end)
+    .slice()
+    .sort((left, right) => left.span.start - right.span.start)[0];
+  if (!firstPostAction) return undefined;
+  return graph.opaqueSpans?.find((span) =>
+    span.start >= primary.end && span.end <= firstPostAction.span.start &&
+    ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(span.text)) &&
+    !graph.sourceText.slice(span.end, firstPostAction.span.start).trim()
+  );
 }
 
 /** Use complete realized negative actions to recognize otherwise untyped FHIR text. */
@@ -4282,6 +4425,13 @@ export function realizeInstructionGraph(
     );
     if (postposedConditional) {
       output += localeAdapter.postposedCondition(node.text);
+      continue;
+    }
+    const discourseConnector = !previous?.understood && node.understood &&
+      ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(previous?.text ?? "")) &&
+      !graph.sourceText.slice(previous.end, node.start).trim();
+    if (discourseConnector) {
+      output += " " + localeAdapter.continuationText(node.text, true);
       continue;
     }
     const explicitRelation = previous?.understood && node.understood

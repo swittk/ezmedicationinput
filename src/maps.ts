@@ -1505,6 +1505,21 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       names: ["eyelid", "eyelids"],
       definition: { coding: { code: "80243003", display: "Eyelid" }, routeHint: RouteCode["Ophthalmic route"] }
     },
+    // Surface anatomical phrases without a verified specific SNOMED code.
+    // The existing typed inside/outside locative grammar owns administration
+    // relative to this structure; avoid assigning an invented site code.
+    {
+      names: ["lower eyelid", "lower lid"],
+      definition: { text: "lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
+    {
+      names: ["left lower eyelid", "lower left eyelid", "left lower lid"],
+      definition: { text: "left lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
+    {
+      names: ["right lower eyelid", "lower right eyelid", "right lower lid"],
+      definition: { text: "right lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
     {
       names: ["forehead"],
       definition: { coding: { code: "52795006", display: "Forehead" }, routeHint: RouteCode["Topical route"] }
@@ -2212,23 +2227,30 @@ export const DISCOURAGED_TOKENS: Record<string, string> = {
 
 export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {
   monday: FhirDayOfWeek.Monday,
+  mondays: FhirDayOfWeek.Monday,
   mon: FhirDayOfWeek.Monday,
   mond: FhirDayOfWeek.Monday,
   tuesday: FhirDayOfWeek.Tuesday,
+  tuesdays: FhirDayOfWeek.Tuesday,
   tue: FhirDayOfWeek.Tuesday,
   tues: FhirDayOfWeek.Tuesday,
   wednesday: FhirDayOfWeek.Wednesday,
+  wednesdays: FhirDayOfWeek.Wednesday,
   wed: FhirDayOfWeek.Wednesday,
   weds: FhirDayOfWeek.Wednesday,
   thursday: FhirDayOfWeek.Thursday,
+  thursdays: FhirDayOfWeek.Thursday,
   thu: FhirDayOfWeek.Thursday,
   thur: FhirDayOfWeek.Thursday,
   thurs: FhirDayOfWeek.Thursday,
   friday: FhirDayOfWeek.Friday,
+  fridays: FhirDayOfWeek.Friday,
   fri: FhirDayOfWeek.Friday,
   saturday: FhirDayOfWeek.Saturday,
+  saturdays: FhirDayOfWeek.Saturday,
   sat: FhirDayOfWeek.Saturday,
   sunday: FhirDayOfWeek.Sunday,
+  sundays: FhirDayOfWeek.Sunday,
   sun: FhirDayOfWeek.Sunday,
   จ: FhirDayOfWeek.Monday,
   จัน: FhirDayOfWeek.Monday,

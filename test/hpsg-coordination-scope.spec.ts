@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  lintSig, nextDueDoses
+  lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import {
@@ -44,11 +44,14 @@ function scopeFacts(overrides: Partial<CoordinationScopeFacts> = {}): Coordinati
     rightHasSchedule: true,
     leftHasCadence: false,
     rightHasCadence: true,
+    leftHasCourseDuration: false,
+    rightHasCourseDuration: false,
     leftHasPrn: false,
     rightHasPrn: false,
     leftHasFrontedSchedule: false,
     leftHasFrontedPrn: false,
     rightHasTrailingSchedule: true,
+    rightHasTrailingCourseDuration: false,
     rightHasTrailingPrn: false,
     rightHasTrailingSafetyGuard: false,
     ...overrides
@@ -397,6 +400,38 @@ describe('HPSG coordination cadence scope', () => {
       rightType: 'administration-clause'
     });
     expect(selected?.construction.headSide).toBeUndefined();
+  });
+
+  it('licenses shared course scope only from a terminal typed course daughter', () => {
+    const shared = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      leftHasSchedule: true,
+      leftHasCadence: true,
+      rightHasCourseDuration: true,
+      rightHasTrailingCourseDuration: true
+    }));
+    expect(shared?.semantic.construction).toMatchObject({
+      id: 'hpsg.cx.coordination.dosed-head-ellipsis-with-trailing-course-duration',
+      operation: 'inherit-administration-head-and-share-trailing-course-duration'
+    });
+
+    const localLeftCourse = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      leftHasSchedule: true,
+      leftHasCadence: true,
+      leftHasCourseDuration: true,
+      rightHasCourseDuration: true,
+      rightHasTrailingCourseDuration: true
+    }));
+    expect(localLeftCourse?.semantic.construction.operation)
+      .toBe('inherit-administration-head');
+
+    const independent = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      relation: { ...scopeFacts().relation, kind: 'independent' },
+      leftHasSchedule: true,
+      leftHasCadence: true,
+      rightHasCourseDuration: true,
+      rightHasTrailingCourseDuration: true
+    }));
+    expect(independent).toBeUndefined();
   });
 
   it('selects the typed adjunct daughter as the coordination head', () => {
@@ -1024,6 +1059,172 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
       .toEqual([7, 7]);
     expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each([
+    '1 drop OD BID and 2 drops OS QID, continue for 14 days',
+    'Instill 1 drop right eye BID and 2 drops left eye QID; continue for14days',
+    '1 drop OD BID and 2 drops OS QID for14days'
+  ])('scopes the typed terminal course over both coordinated eye doses: %s', input => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.frequency))
+      .toEqual([2, 4]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
+      .toEqual([14, 14]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration))
+      .toEqual([
+        expect.objectContaining({ value: 14, code: 'd' }),
+        expect.objectContaining({ value: 14, code: 'd' })
+      ]);
+
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(item => item.timing?.repeat?.boundsDuration))
+      .toEqual([
+        expect.objectContaining({ value: 14, code: 'd' }),
+        expect.objectContaining({ value: 14, code: 'd' })
+      ]);
+    const restoredR6 = toDosageDetails(strictR5);
+    expect(restoredR6.step).toHaveLength(1);
+    expect(restoredR6.step[0].component).toHaveLength(2);
+    expect(restoredR6.step[0].end?.offsetDuration)
+      .toMatchObject({ value: 14, code: 'd' });
+    expect(parsed.input).toBe(input);
+  });
+
+  it('consumes typed continue-treatment duration valence without depending on its surface verb', () => {
+    const input = '1 drop OD BID and 2 drops OS QID, persist for 14 days';
+    const parsed = parseSig(input, {
+      instructionActionMap: {
+        persist: {
+          code: 'continue-treatment',
+          semanticClass: 'course',
+          display: 'Continue treatment',
+          procedural: true,
+          argumentParser: 'duration',
+          realizer: 'duration'
+        }
+      }
+    });
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([14, 14]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
+      .toEqual([14, 14]);
+    expect(parsed.items[1].meta.canonical.clauses[0].instructionGraph?.actions[0])
+      .toMatchObject({
+        predicate: { lemma: 'continue-treatment', semanticClass: 'course' },
+        args: [{ role: 'duration', quantity: { value: 14, unit: 'd' } }]
+      });
+    expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
+      item.rule === 'hpsg.cx.coordination.trailing-shared-course-duration'
+    )).toBe(true);
+  });
+
+  it('keeps explicit eye-specific courses local instead of spreading the terminal course', () => {
+    const parsed = parseSig(
+      '1 drop OD BID for 7 days and 2 drops OS QID for 14 days'
+    );
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([7, 14]);
+    expect(parsed.fhirNext.step[0].end).toBeUndefined();
+  });
+
+  it.each([
+    '1 drop OD BID; 2 drops OS QID for 14 days',
+    '1 drop OD BID; 2 drops OS QID, continue for 14 days'
+  ])('keeps a terminal eye course on its semicolon-independent regimen: %s', input => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.site?.text))
+      .toEqual(['right eye', 'left eye']);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([undefined, 14]);
+    expect(parsed.fhirNext.step[0].end).toBeUndefined();
+    expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
+      item.rule.includes('shared-course-duration')
+    )).toBe(false);
+  });
+
+  it.each([
+    {
+      input: 'Take 1 tab qAM and 2 tabs qPM for 7 days',
+      doses: [1, 2],
+      whens: ['MORN', 'EVE'],
+      duration: 7,
+      unit: 'd'
+    },
+    {
+      input: 'Take 0.5 tablet each morning and 1.5 tablets each evening for 14 days',
+      doses: [0.5, 1.5],
+      whens: ['MORN', 'EVE'],
+      duration: 14,
+      unit: 'd'
+    },
+    {
+      input: 'รับประทาน ครึ่งเม็ดเช้า และ 1 เม็ดเย็น 2 สัปดาห์',
+      doses: [0.5, 1],
+      whens: ['MORN', 'EVE'],
+      duration: 2,
+      unit: 'wk'
+    }
+  ])('scopes one terminal course over distinct coordinated daily doses: $input', ({
+    input, doses, whens, duration, unit
+  }) => {
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual(doses);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when?.[0]))
+      .toEqual(whens);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration))
+      .toEqual([
+        expect.objectContaining({ value: duration, code: unit }),
+        expect.objectContaining({ value: duration, code: unit })
+      ]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
+      .toEqual([duration, duration]);
+    expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
+      item.rule === 'hpsg.cx.coordination.dosed-head-ellipsis-with-trailing-course-duration'
+    )).toBe(true);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(2);
+    expect(parsed.fhirNext.step[0].end?.offsetDuration).toMatchObject({
+      value: duration,
+      code: unit
+    });
+    expect(parsed.input).toBe(input);
+  });
+
+  it('keeps explicitly distinct coordinated course durations local to each slot', () => {
+    const parsed = parseSig(
+      'Take 1 tab qAM for 3 days and 2 tabs qPM for 7 days'
+    );
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([3, 7]);
+    expect(parsed.items.map(item => item.meta.canonical.clauses[0].schedule?.duration))
+      .toEqual([3, 7]);
+    expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
+      item.rule.includes('shared-course-duration')
+    )).toBe(false);
+  });
+
+  it('does not spread a terminal duration across an independent regimen boundary', () => {
+    const parsed = parseSig('Take 1 tab qAM; Take 2 tabs qPM for 7 days');
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.boundsDuration?.value))
+      .toEqual([undefined, 7]);
+    expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
+      item.rule.includes('shared-course-duration')
+    )).toBe(false);
   });
 
   it('preserves an explicit left cadence instead of overriding it', () => {

@@ -275,6 +275,7 @@ function cleanupClause(state: ParserState): void {
       schedule.duration === undefined &&
       schedule.durationMax === undefined &&
       schedule.durationUnit === undefined &&
+      schedule.administrationOffsetMinutes === undefined &&
       schedule.boundsStart === undefined &&
       schedule.boundsEnd === undefined &&
       schedule.frequency === undefined &&

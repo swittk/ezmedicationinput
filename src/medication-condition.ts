@@ -21,9 +21,12 @@ const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\
 const NUMERIC_IF_GUARD = new RegExp(
   String.raw`(?:\bif\b\s+|หาก\s*|ถ้า\s*|เมื่อ\s*)(?=[^,;]*?${OPERATOR}\s*${NUMBER})`, "iu"
 );
-const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(%|mmhg|mg/dl|mmol/l|bpm|°c|c|องศา)?$`, "iu");
+const MEASUREMENT_UNIT = String.raw`(?:%|mmhg|mg/dl|mmol/l|bpm|kg|lbs?|°c|c|องศา)`;
+const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(${MEASUREMENT_UNIT})?$`, "iu");
+const HEADLESS_MEASUREMENT = new RegExp(`^(${OPERATOR})\\s*(${NUMBER})\\s*(${MEASUREMENT_UNIT})?$`, "iu");
 const SEPARATOR_OR = /\s+or\s+|\s*หรือ\s*/iu;
 const SEPARATOR_AND = /\s+and\s+|\s*และ\s*/iu;
+const ALTERNATE_CUE = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\b|(?:มิฉะนั้น|ไม่เช่นนั้น)/iu;
 
 function canonicalOperator(value: string): "gt" | "ge" | "lt" | "le" | "eq" {
   const term = value.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -41,7 +44,12 @@ function stateName(value: string): string {
     .replace(/[\s,.;]+$/gu, "").trim();
 }
 
-function parseAtom(input: string): MedicationCondition {
+interface MeasurementHead {
+  name: string;
+  unit?: string;
+}
+
+function parseAtom(input: string, inheritedHead?: MeasurementHead): MedicationCondition {
   const text = input.trim();
   const numeric = text.match(MEASUREMENT);
   if (numeric && numeric[1].trim() && Number.isFinite(Number(numeric[3]))) {
@@ -52,6 +60,19 @@ function parseAtom(input: string): MedicationCondition {
       operation: canonicalOperator(numeric[2]),
       value: Number(numeric[3]),
       ...(numeric[4] ? { unit: numeric[4] } : {}),
+      text
+    };
+  }
+  const headless = inheritedHead ? text.match(HEADLESS_MEASUREMENT) : undefined;
+  if (headless && inheritedHead && Number.isFinite(Number(headless[2]))) {
+    return {
+      kind: "measurement",
+      name: inheritedHead.name,
+      operation: canonicalOperator(headless[1]),
+      value: Number(headless[2]),
+      ...(headless[3] || inheritedHead.unit
+        ? { unit: headless[3] ?? inheritedHead.unit }
+        : {}),
       text
     };
   }
@@ -66,18 +87,53 @@ function parseAtom(input: string): MedicationCondition {
   return { kind: "text", text };
 }
 
-function parseAnd(text: string): MedicationCondition {
+function lastMeasurementHead(condition: MedicationCondition): MeasurementHead | undefined {
+  const last = condition.kind === "all" || condition.kind === "any"
+    ? condition.conditions[condition.conditions.length - 1]
+    : condition;
+  if (!last) return undefined;
+  if (last.kind === "measurement") {
+    return { name: last.name, ...(last.unit ? { unit: last.unit } : {}) };
+  }
+  return last.kind === "all" || last.kind === "any"
+    ? lastMeasurementHead(last) : undefined;
+}
+
+function hasTypedMeasurement(condition: MedicationCondition): boolean {
+  if (condition.kind === "measurement") return true;
+  if (condition.kind === "all" || condition.kind === "any") {
+    return condition.conditions.some(hasTypedMeasurement);
+  }
+  if (condition.kind === "not") return hasTypedMeasurement(condition.condition);
+  return false;
+}
+
+function parseAnd(text: string, inheritedHead?: MeasurementHead): MedicationCondition {
   const parts = text.split(SEPARATOR_AND).map(part => part.trim()).filter(Boolean);
-  return parts.length > 1
-    ? { kind: "all", conditions: parts.map(parseAtom) }
-    : parseAtom(text);
+  if (parts.length <= 1) return parseAtom(text, inheritedHead);
+  const conditions: MedicationCondition[] = [];
+  let sharedHead = inheritedHead;
+  for (const part of parts) {
+    const condition = parseAtom(part, sharedHead);
+    conditions.push(condition);
+    sharedHead = lastMeasurementHead(condition);
+  }
+  return { kind: "all", conditions };
 }
 
 function parseExpression(text: string): MedicationCondition {
   const parts = text.split(SEPARATOR_OR).map(part => part.trim()).filter(Boolean);
-  return parts.length > 1
-    ? { kind: "any", conditions: parts.map(parseAnd) }
-    : parseAnd(text);
+  if (parts.length <= 1) return parseAnd(text);
+  const conditions: MedicationCondition[] = [];
+  let sharedHead: MeasurementHead | undefined;
+  for (const part of parts) {
+    const condition = parseAnd(part, sharedHead);
+    conditions.push(condition);
+    // An omitted head in the next alternative is licensed by an adjacent
+    // typed measurement constituent, not arbitrary text or a new parse pass.
+    sharedHead = lastMeasurementHead(condition);
+  }
+  return { kind: "any", conditions };
 }
 
 function trailingClauseBoundary(text: string): number {
@@ -103,6 +159,8 @@ export interface ParsedMedicationGuard {
   otherwiseHold: boolean;
   /** Distinct source span of an explicit otherwise-hold action. */
   otherwise?: { start: number; end: number };
+  /** Source span of the generic ELSE branch marker, independent of payload. */
+  alternative?: { start: number; end: number };
 }
 
 /**
@@ -113,7 +171,8 @@ export interface ParsedMedicationGuard {
  * A free-text guard is NOT ignored: scheduling requires a caller evaluator.
  */
 export function parseMedicationGuard(source: string): ParsedMedicationGuard | undefined {
-  const lead = GUARD_LEAD.exec(source) ?? NUMERIC_IF_GUARD.exec(source);
+  const explicitLead = GUARD_LEAD.exec(source);
+  const lead = explicitLead ?? NUMERIC_IF_GUARD.exec(source);
   if (!lead) return undefined;
   const negated = /^(?:unless|เว้นแต่|ยกเว้นกรณี)/iu.test(lead[0]);
   const tailStart = lead.index + lead[0].length;
@@ -121,15 +180,28 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
   let end = source.length;
   let otherwise: { start: number; end: number } | undefined;
   let otherwiseHold = false;
+  const alternateCue = ALTERNATE_CUE.exec(tail);
+  const alternative = alternateCue
+    ? {
+        start: tailStart + alternateCue.index,
+        end: tailStart + alternateCue.index + alternateCue[0].length
+      }
+    : undefined;
   const elseMatch = OTHERWISE_HOLD.exec(tail);
   if (elseMatch) {
     otherwiseHold = true;
     end = tailStart + elseMatch.index;
     otherwise = { start: end, end: end + elseMatch[0].length };
     tail = tail.slice(0, elseMatch.index);
-  } else if (/\b(?:otherwise|else)\b|มิฉะนั้น|ไม่เช่นนั้น/iu.test(tail)) {
-    // A different alternate *dose* is not the same as withholding the dose.
-    return undefined;
+  } else {
+    if (alternateCue) {
+      // A different alternate dose is not a withholding action, but it does
+      // not erase the typed guard on the first administration. End this
+      // constituent before ELSE and leave the alternate branch unconsumed for
+      // regimen coordination.
+      end = tailStart + alternateCue.index;
+      tail = tail.slice(0, alternateCue.index);
+    }
   }
   // Prefixed guards end before the administration. Suffixed guards end at
   // the next clause boundary so trailing maxima/advice remain independently
@@ -153,6 +225,10 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
   const phrase = tail.trim().replace(/[.!?;,]+$/gu, "").trim();
   if (!phrase) return undefined;
   const expression = parseExpression(phrase);
+  // A numeric-looking IF/WHEN is not a medication guard merely because
+  // a later maximum-dose adjunct mentions a number (Thai symptom PRN +
+  // "no more than 3/day"). Only the typed measurement daughter licenses it.
+  if (!explicitLead && !hasTypedMeasurement(expression)) return undefined;
   const condition: MedicationCondition = negated
     ? { kind: "not", condition: expression }
     : expression;
@@ -160,7 +236,8 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
     condition, start: lead.index, end,
     text: source.slice(lead.index, end),
     otherwiseHold,
-    ...(otherwise ? { otherwise } : {})
+    ...(otherwise ? { otherwise } : {}),
+    ...(alternative ? { alternative } : {})
   };
 }
 

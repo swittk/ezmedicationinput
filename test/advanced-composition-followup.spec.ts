@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, fromFhirDosage,
-  getDosageCondition, toDosageDetails, toFhirR5Dosages
+  getDosageCondition, getDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages,
+  parseSig as parseProductionSig
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { resolveBodySitePhrase } from "../src/body-site-grammar";
 import { parseClauseSign } from "../src/parser";
 import type { BodySiteRestriction } from "../src/types";
 import { HPSG_TYPE_SYSTEM, type HpsgFeatureNode } from "../src/hpsg/type-system";
-import { BODY_SITE_RESTRICTION_EXTENSION_URL } from "../src/fhir";
+import {
+  BODY_SITE_RESTRICTION_EXTENSION_URL,
+  ADMINISTRATION_OFFSET_EXTENSION_URL,
+  getAdministrationOffsetMinutes
+} from "../src/fhir";
 
 const CUSTOM_RELATIVE_SITE_MAP = {
   moob: {
@@ -1711,5 +1716,194 @@ describe("registered nominal compounds own product-like words", () => {
     expect(topical.fhir.route?.coding?.[0]?.code).toBe("6064005");
     const everyOther = parseSig("Take 1 tablet every other day");
     expect(everyOther.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "d" });
+  });
+});
+
+
+describe("independent release oracles for newly observed realistic clinical errors", () => {
+  it.each([
+    "Take 1 tablet if BG above 180; otherwise skip",
+    "Take 1 tablet if BG above 180, otherwise skip"
+  ])("does not reverse the condition for a positive dose with a negative ELSE: %s", (source) => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "measurement", name: "bg", operation: "gt", value: 180
+    });
+    expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]))
+      .toMatchObject({ kind: "measurement", operation: "gt", value: 180 });
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each([
+    "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg; otherwise take 1 tablet daily"
+  ])("does not transform a conditional weight threshold into a medicine dose: %s", source => {
+    const parsed = parseSig(source);
+    const doseQuantities = parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity);
+    expect(doseQuantities).not.toContainEqual(expect.objectContaining({ value: 70, unit: "kg" }));
+    expect(doseQuantities).toContainEqual(expect.objectContaining({ value: 2, unit: "tab" }));
+    expect(doseQuantities).toContainEqual(expect.objectContaining({ value: 1, unit: "tab" }));
+    expect(parsed.items.some(item => item.fhir.asNeeded === true)).toBe(false);
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each([
+    "Take one and a half tablets every morning",
+    "Take 1 and a half tablets every morning"
+  ])("keeps additive fractional dose rather than interpreting only the half: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 1.5, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat?.when).toEqual(["MORN"]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("interprets plural weekday daughters as calendar rather than anatomical sites", () => {
+    const parsed = parseSig("Take 1 tablet on Mondays Wednesdays and Fridays, and 2 tablets on Saturdays");
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(rows.map(row => row.site)).toEqual([undefined, undefined]);
+    expect(rows.map(row => row.timing?.repeat?.dayOfWeek)).toEqual([
+      ["mon", "wed", "fri"], ["sat"]
+    ]);
+  });
+
+  it.each([
+    "Take 2 tablets now, then 1 tablet after 12 hours",
+    "Take 2 tablets immediately, then 1 tablet in 12 hours"
+  ])("represents a one-time delayed second administration without inventing course or nasal route: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([2, 1]);
+    expect(rows[0].timing?.repeat?.when).toEqual(["IMD"]);
+    expect(rows[1].route?.coding?.[0]?.code).toBe("26643006");
+    expect(rows[1].timing?.repeat?.boundsDuration).toBeUndefined();
+    const course = parsed.fhirNext;
+    const hasDelay = course.step.some(step => step.start?.offsetDuration?.value === 12 &&
+      step.start.offsetDuration.code === "h");
+    expect(hasDelay).toBe(true);
+    // The historical test adapter exposes only the first dosage as .fhir;
+    // check the shipping API's complete flattened, course-marked R5 array.
+    const extendedR5 = toDosageDetails(parseProductionSig(source).fhir);
+    expect(extendedR5.step.some(step => step.start?.offsetDuration?.value === 12 &&
+      step.start.offsetDuration.code === "h")).toBe(true);
+    const strictR5 = toFhirR5Dosages(course);
+    expect(toDosageDetails(strictR5).step.some(step =>
+      step.start?.offsetDuration?.value === 12 &&
+      step.start.offsetDuration.code === "h")).toBe(true);
+  });
+
+  it("retains a second OD BID phase when its duration is phrased as five more days", () => {
+    const parsed = parseSig("OD 1 drop q2h for 2 days, then BID for 5 more days. OS 1 drop nightly for 7 days.");
+    const right = parsed.items.map(item => item.fhir).filter(row => row.site?.text === "right eye");
+    expect(right.some(row => row.timing?.repeat?.period === 2 &&
+      row.timing?.repeat?.periodUnit === "h")).toBe(true);
+    expect(right.some(row => row.timing?.repeat?.frequency === 2 &&
+      row.timing?.repeat?.boundsDuration?.value === 5)).toBe(true);
+  });
+
+  it("does not erase an explicit Sunday exclusion and four-week course", () => {
+    const parsed = parseSig("Take 1 tablet every day except Sunday for 4 weeks");
+    const row = parsed.fhir;
+    expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(row.timing?.repeat?.boundsDuration?.value).toBe(4);
+    expect(row.timing?.repeat?.boundsDuration?.code).toBe("wk");
+    const ordinaryDays = row.timing?.repeat?.dayOfWeek;
+    const excluded = getDosageExcludedWeekdays(row);
+    // The R5 calendar may use either explicit included weekdays or the
+    // existing source-preserving excluded-weekdays extension.
+    expect(
+      ordinaryDays?.length === 6 && !ordinaryDays.includes("sun") ||
+      excluded.includes("sun")
+    ).toBe(true);
+  });
+
+  it.each([
+    ["Take 1 tab qAM and 2 tabs qPM for 7 days", 7, "d"],
+    ["Take 0.5 tablet each morning and 1.5 tablets each evening for 14 days", 14, "d"],
+    ["รับประทาน ครึ่งเม็ดเช้า และ 1 เม็ดเย็น 2 สัปดาห์", 2, "wk"]
+  ] as const)("applies a terminal course duration to both coordinated daily doses: %s", (source, value, code) => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    const rows = parsed.items.map(item => item.fhir);
+    expect(rows.map(row => row.timing?.repeat?.boundsDuration)).toEqual([
+      expect.objectContaining({ value, code }),
+      expect.objectContaining({ value, code })
+    ]);
+    const strict = toFhirR5Dosages(toDosageDetails(rows));
+    expect(strict.map(row => row.timing?.repeat?.boundsDuration))
+      .toEqual(rows.map(row => row.timing?.repeat?.boundsDuration));
+  });
+
+  it("retains an offset-only external R5 dosage when importing canonical semantics", () => {
+    const external = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      modifierExtension: [{
+        url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+        valueQuantity: { value: 720, unit: "min", system: "http://unitsofmeasure.org", code: "min" }
+      }]
+    };
+    const imported = fromFhirDosage(external);
+    expect(imported.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
+      .toBe(720);
+    expect(getAdministrationOffsetMinutes(imported.fhir)).toBe(720);
+    const strict = toFhirR5Dosages(toDosageDetails([external]));
+    expect(getAdministrationOffsetMinutes(strict[0])).toBe(720);
+    expect(fromFhirDosage(strict[0]).meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
+      .toBe(720);
+  });
+
+  it("keeps a single delayed administration as an R6 treatment-relative step", () => {
+    const source = "Take 1 tablet after 12 hours";
+    const parsed = parseProductionSig(source);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
+      .toBe(720);
+    expect(getAdministrationOffsetMinutes(parsed.fhir[0])).toBe(720);
+    expect(parsed.fhirNext.step[0]?.start?.offsetDuration)
+      .toMatchObject({ value: 12, code: "h" });
+    const restored = toDosageDetails(parsed.fhir);
+    expect(restored.step[0]?.start?.offsetDuration)
+      .toMatchObject({ value: 12, code: "h" });
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]?.start?.offsetDuration)
+      .toMatchObject({ value: 12, code: "h" });
+  });
+
+  it.each([
+    "Take 1 tablet only if SBP below 90 or above 180",
+    "Take 1 tablet only if glucose <70 or >180"
+  ])("inherits the same measurement head across OR's headless comparison: %s", source => {
+    const parsed = parseSig(source);
+    const condition = getDosageCondition(parsed.fhir);
+    expect(condition).toMatchObject({
+      kind: "any",
+      conditions: [
+        { kind: "measurement", operation: "lt" },
+        { kind: "measurement", operation: "gt" }
+      ]
+    });
+    if (condition?.kind === "any" &&
+      condition.conditions[0]?.kind === "measurement" &&
+      condition.conditions[1]?.kind === "measurement") {
+      expect(condition.conditions[1].name).toBe(condition.conditions[0].name);
+    }
+    expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]))
+      .toEqual(condition);
+  });
+
+  it("keeps two SBP bounds on the same measurement", () => {
+    const parsed = parseSig("Take one tablet only if SBP above 100 and below 160");
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "all",
+      conditions: [
+        { kind: "measurement", name: "sbp", operation: "gt", value: 100 },
+        { kind: "measurement", name: "sbp", operation: "lt", value: 160 }
+      ]
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
 import { grammaticalTrailingInstructionScope } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
 import type { ParserState } from '../parser-state';
-import { AdvicePolarity } from '../types';
+import { AdviceArgumentRole, AdvicePolarity, FhirPeriodUnit } from '../types';
 import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
 import { resolveEventTimingExpression } from '../event-timing-expression';
 import { EVENT_TIMING_TOKENS } from '../maps';
@@ -252,7 +252,8 @@ interface ScheduleMergeResult {
 /** Merge whole typed feature groups while preserving explicit local groups. */
 function mergeScheduleFeatureGroups(
   recipient: CanonicalScheduleExpr | undefined,
-  donor: CanonicalScheduleExpr | undefined
+  donor: CanonicalScheduleExpr | undefined,
+  eligibleGroups: readonly ScheduleFeatureGroup[] = SCHEDULE_GROUP_NAMES
 ): ScheduleMergeResult {
   if (!scheduleHasSemantics(donor)) {
     return { schedule: recipient, fields: [], groups: new Set() };
@@ -262,7 +263,7 @@ function mergeScheduleFeatureGroups(
   const fields: string[] = [];
   const groups = new Set<ScheduleFeatureGroup>();
 
-  for (const group of SCHEDULE_GROUP_NAMES) {
+  for (const group of eligibleGroups) {
     const groupFields = SCHEDULE_FEATURE_GROUPS[group];
     const donorFields = groupFields.filter(field =>
       hasSemanticValue(scheduleFieldValue(donor, field))
@@ -406,6 +407,95 @@ function isTrailingEvidence(clause: CanonicalSigClause, category: 'schedule' | '
   return Boolean(adjunct && dose && adjunct.start >= dose.end);
 }
 
+function scheduleGroupEvidenceBounds(
+  clause: CanonicalSigClause,
+  group: ScheduleFeatureGroup
+): { start: number; end: number } | undefined {
+  const groupFields = SCHEDULE_FEATURE_GROUPS[group] as readonly ScheduleSemanticField[];
+  let start = Infinity;
+  let end = -Infinity;
+  for (const evidence of [...(clause.schedule?.evidence ?? []), ...clause.evidence]) {
+    if (!evidence.scheduleFields?.some(field => groupFields.indexOf(field) >= 0)) continue;
+    for (const span of evidence.spans) {
+      if (span.start < start) start = span.start;
+      if (span.end > end) end = span.end;
+    }
+  }
+  return start === Infinity ? undefined : { start, end };
+}
+
+function hasCourseDuration(schedule: CanonicalScheduleExpr | undefined): boolean {
+  return Boolean(schedule?.duration !== undefined && schedule.durationUnit);
+}
+
+function instructionDurationUnit(unit: string | undefined): FhirPeriodUnit | undefined {
+  switch (unit) {
+    case FhirPeriodUnit.Second:
+    case FhirPeriodUnit.Minute:
+    case FhirPeriodUnit.Hour:
+    case FhirPeriodUnit.Day:
+    case FhirPeriodUnit.Week:
+    case FhirPeriodUnit.Month:
+    case FhirPeriodUnit.Year:
+      return unit;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A positive CONTINUE-TREATMENT action with a typed Duration valence states
+ * the course bound of its administration clause. Materialize that typed
+ * contribution before coordination selection so the ordinary course-bound
+ * construction can distribute it; no instruction wording is reparsed here.
+ */
+function materializeTypedContinueCourseDuration(clause: CanonicalSigClause): void {
+  if (hasCourseDuration(clause.schedule)) return;
+  const actions = clause.instructionGraph?.actions;
+  if (!actions?.length) return;
+  const dose = evidenceBounds(clause, 'dose');
+  for (const action of actions) {
+    if (action.predicate.lemma !== 'continue-treatment' ||
+        action.predicate.semanticClass !== 'course' ||
+        action.polarity === AdvicePolarity.Negate ||
+        dose && action.span.start < dose.end) continue;
+    const duration = action.args.find(argument =>
+      argument.role === AdviceArgumentRole.Duration && argument.span
+    );
+    const unit = instructionDurationUnit(duration?.quantity?.unit);
+    const value = duration?.quantity?.value ?? duration?.quantity?.range?.low;
+    const valueMax = duration?.quantity?.range?.high;
+    if (!duration?.span || !unit || value === undefined ||
+        !Number.isFinite(value) || value <= 0 ||
+        valueMax !== undefined && (!Number.isFinite(valueMax) || valueMax < value)) continue;
+
+    const evidence: CanonicalEvidence = {
+      rule: 'hpsg.cx.instruction.continue-treatment-course-duration',
+      spans: [{ ...duration.span, text: duration.text }],
+      scheduleFields: valueMax === undefined
+        ? ['duration', 'durationUnit']
+        : ['duration', 'durationMax', 'durationUnit'],
+      note: 'A typed positive continue-treatment action contributes its Duration valence as the regimen course bound.'
+    };
+    clause.schedule = {
+      ...(clause.schedule ?? {}),
+      duration: value,
+      durationMax: valueMax,
+      durationUnit: unit,
+      evidence: [...(clause.schedule?.evidence ?? [])]
+    };
+    appendEvidence(clause.schedule.evidence!, cloneEvidence(evidence));
+    appendEvidence(clause.evidence, evidence);
+    return;
+  }
+}
+
+function hasTrailingCourseDurationEvidence(clause: CanonicalSigClause): boolean {
+  const duration = scheduleGroupEvidenceBounds(clause, 'courseBounds');
+  const dose = evidenceBounds(clause, 'dose');
+  return Boolean(duration && dose && duration.start >= dose.end);
+}
+
 function clonePrn(prn: CanonicalPrnExpr): CanonicalPrnExpr {
   const cloneReason = (reason: NonNullable<CanonicalPrnExpr['reason']>) => ({
     ...reason,
@@ -469,11 +559,14 @@ function factsFor(
     rightHasSchedule: scheduleHasSemantics(rightClause.schedule),
     leftHasCadence: hasCadence(leftClause.schedule),
     rightHasCadence: hasCadence(rightClause.schedule),
+    leftHasCourseDuration: hasCourseDuration(leftClause.schedule),
+    rightHasCourseDuration: hasCourseDuration(rightClause.schedule),
     leftHasPrn: leftClause.prn?.enabled === true,
     rightHasPrn: rightClause.prn?.enabled === true,
     leftHasFrontedSchedule: isFrontedEvidence(leftClause, 'schedule'),
     leftHasFrontedPrn: isFrontedEvidence(leftClause, 'prn'),
     rightHasTrailingSchedule: isTrailingEvidence(rightClause, 'schedule'),
+    rightHasTrailingCourseDuration: hasTrailingCourseDurationEvidence(rightClause),
     rightHasTrailingPrn: isTrailingEvidence(rightClause, 'prn'),
     rightHasTrailingSafetyGuard: Boolean(
       (rightClause.clinicalAdjuncts?.condition &&
@@ -1133,6 +1226,9 @@ export function applyCoordinatedCadenceScopes(
   source: string
 ): CoordinationScopeApplication[] {
   const applications: CoordinationScopeApplication[] = [];
+  for (const item of states) {
+    materializeTypedContinueCourseDuration(item.state.primaryClause);
+  }
   const inheritedAdministrationSegments = new Set<number>();
   for (const relation of plan.relations) {
     if (relation.kind === 'coordination' && relation.semanticLicense === 'dose-continuation') {
@@ -1164,7 +1260,10 @@ export function applyCoordinatedCadenceScopes(
     ));
     if (!selected) continue;
     const eventEllipsis = selected.semantic.construction.operation === 'inherit-event-timing-administration';
-    const headEllipsis = selected.semantic.construction.operation === 'inherit-administration-head';
+    const headAndCourseEllipsis = selected.semantic.construction.operation ===
+      'inherit-administration-head-and-share-trailing-course-duration';
+    const headEllipsis = selected.semantic.construction.operation === 'inherit-administration-head' ||
+      headAndCourseEllipsis;
     if (eventEllipsis || headEllipsis) {
       if (pass.direction !== 'leading') continue;
       const donor = left.state.primaryClause;
@@ -1192,24 +1291,64 @@ export function applyCoordinatedCadenceScopes(
         recipient.route = cloneStructuredValue(donor.route);
         copiedFields.push('route');
       }
-      if (!copiedFields.length) continue;
-      const scopeEvidence: CanonicalEvidence = {
-        rule: selected.semantic.construction.id,
-        spans: [{ start: relation.range.start - right.start,
-          end: relation.range.end - right.start,
-          text: source.slice(relation.range.start, relation.range.end) }],
-        scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
-        note: scopedEventFields.length
-          ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
-          : 'Omitted administration inherits its typed left head; explicit dose, event timing, and conditions remain right-local.'
-      };
-      appendEvidence(recipient.evidence, scopeEvidence);
-      if (scopedEventFields.length && recipient.schedule) {
-        recipient.schedule.evidence = [...(recipient.schedule.evidence ?? [])];
-        appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
+      if (copiedFields.length) {
+        const scopeEvidence: CanonicalEvidence = {
+          rule: selected.semantic.construction.id,
+          spans: [{ start: relation.range.start - right.start,
+            end: relation.range.end - right.start,
+            text: source.slice(relation.range.start, relation.range.end) }],
+          scheduleFields: scopedEventFields.length ? scopedEventFields : undefined,
+          note: scopedEventFields.length
+            ? 'Bare event inherits omitted relative-event relation and offset; explicit right timing remains authoritative.'
+            : 'Omitted administration inherits its typed left head; explicit dose, event timing, and conditions remain right-local.'
+        };
+        appendEvidence(recipient.evidence, scopeEvidence);
+        if (scopedEventFields.length && recipient.schedule) {
+          recipient.schedule.evidence = [...(recipient.schedule.evidence ?? [])];
+          appendEvidence(recipient.schedule.evidence, cloneEvidence(scopeEvidence));
+        }
+        applications.push({ rule: selected.semantic.construction.id,
+          from: states.indexOf(left), to: states.indexOf(right), fields: copiedFields });
       }
-      applications.push({ rule: selected.semantic.construction.id,
-        from: states.indexOf(left), to: states.indexOf(right), fields: copiedFields });
+      if (headAndCourseEllipsis) {
+        const durationDonor = right.state.primaryClause;
+        const durationRecipient = left.state.primaryClause;
+        const durationMerge = mergeScheduleFeatureGroups(
+          durationRecipient.schedule,
+          durationDonor.schedule,
+          ['courseBounds']
+        );
+        if (durationMerge.fields.length && durationMerge.schedule) {
+          const inheritedDurationEvidence = sourceScheduleEvidence(
+            durationDonor,
+            durationMerge.groups
+          ).map(item => shiftEvidenceToRecipient(item, right.start, left.start));
+          const durationScopeEvidence: CanonicalEvidence = {
+            rule: selected.semantic.construction.id,
+            spans: [{
+              start: relation.range.start - left.start,
+              end: relation.range.end - left.start,
+              text: source.slice(relation.range.start, relation.range.end)
+            }],
+            scheduleFields: durationMerge.fields as CanonicalScheduleSemanticField[],
+            note: 'The source-trailing course duration scopes over both coordinated dose-and-cadence daughters.'
+          };
+          durationMerge.schedule.evidence = [...(durationRecipient.schedule?.evidence ?? [])];
+          for (const item of inheritedDurationEvidence) {
+            appendEvidence(durationMerge.schedule.evidence, cloneEvidence(item));
+            appendEvidence(durationRecipient.evidence, cloneEvidence(item));
+          }
+          appendEvidence(durationMerge.schedule.evidence, cloneEvidence(durationScopeEvidence));
+          appendEvidence(durationRecipient.evidence, cloneEvidence(durationScopeEvidence));
+          durationRecipient.schedule = durationMerge.schedule;
+          applications.push({
+            rule: selected.semantic.construction.id,
+            from: states.indexOf(right),
+            to: states.indexOf(left),
+            fields: durationMerge.fields
+          });
+        }
+      }
       continue;
     }
     const alternative = selected.semantic.construction.operation ===
@@ -1217,7 +1356,8 @@ export function applyCoordinatedCadenceScopes(
     const leading = selected.semantic.construction.operation === 'share-leading-adjuncts';
     const trailing = alternative ||
       selected.semantic.construction.operation === 'share-trailing-cadence' ||
-      selected.semantic.construction.operation === 'share-trailing-adjuncts';
+      selected.semantic.construction.operation === 'share-trailing-adjuncts' ||
+      selected.semantic.construction.operation === 'share-trailing-course-duration';
     if (!leading && !trailing) continue;
     if (leading !== (pass.direction === 'leading')) continue;
 
@@ -1225,11 +1365,19 @@ export function applyCoordinatedCadenceScopes(
     const recipient = leading ? right : left;
     const donorClause = donor.state.primaryClause;
     const targetClause = recipient.state.primaryClause;
-    const copySchedule = leading
+    const courseDurationOnly = selected.semantic.construction.operation ===
+      'share-trailing-course-duration';
+    const copySchedule = courseDurationOnly
+      ? hasTrailingCourseDurationEvidence(donorClause)
+      : leading
       ? isFrontedEvidence(donorClause, 'schedule')
       : isTrailingEvidence(donorClause, 'schedule');
     const scheduleMerge = copySchedule
-      ? mergeScheduleFeatureGroups(targetClause.schedule, donorClause.schedule)
+      ? mergeScheduleFeatureGroups(
+          targetClause.schedule,
+          donorClause.schedule,
+          courseDurationOnly ? ['courseBounds'] : SCHEDULE_GROUP_NAMES
+        )
       : { schedule: targetClause.schedule, fields: [], groups: new Set<ScheduleFeatureGroup>() };
     const inheritedEvidence = sourceScheduleEvidence(donorClause, scheduleMerge.groups).map(item =>
       shiftEvidenceToRecipient(item, donor.start, recipient.start)

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   calculateTotalUnits, lintSig, nextDueDoses, parseSig, parseSigAsync, suggestSig, toDosageDetails,
   MedicationQuantityCalculationError,
-  toFhirR5Dosages, fromFhir, FhirDayOfWeek, FhirPeriodUnit
+  toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
+  FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
 import { canonicalToFhir } from "../src/fhir";
@@ -32,6 +33,123 @@ function dailyDose(overrides: Partial<FhirDosage> = {}): FhirDosage {
     ...overrides
   };
 }
+
+describe("typed calendar and relative timing composition", () => {
+  it.each([
+    [
+      "Take 1 tablet on Mondays Wednesdays and Fridays, and 2 tablets on Saturdays",
+      [["mon", "wed", "fri"], ["sat"]]
+    ],
+    [
+      "Take 1 tablet on Tuesdays Thursdays and Sundays, and 2 tablets on Saturdays",
+      [["tue", "thu", "sun"], ["sat"]]
+    ]
+  ] as const)("keeps plural weekday lists out of anatomical site: %s", (source, expectedDays) => {
+    const parsed = parseSig(source);
+    const directR5 = parsed.items.map(item => item.fhir);
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    const r6 = parsed.fhirNext.step.flatMap(step => step.component);
+
+    for (const rows of [directR5, strictR5, r6]) {
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+      expect(rows.map(row => row.site)).toEqual([undefined, undefined]);
+      expect(rows.map(row => row.timing?.repeat?.dayOfWeek)).toEqual(expectedDays);
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each([
+    "Take 1 tablet daily except Sunday for 4 weeks",
+    "Take 1 tablet every day except on Sundays for 4 weeks"
+  ])("composes a weekday exclusion with its following course duration: %s", source => {
+    const parsed = parseSig(source);
+    const directR5 = parsed.items[0]!.fhir;
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext)[0];
+    const r6 = parsed.fhirNext.step[0]?.component[0];
+    const expectedDays = ["mon", "tue", "wed", "thu", "fri", "sat"];
+
+    expect(directR5.timing?.repeat).toMatchObject({
+      boundsDuration: { value: 4, code: "wk" }, dayOfWeek: expectedDays
+    });
+    expect(getDosageExcludedWeekdays(directR5)).toEqual(["sun"]);
+    expect(strictR5?.timing?.repeat).toMatchObject({
+      boundsDuration: { value: 4, code: "wk" }, dayOfWeek: expectedDays
+    });
+    expect(getDosageExcludedWeekdays(strictR5!)).toEqual(["sun"]);
+    expect(r6?.timing?.repeat).toMatchObject({
+      boundsDuration: { value: 4, code: "wk" }, dayOfWeek: expectedDays
+    });
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each(["more", "additional", "further"])(
+    "keeps a post-quantity %s modifier inside the typed course duration",
+    modifier => {
+      const source = `Take 1 tablet BID for 5 ${modifier} days`;
+      const parsed = parseSig(source);
+      expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({
+        duration: 5, durationUnit: "d"
+      });
+      expect(parsed.items[0]?.fhir.timing?.repeat?.boundsDuration).toMatchObject({
+        value: 5, code: "d"
+      });
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.input).toBe(source);
+    }
+  );
+
+  it.each([
+    ["Take 1 tablet after 12 hours", 720, "after 12 hours"],
+    ["Take 1 tablet in 12 hours", 720, "in 12 hours"],
+    ["Take 1 tablet 12 hours later", 720, "12 hours later"],
+    ["Take 1 tablet 1 hour later", 60, "1 hour later"],
+    ["Take 1 tablet after twelve hours", 720, "after twelve hours"],
+    ["Take 1 tablet in twelve hours", 720, "in twelve hours"],
+    ["Take 1 tablet twelve hours later", 720, "twelve hours later"]
+  ] as const)("types a relative one-time interval as an administration offset: %s", (
+    source, expectedMinutes, evidenceText
+  ) => {
+    const state = parseClauseState(source);
+    expect(state.primaryClause.schedule).toMatchObject({
+      administrationOffsetMinutes: expectedMinutes
+    });
+    expect(state.primaryClause.schedule?.frequency).toBeUndefined();
+    expect(state.primaryClause.schedule?.period).toBeUndefined();
+    expect(state.primaryClause.schedule?.duration).toBeUndefined();
+    expect(state.primaryClause.schedule?.durationUnit).toBeUndefined();
+    expect(state.primaryClause.schedule?.evidence?.some(evidence =>
+      evidence.rule === "hpsg.lex.schedule.administrationOffset.relativeInterval" &&
+      evidence.scheduleFields?.includes("administrationOffsetMinutes") &&
+      evidence.spans.some(span => span.text === evidenceText)
+    )).toBe(true);
+    expect(state.input).toBe(source);
+  });
+
+  it("keeps an infusion-local in-duration distinct from an administration offset", () => {
+    const source = "1 g IV Q 8h drip in 30 minutes";
+    const state = parseClauseState(source);
+
+    expect(state.primaryClause.schedule).toMatchObject({
+      period: 8,
+      periodUnit: "h",
+      administrationDuration: 30,
+      administrationDurationUnit: "min"
+    });
+    expect(state.primaryClause.schedule?.duration).toBeUndefined();
+    expect(state.primaryClause.schedule?.administrationOffsetMinutes).toBeUndefined();
+    expect(state.primaryClause.schedule?.evidence?.some(evidence =>
+      evidence.scheduleFields?.includes("duration") &&
+      evidence.spans.some(span => span.text === "30 minutes")
+    )).toBe(true);
+    expect(parseSig(source).items[0]?.fhir.timing?.repeat).toMatchObject({
+      period: 8,
+      periodUnit: "h",
+      duration: 30,
+      durationUnit: "min"
+    });
+    expect(state.input).toBe(source);
+  });
+});
 
 describe("schedule/supply audit regressions", () => {
   it("schedules the bilateral suggestion while supply enforces aggregate maxima", () => {

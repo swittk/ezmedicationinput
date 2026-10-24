@@ -279,6 +279,8 @@ export interface HpsgScheduleFeature {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  /** Elapsed delay before one administration, not a course duration. */
+  administrationOffsetMinutes?: number;
   boundsStart?: string;
   boundsEnd?: string;
   frequency?: number;

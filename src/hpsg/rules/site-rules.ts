@@ -10,7 +10,7 @@ import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning, h
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, RouteCode } from "../../types";
-import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate } from "../../body-site-grammar";
+import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate, type ResolvedBodySitePhrase } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
@@ -32,6 +32,7 @@ import {
 import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_SEQUENCE_MARKERS,
+  BODY_SITE_BARE_NOMINAL_PREFIXES,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
@@ -278,6 +279,30 @@ function siteI18nWithSourceText(
   const sourceLocale = inferMedicationLocale(sourceText, "en");
   if (sourceLocale === "en") return definitionI18n;
   return { ...(definitionI18n ?? {}), [sourceLocale]: sourceText };
+}
+
+/**
+ * A typed internal locative can inherit the route of its anatomical target:
+ * for example, a product placed INSIDE an ocular site uses the ocular route.
+ * External locatives do not inherit that route, and a product-only default
+ * must not erase the more specific licensed internal-site interpretation.
+ */
+function routeHintForSite(resolved: ResolvedBodySitePhrase | undefined): RouteCode | undefined {
+  const direct = resolved?.definition?.routeHint ??
+    DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
+  if (direct) return direct;
+  const features = resolved?.features;
+  if (features?.kind !== "locative" || features.relation !== "inside") return undefined;
+  const target = features.target.kind === "nominal"
+    ? features.target.canonical
+    : features.target.whole.canonical;
+  // A locative nominal carries its grammatical determiner separately from
+  // anatomy. Resolve the anatomical head using the existing lexical article
+  // class, not the entire source phrase ("the left lower eyelid").
+  const words = target.split(" ");
+  const nounStart = BODY_SITE_BARE_NOMINAL_PREFIXES.has(words[0]) ? 1 : 0;
+  const anatomy = DEFAULT_BODY_SITE_SNOMED[words.slice(nounStart).join(" ")];
+  return anatomy?.internalRouteHint ?? anatomy?.routeHint;
 }
 
 function shouldUseSiteRouteHint(sourceText: string, routeHint: RouteCode | undefined): routeHint is RouteCode {
@@ -692,8 +717,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       range = { start, end };
     }
-    const routeHint = resolved?.definition?.routeHint ??
-      DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
+    const routeHint = routeHintForSite(resolved);
     const featureScore = resolved
       ? BODY_SITE_FEATURE_SCORE_BONUS.get(resolved.features.kind) ?? 0
       : 0;
@@ -785,7 +809,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const displayText = resolved.displayText ?? sourceText;
-      const routeHint = resolved.definition?.routeHint;
+      const routeHint = routeHintForSite(resolved);
       const featureScore = BODY_SITE_FEATURE_SCORE_BONUS.get(resolved.features.kind) ?? 0;
       signs.push(
         lexicalSign({

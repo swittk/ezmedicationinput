@@ -93,6 +93,86 @@ describe("procedural instruction graph", () => {
     expect(restored?.opaqueSpans?.map((span) => span.text)).toEqual(["sing a song"]);
   });
 
+  it.each([
+    ["Take 1 tablet twice daily but skip morning dose on dialysis days.", "on dialysis days"],
+    ["Take 1 tablet daily; hold dose on dialysis days.", "on dialysis days"],
+    ["Take 1 tablet twice daily; skip the evening dose only on dialysis days.", "on dialysis days"],
+    ["Use one drop twice daily; wipe excess with clean tissue after instillation.", "with clean tissue after instillation"]
+  ])("keeps complete source-backed clinical qualifiers visible: %s", (source, advice) => {
+    const parsed = parseSig(source);
+    const rendered = parsed.longText.toLowerCase();
+    expect(rendered).toContain(advice);
+    expect(rendered).not.toContain("then but");
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized;
+    expect(restored.instructionGraph?.sourceText).toBe(source);
+  });
+
+  it.each([
+    ["Take 1 tablet daily; hold dose if nausea develops.", "if nausea develops"],
+    ["Use one drop in both eyes twice daily; do not touch dropper tip to eye.", "do not touch dropper tip to eye"]
+  ])("keeps already-correct conditional or prohibition advice exactly once: %s", (source, advice) => {
+    const rendered = parseSig(source).longText.toLowerCase();
+    expect(rendered.split(advice)).toHaveLength(2);
+  });
+
+  it("does not turn negated dietary advice into a medication meal schedule", () => {
+    const parsed = parseSig("Take 1 tablet daily. Do not skip meals during therapy.");
+    const rendered = parsed.longText.toLowerCase();
+    expect(parsed.fhir.timing?.repeat?.when ?? []).not.toContain("C");
+    expect(rendered).toContain("do not skip meals");
+    expect(rendered).toContain("during therapy");
+
+    const explicitMeal = parseSig("Take 1 tablet daily with meals. Do not skip meals.");
+    expect(explicitMeal.fhir.timing?.repeat?.when ?? []).toContain("C");
+    expect(explicitMeal.longText.toLowerCase()).toContain("do not skip meals");
+  });
+
+  it("keeps a fasting-day hold qualifier attached to the hold instruction", () => {
+    const parsed = parseSig("Take 1 tablet daily, but hold on fasting days.");
+    const rendered = parsed.longText.toLowerCase();
+    expect(rendered).toContain("hold on fasting days");
+    expect(rendered.match(/hold on fasting days/gu) ?? []).toHaveLength(1);
+    expect(rendered).not.toContain("then days");
+    expect(rendered).not.toMatch(/hold on fasting[.;]/u);
+    const hold = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions
+      .find((action) => action.predicate.lemma === "hold");
+    expect(hold?.sourceText).toBe("hold on fasting days");
+    expect(hold?.args).toContainEqual(expect.objectContaining({
+      role: "time",
+      text: "fasting days"
+    }));
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.opaqueSpans ?? [])
+      .not.toContainEqual(expect.objectContaining({ text: "days" }));
+    expect(parsed.fhir.timing?.repeat).toMatchObject({
+      frequency: 1,
+      period: 1,
+      periodUnit: "d"
+    });
+    expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.sourceText)
+      .toBe(parsed.input);
+
+    const independentException = parseSig("Take 1 tablet twice daily, except on dialysis days.");
+    expect(independentException.longText.toLowerCase()).toContain("except on dialysis days");
+  });
+
+  it.each([
+    "Take 1 tablet twice daily but skip morning dose on dialysis days.",
+    "Take 1 tablet daily, but hold on fasting days."
+  ])("keeps adversative withholding distinct from a temporal sequence: %s", (source) => {
+    const parsed = parseSig(source);
+    const rendered = parsed.longText.toLowerCase();
+    expect(rendered).toMatch(/\bbut\b.*(?:skip|hold|withhold).*on (?:dialysis|fasting) days/u);
+    expect(rendered).not.toMatch(/\bthen\b.*(?:skip|hold|withhold).*on (?:dialysis|fasting) days/u);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.opaqueSpans)
+      .toContainEqual(expect.objectContaining({ text: "but" }));
+    const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
+    expect(restored?.opaqueSpans).toContainEqual(expect.objectContaining({ text: "but" }));
+    expect(realizeInstructionGraph(restored!, "en", { position: "post" })?.toLowerCase())
+      .toMatch(/^but (?:skip|hold|withhold).*on (?:dialysis|fasting) days$/u);
+  });
+
   it("keeps Thai press and pump surfaces semantically distinct", () => {
     const press = parseSig("กด 10 วินาที", { locale: "th" });
     expect(press.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma).toBe("press");
@@ -854,6 +934,46 @@ describe("nominal medication-slot omission valence", () => {
 });
 
 
+describe("qualified non-executable counseling remains source-faithful", () => {
+  it.each([
+    "Take 1 tablet twice daily but skip morning dose on dialysis days",
+    "Take 1 tablet twice daily; hold the morning dose on dialysis days"
+  ])("does not present an unqualified withholding directive: %s", source => {
+    const parsed = parseSig(source);
+    const instruction = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions
+      .find(action => action.predicate.semanticClass === "withhold-administration" ||
+        action.predicate.lemma === "hold");
+    expect(instruction?.sourceText).toContain("dialysis days");
+    expect(instruction?.args.some(arg => arg.role === "time" &&
+      arg.text?.includes("dialysis days"))).toBe(true);
+    const en = formatSig(parsed.fhir, "long", { locale: "en" });
+    expect(en).toContain("dialysis days");
+    expect(en).not.toMatch(/withhold administration (?:the )?morning dose\.(?!.*dialysis days)/i);
+    expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.sourceText)
+      .toBe(source);
+  });
+});
+
+describe("unresolved procedural adjuncts remain conditional in patient text", () => {
+  it.each([
+    "Take 1 tablet twice daily; skip morning dose on dialysis days.",
+    "Take 1 tablet twice daily but skip morning dose on dialysis days.",
+    "Take 1 tablet twice daily; hold morning dose on dialysis days."
+  ])("keeps the complete non-executable schedule qualifier: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(2);
+    expect(parsed.meta.canonical.clauses[0]?.patientInstruction).toContain("on dialysis days");
+    const display = formatSig(parsed.fhir, "long", { locale: "en" });
+    expect(display).toMatch(/(?:skip|hold|withhold(?: administration)?)(?: the)? morning dose on dialysis days/i);
+    const directives = display.split(/[.!?]/u).filter(sentence =>
+      /(?:skip|hold|withhold(?: administration)?)(?: the)? morning dose/iu.test(sentence));
+    expect(directives.length).toBeGreaterThan(0);
+    expect(directives.every(sentence => /on dialysis days/iu.test(sentence))).toBe(true);
+    expect(parsed.input).toBe(source);
+  });
+});
+
 describe("source-backed duration valence for procedural rinsing", () => {
   it.each([
     ["one minute", 1],
@@ -920,5 +1040,52 @@ describe("source-backed duration valence for procedural rinsing", () => {
     expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.actions
       .find(frame => frame.predicate.lemma === lemma)?.args.some(arg =>
         arg.role === "duration" && arg.quantity?.value === 1)).toBe(true);
+  });
+});
+
+
+describe("qualified medication withholding remains source-faithful", () => {
+  it.each([
+    "Take 1 tablet twice daily; skip morning dose on dialysis days",
+    "Take 1 tablet twice daily but skip morning dose on dialysis days"
+  ])("preserves unresolved post-action qualifier rather than inventing unconditional withhold: %s", source => {
+    const parsed = parseSig(source);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    expect(graph?.actions.some(a => a.sourceText.includes("on dialysis days"))).toBe(true);
+    const displayed = formatSig(parsed.fhir, "long", { locale: "en" });
+    expect(displayed).toContain("on dialysis days");
+    expect(displayed).not.toMatch(/withhold administration morning dose\.$/i);
+    expect(parsed.input).toBe(source);
+  });
+});
+
+
+describe("negated dietary advice cannot schedule the medication", () => {
+  it.each([
+    ["Take 1 tablet daily. Do not miss meals.", "miss meals"],
+    ["Take 1 tablet daily. Never miss meals.", "miss meals"],
+    ["Take 1 tablet daily. Never skip meals.", "skip meals"],
+    ["Take 1 tablet daily. Do not miss breakfast.", "miss breakfast"],
+    ["Take 1 tablet daily. Do not miss any meals.", "miss any meals"],
+    ["Take 1 tablet daily. Never miss a meal.", "miss a meal"]
+  ] as const)("retains negated meal advice without inventing medication timing: %s", (source, advice) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(1);
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.longText.toLowerCase()).toContain(advice.toLowerCase());
+    const strict = toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0];
+    expect(strict.timing?.repeat?.when).toBeUndefined();
+    expect(strict.timing?.repeat?.frequency).toBe(1);
+  });
+
+  it("retains positive administration meal timing, independent of dietary negative advice", () => {
+    const meal = parseSig("Take one tablet with meals");
+    expect(meal.fhir.timing?.repeat?.when).toContain("C");
+    const breakfast = parseSig("Take one tablet after breakfast");
+    expect(breakfast.fhir.timing?.repeat?.when).toContain("PCM");
+    const alreadyCovered = parseSig("Take 1 tablet daily. Do not skip meals");
+    expect(alreadyCovered.fhir.timing?.repeat?.when).toBeUndefined();
   });
 });

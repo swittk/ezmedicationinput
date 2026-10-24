@@ -17,7 +17,12 @@ import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
-import { FREQUENCY_TIMES_WORDS, parseNumericRange } from "../timing-lexicon";
+import {
+  FREQUENCY_NUMBER_WORDS,
+  FREQUENCY_TIMES_WORDS,
+  mapIntervalUnit,
+  parseNumericRange
+} from "../timing-lexicon";
 import {
   ACTION_COORDINATION_CONNECTORS,
   BODY_SITE_PARTITIVE_CONNECTORS,
@@ -212,6 +217,15 @@ function routeTokenIsTemporalPrepositionBeforeTiming(
   if (span !== 1) return false;
   const token = context.tokens[start];
   if (!token || !SITE_ANCHORS.has(normalizeTokenLower(token))) return false;
+  const intervalValue = context.tokens[start + 1];
+  const intervalUnit = context.tokens[start + 2];
+  const intervalCardinal = intervalValue?.kind === LexKind.Number
+    ? intervalValue.value
+    : intervalValue ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(intervalValue)] : undefined;
+  if (intervalCardinal !== undefined && intervalCardinal >= 0 &&
+      intervalUnit && mapIntervalUnit(normalizeTokenLower(intervalUnit))) {
+    return true;
+  }
   let cursor = start + 1;
   while (cursor < context.limit) {
     const candidate = context.tokens[cursor];

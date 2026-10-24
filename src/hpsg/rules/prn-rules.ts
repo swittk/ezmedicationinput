@@ -746,7 +746,13 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!lead) {
       return [];
     }
+    // A numeric measurement guard belongs to the typed condition grammar.
+    // However an independently licensed symptom-onset PRN must not become a
+    // guard merely because a later, separate occurrence cap contains a
+    // numerical maximum ("when pain, no more than 3 doses daily").
     const contextualLead = matchContextualPrnReasonLead(context, start);
+    if (startsMedicationGuard(context, start) &&
+        !contextualLead && !hasSymptomOnsetPrnAt(context, start)) return [];
     const leadLower = contextualLead?.canonical ?? normalizeTokenLower(lead);
     let cursor = contextualLead?.next ?? start + 1;
     const tokens = contextualLead ? [...contextualLead.tokens] : [lead];

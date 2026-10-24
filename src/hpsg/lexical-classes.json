@@ -301,6 +301,34 @@
       "unit": "cm line"
     },
     {
+      "head": "centimeter",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimeters",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimetre",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimetres",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
       "head": "cm",
       "tails": [
         "ribbon",
@@ -636,6 +664,8 @@
     "twelfth": 0.08333333333333333,
     "twelfths": 0.08333333333333333
   },
+  "doseAdditiveQuantityConnectors": ["and"],
+  "doseFractionArticles": ["a", "an"],
   "doseNumberWords": {
     "a": 1,
     "an": 1,
@@ -1077,6 +1107,9 @@
     "half": 0.5,
     "ครึ่ง": 0.5
   },
+  "relativeIntervalTrailingRelations": {
+    "later": "after"
+  },
   "eventOffsetArticles": [
     "a",
     "an"
@@ -1473,6 +1506,10 @@
   ],
   "actionDirectivePrefixes": [
     {
+      "parts": ["never"],
+      "polarity": "negate"
+    },
+    {
       "parts": [
         "do",
         "not"
@@ -1803,6 +1840,7 @@
     "and",
     "or"
   ],
+  "actionDiscourseConnectors": ["but"],
   "actionCoordinationConnectorI18n": {
     "and": {
       "th": "และ"

@@ -1,4 +1,4 @@
-import { AdviceModality, AdvicePolarity, EventTiming, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, RouteCode } from "../types";
 import { baseLanguageTag } from "../localization";
 import {
   ACTION_SEQUENCE_MARKERS,
@@ -314,6 +314,8 @@ export const DOSE_FRACTION_WORDS = new Map<string, number>(
 export const DOSE_FRACTION_DENOMINATOR_WORDS = new Map<string, number>(
   numberEntries(source.doseFractionDenominatorWords as Record<string, number>)
 );
+export const DOSE_ADDITIVE_QUANTITY_CONNECTORS = setOf(source.doseAdditiveQuantityConnectors);
+export const DOSE_FRACTION_ARTICLES = setOf(source.doseFractionArticles);
 export const DOSE_NUMBER_WORDS = new Map<string, number>(
   numberEntries(source.doseNumberWords as Record<string, number>)
 );
@@ -387,12 +389,31 @@ export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
 export const DAY_RANGE_CONNECTORS = setOf(source.dayRangeConnectors);
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = getAdviceRelationCanonicalSetByGrammarFeature("durationLead");
+
+/** Shared source-lexical reading of an unspaced headed duration NP.
+ * HPSG schedule and procedural action grammar consume the same daughter.
+ * No semantic meaning is assigned until each consumer licenses the unit. */
+export function compactDurationParts(surface: string): {
+  value: number;
+  unitSurface: string;
+} | undefined {
+  const match = surface.toLowerCase().match(/^([a-z]+)([0-9]+(?:\.[0-9]+)?)([a-z]+)$/u);
+  if (!match || !DURATION_LEAD_TOKENS.has(match[1])) return undefined;
+  const value = Number(match[2]);
+  return Number.isFinite(value) && value > 0
+    ? { value, unitSurface: match[3] }
+    : undefined;
+}
 export const EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES =
   (source.eventOffsetMinimumLeadSequences ?? []).map((parts) => [...parts]);
 export const EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES =
   (source.eventOffsetMaximumLeadSequences ?? []).map((parts) => [...parts]);
 export const EVENT_OFFSET_FRACTIONS = new Map<string, number>(
   numberEntries(source.eventOffsetFractions ?? {})
+);
+export const RELATIVE_INTERVAL_TRAILING_RELATIONS = new Map<string, AdviceRelation>(
+  stringEntries(source.relativeIntervalTrailingRelations as Record<string, string>)
+    .map(([surface, relation]) => [surface, relation as AdviceRelation])
 );
 export const EVENT_OFFSET_ARTICLES = setOf(source.eventOffsetArticles ?? []);
 
@@ -408,6 +429,8 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   modality: prefix.modality as AdviceModality | undefined
 }));
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
+/** Closed-class contrast that connects two instructions, not a new action. */
+export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
 /** Disjunction is alternative administration, never conjunctive dose sharing.

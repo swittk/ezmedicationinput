@@ -195,7 +195,11 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
-      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+      const relation = c.time && c.frame.relation &&
+        relationHasGrammarFeature(c.frame.relation, "timeComplement")
+        ? localizeAdviceRelation(c.frame.relation, c.locale, "temporal") ?? c.frame.relation
+        : undefined;
+      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.time ? ` ${relation ?? ""} ${c.time}` : ""}`;
     }
     case "object-time": {
       const object = c.theme ?? c.site;
@@ -337,7 +341,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
-      return `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}`;
+      const relation = c.time && c.frame.relation &&
+        relationHasGrammarFeature(c.frame.relation, "timeComplement")
+        ? localizeAdviceRelation(c.frame.relation, c.locale, "temporal") ?? c.frame.relation
+        : undefined;
+      return `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}${c.time ? `${relation ?? ""}${c.time}` : ""}`;
     }
     case "object-time": {
       const object = c.theme ?? c.site;

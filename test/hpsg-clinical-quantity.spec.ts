@@ -4,6 +4,7 @@ import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalToFhir } from "../src/fhir";
 import {
   calculateTotalUnits,
+  getDosageCondition,
   nextDueDoses,
   parseSig as parsePublicSig,
   toDosageDetails,
@@ -554,4 +555,77 @@ it.each([
   expect(state.primaryClause.schedule?.administrationDurationUnit).toBe("min");
   expect(state.primaryClause.schedule?.duration).toBe(courseDuration);
   expect(state.primaryClause.schedule?.durationUnit).toBe(courseUnit);
+});
+
+
+describe("additive dose quantities and conditional measurement ownership", () => {
+  it.each([
+    ["Take one and a half tablets every morning", 1.5],
+    ["Take 1 and a half tablets every morning", 1.5],
+    ["Take two and a half tablets every morning", 2.5],
+    ["Take 2 and three quarters tablets every morning", 2.75]
+  ])("forms one typed additive quantity daughter for %s", (source, expected) => {
+    const sign = parseClauseSign(source);
+    const state = parseClauseState(source);
+    const parsed = parsePublicSig(source);
+
+    expect(sign?.synsem.head.dose).toMatchObject({ value: expected, unit: "tab" });
+    expect(sign?.evidence).toContainEqual(expect.objectContaining({
+      rule: "hpsg.lex.clinicalQuantity.additiveFractionDose"
+    }));
+    expect(state.primaryClause.dose).toEqual({ value: expected, unit: "tab" });
+    expect(state.primaryClause.leftovers).toEqual([]);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: expected,
+      unit: "tab"
+    });
+    expect(parsed.fhir[0].timing?.repeat?.when).toEqual(["MORN"]);
+    expect(parsed.input).toBe(source);
+  });
+
+  it("does not extend the shared-unit construction across an intervening tablet unit", () => {
+    const source = "Take one tablet and half a tablet every morning";
+    const sign = parseClauseSign(source);
+
+    expect(sign?.evidence).not.toContainEqual(expect.objectContaining({
+      rule: "hpsg.lex.clinicalQuantity.additiveFractionDose"
+    }));
+    expect(parsePublicSig(source).input).toBe(source);
+  });
+
+  it.each([
+    "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg; otherwise take 1 tablet daily"
+  ])("keeps the body-weight measurement distinct from both medication doses: %s", source => {
+    const parsed = parsePublicSig(source);
+    const quantities = parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity);
+    const twoTabletRow = parsed.items.find(item =>
+      item.fhir.doseAndRate?.[0]?.doseQuantity?.value === 2
+    );
+
+    expect(quantities).toContainEqual(expect.objectContaining({ value: 2, unit: "tab" }));
+    expect(quantities).toContainEqual(expect.objectContaining({ value: 1, unit: "tab" }));
+    expect(quantities).not.toContainEqual(expect.objectContaining({ value: 70, unit: "kg" }));
+    expect(getDosageCondition(twoTabletRow?.fhir ?? {})).toMatchObject({
+      kind: "measurement",
+      name: "weight",
+      operation: "gt",
+      value: 70,
+      unit: "kg"
+    });
+    expect(parsed.items.some(item => item.fhir.asNeeded === true)).toBe(false);
+    expect(parsed.input).toBe(source);
+  });
+
+  it("continues to accept an explicitly administered 70 kg product quantity", () => {
+    const source = "Administer 70 kg product daily";
+    const parsed = parsePublicSig(source);
+
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 70,
+      unit: "kg"
+    });
+    expect(parsed.input).toBe(source);
+  });
 });

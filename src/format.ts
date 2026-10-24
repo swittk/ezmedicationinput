@@ -28,7 +28,8 @@ import {
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
-  realizeInstructionGraph
+  realizeInstructionGraph,
+  instructionGraphPostAdministrationDiscourseConnector
 } from "./instruction-graph";
 import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
 import {
@@ -1374,6 +1375,23 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       ).length && instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
     }
     const normalized = normalizeInstruction(instruction.text);
+    // An uncoded shorthand advice fragment may end before a contiguous
+    // unparsed nominal tail that the typed instruction graph still retains.
+    // Prefer the graph's complete action+opaque source span, not the shorter
+    // additionalInstruction label ("hold on fasting" vs "... fasting days").
+    // This is source ownership only; no FHIR or clinical interpretation.
+    const graphOwnsLongerSource = !instruction.coding?.code &&
+      !(instruction.frames?.length) &&
+      clause.instructionGraph.actions.some((action) => {
+        const actionText = normalizeInstruction(action.sourceText);
+        return Boolean(actionText && normalized.includes(actionText) &&
+          clause.instructionGraph?.opaqueSpans?.some((opaque) =>
+            opaque.start >= action.span.end && opaque.text.trim() &&
+            !clause.instructionGraph?.sourceText
+              .slice(action.span.end, opaque.start).trim()
+          ));
+      });
+    if (graphOwnsLongerSource) return true;
     const representedByWarning = graphWarnings.some((action) => {
       const source = normalizeInstruction(action.sourceText);
       return source === normalized || source.includes(normalized) || normalized.includes(source);
@@ -1526,6 +1544,10 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const postFlowsFromAdministration = Boolean(
     !roundTrip && postGraphInstruction && primarySpanForFlow && firstPostActionForFlow &&
     firstPostActionForFlow.polarity !== AdvicePolarity.Negate &&
+    // The post-action's source-backed contrast already joins it to the
+    // administration; prefixing a generic temporal THEN reverses the
+    // connector's meaning ("but hold" is not "then but hold").
+    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!) &&
     noStrongBoundaryForFlow(primarySpanForFlow.end, firstPostActionForFlow.span.start)
   );
 

@@ -750,6 +750,88 @@ describe("clinical SIG correctness and boundary promotion", () => {
   });
 });
 
+describe("typed medication-guard polarity and measurement-head ellipsis", () => {
+  it.each([
+    "Take 1 tablet if BG above 180; otherwise skip",
+    "Take 1 tablet if BG above 180, otherwise hold",
+    "Take 1 tablet if BG above 180"
+  ])("keeps a positive administration guard affirmative: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "measurement", name: "bg", operation: "gt", value: 180
+    });
+    expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]))
+      .toEqual(getDosageCondition(parsed.fhir));
+  });
+
+  it.each([
+    ["Take one tablet only if SBP above 100 and below 160", "sbp", "gt", 100, "lt", 160],
+    ["Take 1 tablet if glucose at least 70 and less than 180", "glucose", "ge", 70, "lt", 180]
+  ] as const)("shares a typed measurement head across a conditional conjunction: %s",
+    (source, name, firstOperation, firstValue, secondOperation, secondValue) => {
+      const parsed = parseSig(source);
+      expect(getDosageCondition(parsed.fhir)).toMatchObject({
+        kind: "all",
+        conditions: [
+          { kind: "measurement", name, operation: firstOperation, value: firstValue },
+          { kind: "measurement", name, operation: secondOperation, value: secondValue }
+        ]
+      });
+      expect(parsed.fhir.asNeeded).not.toBe(true);
+    }
+  );
+
+  it.each([
+    "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily",
+    "Take 2 tablets daily if weight above 70kg, otherwise take 1 tablet daily"
+  ])("keeps a numeric IF guard typed when an explicit alternate dose follows: %s", source => {
+    const guard = parseMedicationGuard(source);
+    expect(guard?.otherwiseHold).toBe(false);
+    expect(guard?.alternative).toBeDefined();
+    expect(source.slice(guard!.alternative!.start, guard!.alternative!.end))
+      .toMatch(/otherwise|else/iu);
+    expect(guard?.condition).toMatchObject({
+      kind: "measurement", name: "weight", operation: "gt", value: 70, unit: "kg"
+    });
+    const parsed = parseSig(source);
+    expect(parsed.items.some(item => item.fhir.asNeeded === true)).toBe(false);
+    expect(parsed.items.some(item =>
+      getDosageCondition(item.fhir)?.kind === "measurement"
+    )).toBe(true);
+  });
+
+  it.each([
+    "Take 1 tab if BG > 180; otherwise hold the dose",
+    "Take 1 tab if BG > 180, otherwise skip the dose"
+  ])("keeps an object-bearing alternate withholding branch out of the positive IF guard: %s", source => {
+    const guard = parseMedicationGuard(source);
+    expect(guard?.alternative).toBeDefined();
+    expect(source.slice(guard!.alternative!.start, guard!.alternative!.end))
+      .toMatch(/otherwise|else/iu);
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 1, unit: "tab" });
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "measurement", name: "bg", operation: "gt", value: 180
+    });
+    expect(getDosageCondition(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]))
+      .toEqual(getDosageCondition(parsed.fhir));
+  });
+
+  it("keeps a direct object-bearing HOLD conditional inverse", () => {
+    const parsed = parseSig("Take 1 tab daily; hold the dose if BG < 70");
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({
+      kind: "not",
+      condition: { kind: "measurement", name: "bg", operation: "lt", value: 70 }
+    });
+  });
+});
+
 describe("real-world Thai clinical meaning stays independent across source, canonical, R5 and R6", () => {
   type ProjectedClinicalRow = {
     doseAndRate?: Array<{ doseQuantity?: { value?: number; unit?: string } }>;
@@ -2168,6 +2250,21 @@ describe("universal weekday exclusion remains a structured contradiction", () =>
     expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual(["sun"]);
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
   });
+
+  it.each([
+    "Take 1 tab daily except Sunday for 4 weeks",
+    "Take 1 tab daily except on Sundays for 4 weeks"
+  ])("bounds a weekday exclusion before an independent trailing course: %s", source => {
+    const parsed = parseSig(source);
+    expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual(["sun"]);
+    expect(parsed.fhir.timing?.repeat?.boundsDuration)
+      .toMatchObject({ value: 4, code: "wk" });
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext)[0];
+    expect(getDosageExcludedWeekdays(strictR5)).toEqual(["sun"]);
+    expect(strictR5.timing?.repeat?.boundsDuration)
+      .toMatchObject({ value: 4, code: "wk" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
 });
 
 
@@ -2742,6 +2839,81 @@ describe("clinical execution adversarial source keeps patient intent and dose id
     });
     const roundtrip = toFhirR5Dosages(toDosageDetails(rows));
     expect(roundtrip.map(getDosageCondition)).toEqual(rows.map(getDosageCondition));
+  });
+
+  it.each([
+    ["omit breakfast dose", [true, false]],
+    ["skip breakfast dose", [true, false]],
+    ["hold breakfast dose", [true, false]],
+    ["omit dinner dose", [false, true]],
+    ["skip dinner dose", [false, true]]
+  ] as const)("binds a meal-named dose slot to its matching insulin administration: %s",
+    (instruction, guarded) => {
+      const source = "Inject 5 units before breakfast and 8 units before dinner; " +
+        instruction + " if glucose below 80";
+      const parsed = parseSig(source);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.input).toBe(source);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.warnings).toEqual([]);
+      const rows = parsed.items.map(item => item.fhir);
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity))
+        .toEqual([{ value: 5, unit: "U" }, { value: 8, unit: "U" }]);
+      expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
+      const conditions = rows.map(getDosageCondition);
+      conditions.forEach((condition, index) => {
+        if (!guarded[index]) {
+          expect(condition).toBeUndefined();
+          return;
+        }
+        expect(condition).toMatchObject({
+          kind: "not", condition: {
+            kind: "measurement", name: "glucose", operation: "lt", value: 80
+          }
+        });
+      });
+
+      const strictR5 = toFhirR5Dosages(toDosageDetails(rows));
+      expect(strictR5.map(getDosageCondition)).toEqual(conditions);
+      const r6Components = parsed.fhirNext.step.flatMap(step => step.component);
+      expect(r6Components).toHaveLength(2);
+      expect(r6Components.map(component => Boolean(component.condition?.length)))
+        .toEqual([...guarded]);
+      r6Components.forEach((component, index) => {
+        if (guarded[index]) expect(component.condition?.[0]?.text).toBe("not (glucose lt 80)");
+      });
+    }
+  );
+
+  it.each([
+    "Skip breakfast if glucose below 80",
+    "Skip breakfast meal if glucose below 80",
+    "Omit salt if glucose below 80",
+    "Omit dinner reservation if glucose below 80",
+    "Hold your breath if glucose below 80"
+  ])("does not license a medication-withholding guard for a non-dose object: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.items.some(item =>
+      getDosageCondition(item.fhir)?.kind === "not"
+    )).toBe(false);
+    expect(parsed.items.flatMap(item =>
+      item.meta.canonical.clauses[0]?.clinicalAdjuncts?.evidence ?? []
+    ).some(evidence => evidence.rule === "hpsg.cx.medication-withholding-conditional"))
+      .toBe(false);
+  });
+
+  it("leaves independent PRN and positive administration conditions unchanged", () => {
+    const prn = parseSig("Take 1 tablet q6h PRN pain");
+    expect(prn.fhir.asNeeded).toBe(true);
+    expect(prn.fhir.asNeededFor?.[0]?.text).toMatch(/pain/iu);
+    expect(getDosageCondition(prn.fhir)).toBeUndefined();
+
+    const positive = parseSig("Take 1 tablet only if glucose above 80");
+    expect(positive.fhir.asNeeded).not.toBe(true);
+    expect(getDosageCondition(positive.fhir)).toMatchObject({
+      kind: "measurement", name: "glucose", operation: "gt", value: 80
+    });
   });
 
   it("keeps explicit positive-only-if dosing positive instead of reversing it", () => {

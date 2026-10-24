@@ -3277,4 +3277,74 @@ counseling may retain its exact untranslated Thai/English source. No additional
 incorrect executable dose, eye/site, timing, phase, condition, PRN or FHIR
 roundtrip was reproduced in the bounded realistic checks. First-class
 clinician-approved complete EN/TH instruction storage remains separate.
-No push, merge, registry publication, or Shinebright deployment performed.
+No push, merge, registry publication, or downstream consumer deployment performed.
+
+
+### 2026-10-24 — HPSG supported clinical grammar and source fidelity final integration
+
+Continued from local f8c2961 and the shared hardcut BB. This pass corrected
+the following genuine, bounded user-plausible clinical semantic failures:
+- Positive glucose IF with negative OTHERWISE action, and weight-threshold
+  conditional 2-tab versus ELSE 1-tab, remain exactly-one alternative doses.
+  Terminal period/comma no longer discards the alternative or changes the
+  dose to 70kg. OR-linked upper/lower SBP thresholds share the typed subject.
+- Spoken 1-and-a-half tablets, Thai halves, plural weekdays, Sunday exclusions,
+  two independent OD/OS instructions, source-backed multi-phase ocular/topical
+  tapers, shared treatment-course duration, delayed second administration
+  relative R6 start, PRN caps and meal-specific insulin withholding are
+  preserved as typed source evidence through extended/strict R5 and R6.
+- Original dependent OPD repeat action and time dependency remain a single
+  typed action. A bounded procedural-object owner now stops at an independent
+  semicolon, preserving a second explicit repeat-cycle medication order.
+- Source-backed ocular internal lower-eyelid ointment uses ophthalmic route
+  and the measured centimetre/cm ribbon unit. External eyelid skin remains
+  nonocular/topical, without inventing an anatomical SNOMED code.
+- An existing typed discourse-connector graph prevents a false temporal THEN
+  for BUT-qualified medication advice. Full fasting/dialysis-day conditions
+  remain attached in patient-visible EN/TH text. A second typed WITH Object
+  such as clean tissue is retained instead of being silently dropped.
+- Negated procedural dietary instructions are NOT medication meal timing.
+  Declarative NEVER polarity and MISS/skip omission lexemes enable six
+  red-first realistic do-not-miss / never-skip meals/breakfast cases to
+  preserve complete counseling without inventing C or CM medication WHEN.
+  Positive take-with-meals and after-breakfast retain correct medication
+  event timing. Never miss a dose remains legible patient advice.
+
+Previously-RED and historical test assertions were retained; no broad raw
+formatter shortcut, invented clinical parser, refusal gate, new classes, or
+production JSON.parse/JSON.stringify introduced. Final Node22 canonical full
+source: 44 suites and 2750/2750 PASS, process
+proc-e81b122c-acb7-44e4-9a70-09d02a31a336.
+Final npm run test:dist: ESM/CJS build and TypeScript declarations PASS,
+packaged exports 4/4 PASS, process proc-d0ac0588-6b85-4255-868a-3afbb4fcc90d.
+Current downstream consumer adapter worktree left unchanged: EZMed R5+
+interop 28/28 PASS and direct five current EZMed0.2 -> downstream adapter -> FHIR R5
+round-trips preserve doses, sites, routes, conditions, choice membership,
+relative delays and course metadata. Replayed 54 near-neighbor plus 55
+realistic EN/TH clinical test inputs without exceptions or newly reproduced
+incorrect supported semantic structures. Two older near54 simple-oracle
+flags are known overly restrictive on valid PCM+PCV versus redundant
+frequency and NIGHT versus EVE/HS. Independent legacy source-corpus
+521/521 no crashes and no lost populated primary dose (not comprehensive
+0.1.x semantic equivalence).
+
+Host-only paired performance medians vs immutable 0615241 baseline in
+/tmp/ezmed-realworld-final-perf-20261024.json: English BID 2.543 ->
+2.898ms (+13.9%), Thai numeric 2.786 -> 3.126 (+12.2%), Thai word
+frequency 4.939 -> 5.339 (+8.1%), independent eyes 3.187 -> 3.359
+(+5.4%), Thai complex taper 13.971 -> 7.992 (-42.8%), established
+English taper 4.197 -> 4.532 (+8.0%), Thai insulin condition 10.962 ->
+11.941 (+8.9%), English article course 3.014 -> 3.322 (+10.2%).
+The routine modest overhead is disclosed, not silently labeled zero; no
+catastrophic latency/memory increase measured. Production phone performance
+is unmeasured and remains a separate optimization consideration.
+
+PR10 base 0d096a4cc913565c0344025d92ce2f96a8cedc42:
+115 raw paths minus same 15 existing exclusions = EXACTLY 100
+CodeRabbit-reviewable. git diff --check PASS; no new exclusions.
+Untracked test/__tmp_open_semantic_probe.ts untouched and unstaged.
+No push, PR revision, merge, publish, deployment, or downstream consumer worktree
+mutation. Release scope remains fast clinician-reviewed suggestions with
+editable unsupported counseling, not universal clinical NLP or autonomous
+ordering. Whole-course clinician-approved EN/TH bilingual persistence is
+a separate follow-up.

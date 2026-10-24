@@ -14,14 +14,16 @@ import { EVENT_TIMING_TOKENS } from '../maps';
 import { parseClockToken } from '../hpsg/rule-context';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
-  DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS, HARD_SEGMENT_BOUNDARY_TOKENS,
+  DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
+  DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
+  HARD_SEGMENT_BOUNDARY_TOKENS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
 import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
 import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { BoundaryPlan, BoundarySite, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from './types';
+import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from './types';
 import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { parseAdditionalInstructions } from '../advice';
@@ -132,6 +134,11 @@ function connectorKind(token: Token | undefined): 'coordination' | 'sequence' | 
   const text = lexeme(token);
   return ACTION_SEQUENCE_MARKERS.has(text) ? 'sequence' : ACTION_COORDINATION_CONNECTORS.has(text) ? 'coordination' : undefined;
 }
+function semanticConnectorKind(site: BoundarySite): CoordinationConnectorKind {
+  return site.kind === 'alternative'
+    ? 'disjunction'
+    : site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown';
+}
 function isHard(token: Token): boolean {
   return HARD_SEGMENT_BOUNDARY_TOKENS.has(token.original.trim().toLowerCase()) || token.original === '\n' || token.original === '\r';
 }
@@ -143,6 +150,22 @@ function explicitDoseAt(tokens: Token[], i: number, options?: ParseOptions): boo
     DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)
   ) &&
     tokens[i + 1] && normalizeUnit(lexeme(tokens[i + 1]), options));
+}
+
+/** Cheap gate for the rare additive quantity construction. The selected HPSG
+ * dose sign remains the authority that may claim the connector. */
+function possibleAdditiveDoseSeam(tokens: Token[], site: BoundarySite): boolean {
+  if (site.kind !== 'coordination' ||
+      !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(lexeme(tokens[site.tokenIndex]))) return false;
+  const whole = tokens[site.tokenIndex - 1];
+  if (!whole || !(whole.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lexeme(whole)))) return false;
+  let cursor = site.rightIndex;
+  if (DOSE_FRACTION_ARTICLES.has(lexeme(tokens[cursor]))) cursor += 1;
+  const fraction = tokens[cursor];
+  if (!fraction) return false;
+  if (DOSE_FRACTION_WORDS.has(lexeme(fraction))) return true;
+  const numerator = fraction.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lexeme(fraction));
+  return numerator && DOSE_FRACTION_DENOMINATOR_WORDS.has(lexeme(tokens[cursor + 1]));
 }
 
 /** Lexical seams are candidates, never decisions. Owned structures can veto every seam kind. */
@@ -168,6 +191,46 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
       rightIndex: boundaryKind === 'adjacent-dose' ? i : i + 1, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
   }
   return sites;
+}
+
+function medicationGuardWithMultipleDoseCandidates(
+  input: string,
+  sites: readonly BoundarySite[]
+) {
+  let doseCandidates = 0;
+  for (const site of sites) {
+    if (site.kind !== 'adjacent-dose') continue;
+    doseCandidates += 1;
+    if (doseCandidates > 1) return parseMedicationGuard(input);
+  }
+  return undefined;
+}
+
+/** Convert the condition grammar's source-backed branch marker into a single
+ * boundary candidate without interpreting its payload. */
+function withAlternativeBoundary(
+  input: string,
+  tokens: readonly Token[],
+  sites: readonly BoundarySite[],
+  alternative: Range
+): BoundarySite[] {
+  const tokenIndex = tokens.findIndex(token => token.sourceEnd > alternative.start);
+  const rightIndex = tokens.findIndex(token => token.sourceStart >= alternative.end);
+  if (tokenIndex < 0 || rightIndex < 0) return [...sites];
+  const next = sites.filter(site =>
+    site.end <= alternative.start || site.start >= alternative.end
+  );
+  next.push({
+    ...alternative,
+    tokenIndex,
+    lastTokenIndex: Math.max(tokenIndex, rightIndex - 1),
+    rightIndex,
+    kind: 'alternative',
+    surface: input.slice(alternative.start, alternative.end)
+  });
+  return next.sort((left, right) =>
+    left.start - right.start || left.end - right.end || left.tokenIndex - right.tokenIndex
+  );
 }
 
 /** Cheap lexical gate for the ordinary non-site connector path. This does not
@@ -250,11 +313,12 @@ class EvidenceContext {
       hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
         s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||
         s.boundsEnd !== undefined || s.count !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
-        s.timeOfDay?.length || s.calendarEvents?.length)),
+        s.timeOfDay?.length || s.calendarEvents?.length || s.administrationOffsetMinutes !== undefined)),
       hasRecurringCadence: Boolean(s && (s.timingCode || s.frequency !== undefined || s.period !== undefined || s.dayOfWeek?.length)),
       hasDates: Boolean(s?.calendarEvents?.length), hasClocks: Boolean(s?.timeOfDay?.length),
       clocks: [...(s?.timeOfDay ?? [])].sort(),
       hasOffset: Boolean(s && (s.offset !== undefined || s.offsetMin !== undefined || s.offsetMax !== undefined ||
+        s.administrationOffsetMinutes !== undefined ||
         s.activityTiming?.some(t => t.offset !== undefined || t.offsetMin !== undefined || t.offsetMax !== undefined))),
       prn: c.prn?.enabled === true,
       targets,
@@ -342,20 +406,116 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const metrics = { lexicalPasses: 1, dateScans: 1, actionScans: 0, clauseProbes: 0,
     siteCoordinationProbes: 0, probeCacheHits: 0,
     probedTokens: 0, candidates: 0, claimedCandidates: 0 };
-  const sites = candidateSites(input, tokens, options);
+  let sites = candidateSites(input, tokens, options);
+  // The conditional grammar is the sole producer of ELSE scope. Ask for it
+  // only when the lexical scan already found a plausible multi-clause seam.
+  const hasCoordinationCandidate = sites.some(site => site.kind === 'coordination');
+  // A terminal full stop is a sentence boundary, not an independent dose.
+  // It must not prevent the existing typed ELSE grammar from seeing two
+  // explicit administration candidates.
+  const lastSite = sites[sites.length - 1];
+  const lastDoseSite = lastSite?.kind === 'punctuation' &&
+    !input.slice(lastSite.end).trim()
+    ? sites[sites.length - 2] : lastSite;
+  const hasDoseCandidateEnvelope = sites.length > 1 &&
+    sites[0]?.kind === 'adjacent-dose' &&
+    lastDoseSite?.kind === 'adjacent-dose';
+  const clinicalGuard = hasCoordinationCandidate
+    ? parseMedicationGuard(input)
+    : hasDoseCandidateEnvelope ? medicationGuardWithMultipleDoseCandidates(input, sites) : undefined;
+  const alternative = clinicalGuard?.alternative;
+  if (alternative) sites = withAlternativeBoundary(input, tokens, sites, alternative);
   const dateSpans = findMedicationDateListSpans(input, options);
   const customSiteHints = buildCustomSiteHints(options?.siteCodeMap);
   const evidence = new EvidenceContext(
     input, tokens, options, metrics, experiment.cache !== false, customSiteHints
   );
   const claims = recognizeStructures({ input, options, tokens, dateSpans });
+  // A complete registered NON-administration procedure owns its own nominal
+  // arguments. A numeric object inside "repeat 1 tablet after 2 hours" is
+  // not an independent medication-order boundary, even when that object has
+  // an explicit unit and the procedure has a typed temporal complement.
+  // Ordinary dose continuations ("take 2 now, then 1 after 12 hours") have
+  // no such procedural head and remain eligible for the existing split.
+  if (sites.some(site => site.kind === 'adjacent-dose')) {
+    const frames = evidence.actions(0, input.length);
+    for (const site of sites) {
+      if (site.kind !== 'adjacent-dose') continue;
+      const owner = frames.find(frame => {
+        const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+        return definition?.procedural === true && definition.definesDose !== true &&
+          frame.span.start < site.start && site.start < frame.span.end &&
+          // An action frame may have an opaque tail past an explicit
+          // punctuation boundary. Its valence must never claim a completely
+          // independent dosage across that boundary.
+          !sites.some(boundary => (boundary.kind === 'hard' ||
+              boundary.kind === 'punctuation') &&
+            boundary.start >= frame.span.start && boundary.end <= site.start) &&
+          frame.args.some(arg => arg.role === 'object' || arg.role === 'amount' ||
+            arg.role === 'duration');
+      });
+      if (!owner) continue;
+      // A procedural action graph may span a later independent order in its
+      // source text; a hard delimiter is a regimen boundary, not part of
+      // the procedural object's valence. Never let a broad action frame
+      // claim the following independent dosage.
+      const hardBoundary = sites.find(candidate =>
+        candidate.start > owner.span.start && candidate.start < owner.span.end &&
+        (candidate.kind === 'hard' ||
+          candidate.kind === 'punctuation' && candidate.surface === ';')
+      );
+      const ownerEnd = Math.min(owner.span.end, hardBoundary?.start ?? owner.span.end);
+      if (site.start >= ownerEnd || claims.some(claim =>
+        claim.kind === 'procedural-argument' &&
+        claim.start === owner.span.start && claim.end === ownerEnd
+      )) continue;
+      claims.push({
+        id: 'typed-procedural-complement:' + owner.span.start + ':' + ownerEnd,
+        kind: 'procedural-argument',
+        start: owner.span.start, end: ownerEnd,
+        producer: 'typed.action.valence',
+        resolved: true, policy: 'no-external-split'
+      });
+    }
+  }
+  // An additive whole-plus-fraction dose is one typed dose daughter even though
+  // its ordinary conjunction also looks like a regimen seam. Probe only after
+  // the bounded lexical shape is present, and grant ownership only when the
+  // selected dose evidence itself spans that seam.
+  for (const site of sites) {
+    if (!possibleAdditiveDoseSeam(tokens, site)) continue;
+    const windowStart = tokens[site.tokenIndex - 1].sourceStart;
+    const followingBoundary = sites.find(candidate =>
+      candidate.start > site.end && candidate.kind !== 'adjacent-dose' &&
+      candidate.kind !== 'coordination'
+    );
+    const windowEnd = followingBoundary?.start ?? input.length;
+    const probe = evidence.probe(windowStart, windowEnd);
+    let doseSpan: Range | undefined;
+    for (const item of probe.clause.evidence) {
+      if (item.lexicalCategory !== 'dose') continue;
+      doseSpan = item.spans.find(span =>
+        windowStart + span.start <= site.start &&
+        windowStart + span.end >= site.end
+      );
+      if (doseSpan) break;
+    }
+    if (!doseSpan) continue;
+    claims.push({
+      id: `numeric-quantity:${windowStart + doseSpan.start}:${windowStart + doseSpan.end}`,
+      kind: 'numeric-quantity',
+      start: windowStart + doseSpan.start,
+      end: windowStart + doseSpan.end,
+      producer: 'hpsg.lexical-category.dose',
+      resolved: true,
+      policy: 'no-external-split'
+    });
+  }
   // The same typed guard constituent used by the HPSG clinical-adjunct
   // lexical rule owns its internal Boolean connectives. Reprobing AND/OR
   // inside that range as possible medication boundaries duplicates a full
   // chart and risks turning one condition into multiple administrations.
   // Skip the recognizer entirely for ordinary inputs with no such boundary.
-  const clinicalGuard = sites.some(site => site.kind === 'coordination')
-    ? parseMedicationGuard(input) : undefined;
   if (clinicalGuard && sites.some(site => site.kind === 'coordination' &&
       clinicalGuard.start < site.start && site.end < clinicalGuard.end)) {
     claims.push({
@@ -706,7 +866,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         const rightActions = () => actionValue ?? (actionValue = evidence.actions(rightStart, end));
         proposals.push(...grammaticalProposals({
           site,
-          connectorKind: site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown',
+          connectorKind: semanticConnectorKind(site),
           inheritedAdministration, explicitRightUnit: rightUnit,
           leftDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= start && c.end <= site.start),
           rightDateSpan: claims.some(c => c.kind === 'calendar-date-list' && c.start >= rightStart && c.end <= end),
@@ -766,7 +926,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         plan.relations.push({ from: plan.segments.length - 1, to: plan.segments.length,
           kind: decision.selected.relation ?? 'independent', rule: decision.selected.rule,
           semanticLicense: decision.selected.semanticLicense,
-          connectorKind: site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown',
+          connectorKind: semanticConnectorKind(site),
           range: { start: site.start, end: site.end } });
       }
       start = site.end;

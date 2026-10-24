@@ -83,6 +83,10 @@ function applySchedule(
   if (schedule.durationUnit !== undefined) {
     state.durationUnit = schedule.durationUnit;
   }
+  if (schedule.administrationOffsetMinutes !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.administrationOffsetMinutes = schedule.administrationOffsetMinutes;
+  }
   if (schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;

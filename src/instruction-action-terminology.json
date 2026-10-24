@@ -1588,7 +1588,7 @@
       "display": "Withhold administration",
       "i18n": { "th": "งดการให้ยา" },
       "aliases": [
-        "omit", "skip", "withhold", "งดให้ยา", "ไม่ต้องให้ยา"
+        "omit", "skip", "miss", "withhold", "งดให้ยา", "ไม่ต้องให้ยา"
       ],
       "procedural": true,
       "argumentParser": "object-duration",
@@ -1980,7 +1980,7 @@
       "display": "Continue taking medication",
       "i18n": { "th": "กินต่อเนื่อง" },
       "aliases": [
-        "continue treatment", "continue taking medication",
+        "continue", "continue treatment", "continue taking medication",
         "continue taking medicine", "continue medication",
         "กินต่อเนื่อง", "รับประทานต่อเนื่อง", "รับประทานยาต่อเนื่อง"
       ],

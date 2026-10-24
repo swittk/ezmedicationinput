@@ -243,3 +243,38 @@ describe("typed site coordination Thai realization", () => {
       .toEqual([1, 1]);
   });
 });
+
+
+describe("typed eyelid administration location and length units", () => {
+  it.each([
+    ["Apply 1 centimeter of ointment inside lower eyelid twice daily", "cm line"],
+    ["Apply 1 cm ribbon of ointment inside the left lower eyelid nightly", "cm ribbon"],
+    ["Apply 1 centimetre of ointment inside right lower eyelid twice daily", "cm line"]
+  ] as const)("preserves ocular length and route for internal eyelid administration: %s", (source, unit) => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("54485002");
+    expect(parsed.fhir.site?.text).toMatch(/eyelid/i);
+    expect(parsed.fhir.timing?.repeat?.frequency ??
+      (parsed.fhir.timing?.repeat?.when?.includes("NIGHT") ? 1 : undefined))
+      .toBeDefined();
+    expect(parsed.input).toBe(source);
+    const strict = toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0];
+    expect(strict.route?.coding?.[0]?.code).toBe("54485002");
+    expect(strict.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit });
+  });
+
+  it("keeps ambiguous external lid cream application topical without an internal locative", () => {
+    const parsed = parseSig("Apply 0.2 g of cream to lower eyelid twice daily");
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("6064005");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 0.2, unit: "g" });
+  });
+
+  it("does not interpret skin outside the lid as conjunctival drug administration", () => {
+    const parsed = parseSig("Apply a thin layer of cream to skin outside the left lower eyelid twice daily");
+    expect(parsed.fhir.route?.coding?.[0]?.code).not.toBe("54485002");
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toContain("outside");
+  });
+});

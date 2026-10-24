@@ -1467,7 +1467,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const activityTiming = parseActivityTimingExtensions(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
+  const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
   if (
+    administrationOffsetMinutes !== undefined ||
     timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
@@ -1497,7 +1499,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
-      administrationOffsetMinutes: getAdministrationOffsetMinutes(dosage),
+      administrationOffsetMinutes,
       timingCode,
       count: repeat?.count,
       countMax: repeat?.countMax,

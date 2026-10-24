@@ -6,7 +6,7 @@ import {
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import {
-  buildCanonicalParallelRegimen, projectParallelRegimen
+  buildCanonicalParallelRegimen, projectParallelRegimen, relativeTime
 } from "./regimen/parallel-course";
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
@@ -455,6 +455,74 @@ function joinGeneratedClauses(clauses: string[]): string {
   ).join("; ");
 }
 
+/**
+ * Lower existing typed administration delays into R6 step starts only when
+ * every component of that step shares the same source-backed offset.
+ * Incompatible individual component offsets stay at their existing R5
+ * dosage extensions; they must never shift unrelated parallel administrations.
+ */
+function typedAdministrationOffsetSteps(
+  results: readonly ParseResult[]
+): NonNullable<EzCourseMetadata["step"]> | undefined {
+  if (!results.some(item =>
+    item.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes !== undefined
+  )) return undefined;
+
+  const sequenceOffsets = new Map<number, Array<number | undefined>>();
+  for (const item of results) {
+    const sequence = item.fhir.sequence ?? 1;
+    const offsets = sequenceOffsets.get(sequence) ?? [];
+    offsets.push(item.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes);
+    sequenceOffsets.set(sequence, offsets);
+  }
+  const steps: NonNullable<EzCourseMetadata["step"]> = [];
+  for (const [sequence, offsets] of sequenceOffsets) {
+    const minutes = offsets[0];
+    if (minutes === undefined || minutes <= 0 || !Number.isFinite(minutes) ||
+        !offsets.every(offset => offset === minutes)) continue;
+    const unit = minutes % 1440 === 0 ? "d" : minutes % 60 === 0 ? "h" : "min";
+    const value = unit === "d" ? minutes / 1440 : unit === "h" ? minutes / 60 : minutes;
+    steps.push({ sequence, start: relativeTime({ value, unit }) });
+  }
+  return steps.length ? steps : undefined;
+}
+
+/**
+ * A parallel set of independently dosed administrations may share one
+ * treatment-course end. Project an R6 step end only when every typed daughter
+ * in the same initial step owns the exact same finite course duration.
+ * Heterogeneous bounds remain local to their respective R5 components.
+ */
+function typedSharedCourseEndSteps(
+  results: readonly ParseResult[]
+): NonNullable<EzCourseMetadata["step"]> | undefined {
+  if (results.length < 2) return undefined;
+  const groups = new Map<number, ParseResult[]>();
+  for (const item of results) {
+    const sequence = item.fhir.sequence ?? 1;
+    const members = groups.get(sequence) ?? [];
+    members.push(item);
+    groups.set(sequence, members);
+  }
+  const steps: NonNullable<EzCourseMetadata["step"]> = [];
+  for (const [sequence, members] of groups) {
+    // Later phases have independent relative starts; they are represented
+    // by the existing typed parallel-regimen projection, not this simple end.
+    if (sequence !== 1 || members.length < 2) continue;
+    const schedule = members[0].meta.canonical.clauses[0]?.schedule;
+    const duration = schedule?.duration;
+    const unit = schedule?.durationUnit;
+    if (duration === undefined || duration <= 0 || !Number.isFinite(duration) ||
+        !unit || !members.every(member => {
+          const own = member.meta.canonical.clauses[0]?.schedule;
+          return own?.duration === duration && own.durationUnit === unit &&
+            own.boundsStart === undefined && own.boundsEnd === undefined;
+        })) continue;
+    steps.push({ sequence, end: relativeTime({ value: duration, unit }) });
+  }
+  return steps.length ? steps : undefined;
+}
+
 /** One whole-course public result, independent of the number of parsed clauses. */
 function buildWholeCourseResult(
   input: string,
@@ -469,14 +537,26 @@ function buildWholeCourseResult(
   const typedRepeatCycle = regimenGraph.repeatCycle
     ? { ...regimenGraph.repeatCycle }
     : undefined;
-  const typedCourse: EzCourseMetadata | undefined = typedRepeatCycle
-    ? {
-      repeatCycle: typedRepeatCycle,
-      ...(regimenGraph.repeatCount !== undefined
-        ? { step: [{ sequence: 1, count: regimenGraph.repeatCount }] }
-        : {})
-    }
-    : undefined;
+  const delayedSteps = parallel ? undefined : typedAdministrationOffsetSteps(results);
+  const sharedCourseEnds = parallel ? undefined : typedSharedCourseEndSteps(results);
+  const typedSteps: NonNullable<EzCourseMetadata["step"]> = delayedSteps?.slice() ?? [];
+  for (const shared of sharedCourseEnds ?? []) {
+    const step = typedSteps.find(item => item.sequence === shared.sequence);
+    if (step) step.end = shared.end;
+    else typedSteps.push(shared);
+  }
+  if (typedRepeatCycle && regimenGraph.repeatCount !== undefined) {
+    const first = typedSteps.find(step => step.sequence === 1);
+    if (first) first.count = regimenGraph.repeatCount;
+    else typedSteps.push({ sequence: 1, count: regimenGraph.repeatCount });
+  }
+  const typedCourse: EzCourseMetadata | undefined =
+    typedRepeatCycle || typedSteps.length
+      ? {
+        ...(typedRepeatCycle ? { repeatCycle: typedRepeatCycle } : {}),
+        ...(typedSteps.length ? { step: typedSteps } : {})
+      }
+      : undefined;
   const fhirNext = parallel?.details
     ? {
       ...parallel.details,
@@ -495,7 +575,7 @@ function buildWholeCourseResult(
     );
   // A recurring-cycle course is projected as one R6 object and flattened by
   // the established R6->R5 bridge. No source text is reparsed or injected.
-  const projectedFhir = typedRepeatCycle
+  const projectedFhir = typedRepeatCycle || typedSteps.length
     ? fromDosageDetails(fhirNext).dosages
     : parallel?.dosages ?? toEzDosages(dosageItems);
   const fhir = withDosageEditProvenance(projectedFhir, input);

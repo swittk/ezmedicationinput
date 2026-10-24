@@ -681,6 +681,9 @@ export interface BodySiteDefinition {
   text?: string;
   spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
+  /** Only applies when a typed locative places medication INSIDE this site;
+   * external skin administration retains the product/administration route. */
+  internalRouteHint?: RouteCode;
   administrationTargetCount?: number;
   /** Optional surface used when the dose applies independently to each target. */
   perTargetText?: string;

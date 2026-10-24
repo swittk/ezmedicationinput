@@ -1,8 +1,17 @@
 import { LexKind } from "../../lexer/token-types";
 import { FhirPeriodUnit, RouteCode } from "../../types";
+import { normalizeUnit } from "../../unit-lexicon";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
-import { DOSE_NUMBER_WORDS, MEDICATION_OBJECT_FILLERS } from "../lexical-classes";
+import {
+  DOSE_ADDITIVE_QUANTITY_CONNECTORS,
+  DOSE_FRACTION_ARTICLES,
+  DOSE_FRACTION_DENOMINATOR_WORDS,
+  DOSE_FRACTION_WORDS,
+  DOSE_NUMBER_WORDS,
+  DOSE_UNIT_CONNECTORS,
+  MEDICATION_OBJECT_FILLERS
+} from "../lexical-classes";
 import {
   HpsgClinicalQuantityFeature,
   HpsgDimensionalQuantityTerm,
@@ -28,6 +37,88 @@ interface UnitExpression {
 function available(context: HpsgClauseContext, index: number): boolean {
   const token = context.tokens[index];
   return Boolean(token && index < context.limit && !context.state.consumed.has(token.index));
+}
+
+function doseNumberValue(
+  token: HpsgClauseContext["tokens"][number] | undefined
+): number | undefined {
+  if (!token) return undefined;
+  return token.kind === LexKind.Number && token.value !== undefined
+    ? token.value
+    : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token));
+}
+
+function directDoseUnitAfter(
+  context: HpsgClauseContext,
+  start: number
+): { unit: string; end: number } | undefined {
+  let cursor = start;
+  while (available(context, cursor) &&
+      DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[cursor]))) {
+    cursor += 1;
+  }
+  if (!available(context, cursor)) return undefined;
+  const unit = normalizeUnit(normalizeTokenLower(context.tokens[cursor]), context.options);
+  return unit ? { unit, end: cursor + 1 } : undefined;
+}
+
+/**
+ * English additive quantity construction with a shared unit:
+ * WHOLE + additive connector + FRACTION + UNIT.
+ *
+ * The unit is a daughter of the whole expression, so this cannot absorb
+ * coordination where the first amount already has its own unit (for example,
+ * "one tablet and half ...").
+ */
+function additiveFractionDose(
+  context: HpsgClauseContext,
+  start: number
+) {
+  const wholeToken = context.tokens[start];
+  if (!wholeToken || !available(context, start) || !available(context, start + 1) ||
+      !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(normalizeTokenLower(context.tokens[start + 1]))) {
+    return undefined;
+  }
+  const whole = doseNumberValue(wholeToken);
+  if (whole === undefined || !Number.isInteger(whole) || whole <= 0) return undefined;
+
+  let cursor = start + 2;
+  if (available(context, cursor) &&
+      DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[cursor]))) {
+    cursor += 1;
+  }
+  if (!available(context, cursor)) return undefined;
+
+  const fractionToken = context.tokens[cursor];
+  let fraction = DOSE_FRACTION_WORDS.get(normalizeTokenLower(fractionToken));
+  let fractionEnd = cursor + 1;
+  if (fraction === undefined) {
+    const numerator = doseNumberValue(fractionToken);
+    const denominatorToken = context.tokens[cursor + 1];
+    const denominator = denominatorToken && available(context, cursor + 1)
+      ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(denominatorToken))
+      : undefined;
+    if (numerator === undefined || denominator === undefined) return undefined;
+    fraction = numerator * denominator;
+    fractionEnd += 1;
+  }
+  if (!(fraction > 0 && fraction < 1)) return undefined;
+
+  const unit = directDoseUnitAfter(context, fractionEnd);
+  if (!unit) return undefined;
+  const tokens = context.tokens.slice(start, unit.end);
+  return lexicalSign({
+    type: "dose-sign",
+    rule: "hpsg.lex.clinicalQuantity.additiveFractionDose",
+    tokens,
+    consumedTokenIndices: tokens.map(token => token.index),
+    synsem: {
+      head: { dose: { value: whole + fraction, unit: unit.unit } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 25
+  });
 }
 
 function compactUnitExpression(
@@ -450,6 +541,8 @@ function dividedDoseCountSign(context: HpsgClauseContext, start: number) {
  */
 export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinicalQuantity", (context, start) => {
+    const additive = additiveFractionDose(context, start);
+    if (additive) return [additive];
     const division = dividedDoseCountSign(context, start);
     if (division) return [division];
     const valueToken = context.tokens[start];

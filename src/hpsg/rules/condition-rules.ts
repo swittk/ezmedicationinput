@@ -1,4 +1,4 @@
-import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
+import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, EventTiming, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
 import {
   findMedicationDateListSpans,
   MedicationDateListMatch,
@@ -16,6 +16,7 @@ import { getProceduralFrames, actionEventRelationAt } from "../procedural-contex
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
 import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
+import { countAndDurationRule } from "./timing-rules";
 import {
   HpsgClauseContext,
   lexicalRule,
@@ -108,11 +109,15 @@ function isOnlyWeekdays(source: string): boolean {
 export function matchCalendarExclusion(
   source: string,
   options?: ParseOptions,
-  knownDateSpans?: MedicationDateListMatch[]
+  knownDateSpans?: MedicationDateListMatch[],
+  scopeEnd?: number
 ): CalendarExclusion | undefined {
   const cue = EXCLUSION_CUE.exec(source);
   if (!cue) return undefined;
-  const end = source.indexOf(";", cue.index) >= 0 ? source.indexOf(";", cue.index) : source.length;
+  const clauseEnd = source.indexOf(";", cue.index) >= 0
+    ? source.indexOf(";", cue.index)
+    : source.length;
+  const end = Math.min(clauseEnd, scopeEnd ?? clauseEnd);
   const rawStart = cue.index + cue[0].length;
   const rawSuffix = source.slice(rawStart, end);
   const leadingWhitespace = rawSuffix.search(/\S/u);
@@ -158,6 +163,32 @@ export function matchCalendarExclusion(
   if (residual.trim() && !isOnlyWeekdays(residual)) return undefined;
   if (!excluded.length && !dates.length) return undefined;
   return { start: cue.index, end, excluded, included, dates: [...new Set(dates)].sort() };
+}
+
+const COURSE_DURATION_RULE = countAndDurationRule();
+
+/** Locate a trailing typed course-duration daughter without consuming it as
+ * part of the weekday/date exclusion. The shared timing rule remains the
+ * authority for which article/quantity/modifier/unit forms are licensed. */
+function trailingCourseDurationBoundary(
+  context: HpsgClauseContext,
+  exclusionStart: number,
+  clauseEnd: number
+): number | undefined {
+  let boundary: number | undefined;
+  for (let index = 0; index < context.limit; index += 1) {
+    const token = context.tokens[index];
+    if (!token || token.sourceStart <= exclusionStart || token.sourceStart >= clauseEnd) continue;
+    for (const sign of COURSE_DURATION_RULE.match(context, index)) {
+      if (sign.synsem.head.schedule?.duration === undefined || !sign.tokens.length) continue;
+      const start = Math.min(...sign.tokens.map((item) => item.sourceStart));
+      const end = Math.max(...sign.tokens.map((item) => item.sourceEnd));
+      if (start <= exclusionStart || end > clauseEnd ||
+          !/^[\s.,!?]*$/u.test(context.state.input.slice(end, clauseEnd))) continue;
+      boundary = boundary === undefined ? start : Math.min(boundary, start);
+    }
+  }
+  return boundary;
 }
 
 function overlappingAvailableTokens(
@@ -268,6 +299,13 @@ function localWithholdingGuard(
   if (!cached || cached.start !== sourceStart || !withholdsMedicationAdministration(context, frame)) {
     return undefined;
   }
+  // In "administer IF predicate; otherwise HOLD", the negative action is the
+  // explicit alternative branch, not the consequent licensed by IF. Keep the
+  // administration guard affirmative. A fronted "IF predicate, HOLD" has no
+  // otherwise branch and still contributes the inverse condition below.
+  if (cached.alternative && cached.alternative.end <= frame.span.start) {
+    return undefined;
+  }
   // A prefixed procedural condition ends at its typed action daughter even
   // without punctuation. Reuse the same Boolean lexical grammar on that
   // bounded constituent; do not let the action become part of a measurement.
@@ -278,6 +316,19 @@ function localWithholdingGuard(
   return guard.condition.kind === "not"
     ? guard.condition.condition
     : { kind: "not" as const, condition: guard.condition };
+}
+
+/** Resolve either the broad daypart head or one of its meal-relative members
+ * to the same typed dose-slot family. Thus BREAKFAST can select a BEFORE
+ * BREAKFAST administration just as MORNING can, without rewriting either
+ * surface form or widening ordinary food objects into medication doses. */
+function doseTargetEventFamily(event: EventTiming): readonly EventTiming[] {
+  const direct = DOSE_TARGET_EVENT_MEMBERS.get(event);
+  if (direct) return direct;
+  for (const members of DOSE_TARGET_EVENT_MEMBERS.values()) {
+    if (members.indexOf(event) >= 0) return members;
+  }
+  return [event];
 }
 
 /** Resolve the nominal target inside a withholding action. Event words here
@@ -297,7 +348,7 @@ function withholdingDoseTarget(
       if (quantifier) target.quantifier = quantifier;
       const event = EVENT_TIMING_TOKENS[word];
       if (!event) continue;
-      const members = DOSE_TARGET_EVENT_MEMBERS.get(event) ?? [event];
+      const members = doseTargetEventFamily(event);
       target.when = [...new Set([...(target.when ?? []), ...members])];
     }
   }
@@ -377,17 +428,22 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
         !/(?:except|excluding|ยกเว้น|เว้น)/iu.test(lead.sourceText ?? lead.original)) {
       return [];
     }
+    const clauseEnd = context.state.input.indexOf(";", lead.sourceStart) >= 0
+      ? context.state.input.indexOf(";", lead.sourceStart)
+      : context.state.input.length;
+    const durationBoundary = trailingCourseDurationBoundary(
+      context, lead.sourceStart, clauseEnd
+    );
     const exclusion = matchCalendarExclusion(
       context.state.input,
       context.options,
-      context.dateSpans
+      context.dateSpans,
+      durationBoundary
     );
     if (!exclusion) {
       const range = {
         start: lead.sourceStart,
-        end: context.state.input.indexOf(";", lead.sourceStart) >= 0
-          ? context.state.input.indexOf(";", lead.sourceStart)
-          : context.state.input.length
+        end: durationBoundary ?? clauseEnd
       };
       const tokens = overlappingAvailableTokens(context, range.start, range.end);
       if (!tokens.length) return [];
