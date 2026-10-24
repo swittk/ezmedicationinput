@@ -4,7 +4,10 @@ import { MedicationCondition } from "./types";
 // measurement comparison. Bare "if pain" retains the existing PRN grammar.
 const NUMERIC_IF_GUARD = /\bif\b(?=\s+[^,;]*?(?:>=|<=|>|<|\b(?:above|below|greater\s+than|less\s+than|at\s+least|at\s+most)\b)\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+))/iu;
 const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี(?:ที่)?/iu;
-const TRAILING_ELSE = /(?:,\s*|\s+)\b(?:otherwise|else)\s+(hold|do\s+not\s+take|skip)\s*\.?$|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?\s*$/iu;
+// A no-dose consequent may be followed by another coordinated instruction.
+// Only the hold/skip constituent belongs to the guard's source ownership;
+// later advice remains available to the shared procedural grammar.
+const OTHERWISE_HOLD = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\s+(?:hold|do\s+not\s+take|skip)\b(?=\s*(?:$|[.,;!?])|\s+(?:and|then)\b)|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?(?=\s*(?:$|[.,;!?]|และ|แล้ว|จากนั้น))/iu;
 const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
 const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d+)?|\.\d+)`;
 const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
@@ -102,15 +105,16 @@ export function parseMedicationGuard(source: string): ParsedMedicationGuard | un
   const lead = GUARD_LEAD.exec(source) ?? NUMERIC_IF_GUARD.exec(source);
   if (!lead) return undefined;
   const negated = /^(?:unless|เว้นแต่|ยกเว้นกรณี)/iu.test(lead[0]);
-  let tail = source.slice(lead.index + lead[0].length);
+  const tailStart = lead.index + lead[0].length;
+  let tail = source.slice(tailStart);
   let end = source.length;
   let otherwise: { start: number; end: number } | undefined;
   let otherwiseHold = false;
-  const elseMatch = TRAILING_ELSE.exec(tail);
+  const elseMatch = OTHERWISE_HOLD.exec(tail);
   if (elseMatch) {
     otherwiseHold = true;
-    end -= elseMatch[0].length;
-    otherwise = { start: source.length - elseMatch[0].length, end: source.length };
+    end = tailStart + elseMatch.index;
+    otherwise = { start: end, end: end + elseMatch[0].length };
     tail = tail.slice(0, elseMatch.index);
   } else if (/\b(?:otherwise|else)\b|มิฉะนั้น|ไม่เช่นนั้น/iu.test(tail)) {
     // A different alternate *dose* is not the same as withholding the dose.

@@ -34,6 +34,7 @@ import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_SEQUENCE_MARKERS,
   OPEN_ENDED_WORDS,
+  OPEN_ENDED_COURSE_END_CONDITIONS,
   ALTERNATE_EVENT_CADENCES,
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
@@ -53,6 +54,9 @@ import {
   MAXIMUM_COUNT_LEAD_SEQUENCES,
   OCCURRENCE_CAP_PERIOD_PHRASES,
   OCCURRENCE_COUNT_WORDS,
+  OCCURRENCE_COUNT_MODIFIERS,
+  MAXIMUM_PERIOD_PREPOSITIONS,
+  MAXIMUM_PERIOD_MODIFIERS,
   RANGE_CONNECTORS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
   SINGLE_OCCURRENCE_PHRASES,
@@ -1522,8 +1526,36 @@ export function quantityFirstActivityTimingRule(): HpsgLexicalRule<HpsgClauseCon
  * They project to the same canonical event-offset feature as `before meals
  * 30 minutes`, so ordering is grammar rather than a separate semantic model.
  */
+/** Immediate modifies a RELATIVE event when it governs before/after + event.
+ * It is zero distance from that event, not an additional stat administration.
+ */
+function zeroEventOffsetSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+  const immediate = context.tokens[start];
+  const relationToken = context.tokens[start + 1];
+  if (!immediate || !relationToken || context.state.consumed.has(immediate.index) ||
+      context.state.consumed.has(relationToken.index) ||
+      EVENT_TIMING_TOKENS[normalizeTokenLower(immediate)] !== EventTiming.Immediate) {
+    return undefined;
+  }
+  const relation = mealRelationFromToken(normalizeTokenLower(relationToken));
+  if (relation !== "before" && relation !== "after") return undefined;
+  const expression = eventExpressionPartsAt(context, start + 2);
+  const event = resolveEventTimingExpression(expression.parts);
+  const timing = event && mealTimingForRelation(relation, event.timing);
+  if (!event || !timing) return undefined;
+  const tokens = [immediate, relationToken, ...expression.members.slice(0, event.length)];
+  return lexicalSign({
+    type: "schedule-sign", rule: "hpsg.lex.schedule.eventOffset.immediate",
+    tokens, synsem: { head: { schedule: { when: [timing], offset: 0 } },
+      valence: {}, cont: { clauseKind: "administration" } },
+    score: 42 + tokens.length
+  });
+}
+
 export function quantityFirstEventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.eventOffset.quantityFirst", (context, start) => {
+    const zero = zeroEventOffsetSign(context, start);
+    if (zero) return [zero];
     const first = context.tokens[start];
     if (!first || context.state.consumed.has(first.index)) return [];
     const firstLower = normalizeTokenLower(first);
@@ -1627,6 +1659,16 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     const valueToken = context.tokens[cursor];
     if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
+    if (!qualifierLength &&
+        EVENT_TIMING_TOKENS[normalizeTokenLower(valueToken)] === EventTiming.Immediate) {
+      const tokens = [relationToken, ...eventTokens, valueToken];
+      return [lexicalSign({
+        type: "schedule-sign", rule: "hpsg.lex.schedule.eventOffset.immediate",
+        tokens, synsem: { head: { schedule: { when: [timing], offset: 0 } },
+          valence: {}, cont: { clauseKind: "administration" } },
+        score: 42 + tokens.length
+      })];
+    }
     const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
       ? valueToken.value
       : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
@@ -2023,6 +2065,24 @@ function maximumDosePeriodAt(
       context.state.consumed.has(connector.index) ||
       context.state.consumed.has(unitToken.index)) return undefined;
   const connectorLower = normalizeTokenLower(connector);
+  if (MAXIMUM_PERIOD_PREPOSITIONS.has(connectorLower)) {
+    let cursor = start + 1;
+    const article = context.tokens[cursor];
+    if (article && !context.state.consumed.has(article.index) &&
+        ["a", "an", "the"].indexOf(normalizeTokenLower(article)) >= 0) cursor++;
+    const modifier = context.tokens[cursor];
+    if (modifier && !context.state.consumed.has(modifier.index) &&
+        MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
+    const value = context.tokens[cursor];
+    const unit = context.tokens[cursor + 1];
+    const amount = value?.kind === LexKind.Number ? value.value
+      : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined;
+    const periodUnit = unit && mapIntervalUnit(normalizeTokenLower(unit));
+    if (amount !== undefined && amount > 0 && periodUnit &&
+        value && unit && !context.state.consumed.has(value.index) && !context.state.consumed.has(unit.index)) {
+      return { tokens: context.tokens.slice(start, cursor + 2), period: amount, periodUnit };
+    }
+  }
   if (connectorLower !== "/" && connectorLower !== "per" && connectorLower !== "a") {
     return undefined;
   }
@@ -2076,9 +2136,10 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     const valueToken = context.tokens[cursor];
     const unitToken = context.tokens[cursor + 1];
-    if (!valueToken || valueToken.kind !== LexKind.Number ||
-        valueToken.value === undefined || !Number.isFinite(valueToken.value) ||
-        valueToken.value <= 0 || !unitToken ||
+    const amount = valueToken?.kind === LexKind.Number ? valueToken.value
+      : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
+    if (!valueToken || amount === undefined || !Number.isFinite(amount) ||
+        amount <= 0 || !unitToken ||
         context.state.consumed.has(valueToken.index) ||
         context.state.consumed.has(unitToken.index)) return [];
     const unitSurface = normalizeTokenLower(unitToken);
@@ -2114,7 +2175,7 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
         head: {
           schedule: {
             maxDosePerPeriod: [{
-              amount: valueToken.value,
+              amount,
               unit,
               period: period.period,
               periodUnit: period.periodUnit
@@ -2354,7 +2415,11 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       const article = context.tokens[start + 1];
       const hasArticle = article && normalizeTokenLower(article) === "the";
       const valueToken = context.tokens[start + (hasArticle ? 2 : 1)];
-      const unitToken = context.tokens[start + (hasArticle ? 3 : 2)];
+      const modifierIndex = start + (hasArticle ? 3 : 2);
+      const modifier = context.tokens[modifierIndex];
+      const hasCountModifier = Boolean(modifier && !context.state.consumed.has(modifier.index) &&
+        OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(modifier)));
+      const unitToken = context.tokens[modifierIndex + (hasCountModifier ? 1 : 0)];
       const initialInterval = valueToken && normalizeTokenLower(valueToken) === "first" ? 1 : undefined;
       if (
         valueToken &&
@@ -2374,7 +2439,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
         if (durationValue === undefined || !Number.isFinite(durationValue) || durationValue <= 0)
           return signs;
         const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
-        if (unit) {
+        if (unit && !hasCountModifier) {
           if (timingRangeIsProcedureLocalDuration(context, valueToken.sourceStart, unitToken.sourceEnd)) return signs;
           const schedule = durationRange && durationRange.high >= durationRange.low
             ? { duration: durationRange.low, durationMax: durationRange.high, durationUnit: unit }
@@ -2399,13 +2464,14 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
             lexicalSign({
               type: "schedule-sign",
               rule: "hpsg.lex.schedule.count.for",
-              tokens: [token, valueToken, unitToken],
+              tokens: [token, ...(hasArticle ? [article] : []), valueToken,
+                ...(hasCountModifier ? [modifier] : []), unitToken],
               synsem: {
                 head: { schedule: { count: durationValue } },
                 valence: {},
                 cont: { clauseKind: "administration" }
               },
-              score: 8
+              score: 22
             })
           );
         }
@@ -2613,12 +2679,62 @@ function openEndedContextMarkers(context: HpsgClauseContext): OpenEndedMarkerMat
   return markers;
 }
 
+function codedCourseEndCondition(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+  const lead = context.tokens[start];
+  if (!lead || normalizeTokenLower(lead) !== 'until') return undefined;
+  // A dated bound has executable calendar semantics and owns this span.
+  if (context.dateSpans.some(span => span.start <= lead.sourceStart && span.end > lead.sourceStart)) {
+    return undefined;
+  }
+  const article = context.tokens[start + 1];
+  let next = start + 1;
+  if (article && normalizeTokenLower(article) === 'the') next += 1;
+  for (const definition of OPEN_ENDED_COURSE_END_CONDITIONS) {
+    const first = context.tokens[next];
+    const second = context.tokens[next + 1];
+    if (!first || !second) continue;
+    const left = normalizeTokenLower(first), right = normalizeTokenLower(second);
+    const matches = definition.kind === 'next-event'
+      ? definition.modifiers?.indexOf(left) !== -1 && definition.heads?.indexOf(right) !== -1
+      : definition.subjects?.indexOf(left) !== -1 && definition.predicates?.indexOf(right) !== -1;
+    if (!matches) continue;
+    const tokens = tokensAvailable(context, start, next + 2 - start);
+    if (!tokens) continue;
+    return lexicalSign({
+      type: 'instruction-sign',
+      rule: 'hpsg.lex.instruction.openEndedCourseCondition',
+      tokens,
+      synsem: {
+        head: {},
+        // R5 has no executable end-date when the patient visit/clinical
+        // outcome is unknown. This is a typed, coded NON-calendar directive,
+        // never a fabricated boundsPeriod or asNeeded trigger.
+        valence: { instructions: [{
+          text: definition.display,
+          i18n: { ...definition.i18n },
+          coding: {
+            system: 'http://snomed.info/sct',
+            code: definition.code,
+            display: definition.display
+          }
+        }] },
+        cont: { clauseKind: 'administration' }
+      },
+      score: 58 + tokens.length
+    });
+  }
+  return undefined;
+}
+
 export function openEndedScheduleRule() {
   return lexicalRule('hpsg.lex.schedule.openEndedDate', (context: HpsgClauseContext, start: number) => {
     const first = context.tokens[start];
     if (!first) return [];
     const match = openEndedContextMarkers(context).find(value => value.start === first.sourceStart);
-    if (!match) return [];
+    if (!match) {
+      const condition = codedCourseEndCondition(context, start);
+      return condition ? [condition] : [];
+    }
     const members = context.tokens
       .slice(start, context.limit)
       .filter(token => token.sourceStart >= match.start && token.sourceEnd <= match.end);

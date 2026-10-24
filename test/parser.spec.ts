@@ -1354,28 +1354,18 @@ describe("parseSig core scenarios", () => {
     );
   });
 
-  it("codes additional instructions using SNOMED when recognized", () => {
+  it("does not invent swallowing-whole meaning from negative crush/chew precautions", () => {
     const result = parseSig("1 tab po daily - do not crush or chew", { context: TAB_CONTEXT });
-    expect(result.fhir.additionalInstruction?.[0]).toEqual({
-      text: "Swallow whole; do not crush or chew",
-      coding: [
-        {
-          system: "http://snomed.info/sct",
-          code: "418693002",
-          display: "Swallowed whole, not chewed (qualifier value)"
-        }
-      ]
-    });
-    expect(result.meta.normalized.additionalInstructions).toEqual([
-      {
-        text: "Swallow whole; do not crush or chew",
-        coding: {
-          system: "http://snomed.info/sct",
-          code: "418693002",
-          display: "Swallowed whole, not chewed (qualifier value)"
-        }
-      }
-    ]);
+    const advice = result.fhir.additionalInstruction ?? [];
+    // Positive swallowing whole is NOT entailed by prohibiting two forms of
+    // manipulation; attributing 418693002 here was a false clinical assertion.
+    expect(advice.some(item => item.coding?.some(c => c.code === "418693002"))).toBe(false);
+    expect(result.meta.normalized.additionalInstructions?.some(item =>
+      item.coding?.code === "418693002"
+    )).not.toBe(true);
+    const negated = result.meta.canonical.clauses[0].instructionGraph?.actions
+      .filter(action => action.polarity === AdvicePolarity.Negate) ?? [];
+    expect(negated.map(action => action.predicate.lemma)).toEqual(["crush", "chew"]);
     expect(result.meta.canonical.clauses[0].additionalInstructions?.[0]?.frames).toEqual([
       expect.objectContaining({
         polarity: AdvicePolarity.Negate,
@@ -1387,7 +1377,9 @@ describe("parseSig core scenarios", () => {
       })
     ]);
     expect(result.meta.leftoverText).toBeUndefined();
-    expect(result.longText).toContain("Swallow whole; do not crush or chew");
+    expect(result.longText.toLowerCase()).toContain("do not crush");
+    expect(result.longText.toLowerCase()).toContain("do not chew");
+    expect(result.longText.toLowerCase()).not.toContain("swallow whole");
   });
 
   it("preserves free-form additional instructions when unmatched", () => {
@@ -2542,11 +2534,12 @@ describe("parseSig core scenarios", () => {
       code: "89545001",
       display: "Face"
     });
-    expect(result.meta.normalized.site?.coding).toEqual({
+    expect(result.meta.normalized.site?.coding).toMatchObject({
       system: "http://snomed.info/sct",
       code: "89545001",
       display: "Face"
     });
+    expect(result.meta.normalized.site?.coding?.i18n?.th).toBe("ใบหน้า");
   });
 
   it("codes eyebrow, hair-region, and joint body sites with SNOMED", () => {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
-import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
+import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
+import { createBoundaryPlan } from "../src/regimen/planner";
+import { getDosageAlternativeChoice, setDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, fromFhir } from "../src";
 
 describe("clinical SIG correctness and boundary promotion", () => {
   it.each([
@@ -1089,6 +1091,37 @@ describe("elliptic target administrations with an explicit waiting interval", ()
     expect(parsed.longText).toContain(second.replace(/^0/u, "") + " am");
   });
 
+  it("accepts clinically elliptical exact clock and waiting interval without punctuation", () => {
+    const parsed = parseSig("Put 1 drop right eye 23:58 wait 5 min then left eye");
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([1, 1]);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(nextDueDoses(parsed, {
+      from: "2026-10-23T23:00:00+07:00",
+      orderedAt: "2026-10-23T23:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 2
+    }).map(value => value.slice(0, 16))).toEqual([
+      "2026-10-23T23:58", "2026-10-24T00:03"
+    ]);
+  });
+
+  it("retains a counted pronoun and explicit repeated verb in the dependent eye administration", () => {
+    const source = "Put 1 drop in right eye at 23:58, wait 5 minutes, then put one in left eye; do not touch the tip to either eye";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+      expect.objectContaining({ value: 1, unit: "drop" }),
+      expect.objectContaining({ value: 1, unit: "drop" })
+    ]);
+    expect(parsed.items.map(item => item.fhir.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(nextDueDoses(parsed, {
+      from: "2026-10-23T23:00:00+07:00", orderedAt: "2026-10-23T23:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 2
+    }).map(value => value.slice(0,16))).toEqual(["2026-10-23T23:58", "2026-10-24T00:03"]);
+    expect(parsed.longText.toLowerCase()).toContain("do not touch");
+  });
+
   it("moves the dependent administration across midnight without shifting its predecessor", () => {
     const parsed = parseSig("Apply 1 drop right eye at 23:58, wait 5 minutes, then left eye");
     expect(parsed.items).toHaveLength(2);
@@ -1216,5 +1249,661 @@ describe("ordinary clinical vocabulary uses the same typed constructions", () =>
     expect(parsed.fhir.site?.text).not.toMatch(/and|let/u);
     expect(parsed.longText).not.toContain("and let.");
     expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+describe("clinical rate durations admit shared number-word morphology", () => {
+  it.each([
+    ["Infuse 500 mL IV over two hours", 500, 2, "h"],
+    ["Administer 250 mL over five minutes IV", 250, 5, "min"],
+    ["Infuse 100 mL over thirty minutes IV", 100, 30, "min"],
+    ["Give 50 mL IV over fifteen minutes", 50, 15, "min"]
+  ])("retains the dose AND ratio for a word-numbered carrier duration: %s",
+    (source, amount, duration, unit) => {
+      const parsed = parseSig(source);
+      expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+        doseQuantity: { value: amount, code: "mL" },
+        rateRatio: {
+          numerator: { value: amount, code: "mL" },
+          denominator: { value: duration, code: unit }
+        }
+      });
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+        representation: "dose-with-rate-ratio",
+        administrationDuration: { value: duration, unit }
+      });
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    });
+  it("keeps active drug quantity separate from the carrier infusion rate", () => {
+    const parsed = parseSig("Infuse 20 mg in 500 mL over four hours IV");
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: 20, unit: "mg" },
+      rateRatio: {
+        numerator: { value: 500, code: "mL" },
+        denominator: { value: 4, code: "h" }
+      }
+    });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "dose-with-rate-ratio",
+      administrationDuration: { value: 4, unit: "h" }
+    });
+  });
+});
+
+describe("clinical temporal prepositions remain compositional", () => {
+  it.each([
+    ["Infuse 20 mg/kg over 30 minutes IV once", 20, "mg/kg", 30, "min"],
+    ["Administer 250 mL IV over 2 hours once", 250, "mL", 2, "h"]
+  ])("attaches the duration to administration without an opaque linker: %s",
+    (source, value, unit, duration, durationUnit) => {
+      const parsed = parseSig(source);
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value, unit });
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        count: 1, duration, durationUnit
+      });
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.fhir.text).toContain(source);
+    });
+  it("keeps the same spatial preposition locative when it governs a body site", () => {
+    const parsed = parseSig("Apply cream over left elbow at bedtime");
+    expect(parsed.fhir.site?.text).toMatch(/elbow/u);
+    expect(parsed.fhir.timing?.repeat?.when).toContain("HS");
+    expect(parsed.fhir.timing?.repeat?.duration).toBeUndefined();
+  });
+});
+
+
+describe("qualitative dosage presentations remain structured without invented measurements", () => {
+  it.each([
+    "Apply thin ribbon of ointment to left eye at bedtime",
+    "Apply a thick strip of ointment to left eye nightly",
+    "Apply a thin line of ointment to left eye at bedtime",
+    "Apply thick film of ointment to left eye nightly"
+  ])("keeps the qualitative amount with the ordinary coded site and cadence: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.site?.coding?.[0]?.code).toBeTruthy();
+    expect(parsed.fhir.timing?.repeat?.when?.length || parsed.fhir.timing?.repeat?.frequency).toBeTruthy();
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.longText.toLowerCase()).toMatch(/ribbon|strip|line|film/u);
+    // An unmeasured qualitative amount belongs in a typed patient direction,
+    // not a fabricated Quantity or a second synthetic oral "take" action.
+    expect(parsed.fhir.patientInstruction?.toLowerCase()).toMatch(/ribbon|strip|line|film/u);
+    expect(parsed.fhir.text).toBeTruthy();
+    const strictR5 = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+    expect(formatSig(strictR5, "long", { locale: "en" }).toLowerCase())
+      .toMatch(/ribbon|strip|line|film/u);
+    expect(formatSig(strictR5, "long", { locale: "th" })).not.toContain("รับประทาน");
+  });
+});
+
+
+describe("cessation conditions own their safety action rather than dosing PRN", () => {
+  it.each([
+    "Apply thin film once daily; stop when control is achieved; wash hands after application.",
+    "Take 1 tablet daily; stop when symptoms improve",
+    "Take 1 tablet daily, discontinue if adverse effects occur"
+  ])("keeps stop/cessation conditions off medication-as-needed timing: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(parsed.fhir.asNeededFor).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions.some(action =>
+      ["stop", "discontinue"].includes(action.predicate.lemma)
+    )).toBe(true);
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.fhir.text?.toLowerCase()).not.toContain("as needed");
+  });
+  it("retains genuine dose-local conditional PRN triggers", () => {
+    const parsed = parseSig("Take 1 tab if pain");
+    expect(parsed.fhir.asNeeded).toBe(true);
+    expect(parsed.fhir.asNeededFor?.some(reason => /pain/iu.test(reason.text ?? ""))).toBe(true);
+  });
+});
+
+
+describe("prescribed but unspecified adjuncts remain editable", () => {
+  it("retains as-directed wording without replacing the executable BID dose", () => {
+    const parsed = parseSig("Take 1 tab PO BID as directed");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.fhir.additionalInstruction?.some(value =>
+      /as directed/iu.test(value.text ?? "")
+    )).toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("does not mistake 'as needed for pain' for non-executable directions", () => {
+    const parsed = parseSig("Take 1 tab BID as needed for pain");
+    expect(parsed.fhir.asNeeded).toBe(true);
+    expect(parsed.fhir.asNeededFor?.some(value => /pain/iu.test(value.text ?? ""))).toBe(true);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+describe("procedure-only medication administration realization", () => {
+  it.each([
+    ["Rinse mouth with 10 mL for 1 minute then spit after meals", "rinse_mouth"],
+    ["Swish 10 mL for 1 minute then spit after meals", "swish"]
+  ])("keeps the actual dosed procedure as well as later spit action: %s", (source, predicate) => {
+    const parsed = parseSig(source);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
+    const primary = graph?.actions.find(action => action.predicate.lemma === predicate);
+    expect(primary?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 10, unit: "mL" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 1, unit: "min" } })
+    ]));
+    expect(graph?.actions.some(action => action.predicate.lemma === "spit")).toBe(true);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "mL" });
+    expect(parsed.longText.toLowerCase()).toMatch(/rinse|swish/u);
+    expect(parsed.longText.toLowerCase()).toContain("spit");
+    expect(parsed.longText).toMatch(/10\s+mL/u);
+    expect(parsed.longText).toContain("1 minute");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+describe("object and prohibition coordination cannot invent positive drinking commands", () => {
+  it("keeps food and beverages as objects of a wait-before action", () => {
+    const parsed = parseSig(
+      "take 1 tablet on empty stomach with water; wait 30 minutes before food, drink, or other meds"
+    );
+    const actions = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? []);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(actions.some(a => a.predicate.lemma === "wait" && a.args.some(arg =>
+      arg.role === AdviceArgumentRole.Duration && arg.quantity?.value === 30 &&
+      arg.quantity.unit === "min"
+    ))).toBe(true);
+    expect(actions.some(a => a.predicate.lemma === "drink" && a.polarity !== AdvicePolarity.Negate))
+      .toBe(false);
+    expect(parsed.longText).not.toMatch(/(?:then\s+)?drink\s*[.;]/iu);
+    expect(parsed.longText.toLowerCase()).toContain("wait");
+    expect(parsed.longText.toLowerCase()).toContain("food");
+  });
+  it("realizes both food and water prohibitions without a positive directive", () => {
+    const parsed = parseSig(
+      "measure 10 mL, swish vigorously for 1 minute then spit out; do not swallow; do not eat or drink for 30 minutes"
+    );
+    const actions = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? []);
+    for (const lemma of ["eat-food", "drink"]) {
+      expect(actions.some(a => a.predicate.lemma === lemma &&
+        a.polarity === AdvicePolarity.Negate &&
+        a.args.some(arg => arg.role === AdviceArgumentRole.Duration &&
+          arg.quantity?.value === 30 && arg.quantity.unit === "min")
+      )).toBe(true);
+    }
+    expect(parsed.longText.toLowerCase()).toMatch(/do not eat/u);
+    expect(parsed.longText.toLowerCase()).toMatch(/do not drink/u);
+    expect(parsed.longText).not.toMatch(/(?:then\s+)?drink\s+the medication/iu);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "mL" });
+  });
+});
+
+
+describe("unresolved course-end events remain coded without invented dates", () => {
+  it.each([
+    ["Take 1 tab daily until next appointment", "1287351008"],
+    ["Take 1 tab daily until the next appointment", "1287351008"],
+    ["Take 1 tab daily until next visit", "1287351008"],
+    ["Take 1 tab daily until symptoms improve", "1287353006"]
+  ])("composes a coded non-calendar stopping condition: %s", (source, code) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(parsed.fhir.site).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+    expect(parsed.fhir.additionalInstruction?.some(x => x.coding?.some(c =>
+      c.system === "http://snomed.info/sct" && c.code === code
+    ))).toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const roundtrip = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+    expect(roundtrip[0]?.additionalInstruction?.some(x => x.coding?.some(c => c.code === code)))
+      .toBe(true);
+  });
+  it("does not falsely code an unrecognized worsening condition as improvement", () => {
+    const parsed = parseSig("Take 1 tab daily until symptoms worsen");
+    expect(parsed.fhir.additionalInstruction?.some(x => x.coding?.some(c =>
+      c.code === "1287353006"
+    ))).not.toBe(true);
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+  });
+  it("keeps a definite end date executable instead of recoding it as a vague appointment", () => {
+    const parsed = parseSig("Take 1 tab daily until 2026-11-15", {
+      datePolicy: { referenceDate: "2026-10-24" }
+    });
+    expect(parsed.fhir.timing?.repeat?.boundsPeriod?.end).toBe("2026-11-15");
+    expect(parsed.fhir.additionalInstruction?.some(x => x.coding?.some(c =>
+      c.code === "1287351008" || c.code === "1287353006"
+    ))).not.toBe(true);
+  });
+});
+
+describe("a whole dosage form is not one dosage form unless counted", () => {
+  it.each([
+    "Swallow tablets whole, do not chew",
+    "Swallow capsules whole",
+    "Swallow tablet whole; do not chew",
+    "Do not crush or chew extended-release tablets; swallow whole"
+  ])("does not invent one tablet/capsule from an adjective: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.meta.canonical.clauses.every(c => c.dose?.value === undefined)).toBe(true);
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.fhir.text?.toLowerCase()).not.toMatch(/(?:take|swallow) 1 (?:tablet|capsule)/iu);
+  });
+  it.each([
+    ["Swallow 1 tablet whole; do not chew", 1],
+    ["Swallow 2 tablets whole; do not chew", 2],
+    ["Take 3 capsules whole", 3]
+  ])("an explicit numeral, not 'whole', licenses the administered quantity: %s", (source, value) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value });
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.fhir.text).toBeTruthy();
+  });
+});
+
+
+describe("boolean clinical guards preserve actual conjunction and disjunction", () => {
+  it.each([
+    ["Take 1 tab BID ONLY IF SBP > 160 AND HR >= 60", "all"],
+    ["Take 1 tab BID if SBP > 160 and HR >= 60", "all"],
+    ["Take 1 tab BID if SBP > 160 or HR >= 60", "any"],
+    ["Take 1 tab BID only if SBP>160 AND HR>=60", "all"]
+  ])("retains the exact clinical truth function through native R6-in-R5: %s",
+    (source, kind) => {
+      const parsed = parseSig(source);
+      const condition = getDosageCondition(parsed.fhir);
+      expect(condition).toMatchObject({ kind, conditions: [
+        { kind: "measurement", name: "sbp", operation: "gt", value: 160 },
+        { kind: "measurement", name: "hr", operation: "ge", value: 60 }
+      ] });
+      expect(parsed.fhir.asNeeded).not.toBe(true);
+      expect(parsed.fhir.timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: "d"
+      });
+      const r5 = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+      expect(getDosageCondition(r5[0])).toEqual(condition);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    });
+});
+
+
+describe("dimensional carrier grammar admits generic medication noun heads", () => {
+  it.each([
+    "Infuse 20 mg drug in 500 mL over four hours IV",
+    "Infuse 20 mg medication in 500 mL over 4 hours IV",
+    "Infuse 20mg product in 500mL over four hours IV",
+    "Infuse 20 mg in 500 mL over four hours IV"
+  ])("preserves active-drug 20 mg AND carrier 500mL/4h: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: 20, code: "mg" },
+      rateRatio: {
+        numerator: { value: 500, code: "mL" },
+        denominator: { value: 4, code: "h" }
+      }
+    });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe("47625008");
+    expect(parsed.meta.canonical.clauses[0]?.clinicalQuantity).toMatchObject({
+      representation: "dose-with-rate-ratio",
+      projectedDose: { value: 20, unit: "mg" },
+      rateNumerator: { value: 500, unit: "mL" },
+      administrationDuration: { value: 4, unit: "h" }
+    });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("does not turn carrier volume into active-drug mass without evidence", () => {
+    const parsed = parseSig("Infuse 500 mL over four hours IV");
+    expect(parsed.fhir.doseAndRate?.[0]).toMatchObject({
+      doseQuantity: { value: 500, code: "mL" },
+      rateRatio: { numerator: { value: 500, code: "mL" }, denominator: { value: 4, code: "h" } }
+    });
+  });
+});
+
+
+describe("universal weekday exclusion remains a structured contradiction", () => {
+  it.each([
+    "Take 1 tab daily except all days",
+    "Take 1 tab daily except every day",
+    "Take 1 tab daily except each day"
+  ])("preserves the dose and recurrence while excluding the entire week: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual([
+      "mon", "tue", "wed", "thu", "fri", "sat", "sun"
+    ]);
+    expect(nextDueDoses(parsed, {
+      from: "2026-10-24T08:00:00+07:00", orderedAt: "2026-10-24T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 5
+    })).toEqual([]);
+    expect(calculateTotalUnits({
+      dosage: parsed,
+      from: "2026-10-24T08:00:00+07:00", orderedAt: "2026-10-24T08:00:00+07:00",
+      timeZone: "Asia/Bangkok", durationValue: 7, durationUnit: "d"
+    })).toMatchObject({ totalUnits: 0, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("retains an explicit single weekday exception without denying other days", () => {
+    const parsed = parseSig("Take 1 tab daily except Sunday");
+    expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual(["sun"]);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+  });
+});
+
+
+describe("disjunctive administration methods are alternatives, not overwritten choices", () => {
+  it.each([
+    "Inhale 2 puffs or nebulize 2.5 mg",
+    "Inhale two puffs or nebulize 2.5 mg"
+  ])("preserves both independent dosed administration methods: %s", source => {
+    const plan = createBoundaryPlan(source);
+    expect(plan.relations).toContainEqual(expect.objectContaining({
+      kind: "alternative", connectorKind: "disjunction"
+    }));
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([2, 2.5]);
+    expect(parsed.items[0]?.fhir.method?.text?.toLowerCase()).toContain("inhale");
+    expect(parsed.items[1]?.fhir.method?.text?.toLowerCase()).toContain("nebulize");
+    expect(parsed.items.every(item => item.meta.canonical.clauses[0]?.rawText)).toBe(true);
+  });
+  it("keeps exclusive either/or administration branches editable, rather than silently selecting one", () => {
+    const source = "Either inhale two puffs OR nebulize 2.5 mg, not both";
+    const parsed = parseSig(source);
+    const plan = createBoundaryPlan(source);
+    expect(plan.relations).toContainEqual(expect.objectContaining({
+      kind: "alternative", connectorKind: "disjunction"
+    }));
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+      .toEqual([2, 2.5]);
+    expect(parsed.items[0]?.fhir.method?.text?.toLowerCase()).toContain("inhale");
+    expect(parsed.items[1]?.fhir.method?.text?.toLowerCase()).toContain("nebulize");
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses.map(c => c.rawText).join(" ")).toContain("not both");
+  });
+  it("does not manufacture two dosed administrations from a nondose procedure choice", () => {
+    const source = "Rinse mouth or wash hands";
+    const parsed = parseSig(source);
+    expect(parsed.items.every(item =>
+      !item.fhir.doseAndRate?.[0]?.doseQuantity?.value
+    )).toBe(true);
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+  });
+});
+
+describe("typed exactly-one medication alternatives through projection and execution", () => {
+  const source = "Take 1 tablet daily or take 2 tablets daily";
+  const clock = { from: "2026-10-24T00:00:00+07:00", orderedAt: "2026-10-24T00:00:00+07:00",
+    timeZone: "Asia/Bangkok", limit: 3 };
+
+  it("preserves OR through sync, async, lint and strict R5/R6 without concurrent implication", async () => {
+    const parsed = parseSig(source);
+    const asyncParsed = await parseSigAsync(source);
+    const linted = lintSig(source);
+    for (const results of [parsed.items, asyncParsed.items, linted.items.map(item => item.result)]) {
+      expect(results).toHaveLength(2);
+      const choices = results.map(item => getDosageAlternativeChoice(item.fhir));
+      expect(choices[0]).toMatchObject({ groupId: "choice-1", branchId: "branch-1", selectionBehavior: "exactly-one" });
+      expect(choices[1]).toMatchObject({ groupId: "choice-1", branchId: "branch-2", selectionBehavior: "exactly-one" });
+      expect(results.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    }
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.map(getDosageAlternativeChoice)).toEqual(parsed.items.map(item => getDosageAlternativeChoice(item.fhir)));
+    const restored = toDosageDetails(strictR5);
+    expect(restored.step[0].component.map(getDosageAlternativeChoice)).toEqual(strictR5.map(getDosageAlternativeChoice));
+    const en = formatSig(restored, "long", { locale: "en" });
+    const th = formatSig(restored, "long", { locale: "th" });
+    expect(en).toContain("Choose one:"); expect(en).toMatch(/ or /u);
+    expect(th).toContain("เลือกอย่างใดอย่างหนึ่ง"); expect(th).toContain("หรือ");
+    expect(formatSig(strictR5, "long", { locale: "en" })).toContain(" or ");
+    expect(fromFhir(restored, { locale: "en" }).longText).toContain(" or ");
+    expect(parsed.meta.canonical.clauses.map(c => c.rawText).join(" ")).toContain("2 tablets");
+  });
+
+  it("offers an explicit branch selection instead of executing/summing both treatments", () => {
+    const parsed = parseSig(source);
+    expect(() => nextDueDoses(parsed, clock)).toThrow(/alternativeChoices/u);
+    expect(() => calculateTotalUnits({ ...clock, dosage: parsed, durationValue: 3, durationUnit: "d" }))
+      .toThrow(/alternativeChoices/u);
+    for (const [branchId, quantity] of [["branch-1", 3], ["branch-2", 6]] as const) {
+      const selected = { ...clock, alternativeChoices: { "choice-1": branchId } };
+      expect(nextDueDoses(parsed, selected)).toHaveLength(3);
+      expect(calculateTotalUnits({ ...selected, dosage: parsed, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: quantity, unit: "tab" });
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      expect(nextDueDoses(strict, selected)).toEqual(nextDueDoses(parsed, selected));
+      expect(calculateTotalUnits({ ...selected, dosage: strict, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(quantity);
+    }
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(2);
+    expect(parsed.items.every(item => getDosageAlternativeChoice(item.fhir))).toBe(true);
+    expect(() => nextDueDoses(parsed, { ...clock, alternativeChoices: { "choice-1": "missing" } }))
+      .toThrow(/branch/u);
+  });
+
+  it("keeps branch identities after array reordering and never invents choices for conjunctions", () => {
+    const parsed = parseSig(source);
+    const native = parsed.items.map(item => item.fhir).reverse();
+    const opts = { ...clock, alternativeChoices: { "choice-1": "branch-1" } };
+    expect(calculateTotalUnits({ ...opts, dosage: native, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(3);
+    const together = parseSig("Take 1 tablet at 08:00 and 2 tablets at 20:00");
+    expect(together.items.every(item => getDosageAlternativeChoice(item.fhir) === undefined)).toBe(true);
+    expect(nextDueDoses(together, clock)).toHaveLength(3);
+  });
+
+  it("does not interpret a malformed choice modifier as permission to give every option", () => {
+    const parsed = parseSig(source);
+    const broken = { ...parsed.items[0].fhir, modifierExtension: [{
+      url: DOSAGE_ALTERNATIVE_CHOICE_URL,
+      extension: [{ url: "groupId", valueString: "choice-1" }]
+    }] };
+    expect(() => nextDueDoses(broken, clock)).toThrow(/Edit or clear/u);
+    expect(broken.modifierExtension[0].extension[0].valueString).toBe("choice-1");
+    setDosageAlternativeChoice(broken, undefined);
+    expect(nextDueDoses(broken, clock)).toHaveLength(3);
+  });
+});
+
+describe("event-relative alternatives retain offset and Boolean scope", () => {
+  const clocks = { from: "2026-10-24T06:00:00+07:00", orderedAt: "2026-10-24T06:00:00+07:00",
+    timeZone: "Asia/Bangkok", eventClock: { CM: "08:00", CD: "12:00", CV: "18:00" }, limit: 3 };
+  it.each([
+    "Inject 5 units 15 minutes before meals OR immediately after meals",
+    "Inject 5 units 15 minutes before meals or after meals immediately",
+    "ฉีด 5 ยูนิต ก่อนอาหาร 15 นาที หรือ หลังอาหารทันที"
+  ])("retains before15 OR after0 as two explicit options, never a shared offset: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([5, 5]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when)).toEqual([["AC"], ["PC"]]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.offset)).toEqual([15, 0]);
+    expect(parsed.items.map(item => getDosageAlternativeChoice(item.fhir)?.groupId)).toEqual(["choice-1", "choice-1"]);
+    const first = { ...clocks, alternativeChoices: { "choice-1": "branch-1" } };
+    const second = { ...clocks, alternativeChoices: { "choice-1": "branch-2" } };
+    expect(nextDueDoses(parsed, first).map(value => value.slice(11, 16))).toEqual(["07:45", "11:45", "17:45"]);
+    expect(nextDueDoses(parsed, second).map(value => value.slice(11, 16))).toEqual(["08:00", "12:00", "18:00"]);
+    const strict = toFhirR5Dosages(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)));
+    expect(strict.map(item => item.timing?.repeat?.offset)).toEqual([15, 0]);
+    expect(formatSig(strict, "long", { locale: "en" })).toContain(" or ");
+    expect(formatSig(strict, "long", { locale: "th" })).toContain("หรือ");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("keeps independent breakfast and lunch offsets without shifting after lunch to before it", () => {
+    const parsed = parseSig("Inject 5 units 15 minutes before breakfast or immediately after lunch");
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when)).toEqual([["ACM"], ["PCD"]]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.offset)).toEqual([15, 0]);
+    expect(nextDueDoses(parsed, { ...clocks, limit: 1,
+      alternativeChoices: { "choice-1": "branch-2" } })[0]?.slice(11,16)).toBe("12:00");
+  });
+  it("uses both conjunctive administrations but keeps their offsets local", () => {
+    const parsed = parseSig("Inject 5 units 15 minutes before breakfast and immediately after lunch");
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.every(item => !getDosageAlternativeChoice(item.fhir))).toBe(true);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.when)).toEqual([["ACM"], ["PCD"]]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.offset)).toEqual([15, 0]);
+    expect(nextDueDoses(parsed, { ...clocks, limit: 2 }).map(value => value.slice(11,16))).toEqual(["07:45", "12:00"]);
+  });
+  it("does not reinterpret an independent stat administration as an event-relative offset", () => {
+    const parsed = parseSig("Inject 5 units immediately");
+    expect(parsed.fhir.timing?.repeat?.when).toContain("IMD");
+    expect(parsed.fhir.timing?.repeat?.offset).toBeUndefined();
+    expect(parsed.items).toHaveLength(1);
+  });
+});
+
+describe("counted additional administrations and rolling quantity windows", () => {
+  it.each(["four additional doses", "4 more doses", "four further doses"])(
+    "keeps occurrence cardinality separate from symptoms and treatment duration: %s", count => {
+      const parsed = parseSig(`Take two tablets now, then one tablet every 12 hours for ${count}; max three tablets in a rolling 24 hours`);
+      expect(parsed.items).toHaveLength(2);
+      expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([2, 1]);
+      expect(parsed.items[0].fhir.timing?.repeat?.when).toContain("IMD");
+      expect(parsed.items[1].fhir.timing?.repeat).toMatchObject({ count: 4, period: 12, periodUnit: "h" });
+      expect(parsed.items[1].fhir.timing?.repeat?.boundsDuration).toBeUndefined();
+      expect(parsed.items[1].fhir.maxDosePerPeriod?.[0]).toMatchObject({
+        numerator: { value: 3, unit: "tab" }, denominator: { value: 24, code: "h" }
+      });
+      expect(parsed.items.every(item => !item.fhir.asNeeded && !item.fhir.site)).toBe(true);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(calculateTotalUnits({ dosage: parsed,
+        from: "2026-10-24T08:00:00+07:00", orderedAt: "2026-10-24T08:00:00+07:00",
+        timeZone: "Asia/Bangkok", durationValue: 3, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 6, unit: "tab" });
+    });
+  it("keeps a decimal medication cap while accepting an ordinary explicit window", () => {
+    const parsed = parseSig("Take 1 tablet q12h max 0.5 tablets within 12 hours");
+    expect(parsed.fhir.maxDosePerPeriod?.[0]).toMatchObject({
+      numerator: { value: 0.5, unit: "tab" }, denominator: { value: 12, code: "h" }
+    });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+describe("registered topical spreading keeps administration site and cadence", () => {
+  it("composes a qualitative manner, bilateral target and two event anchors", () => {
+    const source = "Spread cream thinly over both elbows morning and evening; avoid broken skin";
+    const parsed = parseSig(source);
+    expect(parsed.fhir.site?.text?.toLowerCase()).toContain("elbow");
+    expect(parsed.fhir.timing?.repeat?.when).toEqual(["MORN", "EVE"]);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.fhir.additionalInstruction?.some(instruction => instruction.coding?.some(c => c.code === "420162004"))).toBe(true);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.longText.toLowerCase()).toContain("elbow");
+    expect(parsed.longText.toLowerCase()).toContain("evening");
+    expect(parsed.longText.toLowerCase()).not.toContain("on the morning");
+  });
+  it("does not convert a prohibition of spreading into a positive administration", () => {
+    const parsed = parseSig("Do not spread cream on broken skin");
+    expect(parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? [])
+      .filter(action => action.predicate.lemma === "spread")
+      .every(action => action.polarity === AdvicePolarity.Negate)).toBe(true);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+  });
+});
+
+describe("qualitative application manner does not fabricate positive thinness", () => {
+  it("preserves a thick-layer instruction without assigning thin-layer coding or a numerical dose", () => {
+    const source = "Apply a thick layer of ointment to the rash twice daily";
+    const parsed = parseSig(source);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.fhir.additionalInstruction?.some(i => i.coding?.some(c => c.code === "420162004"))).not.toBe(true);
+    expect(parsed.fhir.additionalInstruction?.some(i => i.coding?.some(c => c.code === "246703001"))).toBe(true);
+    expect(parsed.longText.toLowerCase()).toContain("thick");
+    expect(parsed.meta.canonical.clauses[0]?.rawText).toBe(source);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it.each(["Do not spread cream thinly on the skin", "Do not apply a thin layer to the skin"])(
+    "does not turn a negative application-manner directive into positive thin-layer coding: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir.additionalInstruction?.some(i => i.coding?.some(c => c.code === "420162004"))).not.toBe(true);
+    const spread = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? [])
+      .filter(action => action.predicate.lemma === "spread" || action.predicate.lemma === "apply");
+    expect(spread.length).toBeGreaterThan(0);
+    expect(spread.every(action => action.polarity === AdvicePolarity.Negate)).toBe(true);
+  });
+});
+
+describe("device noun complements do not erase an alternative administration", () => {
+  it.each(["inhaler", "metered dose inhaler"])("keeps both quantified branches with a %s complement", device => {
+    const source = `Either inhale two puffs from ${device} or nebulize 2.5 mg, not both; rinse mouth after whichever is used`;
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([2, 2.5]);
+    expect(parsed.items.map(item => getDosageAlternativeChoice(item.fhir)?.groupId)).toEqual(["choice-1", "choice-1"]);
+    expect(parsed.items[0]?.fhir.method?.text?.toLowerCase()).toContain("inhale");
+    expect(parsed.items[1]?.fhir.method?.text?.toLowerCase()).toContain("nebulize");
+    expect(parsed.longText.toLowerCase()).toContain("inhaler");
+    expect(parsed.longText.toLowerCase()).toContain(" or ");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses.some(c => c.instructionGraph?.actions.some(a => a.predicate.lemma === "rinse_mouth"))).toBe(true);
+  });
+});
+
+describe("mixing complement ownership survives unknown terminology and FHIR", () => {
+  it.each(["applesauce", "yogurt", "frozzlebloop"])("keeps the source-backed mixing medium %s visible without inventing a dose", medium => {
+    const source = `crush tablet and mix with ${medium}, swallow immediately, do not chew`;
+    const parsed = parseSig(source);
+    const actions = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? []);
+    expect(actions.map(a => a.predicate.lemma)).toEqual(expect.arrayContaining(["crush", "mix", "swallow", "chew"]));
+    const mix = actions.find(a => a.predicate.lemma === "mix");
+    expect(mix?.args.some(a => a.text === medium &&
+      [AdviceArgumentRole.Material, AdviceArgumentRole.Substance, AdviceArgumentRole.Object].indexOf(a.role) >= 0)).toBe(true);
+    expect(actions.find(a => a.predicate.lemma === "chew")?.polarity).toBe(AdvicePolarity.Negate);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBeUndefined();
+    expect(parsed.longText.toLowerCase()).toContain(medium);
+    expect(parsed.longText.toLowerCase()).toContain("swallow");
+    const r5 = toFhirR5Dosages(toDosageDetails([parsed.fhir]));
+    expect(formatSig(r5, "long", { locale: "en" }).toLowerCase()).toContain(medium);
+    expect(formatSig(r5, "long", { locale: "th" }).toLowerCase()).toContain(medium);
+    if (medium === "frozzlebloop") {
+      expect(mix?.args.find(a => a.text === medium)?.coding).toBeUndefined();
+    }
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+  it("keeps a mixing instrument visible without coding it as a known liquid", () => {
+    const parsed = parseSig("mix with spoon, then swallow");
+    const mix = parsed.meta.canonical.clauses.flatMap(c => c.instructionGraph?.actions ?? []).find(a => a.predicate.lemma === "mix");
+    expect(mix?.args.some(a => /spoon/iu.test(a.text))).toBe(true);
+    expect(mix?.args.some(a => a.conceptId === "water" || a.conceptId === "clean-water")).toBe(false);
+    expect(parsed.longText.toLowerCase()).toContain("spoon");
+    expect(parsed.longText.toLowerCase()).toContain("swallow");
+  });
+});
+
+describe("Boolean condition constituents own their internal coordination boundaries", () => {
+  it.each([
+    ["Take 1 tab BID only if SBP > 160 and HR >= 60", "all"],
+    ["Take 1 tab BID only if SBP > 160 or HR >= 60", "any"]
+  ])("does not reparse a typed Boolean connective as two regimens: %s", (source, kind) => {
+    const plan = createBoundaryPlan(source, undefined, { trace: true });
+    expect(plan.segments).toHaveLength(1);
+    expect(plan.metrics.clauseProbes).toBe(0);
+    expect(plan.claims.some(claim => claim.kind === "clinical-condition")).toBe(true);
+    const parsed = parseSig(source);
+    expect(getDosageCondition(parsed.fhir)).toMatchObject({ kind, conditions: [
+      { kind: "measurement", name: "sbp", operation: "gt", value: 160 },
+      { kind: "measurement", name: "hr", operation: "ge", value: 60 }
+    ] });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.fhir.asNeeded).not.toBe(true);
+  });
+  it("does not consume an actual disjunctive administration outside a condition", () => {
+    const parsed = parseSig("Take 1 tablet at 08:00 or 2 tablets at 20:00");
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(parsed.items.map(item => item.fhir.timing?.repeat?.timeOfDay)).toEqual([["08:00:00"], ["20:00:00"]]);
+    expect(parsed.items.every(item => getDosageAlternativeChoice(item.fhir)?.groupId === "choice-1")).toBe(true);
   });
 });

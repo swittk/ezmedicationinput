@@ -145,6 +145,8 @@ interface AdviceArgConceptMatcherSource {
 
 interface AdviceMatcherAllOf {
   allOf: AdviceMatcher[];
+  /** Conjuncts must refer to the same administered material, not unrelated drugs. */
+  sharedReferent?: boolean;
 }
 
 interface AdviceMatcherAnyOf {
@@ -177,6 +179,7 @@ type AdviceMatcher =
 
 interface AdviceMatcherAllOfSource {
   allOf: AdviceMatcherSource[];
+  sharedReferent?: boolean;
 }
 
 interface AdviceMatcherAnyOfSource {
@@ -518,7 +521,7 @@ function buildAdviceMatcher(source: AdviceMatcherSource): AdviceMatcher {
     for (const item of source.allOf) {
       allOf.push(buildAdviceMatcher(item));
     }
-    return { allOf };
+    return { allOf, sharedReferent: source.sharedReferent === true };
   }
   if ("anyOf" in source) {
     const anyOf: AdviceMatcher[] = [];
@@ -589,7 +592,11 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
   if (matcher.force && frame.force !== matcher.force) {
     return false;
   }
-  if (matcher.polarity && frame.polarity !== matcher.polarity) {
+  if (matcher.polarity && (
+    matcher.polarity === AdvicePolarity.Affirm
+      ? frame.polarity === AdvicePolarity.Negate
+      : frame.polarity !== matcher.polarity
+  )) {
     return false;
   }
   if (matcher.relations) {
@@ -638,6 +645,89 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
   return true;
 }
 
+/**
+ * Compare the material arguments selected by two composed predicates.
+ * Merely seeing a positive and a negative verb in the same SIG is not
+ * sufficient evidence that they refer to the same medication.
+ */
+function materialReferent(frame: AdviceFrame): AdviceArgument | undefined {
+  return frame.args.find((arg) => [
+    AdviceArgumentRole.Object, AdviceArgumentRole.Theme,
+    AdviceArgumentRole.Material, AdviceArgumentRole.Substance, AdviceArgumentRole.Site
+  ].indexOf(arg.role) >= 0);
+}
+
+function referentIdentity(argument: AdviceArgument): string {
+  const text = normalizeLoosePhraseKey(argument.text || argument.normalized || "");
+  // Remove only non-contrasting articles. Distinct ordinals and other/another
+  // remain part of the identity: a first capsule is not a second tablet.
+  return text.replace(/^(?:the|an?|some)\s+/u, "");
+}
+
+function framesShareMaterialReferent(
+  left: AdviceFrame,
+  right: AdviceFrame,
+  allFrames: readonly AdviceFrame[]
+): boolean {
+  const a = materialReferent(left);
+  const b = materialReferent(right);
+  // A body-site argument is not an administered medication referent.
+  if (a?.role === AdviceArgumentRole.Site || b?.role === AdviceArgumentRole.Site) return false;
+  if (!a && !b) return true;
+  if (a && b) {
+    if (a.conceptId && b.conceptId && a.conceptId !== b.conceptId) return false;
+    const leftKey = referentIdentity(a);
+    const rightKey = referentIdentity(b);
+    // Two objects of the same drug class or SNOMED product type are not
+    // necessarily the same physical medication; require explicit identity.
+    return Boolean(leftKey && leftKey === rightKey);
+  }
+  const explicitFrame = a ? left : right;
+  const impliedFrame = a ? right : left;
+  const explicitReferent = a ?? b;
+  if (!explicitReferent || explicitFrame.span.end > impliedFrame.span.start) return false;
+  const key = referentIdentity(explicitReferent);
+  // Pronoun-free ellipsis may inherit an earlier material only if no
+  // intervening action has introduced a distinct explicit material.
+  return !allFrames.some((frame) => {
+    if (frame === left || frame === right ||
+        frame.span.start < explicitFrame.span.end ||
+        frame.span.end > impliedFrame.span.start) return false;
+    const other = materialReferent(frame);
+    return Boolean(other && (other.role === AdviceArgumentRole.Site ||
+      referentIdentity(other) !== key));
+  });
+}
+
+/** Validate shared-reference constraints declared on the existing matcher. */
+function matchingFramesShareReferent(
+  frames: AdviceFrame[],
+  members: readonly AdviceMatcher[]
+): boolean {
+  const frameMatchers = members.filter(
+    (item): item is AdviceMatcherFrame => "frame" in item
+  );
+  if (frameMatchers.length < 2) return true;
+  const options = frameMatchers.map((item) =>
+    frames.filter((frame) => frameMatches(frame, item.frame))
+  );
+  if (options.some((matches) => !matches.length)) return false;
+  const selected: AdviceFrame[] = [];
+  const select = (index: number): boolean => {
+    if (index === options.length) return true;
+    for (const candidate of options[index]) {
+      if (selected.some((frame) =>
+        frame === candidate || !framesShareMaterialReferent(frame, candidate, frames)
+      )) continue;
+      selected.push(candidate);
+      if (select(index + 1)) return true;
+      selected.pop();
+    }
+    return false;
+  };
+  return select(0);
+}
+
 function matchesAdviceMatcher(
   frames: AdviceFrame[],
   normalizedText: string,
@@ -649,7 +739,8 @@ function matchesAdviceMatcher(
         return false;
       }
     }
-    return true;
+    return !matcher.sharedReferent ||
+      matchingFramesShareReferent(frames, matcher.allOf);
   }
   if ("anyOf" in matcher) {
     for (const item of matcher.anyOf) {
@@ -686,6 +777,56 @@ function matchesAdviceMatcher(
   return false;
 }
 
+function adviceMatcherRequiresComposedFrames(matcher: AdviceMatcher): boolean {
+  if ("frame" in matcher || "argConcept" in matcher) return true;
+  if ("allOf" in matcher) return matcher.allOf.some(adviceMatcherRequiresComposedFrames);
+  if ("anyOf" in matcher) return matcher.anyOf.some(adviceMatcherRequiresComposedFrames);
+  if ("not" in matcher) return adviceMatcherRequiresComposedFrames(matcher.not);
+  return false;
+}
+
+/**
+ * Resolve semantic qualifier codings from the COMPLETE composed action program.
+ * This is the existing structural matcher, with no string-based reparsing of
+ * clinical instructions after FHIR projection.
+ */
+export function matchComposedAdviceCodings(
+  frames: readonly AdviceFrame[]
+): AdditionalInstructionDefinition[] {
+  if (!frames.length) return [];
+  return ADDITIONAL_INSTRUCTION_RULES
+    .filter((rule) => adviceMatcherRequiresComposedFrames(rule.matcher) &&
+      matchesAdviceMatcher([...frames], "", rule.matcher))
+    .map((rule) => ({
+      ...rule.definition,
+      coding: rule.definition.coding ? { ...rule.definition.coding } : undefined,
+      i18n: rule.definition.i18n ? { ...rule.definition.i18n } : undefined
+    }));
+}
+
+/** A rule may be licensed by an exact lexical constituent OR composed frames.
+ * Adding the second proof path must not invalidate a candidate already proven
+ * by the first. The full procedural graph deliberately lacks some lexical
+ * manner detail, so absence of graph proof is not contrary evidence.
+ */
+function adviceMatcherHasPositiveLexicalEvidence(matcher: AdviceMatcher): boolean {
+  if ("normalizedTexts" in matcher) return matcher.normalizedTexts.length > 0;
+  if ("anyOf" in matcher) return matcher.anyOf.some(adviceMatcherHasPositiveLexicalEvidence);
+  if ("allOf" in matcher) return !matcher.sharedReferent &&
+    matcher.allOf.some(adviceMatcherHasPositiveLexicalEvidence);
+  return false;
+}
+
+/** Determine whether a rule's coding must be rechecked against scoped HPSG frames. */
+export function adviceCodingNeedsComposedScope(
+  system: string,
+  code: string
+): boolean {
+  const rule = findRuleByCoding(system, code);
+  return Boolean(rule && adviceMatcherRequiresComposedFrames(rule.matcher) &&
+    !adviceMatcherHasPositiveLexicalEvidence(rule.matcher));
+}
+
 function findRuleByCoding(system: string, code: string): AdviceCodingRule | undefined {
   for (const rule of ADDITIONAL_INSTRUCTION_RULES) {
     if (rule.definition.coding?.system !== system) {
@@ -697,6 +838,47 @@ function findRuleByCoding(system: string, code: string): AdviceCodingRule | unde
     return rule;
   }
   return undefined;
+}
+
+function supportingFramesForMatcher(
+  frames: readonly AdviceFrame[],
+  matcher: AdviceMatcher
+): AdviceFrame[] {
+  if ("frame" in matcher) return frames.filter((frame) => frameMatches(frame, matcher.frame));
+  if ("argConcept" in matcher) return frames.filter((frame) => frameHasArgConcept(frame, matcher.argConcept));
+  if ("anyOf" in matcher) {
+    const branch = matcher.anyOf.find((item) => matchesAdviceMatcher([...frames], "", item));
+    return branch ? supportingFramesForMatcher(frames, branch) : [];
+  }
+  if ("allOf" in matcher) {
+    if (!matchesAdviceMatcher([...frames], "", matcher)) return [];
+    const supporting: AdviceFrame[] = [];
+    for (const item of matcher.allOf) {
+      supporting.push(...supportingFramesForMatcher(frames, item));
+    }
+    return supporting;
+  }
+  // Negated and text-only guards never justify suppressing an actual action.
+  return [];
+}
+
+/**
+ * Standardized coded warnings retain their clinical wording when precisely
+ * one composed action entails that warning. Return its original action source
+ * for exclusion from a DUPLICATE realization; neither action nor code is lost.
+ */
+export function composedCodedWarningActionSources(
+  frames: readonly AdviceFrame[],
+  coding: Pick<FhirCoding, "system" | "code"> | undefined
+): string[] {
+  if (!coding?.code) return [];
+  const rule = findRuleByCoding(coding.system ?? SNOMED_SYSTEM, coding.code);
+  if (!rule?.frames.some((frame) => frame.force === AdviceForce.Warning) ||
+      !matchesAdviceMatcher([...frames], "", rule.matcher)) return [];
+  const supporting = supportingFramesForMatcher(frames, rule.matcher);
+  // Multiple possibly distinct warnings must remain individually visible.
+  return supporting.length === 1 && supporting[0].sourceText
+    ? [supporting[0].sourceText] : [];
 }
 
 function createArgument(
@@ -791,6 +973,16 @@ function findNormalizedLexeme(surface: string, partOfSpeech?: string): AdviceLex
     return entry;
   }
   return undefined;
+}
+
+/** Existing advice terminology supplies manner modifiers to the main action
+ * grammar. It is lexical evidence, not a second clause parser. */
+export function resolveAdviceMannerModifier(surface: string):
+  { lemma: string; i18n?: Record<string, string> } | undefined {
+  const entry = findNormalizedLexeme(surface, "modifier");
+  return entry?.semanticClass === "amount_style"
+    ? { lemma: entry.lemma, i18n: entry.i18n ? { ...entry.i18n } : undefined }
+    : undefined;
 }
 
 function findContainedConcept(normalized: string): AdviceConceptEntry | undefined {

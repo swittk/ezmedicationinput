@@ -4,7 +4,7 @@ import type { Token } from '../parser-state';
 import type { MedicationDateListMatch } from '../date-interpretation';
 
 export interface Range { start: number; end: number }
-export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause';
+export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause' | 'procedural-argument' | 'clinical-condition';
 export interface StructuralClaim extends Range {
   id: string;
   kind: StructureKind;
@@ -35,7 +35,7 @@ export interface Proposal {
   /** Typed boundary license to inherit a following sibling's course duration. */
   inheritFollowingDuration?: boolean;
   /** Typed construction license, never inferred from its display rule id. */
-  semanticLicense?: "dose-continuation" | "target-transition" | "delayed-target";
+  semanticLicense?: "dose-continuation" | "target-transition" | "delayed-target" | "event-timing-ellipsis";
   evidence: Evidence[];
 }
 export interface BoundaryDecision {
@@ -157,6 +157,7 @@ export type RegimenSemanticOperation =
   | 'share-trailing-instruction'
   | 'share-leading-adjuncts'
   | 'preserve-disjunctive-dosages'
+  | 'inherit-event-timing-administration'
   | 'preserve-ambiguous-shared-guard';
 
 export interface RegimenSemanticConstruction {

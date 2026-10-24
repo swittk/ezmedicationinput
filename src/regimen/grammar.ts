@@ -56,6 +56,18 @@ const semanticConstraint = (
  * incomplete, conflicting, or already-timed daughter cannot participate.
  */
 export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] = [{
+  id: 'hpsg.cx.coordination.event-timing-ellipsis',
+  priority: 950,
+  operation: 'inherit-event-timing-administration',
+  constraints: [
+    semanticConstraint('relation.typed-event-timing-ellipsis', f => f.relation.semanticLicense === 'event-timing-ellipsis'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.administration', f => f.leftAdministrationContext),
+    semanticConstraint('left.schedule', f => f.leftHasSchedule),
+    semanticConstraint('right.schedule', f => f.rightHasSchedule),
+    semanticConstraint('right.omits-dose-head', f => !f.rightExplicitDose && !f.rightExplicitHead)
+  ]
+}, {
   id: 'hpsg.cx.coordination.disjunctive-dosage-choice',
   priority: 900,
   operation: 'preserve-disjunctive-dosages',
@@ -224,6 +236,36 @@ export function terminalAdministrationDelay(clause: CanonicalSigClause): number 
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
+  { id: 'regimen.disjunctive-event-timing', priority: 895, relation: 'alternative',
+    semanticLicense: 'event-timing-ellipsis', constraints: [
+    constraint('connector.coordination', f => f.site.kind === 'coordination'),
+    constraint('connector.disjunction', f => f.connectorKind === 'disjunction'),
+    constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),
+    constraint('right.complete-timing', f => f.right.complete && f.right.hasSchedule),
+    // An event/clock choice has distinct event anchors. A lexical number or
+    // frequency range ("once or twice daily") remains one bounded schedule.
+    constraint('daughters.event-anchors', f => Boolean(
+      (f.left.clause.schedule?.when?.length || f.left.clause.schedule?.timeOfDay?.length) &&
+      (f.right.clause.schedule?.when?.length || f.right.clause.schedule?.timeOfDay?.length)
+    )),
+    constraint('right.elliptic-dose', f => !f.right.hasDose && !f.right.method),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
+  ] },
+  { id: 'regimen.conjunctive-distinct-event-offsets', priority: 890, relation: 'coordination',
+    semanticLicense: 'event-timing-ellipsis', constraints: [
+    constraint('connector.coordination', f => f.site.kind === 'coordination'),
+    constraint('connector.conjunction', f => f.connectorKind === 'conjunction'),
+    constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),
+    constraint('right.complete-timing', f => f.right.complete && f.right.hasSchedule),
+    constraint('right.elliptic-dose', f => !f.right.hasDose && !f.right.method),
+    constraint('events.independent-offsets', f => Boolean(
+      f.left.clause.schedule?.when?.length && f.right.clause.schedule?.when?.length &&
+      (f.left.clause.schedule.offset !== f.right.clause.schedule.offset ||
+       f.left.clause.schedule.offsetMin !== f.right.clause.schedule.offsetMin ||
+       f.left.clause.schedule.offsetMax !== f.right.clause.schedule.offsetMax)
+    )),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
+  ] },
   { id: 'regimen.disjunctive-dosage-choice', priority: 900, relation: 'alternative', constraints: [
     constraint('connector.coordination', f => f.site.kind === 'coordination'),
     constraint('connector.disjunction', f => f.connectorKind === 'disjunction'),
@@ -246,7 +288,9 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.dose-and-timing', f => f.left.hasDose && f.left.hasSchedule),
     constraint('left.terminal-wait', f => terminalAdministrationDelay(f.left.clause) !== undefined),
-    constraint('right.target-ellipsis', f => f.right.hasTargets && !f.right.hasDose && !f.right.hasSchedule),
+    // The recipient may name a new amount or an elliptical cardinal; a
+    // separate dose does not cancel an explicit inter-administration wait.
+    constraint('right.target-without-independent-timing', f => f.right.hasTargets && !f.right.hasSchedule),
     constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets)),
     constraint('right.complete', f => f.right.complete)
   ] },

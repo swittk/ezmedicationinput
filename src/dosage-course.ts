@@ -1,12 +1,10 @@
-import { encodeCourseDetails, decodeCourseDetails, encodeConditionPredicate,
-  decodeConditionPredicate, encodeCourseStepSource } from "./fhir-bridge";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirR6Dosage, FhirR6DosageCondition,
-  FhirR6DosageDetails, FhirR6DosageSafety, FhirR6DoseLimit, MedicationCondition,
-  EzDosage, EzCourseMetadata
+  FhirR6DosageDetails, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity,
+  MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep
 } from "./types";
 
 /** Modifier extensions: ignoring either can change whether a dose may be given. */
@@ -39,11 +37,108 @@ const DOSAGE_RETAINED_COURSE_STEP_URL =
 /** Treatment-relative phase origin for an independent parallel component. */
 export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
   "https://solublelabs.com/fhir/StructureDefinition/medication-parallel-component-phase-origin";
+/** Local must-understand profile for exclusive administration choices.
+ * Equal R5 sequences and R6 step components alone represent concurrency,
+ * so grammar-proven alternatives need explicit membership in both formats.
+ */
+export const DOSAGE_ALTERNATIVE_CHOICE_URL =
+  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-alternative-choice";
+
+/** Group identity is course-local; a branch may contain multiple dosages. */
+export interface DosageAlternativeChoice {
+  groupId: string;
+  branchId: string;
+  selectionBehavior: "exactly-one";
+}
+
+/** Read typed membership without interpreting clinical text or changing source.
+ * @param dosage An R5 or R6 dosage carrying the same modifier-extension shape.
+ * @returns Recognized membership, or undefined while unfamiliar data stays attached.
+ */
+export function getDosageAlternativeChoice(
+  dosage: Pick<FhirDosage, "modifierExtension">
+): DosageAlternativeChoice | undefined {
+  const marker = dosage.modifierExtension?.find(extension =>
+    extension.url === DOSAGE_ALTERNATIVE_CHOICE_URL);
+  const fields = marker?.extension;
+  if (!fields) return undefined;
+  const groupId = fields.find(field => field.url === "groupId")?.valueString;
+  const branchId = fields.find(field => field.url === "branchId")?.valueString;
+  const selectionBehavior = fields.find(field => field.url === "selectionBehavior")?.valueCode;
+  return groupId && branchId && selectionBehavior === "exactly-one"
+    ? { groupId, branchId, selectionBehavior } : undefined;
+}
+
+/** Assign membership already established by the typed regimen graph.
+ * This does not choose a branch, deduce a group from wording, or add conditions.
+ * @param dosage The editable R5 or R6 component to update.
+ * @param choice Proven membership; undefined explicitly clears this modifier.
+ */
+export function setDosageAlternativeChoice(
+  dosage: Pick<FhirDosage, "modifierExtension">,
+  choice: DosageAlternativeChoice | undefined
+): void {
+  replacementExtensions(dosage, DOSAGE_ALTERNATIVE_CHOICE_URL, choice ? {
+    url: DOSAGE_ALTERNATIVE_CHOICE_URL,
+    extension: [
+      { url: "groupId", valueString: choice.groupId },
+      { url: "branchId", valueString: choice.branchId },
+      { url: "selectionBehavior", valueCode: choice.selectionBehavior }
+    ]
+  } : undefined);
+}
+
+/** Machine-readable declaration of the local alternative-choice modifier.
+ * It is generated beside its only codec, avoiding a second copied schema or
+ * an undocumented native FHIR field. Callers can publish/validate the returned
+ * StructureDefinition independently of the parser's permissive read path.
+ */
+export function buildDosageAlternativeChoiceStructureDefinition() {
+  const slice = (name: string, code: "string" | "code", fixedCode?: string) => [
+    { id: "Extension.extension:" + name, path: "Extension.extension",
+      sliceName: name, min: 1, max: "1", type: [{ code: "Extension" }] },
+    { id: "Extension.extension:" + name + ".extension",
+      path: "Extension.extension.extension", max: "0" },
+    { id: "Extension.extension:" + name + ".url",
+      path: "Extension.extension.url", fixedUri: name },
+    { id: "Extension.extension:" + name + ".value[x]",
+      path: "Extension.extension.value[x]", min: 1, max: "1",
+      type: [{ code }], ...(fixedCode ? { fixedCode } : {}) }
+  ];
+  return {
+    resourceType: "StructureDefinition" as const,
+    id: "medication-alternative-choice",
+    url: DOSAGE_ALTERNATIVE_CHOICE_URL,
+    name: "MedicationAlternativeChoice",
+    title: "Medication alternative choice membership",
+    status: "draft" as const,
+    description: "Identifies a dosage as one branch in a course-local exactly-one choice. All dosages sharing a branch belong to the same option; ignoring the modifier would incorrectly administer mutually exclusive options concurrently.",
+    kind: "complex-type" as const,
+    abstract: false,
+    type: "Extension",
+    baseDefinition: "http://hl7.org/fhir/StructureDefinition/Extension",
+    derivation: "constraint" as const,
+    context: [{ type: "element" as const, expression: "Dosage" }],
+    differential: { element: [
+      { id: "Extension", path: "Extension", isModifier: true,
+        isModifierReason: "Changes concurrent dosage components into exclusive selectable branches." },
+      { id: "Extension.extension", path: "Extension.extension",
+        slicing: { discriminator: [{ type: "value", path: "url" }],
+          ordered: false, rules: "closed" } },
+      ...slice("groupId", "string"),
+      ...slice("branchId", "string"),
+      ...slice("selectionBehavior", "code", "exactly-one"),
+      { id: "Extension.url", path: "Extension.url", fixedUri: DOSAGE_ALTERNATIVE_CHOICE_URL },
+      { id: "Extension.value[x]", path: "Extension.value[x]", max: "0" }
+    ] }
+  };
+}
+
 const CONDITION_CODE_SYSTEM = "http://hl7.org/fhir/CodeSystem/dosage-condition-code";
 const INTERNAL_CONDITION_CODE_SYSTEM = "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-condition";
 
 function replacementExtensions(
-  dosage: FhirDosage, url: string, value: FhirExtension | undefined
+  dosage: Pick<FhirDosage, "modifierExtension">, url: string, value: FhirExtension | undefined
 ): void {
   const existing = (dosage.modifierExtension ?? []).filter(extension => extension.url !== url);
   const result = value ? [...existing, value] : existing;
@@ -113,6 +208,9 @@ export function assertUnderstoodDosageModifiers(_dosage: FhirDosage | EzDosage):
 
 function parseDosageCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
   const expanded = dosage as EzDosage;
+  // A clinician-cleared native condition also owns direct reads: do not
+  // resurrect the older R5 modifier before an export/reload reconciles it.
+  if (expanded.condition?.length === 0) return undefined;
   if (expanded.condition?.length === 1) return conditionFromR6(expanded.condition[0]);
   if (expanded.condition?.length) {
     return { kind: "any", conditions: expanded.condition.map(conditionFromR6) };
@@ -300,7 +398,9 @@ export function toEzDosages(dosages: readonly (FhirDosage | EzDosage)[]): EzDosa
     const input = dosage as EzDosage;
     // Lift each missing field independently. A preexisting siteReference or
     // expression does not imply an unrelated R5 maximum/condition was lifted.
-    const needsCondition = !input.condition?.length &&
+    // An empty native list is an intentional edit clearing a condition, not
+    // a missing field asking the R5 bridge to restore its previous meaning.
+    const needsCondition = input.condition === undefined &&
       !!dosage.modifierExtension?.some(ext => ext.url === DOSAGE_CONDITION_R5_URL);
     const needsSafety = !input.safety &&
       (!!dosage.maxDosePerPeriod?.length ||
@@ -355,7 +455,9 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     siteReference, excludedDates,
     modifierExtension, extension, ...rest
   } = dosage as EzDosage;
-  const predicate = ownConditions?.length ? undefined : parseDosageCondition(dosage);
+  // Presence is semantically different from absence: [] explicitly clears
+  // an R6-native condition. It must not fall back to a stale R5 modifier.
+  const predicate = ownConditions === undefined ? parseDosageCondition(dosage) : undefined;
   const safety = ownSafety ?? toR6Safety(dosage);
   // A caller may edit the public excludedDates field directly, without
   // updating the older R5 modifier. Rebuild that modifier from the live
@@ -713,59 +815,73 @@ export function withDosageEditProvenance<T extends FhirDosage | EzDosage>(
 }
 
 /**
- * A retained R6 course is authoritative only for fields R5 cannot express:
- * relative step windows, non-R5 expressions and full-course safety rules.
- * Never let the cached component values override edited live R5 dosages.
+ * Reconcile an R6-only expression against the same R5 dose/rate slot.
+ * A clinician editing the numeric amount/rate supersedes its prior expression:
+ * the complete original R6 course stays as inert reconciliation provenance,
+ * never a second active dose/rate entry. Edits to unrelated fields retain the
+ * expression, including R6 components carrying other original dose metadata.
+ * @param original The original R6 choices.
+ * @param projected Editable live dose/rate fields projected back from R5.
+ * @param baseline The original R5-compatible projection, before any edits.
+ * @param warnings Course-level notices for clinically meaningful changes.
  */
 function retainDoseExpressions(
   original: FhirR6Dosage["doseAndRate"],
   projected: FhirR6Dosage["doseAndRate"],
+  baseline: FhirDosage["doseAndRate"],
   warnings: string[]
 ): FhirR6Dosage["doseAndRate"] {
   if (!original?.some(item => item.doseExpression || item.rateExpression)) return projected;
   const result = projected?.map(item => ({ ...item })) ?? [];
-  let preserved = false;
+  let retained = false;
+  let superseded = false;
   for (let index = 0; index < original.length; index++) {
     const old = original[index];
     if (!old.doseExpression && !old.rateExpression) continue;
     const current = result[index];
     if (!current) {
-      // Expressions are R6 choice values. Retain only those choices here;
-      // any R5-representable values have already been projected separately.
-      result.push({
-        ...(old.type ? { type: old.type } : {}),
-        ...(old.doseExpression ? { doseExpression: old.doseExpression } : {}),
-        ...(old.rateExpression ? { rateExpression: old.rateExpression } : {})
-      });
-      preserved = true;
+      // Removal of an editable dosage slot must not resurrect an old
+      // expression as an executable administration.
+      superseded = true;
       continue;
     }
-    const detached: NonNullable<FhirR6Dosage["doseAndRate"]>[number] = {};
+    const previous = baseline?.[index];
+    const doseUnchanged = equivalentProjection(
+      { doseQuantity: previous?.doseQuantity, doseRange: previous?.doseRange },
+      { doseQuantity: current.doseQuantity, doseRange: current.doseRange }
+    );
+    const rateUnchanged = equivalentProjection(
+      { rateQuantity: previous?.rateQuantity, rateRange: previous?.rateRange,
+        rateRatio: previous?.rateRatio },
+      { rateQuantity: current.rateQuantity, rateRange: current.rateRange,
+        rateRatio: current.rateRatio }
+    );
     if (old.doseExpression) {
-      const conflictsWithLiveDose = current.doseQuantity !== undefined ||
-        current.doseRange !== undefined || current.doseExpression !== undefined &&
-        !equivalentProjection(current.doseExpression,
-          old.doseExpression);
-      if (conflictsWithLiveDose) detached.doseExpression = old.doseExpression;
-      else if (!current.doseExpression) current.doseExpression = old.doseExpression;
+      if (!doseUnchanged || current.doseExpression &&
+          !equivalentProjection(current.doseExpression, old.doseExpression)) {
+        superseded = true;
+      } else {
+        if (!current.doseExpression) current.doseExpression = old.doseExpression;
+        retained = true;
+      }
     }
     if (old.rateExpression) {
-      const conflictsWithLiveRate = current.rateQuantity !== undefined ||
-        current.rateRange !== undefined || current.rateRatio !== undefined ||
-        current.rateExpression !== undefined &&
-        !equivalentProjection(current.rateExpression,
-          old.rateExpression);
-      if (conflictsWithLiveRate) detached.rateExpression = old.rateExpression;
-      else if (!current.rateExpression) current.rateExpression = old.rateExpression;
+      if (!rateUnchanged || current.rateExpression &&
+          !equivalentProjection(current.rateExpression, old.rateExpression)) {
+        superseded = true;
+      } else {
+        if (!current.rateExpression) current.rateExpression = old.rateExpression;
+        retained = true;
+      }
     }
-    if (detached.doseExpression || detached.rateExpression) {
-      result.push(detached);
-    }
-    preserved = true;
   }
-  if (preserved) {
+  if (superseded) {
     addWarning(warnings,
-      "Retained R6 dose/rate expressions were kept alongside edited R5 dose fields; review their relationship.");
+      "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
+  }
+  if (retained) {
+    addWarning(warnings,
+      "R6-only dose/rate expressions were preserved because their R5 dose/rate fields were unchanged.");
   }
   return result;
 }
@@ -896,12 +1012,33 @@ function reconcileRetainedCourse(
     const usedOriginalIndices = new Set<number>();
     const originalIdCounts = new Map<string, number>();
     const liveIdCounts = new Map<string, number>();
-    for (const component of step.component) {
+    // A unique alternative branch also supplies source identity when a
+    // strict R5 editor changes and reorders rows without element IDs.
+    // Repeated membership is not an identity: one branch may contain several
+    // concurrent dosages, so such rows use the existing ID/projection rules.
+    let originalChoiceIndices: Map<string, number> | undefined;
+    let liveChoiceCounts: Map<string, number> | undefined;
+    const choiceKey = (choice: DosageAlternativeChoice): string =>
+      choice.groupId.length + ":" + choice.groupId + choice.branchId;
+    for (let index = 0; index < step.component.length; index++) {
+      const component = step.component[index];
       if (component.id)
         originalIdCounts.set(component.id, (originalIdCounts.get(component.id) ?? 0) + 1);
+      const choice = getDosageAlternativeChoice(component);
+      if (choice) {
+        const indices = originalChoiceIndices ?? (originalChoiceIndices = new Map());
+        const key = choiceKey(choice);
+        indices.set(key, indices.has(key) ? -1 : index);
+      }
     }
     for (const dosage of live) {
       if (dosage.id) liveIdCounts.set(dosage.id, (liveIdCounts.get(dosage.id) ?? 0) + 1);
+      const choice = getDosageAlternativeChoice(dosage);
+      if (choice) {
+        const counts = liveChoiceCounts ?? (liveChoiceCounts = new Map());
+        const key = choiceKey(choice);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
     }
     for (let j = 0; j < live.length; j++) {
       const id = live[j].id;
@@ -910,6 +1047,20 @@ function reconcileRetainedCourse(
       if (match >= 0) {
         assigned[j] = match;
         usedOriginalIndices.add(match);
+      }
+    }
+    if (originalChoiceIndices && liveChoiceCounts) {
+      for (let j = 0; j < live.length; j++) {
+        if (assigned[j] >= 0) continue;
+        const choice = getDosageAlternativeChoice(live[j]);
+        if (!choice) continue;
+        const key = choiceKey(choice);
+        const match = originalChoiceIndices.get(key);
+        if (liveChoiceCounts.get(key) === 1 && match !== undefined && match >= 0 &&
+            !usedOriginalIndices.has(match)) {
+          assigned[j] = match;
+          usedOriginalIndices.add(match);
+        }
       }
     }
     for (let j = 0; j < live.length; j++) {
@@ -965,9 +1116,14 @@ function reconcileRetainedCourse(
       const safetyEqual = expanded.safety === undefined || old !== undefined &&
         equivalentProjection(old.safety,
           expanded.safety);
-      const referenceEqual = expanded.siteReference === undefined || old !== undefined &&
-        equivalentProjection(old.site?.reference,
-          expanded.siteReference);
+      // An explicitly present but undefined native field is a clinician edit
+      // clearing a previously retained R6-only BodyStructure reference.
+      // An absent field means an ordinary strict R5 row, which cannot express
+      // that reference and must continue to inherit it from retained source.
+      const siteReferenceSpecified = Object.prototype.hasOwnProperty.call(
+        expanded, "siteReference");
+      const referenceEqual = !siteReferenceSpecified || old !== undefined &&
+        equivalentProjection(old.site?.reference, expanded.siteReference);
       if (!rawEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual)
         structuredChanged = true;
       if (old && rawEqual && datesEqual &&
@@ -981,8 +1137,9 @@ function reconcileRetainedCourse(
         // cannot be represented in strict R5. Preserve them across a change
         // to a DIFFERENT R5 field, provided their own R5 slots are unchanged.
         if (old.doseAndRate?.some(entry => entry.doseExpression || entry.rateExpression))
-          fresh.doseAndRate = retainDoseExpressions(old.doseAndRate, fresh.doseAndRate, warnings);
-        if (old.site?.reference && !expanded.siteReference &&
+          fresh.doseAndRate = retainDoseExpressions(old.doseAndRate, fresh.doseAndRate,
+            baseline.doseAndRate, warnings);
+        if (old.site?.reference && !siteReferenceSpecified &&
             equivalentProjection(liveDosageProjection({ site: baseline.site }),
               liveDosageProjection({ site: dosage.site }))) {
           fresh.site = { ...(fresh.site ?? {}), reference: old.site.reference };
@@ -1385,4 +1542,290 @@ export function createCourseDetailsExtension(details: FhirR6DosageDetails): Fhir
     url: DOSAGE_DETAILS_R5_URL,
     extension: [encodeCourseDetails(details)]
   } : undefined;
+}
+
+
+/**
+ * Private R6-in-R5 typed extension bridge. Kept with its only consumer, the
+ * DosageDetails reconciliation owner, so grammar/clinical meaning stays
+ * upstream and all R5 persistence uses one declared structural encoder.
+ */
+/** A declared primitive/datatype value, nested backbone, or retained extension. */
+type ValueField = Extract<keyof FhirExtension, `value${string}`>;
+interface BridgeField {
+  value?: ValueField;
+  fields?: BridgeShape;
+  repeated?: boolean;
+  extension?: boolean;
+  quantity?: boolean;
+}
+type BridgeShape = Readonly<Record<string, BridgeField>>;
+
+const ELEMENT: BridgeShape = {
+  id: { value: "valueString" },
+  extension: { extension: true, repeated: true },
+  modifierExtension: { extension: true, repeated: true }
+};
+const QUANTITY: BridgeField = { quantity: true };
+const RELATIVE_TIME: BridgeShape = {
+  ...ELEMENT,
+  contextReference: { value: "valueReference" },
+  contextDefinition: { value: "valueCanonical" },
+  contextPath: { value: "valueString" },
+  contextCode: { value: "valueCodeableConcept" },
+  offsetDuration: { value: "valueQuantity" },
+  offsetRange: { value: "valueRange" },
+  text: { value: "valueString" }
+};
+const CONDITION: BridgeShape = {
+  ...ELEMENT,
+  code: { value: "valueCodeableConcept" },
+  details: { value: "valueCodeableConcept" },
+  operation: { value: "valueCode" },
+  valueBoolean: { value: "valueBoolean" },
+  valueQuantity: QUANTITY,
+  valueString: { value: "valueString" },
+  text: { value: "valueString" }
+};
+const SAFETY: BridgeShape = {
+  ...ELEMENT,
+  ifExceeded: { value: "valueCode" },
+  doseLimit: { repeated: true, fields: {
+    ...ELEMENT,
+    scope: { value: "valueCode" },
+    period: { value: "valueQuantity" },
+    valueQuantity: QUANTITY,
+    valueInteger: { value: "valueInteger" },
+    valueExpression: { value: "valueExpression" },
+    text: { value: "valueString" }
+  } }
+};
+const COMPONENT: BridgeShape = {
+  ...ELEMENT,
+  text: { value: "valueString" },
+  patientInstruction: { value: "valueString" },
+  timing: { value: "valueTiming" },
+  route: { value: "valueCodeableConcept" },
+  site: { value: "valueCodeableReference" },
+  method: { value: "valueCodeableConcept" },
+  additionalInstruction: { value: "valueCodeableConcept", repeated: true },
+  asNeeded: { value: "valueBoolean" },
+  asNeededFor: { value: "valueCodeableConcept", repeated: true },
+  condition: { fields: CONDITION, repeated: true },
+  safety: { fields: SAFETY },
+  doseAndRate: { repeated: true, fields: {
+    ...ELEMENT,
+    type: { value: "valueCodeableConcept" },
+    doseRange: { value: "valueRange" },
+    doseQuantity: { value: "valueQuantity" },
+    doseExpression: { value: "valueExpression" },
+    rateRatio: { value: "valueRatio" },
+    rateRange: { value: "valueRange" },
+    rateQuantity: { value: "valueQuantity" },
+    rateExpression: { value: "valueExpression" }
+  } }
+};
+const STEP: BridgeShape = {
+  ...ELEMENT,
+  start: { fields: RELATIVE_TIME },
+  end: { fields: RELATIVE_TIME },
+  count: { value: "valueInteger" },
+  component: { fields: COMPONENT, repeated: true },
+  safety: { fields: SAFETY }
+};
+const COURSE: BridgeShape = {
+  ...ELEMENT,
+  renderedInstruction: { value: "valueString" },
+  repeatCycle: { value: "valueQuantity" },
+  step: { fields: STEP, repeated: true },
+  safety: { fields: SAFETY }
+};
+const COURSE_STEP: BridgeShape = { ...STEP, sequence: { value: "valueInteger" } };
+const PREDICATE: Record<string, BridgeField> = {
+  kind: { value: "valueCode" }, name: { value: "valueString" },
+  operation: { value: "valueCode" }, value: { value: "valueDecimal" },
+  unit: { value: "valueString" }, text: { value: "valueString" },
+  expected: { value: "valueBoolean" }
+};
+PREDICATE.condition = { fields: PREDICATE };
+PREDICATE.conditions = { fields: PREDICATE, repeated: true };
+
+/** Preserve an unfamiliar field as explicit typed extension content, never an
+ * opaque JSON string. Known FHIR fields use the named datatype schemas above;
+ * this escape hatch only retains future/unrecognized native fields verbatim.
+ * @param url The enclosing field name.
+ * @param value The actual source value; no clinical interpretation is inferred.
+ */
+function retainField(url: string, value: unknown): FhirExtension {
+  if (typeof value === "string") return { url, valueString: value };
+  if (typeof value === "boolean") return { url, valueBoolean: value };
+  if (typeof value === "number") return { url, valueDecimal: value };
+  const kind = value === null ? "null" : Array.isArray(value) ? "array" : "object";
+  const children: FhirExtension[] = [{ url: "kind", valueCode: kind }];
+  if (Array.isArray(value)) {
+    for (const item of value) children.push(retainField("item", item));
+  } else if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      const part = (value as Record<string, unknown>)[key];
+      if (part !== undefined) children.push({ url: "field", extension: [
+        { url: "name", valueString: key }, retainField("value", part)
+      ] });
+    }
+  }
+  return { url, extension: children };
+}
+
+/** Read retained fields without evaluating them or reparsing serialized text.
+ * @param node One preserved field extension.
+ */
+function readRetainedField(node: FhirExtension): unknown {
+  if (node.valueString !== undefined) return node.valueString;
+  if (node.valueBoolean !== undefined) return node.valueBoolean;
+  if (node.valueDecimal !== undefined) return node.valueDecimal;
+  const children = node.extension ?? [];
+  const kind = children.find(child => child.url === "kind")?.valueCode;
+  if (kind === "null") return null;
+  if (kind === "array") return children.filter(child => child.url === "item").map(readRetainedField);
+  const result: Record<string, unknown> = {};
+  for (const child of children) {
+    if (child.url !== "field") continue;
+    const name = child.extension?.find(part => part.url === "name")?.valueString;
+    const value = child.extension?.find(part => part.url === "value");
+    if (name !== undefined && value) Object.defineProperty(result, name, {
+      value: readRetainedField(value), enumerable: true, writable: true, configurable: true
+    });
+  }
+  return result;
+}
+
+/** Map a typed object into named FHIR children. Unfamiliar Extension objects are
+ * copied intact under their source slot, including their original URLs/types.
+ * @param value Source object.
+ * @param shape Declared semantic fields for this backbone.
+ */
+function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
+  const children: FhirExtension[] = [];
+  for (const key of Object.keys(value)) {
+    const part = (value as Record<string, unknown>)[key];
+    if (part === undefined) continue;
+    const field = Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] : undefined;
+    if (!field) {
+      children.push({ url: "retainedField", extension: [
+        { url: "name", valueString: key }, retainField("value", part)
+      ] });
+      continue;
+    }
+    if (field.repeated && Array.isArray(part) && part.length === 0) {
+      children.push({ url: "emptyArray", valueCode: key });
+      continue;
+    }
+    const values = field.repeated && Array.isArray(part) ? part : [part];
+    for (const item of values) {
+      if (field.extension) {
+        children.push({ url: key, extension: [cloneStructuredValue(item as FhirExtension)] });
+      } else if (field.fields) {
+        children.push({ url: key, extension: encodeFields(item as object, field.fields) });
+      } else if (field.quantity) {
+        const quantity = item as FhirR6Quantity;
+        if (quantity.comparator === "~") {
+          const { comparator, ...ordinary } = quantity;
+          children.push({ url: key, extension: [
+            { url: "quantity", valueQuantity: cloneStructuredValue(ordinary) },
+            { url: "comparator", valueCode: comparator }
+          ] });
+        } else children.push({ url: key, valueQuantity: cloneStructuredValue(quantity) as FhirExtension["valueQuantity"] });
+      } else if (field.value) {
+        children.push({ url: key, [field.value]: cloneStructuredValue(item) });
+      }
+    }
+  }
+  // Empty-but-present metadata remains representable without violating ext-1.
+  return children.length ? children : [{ url: "empty", valueBoolean: true }];
+}
+
+/** Inverse of the declared extension mapping. No formatter, condition evaluator
+ * or grammar is involved; clinical authority stays in the typed source fields.
+ * @param children Named extension children.
+ * @param shape Declared semantic fields for this backbone.
+ */
+function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const child of children) {
+    if (child.url === "empty") continue;
+    if (child.url === "emptyArray" && child.valueCode && shape[child.valueCode]?.repeated) {
+      result[child.valueCode] = []; continue;
+    }
+    if (child.url === "retainedField") {
+      const name = child.extension?.find(part => part.url === "name")?.valueString;
+      const value = child.extension?.find(part => part.url === "value");
+      if (name !== undefined && value) Object.defineProperty(result, name, {
+        value: readRetainedField(value), enumerable: true, writable: true, configurable: true
+      });
+      continue;
+    }
+    const field = Object.prototype.hasOwnProperty.call(shape, child.url) ? shape[child.url] : undefined;
+    if (!field) {
+      // Unknown bridge children retain their original context as provenance.
+      const extensions = (result.extension ??= []) as FhirExtension[];
+      extensions.push({ url: "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unrecognized-bridge-field",
+        extension: [cloneStructuredValue(child)] });
+      continue;
+    }
+    let value: unknown;
+    if (field.extension) value = child.extension?.[0] && cloneStructuredValue(child.extension[0]);
+    else if (field.fields) value = child.extension && decodeFields(child.extension, field.fields);
+    else if (field.quantity) {
+      value = child.valueQuantity && cloneStructuredValue(child.valueQuantity);
+      if (!value && child.extension) {
+        const quantity = child.extension.find(part => part.url === "quantity")?.valueQuantity;
+        const comparator = child.extension.find(part => part.url === "comparator")?.valueCode;
+        if (quantity) value = { ...cloneStructuredValue(quantity), ...(comparator ? { comparator } : {}) };
+      }
+    } else if (field.value) value = cloneStructuredValue(child[field.value]);
+    if (value === undefined) continue;
+    if (field.repeated) ((result[child.url] ??= []) as unknown[]).push(value);
+    else result[child.url] = value;
+  }
+  return result;
+}
+
+/** Encode the complete R6 course using named, typed R5 extension children.
+ * @param details Course whose step/component semantics must survive R5 storage.
+ */
+function encodeCourseDetails(details: FhirR6DosageDetails): FhirExtension {
+  return { url: "dosageDetails", extension: encodeFields(details, COURSE) };
+}
+
+/** Recover a course from a structured extension, leaving malformed originals
+ * with the caller for preservation. No string payload is interpreted here.
+ * @param node The dosageDetails extension child.
+ */
+function decodeCourseDetails(node: FhirExtension): FhirR6DosageDetails | undefined {
+  if (!node.extension || node.valueString !== undefined) return undefined;
+  const value = decodeFields(node.extension, COURSE);
+  if (!Array.isArray(value.step) || !value.step.every(step =>
+    step && typeof step === "object" && Array.isArray(step.component))) return undefined;
+  return { ...value, step: value.step } as FhirR6DosageDetails;
+}
+
+/** Encode a Boolean predicate with explicit all/any/not child relationships.
+ * @param condition Typed predicate supplied by the HPSG or external API.
+ */
+function encodeConditionPredicate(condition: MedicationCondition): FhirExtension {
+  return { url: "predicate", extension: encodeFields(condition, PREDICATE) };
+}
+
+/** Decode structural predicate fields; the caller checks the small predicate
+ * union before using them as meaning and preserves unfamiliar input unchanged.
+ * @param node The predicate child extension.
+ */
+function decodeConditionPredicate(node: FhirExtension): unknown {
+  return node.extension && node.valueString === undefined ? decodeFields(node.extension, PREDICATE) : undefined;
+}
+
+/** Preserve unmatched step metadata as structured source, not JSON text.
+ * @param step Original editable course-step metadata.
+ */
+function encodeCourseStepSource(step: EzCourseStep): FhirExtension[] {
+  return encodeFields(step, COURSE_STEP);
 }

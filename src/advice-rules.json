@@ -864,21 +864,29 @@
         }
       ],
       "matcher": {
+        "sharedReferent": true,
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": [
-                "crush"
-              ],
-              "polarity": "negate"
+              "predicateLemmas": ["swallow"],
+              "polarity": "affirm",
+              "argConcepts": [
+                { "role": "manner", "conceptIds": ["whole"] }
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": [
-                "chew"
-              ],
+              "predicateLemmas": ["chew"],
               "polarity": "negate"
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "predicateLemmas": ["chew"],
+                "polarity": "affirm"
+              }
             }
           }
         ]
@@ -908,7 +916,8 @@
             "frame": {
               "predicateLemmas": [
                 "chew"
-              ]
+              ],
+              "polarity": "affirm"
             }
           },
           {
@@ -1048,28 +1057,49 @@
         }
       ],
       "matcher": {
-        "normalizedTexts": [
-          "thinly",
-          "apply thinly",
-          "use thinly",
-          "thin layer",
-          "a thin layer",
-          "apply thin layer",
-          "apply a thin layer",
-          "use thin layer",
-          "use a thin layer",
-          "thin film",
-          "a thin film",
-          "apply thin film",
-          "apply a thin film",
-          "thin coat",
-          "a thin coat",
-          "apply thin coat",
-          "apply a thin coat",
-          "ทาบางๆ",
-          "ทาบาง ๆ",
-          "บางๆ",
-          "บาง ๆ"
+        "anyOf": [
+          {
+            "normalizedTexts": [
+              "thinly",
+              "apply thinly",
+              "use thinly",
+              "thin layer",
+              "a thin layer",
+              "apply thin layer",
+              "apply a thin layer",
+              "use thin layer",
+              "use a thin layer",
+              "thin film",
+              "a thin film",
+              "apply thin film",
+              "apply a thin film",
+              "thin coat",
+              "a thin coat",
+              "apply thin coat",
+              "apply a thin coat",
+              "ทาบางๆ",
+              "ทาบาง ๆ",
+              "บางๆ",
+              "บาง ๆ"
+            ]
+          },
+          {
+            "frame": {
+              "predicateSemanticClasses": [
+                "apply"
+              ],
+              "polarity": "affirm",
+              "argConcepts": [
+                {
+                  "role": "manner",
+                  "conceptIds": [
+                    "thin layer",
+                    "thin_layer"
+                  ]
+                }
+              ]
+            }
+          }
         ]
       }
     },

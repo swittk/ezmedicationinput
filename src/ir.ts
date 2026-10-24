@@ -274,6 +274,13 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.site?.evidence);
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
+    // Canonical source spans refer to the complete clinician instruction.
+    // Each FHIR Dosage keeps its own clause-local extension coordinates.
+    const materialRange = clause.clinicalQuantity?.carrierMaterial?.range;
+    if (materialRange) {
+      materialRange.start += offset;
+      materialRange.end += offset;
+    }
 
     for (const restriction of clause.site?.restrictions ?? []) {
       if (restriction.range) {

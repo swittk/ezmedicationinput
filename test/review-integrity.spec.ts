@@ -679,7 +679,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
   });
 
-  it("retains R6 dose expressions as provenance beside conflicting live R5 doses", () => {
+  it("retains superseded R6 dose expressions only as inert provenance after a numeric R5 edit", () => {
     const full: FhirR6DosageDetails = {
       renderedInstruction: "Weight-adjusted dose twice daily",
       step: [{ component: [{
@@ -696,19 +696,31 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toBe("%patient.weight * 0.5");
     flat[0].doseAndRate![0].doseQuantity = { value: 2, unit: "mg" };
     const reconciled = toDosageDetails(flat);
+    // The clinician's explicit 2 mg now owns the executable dose.
+    // An earlier weight formula must not reappear as a second active dosage.
     expect(reconciled.step[0].component[0].doseAndRate).toEqual([
-      expect.objectContaining({ doseQuantity: { value: 2, unit: "mg" } }),
-      expect.objectContaining({
-        doseExpression: {
-          language: "text/fhirpath", expression: "%patient.weight * 0.5"
-        }
-      })
+      expect.objectContaining({ doseQuantity: { value: 2, unit: "mg" } })
     ]);
+    expect(reconciled.step[0].component[0].doseAndRate?.some(value =>
+      value.doseExpression !== undefined)).toBe(false);
     expect(reconciled.renderedInstruction).toBeUndefined();
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
       url: DOSAGE_RECONCILIATION_WARNING_URL,
       valueString: expect.stringMatching(/expressions.*edited R5 dose/i)
     }));
+    // Old expression remains inspectable as typed, inert source ancestry.
+    const source = reconciled.extension?.find(extension =>
+      extension.url.endsWith("medication-course-reconciliation-source"));
+    expect(source).toBeDefined();
+    const containsOriginalExpression = (extension: FhirExtension): boolean =>
+      extension.valueExpression?.expression === "%patient.weight * 0.5" ||
+      extension.extension?.some(containsOriginalExpression) === true;
+    expect(containsOriginalExpression(source!)).toBe(true);
+    // Save/reload through strict R5 must never reactivate the old expression.
+    const reloaded = toDosageDetails(toFhirR5Dosages(reconciled));
+    expect(reloaded.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(reloaded.step[0].component[0].doseAndRate?.some(value =>
+      value.doseExpression !== undefined)).toBe(false);
   });
 
   it("preserves exact R6 safety and coded conditions through unrelated R5 edits", () => {

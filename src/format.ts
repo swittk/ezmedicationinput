@@ -8,6 +8,7 @@ import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
+import { composedCodedWarningActionSources } from "./advice";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { baseLanguageTag } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -17,6 +18,11 @@ import {
   instructionGraphPrimarySiteRelation,
   instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction,
+  instructionGraphEntailsAdviceCoding,
+  instructionGraphCoversTypedWarnings,
+  instructionGraphRealizesWarningText,
+  instructionGraphSourceOwnedByAdvice,
+  instructionGraphFullyOwnsAdvice,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
@@ -1341,8 +1347,21 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
   const instructionPhrases: string[] = [];
+  const codedWarningSources: string[] = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    codedWarningSources.push(...composedCodedWarningActionSources(
+      clause.instructionGraph?.actions ?? [], instruction.coding
+    ));
+  }
   const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction) => instruction.coding?.code)
+    clause.additionalInstructions?.some((instruction) =>
+      instruction.coding?.code && (
+        composedCodedWarningActionSources(
+          clause.instructionGraph?.actions ?? [], instruction.coding
+        ).length > 0 ||
+        !clause.instructionGraph ||
+        !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
+      ))
   );
   const normalizeInstruction = (value: string) => value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
   const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
@@ -1350,13 +1369,21 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   ) ?? [];
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
   const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
-    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+    if (!instruction.text || !clause.instructionGraph) return false;
+    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
+    if (instruction.coding?.code) {
+      return !composedCodedWarningActionSources(
+        clause.instructionGraph.actions, instruction.coding
+      ).length && instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
+    }
     const normalized = normalizeInstruction(instruction.text);
     const representedByWarning = graphWarnings.some((action) => {
       const source = normalizeInstruction(action.sourceText);
       return source === normalized || source.includes(normalized) || normalized.includes(source);
     });
-    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
+      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
+      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
       representedByWarning || !instruction.frames?.length ||
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
@@ -1380,14 +1407,26 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       }
     }
   }
+  for (const source of codedWarningSources) {
+    if (additionalSemanticSourceTexts.indexOf(source) === -1) {
+      additionalSemanticSourceTexts.push(source);
+    }
+  }
+  if (clause.instructionGraph) {
+    for (const instruction of additionalForDirectRendering) {
+      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
+        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
+          additionalSemanticSourceTexts.push(ownedSource);
+        }
+      }
+    }
+  }
   const allAdditionalRepresentedByGraphWarnings = Boolean(
     graphWarnings.length &&
     additionalTexts.every((text) => {
       const normalized = normalizeInstruction(text);
-      return graphWarnings.some((action) => {
-        const source = normalizeInstruction(action.sourceText);
-        return source === normalized || source.includes(normalized) || normalized.includes(source);
-      });
+      return Boolean(clause.instructionGraph &&
+        instructionGraphRealizesWarningText(clause.instructionGraph, text));
     })
   );
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
@@ -1400,7 +1439,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
           omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts
+          omitSourceTexts: richPrimaryGraphAction
+            ? [...additionalSemanticSourceTexts, richPrimaryGraphAction.sourceText]
+            : additionalSemanticSourceTexts
         })
       : undefined;
   if (!graphWholeInstruction) {
@@ -1555,7 +1596,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
   );
   const graphCanStandAlone = Boolean(
-    !hasExplicitMethod && trailingInstructionText && clause.instructionGraph?.actions.length &&
+    !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
+    clause.instructionGraph?.actions.length &&
     !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
   );
   if (graphCanStandAlone) return trailingInstructionText as string;

@@ -2,6 +2,17 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action",
   "actions": [
     {
+      "code": "avoid",
+      "semanticClass": "avoidance",
+      "display": "Avoid",
+      "i18n": { "th": "งด" },
+      "aliases": ["avoid", "refrain from", "abstain from", "งด", "หลีกเลี่ยง"],
+      "procedural": true,
+      "safetyScopeTarget": true,
+      "argumentParser": "object-duration",
+      "realizer": "default"
+    },
+    {
       "code": "shake",
       "semanticClass": "prepare",
       "display": "Shake",
@@ -143,6 +154,7 @@
         "เกลี่ย"
       ],
       "procedural": true,
+      "primaryAdministrationHead": true,
       "administrationMethod": {
         "system": "http://snomed.info/sct",
         "code": "738991002",
@@ -386,6 +398,9 @@
       "aliases": [
         "dry",
         "pat dry",
+        "let dry",
+        "allow to dry",
+        "ปล่อยให้แห้ง",
         "ทำให้แห้ง",
         "ซับให้แห้ง"
       ],
@@ -526,6 +541,8 @@
       },
       "aliases": [
         "stop",
+        "discontinue",
+        "cease",
         "stop use",
         "stop using",
         "หยุด",
@@ -578,6 +595,7 @@
       },
       "aliases": [
         "crush",
+        "crushing",
         "บด"
       ],
       "procedural": true,
@@ -598,6 +616,7 @@
       },
       "aliases": [
         "chew",
+        "chewing",
         "เคี้ยว"
       ],
       "procedural": true,
@@ -848,10 +867,15 @@
       "code": "rotate",
       "semanticClass": "administration_pattern",
       "display": "Rotate",
+      "i18n": { "th": "สลับ" },
       "aliases": [
-        "rotate"
+        "rotate",
+        "rotating",
+        "สลับ"
       ],
-      "procedural": true
+      "procedural": true,
+      "argumentParser": "object-time",
+      "realizer": "default"
     },
     {
       "code": "reapply",
@@ -2083,6 +2107,7 @@
       },
       "aliases": [
         "place",
+        "placing",
         "put"
       ],
       "procedural": false,

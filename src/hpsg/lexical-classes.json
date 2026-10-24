@@ -148,6 +148,7 @@
     "per",
     "per-dose",
     "to",
+    "from",
     "in",
     "into",
     "at",
@@ -155,9 +156,11 @@
     "an",
     "the",
     "of",
+    "either",
     "and",
     "or",
     "on",
+    "over",
     "every",
     "then",
     ",",
@@ -559,6 +562,8 @@
       "unit": "patch"
     }
   ],
+  "qualitativeDoseModifiers": ["thin", "thick", "small"],
+  "qualitativeDoseUnits": ["ribbon", "strip", "line", "film", "layer", "coat"],
   "implicitSingleDoseUnits": [
     "pea-sized amount",
     "finger length"
@@ -579,10 +584,7 @@
     "ninth": 0.1111111111111111,
     "tenth": 0.1,
     "eleventh": 0.09090909090909091,
-    "twelfth": 0.08333333333333333,
-    "whole": 1,
-    "entire": 1,
-    "full": 1
+    "twelfth": 0.08333333333333333
   },
   "doseFractionDenominatorWords": {
     "half": 0.5,
@@ -734,6 +736,9 @@
       "periodUnit": "d"
     }
   ],
+  "occurrenceCountModifiers": ["additional", "more", "further"],
+  "maximumPeriodPrepositions": ["in", "within", "per", "/", "a"],
+  "maximumPeriodModifiers": ["rolling", "consecutive"],
   "occurrenceCountWords": [
     "dose",
     "doses",
@@ -757,8 +762,40 @@
     "nine": 9,
     "ten": 10,
     "eleven": 11,
-    "twelve": 12
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "ninety": 90
   },
+  "calendarUniversalDayQuantifiers": ["all", "every", "each"],
+  "openEndedCourseEndConditions": [
+    {
+      "kind": "next-event",
+      "modifiers": ["next"],
+      "heads": ["appointment", "visit"],
+      "code": "1287351008",
+      "display": "Until next appointment",
+      "i18n": { "th": "ใช้ยาจนถึงการนัดครั้งถัดไป" }
+    },
+    {
+      "kind": "state-change",
+      "subjects": ["symptom", "symptoms"],
+      "predicates": ["improve", "improves"],
+      "code": "1287353006",
+      "display": "Until symptoms improve",
+      "i18n": { "th": "ใช้ยาจนกว่าอาการจะดีขึ้น" }
+    }
+  ],
   "frequencyTimesWords": [
     "time",
     "times",
@@ -996,6 +1033,7 @@
     "-"
   ],
   "instructionStartWords": [
+    "as",
     "avoid",
     "can",
     "could",
@@ -1119,6 +1157,7 @@
     "left",
     "right"
   ],
+  "productSourcePrepositions": ["from"],
   "productFormModifiers": [
     "new",
     "replacement",
@@ -1126,6 +1165,8 @@
     "old"
   ],
   "bodySiteAttributiveModifiers": [
+    "whole",
+    "entire",
     "dry",
     "clean",
     "hairless",
@@ -1134,6 +1175,8 @@
     "moist"
   ],
   "bodySiteAttributiveModifierI18n": {
+    "whole": { "th": "ทั่วทั้ง" },
+    "entire": { "th": "ทั่วทั้ง" },
     "dry": {
       "th": "แห้ง"
     },
@@ -1158,6 +1201,7 @@
     "must"
   ],
   "freeTextDirectiveStarts": [
+    "as",
     "avoid",
     "do",
     "don't",

@@ -1832,6 +1832,12 @@ export type MedicationConditionEvaluator = (condition: MedicationCondition, at: 
 
 export interface NextDueDoseOptions {
   from: Date | string;
+  /** Explicit course-local selection for exactly-one alternative groups.
+   * Keys are getDosageAlternativeChoice(...).groupId; values are branchId.
+   * Omit only for ordinary courses without mutually exclusive alternatives.
+   * Parsing and editing never require a selection; execution and supply do.
+   */
+  alternativeChoices?: Readonly<Record<string, string>>;
   /** Evaluate structured conditional instructions at each candidate occurrence. Required for conditional scheduling. */
   evaluateCondition?: MedicationConditionEvaluator;
   orderedAt?: Date | string;

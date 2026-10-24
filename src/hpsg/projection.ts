@@ -6,6 +6,9 @@ import {
   FhirDosage,
   RouteCode,
   TextRange,
+  type CanonicalAdministrationTargetGroup,
+  type CanonicalSigClause,
+  type CanonicalSiteExpr,
   type CanonicalEvidence,
   type CanonicalLexicalCategory,
   type CanonicalScheduleSemanticField
@@ -188,6 +191,10 @@ function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinical
     numerator: { ...value.numerator },
     denominators: value.denominators.map((term) => ({ ...term })),
     projectedDose: value.projectedDose ? { ...value.projectedDose } : undefined,
+    ...(value.carrierMaterial ? { carrierMaterial: {
+      text: value.carrierMaterial.text,
+      range: value.carrierMaterial.range ? { ...value.carrierMaterial.range } : undefined
+    } } : {}),
     administrationDuration: value.administrationDuration
       ? { ...value.administrationDuration }
       : undefined
@@ -258,10 +265,12 @@ function applyClinicalAdjunct(
       const excluded = new Set(adjunct.excludedWeekdays);
       const allowed = (adjunct.includedWeekdays?.length
         ? adjunct.includedWeekdays : [...ALL_DAYS]).filter((day) => !excluded.has(day));
-      if (allowed.length) {
-        schedule.dayOfWeek = allowed;
-        clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
-      }
+      // The exclusion is clinical meaning even if NO weekday is eligible.
+      // An empty allowed set is a contradictory/non-executable course, not
+      // permission to drop the exclusion and schedule the medication daily.
+      // Retain the full FHIR exclusion extension for review and editing.
+      clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
+      if (allowed.length) schedule.dayOfWeek = allowed;
     }
     if (adjunct.excludedDates?.length) {
       clinical.excludedDates = [...adjunct.excludedDates];
@@ -533,4 +542,76 @@ export function projectHpsgSignToState(
       evidence.lexicalCategory
     );
   }
+}
+
+function cloneAdministrationTarget(site: CanonicalSiteExpr): CanonicalSiteExpr {
+  return {
+    ...site,
+    i18n: site.i18n ? { ...site.i18n } : undefined,
+    coding: site.coding ? {
+      ...site.coding,
+      i18n: site.coding.i18n ? { ...site.coding.i18n } : undefined
+    } : undefined,
+    spatialRelation: site.spatialRelation ? { ...site.spatialRelation } : undefined,
+    ...(site.restrictions?.length ? {
+      restrictions: site.restrictions.map(restriction => ({
+        ...restriction,
+        range: restriction.range ? { ...restriction.range } : undefined,
+        markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
+        predicate: {
+          ...restriction.predicate,
+          range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
+        }
+      }))
+    } : {}),
+    evidence: site.evidence?.map((item) => ({
+      ...item,
+      spans: item.spans.map((span) => ({ ...span }))
+    })),
+    range: site.range ? { ...site.range } : undefined
+  };
+}
+
+function cloneAdministrationTargetGroup(
+  group: CanonicalAdministrationTargetGroup
+): CanonicalAdministrationTargetGroup {
+  return {
+    coordination: group.coordination,
+    sourceText: group.sourceText,
+    range: group.range ? { ...group.range } : undefined,
+    targets: group.targets.map(cloneAdministrationTarget)
+  };
+}
+
+/**
+ * Return the FHIR projection alternatives licensed by the typed HPSG site
+ * coordination. A disjunction is deliberately one retained canonical clause;
+ * it is never converted into simultaneous administrations.
+ */
+export function administrationTargetProjections(
+  clauses: readonly CanonicalSigClause[]
+): Array<CanonicalSiteExpr | undefined> {
+  const group = clauses.find((clause) => clause.administrationTargetGroup)
+    ?.administrationTargetGroup;
+  if (!group || group.coordination !== "conjunction" || group.targets.length < 2) {
+    return [undefined];
+  }
+  return group.targets.map(cloneAdministrationTarget);
+}
+
+/** Pure pre-FHIR projection from one typed conjunction to one singular site. */
+export function projectAdministrationTargetClauses(
+  clauses: readonly CanonicalSigClause[],
+  target: CanonicalSiteExpr | undefined
+): CanonicalSigClause[] {
+  if (!target) return clauses.slice();
+  return clauses.map((clause) => {
+    const group = clause.administrationTargetGroup;
+    if (!group || group.coordination !== "conjunction") return clause;
+    return {
+      ...clause,
+      site: cloneAdministrationTarget(target),
+      administrationTargetGroup: cloneAdministrationTargetGroup(group)
+    };
+  });
 }

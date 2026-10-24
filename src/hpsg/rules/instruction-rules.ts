@@ -12,7 +12,6 @@ import { joinLocalizedTokens } from "../../locale-realization";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
-import { lexInput } from "../../lexer/lex";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -30,6 +29,7 @@ import {
   ACTION_SEQUENCE_MARKERS,
   ADMINISTRATION_WINDOW_INSTRUCTIONS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
+  DOSE_NUMBER_WORDS,
   EVENT_ARTICLE_TOKENS,
   EVENT_PREPOSITIONS,
   FREE_TEXT_DIRECTIVE_STARTS,
@@ -58,6 +58,9 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
 import { isScheduleLead } from "./timing-rules";
+import { productLexicalRule } from "./core-rules";
+
+const PRODUCT_COMPLEMENT_RULE = productLexicalRule();
 
 const INSTRUCTION_PREDICATES = ["take", "apply", "use"] as const;
 const ADMINISTRATION_WINDOWS_BY_FIRST = new Map<string, typeof ADMINISTRATION_WINDOW_INSTRUCTIONS>();
@@ -98,6 +101,19 @@ function isExplicitDoseLead(context: HpsgClauseContext, index: number): boolean 
   return Boolean(normalizeUnit(normalizeTokenLower(unitToken), context.options));
 }
 
+function startsTypedAdministrationComplement(context: HpsgClauseContext, start: number): boolean {
+  if (isExplicitDoseLead(context, start)) return true;
+  let cursor = start;
+  const first = context.tokens[cursor];
+  if (!first || context.state.consumed.has(first.index)) return false;
+  const lower = normalizeTokenLower(first);
+  // Quantification and determiners precede the product daughter. Do not
+  // search beyond this complement into a condition or locative adjunct.
+  if (first.kind === LexKind.Number || first.kind === LexKind.NumberRange ||
+    DOSE_NUMBER_WORDS.has(lower) || EVENT_ARTICLE_TOKENS.has(lower)) cursor += 1;
+  return PRODUCT_COMPLEMENT_RULE.match(context, cursor).length > 0;
+}
+
 function startsScheduledAdministration(context: HpsgClauseContext, index: number): boolean {
   const token = context.tokens.slice(index, index + 1)[0];
   if (!token || context.state.consumed.has(token.index)) {
@@ -106,12 +122,6 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   return Boolean(
     isMedicationAdministrationMethod(normalizeTokenLower(token), context.options) &&
     isScheduleLead(context, index + 1)
-  );
-}
-
-function containsCoordinationSurface(text: string): boolean {
-  return lexInput(text).some((token) =>
-    ACTION_COORDINATION_CONNECTORS.has(token.canonical ?? token.lower)
   );
 }
 
@@ -127,12 +137,9 @@ function proceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
     ) {
       return false;
     }
-    return !frame.args.some((arg) =>
-      !arg.conceptId &&
-      !arg.coding?.code &&
-      !arg.quantity &&
-      containsCoordinationSurface(arg.text)
-    );
+    // Argument coordination belongs to the selected procedural head.
+    // Unknown nominal members remain editable in that typed argument slot.
+    return true;
   });
 }
 
@@ -367,9 +374,6 @@ function instructionStartIsLicensed(
   start: number,
   hasLeadingSeparator: boolean
 ): boolean {
-  if (hasLeadingSeparator) {
-    return true;
-  }
   const token = tokensAvailable(context, start, 1)?.pop();
   const lower = token ? normalizeTokenLower(token) : "";
   const enclosedByProcedure = Boolean(token && getProceduralFrames(context).some((frame) => {
@@ -377,7 +381,11 @@ function instructionStartIsLicensed(
     if (frame.polarity === AdvicePolarity.Negate) return false;
     return resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;
   }));
+  // A comma inside an already-composed procedural argument cannot make
+  // that argument's homographic noun a second directive ("before food,
+  // drink, or other medicines" is not an instruction to drink).
   if (enclosedByProcedure) return false;
+  if (hasLeadingSeparator) return true;
   const previous = context.tokens[start - 1];
   const previousLower = previous ? normalizeTokenLower(previous) : "";
   if (previousLower && WORKFLOW_CONTINUATION_LICENSES.has(`${previousLower} ${lower}`)) {
@@ -677,6 +685,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     if (consumed.length && firstBodyAction && !firstBodyAction.procedural && isMedicationAdministrationMethod(firstBodyLower, context.options)) {
+      if (startsTypedAdministrationComplement(context, cursor + 1)) return [];
       const priorPrimaryMethod = context.tokens.slice(0, cursor).some((candidate) => {
         const priorLower = normalizeTokenLower(candidate);
         const method = isMedicationAdministrationMethod(priorLower, context.options);

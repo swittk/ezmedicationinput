@@ -294,7 +294,10 @@ export function productMethodRealizations(verb: string, product: string): Record
   return values ? { ...values } : undefined;
 }
 export const PRODUCT_FORM_MODIFIERS = setOf(source.productFormModifiers);
+export const PRODUCT_SOURCE_PREPOSITIONS = setOf(source.productSourcePrepositions);
 export const COMPOUND_DOSE_UNITS = source.compoundDoseUnits as CompoundDoseUnit[];
+export const QUALITATIVE_DOSE_MODIFIERS = setOf(source.qualitativeDoseModifiers);
+export const QUALITATIVE_DOSE_UNITS = setOf(source.qualitativeDoseUnits);
 export const IMPLICIT_SINGLE_DOSE_UNITS = setOf(source.implicitSingleDoseUnits);
 export const PERCENT_BODY_AREA_UNITS = new Map<string, string>(
   stringEntries(source.percentBodyAreaUnits)
@@ -320,11 +323,17 @@ export const MAXIMUM_COUNT_LEAD_SEQUENCES = (source.maximumCountLeadSequences ??
   .map((parts) => [...parts])
   .sort((left, right) => right.length - left.length);
 export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
+export const OCCURRENCE_COUNT_MODIFIERS = setOf(source.occurrenceCountModifiers);
+export const MAXIMUM_PERIOD_PREPOSITIONS = setOf(source.maximumPeriodPrepositions);
+export const MAXIMUM_PERIOD_MODIFIERS = setOf(source.maximumPeriodModifiers);
 export const OCCURRENCE_CAP_PERIOD_PHRASES = (source.occurrenceCapPeriodPhrases ?? [])
   .map((entry) => ({ parts: [...entry.parts], period: entry.period, periodUnit: entry.periodUnit }))
   .sort((left, right) => right.parts.length - left.parts.length);
 export const FREQUENCY_SIMPLE_WORDS_DATA = numberRecord(source.frequencySimpleWords);
 export const FREQUENCY_NUMBER_WORDS_DATA = numberRecord(source.frequencyNumberWords);
+/** Coded course-end events remain advisory until an actual bound is known. */
+export const OPEN_ENDED_COURSE_END_CONDITIONS = source.openEndedCourseEndConditions;
+export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
 export const FREQUENCY_CONNECTOR_WORDS_DATA = setOf(source.frequencyConnectorWords);
 export const FREQUENCY_ALTERNATIVE_CONNECTORS = setOf(source.frequencyAlternativeConnectors ?? []);

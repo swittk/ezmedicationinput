@@ -1,4 +1,7 @@
 import { formBodySiteRestriction } from "../body-site-grammar";
+import { composeLocalizedRecords } from "../localization";
+import { joinLocalizedTokens } from "../locale-realization";
+import { ACTION_COORDINATION_CONNECTOR_I18N } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import {
   HpsgDoseFeature,
@@ -226,9 +229,25 @@ function coordinatedSite(
     targets.map((target) => target.text).filter(Boolean).join(
       marker === "disjunction" ? " or " : " and "
     );
+  const connectorKey = marker === "disjunction" ? "or" : "and";
+  const connector = { en: connectorKey, ...ACTION_COORDINATION_CONNECTOR_I18N[connectorKey] };
+  const memberDisplay = (site: HpsgSiteFeature): Record<string, string> => {
+    const display: Record<string, string> = { en: site.text ?? "", ...(site.i18n ?? {}) };
+    for (const locale of Object.keys(connector)) {
+      // An untranslated custom site keeps its own name inside the localized
+      // coordination instead of forcing the whole phrase back to its source.
+      if (!display[locale]) display[locale] = site.text ?? "";
+    }
+    return display;
+  };
+  const i18n = composeLocalizedRecords(
+    [memberDisplay(left), connector, memberDisplay(right)],
+    (members, locale) => joinLocalizedTokens(locale, members)
+  );
   return {
     attachmentClass: attachmentClass(left.attachmentClass),
-    text: sourceText,
+    text: i18n?.en ?? sourceText,
+    i18n,
     source: "text",
     range,
     coordination: { coordination, sourceText, range, targets }

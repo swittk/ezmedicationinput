@@ -12,6 +12,7 @@ import {
 } from "../../relation-terminology";
 import { getProceduralFrames, actionEventRelationAt } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
+import { CALENDAR_UNIVERSAL_DAY_QUANTIFIERS } from "../lexical-classes";
 import {
   HpsgClauseContext,
   lexicalRule,
@@ -57,8 +58,22 @@ export function containsCalendarExclusionCue(source: string): boolean {
   return EXCLUSION_CUE.test(source);
 }
 
+/** A universal weekday quantifier denotes the existing complete weekday
+ * domain. It is NOT a post-parse schedule veto; the typed exclusion carries
+ * all seven members and is editable alongside the original positive cadence.
+ */
+function universalDayScope(source: string): boolean {
+  const words = source.trim().toLowerCase().split(/\s+/u);
+  return words.length === 2 &&
+    CALENDAR_UNIVERSAL_DAY_QUANTIFIERS.has(words[0]) &&
+    (words[1] === "day" || words[1] === "days");
+}
+
 function uniqueDays(source: string): FhirDayOfWeek[] {
   const values = new Set<FhirDayOfWeek>();
+  if (universalDayScope(source)) {
+    for (const day of DAYS) values.add(day);
+  }
   for (const definition of WEEKDAYS) {
     definition.en.lastIndex = 0;
     definition.th.lastIndex = 0;
@@ -75,6 +90,7 @@ function uniqueDays(source: string): FhirDayOfWeek[] {
 }
 
 function isOnlyWeekdays(source: string): boolean {
+  if (universalDayScope(source)) return true;
   let remainder = source;
   for (const definition of WEEKDAYS) {
     definition.en.lastIndex = 0;

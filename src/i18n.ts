@@ -1,4 +1,4 @@
-import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
+import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
@@ -42,6 +42,11 @@ import {
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction,
+  instructionGraphEntailsAdviceCoding,
+  instructionGraphCoversTypedWarnings,
+  instructionGraphRealizesWarningText,
+  instructionGraphSourceOwnedByAdvice,
+  instructionGraphFullyOwnsAdvice,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
@@ -2228,8 +2233,20 @@ function formatLongThai(
     : undefined;
   const roundTrip = options?.realizationMode === "roundtrip";
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
+  const codedWarningSources: string[] = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    codedWarningSources.push(...composedCodedWarningActionSources(
+      clause.instructionGraph?.actions ?? [], instruction.coding
+    ));
+  }
   const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
-    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+    if (!instruction.text || !clause.instructionGraph) return false;
+    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
+    if (instruction.coding?.code) {
+      return !composedCodedWarningActionSources(
+        clause.instructionGraph.actions, instruction.coding
+      ).length && instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
+    }
     const normalized = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
     const representedByWarning = clause.instructionGraph.actions
       .filter((action) => action.polarity === AdvicePolarity.Negate)
@@ -2237,7 +2254,9 @@ function formatLongThai(
         const source = action.sourceText.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
         return source === normalized || source.includes(normalized) || normalized.includes(source);
       });
-    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
+      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
+      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
       representedByWarning || !instruction.frames?.length ||
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
@@ -2262,9 +2281,18 @@ function formatLongThai(
     }
   }
 
+  if (clause.instructionGraph) {
+    for (const instruction of directAdditional) {
+      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
+        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
+          additionalSemanticSourceTexts.push(ownedSource);
+        }
+      }
+    }
+  }
   const graphRealizationOmissions = richPrimaryGraphAction
-    ? [...additionalSemanticSourceTexts, richPrimaryGraphAction.sourceText]
-    : additionalSemanticSourceTexts;
+    ? [...additionalSemanticSourceTexts, ...codedWarningSources, richPrimaryGraphAction.sourceText]
+    : [...additionalSemanticSourceTexts, ...codedWarningSources];
   const graphRealizationOptions = {
     includeWarnings: true,
     omitCanonicalAdministration: clause,

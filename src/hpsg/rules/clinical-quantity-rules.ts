@@ -2,12 +2,18 @@ import { LexKind } from "../../lexer/token-types";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
+import { MEDICATION_OBJECT_FILLERS } from "../lexical-classes";
 import {
   HpsgClinicalQuantityFeature,
   HpsgDimensionalQuantityTerm,
   HpsgLexicalRule,
+  HpsgScheduleFeature,
   lexicalSign
 } from "../signature";
+
+/** Both prepositions license elapsed duration under an infusion head;
+ * neither means ordinary regimen duration in this dimensional construction. */
+const INFUSION_DURATION_LEADS = new Set(["over", "for"]);
 
 const WEIGHT_WARNING =
   "Weight-based dose: patient weight is required to calculate the actual administered amount.";
@@ -72,6 +78,16 @@ function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQuantityTe
   return undefined;
 }
 
+/** Shared numeric-word inventory: clinical quantities and ordinary timing
+ * interpret the same lexical number daughters, without string special cases. */
+function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | undefined): number | undefined {
+  if (!token) return undefined;
+  const value = token.kind === LexKind.Number
+    ? token.value
+    : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(token)];
+  return value !== undefined && value > 0 ? value : undefined;
+}
+
 function timeUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
   if (/^(?:h|hr|hrs|hour|hours)$/u.test(raw)) return FhirPeriodUnit.Hour;
   if (/^(?:min|mins|minute|minutes)$/u.test(raw)) return FhirPeriodUnit.Minute;
@@ -104,9 +120,9 @@ function durationAfter(
     const valueToken = context.tokens[index + 1];
     const unitToken = context.tokens[index + 2];
     const unit = unitToken ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
-    if (!valueToken || valueToken.kind !== LexKind.Number || !unit ||
-        valueToken.value === undefined || valueToken.value <= 0) continue;
-    return { value: valueToken.value, unit, indices: [index, index + 1, index + 2] };
+    const value = clinicalDurationNumber(valueToken);
+    if (value === undefined || !unit) continue;
+    return { value, unit, indices: [index, index + 1, index + 2] };
   }
   return undefined;
 }
@@ -121,7 +137,7 @@ function clinicalSign(
   indices: number[],
   clinicalQuantity: HpsgClinicalQuantityFeature,
   dose?: { value: number; unit: string },
-  schedule?: { frequency: number; period: number; periodUnit: FhirPeriodUnit },
+  schedule?: HpsgScheduleFeature,
   warning?: string,
   explicitRoute?: RouteCode
 ) {
@@ -151,11 +167,17 @@ function activeDoseInCarrierOverTime(
   value: number
 ) {
   const activeUnitToken = context.tokens[start + 1];
-  const inToken = context.tokens[start + 2];
-  const carrierValueToken = context.tokens[start + 3];
-  const carrierUnitToken = context.tokens[start + 4];
+  const possibleProduct = context.tokens[start + 2];
+  // The same registered medication object noun inventory that HPSG uses
+  // for product phrases can stand between a dimensional active dose and its
+  // vehicle: "20 mg drug in 500 mL". It is NOT another dose or a blank name.
+  const productShift = possibleProduct && available(context, start + 2) &&
+      MEDICATION_OBJECT_FILLERS.has(normalizeTokenLower(possibleProduct)) ? 1 : 0;
+  const inToken = context.tokens[start + 2 + productShift];
+  const carrierValueToken = context.tokens[start + 3 + productShift];
+  const carrierUnitToken = context.tokens[start + 4 + productShift];
   if (!activeUnitToken || !inToken || !carrierValueToken || !carrierUnitToken ||
-      !available(context, start + 4) ||
+      !available(context, start + 4 + productShift) ||
       normalizeTokenLower(inToken) !== "in" ||
       carrierValueToken.kind !== LexKind.Number ||
       carrierValueToken.value === undefined || carrierValueToken.value <= 0) return undefined;
@@ -164,37 +186,64 @@ function activeDoseInCarrierOverTime(
   if (!activeDose || !carrier || carrier.dimension !== "volume" ||
       !hasAdministrationCue(context, start)) return undefined;
 
-  const routeToken = context.tokens[start + 5];
-  const markedIV = Boolean(routeToken && available(context, start + 5) &&
+  // The carrier-volume constituent may have a nominal daughter between its
+  // unit and the infusion-duration head: "500 mL normal saline over 4 h".
+  // This is a bounded lexical NP inside a dimensionally licensed construction,
+  // not a dictionary/keyword rule for saline, solution, dextrose, etc.
+  // A number or clause separator cannot be silently absorbed as material.
+  let cursor = start + 5 + productShift;
+  const materialStart = cursor;
+  while (cursor - materialStart < 3 && available(context, cursor)) {
+    const token = context.tokens[cursor];
+    const word = normalizeTokenLower(token);
+    if (INFUSION_DURATION_LEADS.has(word) ||
+        word === "iv" || word === "intravenously" ||
+        token.kind !== LexKind.Word) break;
+    cursor++;
+  }
+  const materialEnd = cursor;
+  const routeToken = context.tokens[cursor];
+  const markedIV = Boolean(routeToken && available(context, cursor) &&
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(routeToken)));
-  const shift = markedIV ? 1 : 0;
-  const overToken = context.tokens[start + 5 + shift];
-  const durationToken = context.tokens[start + 6 + shift];
-  const durationUnitToken = context.tokens[start + 7 + shift];
+  if (markedIV) cursor++;
+  const overToken = context.tokens[cursor];
+  const durationToken = context.tokens[cursor + 1];
+  const durationUnitToken = context.tokens[cursor + 2];
   if (!overToken || !durationToken || !durationUnitToken ||
-      !available(context, start + 7 + shift) ||
-      normalizeTokenLower(overToken) !== "over" ||
-      durationToken.kind !== LexKind.Number || durationToken.value === undefined ||
-      durationToken.value <= 0) return undefined;
+      !available(context, cursor + 2) ||
+      !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
+  const durationValue = clinicalDurationNumber(durationToken);
   const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
-  if (!durationUnit) return undefined;
+  if (durationValue === undefined || !durationUnit) return undefined;
 
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
     status: "resolved",
     numerator: carrier,
-    denominators: [{ value: durationToken.value, unit: durationUnit, dimension: "time" }],
+    denominators: [{ value: durationValue, unit: durationUnit, dimension: "time" }],
     projectedDose: { value, unit: activeDose.unit },
     rateNumerator: { value: carrier.value, unit: carrier.unit },
-    administrationDuration: { value: durationToken.value, unit: durationUnit }
+    ...(materialEnd > materialStart ? { carrierMaterial: {
+      text: context.state.input.slice(
+        context.tokens[materialStart].sourceStart,
+        context.tokens[materialEnd - 1].sourceEnd
+      ),
+      range: {
+        start: context.tokens[materialStart].sourceStart,
+        end: context.tokens[materialEnd - 1].sourceEnd
+      }
+    } } : {}),
+    administrationDuration: { value: durationValue, unit: durationUnit }
   };
   return clinicalSign(
     context,
     "hpsg.lex.clinicalQuantity.activeDoseInCarrierOverTime",
-    Array.from({ length: 8 + shift }, (_, offset) => start + offset),
+    Array.from({ length: cursor + 3 - start }, (_, offset) => start + offset),
     clinicalQuantity,
     clinicalQuantity.projectedDose,
-    undefined,
+    { sourceRanges: [{
+      start: overToken.sourceStart, end: durationUnitToken.sourceEnd
+    }] },
     undefined,
     markedIV ? RouteCode["Intravenous route"] : undefined
   );
@@ -217,20 +266,20 @@ function fixedVolumeOverTime(
   const durationToken = context.tokens[start + 3 + shift];
   const durationUnitToken = context.tokens[start + 4 + shift];
   if (!unitToken || !overToken || !durationToken || !durationUnitToken ||
-      !available(context, start + 4 + shift) || normalizeTokenLower(overToken) !== "over" ||
-      durationToken.kind !== LexKind.Number || durationToken.value === undefined ||
-      durationToken.value <= 0) return undefined;
+      !available(context, start + 4 + shift) || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
   const numerator = volumeOrMassTerm(value, normalizeTokenLower(unitToken));
+  const durationValue = clinicalDurationNumber(durationToken);
   const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
-  if (!numerator || numerator.dimension !== "volume" || !durationUnit ||
+  if (!numerator || numerator.dimension !== "volume" ||
+      durationValue === undefined || !durationUnit ||
       !hasAdministrationCue(context, start)) return undefined;
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
     status: "resolved",
     numerator,
-    denominators: [{ value: durationToken.value, unit: durationUnit, dimension: "time" }],
+    denominators: [{ value: durationValue, unit: durationUnit, dimension: "time" }],
     projectedDose: { value, unit: numerator.unit },
-    administrationDuration: { value: durationToken.value, unit: durationUnit }
+    administrationDuration: { value: durationValue, unit: durationUnit }
   };
   return clinicalSign(
     context,
@@ -238,7 +287,9 @@ function fixedVolumeOverTime(
     Array.from({ length: 5 + shift }, (_, offset) => start + offset),
     clinicalQuantity,
     clinicalQuantity.projectedDose,
-    undefined,
+    { sourceRanges: [{
+      start: overToken.sourceStart, end: durationUnitToken.sourceEnd
+    }] },
     undefined,
     markedIV ? RouteCode["Intravenous route"] : undefined
   );

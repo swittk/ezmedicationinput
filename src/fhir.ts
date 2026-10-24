@@ -83,6 +83,130 @@ export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.c
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
 export const BODY_SITE_RESTRICTION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-body-site-restriction";
 
+export const INFUSION_CARRIER_MATERIAL_EXTENSION_URL =
+  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-infusion-carrier-material";
+
+/** Draft FHIR R5 extension definition, produced from the same typed child
+ * contract as the live encoder. Carrier material is a descriptive vehicle
+ * role, not a verified drug code or a modified administration choice.
+ * External HL7 conformance validation remains a separate release check.
+ */
+export function buildInfusionCarrierMaterialStructureDefinition() {
+  const slice = (name: string, code: "string" | "integer", min: number) => [
+    { id: "Extension.extension:" + name, path: "Extension.extension",
+      sliceName: name, min, max: "1", type: [{ code: "Extension" }] },
+    { id: "Extension.extension:" + name + ".extension",
+      path: "Extension.extension.extension", max: "0" },
+    { id: "Extension.extension:" + name + ".url",
+      path: "Extension.extension.url", fixedUri: name },
+    { id: "Extension.extension:" + name + ".value[x]",
+      path: "Extension.extension.value[x]", min: 1, max: "1",
+      type: [{ code }] }
+  ];
+  return {
+    resourceType: "StructureDefinition" as const,
+    id: "medication-infusion-carrier-material",
+    url: INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+    name: "MedicationInfusionCarrierMaterial",
+    title: "Source-backed infusion carrier material",
+    status: "draft" as const,
+    description: "Uncoded original vehicle-noun phrase tied to a separately typed carrier volume and infusion duration; does not identify the administered active substance.",
+    kind: "complex-type" as const,
+    abstract: false,
+    type: "Extension",
+    baseDefinition: "http://hl7.org/fhir/StructureDefinition/Extension",
+    derivation: "constraint" as const,
+    context: [{ type: "element" as const, expression: "Dosage" }],
+    differential: { element: [
+      { id: "Extension", path: "Extension", isModifier: false },
+      { id: "Extension.extension", path: "Extension.extension",
+        slicing: { discriminator: [{ type: "value", path: "url" }],
+          ordered: false, rules: "closed" } },
+      ...slice("material", "string", 1),
+      ...slice("start", "integer", 0),
+      ...slice("end", "integer", 0),
+      { id: "Extension.url", path: "Extension.url",
+        fixedUri: INFUSION_CARRIER_MATERIAL_EXTENSION_URL },
+      { id: "Extension.value[x]", path: "Extension.value[x]", max: "0" }
+    ] }
+  };
+}
+
+/** Preserve a clinically named vehicle without claiming it has a verified
+ * terminology identity. This describes the volume-owned material and never
+ * changes dose/rate scheduling or converts a vehicle into the active drug.
+ */
+function infusionCarrierMaterialExtension(
+  material: NonNullable<HpsgClinicalQuantityFeature["carrierMaterial"]>
+): FhirExtension {
+  return {
+    url: INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+    extension: [
+      { url: "material", valueString: material.text },
+      ...(material.range ? [
+        { url: "start", valueInteger: material.range.start },
+        { url: "end", valueInteger: material.range.end }
+      ] : [])
+    ]
+  };
+}
+
+/** Typed FHIR extraction: retain only supplied extension children, never
+ * guess a vehicle from original SIG text or volume/mass alone.
+ */
+function infusionCarrierMaterialFromFhir(
+  dosage: FhirDosage
+): HpsgClinicalQuantityFeature["carrierMaterial"] {
+  const extension = dosage.extension?.find(part =>
+    part.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL);
+  const child = (url: string) => extension?.extension?.find(part => part.url === url);
+  const text = child("material")?.valueString;
+  if (!text?.trim()) return undefined;
+  const start = child("start")?.valueInteger;
+  const end = child("end")?.valueInteger;
+  return {
+    text,
+    ...(start !== undefined && end !== undefined &&
+        Number.isInteger(start) && Number.isInteger(end) &&
+        start >= 0 && end >= start ? { range: { start, end } } : {})
+  };
+}
+
+/** Reconstitute dimensional R5 meaning only where the role and amount were
+ * explicitly supplied. Other external rateRatio dosages remain untouched.
+ */
+function clinicalCarrierQuantityFromFhir(
+  dosage: FhirDosage
+): HpsgClinicalQuantityFeature | undefined {
+  const material = infusionCarrierMaterialFromFhir(dosage);
+  const measure = dosage.doseAndRate?.[0];
+  const active = measure?.doseQuantity;
+  const carrier = measure?.rateRatio?.numerator;
+  const duration = measure?.rateRatio?.denominator;
+  const doseUnit = active?.code ?? active?.unit;
+  const volumeUnit = carrier?.code ?? carrier?.unit;
+  const durationUnit = duration?.code ?? duration?.unit;
+  if (!material ||
+      typeof active?.value !== "number" || !Number.isFinite(active.value) ||
+      typeof carrier?.value !== "number" || !Number.isFinite(carrier.value) ||
+      typeof duration?.value !== "number" || !Number.isFinite(duration.value) ||
+      active.value <= 0 || carrier.value <= 0 || duration.value <= 0 ||
+      !doseUnit || !volumeUnit ||
+      !/^(?:mL|L)$/u.test(volumeUnit) ||
+      (durationUnit !== "h" && durationUnit !== "min")) return undefined;
+  const periodUnit = durationUnit === "h" ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
+  return {
+    representation: "dose-with-rate-ratio",
+    status: "resolved",
+    numerator: { value: carrier.value, unit: volumeUnit, dimension: "volume" },
+    denominators: [{ value: duration.value, unit: periodUnit, dimension: "time" }],
+    projectedDose: { value: active.value, unit: doseUnit },
+    rateNumerator: { value: carrier.value, unit: volumeUnit },
+    administrationDuration: { value: duration.value, unit: periodUnit },
+    carrierMaterial: material
+  };
+}
+
 /** Make an implicit multi-clock cadence explicit without overriding a stated frequency.
  * @param repeat Editable FHIR timing currently being lowered.
  */
@@ -1406,6 +1530,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     };
   }
 
+  const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
+  if (carrierQuantity) clause.clinicalQuantity = carrierQuantity;
+
   const prnReasons = dosage.asNeededFor?.length
     ? dosage.asNeededFor.map((concept) => {
       const coding = concept.coding?.find((code) => Boolean(code.code));
@@ -1707,6 +1834,9 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     }
   }
 
+  const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
+  if (carrierQuantity) state.primaryClause.clinicalQuantity = carrierQuantity;
+
   return state;
 }
 
@@ -1787,4 +1917,11 @@ function projectHpsgClinicalQuantityToFhir(
       }
     }
   }];
+  if (quantity.carrierMaterial?.text) {
+    dosage.extension = [
+      ...(dosage.extension ?? []).filter(part =>
+        part.url !== INFUSION_CARRIER_MATERIAL_EXTENSION_URL),
+      infusionCarrierMaterialExtension(quantity.carrierMaterial)
+    ];
+  }
 }

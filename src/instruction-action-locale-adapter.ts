@@ -41,6 +41,8 @@ export interface InstructionActionRealizationInput {
 
 export interface InstructionActionLocaleAdapter {
   locale: string;
+  // A language can select its verb form from an already typed complement.
+  selectLexicalRealization?(input: InstructionActionRealizationInput): InstructionActionRealizationInput;
   render(realizer: MedicationInstructionActionRealizer, input: InstructionActionRealizationInput): string | undefined;
   renderNegated(input: InstructionActionRealizationInput): string;
   applyPositiveModality(text: string, frame: AdviceFrame): string;
@@ -122,8 +124,12 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
     case "mix-substance": {
-      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme);
-      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance);
+      const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement");
+      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme ||
+        (!withComplement && arg.role === AdviceArgumentRole.Object));
+      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Material || (withComplement &&
+          (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
       const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
       const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
@@ -134,10 +140,11 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       return `${c.label}${themeText}${substance ? ` with ${amountText}${substance}` : ""}`;
     }
     case "site-relation": {
+      const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ? ` ${c.manner}` : "";
       if (relationTarget) {
-        const target = c.site && !suppressSite(c) ? ` ${c.site}` : "";
+        const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
         if (c.time && relationHasGrammarFeature(c.frame.relation, "directTimeRealization")) {
           const lower = c.time.toLowerCase();
           const timePhrase = lower === "night" ? "at night"
@@ -153,7 +160,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         return `${c.label}${target}${manner} ${relation} ${relationTarget}`;
       }
       const result = c.result ? ` until ${c.result}` : "";
-      if (c.site) return `${c.label} ${c.site}${manner}${c.substance ? ` with ${c.substance}` : ""}${result}`;
+      if (object) return `${c.label} ${object}${manner}${c.substance ? ` with ${c.substance}` : ""}${result}`;
       return `${c.label}${manner}${c.substance ? ` with ${c.substance}` : ""}${result}`;
     }
     case "object-amount-material": {
@@ -197,7 +204,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "duration": return `${c.label}${c.duration ? ` for ${c.duration}` : ""}`;
     case "duration-activity": {
-      const target = c.activity ?? c.result;
+      const target = c.activity ?? c.substance ?? c.result;
       if (!target) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
       if (c.frame.relation) {
         const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
@@ -249,8 +256,12 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;
     case "mix-substance": {
-      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme);
-      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance);
+      const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement");
+      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme ||
+        (!withComplement && arg.role === AdviceArgumentRole.Object));
+      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Material || (withComplement &&
+          (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
       const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
       const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
@@ -263,10 +274,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       return `${c.label}${themeText}${substanceText}`;
     }
     case "site-relation": {
+      const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ?? "";
       if (relationTarget) {
-        const target = c.site && !suppressSite(c) ? c.site : "";
+        const target = object && (!c.site || !suppressSite(c)) ? object : "";
         if (c.time && relationHasGrammarFeature(c.frame.relation, "directTimeRealization")) {
           const timePhrase = c.time === "กลางคืน" ? "ตอนกลางคืน"
             : c.time === "นอน" || c.time === "bedtime" ? "ก่อนนอน" : c.time;
@@ -278,7 +290,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         return `${c.label}${target}${manner}${relation}${relationTarget}`;
       }
       const result = c.result ? `ให้${c.result}` : "";
-      if (c.site) return `${c.label}${c.site}${manner}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
+      if (object) return `${c.label}${object}${manner}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
       return `${c.label}${manner}${c.substance ? `ด้วย${c.substance}` : ""}${result}`;
     }
     case "object-amount-material": {
@@ -323,7 +335,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "duration": return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
     case "duration-activity": {
-      const target = c.activity ?? c.result;
+      const target = c.activity ?? c.substance ?? c.result;
       if (!target) return `${c.label}${c.duration ? ` ${c.duration}` : ""}`;
       if (c.frame.relation) {
         const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
@@ -352,9 +364,13 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
       return `${prefix}${c.label.toLowerCase()} ${relation} ${object}`;
     }
+    if (relationTarget && c.frame.relation === AdviceRelation.Without) {
+      const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "without";
+      return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""} ${relation} ${relationTarget}`;
+    }
     if (relationTarget && relationHasGrammarFeature(c.frame.relation, "negatedRelationTarget")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
-      return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""} ${relation} ${relationTarget}`;
+      return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""} ${relation} ${relationTarget}`;
     }
     if (c.duration) return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""} for ${c.duration}`;
     const fallback = object ?? relationTarget;
@@ -387,6 +403,14 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
 
 const TH_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "th",
+  selectLexicalRealization(input) {
+    if (input.frame.predicate.semanticClass !== "avoidance" || !input.site) return input;
+    return {
+      ...input,
+      label: "หลีกเลี่ยง",
+      site: input.site.startsWith("บริเวณ") ? input.site : `บริเวณ${input.site}`
+    };
+  },
   render: renderThai,
   renderNegated(c) {
     const object = c.site ?? c.theme ?? c.substance ?? c.material;
@@ -396,9 +420,13 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
       return `${prefix}${c.label}${relation}${object}`;
     }
+    if (relationTarget && c.frame.relation === AdviceRelation.Without) {
+      const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "โดยไม่";
+      return `${prefix}${c.label}${object ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${relation}${relationTarget}`;
+    }
     if (relationTarget && relationHasGrammarFeature(c.frame.relation, "negatedRelationTarget")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
-      return `${prefix}${c.label}${object ?? ""}${relation}${relationTarget}`;
+      return `${prefix}${c.label}${object ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${relation}${relationTarget}`;
     }
     if (c.duration) return `${prefix}${c.label}${object ?? ""}เป็นเวลา ${c.duration}`;
     return `${prefix}${c.label}${object ?? relationTarget ?? ""}`;

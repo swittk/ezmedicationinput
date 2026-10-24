@@ -13,13 +13,15 @@ import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS, LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
-import type { ParseOptions, AdviceFrame } from '../types';
-import type { Token } from '../parser-state';
-import { buildCustomSiteHints } from '../parser';
+import { AdviceForce, type ParseOptions, type AdviceFrame } from '../types';
+import type { ParserState, Token } from '../parser-state';
+import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { BoundaryPlan, BoundarySite, PlannerOptions, Proposal, ProbeSummary } from './types';
-import { EvidenceContext } from './evidence';
+import type { BoundaryPlan, BoundarySite, PlannerOptions, PlannerMetrics, Proposal, ProbeSummary, Range } from './types';
 import { recognizeStructures, OwnershipIndex, clockEnd, lexeme } from './structures';
+import { parseInstructionActions } from '../instruction-graph';
+import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
+import { parseAdditionalInstructions } from '../advice';
 import { grammaticalProposals, arbitrate } from './grammar';
 import type { RejectedConstruction } from './grammar';
 
@@ -76,6 +78,141 @@ function hasSiteCoordinationCue(
   ));
 }
 
+/** Per-input cache: no global results, no mutation of parser state, no cross-option reuse. */
+class EvidenceContext {
+  private readonly cache = new Map<string, ProbeSummary>();
+  /** Reuse completed HPSG probes when their entire input is the final segment.
+   * The caller may take a state only once, after boundary planning finishes. */
+  private readonly parsedStates = new Map<string, ParserState>();
+  private readonly actionCache = new Map<string, AdviceFrame[]>();
+  private allActions?: AdviceFrame[];
+  constructor(readonly input: string, readonly tokens: Token[], readonly options: ParseOptions | undefined,
+    readonly metrics: PlannerMetrics, readonly cacheEnabled: boolean,
+    private readonly customSiteHints?: Set<string>) {}
+
+  probe(start: number, end: number): ProbeSummary {
+    while (start < end && /\s/u.test(this.input[start])) start++;
+    while (end > start && /[\s,;]/u.test(this.input[end - 1])) end--;
+    const key = `${start}:${end}`;
+    const cached = this.cacheEnabled ? this.cache.get(key) : undefined;
+    if (cached) { this.metrics.probeCacheHits++; return cached; }
+    const state = parseClauseState(
+      this.input.slice(start, end), this.options, this.customSiteHints
+    );
+    if (this.cacheEnabled) this.parsedStates.set(key, state);
+    this.metrics.clauseProbes++; this.metrics.probedTokens += state.tokens.length;
+    const c = state.primaryClause, s = c.schedule;
+    const directTarget = c.site?.text?.trim().toLowerCase().replace(/\s+/gu, ' ') ||
+      (c.site?.coding?.code ? 'code:' + c.site.coding.code : undefined);
+    const probeSource = this.input.slice(start, end);
+    const leftoverGroups = findUnparsedTokenGroups(state);
+    // The HPSG probe runs before the calendar-bound resolver. Valid date
+    // ranges can appear as leftover lexical tokens at this point, even
+    // though the finished dosage has real boundsPeriod fields. They count
+    // as complete ONLY when the shared calendar parser owns every token.
+    const bounds = leftoverGroups.length && /[\/-]/u.test(probeSource)
+      ? findMedicationDateListSpans(probeSource, this.options).filter(span =>
+          !span.unresolved && span.relation !== 'event')
+      : [];
+    const complete = leftoverGroups.every(group => group.tokens.every(token =>
+      bounds.some(span => token.sourceStart >= span.start && token.sourceEnd <= span.end)));
+    const targets = c.administrationTargetGroup?.targets.map(target =>
+      target.coding?.code
+        ? `code:${target.coding.code}`
+        : target.text?.trim().toLowerCase().replace(/\s+/gu, ' ')
+    ).filter((value): value is string => Boolean(value)) ??
+      (directTarget ? [directTarget] : []);
+    // Boundary ownership follows the selected production analysis, not every
+    // competing chart hypothesis. The composed sign already retains its typed
+    // site coordination, so no extra chart-wide scan is needed per probe.
+    const coordination = c.administrationTargetGroup;
+    const siteCoordinations: ProbeSummary['siteCoordinations'] = coordination?.range ? [{
+      type: 'site-coordination-phrase',
+      coordination: coordination.coordination,
+      start: coordination.range.start + start,
+      end: coordination.range.end + start
+    }] : [];
+    const summary: ProbeSummary = {
+      start, end, clause: c,
+      complete,
+      hasHead: Boolean(c.method?.coding?.code || c.method?.text || c.dose?.value !== undefined || c.dose?.range ||
+        c.clinicalQuantity || c.site?.coding?.code || c.site?.text || c.patientInstruction || c.additionalInstructions?.length),
+      // A dimensional rate is an administration quantity, not a scalar dose.
+      hasDose: Boolean(c.dose || c.clinicalQuantity),
+      method: Boolean(c.method?.coding?.code || c.method?.text),
+      hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
+        s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||
+        s.boundsEnd !== undefined || s.count !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
+        s.timeOfDay?.length || s.calendarEvents?.length)),
+      hasRecurringCadence: Boolean(s && (s.timingCode || s.frequency !== undefined || s.period !== undefined || s.dayOfWeek?.length)),
+      hasDates: Boolean(s?.calendarEvents?.length), hasClocks: Boolean(s?.timeOfDay?.length),
+      clocks: [...(s?.timeOfDay ?? [])].sort(),
+      hasOffset: Boolean(s && (s.offset !== undefined || s.offsetMin !== undefined || s.offsetMax !== undefined ||
+        s.activityTiming?.some(t => t.offset !== undefined || t.offsetMin !== undefined || t.offsetMax !== undefined))),
+      prn: c.prn?.enabled === true,
+      targets,
+      hasTargets: targets.length > 0,
+      siteCoordinations,
+      // Conditions are typed action/clinical-adjunct relations, never
+      // inferred from HPSG lexical production names.
+      conditionStarts: [
+        ...(c.instructionGraph?.relations ?? []).filter(relation =>
+          (relation.kind === 'if' || relation.kind === 'unless') &&
+          relation.span !== undefined
+        ).map(relation => relation.span!.start + start),
+        ...(c.clinicalAdjuncts?.condition
+          ? (c.clinicalAdjuncts.localRanges ?? []).map(range => range.start + start)
+          : [])
+      ]
+    };
+    if (this.cacheEnabled) this.cache.set(key, summary);
+    return summary;
+  }
+
+  takeParsedState(start: number, end: number, text: string): ParserState | undefined {
+    const key = start + ":" + end;
+    const state = this.parsedStates.get(key);
+    if (!state || state.input !== text) return undefined;
+    this.parsedStates.delete(key);
+    return state;
+  }
+
+  actions(start: number, end: number): AdviceFrame[] {
+    const key = `${start}:${end}`;
+    const cached = this.cacheEnabled ? this.actionCache.get(key) : undefined;
+    if (cached) return cached;
+    this.metrics.actionScans++;
+    const source = this.input.slice(start, end);
+    const leadingWhitespace = /^\s*/u.exec(source)?.[0].length ?? 0;
+    const value = parseInstructionActions(source.trim(), start + leadingWhitespace, this.options);
+    if (this.cacheEnabled) this.actionCache.set(key, value);
+    return value;
+  }
+
+  /** A procedural relation is established by action frames and terminology, not connector spelling. */
+  proceduralBridge(range: Range): boolean {
+    if (!this.allActions) this.allActions = this.actions(0, this.input.length);
+    let left: AdviceFrame | undefined, right: AdviceFrame | undefined;
+    for (const action of this.allActions) {
+      if (action.span.start < range.start && action.span.end <= range.end + 1) {
+        if (!left || action.span.end > left.span.end) left = action;
+      } else if (action.span.start >= range.end && (!right || action.span.start < right.span.start)) right = action;
+    }
+    return Boolean(left && right && resolveMedicationInstructionAction(left.predicate.lemma, this.options)?.procedural &&
+      Math.max(0, range.start - left.span.end) <= 2 && Math.max(0, right.span.start - range.end) <= 2);
+  }
+
+  instructionContinuation(index: number, end: number): boolean {
+    const lead = this.tokens[index], first = this.tokens[index + 1];
+    if (!lead || !first || !CLAUSE_LEAD_WORDS.has(lexeme(lead))) return false;
+    const start = first.sourceStart;
+    return parseAdditionalInstructions(this.input.slice(start, end).replace(/\s+/g, ' ').trim(), { start, end }, {
+      defaultPredicate: lexeme(lead), defaultForce: AdviceForce.Instruction, allowFreeTextFallback: false
+    }).some(i => i.coding?.code || i.frames.length);
+  }
+}
+
+
 const contexts = new WeakMap<BoundaryPlan, EvidenceContext>();
 
 /** Reuse exact completed HPSG probes, but never a partial probe. Carry-forward
@@ -105,6 +242,52 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     input, tokens, options, metrics, experiment.cache !== false, customSiteHints
   );
   const claims = recognizeStructures({ input, options, tokens, dateSpans });
+  // The same typed guard constituent used by the HPSG clinical-adjunct
+  // lexical rule owns its internal Boolean connectives. Reprobing AND/OR
+  // inside that range as possible medication boundaries duplicates a full
+  // chart and risks turning one condition into multiple administrations.
+  // Skip the recognizer entirely for ordinary inputs with no such boundary.
+  const clinicalGuard = sites.some(site => site.kind === 'coordination')
+    ? parseMedicationGuard(input) : undefined;
+  if (clinicalGuard && sites.some(site => site.kind === 'coordination' &&
+      clinicalGuard.start < site.start && site.end < clinicalGuard.end)) {
+    claims.push({
+      id: `clinical-condition:${clinicalGuard.start}:${clinicalGuard.end}`,
+      kind: 'clinical-condition',
+      start: clinicalGuard.start, end: clinicalGuard.end,
+      producer: 'lexical.conditional-attachment',
+      resolved: true, policy: 'no-external-split'
+    });
+  }
+  // Procedural argument structures are already composed into typed action
+  // frames. A comma inside one such action (e.g. "before food, drink, ...")
+  // is a nominal/list boundary, NOT permission to create another medication.
+  // Only inspect cases actually containing an ambiguous comma, and reuse the
+  // existing per-input action scan/cache. This preserves full-source spans.
+  if (sites.some(site => site.kind === 'comma')) {
+    for (const frame of evidence.actions(0, input.length)) {
+      const internal = sites.some(site => site.kind === 'comma' &&
+        frame.span.start < site.start && site.end < frame.span.end &&
+        // A fresh, explicitly counted dose MUST remain eligible to start
+        // another administration, even if an overbroad procedural frame
+        // initially swallowed the comma into its temporal arguments.
+        !explicitDoseAt(tokens, site.rightIndex, options) &&
+        frame.args.some(arg =>
+          arg.role !== 'amount' && arg.role !== 'duration' &&
+          arg.text.includes(',')
+        ));
+      if (!internal) continue;
+      claims.push({
+        id: 'procedural-argument:' + frame.span.start + ':' + frame.span.end,
+        kind: 'procedural-argument',
+        start: frame.span.start,
+        end: frame.span.end,
+        producer: 'typed.action.valence',
+        resolved: true,
+        policy: 'no-external-split'
+      });
+    }
+  }
   // Site ownership comes from the selected production clause sign. Probe the
   // natural clause window around a plausible site connector, then retain that
   // exact cached ParserState for boundary evidence and final clause parsing.
@@ -116,6 +299,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     const site = clauseBoundarySites[index];
     if (site.kind !== 'coordination' && site.kind !== 'comma') continue;
     if (administrationConnectors.has(site.start)) continue;
+    if (clinicalGuard && clinicalGuard.start < site.start && site.end < clinicalGuard.end) continue;
     const windowStart = clauseBoundarySites[index - 1]?.end ?? 0;
     const windowEnd = clauseBoundarySites[index + 1]?.start ?? input.length;
     if (!hasSiteCoordinationCue(tokens, windowStart, windowEnd, customSiteHints)) continue;
@@ -160,7 +344,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     });
   }
   if (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)) {
-    const guard = parseMedicationGuard(input);
+    const guard = clinicalGuard ?? parseMedicationGuard(input);
     const firstNonspace = input.search(/\S/u);
     if (guard?.start === firstNonspace && guard.end < input.length) {
       const comma = tokens.find(token =>
@@ -292,7 +476,16 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           rightTargetCue: targetCue(rightStart, end),
           get left() { return leftValue ?? (leftValue = evidence.probe(start, site.start)); },
           get right() { return rightValue ?? (rightValue = evidence.probe(rightStart, end)); },
-          get rightHasProcedure() { return rightActions().length > 0; },
+          get rightHasProcedure() {
+            // A registered administration head (inhale, nebulize, take, etc.)
+            // is an ACTION too, but is NOT a nondose procedure. Marking any
+            // action as procedural suppressed legitimate independently dosed
+            // "inhale 2 puffs OR nebulize 2.5 mg" alternatives.
+            return rightActions().some((frame) => {
+              const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+              return definition?.procedural === true && definition.definesDose !== true;
+            });
+          },
           get rightAfterFirstAdministration() { return rightActions().some(a =>
             a.args.some(arg => arg.conceptId === 'after-first-administration')); }
         }, rejected));

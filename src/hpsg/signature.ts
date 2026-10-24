@@ -243,6 +243,9 @@ export interface HpsgClinicalQuantityFeature {
   projectedDose?: { value: number; unit: string };
   /** Carrier amount used for an administration rate when it differs from the active drug dose. */
   rateNumerator?: { value: number; unit: string };
+  /** Source-backed vehicle NP scoped to the carrier volume, not the active drug.
+   * It is descriptive and uncoded unless terminology separately confirms it. */
+  carrierMaterial?: { text: string; range?: TextRange };
   dailyTotal?: boolean;
   dividedDoseCount?: number;
   administrationDuration?: { value: number; unit: FhirPeriodUnit };

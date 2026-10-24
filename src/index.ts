@@ -2,6 +2,7 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   withDosageEditProvenance, fromR6Dosage,
   DOSAGE_DETAILS_R5_URL,
+  getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import {
@@ -22,7 +23,7 @@ import {
 import {
   administrationTargetProjections,
   projectAdministrationTargetClauses
-} from "./regimen/targets";
+} from "./hpsg/projection";
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
@@ -75,6 +76,8 @@ export {
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
   TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
   PRN_TRIGGER_PHASE_EXTENSION_URL,
+  INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+  buildInfusionCarrierMaterialStructureDefinition,
   getTimingOccurrenceCap
 } from "./fhir";
 export { suggestSig } from "./suggest";
@@ -187,8 +190,11 @@ export {
   getDosageExcludedDates, setDosageExcludedDates,
   getDosageExcludedWeekdays, setDosageExcludedWeekdays,
   DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, DOSAGE_DETAILS_R5_URL
+  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, DOSAGE_DETAILS_R5_URL,
+  DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
+  setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
 } from "./dosage-course";
+export type { DosageAlternativeChoice } from "./dosage-course";
 export { evaluateMedicationCondition } from "./medication-condition";
 export { parseStrength, parseStrengthIntoRatio, parseStrengthComponents } from "./utils/strength";
 export {
@@ -691,6 +697,54 @@ function composeParsedStates(
   return { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences };
 }
 
+/**
+ * Lower proven HPSG alternative edges into explicit must-understand choice
+ * membership. The original segment supplies stable branch identity, so several
+ * projected targets of the same branch remain one option rather than new ORs.
+ * No text is reparsed and no branch is selected during interpretation.
+ * @param results Source-rebased, independently editable administration results.
+ * @param plan The production typed boundary/regimen relations.
+ */
+function applyRegimenAlternativeMembership(results: readonly ParseResult[], plan: BoundaryPlan): void {
+  const edges = plan.relations.filter(edge => edge.kind === "alternative");
+  if (!edges.length) return;
+  const parent = new Map<number, number>();
+  const root = (index: number): number => {
+    let current = index;
+    while (parent.has(current) && parent.get(current) !== current) current = parent.get(current)!;
+    return current;
+  };
+  for (const edge of edges) {
+    if (!parent.has(edge.from)) parent.set(edge.from, edge.from);
+    if (!parent.has(edge.to)) parent.set(edge.to, edge.to);
+    const left = root(edge.from), right = root(edge.to);
+    parent.set(Math.max(left, right), Math.min(left, right));
+  }
+  const groups = new Map<number, number[]>();
+  for (const member of parent.keys()) {
+    const group = root(member);
+    const members = groups.get(group) ?? [];
+    members.push(member); groups.set(group, members);
+  }
+  const ordered = [...groups.values()].map(members => members.sort((a, b) => a - b))
+    .sort((left, right) => left[0] - right[0]);
+  for (let group = 0; group < ordered.length; group++) {
+    for (const member of ordered[group]) {
+      const segment = plan.segments[member];
+      if (!segment) continue;
+      for (const result of results) {
+        const raw = result.meta.canonical.clauses[0]?.raw;
+        if (!raw || raw.start < segment.start || raw.start >= segment.end) continue;
+        setDosageAlternativeChoice(result.fhir, {
+          groupId: `choice-${group + 1}`,
+          branchId: `branch-${member + 1}`,
+          selectionBehavior: "exactly-one"
+        });
+      }
+    }
+  }
+}
+
 /** Lower the common sync/async result after terminology resolution.
  * @param input Original clinician instruction.
  * @param options Terminology and rendering options.
@@ -718,6 +772,7 @@ function finishParsedBatch(
   }
 
   const results = rawResults;
+  applyRegimenAlternativeMembership(results, boundaryPlan);
   const primary = resolvePrimaryParseResult(results, input, options);
   const parallel = canonicalParallel.kind === "resolved"
     ? projectParallelRegimen(
@@ -791,6 +846,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
+  applyRegimenAlternativeMembership(lintParseResults, boundaryPlan);
   for (let index = 0; index < lintParseResults.length; index++) {
     const segment = resultSegments[index];
     for (const warning of lintParseResults[index].warnings) {
@@ -923,6 +979,49 @@ function appendMedicationConditionText(
   return (trimmed ? trimmed + " " : "") + lead + " " + body + ".";
 }
 
+/** Render same-step concurrent members and typed alternative branches distinctly.
+ * @param members Editable R5 or R6 components carrying native modifier extensions.
+ * @param render A component realizer; never a semantic parser.
+ * @param options Requested locale and conjunction punctuation.
+ * @param separator Separator for independently concurrent members.
+ */
+function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
+  members: readonly T[], render: (member: T) => string,
+  options?: FormatOptions, separator = "; "
+): string {
+  if (!members.some(member => getDosageAlternativeChoice(member))) {
+    return joinGeneratedClauses(members.map(render).filter(text => text.trim()));
+  }
+  const thai = (options?.locale ?? "").toLowerCase().indexOf("th") === 0;
+  const emitted = new Set<string>();
+  const parts: string[] = [];
+  for (const member of members) {
+    const choice = getDosageAlternativeChoice(member);
+    if (!choice) {
+      const text = render(member).trim();
+      if (text) parts.push(text);
+      continue;
+    }
+    if (emitted.has(choice.groupId)) continue;
+    emitted.add(choice.groupId);
+    const branches = new Map<string, string[]>();
+    for (const candidate of members) {
+      const candidateChoice = getDosageAlternativeChoice(candidate);
+      if (candidateChoice?.groupId !== choice.groupId) continue;
+      const texts = branches.get(candidateChoice.branchId) ?? [];
+      const text = render(candidate).trim().replace(/[.!?]+$/u, "");
+      if (text) texts.push(text);
+      branches.set(candidateChoice.branchId, texts);
+    }
+    const alternatives = [...branches.values()].map(texts => texts.join("; ")).filter(Boolean);
+    if (alternatives.length) {
+      parts.push((thai ? "เลือกอย่างใดอย่างหนึ่ง: " : "Choose one: ") +
+        alternatives.join(thai ? " หรือ " : " or ") + ".");
+    }
+  }
+  return parts.join(separator);
+}
+
 export function formatSig(
   input: FhirDosage | FhirR6DosageDetails | readonly EzDosage[],
   style: "short" | "long" = "short",
@@ -950,7 +1049,7 @@ export function formatSig(
     if (oneOrCourse.step.length === 0) return "";
     // Rendering needs each component's projection, not a persisted copy of
     // the whole course plus edit markers on every component.
-    return oneOrCourse.step.map((step, index) => joinGeneratedClauses(step.component.map(component => {
+    return oneOrCourse.step.map((step, index) => formatChoiceMembers(step.component, component => {
       const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
       const expressions: string[] = [];
       for (const amount of component.doseAndRate ?? []) {
@@ -962,7 +1061,7 @@ export function formatSig(
         }
       }
       return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
-    }))).filter(Boolean).join(" then ");
+    }, options)).filter(Boolean).join((options?.locale ?? "").toLowerCase().indexOf("th") === 0 ? " จากนั้น " : " then ");
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
@@ -1018,6 +1117,9 @@ export function formatSigBatch(
   options?: FormatBatchOptions
 ): string {
   const separator = options?.separator ?? ", ";
+  if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
+    return formatChoiceMembers(dosages, dosage => formatSig(dosage, style, options), options, separator);
+  }
   const formatted: string[] = [];
   for (const dosage of dosages) {
     const text = formatSig(dosage, style, options);
@@ -1033,6 +1135,10 @@ export function formatParseBatch(
   style: "short" | "long" = "short",
   separator = ", "
 ): string {
+  const dosages = batch.items.map(item => item.fhir);
+  if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
+    return formatSigBatch(dosages, style, { separator });
+  }
   const texts = batch.items
     .map((item) => (style === "short" ? item.shortText : item.longText))
     .filter((text) => typeof text === "string" && text.trim().length > 0);

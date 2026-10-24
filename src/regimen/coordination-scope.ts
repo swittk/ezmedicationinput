@@ -1,4 +1,4 @@
-import { equalStructuredValues } from '../stable-structure';
+import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import {
   selectHpsgCoordinationScopeConstruction,
   selectHpsgTimingAnchorCoordinationConstruction
@@ -1008,6 +1008,33 @@ export function applyCoordinatedCadenceScopes(
       inheritedAdministrationSegments.has(relation.from)
     ));
     if (!selected) continue;
+    if (selected.semantic.construction.operation === 'inherit-event-timing-administration') {
+      if (pass.direction !== 'leading') continue;
+      const donor = left.state.primaryClause;
+      const recipient = right.state.primaryClause;
+      // The typed right daughter owns its entire event schedule/offset. Only
+      // the omitted administration head is inherited; copying timing here
+      // would turn before15 OR after0 into an incorrect shared offset15.
+      if (donor.method && !hasEvidence(recipient, 'method')) {
+        recipient.method = cloneMethodForRecipient(donor.method, left.start, right.start);
+      }
+      if (donor.dose && !hasEvidence(recipient, 'dose')) {
+        recipient.dose = cloneStructuredValue(donor.dose);
+      }
+      if (donor.route && !recipient.route?.code && !recipient.route?.text) {
+        recipient.route = cloneStructuredValue(donor.route);
+      }
+      appendEvidence(recipient.evidence, {
+        rule: selected.semantic.construction.id,
+        spans: [{ start: relation.range.start - right.start,
+          end: relation.range.end - right.start,
+          text: source.slice(relation.range.start, relation.range.end) }],
+        note: 'Omitted administration inherits its typed left head; event timing remains right-local.'
+      });
+      applications.push({ rule: selected.semantic.construction.id,
+        from: states.indexOf(left), to: states.indexOf(right), fields: ['method', 'dose', 'route'] });
+      continue;
+    }
     const alternative = selected.semantic.construction.operation ===
       'preserve-disjunctive-dosages';
     const leading = selected.semantic.construction.operation === 'share-leading-adjuncts';

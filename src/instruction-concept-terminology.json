@@ -2,6 +2,118 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
   "concepts": [
     {
+      "code": "medication-tablet",
+      "role": "object",
+      "display": "tablet",
+      "i18n": { "th": "ยาเม็ด" },
+      "aliases": ["ยาเม็ด", "เม็ดยา", "tablet", "tablets"]
+    },
+    {
+      "code": "medication-capsule",
+      "role": "object",
+      "display": "capsule",
+      "i18n": { "th": "ยาแคปซูล" },
+      "aliases": ["ยาแคปซูล", "capsule", "capsules"]
+    },
+    {
+      "code": "whole",
+      "role": "manner",
+      "display": "whole",
+      "i18n": { "th": "ทั้งเม็ด" },
+      "aliases": ["ทั้งเม็ด", "ทั้งแคปซูล"]
+    },
+    {
+      "code": "other-medications",
+      "role": "substance",
+      "display": "other medicines",
+      "i18n": { "th": "ยาอื่น" },
+      "aliases": ["other meds", "other medicines", "other medications", "other medicine", "ยาอื่น", "ยาอื่นๆ"]
+    },
+    {
+      "code": "alcohol",
+      "role": "substance",
+      "display": "alcohol",
+      "i18n": { "th": "แอลกอฮอล์" },
+      "aliases": ["alcohol", "แอลกอฮอล์"]
+    },
+    {
+      "code": "needle",
+      "role": "object",
+      "display": "needle",
+      "i18n": { "th": "เข็มฉีดยา" },
+      "aliases": ["needle", "needles", "injection needle", "เข็มฉีดยา"]
+    },
+    {
+      "code": "same-time",
+      "role": "time",
+      "display": "the same time",
+      "i18n": { "th": "เวลาเดิม" },
+      "aliases": ["same time", "the same time", "usual time", "the usual time", "เวลาเดิม"]
+    },
+    {
+      "code": "each-dose",
+      "role": "time",
+      "display": "each dose",
+      "i18n": { "th": "การให้ยาแต่ละครั้ง" },
+      "aliases": ["each dose", "every dose", "การให้ยาแต่ละครั้ง", "การใช้ยาแต่ละครั้ง"]
+    },
+    {
+      "code": "each-injection",
+      "role": "time",
+      "display": "each injection",
+      "i18n": { "th": "การฉีดยาแต่ละครั้ง" },
+      "aliases": ["each injection", "every injection", "การฉีดยาแต่ละครั้ง", "การฉีดแต่ละครั้ง"]
+    },
+    {
+      "code": "each-use",
+      "role": "time",
+      "display": "each use",
+      "i18n": { "th": "การใช้แต่ละครั้ง" },
+      "aliases": ["each use", "every use", "การใช้แต่ละครั้ง"]
+    },
+    {
+      "code": "syringe",
+      "role": "object",
+      "display": "syringe",
+      "i18n": { "th": "กระบอกฉีดยา" },
+      "aliases": ["syringe", "syringes", "กระบอกฉีดยา"]
+    },
+    {
+      "code": "applicator",
+      "role": "object",
+      "display": "applicator",
+      "i18n": { "th": "อุปกรณ์ทายา" },
+      "aliases": ["applicator", "applicators", "อุปกรณ์ทายา"]
+    },
+    {
+      "code": "food",
+      "role": "substance",
+      "display": "food",
+      "i18n": { "th": "อาหาร" },
+      "aliases": ["food", "foods", "meal", "meals", "อาหาร"]
+    },
+    {
+      "code": "drink-product",
+      "role": "substance",
+      "display": "drink",
+      "i18n": { "th": "เครื่องดื่ม" },
+      "aliases": ["drink", "drinks", "beverage", "beverages", "เครื่องดื่ม"]
+    },
+    {
+      "code": "administration-site",
+      "role": "object",
+      "display": "sites",
+      "i18n": { "th": "ตำแหน่ง" },
+      "aliases": ["site", "sites", "injection site", "injection sites", "application site", "application sites", "ตำแหน่ง", "ตำแหน่งฉีด"]
+    },
+    {
+      "code": "each-administration",
+      "role": "time",
+      "display": "each time",
+      "i18n": { "th": "ทุกครั้ง" },
+      "aliases": ["each time", "every time", "each administration", "every administration", "ทุกครั้ง"]
+    },
+    {
       "code": "product",
       "role": "theme",
       "display": "product",

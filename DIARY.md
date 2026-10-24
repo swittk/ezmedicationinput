@@ -2934,3 +2934,107 @@ parity and final source tests cover the finished source.
 
 Evidence is in /tmp/ezmed-structured-extensions-20261023/RESULT.json and its
 referenced test/comparison reports. The original untracked probe remains untouched.
+
+
+## 2026-10-24 — compositional clinical completion and explicit alternatives
+
+Integrated the shared clinical grammar, action/realization, and FHIR editing
+work on the 0.2 branch. This is a verified local implementation checkpoint,
+not a claim that arbitrary clinical prose is completely understood or that the
+entire implementation is a pure HPSG chart. The chart remains the typed clause
+owner, with existing procedural-action, boundary/regimen, and realization
+components still part of the architecture.
+
+Concrete corrections now have permanent independent clinical assertions in
+existing test files: word/numeric loading-to-maintenance counts; divided
+weight-based doses; active drug versus named infusion carrier volume/rate and
+FOR/OVER administration duration; event-local before/after offsets; midnight
+dependent eye administration with counted pronoun ellipsis; typed source-backed
+mixing materials even without known terminology; negated coordinated actions;
+shared-referent SNOMED entailment; whole/entire as manner/site extent rather than
+an invented dose of one; clinical Boolean all/any conditions and otherwise
+hold-follow-up; non-calendar stopping instructions; exclusions; qualified sites;
+and thick/thin topical semantics without fabrication.
+
+A typed alternative edge now survives R5/R6 as a must-understand
+medication-alternative-choice modifier with groupId, branchId and exactly-one
+selectionBehavior. It is NOT a native concurrent R6 component interpretation.
+Every alternative remains editable and both source branches survive conversion.
+formatSig renders Choose one / or (or Thai equivalents). Scheduling and numeric
+supply require explicit `alternativeChoices: { "choice-1": "branch-1" }`, using
+ids returned by getDosageAlternativeChoice. Without a choice the execution API
+reports the available group/branch ids rather than executing both; this does
+not block parse, suggest, format, import or editing. Two alternative tablet
+courses produce three OR six tablets over three days, not nine. Branch identity
+survives array reordering and repeated strict R5/R6 save/reload. Clearing an
+obsolete condition or BodyStructure reference and replacing an expression-based
+dose cannot reactivate the previous executable meaning from retained provenance.
+
+The named-infusion carrier is source-backed and uncoded unless external
+terminology has actually resolved it. The existing FHIR projection retains the
+material and local source span in a typed extension; canonical global source
+spans are rebased separately. Generated StructureDefinition builders for this
+extension and alternative choices are exported from the package entry point.
+They are draft profiles: no external HL7 validator/conformance certification
+has been run. No production application deployment or mobile performance claim.
+
+Review hygiene: consolidated new single-consumer modules into their true owners
+instead of hiding more paths (evidence into planner, typed bridge into course,
+site-target projection into HPSG projection, shared temporal lexical code).
+Entire PR is 115 changed paths minus the same 15 existing CodeRabbit exclusions
+= exactly 100 reviewable files. All new clinical oracles are in existing files.
+Production source contains no JSON.stringify/JSON.parse. Temporary diagnostic
+logging is removed; the original untracked semantic probe is not committed.
+
+Frozen gate at 10:27 Bangkok: 2252/2252 source tests across 45 suites, 4/4
+built-package tests, ESM/CJS and TypeScript declarations pass. git diff --check
+passes. One old test asserting swallowed-whole SNOMED from ONLY a prohibition
+of crushing/chewing was replaced with stronger no-false-code/both-negations
+assertions. OR-corpus scheduling checks now assert required branch selection
+and test every selectable branch rather than silently executing both options.
+No original clinical assertions were merely skipped to manufacture green.
+
+An unchanged independent 43-case adversarial replay completed without throws,
+but it is NOT 43/43 clinical correctness. Several deliberately broad/underspecified
+programs remain imperfect: sparse cycle-day dosing with day-local guards,
+some Thai taper/counseling constructions, complex contrary instructions, and
+some auxiliary object/condition realization. Original source remains available;
+these are not reasons to turn this clinician-operated suggester into a refusal
+engine or to claim automatic prescribing safety. A separate older counseling
+branch has additional semantics worth reconciling later, not blindly cherry-picking.
+
+Interleaved warmed HP-host benchmark against frozen 5838312 dist (milliseconds
+per parse, median of seven alternating rounds; not phone measurements): ordinary
+BID 1.718 -> 1.745 (+1.6%); site relative 2.932 -> 3.107 (+6.0%); eye taper
+6.364 -> 7.052 (+10.8%); loading 2.712 -> 2.798 (+3.2%); coordinated negation
+5.891 -> 6.653 (+12.9%); procedure 3.286 -> 3.478 (+5.8%); compound guard
+4.226 -> 6.604 (+56.3%); now-correct event alternative 6.043 -> 3.083 (-49.0%).
+The compound-guard overhead is explicitly under investigation rather than
+concealed behind the mostly stable ordinary case.
+
+Local evidence: /tmp/ezmed-adversarial-semantics-final-20261024.json and
+/tmp/ezmed-final-performance-20261024.json on the development host. No package
+version change, publication, push, or merge in this checkpoint.
+
+
+### 10:38 follow-up: condition constituent ownership and final checkpoint gates
+
+Profiling located the compound-guard cost in redundant boundary HPSG probes at
+the AND/OR inside an already recognized typed measurement guard. The production
+planner now uses the SAME parseMedicationGuard constituent's exact span to own
+that internal connective, with no extra recognizer invocation for ordinary
+inputs without boundary candidates. It does not suppress independent regimen
+alternatives outside the guard. Three permanent tests assert correct all/any,
+no PRN, original dose/cadence, and zero redundant boundary clause probes.
+Full source is now **2255/2255 across 45 suites**, ESM/CJS/declarations and
+built-package **4/4** pass; exact review count remains100.
+
+Identical interleaved warmed benchmark after this correction (same frozen
+5838312 baseline; separate process/run, host-only): BID1.723->1.729ms(+0.3%),
+site-relative3.042->3.034(-0.3%), eye-taper6.744->7.089(+5.1%),
+loading2.749->2.880(+4.7%), negation6.195->6.396(+3.2%),
+procedure3.165->3.450(+9.0%), compound guard4.173->3.643(-12.7%),
+event alternatives5.961->3.169(-46.8%). This resolves the measured avoidable
+compound-guard regression; it is not a claim that every case is faster or that
+mobile behavior has been benchmarked. Both pre/post optimization reports are
+retained under /tmp/ezmed-final-performance[-optimized]-20261024.json.

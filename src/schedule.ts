@@ -1,5 +1,5 @@
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
-import { getDosageCondition, getDosageExcludedDates, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
+import { getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
 } from "./body-site-target";
@@ -1814,6 +1814,92 @@ function scheduleRepeatedCourse(
  * Produces the next dose timestamps in ascending order according to the
  * provided configuration and dosage metadata.
  */
+/** A choice modifier changes execution, never the ability to parse/edit a SIG.
+ * @param dosage A native R5/R6 administration component.
+ * @returns Whether the original explicitly contains the choice marker.
+ */
+function hasAlternativeChoice(dosage: Pick<FhirDosage, "modifierExtension">): boolean {
+  return dosage.modifierExtension?.some(extension => extension.url === DOSAGE_ALTERNATIVE_CHOICE_URL) ?? false;
+}
+
+/** Read mandatory membership while preserving malformed input for correction.
+ * @param dosage An administration with an explicit choice modifier.
+ */
+function executionChoice(dosage: Pick<FhirDosage, "modifierExtension">) {
+  const choice = getDosageAlternativeChoice(dosage);
+  if (!choice && hasAlternativeChoice(dosage)) {
+    throw new MedicationQuantityCalculationError("invalid-alternative-choice",
+      "An alternative-choice modifier has incomplete group/branch data. Edit or clear that choice on the affected dosage before calculating; the original instruction and all branches are retained.");
+  }
+  return choice;
+}
+
+/** Resolve exactly-one groups from structured memberships, never source text.
+ * Returned execution copies omit the resolved modifier; caller-owned editable
+ * dosages and their full retained source are untouched.
+ * @param members Every relevant member of the course (possibly three or more branches).
+ * @param options Explicit branch choices supplied by the clinician/application.
+ */
+function selectedAlternativeMembers<T extends Pick<FhirDosage, "modifierExtension">>(
+  members: readonly T[], options: NextDueDoseOptions
+): T[] {
+  if (!members.some(hasAlternativeChoice)) return [...members];
+  const groups = new Map<string, Set<string>>();
+  for (const member of members) {
+    const choice = executionChoice(member);
+    if (!choice) continue;
+    const branches = groups.get(choice.groupId) ?? new Set<string>();
+    branches.add(choice.branchId); groups.set(choice.groupId, branches);
+  }
+  for (const [group, branches] of groups) {
+    const selected = options.alternativeChoices?.[group];
+    if (!selected || !branches.has(selected)) {
+      const code = selected ? "unknown-alternative-branch" : "alternative-choice-required";
+      throw new MedicationQuantityCalculationError(code,
+        `Choose one branch for '${group}' using alternativeChoices['${group}']: ${[...branches].join(", ")}. The alternatives remain editable; both are never administered or summed together.`);
+    }
+  }
+  return members.filter(member => {
+    const choice = getDosageAlternativeChoice(member);
+    return !choice || options.alternativeChoices?.[choice.groupId] === choice.branchId;
+  }).map(member => hasAlternativeChoice(member) ? {
+    ...member,
+    modifierExtension: member.modifierExtension?.filter(extension =>
+      extension.url !== DOSAGE_ALTERNATIVE_CHOICE_URL)
+  } : member);
+}
+
+/** Keep exact step timing while choosing one branch in a whole course.
+ * @param course Native R6 course whose modifier fields survived R5/R6 lowering.
+ * @param options Clinician-selected branch ids.
+ */
+function selectedAlternativeCourse(
+  course: FhirR6DosageDetails, options: NextDueDoseOptions
+): FhirR6DosageDetails {
+  // Ordinary courses stay allocation-free; only an explicit modifier needs
+  // group selection. Flatten once, not by repeated growing-array copying.
+  if (!course.step.some(step => step.component.some(hasAlternativeChoice))) return course;
+  const members: FhirR6DosageDetails["step"][number]["component"] = [];
+  for (const step of course.step) members.push(...step.component);
+  // Validate against the WHOLE group, not one component/step at a time.
+  selectedAlternativeMembers(members, options);
+  return {
+    ...course,
+    renderedInstruction: undefined,
+    step: course.step.map(step => ({
+      ...step,
+      component: step.component.filter(component => {
+        const choice = getDosageAlternativeChoice(component);
+        return !choice || options.alternativeChoices?.[choice.groupId] === choice.branchId;
+      }).map(component => hasAlternativeChoice(component) ? {
+        ...component,
+        modifierExtension: component.modifierExtension?.filter(extension =>
+          extension.url !== DOSAGE_ALTERNATIVE_CHOICE_URL)
+      } : component)
+    })).filter(step => step.component.length > 0)
+  };
+}
+
 export function nextDueDoses(
   dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageDetails | ParseBatchResult,
   options: NextDueDoseOptions
@@ -1834,7 +1920,7 @@ export function nextDueDoses(
       return nextDueDoses(toDosageDetails(dosage), options);
     }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
-      ? dosage as FhirR6DosageDetails : undefined;
+      ? selectedAlternativeCourse(dosage as FhirR6DosageDetails, options) : undefined;
     const zone = options?.timeZone ?? options?.config?.timeZone;
     if (r6Course?.repeatCycle && zone) {
       return scheduleRepeatedCourse(r6Course, options, zone);
@@ -1842,7 +1928,7 @@ export function nextDueDoses(
     if (r6Course && r6Course.step.some(step => step.start || step.end)) {
       return scheduleTreatmentRelativeCourse(r6Course, options);
     }
-    const items = Array.isArray(dosage) ? [...dosage] :
+    const items = Array.isArray(dosage) ? selectedAlternativeMembers(dosage, options) :
       toFhirR5Dosages(r6Course!).map(item => ({
         ...item,
         // The course retention marker is for downstream R5 consumers. We
@@ -1862,6 +1948,19 @@ export function nextDueDoses(
     }, []).sort((a, b) => Date.parse(a) - Date.parse(b)).slice(0, Math.floor(limit));
   }
   const one = dosage as FhirDosage;
+  const choice = executionChoice(one);
+  if (choice) {
+    const selected = options.alternativeChoices?.[choice.groupId];
+    if (!selected) {
+      throw new MedicationQuantityCalculationError("alternative-choice-required",
+        `Select a branch for '${choice.groupId}' in alternativeChoices before scheduling. This dosage is '${choice.branchId}'; all alternatives remain editable.`);
+    }
+    if (selected !== choice.branchId) return [];
+    return nextDueDoses({
+      ...one,
+      modifierExtension: one.modifierExtension?.filter(extension => extension.url !== DOSAGE_ALTERNATIVE_CHOICE_URL)
+    }, options);
+  }
   const administrationOffset = getAdministrationOffsetMinutes(one);
   if (administrationOffset !== undefined) {
     const zone = options.timeZone ?? options.config?.timeZone;
@@ -1888,11 +1987,18 @@ export function nextDueDoses(
   }
   const guard = getDosageCondition(one);
   const exclusions = getDosageExcludedDates(one);
-  if (guard || exclusions.length) {
+  const excludedWeekdays = new Set<string>(getDosageExcludedWeekdays(one));
+  if (guard || exclusions.length || excludedWeekdays.size) {
     const limit = options?.limit ?? 10;
     if (!Number.isFinite(limit) || limit <= 0) return [];
+    // A fully excluded week has no administration opportunities. This follows
+    // the typed exclusion set; the prescription remains editable, and the
+    // source and original cadence are not silently rewritten.
+    if (Object.keys(WEEKDAY_TEXT).every(day => excludedWeekdays.has(WEEKDAY_TEXT[day]))) {
+      return [];
+    }
     const timeZone = options?.timeZone ?? options?.config?.timeZone;
-    if (!timeZone) throw new Error("A timeZone is required for exclusion-date scheduling");
+    if (!timeZone) throw new Error("A timeZone is required for excluded-date/weekday scheduling");
     // Native EzDosage mirrors conditional/date semantics as direct fields
     // AND in R5 modifiers. Clear both representations before enumerating
     // candidate times, otherwise recursively re-enter this very filter.
@@ -1906,6 +2012,10 @@ export function nextDueDoses(
     const unconstrained: FhirDosage = withoutOccurrenceCap({
       ...plainDosage,
       maxDosePerPeriod: undefined,
+      // Drop only the filter markers during recursive candidate enumeration.
+      // Their original FHIR payload stays intact on the caller's dosage.
+      extension: plainDosage.extension?.filter(extension =>
+        extension.url !== DOSAGE_EXCLUDED_WEEKDAYS_R5_URL),
       modifierExtension: plainDosage.modifierExtension?.filter(extension =>
         extension.url !== DOSAGE_CONDITION_R5_URL &&
         extension.url !== DOSAGE_EXCLUDED_DATES_R5_URL)
@@ -1915,6 +2025,9 @@ export function nextDueDoses(
       const candidates = nextDueDoses(unconstrained, { ...options, limit: candidateLimit });
       const accepted: string[] = [];
       for (const at of candidates) {
+        if (excludedWeekdays.size && excludedWeekdays.has(getLocalWeekday(new Date(at), timeZone))) {
+          continue;
+        }
         if (exclusions.length) {
           const { year, month, day } = getTimeParts(new Date(at), timeZone);
           const localDate = `${pad(year, 4)}-${pad(month)}-${pad(day)}`;
@@ -3481,6 +3594,7 @@ function calculateTotalUnitsSingle(
   const hasPartialR6Safety = Boolean((dosage as EzDosage).safety);
   const conditional = getDosageCondition(dosage);
   const excludedDates = getDosageExcludedDates(dosage);
+  const excludedWeekdays = getDosageExcludedWeekdays(dosage);
   const useMaximalPlan = !!dosage.asNeeded ||
     (!!conditional && !options.evaluateCondition) ||
     maximalTiming.countMaximum || maximalTiming.frequencyMaximum ||
@@ -3527,7 +3641,7 @@ function calculateTotalUnitsSingle(
     boundsPeriod.end
   );
 
-  const needsFilteredEnumeration = conditional || excludedDates.length ||
+  const needsFilteredEnumeration = conditional || excludedDates.length || excludedWeekdays.length ||
     !!dosage.maxDosePerPeriod?.length || !!getTimingOccurrenceCap(repeat);
   let count: number;
   if (endDay <= countFrom) {
@@ -3741,6 +3855,7 @@ function calculateTotalUnitsSingle(
 function calculateCourseTotalUnits(
   course: FhirR6DosageDetails, options: TotalUnitsOptions
 ): TotalUnitsResult {
+  course = selectedAlternativeCourse(course, options);
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
     throw new MedicationQuantityCalculationError("time-zone-required",
@@ -3950,6 +4065,23 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
     return calculateCourseTotalUnits(input as FhirR6DosageDetails, options);
   if (Array.isArray(input))
     return calculateCourseTotalUnits(toDosageDetails(input as FhirDosage[]), options);
+  const one = input as FhirDosage;
+  const choice = executionChoice(one);
+  if (choice) {
+    const selected = options.alternativeChoices?.[choice.groupId];
+    if (!selected) {
+      throw new MedicationQuantityCalculationError("alternative-choice-required",
+        `Select a branch for '${choice.groupId}' in alternativeChoices before calculating supply. This dosage is '${choice.branchId}'; all alternatives remain editable.`);
+    }
+    if (selected !== choice.branchId) {
+      return { totalUnits: 0, unit: one.doseAndRate?.[0]?.doseQuantity?.unit,
+        quantityKind: "scheduled", explanation: "This is an unselected alternative; it contributes no administrations or supply." };
+    }
+    return calculateTotalUnitsSingle({ ...options, dosage: {
+      ...one,
+      modifierExtension: one.modifierExtension?.filter(extension => extension.url !== DOSAGE_ALTERNATIVE_CHOICE_URL)
+    } });
+  }
   return calculateTotalUnitsSingle(options as Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage });
 }
 

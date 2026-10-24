@@ -445,13 +445,31 @@ function conditionalLeadBelongsToSafetyActionBefore(
   context: HpsgClauseContext,
   start: number
 ): boolean {
+  const lead = context.tokens[start];
+  if (!lead) return false;
+  // A full typed safety/cessation action may contain its own object BEFORE
+  // the "if/when" complement. Use the existing action frames to assign the
+  // conditional to the nearest governing action, not an unrelated drug dose.
+  const preceding = getProceduralFrames(context)
+    .filter(frame => frame.span.end <= lead.sourceStart)
+    .sort((left, right) => right.span.end - left.span.end)[0];
+  if (preceding && medicationInstructionActionIsSafetyScopeTarget(
+    preceding.predicate.lemma, context.options
+  ) && !context.state.input.slice(preceding.span.end, lead.sourceStart).trim()) {
+    return true;
+  }
   const action = context.tokens[start - 1];
   if (!action) return false;
   const actionLower = normalizeTokenLower(action);
-  if (!isMedicationAdministrationMethod(actionLower, context.options) &&
-      !resolveMedicationInstructionAction(actionLower, context.options)) {
+  const definition = resolveMedicationInstructionAction(actionLower, context.options);
+  if (!isMedicationAdministrationMethod(actionLower, context.options) && !definition) {
     return false;
   }
+  // A condition immediately licensed by an explicitly registered safety or
+  // cessation predicate belongs to THAT action, not to the medication dose.
+  // The graph already owns its temporal condition; creating an extra PRN sign
+  // would incorrectly turn a course-stopping instruction into "take PRN".
+  if (medicationInstructionActionIsSafetyScopeTarget(actionLower, context.options)) return true;
   const actionIndex = start - 1;
   return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
     if (prefix.polarity !== AdvicePolarity.Negate) return false;
@@ -896,7 +914,10 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           },
           cont: { clauseKind: "administration" }
         },
-        score: reasonTokens.length ? 10 + reasonTokens.length : 6
+        // A complete, declared PRN lead is a typed executable modifier even
+        // without an indication. Do not rank it below an opaque free-text
+        // instruction that happens to consume the same words.
+        score: reasonTokens.length ? 10 + reasonTokens.length : 16
       })
     ];
   });

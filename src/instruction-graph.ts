@@ -1,4 +1,9 @@
 import { composeCoordinatedActionDirective } from "./hpsg/constructions";
+import {
+  resolveAdviceMannerModifier,
+  matchComposedAdviceCodings,
+  adviceCodingNeedsComposedScope
+} from "./advice";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { stripBodySiteSourceLead } from "./body-site-context-terminology";
 import { lexInput } from "./lexer/lex";
@@ -7,7 +12,7 @@ import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FRE
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue } from "./localization";
-import { inferMedicationLocale } from "./locale-detection";
+import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
   InstructionActionRealizationInput
@@ -22,6 +27,7 @@ import {
   relationHasGrammarFeature,
   relationHasSemanticClass,
   resolveActionRelationSurface,
+  resolveAdviceRelationSurface,
   resolveActionRelationSurfaceByGrammarFeature
 } from "./relation-terminology";
 import {
@@ -35,6 +41,7 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   COMPOUND_DOSE_UNITS,
   DURATION_LEAD_TOKENS,
+  EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
@@ -76,6 +83,7 @@ import {
   CanonicalInstructionGraph,
   CanonicalInstructionRelation,
   CanonicalSigClause,
+  CanonicalAdditionalInstructionExpr,
   CanonicalSourceSpan,
   EventTiming,
   FhirCoding,
@@ -383,7 +391,11 @@ function argumentFromParts(
   const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
   if (!text) return undefined;
   const canonicalParts: string[] = [];
-  for (let index = start; index < endExclusive; index += 1) {
+  let nominalStart = start;
+  while (nominalStart < endExclusive && EVENT_ARTICLE_TOKENS.has(key(parts[nominalStart]))) {
+    nominalStart += 1;
+  }
+  for (let index = nominalStart; index < endExclusive; index += 1) {
     const currentKey = key(parts.slice(index, index + 1)[0]);
     if (currentKey) canonicalParts.push(currentKey);
   }
@@ -394,13 +406,13 @@ function argumentFromParts(
     // constructional fallback. The fallback is only for opaque/free text.
     return direct;
   }
-  const coordinated = coordinatedTypedArgumentFromParts(parts, start, endExclusive, input, options);
-  if (coordinated) return coordinated;
   const resolvedSite = codingFromSite(text, options);
   if (resolvedSite) {
     if (preferredRole === AdviceArgumentRole.Destination) resolvedSite.role = AdviceArgumentRole.Destination;
     return resolvedSite;
   }
+  const coordinated = coordinatedTypedArgumentFromParts(parts, start, endExclusive, input, options);
+  if (coordinated) return coordinated;
   const allPartsCanonical = parts
     .slice(start, endExclusive)
     .every((part) => Boolean(part.canonical));
@@ -418,30 +430,78 @@ function coordinatedTypedArgumentFromParts(
   input: string,
   options?: ParseOptions
 ): AdviceArgument | undefined {
-  for (let index = start + 1; index + 1 < endExclusive; index += 1) {
-    const connector = key(parts[index]);
-    if (connector !== "and" && connector !== "or") continue;
-    const left = argumentFromParts(parts, start, index, input, AdviceArgumentRole.Activity, options);
-    const right = argumentFromParts(parts, index + 1, endExclusive, input, AdviceArgumentRole.Activity, options);
-    if (
-      !left?.conceptId || !right?.conceptId ||
-      left.role !== AdviceArgumentRole.Activity || right.role !== AdviceArgumentRole.Activity
-    ) continue;
-    const enLeft = left.i18n?.en ?? left.normalized ?? left.text;
-    const enRight = right.i18n?.en ?? right.normalized ?? right.text;
-    const i18n = composeLocalizedRecords(
-      [left.i18n, ACTION_COORDINATION_CONNECTOR_I18N[connector], right.i18n],
-      ([leftText, connectorText, rightText], locale) =>
-        joinLocalizedTokens(locale, [leftText, connectorText, rightText])
-    );
-    return {
-      role: AdviceArgumentRole.Activity,
-      text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
-      normalized: `${enLeft} ${connector} ${enRight}`,
-      i18n: { en: `${enLeft} ${connector} ${enRight}`, ...(i18n ?? {}) }
-    };
+  // A typed coordination is a list of nominal daughters, not a series of
+  // new imperatives. Commas and the final and/or preserve their own scope.
+  const members: Array<{ start: number; end: number; connector: string }> = [];
+  let memberStart = start;
+  let connector = "";
+  for (let index = start; index < endExclusive; index += 1) {
+    const token = key(parts[index]);
+    if (token !== "," && token !== "and" && token !== "or") continue;
+    if (index > memberStart) {
+      members.push({ start: memberStart, end: index, connector });
+    }
+    connector = token;
+    memberStart = index + 1;
   }
-  return undefined;
+  if (memberStart < endExclusive) members.push({
+    start: memberStart, end: endExclusive, connector
+  });
+  // Thai may juxtapose two complete substance nouns without a conjunction.
+  // License that construction only with adjacent source characters AND typed
+  // substance atoms; arbitrary Thai compounds must stay opaque.
+  if (members.length < 2 && endExclusive - start > 1) {
+    const contiguousSubstances = parts.slice(start, endExclusive).every((part, offset) =>
+      resolveMedicationInstructionConcept(key(part), options)?.role === AdviceArgumentRole.Substance &&
+      (offset === 0 || (
+        parts[start + offset - 1].sourceEnd === part.sourceStart &&
+        shouldJoinAdjacentSourceTokens(parts[start + offset - 1].original, part.original)
+      ))
+    );
+    if (contiguousSubstances) {
+      members.length = 0;
+      for (let index = start; index < endExclusive; index += 1) {
+        members.push({ start: index, end: index + 1, connector: index === start ? "" : "and" });
+      }
+    }
+  }
+  if (members.length < 2) return undefined;
+  const daughters = members.map((member) => {
+    const text = trimSemanticText(sourceFor(parts, member.start, member.end, input));
+    const canonical = parts.slice(member.start, member.end).map(key).join(" ");
+    return internalArgument(canonical, text, options) ?? codingFromSite(text, options);
+  });
+  const first = daughters[0];
+  if (!first?.role || [
+    AdviceArgumentRole.Activity, AdviceArgumentRole.Substance, AdviceArgumentRole.Object,
+    AdviceArgumentRole.Material, AdviceArgumentRole.Site
+  ].indexOf(first.role) < 0) return undefined;
+  if (!daughters.every((daughter) =>
+    daughter?.role === first.role && Boolean(daughter.conceptId || daughter.coding?.code)
+  )) return undefined;
+  const i18n = composeLocalizedRecords(
+    daughters.map((daughter) => daughter?.i18n),
+    (values, locale) => {
+      let result = values[0];
+      for (let index = 1; index < values.length; index += 1) {
+        const joining = members[index].connector;
+        if (joining === ",") {
+          result += `, ${values[index]}`;
+        } else {
+          const translated = localizedValue(ACTION_COORDINATION_CONNECTOR_I18N[joining], locale) ?? joining;
+          result = joinLocalizedTokens(locale, [result, translated, values[index]]);
+        }
+      }
+      return result;
+    }
+  );
+  const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
+  return {
+    role: first.role,
+    text,
+    normalized: i18n?.en ?? text.toLowerCase(),
+    i18n
+  };
 }
 
 function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefined): void {
@@ -785,12 +845,39 @@ function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgumen
 const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, offset, options, relation, relIndex,
     relationTargetEnd, conditionalTail, duration, separableParticleIndex } = c;
-  const objectEnd = separableParticleIndex !== undefined
+  let objectEnd = separableParticleIndex !== undefined
     ? separableParticleIndex
     : relIndex >= 0 ? relIndex : segmentEnd;
+  let finalManner: AdviceArgument | undefined;
+  // A language may tokenize a single clinical manner as multiple words
+  // (Thai "ทั้งเม็ด"). Bounded longest-suffix selection reuses the same typed
+  // lexical/argument feature instead of guessing a dose or reparsing a clause.
+  for (let start = Math.max(argumentStart, objectEnd - 3); start < objectEnd; start += 1) {
+    const surface = trimSemanticText(sourceFor(parts, start, objectEnd, input));
+    const canonical = parts.slice(start, objectEnd).map(key).join(" ");
+    const declared = internalArgument(surface, surface, options) ??
+      internalArgument(canonical, surface, options);
+    if (declared?.role === AdviceArgumentRole.Manner) {
+      finalManner = declared;
+      objectEnd = start;
+      break;
+    }
+    const modifier = resolveAdviceMannerModifier(canonical) ??
+      resolveAdviceMannerModifier(surface);
+    if (!modifier) continue;
+    finalManner = {
+      role: AdviceArgumentRole.Manner,
+      text: surface,
+      normalized: modifier.lemma,
+      conceptId: modifier.lemma,
+      i18n: { en: modifier.lemma, ...(modifier.i18n ?? {}) }
+    };
+    objectEnd = start;
+    break;
+  }
   const args = parsedArgs(argumentFromParts(
     parts, argumentStart, objectEnd, input, undefined, options
-  ));
+  ), finalManner);
   let typedLocalTime: AdviceArgument | undefined;
   for (let index = argumentStart; index < objectEnd; index += 1) {
     const candidate = internalArgument(key(parts[index]), parts[index].sourceText ?? parts[index].original, options);
@@ -970,8 +1057,17 @@ function trailingTimeArgument(
   input: string,
   options?: ParseOptions
 ): { start: number; argument: AdviceArgument } | undefined {
+  const bounds = semanticArgumentBounds(parts, start, end);
+  start = bounds.start;
+  end = bounds.endExclusive;
   for (let index = start; index < end; index += 1) {
     const canonical = parts.slice(index, end).map((part) => key(part));
+    const declared = internalArgument(
+      canonical.join(" "), trimSemanticText(sourceFor(parts, index, end, input)), options
+    );
+    if (declared?.role === AdviceArgumentRole.Time) {
+      return { start: index, argument: declared };
+    }
     const event = resolveEventTimingExpression(canonical, 0);
     if (!event || event.length !== canonical.length) continue;
     const resolved = argumentFromParts(parts, index, end, input, AdviceArgumentRole.Time, options);
@@ -990,7 +1086,10 @@ function trailingTimeArgument(
 
 const OBJECT_TIME_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const time = trailingTimeArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.options);
-  const objectEnd = time?.start ?? c.segmentEnd;
+  const timeRelation = time && c.relIndex >= c.argumentStart && c.relIndex < time.start &&
+    relationHasGrammarFeature(c.relation, "timeComplement") &&
+    c.parts.slice(c.relIndex + 1, time.start).every(part => EVENT_ARTICLE_TOKENS.has(key(part)));
+  const objectEnd = timeRelation ? c.relIndex : time?.start ?? c.segmentEnd;
   return { args: parsedArgs(
     objectEnd > c.argumentStart
       ? argumentFromParts(c.parts, c.argumentStart, objectEnd, c.input, AdviceArgumentRole.Object, c.options)
@@ -1003,9 +1102,25 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { definition, parts, argumentStart, segmentEnd, input, offset, options, relIndex } = c;
   const absolutePrimary = configuredConceptIndex(
     parts, argumentStart, segmentEnd, definition.argumentParserConfig?.primaryConcepts);
-  if (absolutePrimary < 0) return {
-    args: parsedArgs(argumentFromParts(parts, argumentStart, segmentEnd, input, undefined, options))
-  };
+  if (absolutePrimary < 0) {
+    // A syntactically licensed WITH complement does not require a known food
+    // or vehicle concept. Keep an uncoded material noun fully source-backed;
+    // a recognized instrument/object retains its own role, not a fabricated
+    // Substance identity. The renderer receives this explicit valence too.
+    if (relIndex >= argumentStart && relIndex + 1 < segmentEnd &&
+        relationHasGrammarFeature(c.relation, "accompanimentComplement")) {
+      const args: AdviceArgument[] = [];
+      if (relIndex > argumentStart) pushArgument(args, quantifiedEntityArgument(
+        parts, argumentStart, relIndex, input, offset, AdviceArgumentRole.Theme, options));
+      const nominal = argumentFromParts(parts, relIndex + 1, segmentEnd, input, undefined, options);
+      const role = nominal?.conceptId ? nominal.role : AdviceArgumentRole.Material;
+      pushArgument(args, quantifiedEntityArgument(
+        parts, relIndex + 1, segmentEnd, input, offset, role, options));
+      return { args };
+    }
+    return { args: parsedArgs(argumentFromParts(
+      parts, argumentStart, segmentEnd, input, undefined, options)) };
+  }
 
   const args: AdviceArgument[] = [];
   const split = relIndex >= argumentStart && relIndex < absolutePrimary ? relIndex : absolutePrimary;
@@ -1346,6 +1461,7 @@ function actionCandidateBelongsToCurrentFrame(
   parts: Lexeme[],
   index: number,
   current: ActionDefinition | undefined,
+  input: string,
   options?: ParseOptions
 ): boolean {
   if (!current) return false;
@@ -1355,6 +1471,63 @@ function actionCandidateBelongsToCurrentFrame(
   const previous = key(parts[index - 1]);
   const previousKind = parts[index - 1]?.kind;
   const next = key(parts[index + 1]);
+
+  // A declared temporal noun phrase remains the complement of its relation
+  // even when its event noun is homographic with a command (e.g. "each use").
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const token = key(parts[cursor]);
+    if (/^[,;:.]$/u.test(token) || ACTION_SEQUENCE_MARKERS.has(token)) break;
+    const relation = resolveActionRelationSurface(token);
+    if (!relationHasGrammarFeature(relation, "timeComplement")) continue;
+    const complement = parts.slice(cursor + 1, index + 1).map(key).join(" ");
+    if (resolveMedicationInstructionConcept(complement, options)?.role === AdviceArgumentRole.Time) {
+      return true;
+    }
+    break;
+  }
+
+  // An avoidance predicate selects a nominal complement. Only a typed
+  // administration amount, not a numeric duration, licenses a new command.
+  const nominal = resolveMedicationInstructionConcept(candidateSurface, options);
+  const value = parts[index + 1];
+  const startsAmount = Boolean(
+    value && (value.kind === "NUMBER" || value.kind === "NUMBER_RANGE" ||
+      INSTRUCTION_NUMBER_WORDS[key(value)] !== undefined) &&
+    instructionQuantityUnitAt(parts, index + 2, parts.length, options) &&
+    !durationArgumentAt(parts, index + 1, parts.length, input, 0)
+  );
+  if (
+    current.semanticClass === "avoidance" &&
+    ACTION_COORDINATION_CONNECTORS.has(previous) &&
+    nominal?.role === AdviceArgumentRole.Substance && !startsAmount
+  ) return true;
+  // A temporal/prepositional predicate can select a coordinated LIST of
+  // substances. An ambiguous noun/verb such as "drink" is not a fresh
+  // imperative after "wait ... before food, drink, or other medicines".
+  // Reuse typed nominal roles and the existing relation vocabulary;
+  // a fresh "drink 10 mL" remains an independent action.
+  if (nominal?.role === AdviceArgumentRole.Substance && !startsAmount &&
+      (ACTION_COORDINATION_CONNECTORS.has(previous) || /^[,]$/u.test(previous))) {
+    let previousNominal: AdviceArgumentRole | undefined;
+    let relationOwnsComplement = current.semanticClass === "avoidance";
+    for (let cursor = index - 2; cursor >= Math.max(0, index - 7); cursor -= 1) {
+      const before = key(parts[cursor]);
+      if (/^[;.!?]$/u.test(before)) break;
+      const relation = resolveActionRelationSurface(before);
+      if (relation && (
+        relationHasGrammarFeature(relation, "timeComplement") ||
+        relationHasGrammarFeature(relation, "activityFallback") ||
+        relationHasGrammarFeature(relation, "accompanimentComplement")
+      )) relationOwnsComplement = true;
+      if (!previousNominal) {
+        const priorConcept = resolveMedicationInstructionConcept(before, options);
+        if (priorConcept?.role === AdviceArgumentRole.Substance) {
+          previousNominal = priorConcept.role;
+        }
+      }
+    }
+    if (relationOwnsComplement && previousNominal === nominal.role) return true;
+  }
 
   for (const license of current.continuationLicenses ?? []) {
     if (license.candidateAction !== candidateCode) continue;
@@ -1496,6 +1669,9 @@ function actionTailIsRegimenModifier(
 ): boolean {
   const token = key(parts[index]);
   if (!token) return false;
+  // A lexical avoidance predicate selects its own object and temporal
+  // adjuncts; its complement does not schedule the medication administration.
+  if (definition?.semanticClass === "avoidance") return false;
   if (PRN_LEADS.has(token) || actionTailStartsPhrase(parts, index, AS_NEEDED_LEAD_PHRASES)) {
     return true;
   }
@@ -1529,6 +1705,44 @@ function actionTailIsRegimenModifier(
   // uses of "with" (notably negated food safety) retain their own scope.
   if (definition?.argumentParser === "object-amount-material") return true;
   return actionHasResolvedLocativeSiteBefore(parts, actionStart, index, options);
+}
+
+/**
+ * A comma can separate coordinated imperatives, but cannot by itself extend
+ * a preceding prohibition. An explicit later and/or followed by a licensed
+ * action supplies the list construction; a semicolon, full stop or "then"
+ * begins an independent scope.
+ */
+function actionListCoordination(
+  parts: Lexeme[],
+  bridgeStart: number,
+  actionStart: number,
+  options?: ParseOptions
+): "conjunction" | "disjunction" | "unknown" {
+  const bridge = parts.slice(bridgeStart, actionStart).map(key);
+  if (!bridge.length || bridge.some((token) =>
+    token !== "," && !ACTION_COORDINATION_CONNECTORS.has(token)
+  )) return "unknown";
+  const explicit = bridge.filter((token) => ACTION_COORDINATION_CONNECTORS.has(token));
+  if (explicit.length) return coordinationConnectorKind(explicit[explicit.length - 1]);
+  if (bridge.indexOf(",") < 0) return "unknown";
+
+  // Bounded lookahead inside the local coordination clause, not a new
+  // sentence-level string parser. Each prospective daughter must be a typed
+  // verb/action lexeme, rather than a list of object nouns.
+  const end = Math.min(parts.length, actionStart + 24);
+  for (let cursor = actionStart + 1; cursor < end; cursor += 1) {
+    const token = key(parts[cursor]);
+    if (/^[;.!?]$/u.test(token) || ACTION_SEQUENCE_MARKERS.has(token)) break;
+    if (!ACTION_COORDINATION_CONNECTORS.has(token)) continue;
+    let daughter = cursor + 1;
+    while (daughter < end && key(parts[daughter]) === ",") daughter += 1;
+    if (daughter >= end || prefixedActionAt(parts, daughter, options)) continue;
+    if (actionMatchAt(parts, daughter, options)) {
+      return coordinationConnectorKind(token);
+    }
+  }
+  return "unknown";
 }
 
 export function parseInstructionActions(
@@ -1579,7 +1793,10 @@ export function parseInstructionActions(
       }
       if (
         /^[,;:]$/u.test(currentKey) &&
-        INSTRUCTION_START_WORDS.has(key(parts[index + 1]))
+        INSTRUCTION_START_WORDS.has(key(parts[index + 1])) &&
+        !(currentKey === "," && actionCandidateBelongsToCurrentFrame(
+          parts, index + 1, startingMatch?.definition, sourceText, options
+        ))
       ) {
         end = index;
         break;
@@ -1587,13 +1804,15 @@ export function parseInstructionActions(
       if (
         ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) &&
         !prefixedActionAt(parts, index, options) &&
+        !actionMatchAt(parts, index, options) &&
         !resultativeLeadAt(parts, index, options)
       ) {
         end = index;
         break;
       }
       if (prefixedActionAt(parts, index, options)) {
-        end = index;
+        const previousKey = key(parts[index - 1]);
+        end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ? index - 1 : index;
         break;
       }
       const nextActionMatch = actionMatchAt(parts, index, options);
@@ -1601,10 +1820,12 @@ export function parseInstructionActions(
         nextActionMatch &&
         !actionCandidateIsDoseUnit(parts, index, options) &&
         !actionCandidateIsAnchoredSiteModifier(parts, index, options) &&
-        !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition, options)
+        !actionCandidateBelongsToCurrentFrame(parts, index, startingMatch?.definition, sourceText, options)
       ) {
         const previousKey = key(parts.slice(index - 1, index)[0]);
-        end = ACTION_COORDINATION_CONNECTORS.has(previousKey) || resolveActionRelationSurface(previousKey)
+        end = ACTION_COORDINATION_CONNECTORS.has(previousKey) ||
+          previousKey === "," || resolveActionRelationSurface(previousKey) ||
+          resolveAdviceRelationSurface(previousKey) === AdviceRelation.Without
           ? index - 1 : index;
         break;
       }
@@ -1614,9 +1835,57 @@ export function parseInstructionActions(
     if (frame) {
       const left = frames[frames.length - 1];
       const connector = parts.slice(cursor, start);
-      if (left && connector.length === 1) {
+      const complementRelation = connector.length === 1
+        ? resolveAdviceRelationSurface(key(connector[0]))
+        : undefined;
+      // Under a negated head, "without [gerund]" is a condition of the
+      // prohibition, NOT a new positive command to perform that gerund.
+      // Keep it as a typed activity complement on the governing action.
+      if (left && complementRelation === AdviceRelation.Without &&
+          left.polarity === AdvicePolarity.Negate && !prefixed) {
+        const activity: AdviceArgument = {
+          role: AdviceArgumentRole.Activity,
+          text: frame.sourceText,
+          normalized: frame.predicate.lemma,
+          span: { ...frame.span }
+        };
+        const joined = {
+          ...left,
+          relation: left.relation ?? AdviceRelation.Without,
+          args: [...left.args, activity],
+          span: { ...left.span, end: frame.span.end },
+          sourceText: sourceText.slice(left.span.start - baseOffset, frame.span.end - baseOffset)
+        };
+        frames[frames.length - 1] = joined;
+        cursor = end;
+        if (ACTION_SEQUENCE_MARKERS.has(key(parts[cursor]))) cursor += 1;
+        if (cursor <= start) cursor = start + 1;
+        continue;
+      }
+      if (left && complementRelation === AdviceRelation.Without &&
+          left.polarity !== AdvicePolarity.Negate && !prefixed) {
+        // A positive action with a negated gerund complement supplies
+        // explicit polarity to the subordinate action; the medication dose
+        // and manner remain owned by the positive administration.
+        const lead = connector[0];
+        frame = {
+          ...frame,
+          force: AdviceForce.Warning,
+          polarity: AdvicePolarity.Negate,
+          polaritySource: "shared",
+          span: { ...frame.span, start: baseOffset + lead.sourceStart },
+          sourceText: sourceText.slice(lead.sourceStart, frame.span.end - baseOffset)
+        };
+      }
+      if (left && connector.length) {
+        const coordination = left.polarity === AdvicePolarity.Negate
+          ? actionListCoordination(parts, cursor, start, options)
+          : connector.length === 1
+            ? coordinationConnectorKind(key(connector[0]))
+            : "unknown";
         const composed = composeCoordinatedActionDirective(
-          left, frame, coordinationConnectorKind(key(connector[0])), Boolean(prefixed)
+          left, frame, coordination,
+          Boolean(prefixed) || startingMatch?.definition.semanticClass === "avoidance"
         );
         frames[frames.length - 1] = composed[0];
         frame = composed[1];
@@ -2131,6 +2400,17 @@ function pushActionIfUnique(
   );
   if (existingIndex >= 0) {
     const existing = target[existingIndex];
+    // Source-local fragments can omit an earlier coordinated negator.
+    // When a complete composed action owns the very same source range,
+    // its explicit or inherited polarity wins over an unscoped fragment.
+    // This cannot reach across two distinct source events.
+    const sameSourceAction = existing.span.start === frame.span.start &&
+      existing.span.end === frame.span.end;
+    if (sameSourceAction && existing.polarity !== AdvicePolarity.Negate &&
+        frame.polarity === AdvicePolarity.Negate) {
+      target[existingIndex] = frame;
+      return false;
+    }
     const existingScore = actionSemanticScore(existing);
     const nextScore = actionSemanticScore(frame);
     if (nextScore > existingScore) target[existingIndex] = frame;
@@ -2317,6 +2597,70 @@ function canonicalPrimaryAdministrationSpan(
   return undefined;
 }
 
+/**
+ * HPSG-composed instruction meaning is the source of truth for structurally
+ * scoped advice coding. Preliminary phrase-level coding can carry an
+ * incomplete directive (notably the positive half of a negative coordination).
+ * Reconcile it BEFORE the FHIR projection, using the single advice matcher.
+ */
+function reconcileComposedAdviceCoding(
+  clause: CanonicalSigClause,
+  actionProgram: readonly AdviceFrame[]
+): void {
+  if (!actionProgram.length) return;
+  const proven = matchComposedAdviceCodings(actionProgram);
+  const provenCodes = new Set(proven.map((definition) =>
+    `${definition.coding?.system ?? SNOMED_SYSTEM}|${definition.coding?.code ?? ""}`
+  ));
+  const reconciled = (clause.additionalInstructions ?? []).map((instruction) => {
+    const coding = instruction.coding;
+    if (!coding?.code || !adviceCodingNeedsComposedScope(coding.system ?? SNOMED_SYSTEM, coding.code)) {
+      return instruction;
+    }
+    if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`)) return instruction;
+
+    // Preserve source and the correctly scoped predicate rather than retaining
+    // the preliminary parser's misleading positive-coded paraphrase.
+    const semantic = actionProgram.find((frame) =>
+      instruction.frames?.some((candidate) =>
+        frame.span.start < candidate.span.end &&
+        candidate.span.start < frame.span.end &&
+        frame.predicate.lemma === candidate.predicate.lemma
+      )
+    );
+    // A locally parsed clinical qualifier may have a complete typed
+    // AdviceFrame even when it is NOT a standalone procedural graph action
+    // (slowly, empty-stomach, drowsiness). Absence from the procedural graph
+    // is not evidence that its original, structurally parsed coding was false.
+    // Only a real overlapping composed action can supersede that candidate.
+    if (!semantic) return instruction;
+    return {
+      ...instruction,
+      text: realizeInstructionAction(semantic, "en"),
+      i18n: { ...(instruction.i18n ?? {}), th: realizeInstructionAction(semantic, "th") },
+      coding: undefined,
+      frames: [semantic]
+    };
+  });
+  for (const definition of proven) {
+    const coding = definition.coding;
+    if (!coding?.code) continue;
+    if (reconciled.some((instruction) =>
+      instruction.coding?.code === coding.code &&
+      (instruction.coding?.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)
+    )) continue;
+    reconciled.push({
+      text: definition.text,
+      i18n: definition.i18n ? { ...definition.i18n } : undefined,
+      coding: {
+        ...definition.coding,
+        i18n: definition.i18n ? { ...definition.i18n } : undefined
+      }
+    });
+  }
+  if (reconciled.length) clause.additionalInstructions = reconciled;
+}
+
 export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
@@ -2326,6 +2670,7 @@ export function buildInstructionGraph(
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
   const fullInputFrames = parseInstructionActions(input, 0, options);
+  reconcileComposedAdviceCoding(clause, fullInputFrames);
   const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   const temporalEndpoints = new Set<AdviceFrame>();
   for (const relation of buildInstructionRelations(input, fullInputFrames, [])) {
@@ -2412,7 +2757,12 @@ export function buildInstructionGraph(
       !ownsTemporalEdge(actions[index]) && (
         redundantCanonicalAdministration ||
         actionContainedInCanonicalSite(actions[index], clause) ||
-        actionDominatedByCanonicalMethod(actions[index], clause, options, primaryAdministrationSpan)
+        // A procedural step remains part of a multi-action workflow even
+        // when its verb also supplies the canonical administration method.
+        // Removing it would turn "crush, mix, swallow" into a program that
+        // never administers its prepared medicine.
+        (!participatesInProcedureSequence &&
+          actionDominatedByCanonicalMethod(actions[index], clause, options, primaryAdministrationSpan))
       )
     ) {
       actions.splice(index, 1);
@@ -2560,6 +2910,10 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   }
 
   text = appendDuration(text, c.duration);
+  const timeRelation = c.time && relationHasGrammarFeature(c.frame.relation, "timeComplement")
+    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+    : undefined;
+  text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
   if (withTarget) {
     const withRelation = localizeAdviceRelation(AdviceRelation.With, c.locale, "complement") ?? AdviceRelation.With;
     text = appendLocale(text, joinLocalizedTokens(c.locale, [withRelation, withTarget]));
@@ -2625,7 +2979,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const material = first(AdviceArgumentRole.Material);
   const manner = first(AdviceArgumentRole.Manner);
   const definition = getMedicationInstructionAction(frame.predicate.lemma);
-  const input: InstructionActionRealizationInput = {
+  let input: InstructionActionRealizationInput = {
     frame, locale, label, amount, theme, container, destination, site,
     substance, result, activity, time, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
@@ -2634,6 +2988,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     translateQuantity: (quantity) => translatedQuantity(quantity, locale)
   };
   const adapter = getInstructionActionLocaleAdapter(locale);
+  input = adapter.selectLexicalRealization?.(input) ?? input;
   if (frame.polarity === AdvicePolarity.Negate) {
     return adapter.renderNegated(input);
   }
@@ -2722,6 +3077,127 @@ export function instructionGraphSingleActionRepresentsText(
   });
 }
 
+
+/**
+ * Non-coded advice is redundant only when the grammar already owns every
+ * negative predicate in the same source interval. Free text alone cannot
+ * justify deleting a distinct clinical prohibition.
+ */
+export function instructionGraphCoversTypedWarnings(
+  graph: CanonicalInstructionGraph,
+  frames: readonly AdviceFrame[] | undefined
+): boolean {
+  if (!frames?.length) return false;
+  return frames.every((expected) => {
+    if (expected.polarity !== AdvicePolarity.Negate) return false;
+    const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
+      expected.predicate.lemma;
+    return graph.actions.some((actual) => {
+      if (actual.polarity !== AdvicePolarity.Negate) return false;
+      const actualCode = resolveMedicationInstructionAction(actual.predicate.lemma)?.code ??
+        actual.predicate.lemma;
+      if (actualCode !== expectedCode ||
+          actual.span.end <= expected.span.start ||
+          expected.span.end <= actual.span.start) return false;
+      return expected.args.filter((arg) => arg.quantity || arg.conceptId).every((arg) =>
+        actual.args.some((candidate) =>
+          candidate.role === arg.role &&
+          (arg.conceptId === undefined || arg.conceptId === candidate.conceptId) &&
+          (!arg.quantity || Boolean(candidate.quantity &&
+            arg.quantity.value === candidate.quantity.value &&
+            arg.quantity.unit === candidate.quantity.unit &&
+            arg.quantity.range?.low === candidate.quantity.range?.low &&
+            arg.quantity.range?.high === candidate.quantity.range?.high))
+        )
+      );
+    });
+  });
+}
+
+/** A coded qualifier already entailed by the displayed action graph needs no
+ * second patient-visible sentence, but keeps its exact FHIR coding. */
+export function instructionGraphEntailsAdviceCoding(
+  graph: CanonicalInstructionGraph,
+  coding: FhirCoding | undefined
+): boolean {
+  if (!coding?.code) return false;
+  return matchComposedAdviceCodings(graph.actions).some((definition) => {
+    const candidate = definition.coding;
+    return candidate?.code === coding.code &&
+      (candidate?.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM);
+  });
+}
+
+/**
+ * Give a complete source-preserved free-text instruction ownership of the
+ * graph actions whose exact source ranges it contains. This prevents duplicate
+ * rendering without reinterpreting the instruction or dropping its remaining
+ * unparsed clinical content.
+ */
+export function instructionGraphSourceOwnedByAdvice(
+  graph: CanonicalInstructionGraph,
+  instruction: CanonicalAdditionalInstructionExpr
+): string[] {
+  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) {
+    return [];
+  }
+  const source = graph.sourceText.toLocaleLowerCase("en");
+  const phrase = instruction.text.trim().toLocaleLowerCase("en");
+  const start = source.indexOf(phrase);
+  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return [];
+  const end = start + phrase.length;
+  return graph.actions
+    .filter((action) =>
+      action.span.start >= start && action.span.end <= end &&
+      Boolean(action.sourceText.trim())
+    )
+    .map((action) => action.sourceText);
+}
+
+/**
+ * A source-backed additional fragment is fully represented when every
+ * lexical constituent belongs to a composed action or its licensed
+ * coordination connector. A partial match cannot delete unresolved advice.
+ */
+export function instructionGraphFullyOwnsAdvice(
+  graph: CanonicalInstructionGraph,
+  instruction: CanonicalAdditionalInstructionExpr
+): boolean {
+  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) return false;
+  const source = graph.sourceText.toLocaleLowerCase("en");
+  const phrase = instruction.text.trim().toLocaleLowerCase("en");
+  const start = source.indexOf(phrase);
+  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return false;
+  const end = start + phrase.length;
+  const actions = graph.actions.filter((action) =>
+    action.span.start >= start && action.span.end <= end
+  );
+  if (!actions.length) return false;
+  return lexInput(graph.sourceText.slice(start, end)).every((token) => {
+    const localStart = start + token.sourceStart;
+    const localEnd = start + token.sourceEnd;
+    if (actions.some((action) =>
+      action.span.start <= localStart && localEnd <= action.span.end
+    )) return true;
+    const normalized = key(token);
+    return normalized === "," || ACTION_COORDINATION_CONNECTORS.has(normalized);
+  });
+}
+
+/** Use complete realized negative actions to recognize otherwise untyped FHIR text. */
+export function instructionGraphRealizesWarningText(
+  graph: CanonicalInstructionGraph,
+  text: string
+): boolean {
+  const normalized = normalizedInstructionSurface(text);
+  if (!normalized) return false;
+  return graph.actions.some((frame) =>
+    frame.polarity === AdvicePolarity.Negate &&
+    ["en", "th"].some((locale) =>
+      normalizedInstructionSurface(realizeInstructionAction(frame, locale)) === normalized
+    )
+  );
+}
 
 function codingEquivalent(
   left: { system?: string; code?: string } | undefined,
@@ -3101,9 +3577,9 @@ export function realizeInstructionGraph(
   const frames = graph.actions.filter((frame) => {
     if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) return false;
     const frameSource = normalizedInstructionSurface(frame.sourceText);
-    if (frameSource && omittedSources.some((candidate) =>
-      candidate === frameSource || candidate.includes(frameSource) || frameSource.includes(candidate)
-    )) return false;
+    // A partial text overlap is not evidence that an independent action was
+    // rendered. In particular, it cannot erase one half of a prohibition.
+    if (frameSource && omittedSources.indexOf(frameSource) >= 0) return false;
     if (options?.omitCanonicalAdministration &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
       return false;

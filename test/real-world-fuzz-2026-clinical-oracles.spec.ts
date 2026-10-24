@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import casesJson from "./real-world-fuzz-2026-cases.json";
 import expectedJson from "./real-world-fuzz-2026-oracles.json";
-import { calculateTotalUnits, getDosageCondition, nextDueDoses, parseSig } from "../src";
+import { calculateTotalUnits, getDosageCondition, getDosageAlternativeChoice, nextDueDoses, parseSig } from "../src";
 
 interface FuzzCase { id: string; category: string; input: string }
 interface Oracle {
@@ -94,10 +94,39 @@ describe("manually specified clinical semantic oracles for the independent 200-c
             timeZone: options.timeZone, limit: 12
           })).toThrow(/end must be after its start/i);
         } else {
-          expect(nextDueDoses(parsed, {
+          const groups = new Map<string, Set<string>>();
+          for (const item of parsed.fhir) {
+            const choice = getDosageAlternativeChoice(item);
+            if (!choice) continue;
+            const branches = groups.get(choice.groupId) ?? new Set<string>();
+            branches.add(choice.branchId); groups.set(choice.groupId, branches);
+          }
+          const scheduleOptions = {
             from: options.from, orderedAt: options.orderedAt,
             timeZone: options.timeZone, limit: 12
-          })).toBeInstanceOf(Array);
+          };
+          if (groups.size) {
+            // An editable OR suggestion is NOT a concurrent regimen. Check
+            // the explicit selection path for EVERY branch rather than
+            // treating default enumeration of all alternatives as success.
+            expect(() => nextDueDoses(parsed, scheduleOptions))
+              .toThrow(/alternativeChoices/u);
+            const defaults: Record<string, string> = {};
+            for (const [group, branches] of groups) defaults[group] = [...branches][0];
+            for (const [group, branches] of groups) {
+              expect(branches.size).toBeGreaterThan(1);
+              for (const branch of branches) {
+                expect(nextDueDoses(parsed, {
+                  ...scheduleOptions,
+                  alternativeChoices: { ...defaults, [group]: branch }
+                })).toBeInstanceOf(Array);
+              }
+            }
+            expect(parsed.input).toBe(original.input);
+            expect(parsed.fhir.some(item => getDosageAlternativeChoice(item))).toBe(true);
+          } else {
+            expect(nextDueDoses(parsed, scheduleOptions)).toBeInstanceOf(Array);
+          }
         }
       }
 

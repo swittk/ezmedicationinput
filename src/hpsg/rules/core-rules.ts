@@ -7,6 +7,7 @@ import {
   ROUTE_TEXT
 } from "../../maps";
 import { getRouteMeaning } from "../../lexer/meaning";
+import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
@@ -29,6 +30,8 @@ import {
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
   IMPLICIT_SINGLE_DOSE_UNITS,
+  QUALITATIVE_DOSE_MODIFIERS,
+  QUALITATIVE_DOSE_UNITS,
   FREQUENCY_ALTERNATIVE_CONNECTORS,
   LIST_SEPARATORS,
   METHOD_NOUN_LEFT_CONTEXT,
@@ -39,6 +42,7 @@ import {
   RANGE_CONNECTORS,
   PRODUCT_EXTERNAL_MODIFIERS,
   PRODUCT_FORM_MODIFIERS,
+  PRODUCT_SOURCE_PREPOSITIONS,
   methodAuxiliaryVerbsForLocale,
   productMethodRealizations,
   coordinationConnectorKind,
@@ -60,9 +64,11 @@ import {
   joinTokenText,
   lexicalRule,
   normalizeTokenLower,
+  rangeFromTokens,
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, emptySynsem, lexicalSign } from "../signature";
+import { clinicalQuantityLexicalRule } from "./clinical-quantity-rules";
 import { productRouteHint } from "./product-route";
 import { baseLanguageTag } from "../../localization";
 import { inferMedicationLocale } from "../../locale-detection";
@@ -429,7 +435,12 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 }
                 : undefined
             },
-            valence: {},
+            // A source-device/product PP is not merely a route hint. Keep
+            // its source-backed qualifier in the existing patient direction
+            // feature so strict FHIR and human realization cannot erase it.
+            valence: previous && PRODUCT_SOURCE_PREPOSITIONS.has(normalizeTokenLower(previous))
+              ? { patientInstruction: { text: joinTokenText([previous, ...tokens]) } }
+              : {},
             cont: { clauseKind: "administration" }
           },
           score: 9 + span + (methodText ? 4 : 0)
@@ -724,6 +735,45 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     )) {
       return [];
     }
+    // A qualitative presentation cannot be converted into a fabricated
+    // measured length. Preserve its typed product amount as source-backed
+    // nonnumeric administration advice and let ordinary site/time signs
+    // compose beside it. Measured "1 cm ribbon" still uses dose-sign.
+    const following = context.tokens[start + 1];
+    const followingLower = following && !context.state.consumed.has(following.index)
+      ? normalizeTokenLower(following) : undefined;
+    const followingUnit = followingLower
+      ? normalizeUnit(followingLower, context.options) ??
+        (QUALITATIVE_DOSE_UNITS.has(followingLower) ? followingLower : undefined)
+      : undefined;
+    if (QUALITATIVE_DOSE_MODIFIERS.has(lower) && following &&
+        followingUnit && QUALITATIVE_DOSE_UNITS.has(followingUnit)) {
+      const phrase = joinTokenText([token, following]);
+      const source = rangeFromTokens([token, following]);
+      // The existing structural advice matcher already licenses certain
+      // qualitative amount styles (e.g. topical thin-film application).
+      // Preserve that SNOMED-coded meaning rather than demoting it to
+      // uncoded free text. Unrecognized shapes remain editable directions:
+      // a thin ribbon is NOT an invented one-centimetre ribbon.
+      const coded = source
+        ? parseAdditionalInstructions(phrase, source, {
+            defaultPredicate: "apply", allowFreeTextFallback: false
+          }).find((instruction) => Boolean(instruction.coding?.code))
+        : undefined;
+      return [lexicalSign({
+        type: "instruction-sign",
+        rule: "hpsg.lex.dose.qualitativePresentation",
+        tokens: [token, following],
+        synsem: {
+          head: {},
+          valence: coded
+            ? { instructions: [coded] }
+            : { patientInstruction: { text: phrase } },
+          cont: { clauseKind: "administration" }
+        },
+        score: 11
+      })];
+    }
     const percentBodyAreaDose = percentBodyAreaDoseAfter(context, start, lower);
     if (percentBodyAreaDose) {
       return percentBodyAreaDose;
@@ -865,6 +915,27 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         const modifiedUnit = modifierLower && (
           DEFAULT_ROUTE_SYNONYMS[modifierLower] || getRouteMeaning(modifier!)
         ) ? unitAfter(context, start + 2) : undefined;
+        const previous = context.tokens[start - 1];
+        if (!modifiedUnit && previous &&
+            isMedicationAdministrationMethod(normalizeTokenLower(previous), context.options) &&
+            modifierLower && SITE_ANCHORS.has(modifierLower)) {
+          // A counted ellipsis ("put one in the other eye") supplies a REAL
+          // cardinal, but no new unit. The ordinary typed antecedent/carry
+          // supplies the unit when one exists; no tablet/drop is fabricated.
+          for (let length = 1; length <= 4 && start + 2 + length <= context.limit; length++) {
+            const siteTokens = tokensAvailable(context, start + 2, length);
+            if (!siteTokens) break;
+            const site = resolveBodySiteLexeme(joinTokenText(siteTokens), context.options?.siteCodeMap, {
+              bodySiteContext: context.options?.context?.bodySiteContext
+            });
+            if (!site?.coding && !site?.definition) continue;
+            return [lexicalSign({
+              type: "dose-sign", rule: "hpsg.lex.dose.cardinalSiteEllipsis",
+              tokens: [token], synsem: { head: { dose: { value: numerator } },
+                valence: {}, cont: { clauseKind: "administration" } }, score: 12
+            })];
+          }
+        }
         if (modifiedUnit) {
           // Leave the registered product/site adjective phrase in its own
           // daughter sign. The quantity's unit is licensed by that phrase,
@@ -1008,6 +1079,25 @@ function isClockDoseContext(context: HpsgClauseContext, start: number, lower: st
   return LIST_SEPARATORS.has(separatorLower) && isClockLikeLower(nextClockLower);
 }
 
+// Reuse the same typed lexical quantity construction as the production chart.
+// A unit-bearing volume-over-time phrase is a single clinical quantity sign:
+// treating "over" as a generic gap connector competes with that sign and
+// destroys its rateRatio. When no such sign owns it, "over" can introduce
+// an ordinary HPSG temporal/locative phrase without losing source coverage.
+const TYPED_CLINICAL_QUANTITY = clinicalQuantityLexicalRule();
+
+function overBelongsToTypedClinicalQuantity(context: HpsgClauseContext, position: number): boolean {
+  const token = context.tokens[position];
+  if (!token) return false;
+  for (let start = Math.max(0, position - 7); start < position; start += 1) {
+    if (TYPED_CLINICAL_QUANTITY.match(context, start).some(sign =>
+      sign.synsem.head.dose?.clinicalQuantity?.status === "resolved" &&
+      sign.consumedTokenIndices.indexOf(token.index) >= 0
+    )) return true;
+  }
+  return false;
+}
+
 export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.connector", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -1015,6 +1105,7 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
+    if (lower === "over" && overBelongsToTypedClinicalQuantity(context, start)) return [];
     const eventRelation = actionEventRelationAt(context, start);
     if (!CONNECTORS.has(lower) && !isPunctuation(lower) && !eventRelation) {
       return [];

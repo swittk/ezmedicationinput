@@ -1,4 +1,3 @@
-import { temporalRelationStarts, coordinationLeadsToSchedule } from "../../regimen/temporal-site-boundary";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -7,7 +6,7 @@ import {
   WORD_FREQUENCIES,
   normalizeBodySiteKey
 } from "../../maps";
-import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning } from "../../lexer/meaning";
+import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning, hasDayOfWeekMeaning, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, RouteCode } from "../../types";
@@ -36,6 +35,7 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
+  EVENT_ARTICLE_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
   INSTRUCTION_START_WORDS,
@@ -72,6 +72,41 @@ import {
   startsMaximumCountLead,
   tokenBelongsToContextualPrnReasonLead
 } from "./prn-rules";
+
+/** Shared lexical boundaries for site attachment and site coordination. */
+function temporalRelationStarts(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  return context.dateSpans.some(span =>
+    span.start === token.sourceStart && span.relation !== 'event'
+  );
+}
+
+function scheduleStarts(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  const lower = normalizeTokenLower(token);
+  return Boolean(
+    temporalRelationStarts(context, index) ||
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
+    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
+    FREQUENCY_TIMES_WORDS.has(lower) ||
+    EVERY_INTERVAL_TOKENS.has(lower) ||
+    mapFrequencyAdverb(lower) ||
+    mapIntervalUnit(lower) ||
+    hasTimingAbbreviationMeaning(token) ||
+    hasEventTimingMeaning(token) ||
+    hasDayOfWeekMeaning(token) ||
+    isClockLikeLower(lower)
+  );
+}
+
+function coordinationLeadsToSchedule(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token || !ACTION_COORDINATION_CONNECTORS.has(normalizeTokenLower(token))) return false;
+  return scheduleStarts(context, index + 1);
+}
 
 const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
 
@@ -511,11 +546,17 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const secondAfterAnchorLower = secondAfterAnchor && !context.state.consumed.has(secondAfterAnchor.index)
       ? normalizeTokenLower(secondAfterAnchor)
       : undefined;
-    // The registered non-anatomical phrase must be considered as a whole,
-    // BEFORE accepting a shorter uncoded site ("at same time" ≠ site "same").
+    // Nominal complements permit the same optional determiner as event NPs.
+    // Classify the complete complement before choosing an uncoded site head.
+    let complementStart = start + 1;
+    while (context.tokens[complementStart] &&
+      !context.state.consumed.has(context.tokens[complementStart].index) &&
+      EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(context.tokens[complementStart]))) {
+      complementStart += 1;
+    }
     if (firstAfterAnchorLower && NON_SITE_ANCHORED_PARTS.some((phrase) =>
       phrase.every((word, index) => {
-        const candidate = context.tokens[start + 1 + index];
+        const candidate = context.tokens[complementStart + index];
         return candidate && !context.state.consumed.has(candidate.index) &&
           normalizeTokenLower(candidate) === word;
       })

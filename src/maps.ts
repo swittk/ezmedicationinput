@@ -681,6 +681,21 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "368149001", display: "Right elbow" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["both elbows", "bilateral elbows", "ข้อศอกทั้งสองข้าง"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: buildSnomedBodySiteLateralityPostcoordinationCode(
+            "127949000", SNOMED_CT_BILATERAL_QUALIFIER_CODE
+          ),
+          display: "Both elbows"
+        },
+        text: "both elbows",
+        i18n: { th: "ข้อศอกทั้งสองข้าง" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["leg", "lower leg", "ขา"],
       definition: {
         coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" },
@@ -709,16 +724,31 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "40927001", display: "Both legs" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["thigh"],
-      definition: { coding: { code: "68367000", display: "Thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["thigh", "ต้นขา"],
+      definition: {
+        coding: { code: "68367000", display: "Thigh" },
+        text: "thigh",
+        i18n: { th: "ต้นขา" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
-      names: ["left thigh"],
-      definition: { coding: { code: "61396006", display: "Left thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["left thigh", "ต้นขาซ้าย"],
+      definition: {
+        coding: { code: "61396006", display: "Left thigh" },
+        text: "left thigh",
+        i18n: { th: "ต้นขาซ้าย" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
-      names: ["right thigh"],
-      definition: { coding: { code: "11207009", display: "Right thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["right thigh", "ต้นขาขวา"],
+      definition: {
+        coding: { code: "11207009", display: "Right thigh" },
+        text: "right thigh",
+        i18n: { th: "ต้นขาขวา" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["knee"],
@@ -1026,10 +1056,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["abdomen", "abdominal", "belly"],
+      names: ["abdomen", "abdominal", "belly", "ท้อง", "หน้าท้อง"],
       definition: {
         coding: { code: "302553009", display: "Entire abdomen" },
         text: "abdomen",
+        i18n: { th: "ท้อง" },
         routeHint: RouteCode["Subcutaneous route"]
       }
     },
@@ -1374,8 +1405,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["face"],
-      definition: { coding: { code: "89545001", display: "Face" }, routeHint: RouteCode["Topical route"] }
+      names: ["face", "ใบหน้า"],
+      definition: {
+        coding: { code: "89545001", display: "Face" },
+        text: "face",
+        i18n: { th: "ใบหน้า" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["eyebrow", "brow"],
@@ -1913,6 +1949,8 @@ export interface ProductFormHint {
 }
 
 export const PRODUCT_FORM_HINTS: Record<string, ProductFormHint> = {
+  inhaler: { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
+  "metered dose inhaler": { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
   patch: { routeHint: RouteCode["Transdermal route"] },
   cream: { routeHint: RouteCode["Topical route"] },
   ointment: { routeHint: RouteCode["Topical route"] },
@@ -2095,6 +2133,7 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   waking: EventTiming.Wake,
   stat: EventTiming.Immediate,
   immediate: EventTiming.Immediate,
+  immediately: EventTiming.Immediate,
   now: EventTiming.Immediate
 };
 
