@@ -284,6 +284,10 @@
           {
             "surface": "เป็น เวลา",
             "canonical": "for"
+          },
+          {
+            "surface": "นาน",
+            "canonical": "for"
           }
         ]
       },

@@ -996,7 +996,8 @@ describe("temporal object and preparation valence", () => {
     const wait=clause.instructionGraph?.actions.find(a=>a.predicate.lemma==="wait");
     expect(wait?.relation).toBe(AdviceRelation.Before);
     expect(wait?.args).toEqual(expect.arrayContaining([
-      expect.objectContaining({role:AdviceArgumentRole.Duration, quantity:{value:30,unit:"min"}})
+      expect.objectContaining({role:AdviceArgumentRole.Duration, quantity:{value:30,unit:"min"}}),
+      expect.objectContaining({span:{start:source.indexOf("food"),end:source.length}})
     ]));
     expect(clause.schedule?.duration).toBeUndefined();
     const en=formatSig(parsed.fhir,"long",{locale:"en"});

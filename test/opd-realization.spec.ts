@@ -468,6 +468,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(thai.meta.canonical.clauses[0]?.prn?.reason).toMatchObject({
       triggerPhase: "onset", coding: { code: "37796009" }
     });
+    expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1, countMax: 2 });
     expect(formatSig(thai.fhir, "long", { locale: "en" }))
       .toContain("repeat after 2 hours if needed");
   });

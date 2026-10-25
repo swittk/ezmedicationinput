@@ -1,4 +1,4 @@
-import { AdviceArgumentRole, AdvicePolarity, EventTiming, type CanonicalSigClause } from "../types";
+import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
   BoundarySite,
@@ -10,7 +10,23 @@ import type {
   RegimenSemanticConstruction,
   RegimenSemanticSelection,
   TrailingInstructionScopeFacts
-} from './types';
+} from '../hpsg/signature';
+
+/** A recognized modifier of an administration remains meaningful even when
+ * it cannot be assigned a clock time (for example an accompanying snack).
+ * @param clause Source-typed clause whose explicit dose is being segmented.
+ */
+export function hasAdministrationAdjunct(clause: CanonicalSigClause): boolean {
+  return Boolean(clause.additionalInstructions?.some(instruction =>
+    instruction.frames?.some(frame =>
+      frame.predicate.semanticClass === 'administration' &&
+      frame.polarity !== AdvicePolarity.Negate &&
+      (frame.relation === AdviceRelation.With || frame.relation === AdviceRelation.Before ||
+       frame.relation === AdviceRelation.After || frame.relation === AdviceRelation.During) &&
+      frame.args.some(arg => arg.role !== AdviceArgumentRole.Amount && Boolean(arg.text.trim()))
+    )
+  ));
+}
 
 /** Typed boundary facts are a separate signature from the production clause grammar. */
 export interface BoundaryFacts {
@@ -87,6 +103,21 @@ const semanticConstraint = (
  * incomplete, conflicting, or already-timed daughter cannot participate.
  */
 export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] = [{
+  id: 'hpsg.cx.coordination.event-timing-ellipsis-with-trailing-course-duration',
+  priority: 955,
+  operation: 'inherit-event-timing-and-share-trailing-course-duration',
+  constraints: [
+    semanticConstraint('relation.typed-event-timing-ellipsis', f => f.relation.semanticLicense === 'event-timing-ellipsis'),
+    semanticConstraint('daughters.adjacent', f => f.adjacent),
+    semanticConstraint('left.administration', f => f.leftAdministrationContext),
+    semanticConstraint('left.schedule', f => f.leftHasSchedule),
+    semanticConstraint('right.schedule', f => f.rightHasSchedule),
+    semanticConstraint('right.omits-dose-head', f => !f.rightExplicitDose && !f.rightExplicitHead),
+    semanticConstraint('left.omitsCourseDuration', f => !f.leftHasCourseDuration),
+    semanticConstraint('right.hasCourseDuration', f => f.rightHasCourseDuration),
+    semanticConstraint('right.hasTrailingCourseDuration', f => f.rightHasTrailingCourseDuration)
+  ]
+}, {
   id: 'hpsg.cx.coordination.event-timing-ellipsis',
   priority: 950,
   operation: 'inherit-event-timing-administration',
@@ -104,7 +135,8 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   operation: 'inherit-administration-head-and-share-trailing-course-duration',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    semanticConstraint('relation.licensed-dosed-coordination', f => f.relation.semanticLicense === 'dose-continuation' ||
+      f.relation.semanticLicense === 'target-transition'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
     semanticConstraint('right.complete', f => f.rightComplete),
@@ -112,7 +144,7 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
     semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
     semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
     semanticConstraint('left.cadence', f => f.leftHasCadence),
-    semanticConstraint('right.cadence', f => f.rightHasCadence),
+    semanticConstraint('right.cadence-or-explicit-administration-adjunct', f => f.rightHasCadence || f.rightHasAdministrationAdjunct === true),
     semanticConstraint('right.omits-head', f => !f.rightExplicitHead),
     semanticConstraint('left.omitsCourseDuration', f => !f.leftHasCourseDuration),
     semanticConstraint('right.hasCourseDuration', f => f.rightHasCourseDuration),
@@ -124,13 +156,14 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   operation: 'inherit-administration-head',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    semanticConstraint('relation.licensed-dosed-coordination', f => f.relation.semanticLicense === 'dose-continuation' ||
+      f.relation.semanticLicense === 'target-transition'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.available-administration-method', f => f.leftHasMethod),
     semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
     semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
     semanticConstraint('left.cadence', f => f.leftHasCadence),
-    semanticConstraint('right.cadence', f => f.rightHasCadence),
+    semanticConstraint('right.cadence-or-explicit-administration-adjunct', f => f.rightHasCadence || f.rightHasAdministrationAdjunct === true),
     semanticConstraint('right.omits-head', f => !f.rightExplicitHead)
   ]
 }, {
@@ -188,14 +221,15 @@ export const COORDINATION_SCOPE_CONSTRUCTIONS: readonly SemanticConstruction[] =
   operation: 'share-trailing-course-duration',
   constraints: [
     semanticConstraint('relation.coordination', f => f.relation.kind === 'coordination'),
-    semanticConstraint('relation.conjunction', f => f.relation.connectorKind === 'conjunction'),
-    semanticConstraint('relation.licensed-dose-continuation', f => f.relation.semanticLicense === 'dose-continuation'),
+    // A typed dose-list seam already licenses coordination, including commas.
+    // A complete dose and cadence need no spoken administration verb in a SIG.
+    semanticConstraint('relation.licensed-dosed-coordination', f => f.relation.semanticLicense === 'dose-continuation' ||
+      f.relation.semanticLicense === 'target-transition'),
     semanticConstraint('daughters.adjacent', f => f.adjacent),
     semanticConstraint('left.complete', f => f.leftComplete),
     semanticConstraint('right.complete', f => f.rightComplete),
     semanticConstraint('left.explicitDose', f => f.leftExplicitDose),
     semanticConstraint('right.explicitDose', f => f.rightExplicitDose),
-    semanticConstraint('left.explicit-or-inherited-administration-head', f => f.leftAdministrationContext),
     semanticConstraint('right.omitsAdministrationHead', f => !f.rightExplicitHead),
     semanticConstraint('left.hasCadence', f => f.leftHasCadence),
     semanticConstraint('right.hasCadence', f => f.rightHasCadence),
@@ -348,9 +382,9 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   ] },
   { id: 'regimen.conjunctive-distinct-event-offsets', priority: 890, relation: 'coordination',
     semanticLicense: 'event-timing-ellipsis', constraints: [
-    constraint('connector.coordination', f => f.site.kind === 'coordination'),
-    constraint('connector.conjunction', f => f.connectorKind === 'conjunction'),
-    constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),
+    constraint('connector.coordination', f => f.site.kind === 'coordination' || f.site.kind === 'comma'),
+    constraint('connector.conjunction', f => f.connectorKind === 'conjunction' || f.site.kind === 'comma'),
+    constraint('left.complete-administration', f => f.left.complete && (f.left.hasDose || f.inheritedAdministration) && f.left.hasSchedule),
     constraint('right.complete-timing', f => f.right.complete && f.right.hasSchedule),
     constraint('right.elliptic-dose', f => !f.right.hasDose && !f.right.method),
     constraint('events.independent-offsets', f => Boolean(
@@ -377,7 +411,8 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     coordinationOrSequence, conjunctionOrSequence,
     constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
-    constraint('right.schedule-method-or-target', f => f.right.hasSchedule || f.right.method || f.right.hasTargets)
+    constraint('right.schedule-method-target-or-adjunct', f => f.right.hasSchedule || f.right.method ||
+      f.right.hasTargets || f.right.prn || hasAdministrationAdjunct(f.right.clause))
   ] },
   { id: 'regimen.delayed-target-administration', priority: 790, relation: 'coordination',
     semanticLicense: 'delayed-target', constraints: [
@@ -389,6 +424,14 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('right.target-without-independent-timing', f => f.right.hasTargets && !f.right.hasSchedule),
     constraint('targets.distinct', f => targetSetsDiffer(f.left.targets, f.right.targets)),
     constraint('right.complete', f => f.right.complete)
+  ] },
+  { id: 'regimen.prn-phase-dose-ellipsis', priority: 775, relation: 'sequence',
+    semanticLicense: 'dose-continuation', constraints: [
+    constraint('connector.sequence', f => f.site.kind === 'sequence'),
+    constraint('left.complete-administration', f => f.left.complete && f.left.hasDose),
+    constraint('right.complete-prn-predicate', f => f.right.complete && f.right.prn),
+    constraint('right.omits-dose', f => !f.right.hasDose),
+    constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
   { id: 'regimen.quantitative-phase-transition', priority: 775, relation: 'sequence',
     semanticLicense: 'dose-continuation', constraints: [

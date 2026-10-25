@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
+import { fromFhirDosage, toFhirR5Dosages, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
@@ -375,7 +375,12 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("insert 1 tab pv once after menstruation ends", { context: TAB_CONTEXT });
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
-    expect(result.longText).toBe("Insert 1 tablet vaginally once. Use after menstruation ends.");
+    expect(result.longText).toBe("Insert 1 tablet vaginally after menstruation ends once only.");
+    const relative = { relation: "after", activity: { text: "menstruation ends" } };
+    expect(result.meta.canonical.clauses[0].schedule?.activityTiming).toEqual([relative]);
+    expect(fromFhirDosage(toFhirR5Dosages(result.fhirNext)[0]).meta.canonical.clauses[0].schedule?.activityTiming)
+      .toMatchObject([relative]);
+    expect(result.fhirNext.renderedInstruction).toBe("insert 1 tab pv once after menstruation ends");
   });
 
   it("treats xN days as duration instead of dose count", () => {
@@ -4848,8 +4853,13 @@ describe("topical workflow and timing", () => {
       period: 1,
       periodUnit: "d"
     });
-    expect(result.fhir.patientInstruction).toBe("after showering");
-    expect(result.meta.normalized.patientInstruction).toBe("after showering");
+    // A recognized workflow anchor is typed timing, not opaque advice.
+    const relative = { relation: "after", activity: { text: "showering" } };
+    expect(result.meta.canonical.clauses[0].schedule?.activityTiming).toMatchObject([relative]);
+    expect(fromFhirDosage(toFhirR5Dosages(result.fhirNext)[0]).meta.canonical.clauses[0].schedule?.activityTiming)
+      .toMatchObject([relative]);
+    expect(result.longText).toContain("after showering");
+    expect(result.fhirNext.renderedInstruction).toBe("apply after showering bid");
   });
 
   it("keeps duration-based workflow phrases out of dose parsing", () => {
@@ -5376,9 +5386,14 @@ describe("topical product forms and workflow", () => {
     expect(subcutaneous.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
   });
 
-  it("stores workflow phrases in patientInstruction", () => {
+  it("preserves typed workflow timing and unresolved workflow instruction text", () => {
     const sun = parseSig("apply sunscreen before sun exposure");
-    expect(sun.fhir.patientInstruction).toBe("before sun exposure");
+    const relative = { relation: "before", activity: { text: "sun exposure" } };
+    expect(sun.meta.canonical.clauses[0].schedule?.activityTiming).toMatchObject([relative]);
+    expect(fromFhirDosage(toFhirR5Dosages(sun.fhirNext)[0]).meta.canonical.clauses[0].schedule?.activityTiming)
+      .toMatchObject([relative]);
+    expect(sun.longText).toContain("before sun exposure");
+    expect(sun.fhirNext.renderedInstruction).toBe("apply sunscreen before sun exposure");
     expect(sun.fhir.timing?.repeat?.dayOfWeek).toBeUndefined();
 
     const dressing = parseSig("apply with each dressing change");

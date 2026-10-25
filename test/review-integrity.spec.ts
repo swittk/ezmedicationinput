@@ -1,4 +1,5 @@
 import { cloneStructuredValue } from "../src/stable-structure";
+import { parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { readFileSync, readdirSync } from "node:fs";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
@@ -13,13 +14,13 @@ import {
   DOSAGE_DETAILS_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
   DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL
 } from "../src/dosage-course";
-import { recognizeCycles } from "../src/regimen/cycles";
+import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen, projectParallelRegimen
 } from "../src/regimen/parallel-course";
 import { buildRegimenGraph } from "../src/regimen/regimen";
-import type { BoundaryPlan } from "../src/regimen/types";
+import type { BoundaryPlan } from "../src/hpsg/signature";
 import type { HpsgSigSegment } from "../src/hpsg/segmenter";
 import { BODY_SITE_RESTRICTION_EXTENSION_URL } from "../src/fhir";
 
@@ -1917,5 +1918,496 @@ describe("unresolved calendar-cycle ordinal numbers never replace an explicit dr
     expect(parsed.warnings?.some(warning => warning.includes(error))).toBe(true);
     expect(lintSig(input).issues.some(issue =>
       issue.message.includes("Unresolved schedule"))).toBe(true);
+  });
+});
+
+
+describe("shared HPSG active/rest duration daughters", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const expected = [0, 14, 28].reduce<string[]>((dates, cycle) => dates.concat(
+    Array.from({ length: 7 }, (_, day) =>
+      new Date(Date.parse(start) + (cycle + day) * 86400000 + 8 * 3600000).toISOString())
+  ), []);
+  it.each([
+    "Take 1 tablet at 08:00 for 7 days then stop for 7 days repeat for 3 cycles",
+    "Take 1 tablet at 08:00 for a week; afterwards stop for seven days; and repeat for three cycles.",
+    "Take 1 tablet at 08:00 for 1 week then discontinue for 7 days then repeat for 3 cycles.",
+    "Take 1 tablet at 08:00 for seven days, after that stop for a week and repeat for three cycles.",
+    "รับประทาน 1 เม็ด เวลา 08:00 เป็นเวลา 7 วัน จากนั้นหยุด 7 วัน แล้วทำซ้ำ 3 รอบ"
+  ])("composes ordinary duration and action variants with exact dates: %s", source => {
+    const cycles = recognizeCycles(source);
+    expect(cycles).toHaveLength(1);
+    const sign = cycles[0].sign!;
+    expect(sign.type).toBe("recurring-course-phrase");
+    expect(sign.construction).toMatchObject({
+      operation: "repeat-course", headSide: "left",
+      leftType: "schedule-sign", rightType: "schedule-sign"
+    });
+    expect(sign.fs.features.HEAD_DTR).toBe(sign.fs.features.LEFT_DTR);
+    expect(sign.fs.features.NON_HEAD_DTR).toBe(sign.fs.features.RIGHT_DTR);
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.repeatCycle).toMatchObject({ value: 14, code: "d" });
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, {
+        from: start, orderedAt: start, timeZone: "UTC", limit: 60
+      }).map(date => new Date(date).toISOString())).toEqual(expected);
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 56, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 21, unit: "tab" });
+    }
+  });
+
+  it("uses the shared cardinal and singular duration grammar for a longer course", () => {
+    const source = "Take 1 tablet at 08:00 for two weeks then off for a week and repeat for two cycles.";
+    const parsed = parseSig(source);
+    const dates = [0, 21].reduce<string[]>((values, cycle) => values.concat(
+      Array.from({ length: 14 }, (_, day) =>
+        new Date(Date.parse(start) + (cycle + day) * 86400000 + 8 * 3600000).toISOString())
+    ), []);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, {
+        from: start, orderedAt: start, timeZone: "UTC", limit: 60
+      }).map(date => new Date(date).toISOString())).toEqual(dates);
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 56, durationUnit: "d"
+      }).totalUnits).toBe(28);
+    }
+  });
+
+  it("keeps a single stop/restart gap distinct from repeated treatment", () => {
+    const source = "Take 1 tablet at 08:00 for 7 days then stop for 7 days and resume 1 tablet at 08:00 for 7 days.";
+    expect(recognizeCycles(source)).toEqual([]);
+    const parsed = parseSig(source);
+    const dates = nextDueDoses(parsed.fhirNext, {
+      from: start, orderedAt: start, timeZone: "UTC", limit: 60
+    }).map(date => new Date(date).toISOString());
+    expect(dates).toEqual(expected.slice(0, 14));
+    expect(calculateTotalUnits({
+      dosage: parsed.fhirNext, from: start, orderedAt: start, timeZone: "UTC",
+      durationValue: 56, durationUnit: "d"
+    }).totalUnits).toBe(14);
+  });
+});
+
+
+describe("HPSG modified duration nominals", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const expectedDates = Array.from({ length: 14 }, (_, day) => day)
+    .reduce<string[]>((dates, day) => dates.concat((day < 7 ? [8, 20] : [8]).map(hour =>
+      new Date(Date.parse(start) + day * 86400000 + hour * 3600000).toISOString()
+    )), []);
+  const prefix = "Take 1 tablet at 08:00 and 20:00 for 7 days, then take 1 tablet at 08:00 ";
+  it.each([
+    [prefix + "for another 7 days.", 7, "d"],
+    [prefix + "for another seven days.", 7, "d"],
+    [prefix + "only for another 7 days.", 7, "d"],
+    [prefix + "for another week.", 1, "wk"],
+    [prefix + "for an additional week.", 1, "wk"],
+    [prefix + "for 7 more days.", 7, "d"],
+    ["รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 เป็นเวลา 7 วัน จากนั้นรับประทาน 1 เม็ด เวลา 08:00 เป็นเวลาอีก 7 วัน", 7, "d"]
+  ] as const)("retains two scheduled finite phases for %s", (source, duration, durationUnit) => {
+    const parsed = parseSig(source);
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses.map(clause => Boolean(clause.prn?.enabled))).toEqual([false, false]);
+    expect(clauses.map(clause => clause.dose)).toMatchObject([
+      { value: 1, unit: "tab" }, { value: 1, unit: "tab" }
+    ]);
+    expect(clauses[0].schedule).toMatchObject({ duration: 7, durationUnit: "d", timeOfDay: ["08:00:00", "20:00:00"] });
+    expect(clauses[1].schedule).toMatchObject({ duration, durationUnit, timeOfDay: ["08:00:00"] });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, {
+        from: start, orderedAt: start, timeZone: "UTC", limit: 40
+      }).map(date => new Date(date).toISOString())).toEqual(expectedDates);
+      expect(calculateTotalUnits({
+        dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 21, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 21, unit: "tab" });
+    }
+  });
+
+  it("keeps a genuine PRN successor separate from a quantified duration", () => {
+    const source = prefix + "as needed for pain.";
+    const parsed = parseSig(source);
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses.map(clause => Boolean(clause.prn?.enabled))).toEqual([false, true]);
+    expect(clauses[0].schedule).toMatchObject({ duration: 7, durationUnit: "d" });
+    expect(clauses[1].schedule?.duration).toBeUndefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("HPSG calendar clock ellipsis", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const options = { from: start, orderedAt: start, timeZone: "UTC" };
+  const dates = Array.from({ length: 7 }, (_, day) =>
+    new Date(Date.parse(start) + day * 86400000 + 8 * 3600000).toISOString());
+  function evaluateDay(condition: import("../src").MedicationCondition, at: string): boolean {
+    if (condition.kind === "not") return !evaluateDay(condition.condition, at);
+    if (condition.kind === "all") return condition.conditions.every(part => evaluateDay(part, at));
+    if (condition.kind === "any") return condition.conditions.some(part => evaluateDay(part, at));
+    return [1, 3, 5].includes(new Date(at).getUTCDay());
+  }
+  it.each([
+    ["Take 1 tablet at 08:00 on Mondays, Wednesdays, Fridays; half a tablet on other days.", 5],
+    ["Take 1 tablet at 08:00 on weekdays and half a tablet on weekends.", 6],
+    ["รับประทาน 1 เม็ด เวลา 08:00 วันจันทร์ พุธ ศุกร์ และครึ่งเม็ด วันอื่น", 5],
+    ["Take 1 tablet at 08:00 on dialysis days and half a tablet on other days.", 5],
+    ["Take 1 tablet at 08:00 on Monday Wednesday Friday and 2 tablets at 08:00 on Tuesdays and half a tablet on other days.", 6.5]
+  ] as const)("inherits the shared clock across calendar alternatives: %s", (source, total) => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses.every(clause =>
+      JSON.stringify(clause.schedule?.timeOfDay) === JSON.stringify(["08:00:00"]))).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluateDay, limit: 7 })
+        .map(date => new Date(date).toISOString())).toEqual(dates);
+      expect(calculateTotalUnits({ dosage, ...options, evaluateCondition: evaluateDay,
+        durationValue: 7, durationUnit: "d" }).totalUnits).toBe(total);
+    }
+  });
+
+  it("preserves an explicit contrasting clock on the recipient", () => {
+    const parsed = parseSig("Take 1 tablet at 08:00 on Monday Wednesday Friday and half a tablet at 20:00 on other days.");
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.timeOfDay))
+      .toEqual([["08:00:00"], ["20:00:00"]]);
+    const expected = Array.from({ length: 7 }, (_, day) =>
+      new Date(Date.parse(start) + day * 86400000 + ([0, 2, 4].includes(day) ? 8 : 20) * 3600000).toISOString());
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 7 }).map(date => new Date(date).toISOString()))
+        .toEqual(expected);
+    }
+  });
+
+  it("does not choose between conflicting antecedent clocks", () => {
+    const source = "Take 1 tablet at 08:00 on Monday Wednesday Friday and 2 tablets at 20:00 on Tuesdays and half a tablet on other days.";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.timeOfDay))
+      .toEqual([["08:00:00"], ["20:00:00"], undefined]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("preserves an explicit clock in a successor phase", () => {
+    const parsed = parseSig("Take 1 tablet at 08:00 on weekdays for 7 days, then take half a tablet at 20:00 on weekends.");
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[1].schedule?.timeOfDay).toEqual(["20:00:00"]);
+  });
+});
+
+
+describe("HPSG day-domain predicate typing", () => {
+  it.each([
+    ["Take 1 tablet at 08:00 daily if it is a dialysis day.", "text"],
+    ["Take 1 tablet at 08:00 daily only if it is a dialysis day and it is a treatment day.", "all"],
+    ["Take 1 tablet at 08:00 daily only if it is a dialysis day or it is a treatment day.", "any"],
+    ["Take 1 tablet at 08:00 daily unless it is a dialysis day.", "not"],
+    ["Take 1 tablet at 08:00 daily only if not a dialysis day.", "not"],
+    ["รับประทาน 1 เม็ด เวลา 08:00 เมื่อเป็นวันฟอกไต", "text"],
+    ["Take 1 tablet at 08:00 daily; hold the morning dose if it is a dialysis day.", "not"]
+  ] as const)("retains day-domain meaning through predicate composition: %s", (source, kind) => {
+    const parsed = parseSig(source);
+    const clinical = parsed.meta.canonical.clauses.find(clause => clause.clinicalAdjuncts?.condition)?.clinicalAdjuncts;
+    expect(clinical?.condition?.kind).toBe(kind);
+    expect(clinical?.calendarDayCondition).toEqual(clinical?.condition);
+    expect(clinical?.calendarDayCondition).toBeDefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["Take 1 tablet at 08:00 daily only if it is a dialysis day and heart rate is above 50.", "all"],
+    ["Take 1 tablet at 08:00 daily only if dizzy or it is a dialysis day.", "any"],
+    ["Take 1 tablet at 08:00 daily only if weight increases by 2 kg over 3 days.", "text"]
+  ] as const)("keeps changing predicates outside the whole-day domain: %s", (source, kind) => {
+    const parsed = parseSig(source);
+    const clinical = parsed.meta.canonical.clauses.find(clause => clause.clinicalAdjuncts?.condition)?.clinicalAdjuncts;
+    expect(clinical?.condition?.kind).toBe(kind);
+    expect(clinical?.calendarDayCondition).toBeUndefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("clinical finite withholding courses", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const day = 86400000;
+  const expected = [0, 14].reduce<string[]>((dates, phase) => dates.concat(
+    Array.from({ length: 7 }, (_, offset) => offset).reduce<string[]>((phaseDates, offset) =>
+      phaseDates.concat([8, 20].map(hour =>
+        new Date(Date.parse(start) + (phase + offset) * day + hour * 3600000).toISOString()
+      )), [])
+  ), []);
+  it.each([
+    "STOP for 7 days", "HOLD for 7 days", "STOP x7d", "HOLD x7d", "HOLD x1wk"
+  ])("retains the actual seven-day gap through every public representation: %s", pause => {
+    const source = `1 tab PO at 08:00 and 20:00 x7d, then ${pause}, then 1 tab PO at 08:00 and 20:00 x7d`;
+    const parsed = parseSig(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.treatmentPause?.durationDays).toBe(7);
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(14);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, {
+        from: start, orderedAt: start, timeZone: "UTC", limit: 80
+      }).map(value => new Date(value).toISOString())).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 28, durationUnit: "d" }).totalUnits).toBe(28);
+    }
+  });
+  it.each(["hold your breath for 7 seconds", "do not hold for 7 days"])(
+    "keeps a physical or negative directive out of medication-pause valence: %s", directive => {
+      const parsed = parseSig(`1 tab PO at 08:00 and 20:00 x7d, then ${directive}, then 1 tab PO at 08:00 and 20:00 x7d`);
+      expect(parsed.meta.canonical.clauses.some(clause => clause.clinicalAdjuncts?.treatmentPause)).toBe(false);
+      const contiguous = Array.from({ length: 14 }, (_, offset) => offset).reduce<string[]>((dates, offset) =>
+        dates.concat([8, 20].map(hour => new Date(Date.parse(start) + offset * day + hour * 3600000).toISOString())), []);
+      for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(nextDueDoses(dosage, { from: start, orderedAt: start, timeZone: "UTC", limit: 80 })
+          .map(value => new Date(value).toISOString())).toEqual(contiguous);
+      }
+    }
+  );
+});
+
+describe("clinical weekday abbreviation constituents", () => {
+  const start = "2026-11-02T00:00:00Z";
+  it.each(["MWF", "mwf", "M/W/F"])("keeps the named and remaining day domains disjoint: %s", weekdays => {
+    const source = `1 tab PO ${weekdays} 08:00; 0.5 tab PO other days 08:00`;
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.dayOfWeek)).toEqual([
+      ["mon", "wed", "fri"], ["tue", "thu", "sat", "sun"]
+    ]);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const expected = Array.from({ length: 28 }, (_, day) =>
+      new Date(Date.parse(start) + day * 86400000 + 8 * 3600000).toISOString());
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, { from: start, orderedAt: start, timeZone: "UTC", limit: 28 })
+        .map(value => new Date(value).toISOString())).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 28, durationUnit: "d" }).totalUnits).toBe(20);
+    }
+  });
+});
+
+
+describe("Thai clock suffix ownership", () => {
+  const start = "2026-11-02T00:00:00Z";
+  it.each([
+    "รับประทาน 1 เม็ด เวลา 08:00, 20:00 น. x7d",
+    "รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 น. นาน 7 วัน",
+    "รับประทาน 1 เม็ด เวลา 08:00 น. และ 20:00 น. เป็นเวลา 7 วัน"
+  ])("keeps the finite course after a clock abbreviation: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      timeOfDay: ["08:00:00", "20:00:00"], duration: 7, durationUnit: "d"
+    });
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const expected = Array.from({ length: 7 }, (_, offset) => offset).reduce<string[]>((dates, offset) =>
+      dates.concat([8, 20].map(hour => new Date(Date.parse(start) + offset * 86400000 + hour * 3600000).toISOString())), []);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, { from: start, orderedAt: start, timeZone: "UTC", limit: 60 })
+        .map(value => new Date(value).toISOString())).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 28, durationUnit: "d" }).totalUnits).toBe(14);
+    }
+  });
+});
+
+
+describe("PRN and typed guard constituent ownership", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const iso = (day: number, hour: number) =>
+    new Date(Date.parse(start) + day * 86400000 + hour * 3600000).toISOString();
+  it.each(["PRN if", "as needed if", "PRN only if"])(
+    "keeps the clinical guard separate from the PRN reason for %s", lead => {
+      const source = `1 tab PO at 08:00 x14d; 0.5 tab PO at 20:00 ${lead} SBP >160`;
+      const parsed = parseSig(source);
+      const clauses = parsed.meta.canonical.clauses;
+      expect(clauses).toHaveLength(2);
+      expect(clauses[0].clinicalAdjuncts?.condition).toBeUndefined();
+      expect(clauses[1].clinicalAdjuncts?.condition).toMatchObject({
+        kind: "measurement", name: "sbp", operation: "gt", value: 160
+      });
+      expect(clauses[1].prn).toMatchObject({ enabled: true });
+      expect(clauses[1].prn?.reason).toBeUndefined();
+      expect(clauses.map(clause => clause.dose?.value)).toEqual([1, 0.5]);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+        for (const permission of [false, true]) {
+          const expected = permission ? [iso(0, 8), iso(0, 20), iso(1, 8), iso(1, 20)] :
+            [iso(0, 8), iso(1, 8), iso(2, 8), iso(3, 8)];
+          expect(nextDueDoses(dosage, { from: start, orderedAt: start, timeZone: "UTC",
+            evaluateCondition: () => permission, limit: 4 }).map(value => new Date(value).toISOString()))
+            .toEqual(expected);
+        }
+      }
+    }
+  );
+  it("retains an ordinary symptom PRN reason", () => {
+    const parsed = parseSig("0.5 tab PO at 20:00 PRN if pain");
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.prn).toMatchObject({ enabled: true, reason: { text: "pain" } });
+    expect(clause.clinicalAdjuncts?.condition).toBeUndefined();
+    expect(parsed.fhir[0].asNeeded).toBe(true);
+  });
+});
+
+
+describe("clinical Thai directive polarity", () => {
+  const start = "2026-11-02T00:00:00Z";
+  const cases = [
+    {
+      source: "Take 1 tablet orally twice daily after breakfast and dinner. กินหลังอาหารทันที ดื่มน้ำตามมากๆ ไม่ควรจะนอนราบทันทีหลังกินยา กินต่อเนื่องจนหมด.",
+      fragment: "ไม่ควรจะนอนราบ", lemma: "lie-down", modality: "should",
+      english: "Should not lie down", supply: 56
+    },
+    {
+      source: "1 tab PO BID x7d; อย่านอนราบทันทีหลังกินยา",
+      fragment: "อย่านอนราบ", lemma: "lie-down", modality: undefined,
+      english: "Do not lie down", supply: 14
+    },
+    {
+      source: "5 mL PO TID pc x5d; เขย่าขวดก่อนใช้ ตวงยาด้วยไซริงค์ อย่าใช้ช้อนกินข้าว",
+      fragment: "อย่าใช้ช้อนกินข้าว", lemma: "use", modality: undefined,
+      english: "Do not use household spoon", supply: 75
+    },
+    {
+      source: "ทาบางๆ บริเวณผื่น วันละ 2 ครั้ง x7วัน; ล้างมือหลังทา อย่าทาเข้าตา",
+      fragment: "อย่าทาเข้าตา", lemma: "apply", modality: undefined,
+      english: "Do not apply into the eye", supply: undefined
+    },
+    {
+      source: "หยอดตาขวา 1 หยด วันละ 4 ครั้ง x7วัน; ระวังอย่าให้ปลายขวดสัมผัสตา ปิดฝาหลังหยอด",
+      fragment: "ระวังอย่าให้ปลายขวดสัมผัสตา", lemma: "touch", modality: undefined,
+      english: "Do not touch bottle tip to the eye", supply: 28
+    },
+    {
+      source: "1 drop OD QID x7d; ห้ามให้ปลายหลอดสัมผัสดวงตา",
+      fragment: "ห้ามให้ปลายหลอดสัมผัสดวงตา", lemma: "touch", modality: undefined,
+      english: "Do not touch tube tip to ดวงตา", supply: 28
+    }
+  ];
+  it.each(cases)("preserves negative advice, its participants and the medication: $fragment", entry => {
+    const parsed = parseSig(entry.source);
+    const actions = parsed.meta.canonical.clauses.flatMap(clause => clause.instructionGraph?.actions ?? []);
+    const action = actions.find(value => value.sourceText.includes(entry.fragment));
+    expect(action).toMatchObject({ predicate: { lemma: entry.lemma }, polarity: "negate" });
+    expect(action?.modality).toBe(entry.modality);
+    expect(parsed.input).toBe(entry.source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(entry.source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : dosage.step.flatMap(step => step.component);
+      const copiedActions = rows.flatMap(row => parseInstructionGraphExtension(row.extension)?.actions ?? []);
+      const copied = copiedActions.find(value => value.sourceText.includes(entry.fragment));
+      expect(copied).toMatchObject({ predicate: { lemma: entry.lemma }, polarity: "negate" });
+      expect(copied?.modality).toBe(entry.modality);
+      expect(copied?.args).toMatchObject(action?.args ?? []);
+      expect(rows.every(row => row.asNeeded !== true && !getDosageCondition(row))).toBe(true);
+      if (entry.supply !== undefined) {
+        expect(calculateTotalUnits({ dosage, from: start, orderedAt: start, timeZone: "UTC",
+          durationValue: 28, durationUnit: "d" }).totalUnits).toBe(entry.supply);
+      } else {
+        expect(rows).toHaveLength(1);
+        expect(rows[0].doseAndRate).toBeUndefined();
+        const site = Array.isArray(dosage) ? dosage[0].site : dosage.step[0].component[0].site?.concept;
+        expect(site?.text).toBe("rash");
+        expect(rows[0].route?.coding?.[0].code).toBe("6064005");
+        expect(rows[0].timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d",
+          boundsDuration: { value: 7, code: "d" } });
+      }
+      if (entry.lemma === "touch") {
+        const site = Array.isArray(dosage) ? dosage[0].site : dosage.step[0].component[0].site?.concept;
+        expect(site?.coding?.[0].code).toBe("1290032005");
+      }
+      expect(rows.map(row => formatSig(row, "long", { locale: "en" })).join(" ")).toContain(entry.english);
+      expect(rows.map(row => formatSig(row, "long", { locale: "th" })).join(" ")).toContain(entry.fragment);
+    }
+    if (entry.lemma === "touch") {
+      expect(action?.args[0]).toMatchObject({ role: "theme" });
+      expect(action?.args[1].text).toMatch(/ตา/u);
+      expect(actions.some(value => value.predicate.lemma === "give")).toBe(false);
+      expect(actions.filter(value => value.predicate.lemma === "touch"))
+        .toEqual([action]);
+    }
+    if (entry.source.includes("ปิดฝาหลังหยอด")) {
+      const recap = actions.find(value => value.predicate.lemma === "recap");
+      expect(recap).toBeDefined();
+      expect(recap?.polarity).not.toBe("negate");
+    }
+    if (entry.fragment.includes("ช้อนกินข้าว")) {
+      expect(action?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "object", conceptId: "household-spoon", text: "ช้อนกินข้าว" })
+      ]));
+      expect(actions.some(value => value.sourceText === "กินข้าว")).toBe(false);
+    }
+  });
+
+  it.each(["ไม่ควรจะนอนราบหลังรับประทานยา", "อย่าทาเข้าตา"])(
+    "does not spread the negative directive to the next action: %s", warning => {
+      const medication = warning.includes("ทา") ? "ทาบางๆ บริเวณผื่น วันละ 2 ครั้ง x7วัน" : "1 tab PO BID x7d";
+      const parsed = parseSig(medication + "; " + warning + "; ล้างมือ");
+      const actions = parsed.meta.canonical.clauses.flatMap(clause => clause.instructionGraph?.actions ?? []);
+      expect(actions.find(action => action.sourceText.includes(warning))?.polarity).toBe("negate");
+      const wash = actions.find(action => action.predicate.lemma === "wash");
+      expect(wash).toBeDefined();
+      expect(wash?.polarity).not.toBe("negate");
+      expect(parsed.fhir[0].timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    }
+  );
+
+  it("keeps an affirmative positional instruction affirmative", () => {
+    const parsed = parseSig("1 tab PO BID x7d; นอนราบหลังรับประทานยา");
+    const actions = parsed.meta.canonical.clauses.flatMap(clause => clause.instructionGraph?.actions ?? []);
+    const position = actions.find(action => action.predicate.lemma === "lie-down");
+    expect(position).toBeDefined();
+    expect(position?.polarity).not.toBe("negate");
+    expect(calculateTotalUnits({ dosage: parsed.fhirNext, from: start, orderedAt: start, timeZone: "UTC",
+      durationValue: 28, durationUnit: "d" }).totalUnits).toBe(14);
+  });
+});
+
+
+describe("registered clinical notification advice", () => {
+  it("keeps a conditional notification out of the medication administration", () => {
+    const source = "1 tab PO at 07:00,12:00,18:00 x7d; รับประทานก่อนอาหาร หากคลื่นไส้ให้แจ้งแพทย์";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : dosage.step.flatMap(step => step.component);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].asNeeded).not.toBe(true);
+      expect(getDosageCondition(rows[0])).toBeUndefined();
+      expect(rows[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
+      expect(rows[0].timing?.repeat?.timeOfDay).toEqual(["07:00:00", "12:00:00", "18:00:00"]);
+      const graph = parseInstructionGraphExtension(rows[0].extension);
+      const actions = graph?.actions ?? [];
+      expect(actions.some(action => action.predicate.lemma === "give")).toBe(false);
+      const notify = actions.find(action => action.predicate.lemma === "notify");
+      expect(notify).toBeDefined();
+      expect(graph?.relations?.filter(relation => relation.kind === "if")).toEqual([
+        expect.objectContaining({ toActionIndex: actions.indexOf(notify!) })
+      ]);
+      expect(notify?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "object", conceptId: "doctor", text: "แพทย์" })
+      ]));
+      const english = formatSig(rows[0], "long", { locale: "en" }).toLowerCase();
+      expect(english).toContain("notify doctor");
+      expect(english).toContain("nausea");
+      expect(english).not.toContain("give");
+      expect(formatSig(rows[0], "long", { locale: "th" })).toContain("หากคลื่นไส้ให้แจ้งแพทย์");
+    }
   });
 });

@@ -1,3 +1,6 @@
+import type { HpsgSigSegment } from "./segmenter";
+import type { CanonicalSigClause, ParseOptions } from "../types";
+import type { MedicationDateListMatch } from "../date-interpretation";
 import {
   AdviceFrame,
   AdviceRelation,
@@ -19,6 +22,7 @@ import {
   FhirDayOfWeek,
   FhirPeriodUnit,
   FhirPrimitiveElement,
+  FhirQuantity,
   MedicationCondition,
   RouteCode,
   PrnReasonLookupRequest,
@@ -50,12 +54,20 @@ export type HpsgType =
   | "site-predicate-sign"
   | "site-relative-clause"
   | "restricted-site-phrase"
+  | "recurring-course-phrase"
   | "dose-sign"
   | "schedule-sign"
   | "prn-sign"
   | "instruction-sign"
   | "conditional-sign"
   | "clinical-adjunct-sign"
+  | "guard-predicate-sign"
+  | "guard-operator-sign"
+  | "guard-marker-sign"
+  | "guard-predicate-phrase"
+  | "guard-coordination-tail"
+  | "guard-negation-phrase"
+  | "medication-guard-phrase"
   | "adjustment-sign"
   | "connector-sign";
 
@@ -84,7 +96,8 @@ export type HpsgConstructionOperation =
   | "unify"
   | "scope"
   | "form-site-relative"
-  | "restrict-site";
+  | "restrict-site"
+  | "repeat-course";
 
 export interface HpsgConstruction {
   kind: HpsgConstructionKind;
@@ -182,8 +195,28 @@ export interface HpsgConditionFeature {
  * sign. This is distinct from HpsgConditionFeature, which scopes procedural
  * instruction programs such as "if irritation occurs, stop use".
  */
+/** A predicate daughter can require a measurement head from an adjacent
+ * coordinate. Only the HPSG coordination construction may discharge it. */
+export type HpsgGuardExpression =
+  | { kind: "predicate"; value: MedicationCondition; dayInvariant?: true }
+  | { kind: "measurement-complement"; operation: "gt" | "ge" | "lt" | "le" | "eq";
+      value: number; unit?: string; text: string }
+  | { kind: "coordination"; operator: "all" | "any"; parts: HpsgGuardExpression[] }
+  | { kind: "negation"; operand: HpsgGuardExpression };
+
+/** Internal conditional constituent features, never a second FHIR schema. */
+export interface HpsgGuardFeature {
+  expression?: HpsgGuardExpression;
+  operator?: "all" | "any" | "not";
+  marker?: "if" | "only-if" | "unless";
+  licensesBareIf?: true;
+}
+
 export interface HpsgClinicalAdjunctFeature {
+  treatmentPause?: CanonicalClinicalAdjuncts["treatmentPause"];
   condition?: MedicationCondition;
+  /** Day-domain meaning retained separately for typed anaphoric complements. */
+  calendarDayCondition?: MedicationCondition;
   conditionTarget?: CanonicalClinicalAdjuncts["conditionTarget"];
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];
@@ -194,7 +227,7 @@ export interface HpsgClinicalAdjunctFeature {
   /** Lexical provenance and typed clinical role are distinct. */
   evidence: Array<{
     rule: string;
-    kind: "condition" | "calendar-exclusion" | "unresolved";
+    kind: "condition" | "calendar-exclusion" | "treatment-pause" | "unresolved";
     ranges: TextRange[];
   }>;
 }
@@ -270,7 +303,15 @@ declare module "../types" {
 }
 
 export interface HpsgScheduleFeature {
-  timingReference?: "previous";
+  /** Typed whole-course interval for a recurring active/rest construction. */
+  repeatCycle?: FhirQuantity;
+  /** Explicit finite number of whole-course repetitions; absent means unbounded. */
+  repeatCount?: number;
+  /** Explicit local-clock interval window; not a list of endpoint doses. */
+  clockWindow?: { start: string; end: string; endInclusive: boolean };
+  /** Weekday occurrence in each month; -1 denotes the last occurrence. */
+  weekdayOrdinal?: -1 | 1 | 2 | 3 | 4 | 5;
+  timingReference?: "previous" | "previous-weekday-complement";
   /** Source-relative phase onset, in elapsed days from treatment start. */
   treatmentStartOffsetDays?: number;
   attachmentClass?: "administration" | "procedure";
@@ -323,6 +364,7 @@ export interface HpsgSynsem {
     clauseKind?: "administration";
     condition?: HpsgConditionFeature;
     clinicalAdjunct?: HpsgClinicalAdjunctFeature;
+    guard?: HpsgGuardFeature;
     scopedAdministrations?: HpsgScopedAdministrationFeature[];
     scopeClosed?: true;
     coordinationMarker?: HpsgCoordinationMarkerFeature;
@@ -381,6 +423,7 @@ export function emptySynsem(): HpsgSynsem {
 export function lexicalSign(args: {
   type: HpsgType;
   rule: string;
+  lexicalCategory?: CanonicalLexicalCategory;
   tokens: Token[];
   synsem: HpsgSynsem;
   consumedTokenIndices?: number[];
@@ -401,6 +444,7 @@ export function lexicalSign(args: {
   const evidence: HpsgEvidence = {
     rule: args.rule,
     tokenIndices,
+    lexicalCategory: args.lexicalCategory,
     scheduleDefault: args.scheduleDefault
   };
   switch (args.type) {
@@ -437,4 +481,184 @@ export function lexicalSign(args: {
     evidence: [evidence],
     score: args.score ?? 1
   };
+}
+
+/** Cross-clause HPSG construction facts and source-boundary plans. */
+export interface Range { start: number; end: number }
+export type StructureKind = 'cycle-schedule' | 'target-list' | 'calendar-date-list' | 'clock-list' | 'weekday-list' | 'numeric-quantity' | 'parenthesized' | 'calendar-exclusion' | 'fronted-conditional-clause' | 'procedural-argument' | 'clinical-condition' | 'event-timing-list';
+export interface StructuralClaim extends Range {
+  id: string;
+  kind: StructureKind;
+  policy: 'no-external-split';
+  producer: string;
+  resolved: boolean;
+}
+export type BoundaryKind = 'coordination' | 'alternative' | 'sequence' | 'comma' | 'hard' | 'slash' | 'adjacent-dose' | 'punctuation';
+export type CoordinationConnectorKind = 'conjunction' | 'disjunction' | 'unknown';
+export type RegimenRelation = 'sequence' | 'coordination' | 'alternative' | 'shared-duration' | 'independent';
+export interface BoundarySite extends Range {
+  tokenIndex: number;
+  lastTokenIndex: number;
+  rightIndex: number;
+  kind: BoundaryKind;
+  surface: string;
+}
+export interface Evidence {
+  feature: string;
+  value: string | number | boolean | readonly string[];
+  range?: Range;
+}
+export interface Proposal {
+  action: 'keep' | 'split';
+  rule: string;
+  priority: number;
+  relation?: RegimenRelation;
+  /** Typed boundary license to inherit a following sibling's course duration. */
+  inheritFollowingDuration?: boolean;
+  /** Typed construction license, never inferred from its display rule id. */
+  semanticLicense?: "dose-continuation" | "target-transition" | "delayed-target" | "event-timing-ellipsis" | "interval-origin";
+  evidence: Evidence[];
+}
+export interface BoundaryDecision {
+  site: BoundarySite;
+  selected: Proposal;
+  alternatives: Proposal[];
+  conflict: boolean;
+  rejectedRules?: Array<{ rule: string; failedConstraints: string[] }>;
+}
+export interface ProbeSummary extends Range {
+  complete: boolean;
+  hasHead: boolean;
+  hasDose: boolean;
+  hasSchedule: boolean;
+  hasRecurringCadence: boolean;
+  hasDates: boolean;
+  hasClocks: boolean;
+  hasOffset: boolean;
+  method: boolean;
+  prn: boolean;
+  clocks: readonly string[];
+  conditionStarts: readonly number[];
+  targets: readonly string[];
+  hasTargets: boolean;
+  siteCoordinations: Array<Range & {
+    type: 'site-coordination-phrase';
+    coordination: 'conjunction' | 'disjunction' | 'mixed';
+  }>;
+  clause: CanonicalSigClause;
+}
+export interface PlannerMetrics {
+  lexicalPasses: number;
+  dateScans: number;
+  actionScans: number;
+  clauseProbes: number;
+  siteCoordinationProbes: number;
+  probeCacheHits: number;
+  probedTokens: number;
+  candidates: number;
+  claimedCandidates: number;
+}
+export interface BoundaryPlan {
+  experimental: true;
+  segments: HpsgSigSegment[];
+  claims: StructuralClaim[];
+  decisions: BoundaryDecision[];
+  relations: BoundaryRelation[];
+  metrics: PlannerMetrics;
+}
+export interface PlannerOptions {
+  trace?: boolean;
+  ownership?: boolean;
+  cache?: boolean;
+}
+export interface PlanningInput {
+  input: string;
+  options?: ParseOptions;
+  tokens: Token[];
+  dateSpans?: MedicationDateListMatch[];
+}
+
+/** A licensed relation connects segment identities, never reconstructed from display text. */
+export interface BoundaryRelation {
+  from: number;
+  to: number;
+  kind: RegimenRelation;
+  connectorKind: CoordinationConnectorKind;
+  rule: string;
+  semanticLicense?: Proposal["semanticLicense"];
+  range: Range;
+}
+
+/** Typed facts consumed by cross-clause HPSG coordination constructions. */
+export interface CoordinationScopeFacts {
+  relation: BoundaryRelation;
+  adjacent: boolean;
+  leftComplete: boolean;
+  rightComplete: boolean;
+  leftExplicitDose: boolean;
+  rightExplicitDose: boolean;
+  leftExplicitHead: boolean;
+  /** An available typed method, whether explicit or inherited from an earlier daughter. */
+  leftHasMethod: boolean;
+  leftAdministrationContext: boolean;
+  rightExplicitHead: boolean;
+  leftHasSite: boolean;
+  rightHasSite: boolean;
+  targetsDistinct: boolean;
+  leftHasSchedule: boolean;
+  rightHasSchedule: boolean;
+  leftHasCadence: boolean;
+  rightHasCadence: boolean;
+  /** An independently scoped administration modifier without an invented cadence. */
+  rightHasAdministrationAdjunct?: boolean;
+  leftHasCourseDuration: boolean;
+  rightHasCourseDuration: boolean;
+  leftHasPrn: boolean;
+  rightHasPrn: boolean;
+  leftHasFrontedSchedule: boolean;
+  leftHasFrontedPrn: boolean;
+  rightHasTrailingSchedule: boolean;
+  rightHasTrailingCourseDuration: boolean;
+  rightHasTrailingPrn: boolean;
+  /** A typed, exact trailing clinical predicate/exclusion whose mother scope is unresolved. */
+  rightHasTrailingSafetyGuard: boolean;
+}
+
+/** Typed facts for a terminal negative instruction scoped over one regimen. */
+export interface TrailingInstructionScopeFacts {
+  /** HPSG parsed a local negative action after the terminal semicolon. */
+  localNegativeAction: boolean;
+  /** The terminal action is separated from the administration by grammar evidence. */
+  semicolonDelimited: boolean;
+  /** Segment relations connect this recipient to the terminal donor. */
+  related: boolean;
+  /** Route identity is shared with the terminal administration. */
+  sameRoute: boolean;
+  /** Missing methods are compatible; two explicit methods must agree. */
+  compatibleMethod: boolean;
+  relationPath: readonly BoundaryRelation[];
+}
+
+export type RegimenSemanticOperation =
+  | 'share-trailing-cadence'
+  | 'share-trailing-adjuncts'
+  | 'share-trailing-course-duration'
+  | 'share-trailing-instruction'
+  | 'share-leading-adjuncts'
+  | 'preserve-disjunctive-dosages'
+  | 'inherit-event-timing-administration'
+  | 'inherit-event-timing-and-share-trailing-course-duration'
+  | 'inherit-administration-head'
+  | 'inherit-administration-head-and-share-trailing-course-duration'
+  | 'preserve-ambiguous-shared-guard';
+
+export interface RegimenSemanticConstruction {
+  id: string;
+  priority: number;
+  operation: RegimenSemanticOperation;
+}
+
+export interface RegimenSemanticSelection {
+  construction: RegimenSemanticConstruction;
+  evidence: Evidence[];
 }

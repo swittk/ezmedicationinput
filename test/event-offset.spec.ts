@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatSig,
+  calculateTotalUnits,
   fromFhirDosage,
   getDosageAlternativeChoice,
   nextDueDoses,
@@ -369,5 +370,42 @@ describe("indefinite singular course quantities", () => {
     expect(parsed.meta.leftoverText).toBeUndefined();
     const strict = toFhirR5Dosages(toDosageDetails(rows));
     expect(strict.map(row => row.timing?.repeat?.boundsDuration?.code)).toEqual(["d", "wk"]);
+  });
+});
+
+describe("coordinated meal events keep explicit relation scope", () => {
+  it.each([
+    ["Take 1 tablet before breakfast and after dinner for 7 days.", ["ACM", "PCV"], ["07:30", "19:00"], 14],
+    ["Take 1 tablet after breakfast and before dinner for 7 days.", ["PCM", "ACV"], ["08:30", "18:00"], 14],
+    ["รับประทาน 1 เม็ดก่อนอาหารเช้าและหลังอาหารเย็น 7 วัน", ["ACM", "PCV"], ["07:30", "19:00"], 14],
+    ["Take 1 tablet before breakfast and dinner for 7 days.", ["ACM", "ACV"], ["07:30", "18:00"], 14],
+    ["Take 1 tablet before breakfast, after lunch and dinner for 7 days.", ["ACM", "PCD", "PCV"], ["07:30", "13:00", "19:00"], 21]
+  ])("preserves each overt relation and only inherits omitted ones: %s", (source, expectedWhen, times, supply) => {
+    const parsed = parseSig(source as string);
+    expect(parsed.fhir.timing?.repeat?.when).toEqual(expectedWhen);
+    const opts = {
+      orderedAt: "2026-11-02T00:00:00+07:00", from: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok",
+      eventClock: { CM: "08:00", CD: "12:30", CV: "18:30" },
+      mealOffsets: { ACM: -30, PCM: 30, ACD: -30, PCD: 30, ACV: -30, PCV: 30 }
+    };
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const actual = nextDueDoses(dosage, { ...opts, limit: 3 })
+        .filter(at => at.startsWith("2026-11-02")).map(at => at.slice(11, 16));
+      expect(actual).toEqual(times);
+      expect(calculateTotalUnits({ dosage, ...opts, durationValue: 7, durationUnit: "d" }).totalUnits).toBe(supply);
+    }
+  });
+});
+
+describe("weekday exclusions are stable at sentence boundaries", () => {
+  it.each(["", ".", "!", "?", ";"])("keeps Sunday excluded with terminal %s", end => {
+    const parsed = parseSig("Take 1 tablet every day except Sunday" + end);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const dates = nextDueDoses(dosage, { orderedAt: "2026-11-02T00:00:00+07:00",
+        from: "2026-11-08T00:00:00+07:00", timeZone: "Asia/Bangkok", limit: 7 }).map(at => at.slice(0, 10));
+      expect(dates).not.toContain("2026-11-08");
+      expect(dates).not.toContain("2026-11-15");
+      expect(dates[0]).toBe("2026-11-09");
+    }
   });
 });

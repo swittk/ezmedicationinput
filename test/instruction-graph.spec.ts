@@ -1,7 +1,9 @@
+import { AdviceArgumentRole, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
+import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
 
 describe("procedural instruction graph", () => {
   it("preserves graph action order, relation indices, and coding translations through FHIR", () => {
@@ -1087,5 +1089,158 @@ describe("negated dietary advice cannot schedule the medication", () => {
     expect(breakfast.fhir.timing?.repeat?.when).toContain("PCM");
     const alreadyCovered = parseSig("Take 1 tablet daily. Do not skip meals");
     expect(alreadyCovered.fhir.timing?.repeat?.when).toBeUndefined();
+  });
+});
+
+// Authoritative procedure codes: HL7 Vulcan RWD ExampleDialysisProcedureCodes
+// (SNOMED International 2023-01-31), and HL7 AU Core Procedure-dialysis.
+// These are procedure EVENTS, not SCT 1231460007 (administration method).
+describe("coded procedural timing rather than administration-method homographs", () => {
+  const SNOMED = "http://snomed.info/sct";
+  it.each([
+    ["Take 1 tablet after dialysis.", "108241001", "after"],
+    ["Take 1 tablet before dialysis.", "108241001", "before"],
+    ["Take 1 tablet after hemodialysis.", "302497006", "after"],
+    ["Take 1 tablet after haemodialysis.", "302497006", "after"],
+    ["Take 1 tablet before peritoneal dialysis.", "71192002", "before"],
+    ["รับประทาน 1 เม็ดหลังฟอกไต", "108241001", "after"],
+    ["รับประทาน 1 เม็ดก่อนฟอกเลือด", "302497006", "before"],
+    ["รับประทาน 1 เม็ดหลังล้างไตทางช่องท้อง", "71192002", "after"]
+  ])("preserves procedure %s and its relative timing through native/strict FHIR", (source, code, relation) => {
+    const parsed = parseSig(source);
+    const expected = { relation, activity: { coding: { system: SNOMED, code } } };
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toContainEqual(expect.objectContaining({
+      relation,
+      activity: expect.objectContaining({ coding: expect.objectContaining({ system: SNOMED, code }) })
+    }));
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir.method?.coding?.some(c => c.code === "1231460007")).toBeFalsy();
+    for (const row of [parsed.fhir, ...toFhirR5Dosages(toDosageDetails([parsed.fhir]))]) {
+      const restored = fromFhirDosage(row).meta.canonical.clauses[0]?.schedule?.activityTiming;
+      expect(restored?.[0]).toMatchObject(expected);
+    }
+  });
+
+  it.each([
+    "Take 1 tablet after the dialysis session.",
+    "Take 1 tablet after dialysis sessions."
+  ])("uses the same noun construction with determiners and inflection: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming?.[0]).toMatchObject({
+      relation: "after", activity: { coding: { system: SNOMED, code: "108241001" } }
+    });
+  });
+
+  it("keeps a separate procedural warning from changing the medication schedule", () => {
+    const parsed = parseSig("Take 1 tablet daily. Do not drive after dialysis.");
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toBeUndefined();
+    expect(parsed.longText.toLowerCase()).toContain("dialysis");
+    expect(parsed.longText.toLowerCase()).toMatch(/(?:not|avoid).*driv/);
+  });
+
+  it("does not turn a negated administration into a positive procedure-relative schedule", () => {
+    const parsed = parseSig("Do not take after dialysis.");
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toBeUndefined();
+    expect(parsed.longText.toLowerCase()).toContain("not");
+  });
+
+  it("composes a caller-registered activity without a built-in dialysis phrase rule", () => {
+    const parsed = parseSig("Take 1 tablet before physiotherapy.", {
+      instructionConceptMap: {
+        physiotherapy: {
+          role: AdviceArgumentRole.Activity,
+          display: "physiotherapy",
+          coding: { system: "https://example.test/procedures", code: "physiotherapy" }
+        }
+      }
+    });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming?.[0]).toMatchObject({
+      relation: "before",
+      activity: { coding: { system: "https://example.test/procedures", code: "physiotherapy" } }
+    });
+  });
+
+  it("keeps dialysis as a true administration method when it is the directive head", () => {
+    const parsed = parseSig("dialysis daily");
+    expect(parsed.fhir.method?.coding?.[0]).toMatchObject({ system: SNOMED, code: "1231460007" });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toBeUndefined();
+  });
+
+  it("does not map a dialysis-day qualifier to an invented procedure occurrence", () => {
+    const parsed = parseSig("Take 1 tablet on dialysis days.");
+    expect(parsed.longText.toLowerCase()).toContain("dialysis");
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.activityTiming).toBeUndefined();
+    expect(parsed.fhir.method?.coding?.some(c => c.code === "108241001" || c.code === "302497006")).toBeFalsy();
+  });
+});
+
+
+describe("registered activity-day adjunct membership and exclusion", () => {
+  it.each([
+    ["on dialysis days", false], ["only on dialysis days", false],
+    ["on hemodialysis days", false], ["except on dialysis days", true],
+    ["except dialysis days", true], ["เฉพาะวันฟอกไต", false],
+    ["ในวันฟอกไต", false], ["ยกเว้นวันฟอกไต", true]
+  ] as const)("uses caller day membership rather than an invented calendar: %s", (adjunct, excluded) => {
+    const source = "Take 1 tablet at 08:00 for 7 days " + adjunct + ".";
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhir).toHaveLength(1);
+    const condition = getDosageCondition(parsed.fhir[0]);
+    expect(condition).toMatchObject(excluded ? { kind: "not", condition: { kind: "text" } } : { kind: "text" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming).toBeUndefined();
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const base = { orderedAt: "2026-11-02T00:00:00+07:00", from: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 2 };
+      // The public callback evaluates the complete predicate, not just its
+      // leaf. Supply day membership and honor the retained NOT explicitly.
+      const evaluates = (member: boolean) => (predicate: MedicationCondition) =>
+        predicate.kind === "not" ? !member : member;
+      const enabled = nextDueDoses(dosage, { ...base, evaluateCondition: evaluates(!excluded) });
+      const disabled = nextDueDoses(dosage, { ...base, evaluateCondition: evaluates(excluded) });
+      expect(enabled[0]).toBe("2026-11-02T08:00:00+07:00");
+      expect(disabled).toEqual([]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("composes a caller-registered activity with the same day-noun construction", () => {
+    const parsed = parsePublicSig("Take 1 tablet at 08:00 on physiotherapy days.", {
+      instructionConceptMap: { physiotherapy: {
+        role: AdviceArgumentRole.Activity, display: "physiotherapy",
+        coding: { system: "https://example.test/procedures", code: "physiotherapy" }
+      } }
+    });
+    expect(getDosageCondition(parsed.fhir[0])).toMatchObject({ kind: "text" });
+    expect(parsed.fhir[0].timing?.repeat?.dayOfWeek).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming).toBeUndefined();
+  });
+
+  it("does not change ordinary weekdays, procedure-relative timing, or unrelated warnings", () => {
+    const weekday = parsePublicSig("Take 1 tablet on Monday.");
+    expect(weekday.fhir[0].timing?.repeat?.dayOfWeek).toEqual(["mon"]);
+    expect(getDosageCondition(weekday.fhir[0])).toBeUndefined();
+    const after = parsePublicSig("Take 1 tablet after dialysis.");
+    expect(after.meta.canonical.clauses[0].schedule?.activityTiming?.[0].relation).toBe("after");
+    expect(getDosageCondition(after.fhir[0])).toBeUndefined();
+    const warning = parsePublicSig("Take 1 tablet daily. Do not drive on dialysis days.");
+    expect(getDosageCondition(warning.fhir[0])).toBeUndefined();
+    expect(warning.fhir[0].timing?.repeat?.frequency).toBe(1);
+  });
+
+  it("keeps the day condition on the independently specified evening dose", () => {
+    const source = "Take 1 tablet at 08:00 for 7 days. Take half a tablet at 20:00 for 7 days only on dialysis days.";
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhir).toHaveLength(2);
+    expect(getDosageCondition(parsed.fhir[0])).toBeUndefined();
+    expect(getDosageCondition(parsed.fhir[1])).toMatchObject({ kind: "text" });
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (value: boolean) => nextDueDoses(dosage, {
+        orderedAt: "2026-11-02T00:00:00+07:00", from: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", evaluateCondition: () => value, limit: 4
+      }).filter(stamp => stamp.startsWith("2026-11-02")).map(stamp => stamp.slice(11,16));
+      expect(on(false)).toEqual(["08:00"]);
+      expect(on(true)).toEqual(["08:00", "20:00"]);
+    }
   });
 });

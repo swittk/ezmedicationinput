@@ -2,6 +2,34 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
   "concepts": [
     {
+      "code": "doctor",
+      "role": "object",
+      "display": "doctor",
+      "i18n": { "th": "แพทย์" },
+      "aliases": ["doctor", "physician", "แพทย์"]
+    },
+    {
+      "code": "household-spoon",
+      "role": "object",
+      "display": "household spoon",
+      "i18n": { "th": "ช้อนกินข้าว" },
+      "aliases": ["household spoon", "household spoons", "ช้อนกินข้าว"]
+    },
+    {
+      "code": "bottle-tip",
+      "role": "object",
+      "display": "bottle tip",
+      "i18n": { "th": "ปลายขวด" },
+      "aliases": ["bottle tip", "tip of the bottle", "ปลายขวด"]
+    },
+    {
+      "code": "tube-tip",
+      "role": "object",
+      "display": "tube tip",
+      "i18n": { "th": "ปลายหลอด" },
+      "aliases": ["tube tip", "tip of the tube", "ปลายหลอด"]
+    },
+    {
       "code": "medication-dose",
       "role": "object",
       "display": "medication dose",
@@ -838,6 +866,88 @@
         "completely dissolved",
         "ละลายหมด",
         "ละลายจนหมด"
+      ]
+    },
+    {
+      "code": "dialysis-procedure",
+      "role": "activity",
+      "display": "dialysis",
+      "i18n": {
+        "th": "การฟอกไต"
+      },
+      "aliases": [
+        "dialysis",
+        "dialysis session",
+        "dialysis sessions"
+      ],
+      "localeAliases": {
+        "th": [
+          "ฟอกไต",
+          "การฟอกไต",
+          "ล้างไต",
+          "การล้างไต"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "108241001",
+          "display": "Dialysis procedure"
+        }
+      ]
+    },
+    {
+      "code": "hemodialysis-procedure",
+      "role": "activity",
+      "display": "hemodialysis",
+      "i18n": {
+        "th": "การฟอกเลือด"
+      },
+      "aliases": [
+        "hemodialysis",
+        "haemodialysis",
+        "hemodialysis session",
+        "haemodialysis session"
+      ],
+      "localeAliases": {
+        "th": [
+          "ฟอกเลือด",
+          "การฟอกเลือด",
+          "ฟอกเลือดด้วยเครื่องไตเทียม",
+          "การฟอกเลือดด้วยเครื่องไตเทียม"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "302497006",
+          "display": "Hemodialysis"
+        }
+      ]
+    },
+    {
+      "code": "peritoneal-dialysis-procedure",
+      "role": "activity",
+      "display": "peritoneal dialysis",
+      "i18n": {
+        "th": "การล้างไตทางช่องท้อง"
+      },
+      "aliases": [
+        "peritoneal dialysis",
+        "peritoneal dialysis session"
+      ],
+      "localeAliases": {
+        "th": [
+          "ล้างไตทางช่องท้อง",
+          "การล้างไตทางช่องท้อง"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "71192002",
+          "display": "Peritoneal dialysis"
+        }
       ]
     }
   ]

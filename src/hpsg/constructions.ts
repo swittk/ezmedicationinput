@@ -1,4 +1,15 @@
-import { AdviceArgumentRole, AdviceForce, AdvicePolarity, type AdviceFrame } from "../types";
+import {
+  medicationGuardLeadLexeme, medicationConditionAtomLexeme, conditionSourceLexemes, conditionNegationPrefixLength,
+  medicationGuardClauseBoundary, MEDICATION_GUARD_BOUNDARIES
+} from "../medication-condition";
+import { lexInput } from "../lexer/lex";
+import { LexKind } from "../lexer/token-types";
+import { annotateLexTokens } from "../lexer/meaning";
+import type { Token } from "../parser-state";
+import type { MedicationCondition } from "../types";
+import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
+import { combineSignFeatureStructures } from "./feature-structure";
+import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
 import type {
   HpsgConstruction,
   HpsgConstructionKind,
@@ -7,11 +18,12 @@ import type {
   HpsgType
 } from "./signature";
 import { grammaticalCoordinationScopes } from "../regimen/grammar";
+import { equalStructuredValues } from "../stable-structure";
 import type {
   BoundaryRelation,
   CoordinationScopeFacts,
   RegimenSemanticSelection
-} from "../regimen/types";
+} from "./signature";
 
 export interface HpsgConstructionSelection {
   motherType: HpsgType;
@@ -262,7 +274,12 @@ function scopeRequirementSatisfied(left: HpsgSign, right: HpsgSign): boolean {
   const range = sourceRange(target);
   return Boolean(
     condition && range &&
-    range.start <= condition.targetStart && range.end >= condition.targetEnd
+    range.start <= condition.targetStart && range.end >= condition.targetEnd &&
+    // Containing the target does not license scoping its unrelated siblings.
+    // Attach the condition to the source-owned action constituent first; a
+    // preceding medication duration/cap then unifies outside that scope.
+    target.tokens.every(token => token.kind === LexKind.Separator ||
+      condition.targetStart <= token.sourceStart && token.sourceEnd <= condition.targetEnd)
   );
 }
 
@@ -468,6 +485,37 @@ export function selectHpsgTimingAnchorCoordinationConstruction(
 }
 
 
+/** Source-typed calendar alternatives can omit a shared clock and head. */
+export interface HpsgCalendarClockEllipsisFacts {
+  relation: BoundaryRelation;
+  adjacent: boolean;
+  calendarAlternatives: boolean;
+  compatibleAdministration: boolean;
+  omittedHead: boolean;
+  omittedClock: boolean;
+  /** Every antecedent contributes its clock; absence or disagreement blocks binding. */
+  donorClocks: readonly (string | undefined)[];
+}
+
+export function selectHpsgCalendarClockEllipsisConstruction(
+  facts: HpsgCalendarClockEllipsisFacts
+): (HpsgConstructionSelection & { id: string; timeOfDay: string[] }) | undefined {
+  const clock = facts.donorClocks[0];
+  if ((facts.relation.kind !== "coordination" && facts.relation.kind !== "independent") ||
+      !facts.adjacent || !facts.calendarAlternatives || !facts.compatibleAdministration ||
+      !facts.omittedHead || !facts.omittedClock || clock === undefined ||
+      !facts.donorClocks.every(value => value === clock)) return undefined;
+  return {
+    id: "hpsg.cx.coordination.calendar-clock-ellipsis",
+    timeOfDay: [clock],
+    motherType: "coordination-phrase",
+    construction: {
+      kind: "coordination", operation: "scope", headSide: "left",
+      leftType: "administration-clause", rightType: "administration-clause"
+    }
+  };
+}
+
 /**
  * A shared directive scopes over coordinated action daughters. An explicit
  * directive on the right starts its own scope; sequencing is not coordination.
@@ -489,4 +537,322 @@ export function composeCoordinatedActionDirective(
     ? { ...left, args: [...left.args, { ...duration, quantity: duration.quantity ? { ...duration.quantity } : undefined }] }
     : left;
   return [scopedLeft, scopedRight];
+}
+
+/** A contact clause licenses a preposed physical theme, as in a directive
+ * preventing a bottle tip from touching the eye. A nominal and contact head
+ * are required; the causative marker cannot turn an ordinary GIVE into this
+ * construction or spread negation to an unrelated following action.
+ */
+export function licensesPreposedContactTheme(
+  role: AdviceArgumentRole,
+  semanticClass?: string
+): boolean {
+  return semanticClass === "contact" && (
+    role === AdviceArgumentRole.Object || role === AdviceArgumentRole.Theme ||
+    role === AdviceArgumentRole.Container
+  );
+}
+
+/** Compose the two contact participants under their existing directive scope. */
+export function composePreposedContactTheme(
+  frame: AdviceFrame,
+  theme: AdviceArgument
+): AdviceFrame {
+  if (!licensesPreposedContactTheme(theme.role, frame.predicate.semanticClass)) return frame;
+  return {
+    ...frame,
+    relation: frame.relation ?? AdviceRelation.To,
+    args: [{ ...theme, role: AdviceArgumentRole.Theme }, ...frame.args]
+  };
+}
+
+export interface ParsedMedicationGuard {
+  condition: MedicationCondition;
+  start: number;
+  markerEnd: number;
+  end: number;
+  text: string;
+  otherwiseHold: boolean;
+  otherwise?: { start: number; end: number };
+  alternative?: { start: number; end: number };
+  /** Authoritative typed derivation reused by the main clause chart. */
+  sign: HpsgSign;
+}
+interface GuardHead { name: string; unit?: string }
+interface GuardConstituentContext {
+  source: string;
+  range: { start: number; end: number };
+  /** Licensed by a registered withholding action with a medication-dose object. */
+  withholdingConsequent?: true;
+}
+
+/** A coordinate can share only the last explicitly typed measurement head. */
+function guardMeasurementHead(value: HpsgGuardExpression): GuardHead | undefined {
+  if (value.kind === "predicate" && value.value.kind === "measurement") {
+    return { name: value.value.name, ...(value.value.unit ? { unit: value.value.unit } : {}) };
+  }
+  if (value.kind === "coordination" && value.parts.length) {
+    return guardMeasurementHead(value.parts[value.parts.length - 1]);
+  }
+  return undefined;
+}
+
+/** Discharge a missing comparison head across a licensed coordinate daughter. */
+function bindGuardMeasurementHead(value: HpsgGuardExpression, head?: GuardHead): HpsgGuardExpression {
+  if (value.kind === "measurement-complement" && head) {
+    return { kind: "predicate", value: {
+      kind: "measurement", name: head.name, operation: value.operation, value: value.value,
+      ...(value.unit || head.unit ? { unit: value.unit ?? head.unit } : {}), text: value.text
+    } };
+  }
+  if (value.kind === "coordination") {
+    let shared = head;
+    const parts = value.parts.map(part => {
+      const resolved = bindGuardMeasurementHead(part, shared);
+      shared = guardMeasurementHead(resolved);
+      return resolved;
+    });
+    return { ...value, parts };
+  }
+  return value;
+}
+
+/** Project a completed predicate constituent without further surface analysis. */
+function guardPredicateValue(value: HpsgGuardExpression): MedicationCondition {
+  switch (value.kind) {
+    case "predicate": return value.value;
+    case "measurement-complement": return { kind: "text", text: value.text };
+    case "negation": return { kind: "not", condition: guardPredicateValue(value.operand) };
+    case "coordination": return { kind: value.operator, conditions: value.parts.map(guardPredicateValue) };
+  }
+}
+/** Whole-day invariance is a compositional predicate type, not a text test. */
+function guardExpressionHasDayDomain(value: HpsgGuardExpression): boolean {
+  if (value.kind === "predicate") return value.dayInvariant === true;
+  if (value.kind === "negation") return guardExpressionHasDayDomain(value.operand);
+  return value.kind === "coordination" && value.parts.length > 0 &&
+    value.parts.every(guardExpressionHasDayDomain);
+}
+
+function guardHasMeasurement(value: MedicationCondition): boolean {
+  return value.kind === "measurement" ||
+    (value.kind === "all" || value.kind === "any") && value.conditions.some(guardHasMeasurement) ||
+    value.kind === "not" && guardHasMeasurement(value.condition);
+}
+
+/** Create a binary feature-structure derivation from already licensed daughters. */
+function guardMother(
+  left: HpsgSign, right: HpsgSign, type: HpsgType,
+  synsem: HpsgSynsem, rule: string, headSide?: "left" | "right"
+): HpsgSign | undefined {
+  const fs = combineSignFeatureStructures(left.fs, right.fs, type, headSide, synsem);
+  if (!fs) return undefined;
+  const seen = new Set<number>();
+  const tokens = [...left.tokens, ...right.tokens].filter(token => {
+    if (seen.has(token.index)) return false;
+    seen.add(token.index); return true;
+  }).sort((a, b) => a.index - b.index);
+  const consumedTokenIndices = tokens.map(token => token.index);
+  return { type, synsem, fs, tokens,
+    span: { start: Math.min(left.span.start, right.span.start), end: Math.max(left.span.end, right.span.end) },
+    construction: { kind: type === "guard-predicate-phrase" ? "coordination" :
+        type === "guard-coordination-tail" || type === "guard-negation-phrase" ? "head-complement" : "head-marker",
+      operation: "unify", headSide, leftType: left.type, rightType: right.type },
+    consumedTokenIndices,
+    evidence: [...left.evidence, ...right.evidence, { rule, tokenIndices: consumedTokenIndices }],
+    score: left.score + right.score + 1 };
+}
+
+/** A Boolean coordinator selects a predicate complement, never a dosage. */
+const GUARD_COORDINATOR_COMPLEMENT: HpsgPhraseRule<GuardConstituentContext> = {
+  id: "hpsg.cx.guard.coordinator-complement",
+  combine(_context, left, right) {
+    const operator = left.synsem.cont.guard?.operator;
+    const predicate = right.synsem.cont.guard;
+    if ((operator !== "all" && operator !== "any") || !predicate?.expression) return undefined;
+    return guardMother(left, right, "guard-coordination-tail", {
+      head: {}, valence: {}, cont: { guard: { ...predicate, operator } }
+    }, this.id, "left");
+  }
+};
+
+/** A lexical negator selects exactly one predicate daughter. */
+const GUARD_NEGATED_PREDICATE: HpsgPhraseRule<GuardConstituentContext> = {
+  id: "hpsg.cx.guard.negated-predicate",
+  combine(_context, left, right) {
+    const predicate = right.synsem.cont.guard;
+    if (left.synsem.cont.guard?.operator !== "not" || !predicate?.expression) return undefined;
+    return guardMother(left, right, "guard-negation-phrase", {
+      head: {}, valence: {}, cont: { guard: {
+        expression: { kind: "negation", operand: predicate.expression },
+        ...(predicate.licensesBareIf ? { licensesBareIf: true as const } : {})
+      } }
+    }, this.id, "left");
+  }
+};
+
+/** Boolean coordination and measurement-head ellipsis share this construction. */
+const GUARD_PREDICATE_COORDINATION: HpsgPhraseRule<GuardConstituentContext> = {
+  id: "hpsg.cx.guard.predicate-coordination",
+  combine(_context, left, right) {
+    const first = left.synsem.cont.guard, tail = right.synsem.cont.guard;
+    if (!first?.expression || !tail?.expression || (tail.operator !== "all" && tail.operator !== "any")) return undefined;
+    const last = bindGuardMeasurementHead(tail.expression, guardMeasurementHead(first.expression));
+    const parts = first.expression.kind === "coordination" && first.expression.operator === tail.operator
+      ? [...first.expression.parts, last] : [first.expression, last];
+    return guardMother(left, right, "guard-predicate-phrase", {
+      head: {}, valence: {}, cont: { guard: {
+        expression: { kind: "coordination", operator: tail.operator, parts },
+        ...(first.licensesBareIf || tail.licensesBareIf ? { licensesBareIf: true as const } : {})
+      } }
+    }, this.id);
+  }
+};
+
+/** IF/UNLESS selects a complete predicate; bare symptom IF remains PRN syntax. */
+const MEDICATION_GUARD_HEAD: HpsgPhraseRule<GuardConstituentContext> = {
+  id: "hpsg.cx.guard.head-predicate",
+  combine(context, left, right) {
+    const marker = left.synsem.cont.guard?.marker, predicate = right.synsem.cont.guard;
+    if (!marker || !predicate?.expression) return undefined;
+    const positive = guardPredicateValue(predicate.expression);
+    if (marker === "if" && !predicate.licensesBareIf && !guardHasMeasurement(positive) &&
+        !context.withholdingConsequent) return undefined;
+    const condition: MedicationCondition = marker === "unless" ? { kind: "not", condition: positive } : positive;
+    const result = guardMother(left, right, "medication-guard-phrase", {
+      head: {}, valence: {}, cont: { clauseKind: "administration", clinicalAdjunct: {
+        condition, localRanges: [context.range],
+        ...(guardExpressionHasDayDomain(predicate.expression) ? { calendarDayCondition: condition } : {}),
+        evidence: [{ rule: this.id, kind: "condition", ranges: [context.range] }]
+      } }
+    }, this.id, "left");
+    if (result) result.score = 56 + result.consumedTokenIndices.length;
+    return result;
+  }
+};
+
+/** Attach already typed procedural withholding/target scope to the same guard
+ * derivation. This retains the predicate daughters in the clause feature graph.
+ * @param guard Selected conditional head/predicate analysis.
+ * @param scope Existing clinical scope sign (including otherwise-hold ownership).
+ */
+export function scopeMedicationGuardSign(guard: ParsedMedicationGuard, scope: HpsgSign): HpsgSign {
+  const dayPredicate = guard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
+  const adjunct = scope.synsem.cont.clinicalAdjunct;
+  const condition = adjunct?.condition;
+  // A scoped HOLD can negate the guard. Invariance survives that operator,
+  // but never transfers to a distinct or newly mixed clinical predicate.
+  const retainsDayDomain = dayPredicate && condition && (
+    equalStructuredValues(condition, dayPredicate) ||
+    condition.kind === "not" && equalStructuredValues(condition.condition, dayPredicate) ||
+    dayPredicate.kind === "not" && equalStructuredValues(dayPredicate.condition, condition));
+  const synsem = retainsDayDomain ? { ...scope.synsem, cont: { ...scope.synsem.cont,
+    clinicalAdjunct: { ...adjunct!, calendarDayCondition: condition } } } : scope.synsem;
+  const result = guardMother(guard.sign, scope, "medication-guard-phrase", synsem,
+    "hpsg.cx.guard.administration-scope", "left");
+  if (!result) return scope;
+  // Scope realization does not gain extra ranking weight merely for having
+  // retained its derivation: candidate ranking remains source-meaning based.
+  result.score = scope.score;
+  return result;
+}
+
+/** Bounded predicate grammar driver. AND closes before OR; actual meanings and
+ * ellipsis are contributed only by the typed phrase rules above. */
+function guardPredicateConstituent(
+  context: GuardConstituentContext, tokens: Token[], start: number, end: number
+): HpsgSign | undefined {
+  const tokenRange = (from: number, to: number) => tokens.filter(token => token.sourceStart < to && from < token.sourceEnd);
+  const atom = (from: number, to: number): HpsgSign | undefined => {
+    const members = tokenRange(from, to);
+    if (!members.length) return undefined;
+    const prefixLength = conditionNegationPrefixLength(context.source.slice(from, to));
+    if (prefixLength !== undefined) {
+      const negatorTokens = tokenRange(from, from + prefixLength);
+      const complement = atom(from + prefixLength, to);
+      if (negatorTokens.length && complement) {
+        const negator = lexicalSign({ type: "guard-operator-sign", rule: "hpsg.lex.guard.predicate-negation",
+          tokens: negatorTokens, synsem: { head: {}, valence: {}, cont: { guard: { operator: "not" } } }, score: 1 });
+        return GUARD_NEGATED_PREDICATE.combine(context, negator, complement);
+      }
+    }
+    return lexicalSign({ type: "guard-predicate-sign", rule: "hpsg.lex.guard.predicate-atom", tokens: members,
+      synsem: { head: {}, valence: {}, cont: { guard: medicationConditionAtomLexeme(context.source.slice(from, to)) } }, score: members.length });
+  };
+  const whole = medicationConditionAtomLexeme(context.source.slice(start, end));
+  if (whole.licensesBareIf && whole.expression?.kind === "predicate" &&
+      whole.expression.value.kind === "text" && !whole.expression.dayInvariant) return atom(start, end);
+  const nodes: HpsgSign[] = [], operators: HpsgSign[] = [];
+  const reduce = (): boolean => {
+    const operator = operators.pop(), right = nodes.pop(), left = nodes.pop();
+    if (!operator || !right || !left) return false;
+    const tail = GUARD_COORDINATOR_COMPLEMENT.combine(context, operator, right);
+    const mother = tail && GUARD_PREDICATE_COORDINATION.combine(context, left, tail);
+    if (!mother) return false;
+    nodes.push(mother); return true;
+  };
+  for (const term of conditionSourceLexemes(context.source, start, end)) {
+    if (!term.operator) {
+      const sign = atom(term.start, term.end);
+      if (!sign) return undefined;
+      nodes.push(sign);
+    } else {
+      const members = tokenRange(term.start, term.end);
+      if (!members.length || !nodes.length) return atom(start, end);
+      while (operators.length && (operators[operators.length - 1].synsem.cont.guard?.operator === "all" || term.operator === "any")) {
+        if (!reduce()) return atom(start, end);
+      }
+      operators.push(lexicalSign({ type: "guard-operator-sign", rule: "hpsg.lex.guard.boolean-operator", tokens: members,
+        synsem: { head: {}, valence: {}, cont: { guard: { operator: term.operator } } }, score: 1 }));
+    }
+  }
+  while (operators.length) if (!reduce()) return atom(start, end);
+  return nodes.length === 1 ? nodes[0] : atom(start, end);
+}
+
+/** Single source of medication-guard meaning: lexical daughters compose via
+ * HPSG predicate/coordination/head constructions, reused by planner and chart.
+ * @param source Exact clinician text.
+ * @param existingTokens Already-lexed tokens when the caller has a source context.
+ * @param withholdingConsequent License supplied only by a typed medication-withholding action daughter.
+ */
+export function parseMedicationGuard(
+  source: string, existingTokens?: Token[], withholdingConsequent?: true
+): ParsedMedicationGuard | undefined {
+  const lead = medicationGuardLeadLexeme(source, withholdingConsequent);
+  if (!lead) return undefined;
+  let tail = source.slice(lead.end), end = source.length;
+  const alternateCue = MEDICATION_GUARD_BOUNDARIES.alternative.exec(tail);
+  const alternative = alternateCue ? { start: lead.end + alternateCue.index,
+    end: lead.end + alternateCue.index + alternateCue[0].length } : undefined;
+  const noDose = MEDICATION_GUARD_BOUNDARIES.noDoseConsequent.exec(tail);
+  const otherwise = noDose ? { start: lead.end + noDose.index,
+    end: lead.end + noDose.index + noDose[0].length } : undefined;
+  if (otherwise || alternative) {
+    end = (otherwise ?? alternative)!.start;
+    tail = source.slice(lead.end, end);
+  }
+  const prefix = source.slice(0, lead.start).trim();
+  if (!prefix || /[.;!?]$/u.test(prefix)) {
+    const comma = tail.search(/[,;:]/u), action = MEDICATION_GUARD_BOUNDARIES.administrationHead.exec(tail);
+    end = Math.min(end, lead.end + Math.min(comma >= 0 ? comma : tail.length, action?.index ?? tail.length));
+  } else end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
+  let predicateStart = lead.end, predicateEnd = end;
+  while (predicateStart < predicateEnd && /\s/u.test(source[predicateStart])) predicateStart++;
+  while (predicateEnd > predicateStart && /[\s.!?;,]/u.test(source[predicateEnd - 1])) predicateEnd--;
+  if (predicateStart >= predicateEnd) return undefined;
+  const tokens = existingTokens ?? annotateLexTokens(lexInput(source));
+  const markerTokens = tokens.filter(token => token.sourceStart < lead.end && lead.start < token.sourceEnd);
+  if (!markerTokens.length) return undefined;
+  const context: GuardConstituentContext = { source, range: { start: lead.start, end },
+    ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+  const marker = lexicalSign({ type: "guard-marker-sign", rule: "hpsg.lex.guard.marker", tokens: markerTokens,
+    synsem: { head: {}, valence: {}, cont: { guard: { marker: lead.marker } } }, score: 1 });
+  const predicate = guardPredicateConstituent(context, tokens, predicateStart, predicateEnd);
+  const sign = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+  const condition = sign?.synsem.cont.clinicalAdjunct?.condition;
+  return sign && condition ? { condition, start: lead.start, markerEnd: lead.end, end, text: source.slice(lead.start, end),
+    otherwiseHold: Boolean(otherwise), ...(otherwise ? { otherwise } : {}),
+    ...(alternative ? { alternative } : {}), sign } : undefined;
 }

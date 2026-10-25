@@ -28,6 +28,7 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.valence.patientInstruction ? "U" : "",
     synsem.cont.condition ? "C" : "",
     synsem.cont.clinicalAdjunct ? "A" : "",
+    synsem.cont.guard ? `G${synsem.cont.guard.marker ?? synsem.cont.guard.operator ?? "predicate"}` : "",
     synsem.cont.scopedAdministrations?.length ? "X" : "",
     synsem.cont.scopeClosed ? "K" : "",
     synsem.cont.coordinationMarker
@@ -81,6 +82,7 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
   if (synsem.cont.clinicalAdjunct) {
     contentFeatures.CLINICAL_ADJUNCT = featureNode("clinical-adjunct-feature");
   }
+  if (synsem.cont.guard) contentFeatures.GUARD = featureNode("guard-feature");
   if (synsem.cont.scopedAdministrations?.length) {
     contentFeatures.SCOPED_ADMINISTRATION = featureNode("scoped-administration-feature");
   }

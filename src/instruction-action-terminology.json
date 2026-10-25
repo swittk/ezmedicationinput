@@ -2,6 +2,24 @@
   "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action",
   "actions": [
     {
+      "code": "notify",
+      "semanticClass": "communicate",
+      "display": "Notify",
+      "i18n": { "th": "แจ้ง" },
+      "aliases": ["notify", "inform", "แจ้ง"],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "realizer": "object-duration"
+    },
+    {
+      "code": "recap",
+      "semanticClass": "prepare",
+      "display": "Replace the cap",
+      "i18n": { "th": "ปิดฝา" },
+      "aliases": ["recap", "replace the cap", "replace cap", "ปิดฝา"],
+      "procedural": true
+    },
+    {
       "code": "add",
       "semanticClass": "regimen-adjustment",
       "display": "Add",

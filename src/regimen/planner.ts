@@ -1,6 +1,6 @@
 import { lexInput } from '../lexer/lex';
 import { matchCalendarExclusion } from '../hpsg/rules/condition-rules';
-import { parseMedicationGuard } from '../medication-condition';
+import { parseMedicationGuard } from '../hpsg/constructions';
 import { findMedicationDateListSpans } from '../date-interpretation';
 import {
   annotateLexTokens,
@@ -15,13 +15,14 @@ import { parseClockToken } from '../hpsg/rule-context';
 import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
 import {
   ordinalWeekStageSequence, followingCourseDurationHeaderAt,
-  treatmentRelativePeriodStartAt
+  treatmentRelativePeriodStartAt, recognizeCycles
 } from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
+import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexicon';
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, REGIMEN_SEQUENCE_CONNECTOR_PHRASES,
+  HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd,
   TREATMENT_PERIOD_START_LEADS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
@@ -29,50 +30,17 @@ import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '.
 import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from './types';
+import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from '../hpsg/signature';
 import { parseInstructionActions } from '../instruction-graph';
 import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
+import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
-import { grammaticalProposals, arbitrate } from './grammar';
-import { recognizeCycles } from './cycles';
+import { grammaticalProposals, arbitrate, hasAdministrationAdjunct } from './grammar';
 import type { RejectedConstruction } from './grammar';
 
 /** Use the existing locale normalizer; grammar never maintains Thai connector spellings. */
 function lexeme(token: Token | undefined): string {
   return token ? (token.canonical ?? token.lower).replace(/^[.,;:]+|[.,;:]+$/g, '') : '';
-}
-
-const PHRASE_SEQUENCERS_BY_FIRST = new Map<string, Array<readonly string[]>>();
-for (const parts of REGIMEN_SEQUENCE_CONNECTOR_PHRASES) {
-  const bucket = PHRASE_SEQUENCERS_BY_FIRST.get(parts[0]) ?? [];
-  bucket.push(parts);
-  PHRASE_SEQUENCERS_BY_FIRST.set(parts[0], bucket);
-}
-
-/** Resolve one licensed source sequencing constituent, not arbitrary nearby words. */
-function sequenceConnectorEnd(tokens: readonly Token[], start: number): number | undefined {
-  const initial = lexeme(tokens[start]);
-  if (ACTION_SEQUENCE_MARKERS.has(initial)) return start + 1;
-  const canonicalCandidates = PHRASE_SEQUENCERS_BY_FIRST.get(initial);
-  const surface = tokens[start]?.lower;
-  const surfaceCandidates = surface && surface !== initial
-    ? PHRASE_SEQUENCERS_BY_FIRST.get(surface) : undefined;
-  // Most ordinary doses contain no phrasal sequence lead. Avoid allocating
-  // a matching closure for each token in the common mobile path.
-  if (!canonicalCandidates && !surfaceCandidates) return undefined;
-  const matched = (parts: readonly string[]): boolean => parts.every((part, offset) => {
-    const token = tokens[start + offset];
-    // A Thai surface lexeme can normalize to a wider English meaning,
-    // but a *complete* licensed Thai phrase remains a source constituent.
-    return token && (part === lexeme(token) || part === token.lower);
-  });
-  for (const parts of canonicalCandidates ?? []) {
-    if (matched(parts)) return start + parts.length;
-  }
-  for (const parts of surfaceCandidates ?? []) {
-    if (matched(parts)) return start + parts.length;
-  }
-  return undefined;
 }
 
 /** Recognize typed clock atoms, including a numeral followed by a shared meridiem token. */
@@ -107,7 +75,7 @@ function recognizeStructures(context: PlanningInput): StructuralClaim[] {
     }
     add('calendar-date-list', span.start, end, 'findMedicationDateListSpans', !span.unresolved);
   }
-  for (const cycle of recognizeCycles(input, options)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
+  for (const cycle of recognizeCycles(input, options, tokens)) add('cycle-schedule', cycle.start, cycle.end, 'hpsg.lex.schedule.finiteCycle', !cycle.error);
   // List constructions compose typed atoms and canonical coordinators, not medication phrases.
   for (const kind of ['clock-list', 'weekday-list'] as const) {
     const atomEnd = (index: number): number | undefined => kind === 'clock-list'
@@ -202,12 +170,13 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
   const sites: BoundarySite[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    // The addition predicate supplies a source phase boundary; modifiers
-    // such as BUT/THEN remain provenance on that boundary, not a dosage.
-    if (i > 0 && phaseAdjustmentAt(tokens, i)?.kind === 'add') {
+    // A typed phase-adjustment predicate supplies a candidate boundary;
+    // its complete dosage daughter is still checked by the boundary grammar.
+    // This includes ADD, replacements and resumed treatment, not only THEN.
+    if (i > 0 && phaseAdjustmentAt(tokens, i)) {
       // A source-licensed treatment-relative header immediately preceding
-      // ADD already created the beginning of the next phase. Splitting at
-      // ADD again would strand that header on the previous administration
+      // the adjustment already created the next phase boundary. Splitting
+      // again would strand that header on the previous administration
       // and silently discard the new phase's onset.
       let ownedByFrontedOnset = false;
       for (let headerStart = Math.max(0, i - 6); headerStart < i; headerStart++) {
@@ -224,7 +193,8 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
         const previous = tokens[begin - 1];
         if ([';', ',', '.'].indexOf(previous.original) < 0 &&
             !ACTION_SEQUENCE_MARKERS.has(lexeme(previous)) &&
-            !ACTION_DISCOURSE_CONNECTORS.has(lexeme(previous))) break;
+            !ACTION_DISCOURSE_CONNECTORS.has(lexeme(previous)) &&
+            coordinationConnectorKind(lexeme(previous)) !== 'conjunction') break;
         begin--;
       }
       const boundaryStart = tokens[begin].sourceStart;
@@ -339,14 +309,14 @@ function withOrdinalWeekStageBoundaries(
 }
 
 function medicationGuardWithMultipleDoseCandidates(
-  input: string,
-  sites: readonly BoundarySite[]
+  sites: readonly BoundarySite[],
+  guardForInput: () => ReturnType<typeof parseMedicationGuard>
 ) {
   let doseCandidates = 0;
   for (const site of sites) {
     if (site.kind !== 'adjacent-dose') continue;
     doseCandidates += 1;
-    if (doseCandidates > 1) return parseMedicationGuard(input);
+    if (doseCandidates > 1) return guardForInput();
   }
   return undefined;
 }
@@ -573,9 +543,18 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   const hasDoseCandidateEnvelope = sites.length > 1 &&
     sites[0]?.kind === 'adjacent-dose' &&
     lastDoseSite?.kind === 'adjacent-dose';
+  let guardEvaluated = false;
+  let guard: ReturnType<typeof parseMedicationGuard>;
+  const guardForInput = () => {
+    if (!guardEvaluated) {
+      guard = parseMedicationGuard(input, tokens);
+      guardEvaluated = true;
+    }
+    return guard;
+  };
   const clinicalGuard = hasCoordinationCandidate
-    ? parseMedicationGuard(input)
-    : hasDoseCandidateEnvelope ? medicationGuardWithMultipleDoseCandidates(input, sites) : undefined;
+    ? guardForInput()
+    : hasDoseCandidateEnvelope ? medicationGuardWithMultipleDoseCandidates(sites, guardForInput) : undefined;
   const alternative = clinicalGuard?.alternative;
   if (alternative) sites = withAlternativeBoundary(input, tokens, sites, alternative);
   const dateSpans = findMedicationDateListSpans(input, options);
@@ -650,7 +629,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           // punctuation boundary. Its valence must never claim a completely
           // independent dosage across that boundary.
           !sites.some(boundary => (boundary.kind === 'hard' ||
-              boundary.kind === 'punctuation') &&
+              boundary.kind === 'punctuation' ||
+              boundary.kind === 'sequence' && phaseAdjustmentAt(tokens, boundary.rightIndex)) &&
             boundary.start >= frame.span.start && boundary.end <= site.start) &&
           frame.args.some(arg => arg.role === 'object' || arg.role === 'amount' ||
             arg.role === 'duration');
@@ -663,7 +643,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       const hardBoundary = sites.find(candidate =>
         candidate.start > owner.span.start && candidate.start < owner.span.end &&
         (candidate.kind === 'hard' ||
-          candidate.kind === 'punctuation' && candidate.surface === ';')
+          candidate.kind === 'punctuation' && candidate.surface === ';' ||
+          candidate.kind === 'sequence' && phaseAdjustmentAt(tokens, candidate.rightIndex))
       );
       const ownerEnd = Math.min(owner.span.end, hardBoundary?.start ?? owner.span.end);
       if (site.start >= ownerEnd || claims.some(claim =>
@@ -713,11 +694,11 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     });
   }
   // The same typed guard constituent used by the HPSG clinical-adjunct
-  // lexical rule owns its internal Boolean connectives. Reprobing AND/OR
-  // inside that range as possible medication boundaries duplicates a full
-  // chart and risks turning one condition into multiple administrations.
+  // lexical rule owns its internal Boolean connectives AND measurements.
+  // Neither AND/OR nor a quantified observation inside that constituent is
+  // an independent medication boundary.
   // Skip the recognizer entirely for ordinary inputs with no such boundary.
-  if (clinicalGuard && sites.some(site => site.kind === 'coordination' &&
+  if (clinicalGuard && sites.some(site =>
       clinicalGuard.start < site.start && site.end < clinicalGuard.end)) {
     claims.push({
       id: `clinical-condition:${clinicalGuard.start}:${clinicalGuard.end}`,
@@ -759,7 +740,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     const ownsConnector = probe.clause.schedule?.offset === 0 &&
       (probe.clause.schedule.when?.length ?? 0) >= 2 &&
       probe.clause.evidence.some(item =>
-        item.rule === 'hpsg.lex.schedule.eventOffset.immediate' &&
+        (item.scheduleFields?.indexOf('offset') ?? -1) >= 0 &&
+        (item.scheduleFields?.indexOf('when') ?? -1) >= 0 &&
         item.spans.some(span =>
           offsetStart + span.start <= site.start &&
           offsetStart + span.end >= site.end
@@ -782,18 +764,18 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     for (const site of sites) {
       if (site.kind !== 'comma' ||
           explicitDoseLexicalEnd(tokens, site.rightIndex, options) !== undefined) continue;
-      const internal = actionFrames.some(frame =>
-        frame.span.start < site.start && site.end < frame.span.end &&
-        frame.args.some(arg => {
-          if (arg.role === 'amount' || arg.role === 'duration' ||
-              !arg.text.includes(',')) return false;
-          // Prefer exact typed argument provenance when available. Some
-          // composed multiword nominal arguments retain source as text until
-          // projected, but never grant the WHOLE action an ownership claim.
-          return !arg.span ||
-            arg.span.start <= site.start && arg.span.end >= site.end;
-        })
-      );
+      const internal = actionFrames.some(frame => {
+        const action = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+        // An administration frame may retain an opaque text argument while
+        // HPSG licenses several complete schedule daughters within it. That
+        // text is not a nominal-list constituent and cannot veto their seams.
+        if (!action?.procedural || action.primaryAdministrationHead ||
+            frame.span.start >= site.start || site.end >= frame.span.end) return false;
+        return frame.args.some(arg =>
+          arg.role !== 'amount' && arg.role !== 'duration' && arg.span &&
+          arg.span.start <= site.start && arg.span.end >= site.end
+        );
+      });
       if (!internal) continue;
       // Ownership is local to the licensed internal comma, NOT the frame's
       // entire lexical span. A frame with an overbroad tail argument must
@@ -864,25 +846,34 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       resolved: true, policy: 'no-external-split'
     });
   }
-  if (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)) {
-    const guard = clinicalGuard ?? parseMedicationGuard(input);
-    const firstNonspace = input.search(/\S/u);
-    if (guard?.start === firstNonspace && guard.end < input.length) {
-      const comma = tokens.find(token =>
-        token.original === ',' && token.sourceStart >= guard.end &&
-        /^\s*$/u.test(input.slice(guard.end, token.sourceStart))
-      );
+  let frontedConditionalHeader: { start: number; tokenEnd: number } | undefined;
+  const frontedGuard = clinicalGuard ??
+    (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)
+      ? guardForInput() : undefined);
+  if (frontedGuard && frontedGuard.end < input.length) {
+    let clauseStart = 0;
+    for (const boundary of sites) {
+      if (boundary.end <= frontedGuard.start &&
+          (boundary.kind === 'hard' || boundary.kind === 'punctuation' &&
+            (boundary.surface === ';' || boundary.surface === '.'))) clauseStart = boundary.end;
+    }
+    // A fronted conditional belongs to the following administration even if
+    // an unrelated standing dosage precedes this sentence/semicolon.
+    if (!input.slice(clauseStart, frontedGuard.start).trim()) {
+      const comma = tokens.find(token => token.original === ',' &&
+        token.sourceStart >= frontedGuard.end &&
+        /^\s*$/u.test(input.slice(frontedGuard.end, token.sourceStart)));
       if (comma) {
-        const closing = guard.otherwise &&
-          input.slice(comma.sourceEnd, guard.otherwise.start).indexOf(';') < 0
-          ? guard.otherwise.end : comma.sourceEnd;
+        const closing = frontedGuard.otherwise &&
+          input.slice(comma.sourceEnd, frontedGuard.otherwise.start).indexOf(';') < 0
+          ? frontedGuard.otherwise.end : comma.sourceEnd;
         claims.push({
-          id: `fronted-conditional-clause:${guard.start}:${closing}`,
+          id: `fronted-conditional-clause:${frontedGuard.start}:${closing}`,
           kind: 'fronted-conditional-clause',
-          start: guard.start, end: closing,
-          producer: 'lexical.conditional-attachment',
-          resolved: true, policy: 'no-external-split'
+          start: frontedGuard.start, end: closing,
+          producer: 'lexical.conditional-attachment', resolved: true, policy: 'no-external-split'
         });
+        frontedConditionalHeader = { start: frontedGuard.start, tokenEnd: comma.index + 1 };
       }
     }
   }
@@ -1015,7 +1006,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         const followingCourse = followingCourseDurationHeaderAt(tokens, site.rightIndex);
         // The comma after a fronted duration is internal to that adjunct;
         // probe the administration after it, not just the isolated header.
-        const rightEnd = probeEnd(followingCourse?.tokenEnd ?? site.rightIndex);
+        const conditionalHeadEnd = frontedConditionalHeader?.start === rightStart
+          ? frontedConditionalHeader.tokenEnd : undefined;
+        const rightEnd = probeEnd(conditionalHeadEnd ?? followingCourse?.tokenEnd ?? site.rightIndex);
         // A separately dosed administration must have both dose and timing
         // evidence. Pure procedure/precaution continuations may mention
         // quantities ("re-prime with 2 sprays") without a repeat schedule;
@@ -1026,12 +1019,18 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           (hasEventTimingMeaning(token) ||
             hasTimingAbbreviationMeaning(token) ||
             token.kind === LexKind.TimeLike ||
-            /^(?:daily|nightly|weekly|monthly|once|twice|thrice)$/iu.test(lexeme(token)))
+            mapFrequencyAdverb(lexeme(token)) !== undefined ||
+            FREQUENCY_SIMPLE_WORDS[lexeme(token)] !== undefined ||
+            resolveActionRelationSurface(lexeme(token)) !== undefined)
         );
         const adjustment = phaseAdjustmentAt(tokens, site.rightIndex);
-        if ((rightHasTiming || adjustment) && hasUnit(site.rightIndex, rightEnd)) {
+        const conditionalAdministration = clinicalGuard &&
+          clinicalGuard.start >= rightStart && clinicalGuard.end <= rightEnd;
+        if ((rightHasTiming || adjustment || conditionalAdministration) && hasUnit(site.rightIndex, rightEnd)) {
           const right = evidence.probe(rightStart, rightEnd);
-          if (right.complete && right.hasHead && right.hasDose && right.hasSchedule) {
+          const rightAdjunct = hasAdministrationAdjunct(right.clause);
+          if (right.complete && (right.hasHead || rightAdjunct) && right.hasDose &&
+              (right.hasSchedule || right.clause.clinicalAdjuncts?.condition || rightAdjunct || right.method)) {
             // Preparation is not a preceding medication administration:
             // "Shake bottle. Take 5 mL BID" remains one dosed instruction.
             // Reuse the bounded typed clause probe only after a complete RHS
@@ -1044,8 +1043,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
               const phaseChange = followingCourse || right.clause.regimenAdjustment;
               proposals.push({ action: 'split', rule: phaseChange
                   ? 'regimen.fronted-course-continuation' : 'regimen.separate-administration',
-                priority: 720, relation: phaseChange ? 'sequence' : 'independent',
-                semanticLicense: phaseChange ? 'dose-continuation' : undefined,
+                priority: 720, relation: phaseChange ? 'sequence' : (rightAdjunct || right.clause.schedule?.timingReference) && !right.method ? 'coordination' : 'independent',
+                semanticLicense: phaseChange || (rightAdjunct || right.clause.schedule?.timingReference) && !right.method ? 'dose-continuation' : undefined,
                 evidence: [
                   { feature: 'left.established-administration', value: true },
                   { feature: 'right.complete-dosed-administration', value: true }

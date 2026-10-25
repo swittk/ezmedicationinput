@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { parseMedicationGuard } from "../src/hpsg/constructions";
+import { parseSig as parsePublicSig, getDosageCondition, toFhirR5Dosages, evaluateMedicationCondition } from "../src/index";
 import * as structuredValues from "../src/stable-structure";
 import { parseHpsgChart } from "../src/hpsg/chart";
 import { productLexicalRule } from "../src/hpsg/rules/core-rules";
@@ -187,14 +189,16 @@ describe("formal HPSG typed feature structures", () => {
     expect(fs.features.SYNSEM?.kind).toBe("node");
   });
 
-  it("owns medication guards and calendar exclusions on typed HPSG lexical signs", () => {
+  it("owns composed medication guards and lexical calendar exclusions in typed HPSG", () => {
     expect(HPSG_TYPE_SYSTEM.isSubtype("clinical-adjunct-sign", "word-sign")).toBe(true);
 
     const guard = firstLexicalMatch(
       medicationGuardLexicalRule(),
       "take 1 tab BID only if BP > 160, otherwise hold"
     );
-    expect(guard?.type).toBe("clinical-adjunct-sign");
+    expect(guard?.type).toBe("medication-guard-phrase");
+    expect(guard?.fs.features.HEAD_DTR).toBeDefined();
+    expect(guard?.evidence.some(item => item.rule === "hpsg.cx.guard.head-predicate")).toBe(true);
     expect(guard?.synsem.cont.clinicalAdjunct?.condition).toMatchObject({
       kind: "measurement",
       name: "bp",
@@ -362,5 +366,81 @@ describe("bounded medication lexical complement ownership", () => {
     expect(parsed.input).toBe(input);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
     expect(parsed.items.length).toBeGreaterThan(0);
+  });
+});
+
+
+describe("HPSG medication guard semantic authority", () => {
+  it("composes Boolean predicates and omitted measurement heads as typed daughters", () => {
+    const source = "Take 1 tablet only if systolic BP > 100 mmHg and < 140 or heart rate < 60 bpm.";
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "any", conditions: [
+      { kind: "all", conditions: [
+        { kind: "measurement", name: "systolic bp", operation: "gt", value: 100, unit: "mmHg" },
+        { kind: "measurement", name: "systolic bp", operation: "lt", value: 140, unit: "mmHg" }
+      ] },
+      { kind: "measurement", name: "heart rate", operation: "lt", value: 60, unit: "bpm" }
+    ] });
+    expect(guard.sign.type).toBe("medication-guard-phrase");
+    expect(guard.sign.construction?.kind).toBe("head-marker");
+    expect(guard.sign.fs.features.HEAD_DTR).toBeDefined();
+    expect(guard.sign.fs.features.NON_HEAD_DTR).toBeDefined();
+    expect(guard.sign.evidence.filter(item => item.rule === "hpsg.cx.guard.predicate-coordination")).toHaveLength(2);
+    expect(guard.sign.evidence.some(item => item.rule === "hpsg.cx.guard.head-predicate")).toBe(true);
+    expect(validateFeatureStructure(guard.sign.fs, HPSG_TYPE_SYSTEM)).toEqual([]);
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].evidence.some(item =>
+      item.rule === "hpsg.cx.guard.administration-scope")).toBe(true);
+  });
+
+  it("shares only the nearest explicit head and keeps UNLESS scope over the complete predicate", () => {
+    const guard = parseMedicationGuard("Use 1 tablet unless SBP < 90 or pulse > 100 and < 120.")!;
+    expect(guard.condition).toMatchObject({ kind: "not", condition: { kind: "any", conditions: [
+      { kind: "measurement", name: "sbp", operation: "lt", value: 90 },
+      { kind: "all", conditions: [
+        { kind: "measurement", name: "pulse", operation: "gt", value: 100 },
+        { kind: "measurement", name: "pulse", operation: "lt", value: 120 }
+      ] }
+    ] } });
+    expect(parseMedicationGuard("Take 1 tablet if pain.")).toBeUndefined();
+    expect(parsePublicSig("Take 1 tablet if pain.").fhir[0].asNeeded).toBe(true);
+  });
+});
+
+
+describe("conditional predicate negation is a typed HPSG constituent", () => {
+  it.each([
+    ["Take 1 tablet only if not fasting.", "fasting"],
+    ["Take 1 tablet only if no fever.", "fever"],
+    ["รับประทาน 1 เม็ด เฉพาะเมื่อไม่มีไข้", "ไข้"]
+  ])("preserves the negated state instead of inventing a positive state label: %s", (source, name) => {
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "not", condition: { kind: "state", name, expected: true } });
+    expect(evaluateMedicationCondition(guard.condition, { [name]: true })).toBe(false);
+    expect(evaluateMedicationCondition(guard.condition, { [name]: false })).toBe(true);
+    expect(guard.sign.evidence.some(item => item.rule === "hpsg.cx.guard.negated-predicate")).toBe(true);
+    expect(validateFeatureStructure(guard.sign.fs, HPSG_TYPE_SYSTEM)).toEqual([]);
+    const parsed = parsePublicSig(source);
+    expect(getDosageCondition(toFhirR5Dosages(parsed.fhirNext)[0])).toEqual(guard.condition);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("scopes a negator over its own predicate rather than the coordinated comparison", () => {
+    const source = "Take 1 tablet only if not fasting and systolic BP > 100 mmHg.";
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "all", conditions: [
+      { kind: "not", condition: { kind: "state", name: "fasting" } },
+      { kind: "measurement", name: "systolic bp", operation: "gt", value: 100 }
+    ] });
+    expect(evaluateMedicationCondition(guard.condition, { fasting: false, "systolic bp": 110 })).toBe(true);
+    expect(evaluateMedicationCondition(guard.condition, { fasting: true, "systolic bp": 110 })).toBe(false);
+    expect(evaluateMedicationCondition(guard.condition, { fasting: false, "systolic bp": 90 })).toBe(false);
+  });
+
+  it("keeps lexical no-less-than comparisons intact", () => {
+    const guard = parseMedicationGuard("Take 1 tablet only if SBP no less than 100 mmHg.")!;
+    expect(guard.condition).toMatchObject({ kind: "measurement", name: "sbp", operation: "ge", value: 100 });
+    expect(evaluateMedicationCondition(guard.condition, { sbp: 100 })).toBe(true);
+    expect(evaluateMedicationCondition(guard.condition, { sbp: 99 })).toBe(false);
   });
 });

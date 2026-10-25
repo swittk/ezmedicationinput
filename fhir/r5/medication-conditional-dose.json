@@ -56,7 +56,7 @@
           "rules": "open"
         },
         "min": 1,
-        "max": "1"
+        "max": "*"
       },
       {
         "id": "Extension.extension:predicate",
@@ -499,6 +499,454 @@
       },
       {
         "id": "Extension.extension:predicate.extension:retainedField.extension:value.extension",
+        "path": "Extension.extension.extension.extension.extension",
+        "min": 0,
+        "max": "*",
+        "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate",
+        "path": "Extension.extension",
+        "sliceName": "calendarDayPredicate",
+        "min": 0,
+        "max": "1",
+        "short": "Source-certified whole-day predicate metadata",
+        "definition": "Certifies that the encoded predicate has the same truth value throughout a local calendar day. This is not an additional administration condition. The metadata is usable only when its complete decoded predicate equals the live executable predicate; changed, cleared, or mixed time-varying predicates invalidate the certificate."
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "calendarDayPredicate"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.value[x]",
+        "path": "Extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension",
+        "path": "Extension.extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:kind",
+        "path": "Extension.extension.extension",
+        "sliceName": "kind",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:kind.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "kind"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:kind.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:kind.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:name",
+        "path": "Extension.extension.extension",
+        "sliceName": "name",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:name.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "name"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:name.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:name.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:operation",
+        "path": "Extension.extension.extension",
+        "sliceName": "operation",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:operation.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "operation"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:operation.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:operation.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:value",
+        "path": "Extension.extension.extension",
+        "sliceName": "value",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:value.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "value"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:value.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:value.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "decimal"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:unit",
+        "path": "Extension.extension.extension",
+        "sliceName": "unit",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:unit.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "unit"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:unit.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:unit.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:text",
+        "path": "Extension.extension.extension",
+        "sliceName": "text",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:text.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "text"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:text.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:text.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:expected",
+        "path": "Extension.extension.extension",
+        "sliceName": "expected",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:expected.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "expected"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:expected.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:expected.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "boolean"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:condition",
+        "path": "Extension.extension.extension",
+        "sliceName": "condition",
+        "min": 0,
+        "max": "1",
+        "definition": "Recursive Boolean operand with the same kind/name/value/text and nested condition/conditions field meanings as the enclosing predicate. Its own URL identifies singular negation or a repeated conjunction/disjunction operand.",
+        "constraint": [
+          {
+            "key": "ezmed-predicate-kind",
+            "severity": "error",
+            "human": "Each operand declares one Boolean predicate kind.",
+            "expression": "extension.where(url = 'kind').count() = 1"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:condition.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:condition.extension",
+        "path": "Extension.extension.extension.extension",
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:condition.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "condition"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:conditions",
+        "path": "Extension.extension.extension",
+        "sliceName": "conditions",
+        "min": 0,
+        "max": "*",
+        "definition": "Recursive Boolean operand with the same kind/name/value/text and nested condition/conditions field meanings as the enclosing predicate. Its own URL identifies singular negation or a repeated conjunction/disjunction operand.",
+        "constraint": [
+          {
+            "key": "ezmed-predicate-kind",
+            "severity": "error",
+            "human": "Each operand declares one Boolean predicate kind.",
+            "expression": "extension.where(url = 'kind').count() = 1"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:conditions.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:conditions.extension",
+        "path": "Extension.extension.extension.extension",
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:conditions.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "conditions"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:empty",
+        "path": "Extension.extension.extension",
+        "sliceName": "empty",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:empty.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "empty"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:empty.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:empty.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "boolean"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray",
+        "path": "Extension.extension.extension",
+        "sliceName": "emptyArray",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "emptyArray"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.extension",
+        "path": "Extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField",
+        "path": "Extension.extension.extension",
+        "sliceName": "retainedField",
+        "min": 0,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "retainedField"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension",
+        "path": "Extension.extension.extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name",
+        "path": "Extension.extension.extension.extension",
+        "sliceName": "name",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.url",
+        "path": "Extension.extension.extension.extension.url",
+        "fixedUri": "name"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.extension",
+        "path": "Extension.extension.extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.value[x]",
+        "path": "Extension.extension.extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value",
+        "path": "Extension.extension.extension.extension",
+        "sliceName": "value",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.url",
+        "path": "Extension.extension.extension.extension.url",
+        "fixedUri": "value"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.value[x]",
+        "path": "Extension.extension.extension.extension.value[x]",
+        "min": 0,
+        "max": "1",
+        "type": [
+          {
+            "code": "string"
+          },
+          {
+            "code": "boolean"
+          },
+          {
+            "code": "decimal"
+          }
+        ]
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.extension",
         "path": "Extension.extension.extension.extension.extension",
         "min": 0,
         "max": "*",

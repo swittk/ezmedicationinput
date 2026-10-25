@@ -83,6 +83,41 @@ export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhi
 export const TIMING_EVENT_WINDOW_EXTENSION_URL =
   "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-window";
 
+export const TIMING_CLOCK_WINDOW_EXTENSION_URL =
+  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-clock-window";
+
+/** Read a local-clock recurrence window from structural timing metadata.
+ * @param repeat FHIR Timing.repeat containing a typed window extension.
+ * @returns Source clock endpoints and explicit endpoint inclusivity.
+ */
+export function getTimingClockWindow(
+  repeat: FhirTimingRepeat | undefined
+): { start: string; end: string; endInclusive: boolean } | undefined {
+  const parts = repeat?.extension?.find(part => part.url === TIMING_CLOCK_WINDOW_EXTENSION_URL)?.extension;
+  if (!parts) return undefined;
+  const start = parts.find(part => part.url === "start")?.valueTime;
+  const end = parts.find(part => part.url === "end")?.valueTime;
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/u;
+  return start && end && clock.test(start) && clock.test(end) ? {
+    start, end, endInclusive: parts.find(part => part.url === "endInclusive")?.valueBoolean ?? true
+  } : undefined;
+}
+
+export const TIMING_WEEKDAY_ORDINAL_EXTENSION_URL =
+  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-weekday-ordinal";
+
+/** Read the explicitly encoded ordinal, independent of prose and scheduling anchors.
+ * @param repeat Typed FHIR timing repeat containing an optional ordinal extension.
+ * @returns The source weekday occurrence, including -1 for last, when valid.
+ */
+export function getTimingWeekdayOrdinal(
+  repeat: FhirTimingRepeat | undefined
+): -1 | 1 | 2 | 3 | 4 | 5 | undefined {
+  const value = repeat?.extension?.find(part => part.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL)?.valueInteger;
+  return value === -1 || value === 1 || value === 2 || value === 3 || value === 4 || value === 5
+    ? value : undefined;
+}
+
 /** Read an explicitly encoded daily event window without examining SIG text. */
 export function getTimingEventWindow(
   repeat: FhirTimingRepeat | undefined
@@ -481,7 +516,10 @@ function canonicalDosePeriodMaximums(
   return result.length ? result : undefined;
 }
 
-function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
+/** Read typed activity-event relations from Timing extensions without parsing
+ * narrative instructions or inferring an activity's calendar instant.
+ */
+export function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
   const result: CanonicalActivityTimingExpr[] = [];
   for (const extension of repeat?.extension ?? []) {
     if (extension.url !== TIMING_ACTIVITY_WINDOW_EXTENSION_URL) continue;
@@ -1114,6 +1152,22 @@ export function canonicalToFhir(
     repeat.timeOfDay = [...schedule.timeOfDay];
     hasRepeat = true;
   }
+  if (schedule?.clockWindow) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueTime: schedule.clockWindow.start },
+        { url: "end", valueTime: schedule.clockWindow.end },
+        { url: "endInclusive", valueBoolean: schedule.clockWindow.endInclusive }
+      ]
+    }];
+    hasRepeat = true;
+  }
+  if (schedule?.weekdayOrdinal !== undefined) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, valueInteger: schedule.weekdayOrdinal
+    }];
+    hasRepeat = true;
+  }
   if (schedule?.eventWindow) {
     repeat.extension = [
       ...(repeat.extension ?? []),
@@ -1380,7 +1434,7 @@ export function canonicalToFhir(
   // FHIR projects it exactly once; it must never decide which daughter
   // receives an administration condition or calendar exclusion.
   const adjunct = clause.clinicalAdjuncts;
-  if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition);
+  if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition, adjunct.calendarDayCondition);
   if (adjunct?.excludedDates?.length) {
     setDosageExcludedDates(dosage, adjunct.excludedDates);
   }
@@ -1494,6 +1548,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   const timingBounds = extractCanonicalTimingBounds(repeat);
   const activityTiming = parseActivityTimingExtensions(repeat);
+  const clockWindow = getTimingClockWindow(repeat);
+  const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
   const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
@@ -1504,6 +1560,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
+    clockWindow !== undefined ||
+    weekdayOrdinal !== undefined ||
     eventWindow !== undefined ||
     occurrenceCap !== undefined ||
     maxDosePerPeriod?.length ||
@@ -1551,6 +1609,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offsetMin: offsetMinExtension,
       offsetMax: offsetMaxExtension,
       activityTiming,
+      clockWindow,
+      weekdayOrdinal,
       eventWindow,
       occurrenceCap,
       maxDosePerPeriod,
@@ -1702,6 +1762,12 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.offsetMin = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
+  const clockWindow = getTimingClockWindow(dosage.timing?.repeat);
+  if (clockWindow) state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), clockWindow };
+  const weekdayOrdinal = getTimingWeekdayOrdinal(dosage.timing?.repeat);
+  if (weekdayOrdinal !== undefined) {
+    state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), weekdayOrdinal };
+  }
   const eventWindow = getTimingEventWindow(dosage.timing?.repeat);
   if (eventWindow) {
     state.primaryClause.schedule = {

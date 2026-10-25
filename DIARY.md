@@ -3515,3 +3515,141 @@ checks were green on the repaired staged cases. CodeRabbit remains at exactly
 The original untracked diagnostic probe is neither staged nor deleted.
 The branch is ready for updated remote review; npm publication, merge and
 deployment are separate operations.
+
+
+## 2026-10-25 — Final typed-authority and realistic-regimen release gate
+
+This checkpoint closes the reproduced ordinary clinical failures and removes
+competing semantic interpretation in the guard, repeating-course, and one-shot
+relative-event paths. It is a bounded clinician-operated suggestion release,
+not a claim to understand every possible instruction.
+
+- Medication guard meaning is composed by typed HPSG predicate, coordinator,
+  head-complement and guard-head constructions. AND/OR precedence, comparison
+  head ellipsis, UNLESS and predicate NOT have retained daughter/provenance
+  graphs. The old standalone Boolean interpreter was removed; the public
+  guard entry point delegates to that single HPSG producer. Lexical marker
+  ownership prevents ONLY IF from also becoming an independent PRN phrase.
+- Recurring active/rest/repeat meaning is a typed HPSG construction in the
+  timing grammar. The separate regimen/cycles source module was removed,
+  not hidden behind a review exclusion. Exactly declared cycle counts stop;
+  explicit finite tails crossing repeat boundaries remain executable. The
+  scheduler merges overlapping occurrences without losing multiplicity and
+  supply calculations use the same source bounds.
+- One-shot administration-relative timing is represented by the existing
+  activityTiming model. The scheduler no longer reparses unrelated patient
+  counseling to decide whether a one-time dose can execute. Known anchors
+  are preserved through FHIR, while unresolved real event instants remain
+  unresolved instead of becoming invented dates or daily recurrence.
+- Generic procedural attachment keeps the Thai post-application caution on
+  its intended non-administration action. Its original clinical oracle was
+  retained unchanged. Three earlier opaque-storage assertions were migrated
+  to stronger typed-anchor, original-source and strict-R5 persistence checks;
+  unrecognized workflow text retains its old editable advice behavior.
+- Realistic conditional extra doses retain tablet amounts independently of
+  body-weight or creatinine observations. Fronted and postfixed conditions
+  attach to the intended extra administration, not the standing dose. Caller
+  supplied contextual day membership remains a condition, not an invented
+  procedure date or a patient-problem code.
+- Independent weekday complements, exclusions, meal/snack doses, multiple
+  distinct meal offsets, monthly fourth-versus-last ordinals, time windows,
+  unequal multiweek doses, later ADD/targeted changes and STOP/resume retain
+  their clinical values in native R6 and strict R5. Explicit treatment-relative
+  onset remains fixed when a prior phase is subsequently edited.
+- Source-less R6 display preserves stage bounds, real gaps, overlap, recurrence,
+  finite count, Boolean grouping and negation in English and Thai. Known
+  nested extension values are JSON-compatible for direct schema validation;
+  unfamiliar modifier extensions are not reinterpreted or converted into
+  warnings or refusal gates.
+
+Final frozen source gate: Node 22, 44 suites, 3148/3148 PASS at 10:22:40 Bangkok
+(proc-9038ed88-0454-4b67-ab88-c0d19a1d7dce). Prior matching full pass was
+proc-50857362-2b5c-4b8b-9ad3-59997fe84b4a. TypeScript, ESM/CJS and declarations
+passed; packaged export checks passed 4/4. The source/test fingerprint used
+for the final gate is d213bc2c849ebfbf745f3059244319e6411ab567f801c09690a0aa426745a697.
+
+The commercial 521-input replay against the immutable pre-change bundle had
+zero new exceptions, original-source loss, complete populated-dose loss, or
+changed dose-row counts. This is compatibility evidence, not a universal
+semantic proof. Independent reviewers also replayed 59 realistic inputs with
+462 assertions and 14 actual downstream schema round trips successfully.
+Coordinator replay of the final built package covered 13 clinical families
+through both parser R5 and strict R5 output (26 routes): dosage-schema
+validation, source retention, exact date/time execution and independent supply
+expectations. The formal suite contains the finer field and polarity checks.
+
+Matched esbuild, warmed alternating Node 22 host medians against the immutable
+pre-change bundle: routine BID 1.306 -> 1.362 ms (1.042x), OD QID 1.302 ->
+1.349 ms (1.036x), Thai BID 3.786 -> 3.906 ms (1.032x), Boolean numeric guard
+9.767 -> 8.975 ms (0.919x), finite three-cycle SIG 5.251 -> 5.130 ms (0.977x).
+Shared-host measurements are not phone latency guarantees. No new repeated
+schema validation, JSON serialization, or source reparsing was added to the
+ordinary suggestion path.
+
+Review limit: 114 raw changed paths minus the same 15 existing exclusions =
+99 reviewable files. No additional exclusions. The existing untracked
+__tmp_open_semantic_probe.ts is not part of this checkpoint. Public package
+publication, merge and deployment are not performed by this validation;
+manual review must refer to the final pushed revision, not an older green
+status whose description says Review paused.
+
+
+## 2026-10-25 — HPSG authority closure and packaged release checks
+
+The final closure keeps grammatical ownership in the typed HPSG derivation
+and carries it through the instruction graph, regimen and FHIR projections.
+The accepted clinical cases and all existing source tests are now green.
+
+- Typed predicate boundaries keep an action word inside a day predicate from
+  becoming a conditional consequent. A dialysis-day HOLD retains its NOT and
+  selected dose; unaffected administrations remain scheduled.
+- An undosed meal directive after an explicitly clocked prescription is
+  counseling on those doses. With caller meal clocks and a before-food offset,
+  the accepted 07:00/12:00/18:00 seven-day instructions produce exactly 21
+  tablets. A genuinely independent, quantified meal dose remains independent.
+- HPSG condition scope now survives canonical projection. Graph relations use
+  the closed constituent's source and target ranges, and action sorting remaps
+  relation indices by action identity. The old nearest-action reconstruction
+  no longer overrides that grammatical decision. Conditional NOTIFY DOCTOR
+  remains advice while the preceding medication keeps its standing schedule.
+- Existing pure dose constituents recognize an amount before its administration
+  verb, preserving all 24 Thai modal/timing/PRN/dose orderings. A symptom-onset
+  trigger following a complete quantified administration stays with that dose
+  when a later REPEAT action occurs; the repeat delay and total count survive.
+- Registered Thai negative directives retain polarity, modality, contact theme
+  and target. Household-spoon and bottle/tube-tip nominals stay intact; positive
+  recapping and handwashing remain separate from preceding prohibitions.
+  Permanent tests cover the actual oral, liquid, topical and ocular labels
+  across native R6, parser R5, strict R5 and reopened R6, including laterality,
+  raw source, schedule and independent quantities.
+- The original review findings have permanent regression coverage for monthly
+  weekday ordinals after a later order-time anchor, nested Boolean NOT and
+  grouping without source prose, and method-only inheritance into PRN phases.
+
+Final source gate: **3,329/3,329 tests in 44 suites**, plus TypeScript. All 165
+source, test, FHIR profile and configuration file hashes were unchanged during
+verification and package generation. Source fingerprint:
+`d14f37d45b061fcb50d7f42c586fe952a1ff0cca281b7722082c23fcf4c18741`.
+ES6 ESM/CJS builds, declarations and all **4/4** packaged-export tests passed.
+Built ESM fingerprint:
+`fc9c9160a4aa898a779bd2abb91dcfba89ca308d42496ddf96c9a1ffb278dbd9`.
+
+The actual built package passed 117 authority/round-trip checks, 79 mixed
+schedule checks, 24 configured-label/consumer checks, 18 further actual
+consumer round trips and 462 assertions over 59 clinical inputs. The existing
+521-input compatibility corpus had zero exceptions, source loss, complete
+populated-dose loss, dose-value-array changes or dose-row-count changes against
+the immutable comparison bundle. These are bounded regression and clinical
+oracle results, not a claim of universal language understanding.
+
+Matched ES6 Node 22.22.1 host medians (30 warmups, seven alternating batches
+of 50 parses with GC) against the immutable comparison bundle were: BID
+1.454 -> 1.468 ms; OD QID 1.420 -> 1.497 ms; Thai BID 3.301 -> 3.389 ms;
+two-phase course 3.760 -> 3.877 ms; numeric HOLD 4.409 -> 4.502 ms.
+The measured changes were +1.0% to +5.4%, or +0.014 to +0.117 ms. These
+shared-host measurements do not establish phone latency. No new general
+parse or schema-validation pass was added for the closure fixes.
+
+Review scope remains **99 files**: 114 changed paths minus the same 15
+configured exclusions. The exclusions were not widened. The original
+untracked diagnostic probe remains untouched and outside the commit.

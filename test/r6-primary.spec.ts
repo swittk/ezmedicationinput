@@ -1,14 +1,14 @@
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, nextDueDoses, calculateTotalUnits,
+  parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, formatParseBatch, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageDetails, type FhirExtension, type EzDosage,
+  type FhirR6DosageDetails, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
-  canonicalFromFhir, parserStateFromFhir,
+  canonicalFromFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition
 } from "../src/fhir";
 import { parseMedicationGuard } from "../src/medication-condition";
@@ -1481,5 +1481,422 @@ describe("source-less R6 treatment-relative step display", () => {
       .toContain("two days after dialysis");
     expect(formatSig(course, "long", { locale: "en" }))
       .not.toContain("from day 3");
+  });
+});
+
+describe("source-less repeating and overlapping treatment windows", () => {
+  const boundary = (value: number) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] },
+    offsetDuration: { value, unit: "d", code: "d" }
+  });
+  const tablet = (value: number) => ({
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+    timing: { repeat: { timeOfDay: ["08:00:00"] } }
+  });
+  const step = (start: number, end: number, amount: number) => ({
+    start: boundary(start), end: boundary(end), component: [tablet(amount)]
+  });
+  const variants = (course: FhirR6DosageDetails) => [
+    course, toDosageDetails(toFhirR5Dosages(course)), toFhirR5Dosages(course)
+  ];
+
+  it("renders the repeat period and medication-free tail of a recurring course in both locales", () => {
+    const course: FhirR6DosageDetails = {
+      repeatCycle: { value: 14, unit: "d", code: "d" }, step: [step(0, 7, 1)]
+    };
+    const before = cloneStructuredValue(course);
+    for (const input of variants(course)) {
+      const en = formatSig(input, "long", { locale: "en" });
+      const th = formatSig(input, "long", { locale: "th" });
+      expect(en).toContain("every 14 days");
+      expect(en).toContain("within each cycle");
+      expect(en).toContain("No doses on days 8–14");
+      expect(th).toContain("ทุก 14 วัน");
+      expect(th).toContain("ในแต่ละรอบ");
+      expect(th).toContain("งดยาในวันที่ 8–14");
+      const options = {
+        timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00", limit: 4
+      };
+      expect(nextDueDoses(input, { ...options, from: "2026-11-09T00:00:00+07:00" })[0])
+        .toBe("2026-11-16T08:00:00+07:00");
+      expect(calculateTotalUnits({
+        dosage: input, ...options, from: options.orderedAt,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(14);
+    }
+    expect(course).toEqual(before);
+  });
+
+  it.each([false, true])("does not prescribe a global pause across a continuing parallel component (reordered=%s)", reordered => {
+    const stages = [step(0, 21, 1), step(0, 7, 0.5), step(14, 21, 0.5)];
+    const course: FhirR6DosageDetails = { step: reordered ? [stages[1], stages[2], stages[0]] : stages };
+    for (const input of variants(course)) {
+      expect(formatSig(input, "long", { locale: "en" })).not.toContain("No doses");
+      expect(formatSig(input, "long", { locale: "th" })).not.toContain("งดยา");
+      expect(nextDueDoses(input, {
+        timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00",
+        from: "2026-11-09T00:00:00+07:00", limit: 1
+      })).toEqual(["2026-11-09T08:00:00+07:00"]);
+    }
+  });
+
+  it("describes only the genuinely uncovered days of a partly overlapped pause", () => {
+    const course: FhirR6DosageDetails = { step: [step(0, 10, 1), step(0, 7, 0.5), step(14, 21, 0.5)] };
+    for (const input of variants(course)) {
+      const text = formatSig(input, "long", { locale: "en" });
+      expect(text).toContain("No doses on days 11–14");
+      expect(text).not.toContain("No doses on days 8–14");
+    }
+  });
+
+  it("does not invent a pause when a concurrent component has no finite end", () => {
+    const course: FhirR6DosageDetails = {
+      step: [{ start: boundary(0), component: [tablet(1)] }, step(0, 7, 0.5), step(14, 21, 0.5)]
+    };
+    for (const input of variants(course)) {
+      expect(formatSig(input, "long", { locale: "en" })).not.toContain("No doses");
+    }
+  });
+  it("keeps every rendered pause faithful to the union across 36 adjacent interval combinations", () => {
+    const intervals = [[0, 7], [7, 14], [14, 21], [3, 10], [0, 21], [7, 21]] as const;
+    for (const left of intervals) for (const right of intervals) {
+      const ranges = [[0, 7], left, right] as const;
+      const course: FhirR6DosageDetails = {
+        step: [step(0, 7, 1), step(left[0], left[1], 0.5), step(right[0], right[1], 0.25)]
+      };
+      const end = Math.max(...ranges.map(range => range[1]));
+      const uncovered = Array.from({ length: end }, (_, day) => day)
+        .filter(day => ranges.every(([start, finish]) => day < start || day >= finish))
+        .map(day => day + 1);
+      for (const input of variants(course)) {
+        const en = formatSig(input, "long", { locale: "en" });
+        const stated: number[] = [];
+        for (const match of en.matchAll(/No doses on days (\d+)–(\d+)/gu)) {
+          for (let day = Number(match[1]); day <= Number(match[2]); day++) stated.push(day);
+        }
+        expect(stated).toEqual(uncovered);
+        expect(calculateTotalUnits({
+          dosage: input, timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00",
+          from: "2026-11-02T00:00:00+07:00", durationValue: 28, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(7 + (left[1] - left[0]) * 0.5 + (right[1] - right[0]) * 0.25);
+      }
+    }
+  });
+
+  it("preserves week units and leaves nonrepeating courses nonrepeating", () => {
+    const course: FhirR6DosageDetails = {
+      repeatCycle: { value: 2, unit: "wk", code: "wk" }, step: [step(0, 7, 1)]
+    };
+    for (const input of variants(course)) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("every 2 weeks");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ทุก 2 สัปดาห์");
+    }
+    expect(formatSig({ step: course.step }, "long", { locale: "en" }))
+      .not.toContain("Repeat this schedule");
+  });
+
+  it("does not derive a global pause from a stage exceeding its repeat period", () => {
+    const course: FhirR6DosageDetails = {
+      repeatCycle: { value: 14, unit: "d", code: "d" }, step: [step(7, 21, 1)]
+    };
+    for (const input of variants(course)) {
+      const en = formatSig(input, "long", { locale: "en" });
+      expect(en).toContain("every 14 days");
+      expect(en).not.toContain("No doses");
+      // This presentation control does not define execution for an overlong
+      // cycle. Preserve its declared range and period without inventing a pause.
+      expect(en).toContain("Days 8–21");
+    }
+  });
+
+});
+
+describe("source-less calendar-relative treatment steps", () => {
+  const relative = (value: number, code: string) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] }, offsetDuration: { value, code, unit: code }
+  });
+  const tablet = (value: number) => ({
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+    timing: { repeat: { timeOfDay: ["08:00:00"] } }
+  });
+
+  it("retains exact calendar-month boundaries instead of substituting a fixed day count", () => {
+    const course: FhirR6DosageDetails = { step: [
+      { end: relative(1, "mo"), component: [tablet(1)] },
+      { start: relative(1, "mo"), end: relative(2, "mo"), component: [tablet(0.5)] }
+    ] };
+    for (const input of [course, toFhirR5Dosages(course), toDosageDetails(toFhirR5Dosages(course))]) {
+      const en = formatSig(input, "long", { locale: "en" });
+      const th = formatSig(input, "long", { locale: "th" });
+      expect(en).toContain("1 month after treatment start");
+      expect(en).toContain("2 months after treatment start");
+      expect(en).not.toContain("requires review");
+      expect(en).not.toContain("30 days");
+      expect(th).toContain("1 เดือนหลังเริ่มการรักษา");
+      expect(th).toContain("2 เดือนหลังเริ่มการรักษา");
+      expect(th).not.toContain("ต้องตรวจสอบ");
+      const options = { timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00", limit: 1 };
+      expect(nextDueDoses(input, { ...options, from: "2026-12-02T00:00:00+07:00" }))
+        .toEqual(["2026-12-02T08:00:00+07:00"]);
+      expect(nextDueDoses(input, { ...options, from: "2027-01-02T00:00:00+07:00" })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...options, from: options.orderedAt,
+        durationValue: 2, durationUnit: FhirPeriodUnit.Month }).totalUnits).toBe(45.5);
+    }
+  });
+
+  it("keeps year and mixed day/month offsets visible without inventing conversion factors", () => {
+    const courses: FhirR6DosageDetails[] = [
+      { step: [{ start: relative(1, "a"), end: relative(2, "a"), component: [tablet(1)] }] },
+      { step: [{ start: relative(7, "d"), end: relative(1, "mo"), component: [tablet(1)] }] }
+    ];
+    expect(formatSig(courses[0], "long", { locale: "en" })).toContain("1 year after treatment start");
+    expect(formatSig(courses[0], "long", { locale: "th" })).toContain("2 ปีหลังเริ่มการรักษา");
+    const text = formatSig(courses[1], "long", { locale: "en" });
+    expect(text).toContain("7 days after treatment start");
+    expect(text).toContain("1 month after treatment start");
+    expect(text).not.toContain("30 days");
+  });
+});
+
+
+describe("source-less Boolean condition display preserves nested scope", () => {
+  const state = (name: string): MedicationCondition => ({ kind: "state", name, text: name, expected: true });
+  const variants = (condition: MedicationCondition) => {
+    const row: EzDosage = { timing: { repeat: { timeOfDay: ["08:00:00"] } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    setDosageCondition(row, condition);
+    const course = toDosageDetails([row]);
+    const strict = toFhirR5Dosages(course);
+    expect(getDosageCondition(strict[0])).toEqual(condition);
+    return [row, course, strict] as const;
+  };
+
+  it("keeps a nested NOT inside an OR in native and strict FHIR", () => {
+    const condition: MedicationCondition = { kind: "any", conditions: [
+      { kind: "not", condition: state("fever") }, state("nausea")
+    ] };
+    for (const input of variants(condition)) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("only if not (fever) or nausea");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ไม่ (fever) หรือ nausea");
+    }
+  });
+
+  it("keeps nested AND/OR grouping visible rather than changing logical precedence", () => {
+    const condition: MedicationCondition = { kind: "all", conditions: [
+      { kind: "any", conditions: [state("fever"), state("nausea")] },
+      { kind: "not", condition: state("fasting") }
+    ] };
+    for (const input of variants(condition)) {
+      expect(formatSig(input, "long", { locale: "en" }))
+        .toContain("only if (fever or nausea) and not (fasting)");
+      expect(formatSig(input, "long", { locale: "th" }))
+        .toContain("(fever หรือ nausea) และ ไม่ (fasting)");
+    }
+  });
+
+  it("retains top-level unless without accidentally adding double negation", () => {
+    const condition: MedicationCondition = { kind: "not", condition: state("fasting") };
+    for (const input of variants(condition)) {
+      const text = formatSig(input, "long", { locale: "en" });
+      expect(text).toContain("unless fasting");
+      expect(text).not.toContain("unless not");
+    }
+  });
+});
+
+
+describe("method-only inheritance remains reachable for PRN successors", () => {
+  it.each([
+    ["Instill 1 drop in right eye daily for 7 days, then 1 drop in left eye as needed.", "Instill"],
+    ["Apply 1 mL to scalp nightly for 7 days, then 1 mL to scalp as needed.", "Apply"]
+  ])("inherits the source method without fabricating recurring successor times: %s", (source, method) => {
+    const parsed = parseSig(source);
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhir[1].method?.text).toBe(method);
+    expect(parsed.fhir[1].timing?.repeat).toBeUndefined();
+    expect(parsed.fhir[1].asNeeded).toBe(true);
+    expect(parsed.meta.canonical.clauses[1].evidence.some(item =>
+      item.rule === "hpsg.cx.regimen.shared-administration-method")).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(toFhirR5Dosages(parsed.fhirNext)[1].method?.text).toBe(method);
+  });
+});
+
+
+describe("native R6 label-only condition text", () => {
+  it("does not confuse a source-less condition label with its Boolean or numeric meaning", () => {
+    const cases: Array<{ condition: NonNullable<FhirR6DosageDetails["step"][number]["component"][number]["condition"]>[number]; expected: string }> = [
+      { condition: { code: { coding: [{ code: "problem-presents" }] },
+        details: { text: "fasting" }, valueBoolean: false }, expected: "only if not fasting" },
+      { condition: { code: { text: "systolic BP" }, operation: "gt",
+        valueQuantity: { value: 100, unit: "mmHg" } }, expected: "only if systolic BP > 100 mmHg" }
+    ];
+    for (const { condition, expected } of cases) {
+      const course: FhirR6DosageDetails = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { timeOfDay: ["08:00:00"] } }, condition: [condition]
+      }] }] };
+      const before = cloneStructuredValue(course);
+      for (const input of [course, toFhirR5Dosages(course)]) {
+        expect(formatSig(input, "long", { locale: "en" })).toContain(expected);
+      }
+      expect(course).toEqual(before);
+    }
+  });
+});
+
+describe("cached parse-batch formatting retains course-wide semantics", () => {
+  const relative = (value: number) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] },
+    offsetDuration: { value, code: "d", unit: "d" }
+  });
+  const tablet = (value: number) => ({
+    timing: { repeat: { timeOfDay: ["08:00:00"] } },
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
+  });
+
+  it.each(["en", "th"])("keeps finite phases and a medication-free week in %s, for both styles", locale => {
+    const course: FhirR6DosageDetails = {
+      step: [
+        { end: relative(7), component: [tablet(1)] },
+        { start: relative(14), end: relative(21), component: [tablet(2)] }
+      ]
+    };
+    for (const input of [course, toDosageDetails(toFhirR5Dosages(course))]) {
+      const batch = fromFhir(input, { locale });
+      for (const style of ["short", "long"] as const) {
+        const text = formatParseBatch(batch, style);
+        expect(text).toContain(locale === "th" ? "วันที่ 1–7" : "Days 1–7");
+        expect(text).toContain(locale === "th" ? "วันที่ 15–21" : "Days 15–21");
+        expect(text).toContain(locale === "th" ? "งดยาในวันที่ 8–14" : "No doses on days 8–14");
+        expect(text).toContain("2");
+        expect(formatParseBatch(batch, style, " | ")).toBe(text);
+      }
+    }
+  });
+
+  it("does not reduce repeating finite courses to an unqualified daily dose", () => {
+    const course: FhirR6DosageDetails = {
+      repeatCycle: { value: 14, code: "d", unit: "d" },
+      step: [{ start: relative(0), end: relative(7), count: 2, component: [tablet(1)] }]
+    };
+    const batch = fromFhir(course, { locale: "en" });
+    const text = formatParseBatch(batch, "long");
+    expect(text).toContain("Days 1–7");
+    expect(text).toContain("No doses on days 8–14");
+    expect(text).toMatch(/14 days/);
+    expect(text).toMatch(/2 cycles/);
+  });
+});
+
+describe("parse-batch alternatives keep the selected display language", () => {
+  it.each(["en", "th"])("keeps mutually exclusive source-less doses in %s", locale => {
+    const course: FhirR6DosageDetails = {
+      step: [{ component: [1, 2].map(value => ({
+        doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+        timing: { repeat: { timeOfDay: ["08:00:00"] } }
+      })) }]
+    };
+    course.step[0].component.forEach((component, index) => {
+      setDosageAlternativeChoice(component, {
+        groupId: "dose-option", branchId: String(index), selectionBehavior: "exactly-one"
+      });
+    });
+    const batch = fromFhir(course, { locale });
+    for (const style of ["short", "long"] as const) {
+      const text = formatParseBatch(batch, style, " | ");
+      expect(text).toContain(locale === "th" ? "เลือกอย่างใดอย่างหนึ่ง" : "Choose one");
+      expect(text).toContain(locale === "th" ? " หรือ " : " or ");
+      expect(text).toContain(locale === "th" ? "1 เม็ด" : style === "long" ? "1 tablet" : "1 tab");
+      expect(text).toContain(locale === "th" ? "2 เม็ด" : style === "long" ? "2 tablets" : "2 tab");
+      if (locale === "th") expect(text).not.toContain("Choose one");
+    }
+  });
+});
+
+describe("public batch displays preserve ordinary R5 stage ordering", () => {
+  const row = (sequence: number | undefined, value: number, clock: string): EzDosage => ({
+    sequence,
+    timing: { repeat: { timeOfDay: [clock], boundsDuration: { value: 7, code: "d", unit: "d" } } },
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
+  });
+  const rows = () => [row(1, 2, "08:00:00"), row(1, 0.5, "20:00:00"), row(2, 1, "08:00:00")];
+
+  it.each(["en", "th"])("keeps parallel members within their stage and sequences the next stage in %s", locale => {
+    const dosages = rows();
+    const marker = locale === "th" ? "จากนั้น" : "then";
+    for (const style of ["short", "long"] as const) {
+      const text = formatSigBatch(dosages, style, { locale });
+      expect(text.split(marker)).toHaveLength(2);
+      expect(text.indexOf("0.5")).toBeLessThan(text.indexOf(marker));
+      expect(text.slice(text.indexOf(marker))).toContain(locale === "th" ? "1 เม็ด" : "1 tab");
+      const imported = fromFhir(toDosageDetails(dosages), { locale });
+      expect(formatParseBatch(imported, style).split(marker)).toHaveLength(2);
+      // Input array order must not reverse the explicit sequence relationship.
+      expect(formatSigBatch([dosages[2], dosages[0], dosages[1]], style, { locale })).toBe(text);
+    }
+  });
+
+  it("does not turn simultaneous or unsequenced administrations into a taper", () => {
+    for (const sequence of [undefined, 1]) {
+      const dosages = [row(sequence, 1, "08:00:00"), row(sequence, 0.5, "20:00:00")];
+      const text = formatSigBatch(dosages, "long", { locale: "en", separator: " | " });
+      expect(text.split(" | ")).toHaveLength(2);
+      expect(text).not.toContain("then");
+    }
+  });
+});
+
+it("normalizes ordinary staged R5 batches by default without changing native course round-trip preference", () => {
+  const source = "1 drop OD q2h x1wk then qid x1wk";
+  const parsed = parseSig(source);
+  const r5 = toFhirR5Dosages(parsed.fhirNext);
+  const text = formatSigBatch(r5, "long");
+  expect(text).toMatch(/every 2 hours[\s\S]*four times daily/iu);
+  expect(text).toContain("right eye");
+  expect(formatSig(parsed.fhirNext, "long")).toBe(source);
+  expect(formatSigBatch(r5, "long", { locale: "th" })).toContain("ตาขวา");
+});
+
+describe("activity timing markers are usable by in-memory FHIR consumers", () => {
+  function expectDefined(value: unknown, path: string): void {
+    expect(value, path).not.toBeUndefined();
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) expectDefined(child, path + "." + key);
+    }
+  }
+
+  it.each([
+    "Insert 1 tablet vaginally once after menstruation ends.",
+    "Take 1 tablet once after dialysis.",
+    "รับประทาน 1 เม็ด ครั้งเดียวหลังฟอกไต"
+  ])("omits undefined datatype fields without losing source, coding or translations: %s", input => {
+    const parsed = parseSig(input);
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      const marker = rows[0].timing?.repeat?.extension?.find(e => e.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL);
+      expect(marker).toBeDefined();
+      expectDefined(marker, "activity-marker");
+      const concept = marker?.extension?.find(e => e.url === "activity")?.valueCodeableConcept;
+      expect(concept?.text).toBe(input.includes("menstruation") ? "menstruation ends" : "dialysis");
+      if (!input.includes("menstruation")) expect(concept?.coding?.[0]?.code).toBe("108241001");
+      expect(rows[0].text).toBe(parsed.fhir[0].text);
+    }
+  });
+
+  it("does not normalize, drop or label unrelated unknown modifiers", () => {
+    const course = parseSig("Take 1 tablet once after dialysis.").fhirNext;
+    const opaque: FhirExtension = { url: "urn:external:opaque", extension: [
+      { url: "count", valueInteger: 0 }, { url: "active", valueBoolean: false }
+    ] };
+    course.step[0].component[0].modifierExtension = [opaque];
+    const rows = toFhirR5Dosages(course);
+    expect(rows[0].modifierExtension?.find(e => e.url === opaque.url)).toEqual(opaque);
+    expect(fromFhir(toDosageDetails(rows)).warnings).toEqual([]);
   });
 });

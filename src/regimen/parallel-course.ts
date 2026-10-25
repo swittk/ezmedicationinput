@@ -7,7 +7,7 @@ import {
 } from '../dosage-course';
 import { canonicalToFhir, type FhirProjectionOptions } from '../fhir';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
-import type { BoundaryPlan } from './types';
+import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, type RegimenGraph } from './regimen';
 import type {
   CanonicalSigClause,

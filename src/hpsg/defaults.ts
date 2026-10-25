@@ -391,15 +391,12 @@ function normalizeMealRelations(when: EventTiming[], options: ParseOptions): Eve
       relation = code;
       break;
     }
-    const candidate = MEAL_RELATION_BY_CODE[code];
-    if (candidate && candidate !== EventTiming.Meal) {
-      relation = candidate;
-      break;
-    }
   }
   if (!relation) {
     return when;
   }
+  // Specific before/after events are complete grammar results, not defaults
+  // to spread across sibling events with their own explicit relation.
   const hasSpecificMealTarget = when.some((code) => SPECIFIC_MEAL_INDEX[code] !== undefined);
   if (!hasSpecificMealTarget) {
     return when;
@@ -411,7 +408,8 @@ function normalizeMealRelations(when: EventTiming[], options: ParseOptions): Eve
       continue;
     }
     const index = SPECIFIC_MEAL_INDEX[code];
-    normalized.push(index === undefined ? code : related[index] ?? code);
+    normalized.push(index === undefined || MEAL_RELATION_BY_CODE[code] !== EventTiming.Meal
+      ? code : related[index] ?? code);
   }
   return normalized.length ? normalized : when;
 }
@@ -508,11 +506,12 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   let durationSpan: { start: number; end: number } | undefined;
   let durationSpanCount = 0;
   for (const item of state.primaryClause.evidence) {
-    if (item.rule === "hpsg.lex.method") {
+    if (item.lexicalCategory === "method") {
       for (const span of item.spans) {
         if (span.end > methodEnd) methodEnd = span.end;
       }
-    } else if (item.rule.startsWith("hpsg.lex.schedule.duration")) {
+    } else if ((item.scheduleFields?.indexOf("duration") ?? -1) >= 0 &&
+               (item.scheduleFields?.indexOf("durationUnit") ?? -1) >= 0) {
       for (const span of item.spans) {
         durationSpan = span;
         durationSpanCount += 1;
@@ -534,9 +533,29 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   delete schedule.durationUnit;
 }
 
+/** A coordinated weekday recurrence supplies its slot cardinality unless
+ * an independent frequency constituent explicitly specifies that cardinality. */
+function applyCoordinatedWeekdayFrequency(state: ParserState): void {
+  const schedule = state.primaryClause.schedule;
+  if (!schedule?.dayOfWeek || schedule.dayOfWeek.length < 2 ||
+      schedule.frequency !== 1 || schedule.period !== 1 ||
+      schedule.periodUnit !== FhirPeriodUnit.Week || schedule.timingCode !== undefined) return;
+  let weekdayRecurrence = false;
+  for (const evidence of state.primaryClause.evidence) {
+    const fields = evidence.scheduleFields;
+    if (!fields || fields.indexOf("frequency") < 0) continue;
+    if (fields.indexOf("dayOfWeek") < 0) return;
+    weekdayRecurrence = true;
+  }
+  if (weekdayRecurrence) {
+    schedule.frequency = schedule.dayOfWeek.length * (schedule.timeOfDay?.length ?? 1);
+  }
+}
+
 function applyWeeklyDefaultForDayFilters(state: ParserState): void {
   if (
     state.dayOfWeek.length &&
+    state.occurrenceCap === undefined &&
     state.frequency === undefined &&
     state.frequencyMax === undefined &&
     state.period === undefined &&
@@ -562,6 +581,7 @@ export function applyHpsgDefaultConstraints(
   applySingleDoseDefault(state, options);
   applyRouteSiteDefault(state);
   applyWeeklyDefaultForDayFilters(state);
+  applyCoordinatedWeekdayFrequency(state);
   applyAdministrationDurationSemantics(state, options);
   applySmartMealExpansion(state, options);
   applyCompletenessWarnings(state);

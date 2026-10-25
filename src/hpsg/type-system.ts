@@ -299,6 +299,7 @@ export function canonicalFeatureStructure(value: HpsgFeatureValue): CanonicalFea
 const SIGN_TYPES = [
   "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign",
   "prn-sign", "instruction-sign", "conditional-sign", "clinical-adjunct-sign",
+  "guard-predicate-sign", "guard-operator-sign", "guard-marker-sign",
   "adjustment-sign", "connector-sign", "site-relative-marker-sign",
   "site-predicate-sign"
 ];
@@ -333,8 +334,13 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "head-marker-phrase", parents: ["headed-phrase"] },
   { name: "site-relative-clause", parents: ["head-marker-phrase"] },
   { name: "restricted-site-phrase", parents: ["head-adjunct-phrase"] },
+  { name: "recurring-course-phrase", parents: ["head-adjunct-phrase"] },
   { name: "procedure-sequence-phrase", parents: ["phrase-sign"] },
   { name: "conditional-instruction-phrase", parents: ["phrase-sign"] },
+  { name: "guard-predicate-phrase", parents: ["coordination-phrase"] },
+  { name: "guard-coordination-tail", parents: ["head-complement-phrase"] },
+  { name: "guard-negation-phrase", parents: ["head-complement-phrase"] },
+  { name: "medication-guard-phrase", parents: ["head-marker-phrase"] },
   { name: "coordination-phrase", parents: ["phrase-sign"] },
   { name: "site-coordination-phrase", parents: ["coordination-phrase"] },
   { name: "clause-sign", parents: ["phrase-sign"] },
@@ -378,6 +384,7 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
       REGIMEN_ADJUSTMENT: { valueType: "string" },
       CONDITION: { valueType: "condition-feature" },
       CLINICAL_ADJUNCT: { valueType: "clinical-adjunct-feature" },
+      GUARD: { valueType: "guard-feature" },
       SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },
       SCOPE_CLOSED: { valueType: "boolean" },
       COORDINATION_MARKER: { valueType: "coordination-marker-feature" },
@@ -396,6 +403,7 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "patient-instruction-feature", parents: ["top"] },
   { name: "condition-feature", parents: ["top"] },
   { name: "clinical-adjunct-feature", parents: ["top"] },
+  { name: "guard-feature", parents: ["top"] },
   { name: "scoped-administration-feature", parents: ["top"] },
   { name: "coordination-marker-feature", parents: ["top"] },
   { name: "site-relative-marker-feature", parents: ["top"] },

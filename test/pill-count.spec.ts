@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits } from "../src/index";
+import { calculateTotalUnits, parseSig as parseBatch, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming, FhirDosage, FhirPeriodUnit } from "../src/types";
+import { EventTiming, FhirDosage, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
 
 describe("calculateTotalUnits", () => {
     const BASE_OPTIONS = {
@@ -838,4 +838,217 @@ describe("calculateTotalUnits", () => {
         // 2 weeks include Fri/Sat/Sun/Mon twice = 8 doses
         expect(result.totalUnits).toBe(8);
     });
+});
+
+describe("maximum supply from a typed occurrence cap without fixed dose times", () => {
+  const start = "2026-11-02T00:00:00+07:00";
+  const options = { from: start, orderedAt: start, timeZone: "Asia/Bangkok" };
+  /** An occurrence cap is capacity, not an instruction to invent administration clocks. */
+  function capped(max: number, periodUnit = FhirPeriodUnit.Day): FhirDosage {
+    return {
+      asNeeded: true,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { extension: [{
+        url: TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+        extension: [
+          { url: "max", valueInteger: max },
+          { url: "period", valueQuantity: { value: 1, code: periodUnit, unit: periodUnit } }
+        ]
+      }] } }
+    };
+  }
+
+  it("counts maximum PRN supply in scalar, array, native R6 and strict R5 without creating scheduled times", () => {
+    const parsed = parseBatch("Take 1 tablet as needed up to 2 times daily.");
+    for (const dosage of [parsed.fhir[0], parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext), toDosageDetails(toFhirR5Dosages(parsed.fhirNext))]) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 14, quantityKind: "maximum" });
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([]);
+    }
+  });
+
+  it("uses calendar weekly and monthly caps rather than inventing one occurrence per period", () => {
+    expect(calculateTotalUnits({ dosage: capped(3, FhirPeriodUnit.Week), ...options,
+      durationValue: 14, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 6, quantityKind: "maximum" });
+    expect(calculateTotalUnits({ dosage: capped(4, FhirPeriodUnit.Month), ...options,
+      from: "2026-11-01T00:00:00+07:00", orderedAt: "2026-11-01T00:00:00+07:00",
+      durationValue: 30, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(4);
+  });
+
+  it("counts only intersecting cap periods and subtracts known prior administrations in each", () => {
+    const dosage = capped(2);
+    expect(calculateTotalUnits({ dosage, ...options,
+      from: "2026-11-02T12:00:00+07:00", durationValue: 1, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(4);
+    expect(calculateTotalUnits({ dosage, ...options,
+      from: "2026-11-02T12:00:00+07:00", durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+      priorDoseTimes: ["2026-11-02T09:00:00+07:00"]
+    }).totalUnits).toBe(3);
+    expect(calculateTotalUnits({ dosage, ...options,
+      from: "2026-11-02T12:00:00+07:00", durationValue: 12, durationUnit: FhirPeriodUnit.Hour
+    }).totalUnits).toBe(2);
+  });
+
+  it("respects a finite course end and permitted weekdays", () => {
+    const finite = capped(2);
+    finite.timing!.repeat!.boundsDuration = { value: 3, code: "d", unit: "d" };
+    expect(calculateTotalUnits({ dosage: finite, ...options,
+      from: "2026-11-03T12:00:00+07:00", durationValue: 14, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(4);
+    const weekdays = capped(2);
+    weekdays.timing!.repeat!.dayOfWeek = [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday, FhirDayOfWeek.Friday];
+    expect(calculateTotalUnits({ dosage: weekdays, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(6);
+  });
+
+  it("preserves tighter lifetime count and per-period quantity limits", () => {
+    const count = capped(2);
+    count.timing!.repeat!.countMax = 3;
+    expect(calculateTotalUnits({ dosage: count, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(3);
+    const quantity = capped(2);
+    quantity.maxDosePerPeriod = [{
+      numerator: { value: 1, unit: "tab" }, denominator: { value: 1, unit: "d", code: "d" }
+    }];
+    expect(calculateTotalUnits({ dosage: quantity, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(7);
+  });
+
+  it("does not count supply before treatment onset", () => {
+    expect(calculateTotalUnits({ dosage: capped(2), ...options,
+      orderedAt: "2026-11-02T12:00:00+07:00", durationValue: 6, durationUnit: FhirPeriodUnit.Hour
+    }).totalUnits).toBe(0);
+  });
+
+  it("multiplies allowed occurrences by dose size and supports subdaily periods", () => {
+    const half = capped(2);
+    half.doseAndRate![0].doseQuantity!.value = 0.5;
+    expect(calculateTotalUnits({ dosage: half, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(7);
+    expect(calculateTotalUnits({ dosage: capped(2, FhirPeriodUnit.Hour), ...options,
+      durationValue: 30, durationUnit: FhirPeriodUnit.Minute
+    }).totalUnits).toBe(2);
+    const weekdays = parseBatch("Take 1 tablet as needed up to 2 times daily except Sunday.");
+    expect(nextDueDoses(weekdays.fhirNext, { ...options, limit: 2 })).toEqual([]);
+    expect(nextDueDoses(toFhirR5Dosages(weekdays.fhirNext), { ...options, limit: 2 })).toEqual([]);
+    expect(calculateTotalUnits({ dosage: weekdays.fhirNext, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(12);
+  });
+
+  it("does not reset a rolling quantity limit at calendar midnight", () => {
+    const dosage = capped(2);
+    dosage.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab" },
+      denominator: { value: 1, unit: "d", code: "d" } }];
+    expect(calculateTotalUnits({ dosage, ...options,
+      from: "2026-11-02T12:00:00+07:00", durationValue: 1, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(1);
+    expect(calculateTotalUnits({ dosage, ...options,
+      from: "2026-11-02T12:00:00+07:00", durationValue: 36, durationUnit: FhirPeriodUnit.Hour,
+      priorDoseTimes: ["2026-11-02T10:00:00+07:00"]
+    }).totalUnits).toBe(1);
+  });
+
+  it("combines rolling quantity limits with allowed weekdays rather than separate loose bounds", () => {
+    const dosage = capped(2);
+    dosage.timing!.repeat!.dayOfWeek = [FhirDayOfWeek.Monday, FhirDayOfWeek.Friday];
+    dosage.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab" },
+      denominator: { value: 7, unit: "d", code: "d" } }];
+    expect(calculateTotalUnits({ dosage, ...options,
+      durationValue: 14, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(2);
+    const course = toDosageDetails([dosage]);
+    expect(calculateTotalUnits({ dosage: toFhirR5Dosages(course), ...options,
+      durationValue: 14, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(2);
+  });
+
+  it("uses certified whole-day conditions without inventing event times", () => {
+    const parsed = parseBatch("Take 1 tablet as needed up to 2 times daily only on dialysis days.");
+    for (const dosage of [parsed.fhir[0], parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext), toDosageDetails(toFhirR5Dosages(parsed.fhirNext))]) {
+      const base = { dosage, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day };
+      expect(calculateTotalUnits({ ...base, evaluateCondition: () => false }).totalUnits).toBe(0);
+      expect(calculateTotalUnits({ ...base, evaluateCondition: () => true }).totalUnits).toBe(14);
+      expect(calculateTotalUnits({ ...base, evaluateCondition: (_condition, at) =>
+        [2, 4, 6].includes(Number(at.slice(8, 10)))
+      }).totalUnits).toBe(6);
+      expect(calculateTotalUnits(base)).toMatchObject({ totalUnits: 14, quantityKind: "maximum" });
+    }
+  });
+
+  it("does not treat time-varying measurement conditions as constant throughout a cap period", () => {
+    const parsed = parseBatch("Take 1 tablet as needed up to 2 times daily if blood pressure is above 160.");
+    let sampled = 0;
+    const result = calculateTotalUnits({ dosage: parsed.fhirNext, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day,
+      evaluateCondition: () => { sampled++; return false; }
+    });
+    expect(sampled).toBe(0);
+    expect(result).toMatchObject({ totalUnits: 14, quantityKind: "maximum" });
+    expect(result.explanation).toContain("administration times are unspecified");
+  });
+
+  it("does not replace actual cadence or assign a maximum to uncapped PRN", () => {
+    const scheduled = capped(3);
+    scheduled.asNeeded = false;
+    Object.assign(scheduled.timing!.repeat!, { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day });
+    expect(calculateTotalUnits({ dosage: scheduled, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(14);
+    const unbounded = parseBatch("Take 1 tablet as needed.");
+    expect(() => calculateTotalUnits({ dosage: unbounded.fhirNext, ...options,
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day
+    })).toThrow(/no executable frequency|timing/i);
+  });
+});
+
+describe("fixed administration clocks with attached meal counseling", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const options = {
+    orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+    eventClock: {
+      [EventTiming.Breakfast]: "08:00",
+      [EventTiming.Lunch]: "12:30",
+      [EventTiming.Dinner]: "18:30"
+    },
+    mealOffsets: { [EventTiming["Before Meal"]]: -30 }
+  };
+
+  it.each([
+    "1 tab PO at 07:00,12:00,18:00 x7d",
+    "1 tab PO at 07:00,12:00,18:00 x7d; รับประทานก่อนอาหาร หากคลื่นไส้ให้รับประทานพร้อมอาหาร",
+    "1 tab PO at 07:00,12:00,18:00 x7d; รับประทานก่อนอาหาร หากคลื่นไส้ให้แจ้งแพทย์"
+  ])("does not add extra administrations from instructions attached to the same fixed doses: %s", source => {
+    const parsed = parseBatch(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhir, parsed.fhirNext, strict, toDosageDetails(strict)]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual([
+        "2026-11-02T07:00:00+07:00", "2026-11-02T12:00:00+07:00", "2026-11-02T18:00:00+07:00",
+        "2026-11-03T07:00:00+07:00", "2026-11-03T12:00:00+07:00", "2026-11-03T18:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits).toBe(21);
+    }
+    expect(parsed.fhir.every(dosage => !dosage.asNeeded)).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("preserves separately prescribed clock and meal-relative administrations", () => {
+    const source = "Take 1 tablet at 07:00 for 7 days and half a tablet before breakfast for 7 days.";
+    const parsed = parseBatch(source);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([
+        "2026-11-02T07:00:00+07:00", "2026-11-02T07:30:00+07:00",
+        "2026-11-03T07:00:00+07:00", "2026-11-03T07:30:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits).toBe(10.5);
+    }
+  });
 });

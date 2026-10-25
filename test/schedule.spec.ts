@@ -1,5 +1,6 @@
+import type { MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
-import { nextDueDoses, calculateTotalUnits, toDosageDetails, toFhirR5Dosages } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import {
@@ -1594,4 +1595,677 @@ describe("waking-hours overnight shifts", () => {
       }).totalUnits).toBe(4);
     }
   });
+});
+
+
+describe("repeating R6 course intervals crossing cycle boundaries", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const relative = (value: number) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] },
+    offsetDuration: { value, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
+  });
+  const makeCycle = (start: number, end: number): FhirR6DosageDetails => ({
+    repeatCycle: { value: 14, unit: "d", code: "d" },
+    step: [{ start: relative(start), end: relative(end), component: [{
+      timing: { repeat: { timeOfDay: ["08:00:00"] } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }]
+  });
+  const on = (dosage: FhirR6DosageDetails | FhirDosage[], day: string) =>
+    nextDueDoses(dosage, {
+      orderedAt, from: day + "T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 6
+    }).filter(ts => ts.startsWith(day));
+
+  it("retains the active prior-cycle dose after a new cycle begins", () => {
+    const course = makeCycle(7, 21);
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(on(dosage, "2026-11-02")).toEqual([]);
+      for (const day of ["2026-11-09", "2026-11-16", "2026-11-23", "2026-11-29"]) {
+        expect(on(dosage, day)).toEqual([day + "T08:00:00+07:00"]);
+      }
+      expect(calculateTotalUnits({
+        dosage, orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(21);
+    }
+  });
+
+  it("retains a genuine seven-day rest in an ordinary 7-on/7-off cycle", () => {
+    const course = makeCycle(0, 7);
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(on(dosage, "2026-11-02")).toEqual(["2026-11-02T08:00:00+07:00"]);
+      expect(on(dosage, "2026-11-09")).toEqual([]);
+      expect(on(dosage, "2026-11-16")).toEqual(["2026-11-16T08:00:00+07:00"]);
+      expect(calculateTotalUnits({
+        dosage, orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(14);
+    }
+  });
+  it("merges overlapping cycles chronologically without deduplicating administrations", () => {
+    const course = makeCycle(0, 21);
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(dosage, {
+        orderedAt, from: "2026-11-16T00:00:00+07:00", timeZone: "Asia/Bangkok", limit: 3
+      })).toEqual([
+        "2026-11-16T08:00:00+07:00", "2026-11-16T08:00:00+07:00",
+        "2026-11-17T08:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(35);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: "2026-11-16T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", durationValue: 7, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(14);
+    }
+  });
+
+  it("keeps a finite delayed component even when its onset is after one whole cycle", () => {
+    const course = makeCycle(21, 28);
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(dosage, { orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", limit: 1
+      })).toEqual(["2026-11-23T08:00:00+07:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 42, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(14);
+    }
+  });
+
+  it("does not accumulate unbounded daily administrations at each cycle restart", () => {
+    const course = makeCycle(0, 7);
+    delete course.step[0].end;
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(on(dosage, "2026-11-16")).toEqual(["2026-11-16T08:00:00+07:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(28);
+    }
+  });
+
+  it("preserves calendar-month offsets rather than treating each month as thirty days", () => {
+    const month = (value: number) => ({ ...relative(value),
+      offsetDuration: { value, unit: "mo", code: "mo" }
+    });
+    const course = makeCycle(0, 7);
+    course.repeatCycle = { value: 1, unit: "mo", code: "mo" };
+    course.step[0].start = month(1);
+    course.step[0].end = month(2);
+    const monthStart = "2026-11-01T00:00:00+07:00";
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(dosage, { orderedAt: monthStart, from: "2027-01-01T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 1
+      })).toEqual(["2027-01-01T08:00:00+07:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt: monthStart, from: monthStart,
+        timeZone: "Asia/Bangkok", durationValue: 3, durationUnit: FhirPeriodUnit.Month
+      }).totalUnits).toBe(62);
+    }
+  });
+
+  it("bounds each independent concurrent component within a repeated step", () => {
+    const course = makeCycle(0, 7);
+    delete course.step[0].end;
+    course.step[0].component[0].timing!.repeat!.boundsDuration = {
+      value: 21, unit: "d", code: "d"
+    };
+    course.step[0].component.push({
+      timing: { repeat: { timeOfDay: ["20:00:00"] } },
+      doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]
+    });
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(on(dosage, "2026-11-16")).toEqual([
+        "2026-11-16T08:00:00+07:00", "2026-11-16T08:00:00+07:00",
+        "2026-11-16T20:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(49);
+    }
+  });
+
+  it("stops the already-supported three-cycle instruction after the third course", () => {
+    const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat for 3 cycles");
+    expect(parsed.fhirNext.step[0].count).toBe(3);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 3
+      })).toEqual([]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 56, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(21);
+    }
+  });
+
+  it("keeps the last counted cycle's finite tail but never starts a fourth cycle", () => {
+    const course = makeCycle(7, 21);
+    course.step[0].count = 3;
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(on(dosage, "2026-12-14")).toEqual(["2026-12-14T08:00:00+07:00"]);
+      expect(on(dosage, "2026-12-21")).toEqual([]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 70, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(42);
+    }
+  });
+
+  it.each([", then stop for 7 days; repeat", "; then stop for 7 days. Repeat", ". Then stop for 7 days, repeat"])(
+    "preserves a counted source cycle across normal punctuation: %s", tail => {
+      const input = "Take 1 tablet daily for 7 days" + tail + " for 3 cycles.";
+      const parsed = parseSig(input);
+      expect(parsed.fhirNext.repeatCycle?.value).toBe(14);
+      expect(parsed.fhirNext.step[0].count).toBe(3);
+      expect(parsed.fhirNext.renderedInstruction).toBe(input);
+      for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
+          timeZone: "Asia/Bangkok", limit: 3
+        })).toEqual([]);
+        expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+          timeZone: "Asia/Bangkok", durationValue: 56, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(21);
+      }
+    }
+  );
+
+  it.each([1, 3])("shows a source-less cycle count of %i in both languages", count => {
+    const course = makeCycle(0, 7);
+    course.step[0].count = count;
+    for (const input of [course, toFhirR5Dosages(course)]) {
+      expect(formatSig(input, "long", { locale: "en" }))
+        .toContain(count + (count === 1 ? " cycle" : " cycles"));
+      expect(formatSig(input, "long", { locale: "th" })).toContain(count + " รอบ");
+    }
+  });
+
+});
+
+describe("scalar R5 retained-course execution parity", () => {
+  const options = {
+    timeZone: "Asia/Bangkok",
+    orderedAt: "2026-11-02T00:00:00+07:00",
+    from: "2026-11-02T00:00:00+07:00"
+  };
+  const course = parseSig("Take 1 tablet at 08:00 for 7 days then stop for 7 days repeat for 3 cycles").fhirNext;
+
+  it("keeps later active cycles and the final cycle bound when one retained R5 row is supplied", () => {
+    const row = toFhirR5Dosages(course)[0];
+    for (const dosage of [row, { ...row, text: undefined, patientInstruction: undefined }]) {
+      expect(nextDueDoses(dosage, {
+        ...options, from: "2026-11-16T00:00:00+07:00", limit: 2
+      })).toEqual(["2026-11-16T08:00:00+07:00", "2026-11-17T08:00:00+07:00"]);
+      expect(nextDueDoses(dosage, {
+        ...options, from: "2026-12-14T00:00:00+07:00", limit: 2
+      })).toEqual([]);
+    }
+  });
+
+  it("counts three active weeks as 21 tablets rather than only the first seven", () => {
+    const row = toFhirR5Dosages(course)[0];
+    for (const dosage of [course, [row], row, { ...row, text: undefined, patientInstruction: undefined }]) {
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 56, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(21);
+    }
+  });
+
+  it("preserves a delayed source-less start for a single retained course row", () => {
+    const day = (value: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] },
+      offsetDuration: { value, unit: "d", code: "d" }
+    });
+    const delayed: FhirR6DosageDetails = { step: [{
+      start: day(14), end: day(21), component: [{
+        timing: { repeat: { timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]
+      }]
+    }] };
+    const row = toFhirR5Dosages(delayed)[0];
+    expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([
+      "2026-11-16T08:00:00+07:00", "2026-11-17T08:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({
+      ...options, dosage: row, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(3.5);
+  });
+});
+
+describe("execution follows typed course semantics rather than narrative reparsing", () => {
+  const options = {
+    timeZone: "Asia/Bangkok",
+    orderedAt: "2026-11-02T00:00:00+07:00",
+    from: "2026-11-16T00:00:00+07:00",
+    limit: 2
+  };
+  it.each(["text", "patientInstruction"] as const)("does not invent additional cycles from retained %s", field => {
+    const dosage: FhirDosage = {
+      [field]: "Take 1 tablet daily for 7 days, then stop for 7 days and repeat.",
+      timing: { repeat: {
+        timeOfDay: ["08:00:00"], boundsDuration: { value: 7, unit: "d", code: "d" }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    // Narrative survives an edit/import, but cannot recreate absent cycle fields.
+    expect(nextDueDoses(dosage, options)).toEqual([]);
+    expect(calculateTotalUnits({
+      ...options, from: options.orderedAt, dosage,
+      durationValue: 56, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(7);
+    expect(dosage[field]).toBe("Take 1 tablet daily for 7 days, then stop for 7 days and repeat.");
+  });
+});
+
+describe("monthly execution does not reparse retained narrative", () => {
+  it.each(["text", "patientInstruction"] as const)("keeps the structured monthly anchor when stale %s is present", field => {
+    const dosage: FhirDosage = {
+      [field]: "Take on the first Monday of each month.",
+      timing: { repeat: {
+        period: 1, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: [FhirDayOfWeek.Monday], timeOfDay: ["08:00:00"],
+        boundsPeriod: { start: "2026-11-09" }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const options = {
+      timeZone: "Asia/Bangkok", orderedAt: "2026-11-09T00:00:00+07:00",
+      from: "2026-11-09T00:00:00+07:00", limit: 3
+    };
+    for (const input of [dosage, toDosageDetails([dosage]), toFhirR5Dosages(toDosageDetails([dosage]))]) {
+      expect(nextDueDoses(input, options)).toEqual([
+        "2026-11-09T08:00:00+07:00", "2026-12-14T08:00:00+07:00", "2027-01-11T08:00:00+07:00"
+      ]);
+    }
+    expect(dosage[field]).toBe("Take on the first Monday of each month.");
+  });
+});
+
+describe("one-time activity timing is owned by HPSG, not counseling text", () => {
+  const options = {
+    timeZone: "Asia/Bangkok",
+    orderedAt: "2026-11-02T08:00:00+07:00",
+    from: "2026-11-02T08:00:00+07:00", limit: 2
+  };
+  it.each(["Do not drive after taking.", "Do not lie down after taking."])(
+    "does not cancel a one-time administration because of separate advice: %s", advice => {
+      const parsed = parseSig("Take 1 tablet once. " + advice);
+      for (const dosage of [parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(nextDueDoses(dosage, options)).toEqual(["2026-11-02T08:00:00+07:00"]);
+        expect(calculateTotalUnits({ ...options, dosage,
+          durationValue: 1, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(1);
+      }
+      expect(parsed.longText.toLowerCase()).toContain(advice.toLowerCase().replace(/\.$/u, ""));
+    }
+  );
+
+  it.each(["menstruation ends", "menstruation finishes", "dressing change"])(
+    "keeps an administration-owned unresolved activity anchor without relying on source prose: %s", activity => {
+      const parsed = parseSig("Insert 1 tablet vaginally once after " + activity + ".");
+      expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming).toEqual([
+        expect.objectContaining({ relation: "after", activity: expect.objectContaining({ text: activity }) })
+      ]);
+      const dosage = { ...parsed.fhir, text: undefined, patientInstruction: undefined, additionalInstruction: undefined };
+      for (const input of [dosage, toDosageDetails([dosage]), toFhirR5Dosages(toDosageDetails([dosage]))]) {
+        expect(nextDueDoses(input, options)).toEqual([]);
+        expect(calculateTotalUnits({ ...options, dosage: input,
+          durationValue: 1, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(0);
+      }
+      expect(parsed.longText.toLowerCase()).toContain(activity);
+    }
+  );
+
+  it.each(["patientInstruction", "additionalInstruction"] as const)(
+    "does not let imported %s veto a structured one-time dated dose", field => {
+      const advice = "Do not drive after taking.";
+      const dosage: FhirDosage = {
+        timing: { repeat: { count: 1, boundsPeriod: { start: options.orderedAt } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        ...(field === "patientInstruction" ? { patientInstruction: advice } : { additionalInstruction: [{ text: advice }] })
+      };
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-11-02T08:00:00+07:00"]);
+      expect(calculateTotalUnits({ ...options, dosage,
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(1);
+    }
+  );
+});
+
+describe("Thai one-time event ownership", () => {
+  it.each([
+    { input: "รับประทาน 1 เม็ด ครั้งเดียวหลังฟอกไต", due: [], activity: true },
+    { input: "รับประทาน 1 เม็ด ครั้งเดียว ห้ามขับรถหลังรับประทานยา", due: ["2026-11-02T08:00:00+07:00"], activity: false }
+  ])("keeps activity timing distinct from separate counseling: $input", ({ input, due, activity }) => {
+    const parsed = parseSig(input, { locale: "th" });
+    expect(Boolean(parsed.meta.canonical.clauses[0].schedule?.activityTiming?.length)).toBe(activity);
+    for (const dosage of [parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, {
+        timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T08:00:00+07:00",
+        from: "2026-11-02T08:00:00+07:00", limit: 1
+      })).toEqual(due);
+    }
+    expect(parsed.input).toBe(input);
+  });
+});
+
+
+describe("selective withholding targets individual administrations", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it.each([
+    ["Take 1 tablet at 08:00 and 20:00 daily, but hold only the 20:00 dose if blood pressure is below 100 mmHg.", "08:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily, but hold only the 08:00 dose if blood pressure is below 100 mmHg.", "20:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily, but hold the evening dose if blood pressure is below 100 mmHg.", "08:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily. If blood pressure is below 100 mmHg, hold the evening dose only.", "08:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily, but hold 20:00 if blood pressure is below 100 mmHg.", "08:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily, but hold only 20:00 if blood pressure is below 100 mmHg.", "08:00"],
+    ["Take 1 tablet at 08:00 and 20:00 daily. Omit PM if blood pressure is below 100 mmHg.", "08:00"]
+  ])("does not suppress the unaffected scheduled dose: %s", (input, unaffected) => {
+    const parsed = parseSig(input);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (bp: number) => nextDueDoses(dosage, {
+        orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 6,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { "blood pressure": bp })
+      }).filter(value => value.startsWith("2026-11-02")).map(value => value.slice(11,16));
+      expect(on(90)).toEqual([unaffected]);
+      expect(on(110)).toEqual(["08:00", "20:00"]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(2);
+  });
+
+  it.each([
+    "Take 1 tablet at 08:00 and 20:00 every day, except omit the evening dose on Sundays.",
+    "Take 1 tablet at 08:00 and 20:00 every day, except omit the 20:00 dose on Sundays.",
+    "Take 1 tablet at 08:00 and 20:00 every day. Omit the evening dose every Sunday.",
+    "Take 1 tablet at 08:00 and 20:00 every day. On Sundays omit the 20:00 dose.",
+    "Take 1 tablet at 08:00 and 20:00 every day; skip 20:00 on Sundays.",
+    "Take 1 tablet at 08:00 and 20:00 every day. Do not take the evening tablet on Sundays."
+  ])("keeps morning dosing on a day with a selected evening omission: %s", input => {
+    const parsed = parseSig(input);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (day: string) => nextDueDoses(dosage, {
+        orderedAt, from: day + "T00:00:00+07:00", timeZone: "Asia/Bangkok", limit: 6
+      }).filter(value => value.startsWith(day)).map(value => value.slice(11,16));
+      expect(on("2026-11-08")).toEqual(["08:00"]);
+      expect(on("2026-11-09")).toEqual(["08:00", "20:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 7, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(13);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+  it("retains both slots of an explicit all-dose hold and does not reinterpret a physical hold", () => {
+    const all = parseSig("Take 1 tablet at 08:00 and 20:00 daily; hold all doses if blood pressure is below 100 mmHg.");
+    const base = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 3 };
+    expect(nextDueDoses(all.fhirNext, { ...base, evaluateCondition: condition =>
+      evaluateMedicationCondition(condition, { "blood pressure": 90 }) })).toEqual([]);
+    const physical = parseSig("Take 1 tablet at 08:00 and 20:00 daily. Hold your breath during inhalation.");
+    expect(nextDueDoses(physical.fhirNext, { ...base, evaluateCondition: () => false })
+      .filter(value => value.startsWith("2026-11-02")).map(value => value.slice(11,16)))
+      .toEqual(["08:00", "20:00"]);
+  });
+
+  it("partitions a selected meal-event dose without losing its before-meal relation", () => {
+    const source = "Take 1 tablet before breakfast and dinner daily; hold the dinner dose if blood pressure is below 100 mmHg.";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.step[0].component.map(component => component.timing?.repeat?.when))
+      .toEqual([["ACM"], ["ACV"]]);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const base = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+        eventClock: { CM: "08:00", CV: "18:00" }, limit: 5 };
+      const on = (bp: number) => nextDueDoses(dosage, { ...base,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { "blood pressure": bp })
+      }).filter(value => value.startsWith("2026-11-02")).map(value => value.slice(11,16));
+      // No numeric offset was supplied: preserve the relative event codes
+      // while using the configured anchors, rather than inventing 30 minutes.
+      expect(on(90)).toEqual(["08:00"]);
+      expect(on(110)).toEqual(["08:00", "18:00"]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+});
+
+
+describe("symptom-conditioned withholding keeps positive PRN distinct", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const evaluate = (present: boolean) => (condition: MedicationCondition): boolean => {
+    const visit = (value: MedicationCondition): boolean => value.kind === "not" ? !visit(value.condition) :
+      value.kind === "all" ? value.conditions.every(visit) :
+      value.kind === "any" ? value.conditions.some(visit) : present;
+    return visit(condition);
+  };
+  it.each([
+    "Take 1 tablet at 08:00 daily. If dizzy, hold the morning dose.",
+    "Take 1 tablet at 08:00 daily. On days with dizziness, hold the morning dose.",
+    "Take 1 tablet at 08:00 daily. If dizzy, omit the morning dose."
+  ])("uses the existing typed withholding action to license the conditional predicate: %s", source => {
+    const parsed = parsePublicSig(source);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      const options = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 2 };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluate(true) })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluate(false) })[0])
+        .toBe("2026-11-02T08:00:00+07:00");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+  it.each([
+    "Take 1 tablet at 08:00 daily. If dizzy, hold your breath.",
+    "Take 1 tablet at 08:00 daily. If dizzy, do not hold the morning dose."
+  ])("does not invent a medication-withholding guard for a different action sense: %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(nextDueDoses(parsed.fhirNext, { orderedAt, from: orderedAt,
+      timeZone: "Asia/Bangkok", limit: 1, evaluateCondition: evaluate(true) })[0])
+      .toBe("2026-11-02T08:00:00+07:00");
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("later counseling never changes an earlier selective withholding guard", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it.each(["avoid alcohol", "งดสุรา", "ห้ามขับรถหลังรับประทานยา", "do not drive"])(
+    "keeps the clinical guard and dose target when adding unrelated counseling: %s", advice => {
+      const input = "1 tab PO at 08:00 and 20:00 x14d; HOLD 20:00 dose if SBP <100; " + advice;
+      const parsed = parsePublicSig(input);
+      for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+        for (const sbp of [90, 130]) {
+          const options = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+            evaluateCondition: (condition: MedicationCondition) => evaluateMedicationCondition(condition, { sbp }), limit: 4 };
+          expect(nextDueDoses(dosage, options).filter(value => value.startsWith("2026-11-02"))
+            .map(value => value.slice(11,16))).toEqual(sbp < 100 ? ["08:00"] : ["08:00", "20:00"]);
+          expect(calculateTotalUnits({ dosage, ...options, durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+            .toBe(sbp < 100 ? 14 : 28);
+        }
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    }
+  );
+});
+
+describe("elapsed intervals retain a single explicit clock as their phase anchor", () => {
+  const start = "2026-11-02T00:00:00+07:00";
+  const base = { orderedAt: start, from: start, timeZone: "Asia/Bangkok", limit: 40 };
+  it.each([
+    ["1 tab PO q48h at 08:00 x14d", 48, "08:00:00", 14, 7],
+    ["1 tab PO q12h at 08:00 x7d", 12, "08:00:00", 7, 14],
+    ["1 tab PO q8h at 06:00 x7d", 8, "06:00:00", 7, 21]
+  ] as const)("does not degrade %s into one dose every day", (input, hours, clock, days, total) => {
+    const parsed = parseSig(input);
+    const plain: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: hours, periodUnit: FhirPeriodUnit.Hour,
+        timeOfDay: [clock], boundsDuration: { value: days, unit: "d", code: "d" } } } };
+    const course = toDosageDetails([parsed.fhir]);
+    const anchor = new Date("2026-11-02T" + clock + "+07:00").getTime();
+    const expected = Array.from({ length: total }, (_, i) => anchor + i * hours * 3600000);
+    for (const dosage of [plain, parsed.fhir, course, toFhirR5Dosages(course), toDosageDetails(toFhirR5Dosages(course))]) {
+      expect(nextDueDoses(dosage, base).map(Date.parse)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...base, durationValue: days, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(total);
+    }
+  });
+
+  it("does not reanchor a 48-hour regimen when querying a later day", () => {
+    const dosage = parseSig("1 tab PO q48h at 08:00 x14d").fhir;
+    expect(nextDueDoses(dosage, { ...base, from: "2026-11-03T00:00:00+07:00", limit: 2 })).toEqual([
+      "2026-11-04T08:00:00+07:00", "2026-11-06T08:00:00+07:00"
+    ]);
+  });
+
+  it("derives prior count from the interval rather than one occurrence per clock day", () => {
+    const dosage: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 3, period: 12, periodUnit: FhirPeriodUnit.Hour, timeOfDay: ["08:00:00"] } } };
+    const options = { ...base, from: "2026-11-03T00:00:00+07:00" };
+    expect(nextDueDoses(dosage, options)).toEqual(["2026-11-03T08:00:00+07:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+  });
+
+  it("starts a new explicit-clock interval at each finite phase boundary", () => {
+    const parsed = parseSig("1 tab PO q12h at 08:00 x7d then 1 tab PO q24h at 08:00 x7d");
+    const course = toDosageDetails(parsed.items.map(item => item.fhir));
+    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(dosage, { ...base, limit: 2 })).toEqual([
+        "2026-11-02T08:00:00+07:00", "2026-11-02T20:00:00+07:00"
+      ]);
+      expect(nextDueDoses(dosage, { ...base, from: "2026-11-09T00:00:00+07:00", limit: 2 })).toEqual([
+        "2026-11-09T08:00:00+07:00", "2026-11-10T08:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...base, durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+    }
+  });
+
+  it("honors treatment onset and preserves ordinary calendar-day and explicit-list schedules", () => {
+    const hourly = parseSig("1 tab PO q12h at 08:00 x7d").fhir;
+    expect(nextDueDoses(hourly, { ...base, orderedAt: "2026-11-02T12:00:00+07:00", from: "2026-11-02T12:00:00+07:00", limit: 2 })).toEqual([
+      "2026-11-03T08:00:00+07:00", "2026-11-03T20:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({ dosage: parseSig("1 tab PO qod at 08:00 x14d").fhir,
+      ...base, durationValue: 14, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(7);
+    expect(calculateTotalUnits({ dosage: parseSig("1 tab PO at 08:00 and 20:00 x7d").fhir,
+      ...base, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(14);
+  });
+
+  it("keeps hourly elapsed intervals distinct from daily wall-clock lists across DST", () => {
+    const options = { timeZone: "America/New_York", orderedAt: "2024-03-09T00:00:00-05:00", from: "2024-03-09T00:00:00-05:00", limit: 4 };
+    const hourly = parseSig("1 tab PO q12h at 08:00 x3d").fhir;
+    expect(nextDueDoses(hourly, options)).toEqual([
+      "2024-03-09T08:00:00-05:00", "2024-03-09T20:00:00-05:00",
+      "2024-03-10T09:00:00-04:00", "2024-03-10T21:00:00-04:00"
+    ]);
+    const clocks = parseSig("1 tab PO at 08:00 and 20:00 x3d").fhir;
+    expect(nextDueDoses(clocks, options)).toEqual([
+      "2024-03-09T08:00:00-05:00", "2024-03-09T20:00:00-05:00",
+      "2024-03-10T08:00:00-04:00", "2024-03-10T20:00:00-04:00"
+    ]);
+  });
+});
+
+
+describe("registered medication nouns in withholding conditions", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it.each([
+    "1 tab PO at 08:00 x7d; งดยาหาก SBP <90",
+    "1 tab PO at 08:00 x7d; ถ้า SBP<90 ให้งดยา",
+    "1 tab PO at 08:00 x7d; avoid medication if SBP <90"
+  ])("binds a conditional registered avoidance action to the prescribed medication: %s", source => {
+    const parsed = parsePublicSig(source);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (sbp: number) => nextDueDoses(dosage, { orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", limit: 2,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { sbp }) });
+      expect(on(80)).toEqual([]);
+      expect(on(130)[0]).toBe("2026-11-02T08:00:00+07:00");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains Thai symptom-condition withholding on the medication object", () => {
+    const source = "1 tab PO at 08:00 x7d; ถ้าเวียนศีรษะ ให้งดยา";
+    const parsed = parsePublicSig(source);
+    const evaluator = (present: boolean) => (condition: MedicationCondition) =>
+      condition.kind === "not" ? !present : present;
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const options = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 2 };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluator(true) })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluator(false) })[0]).toContain("08:00:00");
+    }
+  });
+
+  it("uses the same contextual-day daughter as an inverse guard under HOLD", () => {
+    const source = "1 tab PO at 08:00 x7d; HOLD on dialysis days";
+    const parsed = parsePublicSig(source);
+    const evaluate = (member: boolean) => (condition: MedicationCondition) => condition.kind === "not" ? !member : member;
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const options = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 2 };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluate(true) })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: evaluate(false) })[0]).toContain("08:00:00");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["avoid food if SBP <90", "hold your breath if SBP <90", "hold your breath on dialysis days"])(
+    "does not turn a different procedural object into a medication guard: %s", advice => {
+      const parsed = parsePublicSig("1 tab PO at 08:00 x7d; " + advice);
+      expect(nextDueDoses(parsed.fhirNext, { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 1,
+        evaluateCondition: () => false })[0]).toBe("2026-11-02T08:00:00+07:00");
+    }
+  );
+
+  it("keeps a second PRN administration's explicit numeric IF separate from its standing dose", () => {
+    const source = "1 tab PO at 08:00 x14d; 0.5 tab PO at 20:00 PRN if SBP >160";
+    const parsed = parsePublicSig(source);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) for (const sbp of [130, 170]) {
+      const due = nextDueDoses(dosage, { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 4,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { sbp })
+      }).filter(value => value.startsWith("2026-11-02")).map(value => value.slice(11,16));
+      expect(due).toEqual(sbp > 160 ? ["08:00", "20:00"] : ["08:00"]);
+    }
+  });
+});
+
+
+describe("conditional counseling keeps the standing medication scheduled", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it.each([
+    "รับประทานก่อนอาหาร หากคลื่นไส้ให้รับประทานพร้อมอาหาร",
+    "หากคลื่นไส้ให้แจ้งแพทย์",
+    "if nauseated, contact the doctor"
+  ])("keeps a conditional advice action out of the standing dose's PRN/timing: %s", advice => {
+    const source = "1 tab PO at 07:00,12:00,18:00 x7d; " + advice;
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].asNeeded).not.toBe(true);
+    expect(parsed.fhir[0].asNeededFor).toBeUndefined();
+    expect(parsed.fhir[0].timing?.repeat?.when ?? []).not.toContain("C");
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 3,
+        evaluateCondition: () => false }).map(value => value.slice(11,16)))
+        .toEqual(["07:00", "12:00", "18:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("does not let later advice arguments erase a preceding numeric HOLD predicate", () => {
+    const source = "1 tab PO qAM; HOLD if SBP <100 mmHg; วัดความดันก่อนกินยา หากเวียนศีรษะให้ติดต่อแพทย์";
+    const parsed = parsePublicSig(source);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const options = { orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", eventClock: { MORN: "08:00" }, limit: 1 };
+      expect(nextDueDoses(dosage, { ...options,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { sbp: 90 }) })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options,
+        evaluateCondition: condition => evaluateMedicationCondition(condition, { sbp: 130 }) })[0])
+        .toBe("2026-11-02T08:00:00+07:00");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["Take 1 tablet if nausea.", "If nausea, take 1 tablet.", "Take 1 tablet PRN nausea."])(
+    "keeps a genuinely conditional medication administration PRN: %s", source => {
+      expect(parsePublicSig(source).fhir[0].asNeeded).toBe(true);
+    }
+  );
 });

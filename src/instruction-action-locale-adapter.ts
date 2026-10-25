@@ -90,6 +90,19 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
 
+/** Preserve both typed participants of a negated relational action. */
+function negatedAttachmentArguments(c: InstructionActionRealizationInput): {
+  theme?: string; target?: string;
+} {
+  const theme = c.frame.args.find(arg => arg.role === AdviceArgumentRole.Theme);
+  const target = theme && c.frame.args.find(arg =>
+    arg !== theme && (arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Object)
+  );
+  return theme && target
+    ? { theme: c.translateArgumentConcept(theme), target: c.translateArgumentConcept(target) }
+    : { target: c.site ?? c.theme ?? c.substance ?? c.material };
+}
+
 const EN_NEGATED_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
   [AdviceModality.Should]: "Should not ", [AdviceModality.Must]: "Must not "
 };
@@ -399,7 +412,8 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
     }
     if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
-      return `${prefix}${c.label.toLowerCase()} ${relation} ${object}`;
+      const attachment = negatedAttachmentArguments(c);
+      return `${prefix}${c.label.toLowerCase()}${attachment.theme ? ` ${attachment.theme}` : ""} ${relation} ${attachment.target}`;
     }
     if (relationTarget && c.frame.relation === AdviceRelation.Without) {
       const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "without";
@@ -471,7 +485,8 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     const prefix = (c.frame.modality && TH_NEGATED_MODALITY_PREFIX[c.frame.modality]) ?? "ห้าม";
     if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
-      return `${prefix}${c.label}${relation}${object}`;
+      const attachment = negatedAttachmentArguments(c);
+      return `${prefix}${c.label}${attachment.theme ?? ""}${relation}${attachment.target}`;
     }
     if (relationTarget && c.frame.relation === AdviceRelation.Without) {
       const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "โดยไม่";

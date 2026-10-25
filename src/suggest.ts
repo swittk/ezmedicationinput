@@ -1247,7 +1247,7 @@ function semanticTrajectorySuggestions(
   const actionDefinition = suggestionActionDefinitionForClause(normalized, clause, options);
   const supportsDose = actionDefinition?.definesDose === true || actionDefinition?.acceptsAmount === true;
   const actionOnly = (clause.evidence ?? []).length > 0 &&
-    (clause.evidence ?? []).every((evidence) => evidence.rule === "hpsg.lex.method");
+    (clause.evidence ?? []).every((evidence) => evidence.lexicalCategory === "method");
 
   const suggestions: string[] = [];
   const seen = new Set<string>();

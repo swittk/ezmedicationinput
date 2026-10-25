@@ -35,10 +35,12 @@ import {
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
   COUNT_CONNECTOR_WORDS_DATA,
+  SUPPLEMENTAL_DOSE_MODIFIERS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_FRACTION_WORDS,
+  DOSE_TARGET_SLOT_HEADS,
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
   IMPLICIT_SINGLE_DOSE_UNITS,
@@ -146,36 +148,54 @@ export function phaseAdjustmentAt(tokens: readonly Token[], start: number, limit
   if (!first || start >= limit) return undefined;
   const candidates = PHASE_ADJUSTMENTS_BY_FIRST.get(normalizeTokenLower(first));
   if (!candidates) return undefined;
-  // The same typed transitive adjustment can select one explicit clock dose
-  // with or without the contrastive ONLY. Both variants are constrained by
-  // an overt target noun, clock and an independently valid amount daughter.
+  // A transitive adjustment may select a nominal dose or a temporal target,
+  // with or without an explicit restrictor. Its clock and target amount must
+  // still be independent typed daughters of the registered verb/linker.
   const negated = ACTION_DIRECTIVE_PREFIXES.some(prefix =>
     prefix.polarity === AdvicePolarity.Negate && start >= prefix.parts.length &&
     prefix.parts.every((part, index) =>
       normalizeTokenLower(tokens[start - prefix.parts.length + index]) === part));
   if (negated) return undefined;
-  const restrictive = tokens[start + 1] &&
-    lexicalClasses.phaseTargetRestrictors.indexOf(normalizeTokenLower(tokens[start + 1])) >= 0;
-  const determinerIndex = start + (restrictive ? 2 : 1);
-  const clockIndex = determinerIndex + 1;
-  const targetClock = tokens[clockIndex];
-  const targetNoun = tokens[clockIndex + 1];
-  const linker = tokens[clockIndex + 2];
-  if (tokens[determinerIndex] &&
-      lexicalClasses.phaseTargetDeterminers.indexOf(normalizeTokenLower(tokens[determinerIndex])) >= 0 &&
-      targetClock?.kind === LexKind.TimeLike && targetNoun && linker &&
-      lexicalClasses.phaseDoseNouns.indexOf(normalizeTokenLower(targetNoun)) >= 0 &&
-      lexicalClasses.phaseTargetLinkers.indexOf(normalizeTokenLower(linker)) >= 0 &&
-      candidates.some(candidate => candidate.kind === "replace" &&
-        candidate.parts.length === 2 && candidate.parts[1] === normalizeTokenLower(linker)) &&
-      explicitDoseLexicalEnd(tokens, clockIndex + 3, undefined, limit) !== undefined) {
-    return { kind: "replace-target" as const, end: clockIndex + 3, clockStart: clockIndex };
+  for (const candidate of candidates) {
+    if (candidate.kind !== "replace" || candidate.parts.length < 2) continue;
+    // The registered verb selects its own target-amount linker. Its target
+    // can be a nominal dose (the 20:00 dose) or an explicit time (at 20:00).
+    // Both are typed clock arguments; neither licenses arbitrary text targets.
+    const headLength = candidate.parts.length - 1;
+    if (!candidate.parts.every((part, index) => index === headLength ||
+        tokens[start + index] && normalizeTokenLower(tokens[start + index]) === part)) continue;
+    let targetIndex = start + headLength;
+    if (tokens[targetIndex] && lexicalClasses.phaseTargetRestrictors.indexOf(
+      normalizeTokenLower(tokens[targetIndex])) >= 0) targetIndex++;
+    const lead = tokens[targetIndex] && normalizeTokenLower(tokens[targetIndex]);
+    const nominal = lead && lexicalClasses.phaseTargetDeterminers.indexOf(lead) >= 0;
+    const temporal = lead && CLOCK_LEAD_TOKENS.has(lead);
+    const doseSlot = lead && DOSE_TARGET_SLOT_HEADS.has(lead);
+    const prefixedTarget = nominal || temporal || doseSlot;
+    const targetStart = targetIndex + (prefixedTarget ? 1 : 0);
+    const event = tokens[targetStart] && EVENT_TIMING_TOKENS[normalizeTokenLower(tokens[targetStart])];
+    if (tokens[targetStart]?.kind !== LexKind.TimeLike && !event) continue;
+    let linkerIndex = targetStart + 1;
+    const noun = tokens[linkerIndex] && lexicalClasses.phaseDoseNouns.indexOf(
+      normalizeTokenLower(tokens[linkerIndex])) >= 0;
+    if ((nominal || !prefixedTarget) && !noun) continue;
+    if (noun) linkerIndex++;
+    const linker = tokens[linkerIndex] && normalizeTokenLower(tokens[linkerIndex]);
+    if (!linker || lexicalClasses.phaseTargetLinkers.indexOf(linker) < 0 ||
+        linker !== candidate.parts[headLength] || linkerIndex + 1 >= limit ||
+        explicitDoseLexicalEnd(tokens, linkerIndex + 1, undefined, limit) === undefined) continue;
+    return { kind: "replace-target" as const, end: linkerIndex + 1, targetStart };
   }
   for (const { kind, parts } of candidates) {
     if (start + parts.length >= limit) continue;
     if (parts.every((part, index) => tokens[start + index] &&
       normalizeTokenLower(tokens[start + index]) === part)) {
-      return { kind, end: start + parts.length };
+      // A supplemental modifier belongs to the dose NP (another half tablet),
+      // not to both the ADD operator and its amount daughter. The lexical head
+      // may select that modifier without consuming overlapping source spans.
+      const supplemental = kind === "add" && parts.length > 1 &&
+        SUPPLEMENTAL_DOSE_MODIFIERS.has(parts[parts.length - 1]);
+      return { kind, end: start + parts.length - (supplemental ? 1 : 0) };
     }
   }
   return undefined;
@@ -189,14 +209,17 @@ export function phaseAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     const tokens = tokensAvailable(context, start, match.end - start);
     if (!tokens) return [];
     if (match.kind === "replace-target") {
-      const clock = timeOfDayRule().match(context, match.clockStart).find(item =>
-        item.synsem.head.schedule?.timeOfDay?.length === 1);
-      if (!clock) return [];
+      const targetRule = context.tokens[match.targetStart].kind === LexKind.TimeLike
+        ? timeOfDayRule() : timingLexicalRule();
+      const target = targetRule.match(context, match.targetStart).find(item =>
+        (item.synsem.head.schedule?.timeOfDay?.length ?? 0) +
+        (item.synsem.head.schedule?.when?.length ?? 0) === 1);
+      if (!target) return [];
       return [lexicalSign({
         type: "adjustment-sign",
         rule: "hpsg.lex.regimen.targeted-phase-adjustment",
         tokens,
-        synsem: { head: { schedule: clock.synsem.head.schedule }, valence: {},
+        synsem: { head: { schedule: target.synsem.head.schedule }, valence: {},
           cont: { regimenAdjustment: "replace-target" } },
         score: 25 + tokens.length
       })];
@@ -770,15 +793,9 @@ function doseNumeratorValue(token: Token, lower: string): number | undefined {
   return DOSE_NUMBER_WORDS.get(lower);
 }
 
-// These prenominal modifiers already belong to the shared count-connector
-// vocabulary. Their intersection is intentionally narrow: other count words
-// such as `maximum`, `total`, and `more` have different scope constructions.
-const SUPPLEMENTAL_DOSE_MODIFIERS = new Set(
-  ["additional", "extra"].filter(word => COUNT_CONNECTOR_WORDS_DATA.has(word))
-);
-
 interface SupplementalDosePrefix {
   quantityStart: number;
+  unitStart?: number;
 }
 
 /** Maximal source prefix for a supplemental scalar dose NP. */
@@ -789,6 +806,13 @@ function supplementalDosePrefixAt(
 ): SupplementalDosePrefix | undefined {
   const first = tokens[start];
   if (!first || start < 0 || start >= limit) return undefined;
+  const afterQuantity = tokens[start + 1];
+  if (!DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(first)) &&
+      doseNumeratorValue(first, normalizeTokenLower(first)) !== undefined &&
+      start + 1 < limit && afterQuantity &&
+      SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(afterQuantity))) {
+    return { quantityStart: start, unitStart: start + 2 };
+  }
   let modifierIndex = start;
   if (DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(first))) modifierIndex += 1;
   const modifier = tokens[modifierIndex];
@@ -824,7 +848,7 @@ function supplementalDoseAfter(
   }
 
   let value = DOSE_FRACTION_WORDS.get(quantityLower);
-  let unitStart = prefix.quantityStart + 1;
+  let unitStart = prefix.unitStart ?? prefix.quantityStart + 1;
   if (value === undefined) {
     const numerator = doseNumeratorValue(quantityToken, quantityLower);
     if (numerator === undefined) return undefined;
@@ -896,6 +920,8 @@ function explicitScalarDoseLexicalEnd(
   }
 
   let cursor = start + 1;
+  if (tokens[cursor] && cursor < limit &&
+      SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(tokens[cursor]))) cursor++;
   const additiveConnector = tokens[cursor];
   if (numeratorValue !== undefined && Number.isInteger(numeratorValue) && numeratorValue > 0 &&
       additiveConnector && DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(

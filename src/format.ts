@@ -397,7 +397,26 @@ function describeAlternateEventCadenceEnglish(
   return undefined;
 }
 
+/** Daily recurrence applies to every explicit clock, not one occurrence in total.
+ * Presentation may say "daily at ..." without rewriting the stored frequency.
+ * Explicit ranges and counts other than one retain their authored summary.
+ * @param schedule Typed timing to realize; source text is never inspected.
+ */
+export function hasDailyRecurrenceAcrossClocks(schedule: CanonicalScheduleExpr | undefined): boolean {
+  if (!schedule || schedule.frequencyMax !== undefined || schedule.periodMax !== undefined ||
+      (schedule.period !== undefined && schedule.period !== 1)) return false;
+  const daily = schedule.frequency === 1 && schedule.periodUnit === FhirPeriodUnit.Day ||
+    schedule.timingCode === "QD" &&
+    (schedule.frequency === undefined || schedule.frequency === 1) &&
+    (schedule.periodUnit === undefined || schedule.periodUnit === FhirPeriodUnit.Day);
+  const clocks = schedule.timeOfDay;
+  if (!daily || !clocks || clocks.length < 2) return false;
+  const first = clocks[0].length === 5 ? clocks[0] + ":00" : clocks[0];
+  return clocks.some(clock => (clock.length === 5 ? clock + ":00" : clock) !== first);
+}
+
 function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) return "daily";
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
   const period = schedule?.period;
@@ -952,6 +971,10 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   for (const day of dayOfWeek) {
     days.push(DAY_NAMES[day] ?? day);
   }
+  if (days.length && schedule?.weekdayOrdinal !== undefined) {
+    const names: Record<number, string> = { [-1]: "last", 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth" };
+    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)} of each month`;
+  }
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
 
@@ -1080,7 +1103,9 @@ function formatShort(clause: CanonicalSigClause): string {
   } else if (routeText) {
     parts.push(routeText);
   }
-  if (schedule.timingCode) {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) {
+    parts.push("daily");
+  } else if (schedule.timingCode) {
     parts.push(schedule.timingCode);
   } else if (
     schedule.frequency !== undefined &&
@@ -1111,7 +1136,8 @@ function formatShort(clause: CanonicalSigClause): string {
     for (const day of schedule.dayOfWeek) {
       days.push(day.charAt(0).toUpperCase() + day.slice(1, 3));
     }
-    parts.push(days.join(","));
+    const ordinal = schedule.weekdayOrdinal;
+    parts.push(days.join(",") + (ordinal === undefined ? "" : `(${ordinal === -1 ? "last" : ordinal})`));
   }
   if (schedule.timeOfDay?.length) {
     const times: string[] = [];
@@ -1750,6 +1776,18 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
+  const clockWindow = clause.schedule?.clockWindow;
+  if (clockWindow) {
+    const schedule = { ...clause.schedule, clockWindow: undefined };
+    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const start = clockWindow.start.slice(0, 5);
+    const end = clockWindow.end.slice(0, 5);
+    const thai = localization?.locale.startsWith("th");
+    const range = thai ? `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน` :
+      `only between ${start} and ${end} each day`;
+    const boundary = clockWindow.endInclusive ? "" : thai ? " (ไม่รวมเวลาสิ้นสุด)" : " (end excluded)";
+    return `${rendered.replace(/[.。]$/u, "")} ${range}${boundary}.`;
+  }
   const offset = clause.schedule?.administrationOffsetMinutes;
   if (offset !== undefined && Number.isFinite(offset)) {
     const schedule = { ...clause.schedule, administrationOffsetMinutes: undefined };

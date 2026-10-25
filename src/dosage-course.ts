@@ -223,10 +223,57 @@ export function getDosageCondition(dosage: FhirDosage | EzDosage): MedicationCon
   return parseDosageCondition(dosage);
 }
 
-export function setDosageCondition(dosage: FhirDosage, condition: MedicationCondition | undefined): void {
+/** Read the source-certified whole-day predicate from the existing condition bridge.
+ * @param dosage Editable dosage containing a structured condition extension.
+ */
+function retainedCalendarDayPredicate(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+  const extension = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
+  const child = extension?.extension?.find(value => value.url === "calendarDayPredicate");
+  const value = child ? decodeConditionPredicate(child) : undefined;
+  return isMedicationCondition(value) ? value : undefined;
+}
+
+/** A whole-day evaluation is licensed only for the same live predicate that
+ * the source grammar identified as calendar membership. An edited native
+ * condition or a mixed measurement/day predicate cannot inherit that claim.
+ * @param dosage Native or R5 dosage with optional source-owned day-domain metadata.
+ */
+export function getDosageCalendarDayCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+  const calendar = retainedCalendarDayPredicate(dosage);
+  if (!calendar) return undefined;
+  const condition = parseDosageCondition(dosage);
+  return condition && equalStructuredValues(condition, calendar) ? calendar : undefined;
+}
+
+/** Recognize only the exact generated bridge; unfamiliar metadata remains raw.
+ * @param extension The retained known condition bridge.
+ */
+function isExactCalendarConditionBridge(extension: FhirExtension): boolean {
+  if (Object.keys(extension).some(key => key !== "url" && key !== "extension")) return false;
+  const predicate = parseConditionModifier(extension);
+  const calendar = retainedCalendarDayPredicate({ modifierExtension: [extension] });
+  return Boolean(predicate && calendar && equalStructuredValues(predicate, calendar) &&
+    equalStructuredValues(extension.extension, [encodeConditionPredicate(predicate),
+      { ...encodeConditionPredicate(calendar), url: "calendarDayPredicate" }]));
+}
+
+/** Encode the clinical predicate and its independently supplied day-domain type.
+ * @param dosage Editable target dosage; other modifiers remain untouched.
+ * @param condition Live clinical predicate, or undefined to clear it.
+ * @param calendarDayCondition Source-certified whole-day predicate, never inferred from prose.
+ */
+export function setDosageCondition(
+  dosage: FhirDosage,
+  condition: MedicationCondition | undefined,
+  calendarDayCondition?: MedicationCondition
+): void {
+  const calendar = calendarDayCondition ?? retainedCalendarDayPredicate(dosage);
+  const children = condition ? [encodeConditionPredicate(condition)] : [];
+  if (condition && calendar && equalStructuredValues(condition, calendar)) {
+    children.push({ ...encodeConditionPredicate(calendar), url: "calendarDayPredicate" });
+  }
   replacementExtensions(dosage, DOSAGE_CONDITION_R5_URL, condition ? {
-    url: DOSAGE_CONDITION_R5_URL,
-    extension: [encodeConditionPredicate(condition)]
+    url: DOSAGE_CONDITION_R5_URL, extension: children
   } : undefined);
 }
 
@@ -557,6 +604,13 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
       kind: "any",
       conditions: condition.map(conditionFromR6)
     });
+  } else if (condition !== undefined) {
+    // A clinician-cleared native condition must not be resurrected by the
+    // exact day-domain bridge retained solely to preserve its source type.
+    // Unfamiliar modifiers and additional metadata are left untouched.
+    const retained = output.modifierExtension?.filter(extension =>
+      extension.url !== DOSAGE_CONDITION_R5_URL || !isExactCalendarConditionBridge(extension));
+    output.modifierExtension = retained?.length ? retained : undefined;
   }
   return output;
 }

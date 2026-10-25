@@ -135,6 +135,14 @@ function applySchedule(
   if (schedule.maxDosePerPeriod?.length) {
     state.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({ ...maximum }));
   }
+  if (schedule.clockWindow) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.clockWindow = { ...schedule.clockWindow };
+  }
+  if (schedule.weekdayOrdinal !== undefined) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.weekdayOrdinal = schedule.weekdayOrdinal;
+  }
   if (schedule.eventWindow) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.eventWindow = { ...schedule.eventWindow };
@@ -281,17 +289,25 @@ function applyClinicalAdjunct(
     clause.dose || clause.method || clause.route || clause.site ||
     hasRecurringSchedule(clause.schedule)
   );
+  if (hasAdministration && adjunct.conditionTarget) clinical.conditionTarget = {
+    ...adjunct.conditionTarget,
+    when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined,
+    timeOfDay: adjunct.conditionTarget.timeOfDay ? [...adjunct.conditionTarget.timeOfDay] : undefined,
+    clockRange: adjunct.conditionTarget.clockRange ? { ...adjunct.conditionTarget.clockRange } : undefined
+  };
+  if (adjunct.treatmentPause && hasAdministration) {
+    clinical.treatmentPause = { ...adjunct.treatmentPause, range: { ...adjunct.treatmentPause.range } };
+    acceptedKinds.add("treatment-pause");
+  }
   if (adjunct.condition && hasAdministration) {
     clinical.condition = adjunct.condition;
-    if (adjunct.conditionTarget) clinical.conditionTarget = {
-      ...adjunct.conditionTarget,
-      when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined
-    };
+    if (adjunct.calendarDayCondition) clinical.calendarDayCondition = adjunct.calendarDayCondition;
     acceptedKinds.add("condition");
   }
 
   const schedule = clause.schedule;
   const hasCadence = Boolean(schedule && (
+    schedule.occurrenceCap !== undefined ||
     schedule.frequency !== undefined ||
     schedule.period !== undefined ||
     schedule.when?.length ||
@@ -308,7 +324,8 @@ function applyClinicalAdjunct(
       // permission to drop the exclusion and schedule the medication daily.
       // Retain the full FHIR exclusion extension for review and editing.
       clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
-      if (allowed.length) schedule.dayOfWeek = allowed;
+      // Selected-dose exclusions are scoped after partitioning source anchors.
+      if (allowed.length && !adjunct.conditionTarget) schedule.dayOfWeek = allowed;
     }
     if (adjunct.excludedDates?.length) {
       clinical.excludedDates = [...adjunct.excludedDates];
@@ -500,6 +517,20 @@ export function projectHpsgSignToState(
     state.patientInstruction = state.patientInstruction
       ? `${state.patientInstruction}; ${patientInstruction.text}`
       : patientInstruction.text;
+  }
+
+  for (const scoped of sign.synsem.cont.scopedAdministrations ?? []) {
+    const condition = scoped.condition;
+    const scopes = state.primaryClause.instructionScopes ?? (state.primaryClause.instructionScopes = []);
+    if (!scopes.some(scope => scope.kind === condition.relation &&
+        scope.span.start === condition.sourceStart && scope.span.end === condition.sourceEnd &&
+        scope.target.start === condition.targetStart && scope.target.end === condition.targetEnd)) {
+      scopes.push({
+        kind: condition.relation,
+        span: { start: condition.sourceStart, end: condition.sourceEnd },
+        target: { start: condition.targetStart, end: condition.targetEnd }
+      });
+    }
   }
 
   const dose = sign.synsem.head.dose;

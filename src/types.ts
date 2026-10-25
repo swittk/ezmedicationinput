@@ -1536,9 +1536,17 @@ export interface CanonicalCalendarEventExpr {
 }
 
 export interface CanonicalScheduleExpr {
+  /** Typed whole-course interval for a recurring active/rest construction. */
+  repeatCycle?: FhirQuantity;
+  /** Explicit finite number of whole-course repetitions; absent means unbounded. */
+  repeatCount?: number;
+  /** Explicit local-clock interval window; not a list of endpoint doses. */
+  clockWindow?: { start: string; end: string; endInclusive: boolean };
+  /** Weekday occurrence in each month; -1 denotes the last occurrence. */
+  weekdayOrdinal?: -1 | 1 | 2 | 3 | 4 | 5;
   /** Source-anaphoric timing (e.g. "at the same times") awaiting a licensed
    * previous regimen daughter. Resolved within HPSG/regimen, never by FHIR. */
-  timingReference?: "previous";
+  timingReference?: "previous" | "previous-weekday-complement";
   /** Source-relative phase onset, in elapsed days from treatment start. */
   treatmentStartOffsetDays?: number;
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
@@ -1647,7 +1655,7 @@ export interface CanonicalSourceSpan extends TextRange {
 
 /** Lexical grammatical role carried from the originating typed sign.
  * Production names remain diagnostic labels, never semantic dispatch keys. */
-export type CanonicalLexicalCategory = "dose" | "method" | "prn" | "connector";
+export type CanonicalLexicalCategory = "dose" | "method" | "prn" | "connector" | "instruction" | "workflow";
 
 export interface CanonicalEvidence {
   rule: string;
@@ -1666,11 +1674,19 @@ export interface CanonicalEvidence {
  * scope; FHIR only projects the resulting semantics. Raw/source data is kept.
  */
 export interface CanonicalClinicalAdjuncts {
+  /** Finite medication-free interval selected by a typed withholding head. */
+  treatmentPause?: { durationDays: number; range: TextRange };
   condition?: MedicationCondition;
+  /** Source-typed calendar membership, distinct from unrelated clinical guards. */
+  calendarDayCondition?: MedicationCondition;
   /** Typed nominal reference of a conditional administration instruction.
    * Resolved across related regimen daughters before any FHIR lowering. */
   conditionTarget?: {
     when?: EventTiming[];
+    /** Explicit existing clock slots selected by the nominal dose object. */
+    timeOfDay?: string[];
+    /** Lexical daypart membership over already stated clocks; creates no times. */
+    clockRange?: { startHour: number; endHour: number };
     quantifier?: "all" | "both";
   };
   excludedDates?: string[];
@@ -1703,6 +1719,8 @@ export interface CanonicalSigClause {
   provisionalSchedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
   clinicalAdjuncts?: CanonicalClinicalAdjuncts;
+  /** Closed HPSG condition ownership, projected into instruction-graph relations. */
+  instructionScopes?: Array<{ kind: AdviceRelation; span: TextRange; target: TextRange }>;
   patientInstruction?: string;
   instructionGraph?: CanonicalInstructionGraph;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];

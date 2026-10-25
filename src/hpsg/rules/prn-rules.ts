@@ -11,7 +11,7 @@ import {
 } from "../../symptom-terminology";
 import { LexKind } from "../../lexer/token-types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
-import { getProceduralFrames } from "../procedural-context";
+import { getProceduralFrames, conditionalAdviceOwnerAt } from "../procedural-context";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, AdvicePolarity, PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
@@ -59,6 +59,7 @@ import {
   rangeFromTokens,
   splitByLexicalSeparators,
   startsMedicationGuard,
+  isMedicationGuardMarker,
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
@@ -429,18 +430,6 @@ function parsePrnReasonAtoms(
   return atoms;
 }
 
-function hasSafetyConditionalActionAfter(
-  context: HpsgClauseContext,
-  start: number
-): boolean {
-  const lead = context.tokens[start];
-  if (!lead) return false;
-  return getProceduralFrames(context).some((frame) =>
-    frame.span.start >= lead.sourceEnd &&
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
-  );
-}
-
 function conditionalLeadBelongsToSafetyActionBefore(
   context: HpsgClauseContext,
   start: number
@@ -479,19 +468,6 @@ function conditionalLeadBelongsToSafetyActionBefore(
       const token = context.tokens[prefixStart + offset];
       return Boolean(token && normalizeTokenLower(token) === part);
     });
-  });
-}
-
-function hasProceduralInstructionActionAfter(
-  context: HpsgClauseContext,
-  start: number
-): boolean {
-  const lead = context.tokens[start];
-  if (!lead) return false;
-  return getProceduralFrames(context).some((frame) => {
-    if (frame.span.start < lead.sourceEnd) return false;
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-    return definition?.procedural === true;
   });
 }
 
@@ -751,8 +727,8 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     // guard merely because a later, separate occurrence cap contains a
     // numerical maximum ("when pain, no more than 3 doses daily").
     const contextualLead = matchContextualPrnReasonLead(context, start);
-    if (startsMedicationGuard(context, start) &&
-        !contextualLead && !hasSymptomOnsetPrnAt(context, start)) return [];
+    if (isMedicationGuardMarker(context, start) &&
+        !hasSymptomOnsetPrnAt(context, start)) return [];
     const leadLower = contextualLead?.canonical ?? normalizeTokenLower(lead);
     let cursor = contextualLead?.next ?? start + 1;
     const tokens = contextualLead ? [...contextualLead.tokens] : [lead];
@@ -763,8 +739,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (contextualLead) {
       if (
         previousTokensEndNegatedDirectivePrefix(context, start) ||
-        hasSafetyConditionalActionAfter(context, start) ||
-        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+        conditionalAdviceOwnerAt(context, start)
       ) {
         return [];
       }
@@ -778,9 +753,8 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {
       if (
         previousTokensEndNegatedDirectivePrefix(context, start) ||
-        hasSafetyConditionalActionAfter(context, start) ||
         conditionalLeadBelongsToSafetyActionBefore(context, start) ||
-        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+        conditionalAdviceOwnerAt(context, start)
       ) {
         return [];
       }
@@ -826,6 +800,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!leadIn || context.state.consumed.has(leadIn.index)) {
         break;
       }
+      // A separately licensed guard owns its marker before optional PRN
+      // reason lead-ins are consumed; PRN and the clinical guard both remain.
+      if (startsMedicationGuard(context, cursor)) break;
       const lower = normalizeTokenLower(leadIn);
       const next = context.tokens[cursor + 1];
       const multiword = next ? `${lower} ${normalizeTokenLower(next)}` : lower;

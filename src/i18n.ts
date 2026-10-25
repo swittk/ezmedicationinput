@@ -1,3 +1,4 @@
+import { hasDailyRecurrenceAcrossClocks } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -1068,6 +1069,7 @@ function describeAlternateEventCadenceThai(
 }
 
 function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) return "ทุกวัน";
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
   const period = schedule?.period;
@@ -1720,6 +1722,10 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
       days.push(text);
     }
   }
+  if (days.length && schedule?.weekdayOrdinal !== undefined) {
+    return schedule.weekdayOrdinal === -1 ? `ใน${joinWithAndThai(days)}สุดท้ายของทุกเดือน` :
+      `ใน${joinWithAndThai(days)}ครั้งที่ ${schedule.weekdayOrdinal} ของแต่ละเดือน`;
+  }
   return days.length ? `ใน${joinWithAndThai(days)}` : undefined;
 }
 
@@ -1927,7 +1933,8 @@ function formatShortThai(clause: CanonicalSigClause): string {
     for (const day of schedule.dayOfWeek) {
       days.push(DAY_NAMES_THAI[day]?.replace(/^วัน/, "") ?? day);
     }
-    parts.push(days.join(","));
+    const ordinal = schedule.weekdayOrdinal;
+    parts.push(days.join(",") + (ordinal === undefined ? "" : ordinal === -1 ? "สุดท้าย" : `ครั้งที่${ordinal}`));
   }
   if (schedule.calendarEvents?.length) {
     parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);

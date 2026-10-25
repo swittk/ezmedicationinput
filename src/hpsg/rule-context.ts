@@ -5,7 +5,7 @@ import type { MedicationDateListMatch } from "../date-interpretation";
 import {
   parseMedicationGuard,
   type ParsedMedicationGuard
-} from "../medication-condition";
+} from "./constructions";
 import {
   ANTE_MERIDIEM_TOKENS,
   MERIDIEM_TOKENS,
@@ -33,10 +33,22 @@ export function medicationGuardForContext(
   context: HpsgClauseContext
 ): ParsedMedicationGuard | undefined {
   if (!context.clinicalCache.medicationGuardScanned) {
-    context.clinicalCache.medicationGuard = parseMedicationGuard(context.state.input);
+    context.clinicalCache.medicationGuard = parseMedicationGuard(context.state.input, context.tokens);
     context.clinicalCache.medicationGuardScanned = true;
   }
   return context.clinicalCache.medicationGuard;
+}
+
+/** A marker phrase owns each of its lexical tokens, including IF inside
+ * ONLY IF. Such a token cannot independently introduce a PRN phrase.
+ * @param context Shared cached typed guard producer.
+ * @param start Candidate lexical token index.
+ */
+export function isMedicationGuardMarker(context: HpsgClauseContext, start: number): boolean {
+  const token = context.tokens[start];
+  if (!token || !/(?:\bonly\b|\bunless\b|\bif\b|เฉพาะ|เว้นแต่|ยกเว้น|หาก|ถ้า|เมื่อ)/iu.test(token.sourceText ?? token.original)) return false;
+  const guard = medicationGuardForContext(context);
+  return Boolean(guard && guard.start <= token.sourceStart && token.sourceStart < guard.markerEnd);
 }
 
 export function startsMedicationGuard(

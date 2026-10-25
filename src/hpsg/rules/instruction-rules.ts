@@ -2,14 +2,15 @@ import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
-import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
+import { listMedicationInstructionConcepts, medicationInstructionConceptCodings, normalizeConceptSurface, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
   getAdviceRelationRealizations,
-  resolveActionRelationSurface
+  resolveActionRelationSurface,
+  relationHasGrammarFeature
 } from "../../relation-terminology";
 import { composeLocalizedRecords } from "../../localization";
 import { joinLocalizedTokens } from "../../locale-realization";
-import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass, followingProcedureOwnsTemporalAdjunct, actionEventRelationAt } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
@@ -20,7 +21,8 @@ import {
   AdviceFrame,
   AdvicePolarity,
   AdviceRelation,
-  CanonicalAdditionalInstructionExpr
+  CanonicalAdditionalInstructionExpr,
+  FhirCoding
 } from "../../types";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -28,6 +30,7 @@ import {
   ACTION_COORDINATION_CONNECTOR_I18N,
   ACTION_SEQUENCE_MARKERS,
   ADMINISTRATION_WINDOW_INSTRUCTIONS,
+  ACTIVITY_DAY_ADJUNCTS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   DOSE_NUMBER_WORDS,
   EVENT_ARTICLE_TOKENS,
@@ -44,6 +47,7 @@ import {
   WORKFLOW_ACTION_RELATION_LEADS,
   WORKFLOW_CONTINUATION_LICENSES,
   WORKFLOW_NOUNS,
+  WORKFLOW_EVENT_PHASE_VERBS,
   WORKFLOW_START_WORDS
 } from "../lexical-classes";
 import { isMedicationAdministrationMethod } from "../method-lexicon";
@@ -56,8 +60,9 @@ import {
   rangeFromTokens,
   tokensAvailable
 } from "../rule-context";
-import { HpsgLexicalRule, lexicalSign } from "../signature";
-import { isScheduleLead } from "./timing-rules";
+import { HpsgLexicalRule, type HpsgSign, lexicalSign } from "../signature";
+import { combineSignFeatureStructures } from "../feature-structure";
+import { finiteTreatmentPauseAt, isScheduleLead } from "./timing-rules";
 import { productLexicalRule } from "./core-rules";
 
 const PRODUCT_COMPLEMENT_RULE = productLexicalRule();
@@ -184,21 +189,40 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
       const directiveInstructions = frame.polarity === AdvicePolarity.Negate
         ? parseInstructionCandidates(text, frame.span)
         : [];
-      signs.push(
-        lexicalSign({
-          type: "instruction-sign",
-          rule: "hpsg.lex.patientInstruction.procedure",
-          tokens,
-          synsem: {
-            head: { dose: frameDose(context, frame) },
-            valence: frame.polarity === AdvicePolarity.Negate
-              ? { instructions: directiveInstructions.length ? directiveInstructions : [{ text, frames: [frame] }] }
-              : { patientInstruction: { text } },
-            cont: { clauseKind: "administration" }
-          },
-          score: 18 + tokens.length + frame.args.length * 2
-        })
-      );
+      let sign: HpsgSign = lexicalSign({
+        type: "instruction-sign",
+        rule: "hpsg.lex.patientInstruction.procedure",
+        tokens,
+        synsem: {
+          head: { dose: frameDose(context, frame) },
+          valence: frame.polarity === AdvicePolarity.Negate
+            ? { instructions: directiveInstructions.length ? directiveInstructions : [{ text, frames: [frame] }] }
+            : { patientInstruction: { text } },
+          cont: { clauseKind: "administration" }
+        },
+        score: 18 + tokens.length + frame.args.length * 2
+      });
+      const pause = finiteTreatmentPauseAt(context, frame, start);
+      if (pause) {
+        const headTokens = context.tokens.slice(start, pause.actionEnd);
+        const head = lexicalSign({
+          type: "instruction-sign", rule: "hpsg.lex.instruction.withholdingHead", tokens: headTokens,
+          synsem: { head: {}, valence: { patientInstruction: {
+            text: context.state.input.slice(headTokens[0].sourceStart, headTokens[headTokens.length - 1].sourceEnd)
+          } }, cont: { clauseKind: "administration" } }
+        });
+        const synsem = { ...sign.synsem, cont: { ...sign.synsem.cont, clinicalAdjunct: {
+          treatmentPause: pause.pause, localRanges: [pause.pause.range],
+          evidence: [{ rule: "hpsg.cx.treatmentPause", kind: "treatment-pause" as const, ranges: [pause.pause.range] }]
+        } } };
+        const fs = combineSignFeatureStructures(head.fs, pause.duration.fs, "head-complement-phrase", "left", synsem);
+        if (fs) sign = { ...sign, type: "head-complement-phrase", synsem, fs,
+          construction: { kind: "head-complement", operation: "scope", headSide: "left",
+            leftType: head.type, rightType: pause.duration.type },
+          evidence: [...sign.evidence, { rule: "hpsg.cx.treatmentPause", tokenIndices: tokens.map(token => token.index) }]
+        };
+      }
+      signs.push(sign);
     }
     return signs;
   });
@@ -242,7 +266,7 @@ function semanticActivityWindowStartsAt(context: HpsgClauseContext, start: numbe
     return Boolean(tokens && tokens.every(
       (token, index) => normalizeTokenLower(token) === definition.parts[index]
     ));
-  });
+  }) || Boolean(registeredActivityTimingAt(context, start));
 }
 
 export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -359,6 +383,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       lexicalSign({
         type: "instruction-sign",
         rule: "hpsg.lex.patientInstruction.workflow",
+        lexicalCategory: "workflow",
         tokens: [...consumed, ...bodyTokens],
         synsem: {
           head: {},
@@ -385,7 +410,8 @@ function instructionStartIsLicensed(
   const frames = getProceduralFrames(context);
   const ownedByProcedure = Boolean(token && frames.some((frame) =>
     frame.span.start === token.sourceStart && token.sourceEnd <= frame.span.end &&
-    frame.args.some(argument => argument.role === AdviceArgumentRole.Duration && argument.quantity) &&
+    (frame.args.some(argument => argument.role === AdviceArgumentRole.Duration && argument.quantity) ||
+      finiteTreatmentPauseAt(context, frame, start) !== undefined) &&
     (isProceduralInstructionFrame(context, frame) ||
       // Workflow verbs can still own a complete *quantified* Duration.
       // Their partial generic heads must not compete with that full typed
@@ -520,20 +546,75 @@ function bodyParsesAsStyleInstruction(
 }
 
 
+const ACTIVITY_NOUN_PREFIXES = new Set<string>();
+for (const concept of listMedicationInstructionConcepts()) {
+  if (concept.role !== AdviceArgumentRole.Activity) continue;
+  const surfaces = [concept.code, concept.display, ...(concept.aliases ?? [])];
+  for (const locale of Object.keys(concept.localeAliases ?? {})) {
+    surfaces.push(...concept.localeAliases![locale]);
+  }
+  for (const surface of surfaces) {
+    const normalized = normalizeConceptSurface(surface);
+    for (let end = 1; end <= normalized.length; end += 1) {
+      ACTIVITY_NOUN_PREFIXES.add(normalized.slice(0, end));
+    }
+  }
+}
+
+/** Stop noun matching as soon as neither the built-in nor caller lexicon
+ * can extend the observed source prefix.
+ * @param surface Source-preserving or canonicalized candidate noun text.
+ * @param context Clause containing the optional caller concept dictionary.
+ */
+function isRegisteredActivityPrefix(surface: string, context: HpsgClauseContext): boolean {
+  const prefix = normalizeConceptSurface(surface);
+  if (ACTIVITY_NOUN_PREFIXES.has(prefix)) return true;
+  const custom = context.options?.instructionConceptMap;
+  for (const key of Object.keys(custom ?? {})) {
+    const concept = custom![key];
+    if (concept.role !== AdviceArgumentRole.Activity) continue;
+    const surfaces = [key, concept.code ?? "", concept.display ?? "", ...(concept.aliases ?? [])];
+    for (const locale of Object.keys(concept.localeAliases ?? {})) {
+      surfaces.push(...concept.localeAliases![locale]);
+    }
+    if (surfaces.some(value => normalizeConceptSurface(value).startsWith(prefix))) return true;
+  }
+  return false;
+}
+
+/** Read the longest registered activity noun while retaining original tokens.
+ * @param context Shared clause and caller vocabulary.
+ * @param start First noun token, after any separate nominal modifier.
+ * @param prefixLength Length of a source-attached lexical modifier already interpreted by its construction.
+ */
 function activityConceptAt(
   context: HpsgClauseContext,
-  start: number
-): { length: number; display: string; i18n?: Record<string, string> } | undefined {
-  const maxLength = Math.min(4, context.limit - start);
-  for (let length = maxLength; length >= 1; length -= 1) {
+  start: number,
+  prefixLength = 0
+): { length: number; display: string; i18n?: Record<string, string>; coding?: FhirCoding } | undefined {
+  let match: { length: number; display: string; i18n?: Record<string, string>; coding?: FhirCoding } | undefined;
+  for (let length = 1; start + length <= context.limit; length += 1) {
     const tokens = tokensAvailable(context, start, length);
-    if (!tokens) continue;
-    const surface = tokens.map((token) => normalizeTokenLower(token)).join(" ");
-    const concept = resolveMedicationInstructionConcept(surface, context.options);
+    if (!tokens || tokens[tokens.length - 1].kind === LexKind.Separator) break;
+    // Registered nouns may span several Thai lexical tokens without spaces.
+    // Reuse the source-aware join instead of translating each morpheme first.
+    const sourceSurface = joinTokenText(tokens).slice(prefixLength);
+    const canonicalSurface = tokens.map(normalizeTokenLower).join(" ").slice(prefixLength);
+    if (!isRegisteredActivityPrefix(sourceSurface, context) &&
+        !isRegisteredActivityPrefix(canonicalSurface, context)) break;
+    const concept = resolveMedicationInstructionConcept(sourceSurface, context.options)
+      ?? resolveMedicationInstructionConcept(canonicalSurface, context.options);
     if (concept?.role !== AdviceArgumentRole.Activity) continue;
-    return { length, display: concept.display, i18n: concept.i18n ? { ...concept.i18n } : undefined };
+    match = {
+      length,
+      display: concept.display,
+      i18n: concept.i18n ? { ...concept.i18n } : undefined,
+      // Activity timing carries one concept, so prefer its registered exact
+      // external equivalent over the local registry identifier.
+      coding: concept.coding ?? concept.externalCodings?.[0] ?? medicationInstructionConceptCodings(concept)[0]
+    };
   }
-  return undefined;
+  return match;
 }
 
 function coordinatedAdministrationWindowInstructionAt(
@@ -576,6 +657,144 @@ function coordinatedAdministrationWindowInstructionAt(
       cont: { clauseKind: "administration" }
     },
     score: 27 + tokens.length
+  });
+}
+
+const ACTIVITY_DAY_FRAMES_BY_FIRST = new Map<string, typeof ACTIVITY_DAY_ADJUNCTS.frames>();
+for (const frame of ACTIVITY_DAY_ADJUNCTS.frames) {
+  const bucket = ACTIVITY_DAY_FRAMES_BY_FIRST.get(frame.parts[0]) ?? [];
+  bucket.push(frame);
+  bucket.sort((left, right) => right.parts.length - left.parts.length);
+  ACTIVITY_DAY_FRAMES_BY_FIRST.set(frame.parts[0], bucket);
+}
+const ACTIVITY_DAY_HEADS = new Set(ACTIVITY_DAY_ADJUNCTS.dayTokens);
+const ACTIVITY_DAY_NEGATORS = new Set(ACTIVITY_DAY_ADJUNCTS.negativeNounTokens);
+const ACTIVITY_DAY_RELATIVE_TOKENS = new Set(ACTIVITY_DAY_ADJUNCTS.dayRelativeTokens);
+
+/** Compose ON/ONLY ON/EXCEPT with a registered activity and DAY noun.
+ * The activity identifies the day domain, not a scheduled procedure occurrence.
+ * Membership remains a caller-evaluated condition; no dates are guessed.
+ * @param context Shared source, lexical registry and procedural ownership.
+ * @param start Beginning of a declared day-adjunct frame.
+ * @param withholdingComplement Licensed by a typed withholding head selecting this adjunct.
+ */
+export function registeredActivityDayAt(
+  context: HpsgClauseContext, start: number, withholdingComplement?: true
+) {
+  const first = context.tokens[start];
+  if (!first) return undefined;
+  const frames = ACTIVITY_DAY_FRAMES_BY_FIRST.get(normalizeTokenLower(first));
+  if (!frames) return undefined;
+  for (const frame of frames) {
+    if (!frame.parts.every((part, offset) => context.tokens[start + offset] &&
+        normalizeTokenLower(context.tokens[start + offset]) === part)) continue;
+    let cursor = start + frame.parts.length;
+    const subjectStart = cursor;
+    if (context.tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+    const dayHead = frame.dayFirst ? context.tokens[cursor] : undefined;
+    if (frame.dayFirst) {
+      if (!dayHead || !ACTIVITY_DAY_HEADS.has(normalizeTokenLower(dayHead))) continue;
+      cursor++;
+      if (context.tokens[cursor] && ACTIVITY_DAY_RELATIVE_TOKENS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+    }
+    const modifier = context.tokens[cursor];
+    const modifierSurface = modifier ? normalizeTokenLower(modifier) : "";
+    const negativePrefix = ACTIVITY_DAY_ADJUNCTS.negativeNounPrefixes.find(prefix => modifierSurface.startsWith(prefix));
+    const negativeToken = ACTIVITY_DAY_NEGATORS.has(modifierSurface);
+    if (negativeToken) cursor++;
+    const activityStart = cursor;
+    const prefixLength = negativePrefix?.length ?? 0;
+    const activity = activityConceptAt(context, cursor, prefixLength);
+    if (!activity) continue;
+    cursor += activity.length;
+    const activityEnd = cursor;
+    const negativeNoun = Boolean(negativePrefix || negativeToken);
+    if (!frame.dayFirst) {
+      if (!context.tokens[cursor] || !ACTIVITY_DAY_HEADS.has(normalizeTokenLower(context.tokens[cursor]))) continue;
+      cursor++;
+    }
+    const members = tokensAvailable(context, start, cursor - start);
+    if (!members) continue;
+    const range = rangeFromTokens(members);
+    if (!range || !withholdingComplement &&
+        sourceRangeAttachmentClass(context, range.start, range.end) !== "administration") continue;
+    const subjectText = context.state.input.slice(context.tokens[subjectStart].sourceStart, range.end).trim();
+    // The noun prefix contributes logical polarity, not part of the positive
+    // day-domain predicate. Keep the full source span separately unchanged.
+    const positiveActivityStart = context.tokens[activityStart].sourceStart + prefixLength;
+    const text = !negativeNoun ? subjectText : frame.dayFirst && dayHead
+      ? dayHead.original + context.state.input.slice(positiveActivityStart, context.tokens[activityEnd - 1].sourceEnd)
+      : context.state.input.slice(positiveActivityStart, range.end).trim();
+    const membership = { kind: "text" as const, text };
+    return lexicalSign({
+      type: "clinical-adjunct-sign", rule: "hpsg.lex.condition.registeredActivityDay",
+      tokens: members,
+      synsem: { head: {}, valence: {}, cont: {
+        clauseKind: "administration",
+        clinicalAdjunct: {
+          condition: frame.exclude !== negativeNoun ? { kind: "not", condition: membership } : membership,
+          calendarDayCondition: frame.exclude !== negativeNoun ? { kind: "not", condition: membership } : membership,
+          localRanges: [range],
+          evidence: [{ rule: "hpsg.lex.condition.registeredActivityDay", kind: "condition", ranges: [range] }]
+        }
+      } },
+      score: 56 + members.length
+    });
+  }
+  return undefined;
+}
+
+/** Compose a temporal preposition with a registered activity noun.
+ * @param context Shared clause and source-local procedural ownership.
+ * @param start Index of the before/after relation, not a procedure verb.
+ */
+function registeredActivityTimingAt(context: HpsgClauseContext, start: number) {
+  const lead = context.tokens[start];
+  if (!lead || context.state.consumed.has(lead.index)) return undefined;
+  const relation = resolveActionRelationSurface(normalizeTokenLower(lead));
+  if (relation !== AdviceRelation.Before && relation !== AdviceRelation.After) return undefined;
+  let activityStart = start + 1;
+  const article = context.tokens[activityStart];
+  if (article && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(article))) activityStart += 1;
+  const activity = activityConceptAt(context, activityStart);
+  let activityEnd = activityStart + (activity?.length ?? 0);
+  if (!activity) {
+    // Existing workflow nouns license an uncoded event anchor as well as a
+    // registered clinical concept. Source text is retained; no code is guessed.
+    while (context.tokens[activityEnd] &&
+        WORKFLOW_NOUNS.has(normalizeTokenLower(context.tokens[activityEnd]))) activityEnd += 1;
+    if (activityEnd === activityStart) return undefined;
+  }
+  const phaseVerb = context.tokens[activityEnd];
+  const hasEventPhase = Boolean(phaseVerb &&
+    WORKFLOW_EVENT_PHASE_VERBS.has(normalizeTokenLower(phaseVerb)));
+  if (hasEventPhase) activityEnd += 1;
+  const tokens = tokensAvailable(context, start, activityEnd - start);
+  if (!tokens) return undefined;
+  const eventText = context.state.input.slice(
+    context.tokens[activityStart].sourceStart, context.tokens[activityEnd - 1].sourceEnd
+  );
+  const temporalActivity = activity && !hasEventPhase
+    ? { text: activity.display, i18n: activity.i18n, coding: activity.coding }
+    : { text: eventText };
+  const range = rangeFromTokens(tokens);
+  if (!range || sourceRangeAttachmentClass(context, range.start, range.end) !== "administration" ||
+      followingProcedureOwnsTemporalAdjunct(context, range.start, range.end)) {
+    return undefined;
+  }
+  return lexicalSign({
+    type: "schedule-sign",
+    rule: "hpsg.lex.schedule.activityTiming.registeredNoun",
+    tokens,
+    synsem: {
+      head: { schedule: { sourceRanges: [range], activityTiming: [{
+        relation,
+        activity: temporalActivity
+      }] } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 26 + tokens.length
   });
 }
 
@@ -642,7 +861,7 @@ function administrationWindowInstructionAt(
       score: 24 + tokens.length
     });
   }
-  return undefined;
+  return registeredActivityTimingAt(context, start);
 }
 
 export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
@@ -651,6 +870,8 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
+    const activityDay = registeredActivityDayAt(context, start);
+    if (activityDay) return [activityDay];
     const administrationWindow = administrationWindowInstructionAt(context, start);
     if (administrationWindow) return [administrationWindow];
 
@@ -700,6 +921,12 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (consumed.length > 0 && startsEventTimingPhrase(context, cursor)) return [];
     const firstBodyToken = context.tokens[cursor];
     const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";
+    // A temporal marker plus a typed schedule daughter is not free advice
+    // consisting of the marker alone (e.g. ". On" before Sundays). Leave
+    // the complete temporal/conditional construction to its lexical owner.
+    const bodyRelation = resolveActionRelationSurface(firstBodyLower);
+    if (bodyRelation && relationHasGrammarFeature(bodyRelation, "timeComplement") &&
+        isScheduleLead(context, cursor + 1)) return [];
     if (CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS.has(firstBodyLower)) return [];
     const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
     if (
@@ -796,6 +1023,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       lexicalSign({
         type: "instruction-sign",
         rule: "hpsg.lex.instruction",
+        lexicalCategory: "instruction",
         tokens: [...consumed, ...bodyTokens],
         synsem: {
           head: {},

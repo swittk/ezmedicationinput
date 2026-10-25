@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { calculateTotalUnits, findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
-import { canonicalToFhir } from "../src/fhir";
+import { canonicalToFhir, canonicalFromFhir } from "../src/fhir";
+import { toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { parseHpsgClause } from "../src/hpsg/clause-parser";
 import { lexInput } from "../src/lexer/lex";
 import { normalizeBodySiteKey } from "../src/maps";
@@ -1391,4 +1392,63 @@ describe("calendar date interpretation", () => {
     expect(deliberatelyGregorian.items[0]?.fhir.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
   });
 
+});
+
+describe("monthly weekday ordinals survive without source prose", () => {
+  it.each([
+    ["last", -1, ["2026-11-27", "2026-12-25", "2027-01-29", "2027-02-26"]],
+    ["third", 3, ["2026-11-20", "2026-12-18", "2027-01-15", "2027-02-19"]]
+  ])("retains the typed %s Friday regardless of a later order-time anchor", (word, ordinal, expectedDates) => {
+    const parsed = parseBatch(`Take 1 tablet on the ${word} Friday of each month at 08:00.`, {
+      datePolicy: { referenceDate: "2026-11-01" }
+    });
+    expect(parsed.meta.canonical.clauses[0].schedule?.weekdayOrdinal).toBe(ordinal);
+    const stripped = { ...parsed.fhir[0], text: undefined, patientInstruction: undefined };
+    if (stripped.timing?.code) stripped.timing = { ...stripped.timing, code: { ...stripped.timing.code, text: undefined } };
+    const course = toDosageDetails([stripped]);
+    for (const dosage of [stripped, course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(dosage, {
+        orderedAt: "2026-11-17T00:00:00+07:00", from: "2026-11-17T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 4
+      }).map(at => at.slice(0, 10))).toEqual(expectedDates);
+    }
+    expect(canonicalFromFhir(stripped).schedule?.weekdayOrdinal).toBe(ordinal);
+    expect(formatSig(stripped, "long", { locale: "en" })).toContain(`${word} Friday`);
+    if (ordinal === -1) {
+      expect(formatSig(stripped, "long", { locale: "th" })).toContain("ศุกร์สุดท้าย");
+    }
+  });
+});
+
+
+describe("Thai clock suffixes belong to the time constituent", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it.each([
+    "รับประทาน 1 เม็ด เวลา 08:00, 20:00 น. x7d",
+    "รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 น. นาน 7 วัน",
+    "รับประทาน 1 เม็ด เวลา 08:00 น. และ 20:00 น. เป็นเวลา 7 วัน",
+    "รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 นาฬิกา เป็นเวลา 7 วัน"
+  ])("does not lose a finite course after a normal Thai time-unit abbreviation: %s", input => {
+    const parsed = parseBatch(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(7);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: "d"
+      }).totalUnits).toBe(14);
+      expect(nextDueDoses(dosage, { orderedAt, from: "2026-11-09T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 2 })).toEqual([]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("leaves a genuine following sentence boundary and its phase local", () => {
+    const input = "รับประทาน 1 เม็ด เวลา 08:00 น. 7 วัน. จากนั้นรับประทาน 2 เม็ด เวลา 20:00 น. 7 วัน";
+    const parsed = parseBatch(input);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhir.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.timeOfDay)).toEqual([["08:00:00"], ["20:00:00"]]);
+    expect(parsed.fhir.map(row => row.timing?.repeat?.boundsDuration?.value)).toEqual([7, 7]);
+  });
 });

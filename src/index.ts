@@ -14,7 +14,7 @@ import {
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
-import type { BoundaryPlan } from "./regimen/types";
+import type { BoundaryPlan } from "./hpsg/signature";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
   buildRegimenGraph, regimenMemberSequences,
@@ -25,7 +25,7 @@ import {
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
 import { formatCanonicalClause } from "./format";
-import { canonicalFromFhir, canonicalToFhir } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization } from "./i18n";
 import { ParserState } from "./parser-state";
@@ -555,7 +555,7 @@ function typedSharedCourseEndSteps(
 /** Detach a structured R5 modifier marker without emitting non-JSON optional
  * fields. A missing optional property and an explicit undefined are identical
  * in FHIR, but in-memory consumers cannot validate the latter as JSON.
- * Recurses only for the uncommon R6-in-R5 marker, not normal single dosages.
+ * Recurses only for emitted course/activity markers, not ordinary single dosages.
  * @param value Source FHIR marker or nested datatype value.
  */
 function cloneDefinedExtensionValue<T>(value: T): T {
@@ -569,18 +569,27 @@ function cloneDefinedExtensionValue<T>(value: T): T {
   return result;
 }
 
-/** Normalize emitted R6-in-R5 markers without touching independent or
- * unfamiliar user-provided modifier extensions. Normal R5 dosages cost only
- * a cheap marker presence check.
+/** Normalize emitted course and activity-timing markers without touching
+ * unfamiliar user-provided extensions. Ordinary R5 dosages cost only
+ * cheap presence checks for these known semantic markers.
  * @param rows New FHIR dosage rows owned by the bridge.
  */
-function normalizeRetainedCourseMarkers(rows: FhirDosage[]): FhirDosage[] {
+function normalizeEmittedSemanticMarkers(rows: FhirDosage[]): FhirDosage[] {
   for (const row of rows) {
     if (row.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
       row.modifierExtension = row.modifierExtension.map(extension =>
         extension.url === DOSAGE_DETAILS_R5_URL
           ? cloneDefinedExtensionValue(extension) : extension
       );
+    }
+    const repeat = row.timing?.repeat;
+    if (repeat?.extension?.some(extension => extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL)) {
+      row.timing = { ...row.timing, repeat: {
+        ...repeat,
+        extension: repeat.extension.map(extension =>
+          extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL
+            ? cloneDefinedExtensionValue(extension) : extension)
+      } };
     }
   }
   return rows;
@@ -595,7 +604,7 @@ export function toFhirR5Dosages(
   input: Parameters<typeof toFhirR5DosagesInternal>[0],
   course?: Parameters<typeof toFhirR5DosagesInternal>[1]
 ): FhirDosage[] {
-  return normalizeRetainedCourseMarkers(toFhirR5DosagesInternal(input, course));
+  return normalizeEmittedSemanticMarkers(toFhirR5DosagesInternal(input, course));
 }
 
 /** One whole-course public result, independent of the number of parsed clauses. */
@@ -664,7 +673,7 @@ function buildWholeCourseResult(
     : parallel?.dosages ?? toEzDosages(dosageItems);
   // The same JSON-compatible structural bridge serves both public routes:
   // parser FHIR rows and callers using strict toFhirR5Dosages directly.
-  const fhir = withDosageEditProvenance(normalizeRetainedCourseMarkers(projectedFhir), input);
+  const fhir = withDosageEditProvenance(normalizeEmittedSemanticMarkers(projectedFhir), input);
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -1090,7 +1099,11 @@ function medicationConditionBody(
   const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
   switch (condition.kind) {
     case "measurement": {
-      if (condition.text?.trim()) return condition.text.trim();
+      // Imported FHIR often supplies only the concept label as text. It is
+      // not a realization of a comparator, value, or negated Boolean state.
+      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
+        return condition.text.trim();
+      }
       const operator = {
         gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!="
       }[condition.operation];
@@ -1098,22 +1111,29 @@ function medicationConditionBody(
         (condition.unit ? " " + condition.unit : "");
     }
     case "state":
-      if (condition.text?.trim()) return condition.text.trim();
+      // Imported FHIR often supplies only the concept label as text. It is
+      // not a realization of a comparator, value, or negated Boolean state.
+      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
+        return condition.text.trim();
+      }
       return condition.expected
         ? condition.name
         : (thai ? "ไม่ " : "not ") + condition.name;
     case "text":
       return condition.text;
     case "not":
-      return medicationConditionBody(condition.condition, locale);
+      return (thai ? "ไม่ " : "not ") + "(" +
+        medicationConditionBody(condition.condition, locale) + ")";
     case "all":
-      return condition.conditions
-        .map(value => medicationConditionBody(value, locale))
-        .join(thai ? " และ " : " and ");
     case "any":
-      return condition.conditions
-        .map(value => medicationConditionBody(value, locale))
-        .join(thai ? " หรือ " : " or ");
+      return condition.conditions.map(value => {
+        const body = medicationConditionBody(value, locale);
+        // Mixed Boolean daughters retain the exact tree grouping. Only the
+        // outer NOT uses "unless"; an inner NOT must remain explicit here.
+        return (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind
+          ? "(" + body + ")" : body;
+      }).join(condition.kind === "all" ? (thai ? " และ " : " and ") :
+        (thai ? " หรือ " : " or "));
   }
 }
 
@@ -1191,22 +1211,134 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
   return parts.join(separator);
 }
 
-/** Convert a typed R6 treatment-start step boundary to a day offset.
- * Unsupported event anchors remain visible as text/review qualifiers, not invented dates.
+/** Resolve exact day/week quantities without converting clock-time units to calendar days.
+ * @param quantity Typed FHIR duration, including its original unit and comparator.
+ * @returns Whole nonnegative calendar days, or undefined when not exact.
  */
-function treatmentStepOffsetDays(
+function exactCourseDays(quantity: FhirQuantity | undefined): number | undefined {
+  if (!quantity || quantity.comparator || quantity.value === undefined ||
+      !Number.isFinite(quantity.value) || quantity.value < 0) return undefined;
+  const unit = quantity.code ?? quantity.unit;
+  const days = unit === "d" ? quantity.value : unit === "wk" ? quantity.value * 7 : undefined;
+  return days !== undefined && Number.isInteger(days) ? days : undefined;
+}
+
+/** Find gaps in the union of all typed course windows, not between adjacent rows.
+ * An open-ended or unresolved parallel stage cannot license a global withholding instruction.
+ * @param windows Resolved treatment-day windows for every nonempty step.
+ * @param repeatCycle Original whole-course period, when the schedule repeats.
+ * @returns Half-open calendar-day intervals where the entire course has no medication.
+ */
+function medicationFreeCourseWindows(
+  windows: readonly { start: number | undefined; end: number | undefined }[],
+  repeatCycle: FhirQuantity | undefined
+): Array<{ start: number; end: number }> {
+  const ordered: Array<{ start: number; end: number }> = [];
+  for (const window of windows) {
+    if (window.start === undefined ||
+        (window.end !== undefined && window.end <= window.start)) return [];
+    ordered.push({ start: window.start, end: window.end ?? Infinity });
+  }
+  if (!ordered.length) return [];
+  const cycleDays = exactCourseDays(repeatCycle);
+  // A stage extending into another cycle can cover its apparent gap. Show
+  // the exact stage and repeat period, but never assert a global pause there.
+  if (repeatCycle && (cycleDays === undefined || cycleDays <= 0 ||
+      ordered.some(window => window.end > cycleDays))) return [];
+  ordered.sort((left, right) => left.start - right.start);
+  const gaps: Array<{ start: number; end: number }> = [];
+  let coveredUntil = 0;
+  for (const window of ordered) {
+    if (window.start > coveredUntil) gaps.push({ start: coveredUntil, end: window.start });
+    coveredUntil = Math.max(coveredUntil, window.end);
+  }
+  if (cycleDays !== undefined && cycleDays > coveredUntil) {
+    gaps.push({ start: coveredUntil, end: cycleDays });
+  }
+  return gaps;
+}
+
+/** Realize a temporal quantity without approximating calendar months or years.
+ * @param quantity Original typed temporal quantity.
+ * @param thai Whether the requested realization is Thai.
+ * @returns The original amount/comparator with a localized temporal unit.
+ */
+function formatCourseTimeQuantity(quantity: FhirQuantity, thai: boolean): string {
+  const units: Record<string, readonly [string, string, string]> = {
+    s: ["second", "seconds", "วินาที"], min: ["minute", "minutes", "นาที"],
+    h: ["hour", "hours", "ชั่วโมง"], d: ["day", "days", "วัน"],
+    wk: ["week", "weeks", "สัปดาห์"], mo: ["month", "months", "เดือน"],
+    a: ["year", "years", "ปี"]
+  };
+  const unit = quantity.code ?? quantity.unit ?? "";
+  const label = units[unit]?.[thai ? 2 : quantity.value === 1 ? 0 : 1] ?? quantity.unit ?? unit;
+  return `${quantity.comparator ?? ""}${quantity.value ?? ""} ${label}`.trim();
+}
+
+/** Render the typed whole-course repetition interval independently of component cadence.
+ * @param cycle Original R6 repeatCycle quantity; unknown units remain verbatim.
+ * @param thai Whether the requested realization is Thai.
+ * @param count Supplied common step repetition count, when explicitly finite.
+ * @returns A visible cycle instruction preserving the supplied count without inventing an end date.
+ */
+function formatCourseRepeatCycle(cycle: FhirQuantity, thai: boolean, count?: number): string {
+  const unit = cycle.code ?? cycle.unit ?? "";
+  const interval = formatCourseTimeQuantity(cycle, thai);
+  if (cycle.comparator || cycle.value === undefined || !Number.isFinite(cycle.value) ||
+      cycle.value <= 0 || !unit) {
+    return thai ? `ระยะรอบการใช้ยา: ${interval}.` : `Repeat-cycle interval: ${interval}.`;
+  }
+  const iterations = count === undefined ? "" : thai ? ` จำนวน ${count} รอบ` :
+    ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
+  return thai
+    ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับวันที่ใหม่ในแต่ละรอบ).`
+    : `Repeat this schedule every ${interval}${iterations} (days are numbered within each cycle).`;
+}
+
+/** Read a typed treatment-start quantity without reinterpreting its calendar unit.
+ * @param relative Source R6 boundary and event context.
+ * @returns Its finite nonnegative offset, or undefined for another/uncertain event.
+ */
+function treatmentStepOffsetQuantity(
   relative: FhirR6DosageDetails["step"][number]["start"]
-): number | undefined {
+): FhirQuantity | undefined {
   if (!relative || relative.contextReference || relative.contextDefinition ||
       relative.contextPath || relative.offsetRange) return undefined;
   if (!relative.contextCode?.coding?.some(coding =>
     coding.system === "http://hl7.org/fhir/evidence-variable-event" &&
     coding.code === "treatment-start")) return undefined;
-  const offset = relative.offsetDuration;
-  if (!offset || offset.comparator || !Number.isInteger(offset.value) ||
-      offset.value === undefined || offset.value < 0) return undefined;
-  const unit = offset.code ?? offset.unit;
-  return unit === "d" ? offset.value : unit === "wk" ? offset.value * 7 : undefined;
+  const quantity = relative.offsetDuration;
+  return quantity && quantity.value !== undefined && Number.isFinite(quantity.value) &&
+    quantity.value >= 0 && !quantity.comparator ? quantity : undefined;
+}
+
+/** Convert an exact treatment-start boundary into a calendar-day ordinal.
+ * @param relative Source R6 step boundary.
+ * @returns Its day offset, leaving month/year boundaries unconverted.
+ */
+function treatmentStepOffsetDays(
+  relative: FhirR6DosageDetails["step"][number]["start"]
+): number | undefined {
+  return exactCourseDays(treatmentStepOffsetQuantity(relative));
+}
+
+/** Format a calendar-valued step when day ordinals cannot faithfully represent it.
+ * @param start Source-backed onset, including an inherited preceding end if known.
+ * @param end Source-backed end of the phase.
+ * @param thai Whether the requested realization is Thai.
+ * @returns Exact relative calendar wording without a guessed treatment start date.
+ */
+function formatCalendarStepWindow(
+  start: FhirQuantity | undefined, end: FhirQuantity | undefined, thai: boolean
+): string {
+  const point = (quantity: FhirQuantity) => quantity.value === 0
+    ? (thai ? "เริ่มการรักษา" : "treatment start")
+    : thai ? `${formatCourseTimeQuantity(quantity, true)}หลังเริ่มการรักษา`
+      : `${formatCourseTimeQuantity(quantity, false)} after treatment start`;
+  if (start && end) return thai ? `ตั้งแต่${point(start)}จนถึง${point(end)}` :
+    `From ${point(start)} until ${point(end)}`;
+  if (start) return thai ? `ตั้งแต่${point(start)}เป็นต้นไป` : `From ${point(start)} onward`;
+  return end ? (thai ? `จนถึง${point(end)}` : `Until ${point(end)}`) : "";
 }
 
 export function formatSig(
@@ -1238,19 +1370,18 @@ export function formatSig(
     // the whole course plus edit markers on every component.
     const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
     const stages: string[] = [];
+    const firstRepeatCount = oneOrCourse.step[0]?.count;
+    const courseRepeatCount = firstRepeatCount !== undefined &&
+      oneOrCourse.step.every(step => step.count === firstRepeatCount) ? firstRepeatCount : undefined;
     let priorEndDays: number | undefined;
+    const windows = oneOrCourse.step.map((step, index) => {
+      const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
+      const end = treatmentStepOffsetDays(step.end);
+      priorEndDays = end;
+      return { start, end };
+    });
     for (const [index, step] of oneOrCourse.step.entries()) {
-      const explicitStart = treatmentStepOffsetDays(step.start);
-      const startDays = step.start ? explicitStart : index === 0 ? 0 : priorEndDays;
-      const endDays = treatmentStepOffsetDays(step.end);
-      // A source-less course can have a real administration-free interval.
-      // Never join the surrounding identical doses as though they are consecutive.
-      if (priorEndDays !== undefined && startDays !== undefined &&
-          startDays > priorEndDays) {
-        stages.push(thai
-          ? `งดยาในวันที่ ${priorEndDays + 1}–${startDays}.`
-          : `No doses on days ${priorEndDays + 1}–${startDays}.`);
-      }
+      const { start: startDays, end: endDays } = windows[index];
       const rendered = formatChoiceMembers(step.component, component => {
         const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
         const expressions: string[] = [];
@@ -1264,10 +1395,7 @@ export function formatSig(
         }
         return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
       }, options);
-      if (!rendered.trim()) {
-        priorEndDays = endDays;
-        continue;
-      }
+      if (!rendered.trim()) continue;
       let timing = "";
       if (step.start || step.end) {
         if ((step.start && startDays === undefined) ||
@@ -1276,10 +1404,19 @@ export function formatSig(
               endDays <= startDays)) {
           // Unsupported event anchors must stay visible instead of becoming
           // an unconditional dose when the original source text is absent.
-          const source = [step.start?.text, step.end?.text]
-            .filter((value): value is string => Boolean(value?.trim())).join("; ");
-          timing = source ? (thai ? `ต้องตรวจสอบช่วงเวลา: ${source}` : `Timing requires review: ${source}`) :
-            (thai ? "ต้องตรวจสอบช่วงเวลาการใช้ยา" : "Stage timing requires review");
+          const startQuantity = step.start ? treatmentStepOffsetQuantity(step.start) :
+            index === 0 ? { value: 0, unit: "d" } :
+              treatmentStepOffsetQuantity(oneOrCourse.step[index - 1].end);
+          const endQuantity = treatmentStepOffsetQuantity(step.end);
+          if ((!step.start || startQuantity) && (!step.end || endQuantity) &&
+              !(startDays !== undefined && endDays !== undefined && endDays <= startDays)) {
+            timing = formatCalendarStepWindow(startQuantity, endQuantity, thai);
+          } else {
+            const source = [step.start?.text, step.end?.text]
+              .filter((value): value is string => Boolean(value?.trim())).join("; ");
+            timing = source ? (thai ? `ต้องตรวจสอบช่วงเวลา: ${source}` : `Timing requires review: ${source}`) :
+              (thai ? "ต้องตรวจสอบช่วงเวลาการใช้ยา" : "Stage timing requires review");
+          }
         } else if (endDays !== undefined && startDays !== undefined) {
           timing = thai ? `วันที่ ${startDays + 1}–${endDays}` :
             `Days ${startDays + 1}–${endDays}`;
@@ -1290,11 +1427,27 @@ export function formatSig(
           timing = thai ? `ถึงวันที่ ${endDays}` : `Through day ${endDays}`;
         }
       }
-      stages.push(timing ? `${timing}: ${rendered}` : rendered);
-      priorEndDays = endDays;
+      const stageCount = oneOrCourse.repeatCycle && courseRepeatCount === undefined &&
+        step.count !== undefined ? (thai ? `จำนวน ${step.count} รอบ` :
+          `for ${step.count} ${step.count === 1 ? "cycle" : "cycles"}`) : "";
+      const heading = [timing, stageCount].filter(Boolean).join("; ");
+      stages.push(heading ? `${heading}: ${rendered}` : rendered);
     }
     const hasTimedStages = oneOrCourse.step.some(step => step.start || step.end);
-    return stages.join(hasTimedStages ? " " : thai ? " จากนั้น " : " then ");
+    if (hasTimedStages) {
+      const pauses = medicationFreeCourseWindows(
+        windows.filter((_, index) => oneOrCourse.step[index].component.length > 0),
+        oneOrCourse.repeatCycle
+      );
+      for (const pause of pauses) {
+        stages.push(thai ? `งดยาในวันที่ ${pause.start + 1}–${pause.end}.` :
+          `No doses on days ${pause.start + 1}–${pause.end}.`);
+      }
+    }
+    if (oneOrCourse.repeatCycle) {
+      stages.push(formatCourseRepeatCycle(oneOrCourse.repeatCycle, thai, courseRepeatCount));
+    }
+    return stages.join(hasTimedStages || oneOrCourse.repeatCycle ? " " : thai ? " จากนั้น " : " then ");
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
@@ -1350,9 +1503,14 @@ export function formatSigBatch(
   options?: FormatBatchOptions
 ): string {
   const separator = options?.separator ?? ", ";
-  if (dosages.some(dosage => dosage.modifierExtension?.some(extension =>
-    extension.url === DOSAGE_DETAILS_R5_URL))) {
-    return formatSig(toDosageDetails(dosages), style, options);
+  const firstSequence = dosages[0]?.sequence ?? 1;
+  // Distinct ordinary R5 sequences also carry course-level ordering, even
+  // without a retained R6 marker. Equal/absent sequences remain concurrent.
+  if (dosages.some(dosage => (dosage.sequence ?? 1) !== firstSequence ||
+    dosage.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL))) {
+    // Batch formatting requests a realization; undefined native R6 options
+    // instead request the original course source. Keep those APIs distinct.
+    return formatSig(toDosageDetails(dosages), style, options ?? {});
   }
   if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
     return formatChoiceMembers(dosages, dosage => formatSig(dosage, style, options), options, separator);
@@ -1372,9 +1530,17 @@ export function formatParseBatch(
   style: "short" | "long" = "short",
   separator = ", "
 ): string {
+  // Item displays cannot encode course-wide starts, pauses or repetition.
+  // Keep the already realized whole-course text (and its locale) for those
+  // semantics; the custom separator still applies to ordinary flat batches.
+  if (batch.fhirNext.step.length > 1 || batch.fhirNext.repeatCycle ||
+    batch.fhirNext.step.some(step => step.start || step.end || step.count !== undefined)) {
+    return style === "short" ? batch.shortText : batch.longText;
+  }
   const dosages = batch.items.map(item => item.fhir);
   if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
-    return formatSigBatch(dosages, style, { separator });
+    // The batch already owns a localized, mutually exclusive choice display.
+    return style === "short" ? batch.shortText : batch.longText;
   }
   const texts = batch.items
     .map((item) => (style === "short" ? item.shortText : item.longText))
@@ -1695,9 +1861,28 @@ function buildParseResult(
   const hasUnrealizedLexicalTail = Boolean(
     clause.leftovers?.length && !clause.instructionGraph?.actions.length
   );
+  // A retained instruction can already realize the complete local guard.
+  // Its source evidence licenses normal formatting without losing the guard;
+  // other clinical adjuncts still retain their exact original wording.
+  const adjunct = clause.clinicalAdjuncts;
+  const guardRanges = adjunct?.localRanges?.length ? adjunct.localRanges :
+    adjunct?.evidence?.reduce<TextRange[]>((ranges, evidence) => {
+      ranges.push(...evidence.spans);
+      return ranges;
+    }, []);
+  const guardRenderedByInstruction = Boolean(
+    adjunct?.condition &&
+    !adjunct.excludedDates?.length && !adjunct.excludedWeekdays?.length &&
+    guardRanges?.length && guardRanges.every(range =>
+      clause.additionalInstructions?.some(instruction => instruction.text &&
+        instruction.evidence?.some(evidence => evidence.spans.some(span =>
+          span.start <= range.start && range.end <= span.end
+        )))
+    )
+  );
   const useOriginalText = Boolean(
     clause.clinicalQuantity ||
-    clause.clinicalAdjuncts?.localRanges?.length ||
+    (adjunct?.localRanges?.length && !guardRenderedByInstruction) ||
     clause.schedule?.maxDosePerPeriod?.length ||
     hasUnrealizedTypedConditionSource ||
     hasUnrealizedLexicalTail
@@ -1713,7 +1898,7 @@ function buildParseResult(
   // the one FHIR projection instead of deleting and regenerating Dosage.text.
   if (clause.clinicalAdjuncts && !clause.clinicalAdjuncts.localRanges?.length) {
     const condition = clause.clinicalAdjuncts.condition;
-    if (condition) {
+    if (condition && !guardRenderedByInstruction) {
       shortText = appendMedicationConditionText(shortText, condition, options);
       longText = appendMedicationConditionText(longText, condition, options);
     }

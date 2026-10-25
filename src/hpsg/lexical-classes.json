@@ -1,4 +1,14 @@
 {
+  "clockSuffixSequences": [["น", "."]],
+  "clinicalWeekdayAbbreviations": {
+    "mwf": ["mon", "wed", "fri"],
+    "m/w/f": ["mon", "wed", "fri"]
+  },
+  "cycleCountHeads": [
+    "cycle",
+    "cycles",
+    "รอบ"
+  ],
   "measurementNameAliases": {
     "น้ำตาล": "glucose",
     "ระดับน้ำตาล": "glucose",
@@ -839,7 +849,8 @@
   "occurrenceCountModifiers": [
     "additional",
     "more",
-    "further"
+    "further",
+    "another"
   ],
   "maximumPeriodPrepositions": [
     "in",
@@ -937,6 +948,16 @@
       ]
     ]
   },
+  "calendarComplementDayModifiers": [
+    "other",
+    "remaining",
+    "อื่น",
+    "อื่นๆ"
+  ],
+  "calendarComplementDeterminers": [
+    "the",
+    "all"
+  ],
   "calendarUniversalDayQuantifiers": [
     "all",
     "every",
@@ -1119,6 +1140,16 @@
     "shake",
     "mix"
   ],
+  "workflowEventPhaseVerbs": [
+    "end",
+    "ends",
+    "finish",
+    "finishes",
+    "start",
+    "starts",
+    "begin",
+    "begins"
+  ],
   "workflowNouns": [
     "bowel",
     "change",
@@ -1147,6 +1178,12 @@
     "and"
   ],
   "phaseAdjustmentLeadSequences": [
+    [
+      "resume"
+    ],
+    [
+      "restart"
+    ],
     [
       "reduce",
       "to"
@@ -1322,7 +1359,8 @@
   },
   "eventOffsetArticles": [
     "a",
-    "an"
+    "an",
+    "another"
   ],
   "instructionLeadingSeparators": [
     ",",
@@ -1727,6 +1765,35 @@
     "external"
   ],
   "actionDirectivePrefixes": [
+    {
+      "parts": ["ระวัง", "อย่า", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": ["อย่า", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": ["avoid", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": [
+        "should-not",
+        "จะ"
+      ],
+      "polarity": "negate",
+      "modality": "should"
+    },
+    {
+      "parts": [
+        "อย่า"
+      ],
+      "polarity": "negate"
+    },
     {
       "parts": [
         "never"
@@ -2182,9 +2249,38 @@
       }
     }
   },
+  "clockWindowFrames": [
+    [
+      "from",
+      "to"
+    ],
+    [
+      "from",
+      "until"
+    ],
+    [
+      "between",
+      "and"
+    ],
+    [
+      "ตั้งแต่",
+      "ถึง"
+    ],
+    [
+      "ระหว่าง",
+      "and"
+    ]
+  ],
+  "courseContinuationDurationHeads": [
+    "ต่อ"
+  ],
   "phaseAdditionLeadSequences": [
     [
       "add"
+    ],
+    [
+      "เพิ่ม",
+      "additional"
     ]
   ],
   "openEndedContinuationTokens": [
@@ -2219,16 +2315,169 @@
     "the"
   ],
   "phaseTargetLinkers": [
-    "to"
+    "to",
+    "เป็น",
+    "เหลือ"
   ],
   "regimenSequenceConnectorPhrases": [
-    ["after", "that"],
-    ["followed", "by"],
-    ["subsequently"],
-    ["afterwards"],
-    ["thereafter"],
-    ["next", "week"],
-    ["ต่อ", "ด้วย"],
-    ["สัปดาห์", "ถัด", "ไป"]
+    [
+      "after",
+      "that"
+    ],
+    [
+      "followed",
+      "by"
+    ],
+    [
+      "subsequently"
+    ],
+    [
+      "afterwards"
+    ],
+    [
+      "thereafter"
+    ],
+    [
+      "next",
+      "week"
+    ],
+    [
+      "ต่อ",
+      "ด้วย"
+    ],
+    [
+      "สัปดาห์",
+      "ถัด",
+      "ไป"
+    ]
+  ],
+  "activityDayAdjuncts": {
+    "negativeNounPrefixes": [
+      "non-"
+    ],
+    "negativeNounTokens": [
+      "non",
+      "ไม่"
+    ],
+    "dayRelativeTokens": [
+      "at"
+    ],
+    "dayTokens": [
+      "day",
+      "days"
+    ],
+    "frames": [
+      {
+        "parts": [
+          "only",
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "except",
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "except"
+        ],
+        "dayFirst": false,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "only",
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "only"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "ยกเว้น",
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "ยกเว้น"
+        ],
+        "dayFirst": true,
+        "exclude": true
+      }
+    ]
+  },
+  "doseTargetDaypartClockRanges": {
+    "MORN": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "AFT": {
+      "startHour": 12,
+      "endHour": 18
+    },
+    "EVE": {
+      "startHour": 18,
+      "endHour": 24
+    }
+  },
+  "doseTargetMeridiemClockRanges": {
+    "am": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "a.m.": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "pm": {
+      "startHour": 12,
+      "endHour": 24
+    },
+    "p.m.": {
+      "startHour": 12,
+      "endHour": 24
+    }
+  },
+  "circumstantialConditionLeads": [
+    [
+      "on",
+      "days",
+      "with"
+    ],
+    [
+      "on",
+      "days",
+      "when"
+    ]
   ]
 }

@@ -1,10 +1,8 @@
+import { DOSE_TARGET_EVENT_MEMBERS } from "../hpsg/lexical-classes";
 import { terminalAdministrationDelay } from "./grammar";
-import {
-  AdviceArgumentRole, AdvicePolarity,
-  EventTiming as SequenceEventTiming, FhirPeriodUnit
-} from '../types';
+import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
-import type { BoundaryPlan, BoundaryRelation } from './types';
+import type { BoundaryPlan, BoundaryRelation } from '../hpsg/signature';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import { ParserState } from '../parser-state';
 import type {
@@ -206,27 +204,17 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
   ));
 }
 
-/**
- * A terminal affirmative STOP with a finite elapsed-duration daughter is
- * a medication-free pause before the next licensed regimen phase. This is
- * distinct from a dosage course end and never creates a fictitious dose.
- * There is no implied exact pause without both a typed STOP and its duration.
- */
+/** Consume the HPSG pause only at the end of its administration program. */
 function terminalTreatmentPauseDays(clause: CanonicalSigClause): number | undefined {
+  const pause = clause.clinicalAdjuncts?.treatmentPause;
   const graph = clause.instructionGraph;
   const actions = graph?.actions;
   const last = actions?.[actions.length - 1];
-  if (!last || last.predicate.semanticClass !== 'stop' ||
-      last.polarity === AdvicePolarity.Negate ||
+  if (!pause || !last || last.span.start !== pause.range.start ||
+      last.span.end !== pause.range.end ||
       (graph?.primaryAdministrationSpan &&
         last.span.start < graph.primaryAdministrationSpan.end)) return undefined;
-  const quantity = last.args.find(arg =>
-    arg.role === AdviceArgumentRole.Duration)?.quantity;
-  if (!quantity || quantity.range || quantity.value === undefined ||
-      quantity.value <= 0 || !Number.isFinite(quantity.value)) return undefined;
-  const days = quantity.unit === 'd' ? quantity.value :
-    quantity.unit === 'wk' ? quantity.value * 7 : undefined;
-  return days !== undefined && Number.isInteger(days) ? days : undefined;
+  return pause.durationDays;
 }
 
 /**
@@ -347,6 +335,32 @@ export function scopeSequentialPhaseSemantics(
       if (!clause) continue;
 
       const fields: string[] = [];
+      if (edge.relation.semanticLicense === 'dose-continuation' && clause.prn?.enabled &&
+          !clause.clinicalQuantity && !clause.evidence.some(item => item.lexicalCategory === 'dose' &&
+            item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length))) {
+        // A PRN successor can omit the repeated administration, but only
+        // features shared by the whole predecessor phase have an antecedent.
+        // In particular, never pick the last of several different doses.
+        const antecedents = prior.map(member => states[member]?.primaryClause);
+        const first = antecedents[0];
+        if (first?.dose && antecedents.every(value => equalStructuredValues(value?.dose, first.dose))) {
+          clause.dose = cloneStructuredValue(first.dose);
+          fields.push('dose');
+        } else {
+          // Earlier local ellipsis may have a nearest-neighbor quantity;
+          // it is not authoritative across a multi-component predecessor.
+          delete clause.dose;
+          clause.patientInstruction = clause.patientInstruction ?? clause.rawText;
+        }
+        if (!clause.route && first?.route && antecedents.every(value => equalStructuredValues(value?.route, first.route))) {
+          clause.route = cloneStructuredValue(first.route);
+          fields.push('route');
+        }
+        if (!clause.site && first?.site && antecedents.every(value => equalStructuredValues(value?.site, first.site))) {
+          clause.site = cloneStructuredValue(first.site);
+          fields.push('site');
+        }
+      }
       if (sharedMethod && !clause.method) {
         clause.method = cloneStructuredValue(sharedMethod);
         fields.push('method');
@@ -513,15 +527,39 @@ export function expandRegimenAdjustmentPhases(
           target.patientInstruction = target.patientInstruction ?? target.rawText;
         }
       }
-      // A source-licensed, restrictive clock adjustment replaces exactly
-      // its named administration. Preserve every unrelated predecessor slot.
-      // Without one explicit target clock there is no safe partial replacement.
+      // A restricted clock or event nominal names an existing administration.
+      // Dinner can select a before-dinner dose without changing its meal relation;
+      // a unique typed antecedent, never a guessed clock-to-event mapping, is required.
       const replacedClock = target.regimenAdjustment === "replace-target" &&
         target.schedule?.timeOfDay?.length === 1
         ? target.schedule.timeOfDay[0] : undefined;
-      if (target.dose && (target.regimenAdjustment !== "replace-target" ||
+      const eventTarget = target.regimenAdjustment === "replace-target" &&
+        target.schedule?.when?.length === 1 && !replacedClock ? target.schedule.when[0] : undefined;
+      let replacedEvent: SequenceEventTiming | undefined;
+      if (eventTarget && target.schedule) {
+        const eventFamily = DOSE_TARGET_EVENT_MEMBERS.get(eventTarget) ??
+          [...DOSE_TARGET_EVENT_MEMBERS.values()].find(members => members.indexOf(eventTarget) >= 0) ?? [eventTarget];
+        const matches: SequenceEventTiming[] = [];
+        for (const state of previous) for (const event of state.primaryClause.schedule?.when ?? []) {
+          if (eventFamily.indexOf(event) >= 0) matches.push(event);
+        }
+        const exact = matches.indexOf(eventTarget) >= 0 ? eventTarget :
+          matches.length === 1 ? matches[0] : undefined;
+        if (exact) {
+          replacedEvent = exact;
+          target.schedule.when = [exact];
+          const donor = previous.find(state =>
+            (state.primaryClause.schedule?.when?.indexOf(exact) ?? -1) >= 0)?.primaryClause.schedule;
+          if (donor) for (const field of ["offset", "offsetMin", "offsetMax"] as const) {
+            if (target.schedule[field] === undefined && donor[field] !== undefined) {
+              target.schedule[field] = donor[field];
+            }
+          }
+        }
+      }
+      if (target.dose && (target.regimenAdjustment !== "replace-target" || replacedEvent ||
           replacedClock && previous.some(state =>
-            state.primaryClause.schedule?.timeOfDay?.indexOf(replacedClock) !== -1))) {
+            (state.primaryClause.schedule?.timeOfDay?.indexOf(replacedClock) ?? -1) >= 0))) {
         for (const donorIndex of prior.members) {
           const donor = outputStates[donorIndex];
           const clone = new ParserState(donor.input, donor.tokens, donor.customSiteHints);
@@ -539,6 +577,16 @@ export function expandRegimenAdjustmentPhases(
               if (!remaining.length && !schedule.when?.length) continue;
               schedule.timeOfDay = remaining;
               if (schedule.frequency === oldClocks.length && schedule.period === 1 &&
+                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+            }
+          }
+          if (schedule && replacedEvent && target.regimenAdjustment === "replace-target") {
+            const oldEvents = schedule.when ?? [];
+            if (oldEvents.indexOf(replacedEvent) >= 0) {
+              const remaining = oldEvents.filter(event => event !== replacedEvent);
+              if (!remaining.length && !schedule.timeOfDay?.length) continue;
+              schedule.when = remaining;
+              if (schedule.frequency === oldEvents.length && schedule.period === 1 &&
                   schedule.periodUnit === 'd') schedule.frequency = remaining.length;
             }
           }

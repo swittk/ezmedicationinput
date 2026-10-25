@@ -10,9 +10,9 @@ import {
 } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
-import type { BoundaryPlan } from '../src/regimen/types';
+import type { BoundaryPlan } from '../src/hpsg/signature';
 import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
-import type { CoordinationScopeFacts } from '../src/regimen/types';
+import type { CoordinationScopeFacts } from '../src/hpsg/signature';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
 
 const source = 'instill 1 drop in left eye and 2 drops in right eye twice daily';

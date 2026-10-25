@@ -4,6 +4,7 @@ import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalToFhir } from "../src/fhir";
 import {
   calculateTotalUnits,
+  parseInstructionActions,
   getDosageCondition,
   nextDueDoses,
   parseSig as parsePublicSig,
@@ -743,5 +744,133 @@ describe("prenominal supplemental dose quantities", () => {
         durationUnit: "d"
       })).toMatchObject({ totalUnits: 31.5, unit: "tab", quantityKind: "maximum" });
     }
+  });
+});
+
+
+describe("conditional observation quantities never become medication doses", () => {
+  it.each([
+    "Take 1 tablet every morning. Take 1 extra tablet if weight increases by 2 kg in 3 days.",
+    "Take 1 tablet in the morning. Take an extra 1 tablet if weight gain exceeds 2 kg over 3 days."
+  ])("preserves the two tablet administrations and the complete observation condition: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir.map(row => row.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
+    expect(parsed.fhir.every(row => row.timing?.repeat?.boundsDuration === undefined)).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    expect(getDosageCondition(parsed.fhir[0])).toBeUndefined();
+    expect(getDosageCondition(parsed.fhir[1])).toMatchObject({ kind: "text" });
+    const last = parsed.fhir[1];
+    expect(last.text).toContain("weight");
+    expect(last.text).toContain("2 kg");
+    expect(last.text).toContain("3 days");
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(strict.map(row => row.doseAndRate?.[0]?.doseQuantity))
+      .toEqual([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
+    for (const frame of parseInstructionActions(input)) {
+      for (const argument of frame.args) {
+        if (argument.role !== "amount" || !argument.span) continue;
+        expect(argument.span.start).toBeGreaterThanOrEqual(frame.span.start);
+        expect(argument.span.end).toBeLessThanOrEqual(frame.span.end);
+        expect(argument.quantity?.unit).not.toBe("kg");
+      }
+    }
+  });
+
+  it("still interprets a real quantified medication instruction rather than banning mass units", () => {
+    const parsed = parsePublicSig("Take 2 g daily for 3 days.");
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "g" });
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(3);
+  });
+  it.each([
+    ["Take 2 additional tablets if weight rises by 2 kg within 72 hours.", 2],
+    ["Take an additional half tablet if weight decreases by 1 kg over 3 days.", 0.5],
+    ["Take 1 extra tablet if creatinine rises by 0.3 mg/dl in 48 hours.", 1]
+  ] as const)("keeps the observation window separate for adjacent quantified conditional forms: %s", (input, amount) => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: amount, unit: "tab" });
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(getDosageCondition(parsed.fhir[0])).toMatchObject({ kind: "text" });
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    "Take 1 tablet in the morning; if body weight increases by 2 kg in 3 days, take an extra 1 tablet at noon.",
+    "Take 1 tablet in the morning. If weight increases by 2 kg, take 1 extra tablet at noon.",
+    "Take 1 tablet in the morning and take an extra 1 tablet at noon if body weight increases by 2 kg in 3 days."
+  ])("attaches a conditional extra administration without conditioning the unrelated standing dose: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhir).toHaveLength(2);
+    expect(getDosageCondition(parsed.fhir[0])).toBeUndefined();
+    expect(getDosageCondition(parsed.fhir[1])).toBeDefined();
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const day = "2026-11-02";
+      const options = { orderedAt: day + "T00:00:00+07:00", from: day + "T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", eventClock: { MORN: "08:00", NOON: "12:00" }, limit: 4 };
+      const times = (enabled: boolean) => nextDueDoses(dosage, {
+        ...options, evaluateCondition: () => enabled
+      }).filter(value => value.startsWith(day)).map(value => value.slice(11, 16));
+      expect(times(false)).toEqual(["08:00"]);
+      expect(times(true)).toEqual(["08:00", "12:00"]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    "Take 1 tablet at 08:00 for 7 days if dialysis day.",
+    "Take 1 tablet at 08:00 for 7 days if it is a dialysis day.",
+    "รับประทาน 1 เม็ด เวลา 08:00 เป็นเวลา 7 วัน ถ้าเป็นวันฟอกไต"
+  ])("retains an explicit context-day condition without inventing the patient's calendar: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    // Calendar membership is supplied by the caller, not a coded patient problem.
+    expect(getDosageCondition(parsed.fhir[0])).toMatchObject({ kind: "text" });
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const options = { orderedAt: "2026-11-02T00:00:00+07:00", from: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 2 };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: () => false })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: () => true })[0])
+        .toBe("2026-11-02T08:00:00+07:00");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each(["only if dialysis day", "unless dialysis day", "เฉพาะเมื่อเป็นวันฟอกไต"])(
+    "does not recode contextual day membership as a patient problem under an explicit guard: %s", guard => {
+      const input = "Take 1 tablet at 08:00 for 7 days " + guard + ".";
+      const parsed = parsePublicSig(input);
+      const condition = getDosageCondition(parsed.fhir[0]);
+      if (guard.startsWith("unless")) {
+        expect(condition).toMatchObject({ kind: "not", condition: { kind: "text" } });
+      } else expect(condition).toMatchObject({ kind: "text" });
+      expect(getDosageCondition(toFhirR5Dosages(parsed.fhirNext)[0])).toEqual(condition);
+      expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    }
+  );
+
+});
+
+
+describe("finite duration follows an administration adjunct", () => {
+  it.each([
+    "Take 1 tablet with snacks for 14 days.",
+    "Take 1 tablet with snacks for 2 weeks."
+  ])("keeps the course bound separate from the adjunct object: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(input.includes("14") ? 14 : 2);
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.code).toBe(input.includes("14") ? "d" : "wk");
+    expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+  it("does not promote the duration of an unrelated procedure into the medication course", () => {
+    const parsed = parsePublicSig("Take 2 tablets with meals; wash hands for 14 seconds.");
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
   });
 });

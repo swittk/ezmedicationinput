@@ -519,6 +519,10 @@ function mergeSchedule(
     !sameOptionalScalar(left.period, right.period) ||
     !sameOptionalScalar(left.periodMax, right.periodMax) ||
     !sameOptionalScalar(left.periodUnit, right.periodUnit) ||
+    (left.clockWindow && right.clockWindow && (
+      left.clockWindow.start !== right.clockWindow.start || left.clockWindow.end !== right.clockWindow.end ||
+      left.clockWindow.endInclusive !== right.clockWindow.endInclusive)) ||
+    !sameOptionalScalar(left.weekdayOrdinal, right.weekdayOrdinal) ||
     !sameOptionalScalar(left.offset, right.offset) ||
     !sameOptionalScalar(left.offsetMin, right.offsetMin) ||
     !sameOptionalScalar(left.offsetMax, right.offsetMax) ||
@@ -550,6 +554,8 @@ function mergeSchedule(
     period: mergeOptionalScalar(left.period, right.period),
     periodMax: mergeOptionalScalar(left.periodMax, right.periodMax),
     periodUnit: mergeOptionalScalar(left.periodUnit, right.periodUnit),
+    clockWindow: left.clockWindow ?? right.clockWindow,
+    weekdayOrdinal: mergeOptionalScalar(left.weekdayOrdinal, right.weekdayOrdinal),
     offset: mergeOptionalScalar(left.offset, right.offset),
     offsetMin: mergeOptionalScalar(left.offsetMin, right.offsetMin),
     offsetMax: mergeOptionalScalar(left.offsetMax, right.offsetMax),
@@ -594,8 +600,14 @@ function mergeClinicalAdjunct(
   }
   if (left.conditionTarget && right.conditionTarget &&
       !equalStructuredValues(left.conditionTarget, right.conditionTarget)) return undefined;
+  if (left.calendarDayCondition && right.calendarDayCondition &&
+      !equalStructuredValues(left.calendarDayCondition, right.calendarDayCondition)) return undefined;
+  if (left.treatmentPause && right.treatmentPause &&
+      !equalStructuredValues(left.treatmentPause, right.treatmentPause)) return undefined;
   return {
+    treatmentPause: left.treatmentPause ?? right.treatmentPause,
     condition: left.condition ?? right.condition,
+    calendarDayCondition: left.calendarDayCondition ?? right.calendarDayCondition,
     conditionTarget: left.conditionTarget ?? right.conditionTarget,
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),

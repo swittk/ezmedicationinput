@@ -1,4 +1,5 @@
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, RouteCode } from "../types";
+import { LexKind, type LexToken } from "../lexer/token-types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode } from "../types";
 import { baseLanguageTag } from "../localization";
 import {
   ACTION_SEQUENCE_MARKERS,
@@ -326,6 +327,10 @@ export const COMPACT_LIST_SEPARATORS = setOf(source.compactListSeparators);
 export const EVERY_INTERVAL_TOKENS_DATA = setOf(source.everyIntervalTokens);
 export const COUNT_MARKER_TOKENS_DATA = setOf(source.countMarkerTokens);
 export const COUNT_CONNECTOR_WORDS_DATA = setOf(source.countConnectorWords);
+/** Restrictive supplemental-quantity modifiers shared by dose and action NPs. */
+export const SUPPLEMENTAL_DOSE_MODIFIERS = new Set(
+  ["additional", "extra"].filter(word => COUNT_CONNECTOR_WORDS_DATA.has(word))
+);
 export const MAXIMUM_COUNT_LEAD_TOKENS = setOf(source.maximumCountLeadTokens ?? []);
 export const MAXIMUM_COUNT_LEAD_SEQUENCES = (source.maximumCountLeadSequences ?? [])
   .map((parts) => [...parts])
@@ -347,11 +352,23 @@ export const DOSE_TARGET_QUANTIFIERS = new Map<string, "all" | "both">(
   Object.keys(source.doseTargetQuantifiers).map(key => [key,
     (source.doseTargetQuantifiers as Record<string, "all" | "both">)[key]])
 );
+/** Broad named dayparts can select a unique already stated clock, never invent one. */
+export const DOSE_TARGET_DAYPART_CLOCK_RANGES = new Map<EventTiming, { startHour: number; endHour: number }>(
+  Object.keys(source.doseTargetDaypartClockRanges).map(key => [key as EventTiming,
+    (source.doseTargetDaypartClockRanges as Record<string, { startHour: number; endHour: number }>)[key]])
+);
+/** Meridiem nominals select existing clock slots without asserting a meal time. */
+export const DOSE_TARGET_MERIDIEM_CLOCK_RANGES = new Map<string, { startHour: number; endHour: number }>(
+  Object.keys(source.doseTargetMeridiemClockRanges).map(key => [key,
+    (source.doseTargetMeridiemClockRanges as Record<string, { startHour: number; endHour: number }>)[key]])
+);
 export const DOSE_TARGET_EVENT_MEMBERS = new Map<EventTiming, readonly EventTiming[]>(
   Object.keys(source.doseTargetEventMembers).map(key => [key as EventTiming,
     (source.doseTargetEventMembers as Record<string, EventTiming[]>)[key]])
 );
 export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
+export const CALENDAR_COMPLEMENT_DAY_MODIFIERS = setOf(source.calendarComplementDayModifiers);
+export const CALENDAR_COMPLEMENT_DETERMINERS = setOf(source.calendarComplementDeterminers);
 export const FREQUENCY_TIMES_WORDS_DATA = setOf(source.frequencyTimesWords);
 export const FREQUENCY_CONNECTOR_WORDS_DATA = setOf(source.frequencyConnectorWords);
 export const FREQUENCY_ALTERNATIVE_CONNECTORS = setOf(source.frequencyAlternativeConnectors ?? []);
@@ -366,6 +383,8 @@ export const WORKFLOW_START_WORDS = new Set([
   ...getAdviceRelationCanonicalSetByGrammarFeature("workflowStart")
 ]);
 export const WORKFLOW_NOUNS = setOf(source.workflowNouns);
+/** Finite event-phase verbs that complete a workflow temporal noun phrase. */
+export const WORKFLOW_EVENT_PHASE_VERBS = setOf(source.workflowEventPhaseVerbs);
 export const ANTE_MERIDIEM_TOKENS = setOf(source.anteMeridiemTokens);
 export const POST_MERIDIEM_TOKENS = setOf(source.postMeridiemTokens);
 export const MERIDIEM_TOKENS = setOf(source.meridiemTokens);
@@ -432,7 +451,8 @@ export const POSITIVE_DIRECTIVE_MARKERS = setOf(source.positiveDirectiveMarkers)
 export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((prefix) => ({
   parts: prefix.parts as readonly string[],
   polarity: prefix.polarity as AdvicePolarity | undefined,
-  modality: prefix.modality as AdviceModality | undefined
+  modality: prefix.modality as AdviceModality | undefined,
+  complement: prefix.complement as "contact-clause" | undefined
 }));
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
 /** Closed-class contrast that connects two instructions, not a new action. */
@@ -442,6 +462,41 @@ export const REGIMEN_SEQUENCE_CONNECTOR_PHRASES: readonly (readonly string[])[] 
   source.regimenSequenceConnectorPhrases
     .map(parts => [...parts])
     .sort((left, right) => right.length - left.length);
+const PHRASE_SEQUENCERS_BY_FIRST = new Map<string, Array<readonly string[]>>();
+for (const parts of REGIMEN_SEQUENCE_CONNECTOR_PHRASES) {
+  const bucket = PHRASE_SEQUENCERS_BY_FIRST.get(parts[0]) ?? [];
+  bucket.push(parts);
+  PHRASE_SEQUENCERS_BY_FIRST.set(parts[0], bucket);
+}
+
+/** Source-backed sequence marker shared by clause and course constructions.
+ * @param tokens Existing normalized lexical stream.
+ * @param start Candidate marker head; no search beyond its licensed phrase.
+ */
+function sequenceLexeme(token: LexToken | undefined): string {
+  return token ? (token.canonical ?? token.lower).replace(/^[.,;:]+|[.,;:]+$/g, "") : "";
+}
+
+export function sequenceConnectorEnd(tokens: readonly LexToken[], start: number): number | undefined {
+  const initial = sequenceLexeme(tokens[start]);
+  if (ACTION_SEQUENCE_MARKERS.has(initial)) return start + 1;
+  const canonicalCandidates = PHRASE_SEQUENCERS_BY_FIRST.get(initial);
+  const surface = tokens[start]?.lower;
+  const surfaceCandidates = surface && surface !== initial
+    ? PHRASE_SEQUENCERS_BY_FIRST.get(surface) : undefined;
+  if (!canonicalCandidates && !surfaceCandidates) return undefined;
+  const matched = (parts: readonly string[]) => parts.every((part, offset) => {
+    const token = tokens[start + offset];
+    return token && (part === sequenceLexeme(token) || part === token.lower);
+  });
+  for (const parts of canonicalCandidates ?? []) if (matched(parts)) return start + parts.length;
+  for (const parts of surfaceCandidates ?? []) if (matched(parts)) return start + parts.length;
+  return undefined;
+}
+
+/** Count nouns select whole treatment cycles rather than doses or days. */
+export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
+
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
@@ -497,6 +552,9 @@ export const ALTERNATE_EVENT_CADENCES = (source.alternateEventCadences ?? [])
     Boolean(entry.when && entry.parts.length && entry.period > 0)
   )
   .sort((left, right) => right.parts.length - left.parts.length);
+
+/** Day-membership adjuncts around registered activity nouns; never calendar inference. */
+export const ACTIVITY_DAY_ADJUNCTS = source.activityDayAdjuncts;
 
 export const ADMINISTRATION_WINDOW_INSTRUCTIONS = (source.administrationWindowInstructions ?? [])
   .map((entry) => ({
@@ -559,3 +617,37 @@ export const TEMPORAL_RELATION_LEAD_WORDS = new Set([
 ]);
 
 export const OPEN_ENDED_WORDS = new Set(['onward','onwards','forward','forwards','ต่อไป']);
+
+const COURSE_CONTINUATION_DURATION_HEADS = setOf(source.courseContinuationDurationHeads);
+
+/** Resolve the duration-complement sense of a polysemous continuation head.
+ * A physical attachment still requires its object and is not licensed by this
+ * time-quantity valence. One source constituent is shared by action sense
+ * selection and the HPSG schedule lexicon, avoiding competing ownership.
+ * @param tokens Source-preserving normalized lexical tokens.
+ * @param start Candidate head; never searches later unrelated text.
+ * @param limit Exclusive constituent boundary.
+ * @returns Complete duration daughter, or undefined for an object/negated sense.
+ */
+export function courseContinuationDurationAt(
+  tokens: readonly Pick<LexToken, "lower" | "canonical" | "kind" | "value">[],
+  start: number,
+  limit = tokens.length
+): { end: number; value: number; unit: FhirPeriodUnit } | undefined {
+  const head = tokens[start];
+  if (!head || start >= limit || !COURSE_CONTINUATION_DURATION_HEADS.has(head.lower)) return undefined;
+  const normalized = (index: number) => tokens[index]?.canonical ?? tokens[index]?.lower ?? "";
+  if (ACTION_DIRECTIVE_PREFIXES.some(prefix => prefix.polarity === AdvicePolarity.Negate &&
+      start >= prefix.parts.length && prefix.parts.every((part, index) =>
+        normalized(start - prefix.parts.length + index) === part))) return undefined;
+  let cursor = start + 1;
+  if (cursor < limit && OCCURRENCE_COUNT_MODIFIERS.has(normalized(cursor))) cursor++;
+  if (cursor + 1 >= limit) return undefined;
+  const cardinal = tokens[cursor];
+  const value = cardinal?.kind === LexKind.Number ? cardinal.value :
+    FREQUENCY_NUMBER_WORDS_DATA[normalized(cursor)];
+  const label = INTERVAL_UNIT_TOKENS_DATA.get(normalized(cursor + 1));
+  const unit = label ? FhirPeriodUnit[label as keyof typeof FhirPeriodUnit] : undefined;
+  return value !== undefined && Number.isFinite(value) && value > 0 && unit
+    ? { end: cursor + 2, value, unit } : undefined;
+}

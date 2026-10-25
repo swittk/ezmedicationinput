@@ -1,4 +1,5 @@
-import { composeCoordinatedActionDirective } from "./hpsg/constructions";
+import { courseContinuationDurationAt } from "./hpsg/lexical-classes";
+import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
   resolveAdviceMannerModifier,
   matchComposedAdviceCodings,
@@ -50,6 +51,8 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   COMPOUND_DOSE_UNITS,
   DOSE_NUMBER_WORDS,
+  DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES,
+  SUPPLEMENTAL_DOSE_MODIFIERS,
   DURATION_LEAD_TOKENS,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
@@ -218,7 +221,7 @@ function actionMatchAt(
 ): ActionMatch | undefined {
   const current = parts[index];
   const next = parts[index + 1];
-  if (actionCandidateIsPerPeriodGrammar(parts, index)) return undefined;
+  if (actionCandidateIsPerPeriodGrammar(parts, index) || courseContinuationDurationAt(parts, index)) return undefined;
   if (
     current && next &&
     AS_NEEDED_LEAD_PHRASES.has(`${key(current)} ${key(next)}`) &&
@@ -756,7 +759,10 @@ function parseQuantityArgument(
   for (let index = start; index + 1 < endExclusive; index += 1) {
     const valueToken = parts[index];
     if (!valueToken) continue;
-    const unitMatch = instructionQuantityUnitAt(parts, index + 1, endExclusive, options);
+    const modifier = parts[index + 1];
+    const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
+      ? index + 2 : index + 1;
+    const unitMatch = instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
     if (!unitMatch) continue;
     const unitToken = parts[unitMatch.endExclusive - 1];
     if (!unitToken) continue;
@@ -1460,6 +1466,16 @@ const DURATION_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   let activity = activityStart !== undefined && activityStart < c.segmentEnd
     ? argumentFromParts(c.parts, activityStart, c.segmentEnd, c.input, AdviceArgumentRole.Activity, c.options)
     : undefined;
+  if (activity && activityStart !== undefined) {
+    const bounds = semanticArgumentBounds(c.parts, activityStart, c.segmentEnd);
+    activity = {
+      ...activity,
+      span: {
+        start: c.offset + c.parts[bounds.start].sourceStart,
+        end: c.offset + c.parts[bounds.endExclusive - 1].sourceEnd
+      }
+    };
+  }
   if (!activity) {
     const configured = c.definition.argumentParserConfig;
     const implicitConcept = configured?.implicitMatchedConcept;
@@ -1555,7 +1571,11 @@ function buildActionFrame(
         definition.preferredRelationSemanticClasses
       )
     : undefined;
-  const nextRelationIndex = relIndex >= 0 ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
+  const conditionalTail = relationHasGrammarFeature(rawRelation, "conditionalTail");
+  // A conditional daughter starts a different constituent. Its later
+  // temporal relations cannot become arguments of the preceding action.
+  const nextRelationIndex = relIndex >= 0 && !conditionalTail
+    ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
   const nextRelation = nextRelationIndex >= 0
     ? resolveActionRelationSurface(
         key(parts[nextRelationIndex]),
@@ -1563,7 +1583,6 @@ function buildActionFrame(
       )
     : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
-  const conditionalTail = relationHasGrammarFeature(rawRelation, "conditionalTail");
   const secondaryConditionalTail = relationHasGrammarFeature(nextRelation, "conditionalTail");
   const relation = conditionalTail ? undefined : rawRelation;
   const secondaryActivityTarget = nextRelationIndex >= 0
@@ -1574,15 +1593,17 @@ function buildActionFrame(
     relationHasGrammarFeature(nextRelation, "activityFallback")
       ? nextRelation
       : undefined;
-  const amount = definition.acceptsAmount
-    ? parseQuantityArgument(parts, argumentStart, segmentEnd, input, offset, options)
-    : undefined;
-  const duration = parseAnyDurationArgument(parts, argumentStart, segmentEnd, input, offset);
   let semanticEnd = conditionalTail && relIndex >= 0
     ? relIndex
     : secondaryConditionalTail && nextRelationIndex >= 0
       ? nextRelationIndex
       : segmentEnd;
+  // A conditional daughter owns its own measurements and observation window.
+  // They are not the preceding administration's amount or course duration.
+  const amount = definition.acceptsAmount
+    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options)
+    : undefined;
+  const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
 
   const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
     DEFAULT_ACTION_ARGUMENT_PARSER;
@@ -1682,7 +1703,7 @@ function buildActionFrame(
   if (earliestArgumentStart < span.start) {
     span = trimActionRange(input, { start: earliestArgumentStart, end: span.end }, offset);
   }
-  return {
+  const frame: AdviceFrame = {
     force: polarity === AdvicePolarity.Negate
       ? AdviceForce.Warning
       : modality === AdviceModality.Should
@@ -1705,6 +1726,14 @@ function buildActionFrame(
     sourceText: input.slice(span.start - offset, span.end - offset),
     sequenceIndex
   };
+  if (prefixed?.preposedTheme) {
+    const bounds = prefixed.preposedTheme;
+    const theme = argumentFromParts(parts, bounds.start, bounds.end, input, undefined, options);
+    if (theme) return composePreposedContactTheme(frame, {
+      ...theme, span: rangeFor(parts, bounds.start, bounds.end, offset)
+    });
+  }
+  return frame;
 }
 
 interface PrefixedActionMatch {
@@ -1712,6 +1741,7 @@ interface PrefixedActionMatch {
   match: ActionMatch;
   polarity?: AdvicePolarity;
   modality?: AdviceModality;
+  preposedTheme?: { start: number; end: number };
 }
 
 function directivePrefixMatches(parts: Lexeme[], index: number, prefix: (typeof ACTION_DIRECTIVE_PREFIXES)[number]): boolean {
@@ -1725,16 +1755,25 @@ function prefixedActionAt(
 ): PrefixedActionMatch | undefined {
   for (const prefix of ACTION_DIRECTIVE_PREFIXES) {
     if (!directivePrefixMatches(parts, index, prefix)) continue;
-    const actionIndex = index + prefix.parts.length;
+    const complementStart = index + prefix.parts.length;
+    const actionIndex = prefix.complement === "contact-clause"
+      ? complementStart + 1 : complementStart;
     const match = actionMatchAt(parts, actionIndex, options);
-    if (match) {
-      return {
-        actionIndex,
-        match,
-        polarity: prefix.polarity,
-        modality: prefix.modality
-      };
+    if (!match) continue;
+    if (prefix.complement === "contact-clause") {
+      // The locale lexicon supplies one complete nominal constituent. Do not
+      // search across unknown prose or a separate action for a contact head.
+      const theme = resolveMedicationInstructionConcept(key(parts[complementStart]), options);
+      if (!theme || !licensesPreposedContactTheme(theme.role, match.definition.semanticClass)) continue;
     }
+    return {
+      actionIndex,
+      match,
+      polarity: prefix.polarity,
+      modality: prefix.modality,
+      ...(prefix.complement === "contact-clause"
+        ? { preposedTheme: { start: complementStart, end: actionIndex } } : {})
+    };
   }
   return undefined;
 }
@@ -1974,6 +2013,11 @@ function actionTailIsRegimenModifier(
 ): boolean {
   const token = key(parts[index]);
   if (!token) return false;
+  // A withholding verb can select an elliptical temporal DOSE nominal. That
+  // argument is not an additional global administration timing modifier.
+  if (definition?.argumentParserConfig?.medicationConditionEffect &&
+      (DOSE_TARGET_EVENT_MEMBERS.has(EVENT_TIMING_TOKENS[token]) ||
+       DOSE_TARGET_MERIDIEM_CLOCK_RANGES.has(token))) return false;
   // A procedural action's declared Time daughter has local scope; it cannot
   // become a second global medication administration event.
   if (definition?.argumentParser === "duration-activity" &&
@@ -2319,7 +2363,7 @@ function definitionCanRepresentPrimaryAdministration(
 
 function frameOverlapsPrimaryMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
   for (const evidence of clause.evidence) {
-    if (evidence.rule !== "hpsg.lex.method") continue;
+    if (evidence.lexicalCategory !== "method") continue;
     for (const span of evidence.spans) {
       if (frame.span.start < span.end && span.start < frame.span.end) return true;
     }
@@ -2397,9 +2441,9 @@ function semanticSourceSpans(clause: CanonicalSigClause): SemanticSourceSpan[] {
   const ranges: SemanticSourceSpan[] = [];
   for (const evidence of clause.evidence) {
     const kind: SemanticSourceKind | undefined =
-      evidence.rule === "hpsg.lex.patientInstruction.workflow"
+      evidence.lexicalCategory === "workflow"
         ? "workflow"
-        : evidence.rule === "hpsg.lex.instruction" || evidence.rule === "hpsg.lex.conditionalAdvice"
+        : evidence.lexicalCategory === "instruction"
           ? "instruction"
           : undefined;
     if (!kind) continue;
@@ -2829,7 +2873,7 @@ function actionDominatedByCanonicalMethod(
     : [];
   if (!methodSpans.length) {
     for (const evidence of clause.evidence) {
-      if (evidence.rule !== "hpsg.lex.method") continue;
+      if (evidence.lexicalCategory !== "method") continue;
       for (const span of evidence.spans) methodSpans.push({ start: span.start, end: span.end });
     }
   }
@@ -2848,7 +2892,7 @@ function actionDominatedByCanonicalMethod(
   } else {
     const workflowStarts: number[] = [];
     for (const evidence of clause.evidence) {
-      if (evidence.rule !== "hpsg.lex.patientInstruction.workflow") continue;
+      if (evidence.lexicalCategory !== "workflow") continue;
       for (const span of evidence.spans) workflowStarts.push(span.start);
     }
     if (workflowStarts.length) {
@@ -2943,40 +2987,23 @@ function reconcileOpaqueWithActionCoverage(
   return result;
 }
 
-function conditionRelationsFromHpsgEvidence(
+/** Project the action selected by the closed HPSG condition constituent. */
+function conditionRelationsFromHpsgScopes(
   clause: CanonicalSigClause,
   input: string,
   actions: AdviceFrame[]
 ): CanonicalInstructionRelation[] {
   const result: CanonicalInstructionRelation[] = [];
-  for (const evidence of clause.evidence) {
-    if (evidence.rule !== "hpsg.lex.condition") continue;
-    for (const span of evidence.spans) {
-      const conditionText = input.slice(span.start, span.end).trim();
-      const kind = relationFromSourceText(conditionText);
-      if (!kind || !relationHasGrammarFeature(kind, "conditionScope")) continue;
-      let target = -1;
-      let distance = Number.POSITIVE_INFINITY;
-      for (let index = 0; index < actions.length; index += 1) {
-        const action = actions[index];
-        const current = action.span.start >= span.end
-          ? action.span.start - span.end
-          : action.span.end <= span.start
-            ? span.start - action.span.end
-            : 0;
-        if (current < distance) {
-          distance = current;
-          target = index;
-        }
-      }
-      if (target < 0) continue;
-      result.push({
-        kind,
-        toActionIndex: target,
-        text: conditionText,
-        span: { start: span.start, end: span.end }
-      });
-    }
+  for (const scope of clause.instructionScopes ?? []) {
+    const target = actions.findIndex(action => scope.target.start <= action.span.start &&
+      action.span.end <= scope.target.end);
+    if (target < 0) continue;
+    result.push({
+      kind: scope.kind,
+      toActionIndex: target,
+      text: input.slice(scope.span.start, scope.span.end).trim(),
+      span: { ...scope.span }
+    });
   }
   return result;
 }
@@ -2984,11 +3011,23 @@ function conditionRelationsFromHpsgEvidence(
 export function refreshInstructionGraphDerivedState(
   graph: CanonicalInstructionGraph
 ): void {
+  const previousActions = graph.relations?.length ? graph.actions.slice() : undefined;
   graph.actions.sort((left, right) =>
     left.span.start - right.span.start || left.span.end - right.span.end
   );
   for (let index = 0; index < graph.actions.length; index += 1) {
     graph.actions[index].sequenceIndex = index;
+  }
+  if (previousActions) {
+    const indices = new Map(graph.actions.map((action, index) => [action, index] as const));
+    for (const relation of graph.relations ?? []) {
+      const target = indices.get(previousActions[relation.toActionIndex]);
+      if (target !== undefined) relation.toActionIndex = target;
+      if (relation.fromActionIndex !== undefined) {
+        const source = indices.get(previousActions[relation.fromActionIndex]);
+        if (source !== undefined) relation.fromActionIndex = source;
+      }
+    }
   }
   const opaqueSpans = graph.opaqueSpans ?? [];
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
@@ -2997,7 +3036,13 @@ export function refreshInstructionGraphDerivedState(
   const preserved = (graph.relations ?? []).filter((relation) =>
     relationHasGrammarFeature(relation.kind, "conditionScope") && relation.fromActionIndex === undefined
   );
-  const relations = derived.slice();
+  // An existing grammatical or imported condition retains its action owner.
+  // Gap/opaque-span fallback must not attach the same source to a nearer sibling.
+  const relations = derived.filter(candidate => !preserved.some(relation =>
+    candidate.kind === relation.kind && candidate.fromActionIndex === undefined &&
+    candidate.span && relation.span && candidate.span.start < relation.span.end &&
+    relation.span.start < candidate.span.end
+  ));
   for (const relation of preserved) {
     const relationText = normalizedInstructionSurface(relation.text ?? "");
     if (!relations.some((candidate) => {
@@ -3057,7 +3102,7 @@ function canonicalPrimaryAdministrationSpan(
   if (semantic) {
     let best: TextRange | undefined;
     for (const evidence of clause.evidence) {
-      if (evidence.rule !== "hpsg.lex.method") continue;
+      if (evidence.lexicalCategory !== "method") continue;
       for (const span of evidence.spans) {
         if (span.start < semantic.span.start || semantic.span.end < span.end) continue;
         const candidate = { start: span.start, end: span.end };
@@ -3071,7 +3116,7 @@ function canonicalPrimaryAdministrationSpan(
     return best ?? { start: semantic.span.start, end: semantic.span.end };
   }
   for (const evidence of clause.evidence) {
-    if (evidence.rule !== "hpsg.lex.method") continue;
+    if (evidence.lexicalCategory !== "method") continue;
     const span = evidence.spans[0];
     if (span) return { start: span.start, end: span.end };
   }
@@ -3342,7 +3387,7 @@ export function buildInstructionGraph(
     sourceText: input,
     sourceLocale: baseLanguageTag(options?.locale) ?? inferMedicationLocale(input, "en")
   };
-  const hpsgConditionRelations = conditionRelationsFromHpsgEvidence(clause, input, actions);
+  const hpsgConditionRelations = conditionRelationsFromHpsgScopes(clause, input, actions);
   graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
   refreshInstructionGraphDerivedState(graph);
   return graph;
