@@ -3898,7 +3898,7 @@ phase. The unchanged **521-input compatibility replay** reports zero failures,
 populated-dose-value changes or dose-row-count changes. These batches overlap
 and are not a unique-input total. A separate full HL7 validator run is not claimed.
 
-Matched Node 22.22.0 measurements compared the prior built package with the new
+Matched Node measurements compared the prior built package with the new
 one in one process after warmup, alternating old/new order and taking the median
 of seven batch means:
 
@@ -3920,3 +3920,44 @@ These are shared-host measurements, not phone measurements or a claim of zero
 runtime regression. This work changes persistence and reconstruction, without
 expanding the grammar. The PR remains **99 reviewable files**: 114 changed paths
 minus the existing 15 configured exclusions. No new reviewable path was added.
+
+
+## 2026-10-25 — Conflicting compact phase edits require explicit resolution
+
+Independent audit found a real omission in the compact persistence checks.
+Editing only one phase-two row in the independent eye taper from treatment day
+7 to day 8 left its peer row at day 7. Reconciliation retained both variants and
+warned, but chose the first source row for the entire phase. On the built
+package this removed all eight day-seven administrations and changed the
+30-day supply from 296 to 288 drops. The previous green suite did not exercise
+this same-phase executable disagreement; the concern was independently reproduced.
+
+Executable disagreements in start, end, count, safety or modifier metadata now
+retain a typed unresolved-context marker on the affected phase. Scheduling and
+supply raise `conflicting-course-phase` until the conflict is resolved. IDs and
+non-modifier annotations remain non-blocking, all row data and both source
+variants remain available, and unaffected phases remain independently usable.
+Reordering, R6 import, JSON persistence and re-export cannot silently remove the
+conflict. Correcting the original disagreeing live row restores the 296-drop
+course. After persistence, explicit reconciliation of the phase plus clearing
+its acknowledged conflict marker also restores the eight day-seven doses and
+296-drop total; this recovery was verified through the actual downstream
+schema/converter. The existing extension profile documents the reserved marker.
+
+Four primary/strict × right/left start-edit regressions failed against the prior
+implementation before the fix. All five added tests, including harmless
+annotation differences, pass. The final main-checkout gate passed
+**3,444/3,444 source tests across 44 files**, TypeScript, ES6 ESM/CJS bundles and
+declarations, and **4/4 packaged-export checks**. The unchanged **70 consumer
+checks** and **521-input compatibility replay** pass. Four additional actual
+schema/converter scenarios retain the conflict over three save/reopen cycles,
+keep English and Thai rendering available, and verify explicit recovery.
+
+All 245 tracked/probe input hashes stayed unchanged through the full gate and
+consumers; the diary and a definition-only profile clarification followed it.
+The profile's structural JSON is otherwise identical. All 91 built files
+remained unchanged. Final ESM SHA-256:
+`5d0cd5f826fec1a60531e695689760189155abe14dac7a28a3e01db2a8698995`.
+The ordinary eye taper remains **9,926 bytes** in primary/strict R5 and
+**10,604 bytes** after the actual schema save/reload. The PR remains
+**99 reviewable files** (114 raw paths, 15 configured exclusions).

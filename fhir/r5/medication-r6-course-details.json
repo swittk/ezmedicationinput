@@ -7103,7 +7103,7 @@
         "sliceName": "missingContext",
         "min": 0,
         "max": "*",
-        "definition": "Unresolved course or predecessor identity preserved on a surviving component. Numeric execution requires the missing context; editing and rendering remain available."
+        "definition": "Unresolved course or predecessor identity preserved on a surviving component. The reserved value conflicting-phase marks contradictory executable metadata for that component phase; preserve it across saving and remove it only after explicitly reconciling the retained variants. Numeric execution requires resolved context; editing and rendering remain available."
       },
       {
         "id": "Extension.extension:missingContext.url",

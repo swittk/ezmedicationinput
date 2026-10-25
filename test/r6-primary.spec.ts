@@ -2338,3 +2338,68 @@ describe("compact shared metadata conflict preservation", () => {
     expect(toDosageDetails(toFhirR5Dosages(restored)).extension).toEqual(restored.extension);
   });
 });
+
+
+describe("conflicting executable phase metadata", () => {
+  const input = "1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid";
+  const orderedAt = "2026-10-19T08:00:00+07:00";
+  const options = { from: "2026-10-26T08:00:00+07:00", orderedAt, timeZone: "Asia/Bangkok", limit: 20 };
+  const phase = (row: EzDosage) => row.modifierExtension!
+    .find(extension => extension.url.endsWith("medication-r6-course-details"))!
+    .extension!.find(child => child.url === "step")!;
+  const start = (row: EzDosage) => phase(row).extension!.find(child => child.url === "start")!
+    .extension!.find(child => child.url === "offsetDuration")!.valueQuantity!;
+
+  it.each([
+    ["primary", 2], ["primary", 3], ["strict", 2], ["strict", 3]
+  ] as const)("blocks conflicting starts in %s row %i through edit and save paths", (projection, rowIndex) => {
+    const parsed = parseSig(input);
+    const rows = cloneStructuredValue(projection === "primary" ? parsed.fhir : toFhirR5Dosages(parsed.fhirNext));
+    expect(nextDueDoses(rows, options).filter(value => value.startsWith("2026-10-26"))).toHaveLength(8);
+    start(rows[rowIndex]).value = 8;
+    const edited = cloneStructuredValue(rows);
+    const restored = toDosageDetails(rows);
+    const sources = restored.extension?.filter(extension => extension.url.endsWith("medication-course-reconciliation-source")) ?? [];
+    expect(sources.length).toBeGreaterThanOrEqual(2);
+    expect(() => formatSig(restored, "long", { locale: "th" })).not.toThrow();
+    const assertConflict = (course: FhirR6DosageDetails) => {
+      expect(() => nextDueDoses(course, options)).toThrow(/conflicting course phase metadata/i);
+      expect(() => calculateTotalUnits({ ...options, from: orderedAt, dosage: course, durationValue: 30, durationUnit: "d" }))
+        .toThrow(/conflicting course phase metadata/i);
+    };
+    expect(() => nextDueDoses(rows, options)).toThrow(/conflicting course phase metadata/i);
+    expect(() => calculateTotalUnits({ ...options, from: orderedAt, dosage: rows, durationValue: 30, durationUnit: "d" }))
+      .toThrow(/conflicting course phase metadata/i);
+    assertConflict(restored);
+    assertConflict(toDosageDetails([...rows].reverse()));
+    const imported = fromFhir(restored);
+    assertConflict(toDosageDetails(imported.fhir, undefined, imported.course));
+    let saved = restored;
+    for (let cycle = 0; cycle < 3; cycle++) {
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+      assertConflict(saved);
+    }
+    expect(rows).toEqual(edited);
+    // The conflict belongs to phase 2; unaffected rows remain executable on their own.
+    const persisted = toFhirR5Dosages(restored);
+    expect(() => nextDueDoses(persisted[0], { ...options, from: orderedAt, limit: 2 })).not.toThrow();
+    const withoutConflictingPhase = persisted.filter(row => row.sequence !== 2);
+    expect(calculateTotalUnits({ ...options, from: orderedAt, dosage: withoutConflictingPhase, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(112);
+    // Correcting the disagreeing live row restores the original executable course.
+    start(rows[rowIndex]).value = 7;
+    expect(nextDueDoses(rows, options).filter(value => value.startsWith("2026-10-26"))).toHaveLength(8);
+    expect(calculateTotalUnits({ ...options, from: orderedAt, dosage: rows, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(296);
+  });
+
+  it("keeps ID and non-modifier annotation disagreements numerically executable", () => {
+    const rows = toFhirR5Dosages(parseSig(input).fhirNext);
+    phase(rows[2]).extension!.push({ url: "id", valueString: "edited-phase-label" }, {
+      url: "extension", extension: [{ url: "https://example.org/phase-note", valueString: "reviewed" }]
+    });
+    const restored = toDosageDetails(rows);
+    expect(restored.step[1].id).toBe("edited-phase-label");
+    expect(restored.step[1].extension).toContainEqual({ url: "https://example.org/phase-note", valueString: "reviewed" });
+    expect(nextDueDoses(restored, options).filter(value => value.startsWith("2026-10-26"))).toHaveLength(8);
+    expect(calculateTotalUnits({ ...options, from: orderedAt, dosage: restored, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(296);
+  });
+});

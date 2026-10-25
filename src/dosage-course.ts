@@ -1761,19 +1761,36 @@ function withMissingCourseContext(component: FhirR6Dosage, contexts: readonly st
   ] } : component;
 }
 
-/** Numeric utilities must not silently execute a row whose shared context is absent.
- * Parsing, formatting and editing continue to preserve all surviving data.
- * @param course Reconstructed course with local typed missing-context markers.
+const CONFLICTING_PHASE_CONTEXT = "conflicting-phase";
+
+/** Phase fields whose disagreement can change administration or supply.
+ * IDs and non-modifier annotations remain editable without blocking execution.
+ * @param step Local phase metadata without dosage components.
  */
-export function getMissingCourseContext(course: FhirR6DosageDetails): string | undefined {
+function executablePhaseMetadata(step: NonNullable<CompactCourseRow["step"]>) {
+  const { start, end, count, safety, modifierExtension } = step;
+  return { start, end, count, safety, modifierExtension };
+}
+
+/** Identify unavailable or contradictory context before numeric execution.
+ * Parsing, formatting and editing continue to preserve all surviving data.
+ * @param course Reconstructed course with typed context markers on its components.
+ */
+export function getCourseContextIssue(
+  course: FhirR6DosageDetails
+): "missing-course-context" | "conflicting-course-phase" | undefined {
+  let missing = false;
   for (const step of course.step) for (const component of step.component) {
     for (const extension of component.modifierExtension ?? []) {
       if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
-      const missing = extension.extension?.find(child => child.url === "missingContext")?.valueString;
-      if (missing !== undefined) return missing;
+      for (const child of extension.extension ?? []) {
+        if (child.url !== "missingContext") continue;
+        if (child.valueString === CONFLICTING_PHASE_CONTEXT) return "conflicting-course-phase";
+        if (child.valueString !== undefined) missing = true;
+      }
     }
   }
-  return undefined;
+  return missing ? "missing-course-context" : undefined;
 }
 
 /** Reconstruct a course from current R5 fields and each row's local metadata.
@@ -1790,6 +1807,7 @@ function reconcileCompactCourse(
   const sources: FhirExtension[] = [];
   const headers = new Map<string, CompactCourseRow>();
   const conflictingContexts = new Set<string>();
+  const conflictingPhases = new Set<number>();
   let metadataEdited = false;
   const metadata = new Map<number, { step: NonNullable<CompactCourseRow["step"]>; rowIndex: number; marker?: FhirExtension }>();
   const localRows = dosages.map(dosage => {
@@ -1826,12 +1844,17 @@ function reconcileCompactCourse(
       sources.push(marker);
       addWarning(warnings, "Shared course metadata without its context identity was retained as source provenance.");
     }
+    if (value.missingContext && value.missingContext.indexOf(CONFLICTING_PHASE_CONTEXT) >= 0)
+      conflictingPhases.add(value.sequence);
     const previous = metadata.get(value.sequence);
     const step = value.step ?? {};
     if (previous && !equalStructuredValues(previous.step, step)) {
       if (previous.marker) sources.push(localReconciliationSource(previous.marker));
       sources.push(localReconciliationSource(marker));
-      addWarning(warnings, "Local course phase metadata differs; the first source row's phase was retained and conflicting metadata was preserved.");
+      if (!equalStructuredValues(executablePhaseMetadata(previous.step), executablePhaseMetadata(step))) {
+        conflictingPhases.add(value.sequence);
+        addWarning(warnings, "Local course phase metadata differs; conflicting executable fields must be resolved before numeric execution.");
+      } else addWarning(warnings, "Local course phase metadata differs; the first source row's annotations were retained and conflicting metadata was preserved.");
     }
     if (!previous || value.rowIndex < previous.rowIndex) metadata.set(value.sequence, { step, rowIndex: value.rowIndex, marker });
     return { value, marker };
@@ -1865,7 +1888,9 @@ function reconcileCompactCourse(
         sources.push(localReconciliationSource(local.marker));
       }
     }
-    for (const context of local.value.missingContext ?? []) missing.add(context);
+    for (const context of local.value.missingContext ?? []) {
+      if (context !== CONFLICTING_PHASE_CONTEXT) missing.add(context);
+    }
   }
   for (const step of header?.emptyStep ?? []) {
     const { sequence, ...fields } = step;
@@ -1893,7 +1918,8 @@ function reconcileCompactCourse(
   const savedInstruction = instructionMarker?.extension?.find(value => value.url === "instruction")?.valueString;
   const baselineRows = instructionMarker?.extension?.filter(value => value.url === "row") ?? [];
   const used = new Set<number>();
-  let instructionMatches = !metadataEdited && baselineRows.length === dosages.length && baselineRows.length > 0;
+  let instructionMatches = !metadataEdited && !conflictingPhases.size &&
+    baselineRows.length === dosages.length && baselineRows.length > 0;
   const live = dosages.map((dosage, index) => {
     const local = localRows[index];
     const sourceIndex = local?.value.rowIndex ?? index;
@@ -1924,7 +1950,9 @@ function reconcileCompactCourse(
     const sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
     if (sequence !== requested) addWarning(warnings, "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction.");
     const local = localRows[index];
-    const component = local ? restoreComponentDelta(dosage, local.value, warnings) : toR6Dosage(dosage);
+    const restored = local ? restoreComponentDelta(dosage, local.value, warnings) : toR6Dosage(dosage);
+    const component = local && conflictingPhases.has(local.value.sequence)
+      ? withMissingCourseContext(restored, [CONFLICTING_PHASE_CONTEXT]) : restored;
     if (warnings.some(value => value.includes("superseded by edited R5 dose fields")) && local)
       sources.push(localReconciliationSource(local.marker));
     const entries = groups.get(sequence) ?? [];

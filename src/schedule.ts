@@ -1,5 +1,5 @@
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
-import { getMissingCourseContext, getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
+import { getCourseContextIssue, getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
 } from "./body-site-target";
@@ -2012,9 +2012,7 @@ export function nextDueDoses(
     }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
       ? selectedAlternativeCourse(dosage as FhirR6DosageDetails, options) : undefined;
-    if (r6Course && getMissingCourseContext(r6Course) !== undefined)
-      throw new MedicationQuantityCalculationError("missing-course-context",
-        "Supply the complete dosage array or restore its shared course metadata before scheduling; the surviving rows remain editable.");
+    if (r6Course) requireExecutableCourseContext(r6Course, "scheduling");
     const zone = options?.timeZone ?? options?.config?.timeZone;
     if (r6Course?.repeatCycle && zone) {
       return scheduleRepeatedCourse(r6Course, options, zone);
@@ -3456,6 +3454,18 @@ export class MedicationQuantityCalculationError extends Error {
   }
 }
 
+/** Require an unambiguous phase context for numerical utilities.
+ * @param course Editable course whose context may be missing or contradictory.
+ * @param operation The numeric operation reported to the caller.
+ */
+function requireExecutableCourseContext(course: FhirR6DosageDetails, operation: "scheduling" | "calculating"): void {
+  const issue = getCourseContextIssue(course);
+  if (issue) throw new MedicationQuantityCalculationError(issue,
+    issue === "conflicting-course-phase"
+      ? `Resolve conflicting course phase metadata before ${operation}; the surviving rows remain editable.`
+      : `Supply the complete dosage array or restore its shared course metadata before ${operation}; the surviving rows remain editable.`);
+}
+
 function calculationHorizon(options: TotalUnitsOptions, zone: string): Date {
   if (!Number.isFinite(options.durationValue) || options.durationValue <= 0)
     throw new MedicationQuantityCalculationError("invalid-horizon",
@@ -4128,9 +4138,7 @@ function calculateCourseTotalUnits(
   cycleDefaultEnd?: Date, cycleIndex?: number
 ): TotalUnitsResult {
   course = selectedAlternativeCourse(course, options);
-  if (getMissingCourseContext(course) !== undefined)
-    throw new MedicationQuantityCalculationError("missing-course-context",
-      "Supply the complete dosage array or restore its shared course metadata before calculating; the surviving rows remain editable.");
+  requireExecutableCourseContext(course, "calculating");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
     throw new MedicationQuantityCalculationError("time-zone-required",
