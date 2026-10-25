@@ -373,6 +373,19 @@ describe("typed phase addition contrasting instructions", () => {
     const parsed = parseSig(input);
     const noon = parsed.fhir.filter(row => row.timing?.repeat?.when?.indexOf("NOON") !== -1 && row.timing?.repeat?.when);
     expect(noon.every(row => row.doseAndRate?.[0]?.doseQuantity?.value === undefined)).toBe(true);
+    // A new dose with no unique antecedent stays editable, but must not
+    // terminate the already prescribed unequal morning/bedtime administrations.
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 3]);
+    const continued = parsed.fhirNext.step[1].component;
+    expect(continued).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]
+      }),
+      expect.objectContaining({
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      })
+    ]));
+    expect(toFhirR5Dosages(parsed.fhirNext)).toHaveLength(5);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
 

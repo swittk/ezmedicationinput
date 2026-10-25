@@ -1376,6 +1376,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
+    if (monthDayPart) graphRegimenTail.push(monthDayPart);
     if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);

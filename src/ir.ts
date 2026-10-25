@@ -233,40 +233,45 @@ export function buildCanonicalSigClauses(
   return internal.clauses;
 }
 
+/**
+ * Convert one segment's relative canonical source ranges into full-SIG ranges.
+ *
+ * Flattened dosage rows may share nested evidence, target, and instruction
+ * frames. Keep the same seen-set across their projections so an aliased source
+ * span moves once for the segment, not once for every projected dosage.
+ *
+ * @param clauses Canonical clauses to rebase.
+ * @param offset Absolute start of the source segment in the full SIG.
+ * @param shiftedSpans Identity set shared by all projections of one segment.
+ */
 export function shiftCanonicalSigClauses(
   clauses: CanonicalSigClause[],
-  offset: number
+  offset: number,
+  shiftedSpans: WeakSet<object> = new WeakSet<object>()
 ): void {
+  const shiftSpan = (span: TextRange | undefined): void => {
+    if (!span || shiftedSpans.has(span)) return;
+    shiftedSpans.add(span);
+    span.start += offset;
+    span.end += offset;
+  };
+  const shiftEvidenceSpans = (evidence: CanonicalEvidence[] | undefined): void => {
+    for (const entry of evidence ?? []) for (const span of entry.spans) shiftSpan(span);
+  };
+  const shiftSiteRestrictions = (
+    restrictions: NonNullable<CanonicalSigClause["site"]>["restrictions"]
+  ): void => {
+    for (const restriction of restrictions ?? []) {
+      shiftSpan(restriction.range);
+      shiftSpan(restriction.markerRange);
+      shiftSpan(restriction.predicate.range);
+    }
+  };
+
   for (const clause of clauses) {
-    if (clause.span) {
-      clause.span = {
-        start: clause.span.start + offset,
-        end: clause.span.end + offset
-      };
-    }
-
-    clause.raw = {
-      ...clause.raw,
-      start: clause.raw.start + offset,
-      end: clause.raw.end + offset
-    };
-
-    for (const leftover of clause.leftovers) {
-      leftover.start += offset;
-      leftover.end += offset;
-    }
-
-    const shiftEvidenceSpans = (evidence: CanonicalEvidence[] | undefined) => {
-      if (!evidence) {
-        return;
-      }
-      for (const entry of evidence) {
-        for (const span of entry.spans) {
-          span.start += offset;
-          span.end += offset;
-        }
-      }
-    };
+    shiftSpan(clause.span);
+    shiftSpan(clause.raw);
+    for (const leftover of clause.leftovers) shiftSpan(leftover);
 
     shiftEvidenceSpans(clause.evidence);
     shiftEvidenceSpans(clause.dose?.evidence);
@@ -274,112 +279,41 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.site?.evidence);
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
-    // Canonical source spans refer to the complete clinician instruction.
-    // Each FHIR Dosage keeps its own clause-local extension coordinates.
-    const materialRange = clause.clinicalQuantity?.carrierMaterial?.range;
-    if (materialRange) {
-      materialRange.start += offset;
-      materialRange.end += offset;
-    }
 
-    if (clause.site?.range) {
-      clause.site.range.start += offset;
-      clause.site.range.end += offset;
-    }
-    for (const restriction of clause.site?.restrictions ?? []) {
-      if (restriction.range) {
-        restriction.range.start += offset;
-        restriction.range.end += offset;
-      }
-      if (restriction.markerRange) {
-        restriction.markerRange.start += offset;
-        restriction.markerRange.end += offset;
-      }
-      if (restriction.predicate.range) {
-        restriction.predicate.range.start += offset;
-        restriction.predicate.range.end += offset;
-      }
-    }
+    // All provenance ranges refer to the original clinician instruction.
+    // FHIR rows retain their existing independent clause-local metadata.
+    shiftSpan(clause.clinicalQuantity?.carrierMaterial?.range);
+    shiftSpan(clause.site?.range);
+    shiftSiteRestrictions(clause.site?.restrictions);
 
-    const targetGroup = clause.administrationTargetGroup;
-    if (targetGroup?.range) {
-      targetGroup.range.start += offset;
-      targetGroup.range.end += offset;
-    }
-    for (const target of targetGroup?.targets ?? []) {
-      if (target.range) {
-        target.range.start += offset;
-        target.range.end += offset;
-      }
+    const group = clause.administrationTargetGroup;
+    shiftSpan(group?.range);
+    for (const target of group?.targets ?? []) {
+      shiftSpan(target.range);
       shiftEvidenceSpans(target.evidence);
-      // Every independently projected target owns its predicate source spans.
-      for (const restriction of target.restrictions ?? []) {
-        if (restriction.range) {
-          restriction.range.start += offset;
-          restriction.range.end += offset;
-        }
-        if (restriction.markerRange) {
-          restriction.markerRange.start += offset;
-          restriction.markerRange.end += offset;
-        }
-        if (restriction.predicate.range) {
-          restriction.predicate.range.start += offset;
-          restriction.predicate.range.end += offset;
-        }
-      }
+      shiftSiteRestrictions(target.restrictions);
     }
 
     for (const scope of clause.instructionScopes ?? []) {
-      scope.span.start += offset;
-      scope.span.end += offset;
-      scope.target.start += offset;
-      scope.target.end += offset;
+      shiftSpan(scope.span);
+      shiftSpan(scope.target);
     }
 
-    const shiftedInstructionFrames = new Set<object>();
-    if (clause.instructionGraph) {
-      if (clause.instructionGraph.primaryAdministrationSpan) {
-        clause.instructionGraph.primaryAdministrationSpan.start += offset;
-        clause.instructionGraph.primaryAdministrationSpan.end += offset;
-      }
-      for (const action of clause.instructionGraph.actions) {
-        action.span.start += offset;
-        action.span.end += offset;
-        shiftedInstructionFrames.add(action);
-        for (const arg of action.args) {
-          if (arg.span) {
-            arg.span.start += offset;
-            arg.span.end += offset;
-          }
-        }
-      }
-      for (const opaque of clause.instructionGraph.opaqueSpans ?? []) {
-        opaque.start += offset;
-        opaque.end += offset;
-      }
-      for (const relation of clause.instructionGraph.relations ?? []) {
-        if (relation.span) {
-          relation.span.start += offset;
-          relation.span.end += offset;
-        }
-      }
+    const graph = clause.instructionGraph;
+    shiftSpan(graph?.primaryAdministrationSpan);
+    for (const action of graph?.actions ?? []) {
+      shiftSpan(action.span);
+      for (const arg of action.args) shiftSpan(arg.span);
     }
+    for (const opaque of graph?.opaqueSpans ?? []) shiftSpan(opaque);
+    for (const relation of graph?.relations ?? []) shiftSpan(relation.span);
 
-    if (clause.additionalInstructions) {
-      for (const instruction of clause.additionalInstructions) {
-        shiftEvidenceSpans(instruction.evidence);
-        for (const frame of instruction.frames ?? []) {
-          if (shiftedInstructionFrames.has(frame)) continue;
-          frame.span.start += offset;
-          frame.span.end += offset;
-          shiftedInstructionFrames.add(frame);
-          for (const arg of frame.args) {
-            if (arg.span) {
-              arg.span.start += offset;
-              arg.span.end += offset;
-            }
-          }
-        }
+    for (const instruction of clause.additionalInstructions ?? []) {
+      shiftEvidenceSpans(instruction.evidence);
+      // Actions also referenced in a graph share their frame objects.
+      for (const frame of instruction.frames ?? []) {
+        shiftSpan(frame.span);
+        for (const arg of frame.args) shiftSpan(arg.span);
       }
     }
   }

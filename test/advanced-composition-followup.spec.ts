@@ -15,8 +15,9 @@ import { HPSG_TYPE_SYSTEM, type HpsgFeatureNode } from "../src/hpsg/type-system"
 import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
-  getAdministrationOffsetMinutes
+  getAdministrationOffsetMinutes, parserStateFromFhir
 } from "../src/fhir";
+import { shiftCanonicalSigClauses } from "../src/ir";
 
 const CUSTOM_RELATIVE_SITE_MAP = {
   moob: {
@@ -2070,5 +2071,65 @@ describe("independent release oracles for newly observed realistic clinical erro
         { kind: "measurement", name: "sbp", operation: "lt", value: 160 }
       ]
     });
+  });
+});
+
+
+describe("CodeRabbit 2026-10-25 dose preservation review", () => {
+  it("reopens coded FHIR body-site predicates in ParserState without losing location or text", () => {
+    const source = "apply 1 mL to left knee where painful twice daily";
+    const dosage = parseProductionSig(source).fhir[0];
+    const state = parserStateFromFhir(dosage);
+    expect(state.primaryClause.site?.text).toBe("left knee");
+    expectRestriction(state.primaryClause.site, "where painful", "painful", source);
+    expect(state.primaryClause.site?.coding?.code).toBe(dosage.site?.coding?.[0]?.code);
+  });
+
+  it("shows a monthly restriction alongside a rich, procedurally composed administration in both languages", () => {
+    const rich = parseProductionSig("Rinse mouth with 10 mL for 1 minute then spit after meals");
+    const monthly = parseProductionSig("1 tab PO QD on days 1-14 of each month").fhir[0];
+    expect(rich.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma)
+      .toBe("rinse_mouth");
+    const dosage = {
+      ...rich.fhir[0],
+      timing: {
+        ...rich.fhir[0].timing,
+        repeat: {
+          ...rich.fhir[0].timing?.repeat,
+          extension: [
+            ...(rich.fhir[0].timing?.repeat?.extension ?? []),
+            ...(monthly.timing?.repeat?.extension ?? [])
+          ]
+        }
+      }
+    };
+    const en = formatSig(dosage, "long", { locale: "en" });
+    const th = formatSig(dosage, "long", { locale: "th" });
+    expect(en).toContain("on days 1–14 of each month");
+    expect(th).toContain("วันที่ 1–14 ของทุกเดือน");
+    expect(en.toLowerCase()).toMatch(/rinse/);
+    expect(th).toContain("บ้วนปาก");
+  });
+
+  it("rebases an aliased clinical source span only once across projected clauses", () => {
+    const input = "apply 1 mL to left knee where painful twice daily";
+    const original = parseProductionSig(input).items[0].meta.canonical.clauses[0];
+    const restriction = original.site?.restrictions?.[0];
+    const shared = restriction?.range;
+    if (!shared || !restriction || !original.site) throw new Error("Expected a typed restricted site.");
+    const from = { ...shared };
+    const local = original.raw.start;
+    // Source-evidence and site restrictions may point to the same source object
+    // in separate flattened FHIR dosage projections of a clinical clause.
+    original.site.range = shared;
+    restriction.predicate.range = shared;
+    original.evidence.push({ rule: "test.shared-site-evidence", spans: [shared] });
+    const other = { ...original, raw: { ...original.raw } };
+    shiftCanonicalSigClauses([original, other], 7);
+    expect(shared).toEqual({ start: from.start + 7, end: from.end + 7 });
+    expect(original.site.range).toBe(shared);
+    expect(other.site?.restrictions?.[0]?.range).toBe(shared);
+    expect(original.raw.start).toBe(local + 7);
+    expect(other.raw.start).toBe(local + 7);
   });
 });

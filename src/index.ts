@@ -943,8 +943,9 @@ function finishParsedBatch(
     const segment = outputSegments[index];
     const state = outputStates[index];
     const projected = buildParseResults(state, options, phaseSequences[index]);
+    const shiftedSpans = new WeakSet<object>();
     for (const result of projected) {
-      rebaseParseResult(result, input, segment.start);
+      rebaseParseResult(result, input, segment.start, shiftedSpans);
       rawResults.push(result);
     }
   }
@@ -1009,8 +1010,9 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
       };
     });
     const projected = buildParseResults(state, options, phaseSequences[index]);
+    const shiftedSpans = new WeakSet<object>();
     for (const result of projected) {
-      rebaseParseResult(result, input, segment.start);
+      rebaseParseResult(result, input, segment.start, shiftedSpans);
       const issues = [...recognizedIssues];
       issues.push(
         ...buildSemanticLintIssues(result, input, {
@@ -2050,7 +2052,10 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
   }
 }
 
-function rebaseParseResult(result: ParseResult, fullInput: string, offset: number): void {
+function rebaseParseResult(
+  result: ParseResult, fullInput: string, offset: number,
+  shiftedSpans: WeakSet<object>
+): void {
   const rebaseRequest = <T extends { inputText: string; sourceText?: string; range?: TextRange }>(
     request: T
   ) => {
@@ -2073,7 +2078,7 @@ function rebaseParseResult(result: ParseResult, fullInput: string, offset: numbe
       rebaseRequest(lookup.request);
     }
   }
-  shiftCanonicalSigClauses(result.meta.canonical.clauses, offset);
+  shiftCanonicalSigClauses(result.meta.canonical.clauses, offset, shiftedSpans);
 }
 
 function shiftRange(range: TextRange | undefined, offset: number): TextRange | undefined {

@@ -561,9 +561,13 @@ export function expandRegimenAdjustmentPhases(
           }
         }
       }
-      if (target.dose && (target.regimenAdjustment !== "replace-target" || replacedEvent ||
-          replacedClock && previous.some(state =>
-            (state.primaryClause.schedule?.timeOfDay?.indexOf(replacedClock) ?? -1) >= 0))) {
+      // ADD continues every predecessor administration even when its new dose
+      // has no unique antecedent. REPLACE may partition only a matched target.
+      const continuesPredecessor = target.regimenAdjustment === "add" ||
+        Boolean(replacedEvent) ||
+        Boolean(replacedClock && previous.some(state =>
+          (state.primaryClause.schedule?.timeOfDay?.indexOf(replacedClock) ?? -1) >= 0));
+      if (continuesPredecessor) {
         for (const donorIndex of prior.members) {
           const donor = outputStates[donorIndex];
           const clone = new ParserState(donor.input, donor.tokens, donor.customSiteHints);

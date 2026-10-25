@@ -1897,6 +1897,10 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.siteText = getFallbackSiteText(dosage.site);
   state.siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
   state.siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
+  const siteRestrictions = parseBodySiteRestrictionExtensions(dosage.site);
+  if (siteRestrictions?.length) {
+    state.primaryClause.site = { ...state.primaryClause.site, restrictions: siteRestrictions };
+  }
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
