@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import cases from "./generation-roundtrip-cases.json";
 import thaiCases from "./generation-roundtrip-thai-cases.json";
 import crossLanguageCases from "./generation-cross-language-cases.json";
-import { formatSig } from "../src/index";
+import {
+  formatSig, formatSigBatch, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
+  nextDueDoses, calculateTotalUnits, FhirPeriodUnit
+} from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import type { AdviceArgument, AdviceFrame, CanonicalSigClause } from "../src/types";
 
@@ -269,4 +272,226 @@ describe("12-case cross-language semantic realization", () => {
       expect(crossFingerprint(reparsed)).toEqual(crossFingerprint(parsed));
     });
   }
+});
+
+
+/**
+ * A source-less FHIR import has to be intelligible without the original SIG.
+ * These are independent future administrations, not parser-output snapshots:
+ * verify dates, clock opportunities, unequal quantities, and supply as well
+ * as the English/Thai text generated from R6 and its strict R5 bridge.
+ */
+describe("source-less multi-administration treatment course realization", () => {
+  const relativeDay = (value: number) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event",
+      code: "treatment-start"
+    }] },
+    offsetDuration: {
+      value, code: "d", unit: "d", system: "http://unitsofmeasure.org"
+    }
+  });
+  const clockDose = (quantity: number, times: string[]) => ({
+    doseAndRate: [{ doseQuantity: { value: quantity, unit: "tablet" } }],
+    timing: { repeat: { timeOfDay: times.map(time => time + ":00") } }
+  });
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const dates = [
+    "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"
+  ];
+  const dayClocks = (
+    dosage: import("../src/types").FhirR6DosageDetails |
+      readonly import("../src/types").FhirDosage[], date: string
+  ) => nextDueDoses(dosage, {
+    orderedAt, from: date + "T00:00:00+07:00",
+    timeZone: "Asia/Bangkok", limit: 48
+  }).filter(value => value.startsWith(date)).map(value => value.slice(11, 16));
+  const supply = (
+    dosage: import("../src/types").FhirR6DosageDetails |
+      readonly import("../src/types").FhirDosage[]
+  ) => calculateTotalUnits({
+    dosage, orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
+    durationValue: 28, durationUnit: FhirPeriodUnit.Day
+  }).totalUnits;
+
+  it("keeps three independent dated daily dose patterns human-readable and executable", () => {
+    const course: import("../src/types").FhirR6DosageDetails = {
+      step: [
+        {
+          end: relativeDay(7),
+          component: [
+            clockDose(0.5, ["07:00"]),
+            clockDose(1, ["12:00"]),
+            clockDose(0.5, ["19:00"])
+          ]
+        },
+        {
+          start: relativeDay(7), end: relativeDay(14),
+          component: [
+            clockDose(1, ["07:00", "13:00", "19:00"]),
+            clockDose(0.5, ["22:00"])
+          ]
+        },
+        {
+          start: relativeDay(14), end: relativeDay(21),
+          component: [
+            clockDose(1, ["07:00", "13:00"]),
+            clockDose(0.5, ["19:00"])
+          ]
+        }
+      ]
+    };
+    const rows = toFhirR5Dosages(course);
+    const reopened = toDosageDetails(rows);
+    expect(rows.map(row => row.sequence)).toEqual([1, 1, 1, 2, 2, 3, 3]);
+    expect(course.step.map(stage => stage.component.map(component =>
+      component.doseAndRate?.[0]?.doseQuantity?.value
+    ))).toEqual([[0.5, 1, 0.5], [1, 0.5], [1, 0.5]]);
+
+    const expectedClocks = [
+      ["07:00", "12:00", "19:00"],
+      ["07:00", "13:00", "19:00", "22:00"],
+      ["07:00", "13:00", "19:00"],
+      []
+    ];
+    for (const dosage of [course, rows, reopened]) {
+      expect(dates.map(date => dayClocks(dosage, date))).toEqual(expectedClocks);
+      expect(supply(dosage)).toBe(56);
+    }
+
+    for (const representation of [course, reopened]) {
+      const en = formatSig(representation, "long", { locale: "en" });
+      const th = formatSig(representation, "long", { locale: "th" });
+      for (const period of ["days 1–7", "days 8–14", "days 15–21"]) {
+        expect(en.toLowerCase()).toContain(period);
+      }
+      for (const period of ["วันที่ 1–7", "วันที่ 8–14", "วันที่ 15–21"]) {
+        expect(th).toContain(period);
+      }
+      expect(en).toContain("0.5 tablet");
+      expect(en).toContain("10:00 pm");
+      expect(th).toContain("0.5 เม็ด");
+      expect(th).toContain("22:00");
+    }
+    const strictR5Text = formatSigBatch(rows, "long", { locale: "en" });
+    expect(strictR5Text.toLowerCase()).toContain("days 8–14");
+    expect(strictR5Text.toLowerCase()).toContain("days 15–21");
+  });
+
+  it("exposes a full seven-day no-medication interval between complex schedules", () => {
+    const course: import("../src/types").FhirR6DosageDetails = {
+      step: [
+        {
+          end: relativeDay(7),
+          component: [
+            clockDose(1, ["08:00"]),
+            clockDose(0.5, ["12:00"]),
+            clockDose(1, ["20:00"])
+          ]
+        },
+        {
+          start: relativeDay(14), end: relativeDay(21),
+          component: [
+            clockDose(0.5, ["08:00"]),
+            clockDose(1, ["13:00"]),
+            clockDose(1, ["20:00"])
+          ]
+        }
+      ]
+    };
+    const rows = toFhirR5Dosages(course);
+    const expectedClocks = [
+      ["08:00", "12:00", "20:00"],
+      [],
+      ["08:00", "13:00", "20:00"],
+      []
+    ];
+    for (const dosage of [course, rows, toDosageDetails(rows)]) {
+      expect(dates.map(date => dayClocks(dosage, date))).toEqual(expectedClocks);
+      expect(supply(dosage)).toBe(35);
+    }
+    for (const representation of [course, toDosageDetails(rows)]) {
+      const en = formatSig(representation, "long", { locale: "en" });
+      const th = formatSig(representation, "long", { locale: "th" });
+      expect(en.toLowerCase()).toContain("days 1–7");
+      expect(en.toLowerCase()).toContain("no doses on days 8–14");
+      expect(en.toLowerCase()).toContain("days 15–21");
+      expect(th).toContain("วันที่ 1–7");
+      expect(th).toContain("งดยาในวันที่ 8–14");
+      expect(th).toContain("วันที่ 15–21");
+    }
+    expect(formatSigBatch(rows, "long", { locale: "en" }).toLowerCase())
+      .toContain("no doses on days 8–14");
+  });
+
+  it("renders calendar-bounded unequal clock dosages without original text", () => {
+    const dosage: import("../src/types").FhirDosage[] = [
+      {
+        sequence: 1,
+        ...clockDose(0.5, ["08:00"]),
+        timing: { repeat: {
+          timeOfDay: ["08:00:00"],
+          boundsPeriod: { start: "2026-11-02", end: "2026-11-08" }
+        } }
+      },
+      {
+        sequence: 1,
+        ...clockDose(1, ["20:00"]),
+        timing: { repeat: {
+          timeOfDay: ["20:00:00"],
+          boundsPeriod: { start: "2026-11-02", end: "2026-11-08" }
+        } }
+      },
+      {
+        sequence: 2,
+        ...clockDose(1, ["08:00"]),
+        timing: { repeat: {
+          timeOfDay: ["08:00:00"],
+          boundsPeriod: { start: "2026-11-09", end: "2026-11-15" }
+        } }
+      },
+      {
+        sequence: 2,
+        ...clockDose(2, ["20:00"]),
+        timing: { repeat: {
+          timeOfDay: ["20:00:00"],
+          boundsPeriod: { start: "2026-11-09", end: "2026-11-15" }
+        } }
+      }
+    ];
+    const course = toDosageDetails(dosage);
+    for (const representation of [dosage, course]) {
+      expect(dates.map(date => dayClocks(representation, date))).toEqual([
+        ["08:00", "20:00"], ["08:00", "20:00"], [], []
+      ]);
+      expect(supply(representation)).toBe(31.5);
+    }
+    const en = formatSigBatch(dosage, "long", { locale: "en" });
+    const th = formatSigBatch(dosage, "long", { locale: "th" });
+    const composed = formatSig(course, "long", { locale: "en" });
+    for (const text of [en, composed]) {
+      expect(text).toContain("2 Nov 2026");
+      expect(text).toContain("9 Nov 2026");
+      expect(text).toContain("2 tablets");
+    }
+    expect(th).toContain("2/11/2569");
+    expect(th).toContain("9/11/2569");
+    expect(th).toContain("2 เม็ด");
+  });
+
+  it("retains an unfamiliar modifier without inventing a warning or interpretation", () => {
+    const modifier = {
+      url: "https://example.org/fhir/StructureDefinition/opaque-medication-modifier",
+      valueString: "uninterpreted external metadata"
+    };
+    const dosage: import("../src/types").FhirDosage = {
+      ...clockDose(1, ["08:00"]),
+      modifierExtension: [modifier]
+    };
+    const without = { ...dosage, modifierExtension: undefined };
+    expect(formatSig(dosage, "long", { locale: "en" }))
+      .toBe(formatSig(without, "long", { locale: "en" }));
+    expect(fromFhirDosage(dosage).fhir.modifierExtension).toEqual([modifier]);
+    expect(fromFhirDosage(dosage).warnings).toEqual([]);
+  });
 });

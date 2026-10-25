@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatSig,
+  calculateTotalUnits,
   getDosageAlternativeChoice,
   getDosageCondition,
   nextDueDoses,
@@ -908,5 +909,63 @@ describe("typed conditional dosage alternatives", () => {
     expect(toFhirR5Dosages(parsed.fhirNext).map(getDosageAlternativeChoice))
       .toEqual(choices);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+});
+
+
+describe("fronted treatment-relative ADD source ownership", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  it("retains the source week-two onset with the new dose, not the preceding course", () => {
+    const source = "Take 1 tablet at 08:00 and 20:00 daily. From week 2 add half a tablet at 14:00 daily.";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[1]?.start?.offsetDuration?.value).toBe(7);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (day: string) => nextDueDoses(dosage, {
+        orderedAt, from: day + "T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 8
+      }).filter(value => value.startsWith(day)).map(value => value.slice(11, 16));
+      expect(on("2026-11-02")).toEqual(["08:00", "20:00"]);
+      expect(on("2026-11-09")).toEqual(["08:00", "14:00", "20:00"]);
+      expect(on("2026-11-16")).toEqual(["08:00", "14:00", "20:00"]);
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
+        timeZone: "Asia/Bangkok", durationValue: 14, durationUnit: "d"
+      }).totalUnits).toBe(31.5);
+    }
+  });
+
+  it("keeps the explicit week-two onset if a clinician later edits the first phase length", () => {
+    const source = "Take 1 tablet at 08:00 and 20:00 daily. From week 2 add half a tablet at 14:00 daily.";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.step[1]?.start?.offsetDuration?.value).toBe(7);
+    const firstCourse = parsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.boundsDuration;
+    expect(firstCourse?.value).toBe(7);
+    if (!firstCourse) throw new Error("The initial finite phase was not structured.");
+    // R6 editing permits changing the first phase without changing the
+    // independent author-specified FROM WEEK 2 onset of the added dose.
+    firstCourse.value = 5;
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (day: string) => nextDueDoses(dosage, {
+        orderedAt, from: day + "T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 8
+      }).filter(value => value.startsWith(day)).map(value => value.slice(11, 16));
+      expect(on("2026-11-07")).toEqual([]);
+      expect(on("2026-11-09")).toEqual(["08:00", "14:00", "20:00"]);
+    }
+  });
+
+  it("keeps a fronted week-two full replacement distinct from an addition", () => {
+    const input = "Take 1 tablet at 08:00 and 20:00 daily. From week 2 take 1 tablet at 20:00 daily.";
+    const parsed = parseSig(input);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const on = (day: string) => nextDueDoses(dosage, {
+        orderedAt, from: day + "T00:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 8
+      }).filter(value => value.startsWith(day)).map(value => value.slice(11, 16));
+      expect(on("2026-11-02")).toEqual(["08:00", "20:00"]);
+      expect(on("2026-11-09")).toEqual(["20:00"]);
+    }
   });
 });

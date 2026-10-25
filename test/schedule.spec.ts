@@ -1472,3 +1472,126 @@ describe("finite waking and bedtime phase followed by an added noon administrati
     }
   });
 });
+
+
+describe("waking-hours overnight shifts", () => {
+  const course: FhirR6DosageDetails = {
+    step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        period: 3, periodUnit: FhirPeriodUnit.Hour,
+        extension: [{
+          url: TIMING_EVENT_WINDOW_EXTENSION_URL,
+          extension: [
+            { url: "start", valueCode: EventTiming.Wake },
+            { url: "end", valueCode: EventTiming["Before Sleep"] }
+          ]
+        }]
+      } }
+    }] }]
+  };
+  const variants = [
+    course, toFhirR5Dosages(course), toDosageDetails(toFhirR5Dosages(course))
+  ];
+  const options = {
+    timeZone: "Asia/Bangkok" as const,
+    orderedAt: "2026-11-02T00:00:00+07:00",
+    eventClock: {
+      [EventTiming.Wake]: "22:00",
+      [EventTiming["Before Sleep"]]: "07:00"
+    }
+  };
+
+  it("continues the previous wake-day window after midnight without daytime administrations", () => {
+    for (const dosage of variants) {
+      expect(nextDueDoses(dosage, {
+        ...options,
+        from: "2026-11-03T00:00:00+07:00",
+        limit: 5
+      })).toEqual([
+        "2026-11-03T01:00:00+07:00",
+        "2026-11-03T04:00:00+07:00",
+        "2026-11-03T22:00:00+07:00",
+        "2026-11-04T01:00:00+07:00",
+        "2026-11-04T04:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("does not manufacture prior-day administrations when a course begins at midnight", () => {
+    for (const dosage of variants) {
+      expect(nextDueDoses(dosage, {
+        ...options,
+        from: "2026-11-02T00:00:00+07:00",
+        limit: 4
+      })).toEqual([
+        "2026-11-02T22:00:00+07:00",
+        "2026-11-03T01:00:00+07:00",
+        "2026-11-03T04:00:00+07:00",
+        "2026-11-03T22:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("anchors weekday filtering to the waking date rather than post-midnight clock date", () => {
+    const mondayCourse: FhirR6DosageDetails = {
+      step: [{ component: [{
+        ...course.step[0].component[0],
+        timing: { repeat: {
+          ...course.step[0].component[0].timing?.repeat,
+          dayOfWeek: [FhirDayOfWeek.Monday]
+        } }
+      }] }]
+    };
+    for (const dosage of [mondayCourse, toFhirR5Dosages(mondayCourse)]) {
+      expect(nextDueDoses(dosage, {
+        ...options,
+        from: "2026-11-03T00:00:00+07:00",
+        limit: 3
+      })).toEqual([
+        "2026-11-03T01:00:00+07:00",
+        "2026-11-03T04:00:00+07:00",
+        "2026-11-09T22:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("preserves ordinary daytime windows and rejects identical wake/sleep clocks", () => {
+    for (const dosage of variants) {
+      expect(nextDueDoses(dosage, {
+        ...options,
+        from: "2026-11-02T00:00:00+07:00",
+        limit: 3,
+        eventClock: {
+          [EventTiming.Wake]: "06:30",
+          [EventTiming["Before Sleep"]]: "22:00"
+        }
+      })).toEqual([
+        "2026-11-02T06:30:00+07:00",
+        "2026-11-02T09:30:00+07:00",
+        "2026-11-02T12:30:00+07:00"
+      ]);
+      expect(() => nextDueDoses(dosage, {
+        ...options,
+        from: "2026-11-02T00:00:00+07:00",
+        limit: 1,
+        eventClock: {
+          [EventTiming.Wake]: "22:00",
+          [EventTiming["Before Sleep"]]: "22:00"
+        }
+      })).toThrow("WAKE precedes HS");
+    }
+  });
+
+  it("counts overnight administrations only within the requested finite treatment window", () => {
+    for (const dosage of variants) {
+      expect(calculateTotalUnits({
+        dosage,
+        ...options,
+        from: "2026-11-02T00:00:00+07:00",
+        durationValue: 2,
+        durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(4);
+    }
+  });
+});

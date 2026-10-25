@@ -146,16 +146,35 @@ export function phaseAdjustmentAt(tokens: readonly Token[], start: number, limit
   if (!first || start >= limit) return undefined;
   const candidates = PHASE_ADJUSTMENTS_BY_FIRST.get(normalizeTokenLower(first));
   if (!candidates) return undefined;
+  // The same typed transitive adjustment can select one explicit clock dose
+  // with or without the contrastive ONLY. Both variants are constrained by
+  // an overt target noun, clock and an independently valid amount daughter.
+  const negated = ACTION_DIRECTIVE_PREFIXES.some(prefix =>
+    prefix.polarity === AdvicePolarity.Negate && start >= prefix.parts.length &&
+    prefix.parts.every((part, index) =>
+      normalizeTokenLower(tokens[start - prefix.parts.length + index]) === part));
+  if (negated) return undefined;
+  const restrictive = tokens[start + 1] &&
+    lexicalClasses.phaseTargetRestrictors.indexOf(normalizeTokenLower(tokens[start + 1])) >= 0;
+  const determinerIndex = start + (restrictive ? 2 : 1);
+  const clockIndex = determinerIndex + 1;
+  const targetClock = tokens[clockIndex];
+  const targetNoun = tokens[clockIndex + 1];
+  const linker = tokens[clockIndex + 2];
+  if (tokens[determinerIndex] &&
+      lexicalClasses.phaseTargetDeterminers.indexOf(normalizeTokenLower(tokens[determinerIndex])) >= 0 &&
+      targetClock?.kind === LexKind.TimeLike && targetNoun && linker &&
+      lexicalClasses.phaseDoseNouns.indexOf(normalizeTokenLower(targetNoun)) >= 0 &&
+      lexicalClasses.phaseTargetLinkers.indexOf(normalizeTokenLower(linker)) >= 0 &&
+      candidates.some(candidate => candidate.kind === "replace" &&
+        candidate.parts.length === 2 && candidate.parts[1] === normalizeTokenLower(linker)) &&
+      explicitDoseLexicalEnd(tokens, clockIndex + 3, undefined, limit) !== undefined) {
+    return { kind: "replace-target" as const, end: clockIndex + 3, clockStart: clockIndex };
+  }
   for (const { kind, parts } of candidates) {
     if (start + parts.length >= limit) continue;
     if (parts.every((part, index) => tokens[start + index] &&
       normalizeTokenLower(tokens[start + index]) === part)) {
-      // A negated adjustment is procedural advice, not a phase operation.
-      const negated = ACTION_DIRECTIVE_PREFIXES.some(prefix =>
-        prefix.polarity === AdvicePolarity.Negate && start >= prefix.parts.length &&
-        prefix.parts.every((part, index) =>
-          normalizeTokenLower(tokens[start - prefix.parts.length + index]) === part));
-      if (negated) return undefined;
       return { kind, end: start + parts.length };
     }
   }
@@ -169,6 +188,19 @@ export function phaseAdjustmentLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     if (!match) return [];
     const tokens = tokensAvailable(context, start, match.end - start);
     if (!tokens) return [];
+    if (match.kind === "replace-target") {
+      const clock = timeOfDayRule().match(context, match.clockStart).find(item =>
+        item.synsem.head.schedule?.timeOfDay?.length === 1);
+      if (!clock) return [];
+      return [lexicalSign({
+        type: "adjustment-sign",
+        rule: "hpsg.lex.regimen.targeted-phase-adjustment",
+        tokens,
+        synsem: { head: { schedule: clock.synsem.head.schedule }, valence: {},
+          cont: { regimenAdjustment: "replace-target" } },
+        score: 25 + tokens.length
+      })];
+    }
     if (match.kind === "add") {
       let cursor = match.end;
       if (context.tokens[cursor] && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;

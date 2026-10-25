@@ -319,7 +319,7 @@ export interface HpsgSynsem {
   };
   cont: {
     /** Source operation on the preceding regimen, resolved before projection. */
-    regimenAdjustment?: "replace" | "add";
+    regimenAdjustment?: "replace" | "add" | "replace-target";
     clauseKind?: "administration";
     condition?: HpsgConditionFeature;
     clinicalAdjunct?: HpsgClinicalAdjunctFeature;

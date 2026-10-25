@@ -1,5 +1,5 @@
 import {
-  toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  toDosageDetails, toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages, fromDosageDetails,
   withDosageEditProvenance, fromR6Dosage,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
@@ -18,7 +18,7 @@ import type { BoundaryPlan } from "./regimen/types";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
   buildRegimenGraph, regimenMemberSequences,
-  scopeSequentialPhaseSemantics, expandAdditiveRegimenPhases, type RegimenGraph
+  scopeSequentialPhaseSemantics, expandRegimenAdjustmentPhases, type RegimenGraph
 } from "./regimen/regimen";
 import {
   administrationTargetProjections,
@@ -185,7 +185,7 @@ export {
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits, MedicationQuantityCalculationError } from "./schedule";
 export {
-  toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
+  toDosageDetails, toEzDosages, fromDosageDetails,
   getDosageCondition, setDosageCondition,
   getDosageExcludedDates, setDosageExcludedDates,
   getDosageExcludedWeekdays, setDosageExcludedWeekdays,
@@ -488,6 +488,35 @@ function typedAdministrationOffsetSteps(
 }
 
 /**
+ * A source-typed relative phase onset can include a deliberate interval
+ * with NO medication (for example, an explicit STOP for seven days before
+ * resuming). Project that onset only when every component in the phase
+ * agrees; neither the wire layer nor the scheduler interprets free text.
+ */
+function typedRelativePhaseStartSteps(
+  results: readonly ParseResult[]
+): NonNullable<EzCourseMetadata["step"]> | undefined {
+  if (!results.some(item =>
+    item.meta.canonical.clauses[0]?.schedule?.treatmentStartOffsetDays !== undefined
+  )) return undefined;
+  const bySequence = new Map<number, Array<number | undefined>>();
+  for (const item of results) {
+    const sequence = item.fhir.sequence ?? 1;
+    const offsets = bySequence.get(sequence) ?? [];
+    offsets.push(item.meta.canonical.clauses[0]?.schedule?.treatmentStartOffsetDays);
+    bySequence.set(sequence, offsets);
+  }
+  const steps: NonNullable<EzCourseMetadata["step"]> = [];
+  for (const [sequence, offsets] of bySequence) {
+    const days = offsets[0];
+    if (sequence < 2 || days === undefined || !Number.isFinite(days) ||
+        days <= 0 || !offsets.every(offset => offset === days)) continue;
+    steps.push({ sequence, start: relativeTime({ value: days, unit: "d" }) });
+  }
+  return steps.length ? steps : undefined;
+}
+
+/**
  * A parallel set of independently dosed administrations may share one
  * treatment-course end. Project an R6 step end only when every typed daughter
  * in the same initial step owns the exact same finite course duration.
@@ -523,6 +552,52 @@ function typedSharedCourseEndSteps(
   return steps.length ? steps : undefined;
 }
 
+/** Detach a structured R5 modifier marker without emitting non-JSON optional
+ * fields. A missing optional property and an explicit undefined are identical
+ * in FHIR, but in-memory consumers cannot validate the latter as JSON.
+ * Recurses only for the uncommon R6-in-R5 marker, not normal single dosages.
+ * @param value Source FHIR marker or nested datatype value.
+ */
+function cloneDefinedExtensionValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(part => cloneDefinedExtensionValue(part)) as T;
+  if (value === null || typeof value !== "object") return value;
+  const result = { ...value };
+  for (const key of Object.keys(result) as (keyof T)[]) {
+    if (result[key] === undefined) delete result[key];
+    else result[key] = cloneDefinedExtensionValue(result[key]);
+  }
+  return result;
+}
+
+/** Normalize emitted R6-in-R5 markers without touching independent or
+ * unfamiliar user-provided modifier extensions. Normal R5 dosages cost only
+ * a cheap marker presence check.
+ * @param rows New FHIR dosage rows owned by the bridge.
+ */
+function normalizeRetainedCourseMarkers(rows: FhirDosage[]): FhirDosage[] {
+  for (const row of rows) {
+    if (row.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
+      row.modifierExtension = row.modifierExtension.map(extension =>
+        extension.url === DOSAGE_DETAILS_R5_URL
+          ? cloneDefinedExtensionValue(extension) : extension
+      );
+    }
+  }
+  return rows;
+}
+
+/** The public strict R5 converter must carry the same in-memory FHIR contract
+ * as parseSig().fhir; callers need not JSON-serialize before schema validation.
+ * @param input Structured R6 course or existing R5/Ez dosage rows.
+ * @param course Optional typed course metadata when inputs are flat rows.
+ */
+export function toFhirR5Dosages(
+  input: Parameters<typeof toFhirR5DosagesInternal>[0],
+  course?: Parameters<typeof toFhirR5DosagesInternal>[1]
+): FhirDosage[] {
+  return normalizeRetainedCourseMarkers(toFhirR5DosagesInternal(input, course));
+}
+
 /** One whole-course public result, independent of the number of parsed clauses. */
 function buildWholeCourseResult(
   input: string,
@@ -538,8 +613,17 @@ function buildWholeCourseResult(
     ? { ...regimenGraph.repeatCycle }
     : undefined;
   const delayedSteps = parallel ? undefined : typedAdministrationOffsetSteps(results);
+  const relativeStarts = parallel ? undefined : typedRelativePhaseStartSteps(results);
   const sharedCourseEnds = parallel ? undefined : typedSharedCourseEndSteps(results);
   const typedSteps: NonNullable<EzCourseMetadata["step"]> = delayedSteps?.slice() ?? [];
+  for (const relative of relativeStarts ?? []) {
+    const step = typedSteps.find(item => item.sequence === relative.sequence);
+    if (step) {
+      // A dose-local delay and a whole-phase start are different notions;
+      // do not invent one combined time when both are explicitly defined.
+      if (!step.start) step.start = relative.start;
+    } else typedSteps.push(relative);
+  }
   for (const shared of sharedCourseEnds ?? []) {
     const step = typedSteps.find(item => item.sequence === shared.sequence);
     if (step) step.end = shared.end;
@@ -578,7 +662,9 @@ function buildWholeCourseResult(
   const projectedFhir = typedRepeatCycle || typedSteps.length
     ? fromDosageDetails(fhirNext).dosages
     : parallel?.dosages ?? toEzDosages(dosageItems);
-  const fhir = withDosageEditProvenance(projectedFhir, input);
+  // The same JSON-compatible structural bridge serves both public routes:
+  // parser FHIR rows and callers using strict toFhirR5Dosages directly.
+  const fhir = withDosageEditProvenance(normalizeRetainedCourseMarkers(projectedFhir), input);
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
@@ -774,7 +860,7 @@ function composeParsedStates(
   const outputRegimenGraph = hasComposedTiming
     ? buildRegimenGraph(boundaryPlan, outputSegments)
     : regimenGraph;
-  const expanded = expandAdditiveRegimenPhases(outputStates, outputSegments, outputRegimenGraph);
+  const expanded = expandRegimenAdjustmentPhases(outputStates, outputSegments, outputRegimenGraph);
   const phaseSequences = regimenMemberSequences(expanded.graph);
   return { regimenGraph, outputStates: expanded.states, outputSegments: expanded.segments,
     outputRegimenGraph: expanded.graph, phaseSequences };
@@ -1105,6 +1191,24 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
   return parts.join(separator);
 }
 
+/** Convert a typed R6 treatment-start step boundary to a day offset.
+ * Unsupported event anchors remain visible as text/review qualifiers, not invented dates.
+ */
+function treatmentStepOffsetDays(
+  relative: FhirR6DosageDetails["step"][number]["start"]
+): number | undefined {
+  if (!relative || relative.contextReference || relative.contextDefinition ||
+      relative.contextPath || relative.offsetRange) return undefined;
+  if (!relative.contextCode?.coding?.some(coding =>
+    coding.system === "http://hl7.org/fhir/evidence-variable-event" &&
+    coding.code === "treatment-start")) return undefined;
+  const offset = relative.offsetDuration;
+  if (!offset || offset.comparator || !Number.isInteger(offset.value) ||
+      offset.value === undefined || offset.value < 0) return undefined;
+  const unit = offset.code ?? offset.unit;
+  return unit === "d" ? offset.value : unit === "wk" ? offset.value * 7 : undefined;
+}
+
 export function formatSig(
   input: FhirDosage | FhirR6DosageDetails | readonly EzDosage[],
   style: "short" | "long" = "short",
@@ -1132,19 +1236,65 @@ export function formatSig(
     if (oneOrCourse.step.length === 0) return "";
     // Rendering needs each component's projection, not a persisted copy of
     // the whole course plus edit markers on every component.
-    return oneOrCourse.step.map((step, index) => formatChoiceMembers(step.component, component => {
-      const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
-      const expressions: string[] = [];
-      for (const amount of component.doseAndRate ?? []) {
-        if (amount.doseExpression?.expression) {
-          expressions.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
+    const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
+    const stages: string[] = [];
+    let priorEndDays: number | undefined;
+    for (const [index, step] of oneOrCourse.step.entries()) {
+      const explicitStart = treatmentStepOffsetDays(step.start);
+      const startDays = step.start ? explicitStart : index === 0 ? 0 : priorEndDays;
+      const endDays = treatmentStepOffsetDays(step.end);
+      // A source-less course can have a real administration-free interval.
+      // Never join the surrounding identical doses as though they are consecutive.
+      if (priorEndDays !== undefined && startDays !== undefined &&
+          startDays > priorEndDays) {
+        stages.push(thai
+          ? `งดยาในวันที่ ${priorEndDays + 1}–${startDays}.`
+          : `No doses on days ${priorEndDays + 1}–${startDays}.`);
+      }
+      const rendered = formatChoiceMembers(step.component, component => {
+        const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
+        const expressions: string[] = [];
+        for (const amount of component.doseAndRate ?? []) {
+          if (amount.doseExpression?.expression) {
+            expressions.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
+          }
+          if (amount.rateExpression?.expression) {
+            expressions.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
+          }
         }
-        if (amount.rateExpression?.expression) {
-          expressions.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
+        return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+      }, options);
+      if (!rendered.trim()) {
+        priorEndDays = endDays;
+        continue;
+      }
+      let timing = "";
+      if (step.start || step.end) {
+        if ((step.start && startDays === undefined) ||
+            (step.end && endDays === undefined) ||
+            (startDays !== undefined && endDays !== undefined &&
+              endDays <= startDays)) {
+          // Unsupported event anchors must stay visible instead of becoming
+          // an unconditional dose when the original source text is absent.
+          const source = [step.start?.text, step.end?.text]
+            .filter((value): value is string => Boolean(value?.trim())).join("; ");
+          timing = source ? (thai ? `ต้องตรวจสอบช่วงเวลา: ${source}` : `Timing requires review: ${source}`) :
+            (thai ? "ต้องตรวจสอบช่วงเวลาการใช้ยา" : "Stage timing requires review");
+        } else if (endDays !== undefined && startDays !== undefined) {
+          timing = thai ? `วันที่ ${startDays + 1}–${endDays}` :
+            `Days ${startDays + 1}–${endDays}`;
+        } else if (startDays !== undefined) {
+          timing = thai ? `ตั้งแต่วันที่ ${startDays + 1} เป็นต้นไป` :
+            `From day ${startDays + 1} onward`;
+        } else if (endDays !== undefined) {
+          timing = thai ? `ถึงวันที่ ${endDays}` : `Through day ${endDays}`;
         }
       }
-      return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
-    }, options)).filter(Boolean).join((options?.locale ?? "").toLowerCase().indexOf("th") === 0 ? " จากนั้น " : " then ");
+      stages.push(timing ? `${timing}: ${rendered}` : rendered);
+      priorEndDays = endDays;
+    }
+    const hasTimedStages = oneOrCourse.step.some(step => step.start || step.end);
+    return stages.join(hasTimedStages ? " " : thai ? " จากนั้น " : " then ");
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
@@ -1200,6 +1350,10 @@ export function formatSigBatch(
   options?: FormatBatchOptions
 ): string {
   const separator = options?.separator ?? ", ";
+  if (dosages.some(dosage => dosage.modifierExtension?.some(extension =>
+    extension.url === DOSAGE_DETAILS_R5_URL))) {
+    return formatSig(toDosageDetails(dosages), style, options);
+  }
   if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
     return formatChoiceMembers(dosages, dosage => formatSig(dosage, style, options), options, separator);
   }

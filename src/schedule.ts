@@ -2112,17 +2112,23 @@ function generateWakingHoursIntervalSeries(
   const advance = createIntervalStepper(repeat, timeZone);
   if (!advance) return undefined;
 
+  // A patient may wake in the evening and go to sleep the next morning.
+  // Anchor weekday rules to the wake date, not to the spillover date.
+  const overnight = sleepClock < wakeClock;
+  const firstTreatmentDay = overnight && orderedAt ? startOfLocalDay(orderedAt, timeZone) : null;
   const results: string[] = [];
   let currentDay = startOfLocalDay(from, timeZone);
+  if (overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
   let dayIterations = 0;
   const maxDays = calendarScanLimit(currentDay, courseEnd, limit);
   while (results.length < limit && dayIterations < maxDays &&
       (!courseEnd || currentDay < courseEnd)) {
-    if (matchesCalendarDay(
+    if ((!firstTreatmentDay || currentDay >= firstTreatmentDay) && matchesCalendarDay(
       currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone
     )) {
       const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
-      const sleep = makeZonedDateFromDay(currentDay, timeZone, sleepClock);
+      const sleepDay = overnight ? addLocalDays(currentDay, 1, timeZone) : currentDay;
+      const sleep = makeZonedDateFromDay(sleepDay, timeZone, sleepClock);
       if (!wake || !sleep || sleep <= wake) {
         throw new Error(
           "Cannot execute a waking-hours interval unless configured WAKE precedes HS"

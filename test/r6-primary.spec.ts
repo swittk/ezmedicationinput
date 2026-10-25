@@ -1,7 +1,7 @@
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, parseSigAsync, fromFhir, formatSig, nextDueDoses, calculateTotalUnits,
+  parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FhirR6DosageDetails, type FhirExtension, type EzDosage,
@@ -1414,4 +1414,72 @@ describe("typed within-phase duration sharing for Parkinsonian schedules", () =>
       )).toEqual([14, 7]);
     }
   );
+});
+
+
+
+describe("source-less R6 treatment-relative step display", () => {
+  const relativeDay = (value: number) => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] },
+    offsetDuration: { value, unit: "d", code: "d" }
+  });
+  const tablet = (value: number) => ({
+    timing: { repeat: { timeOfDay: ["08:00:00"] } },
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
+  });
+
+  it("displays both finite phase windows in source-less EN/TH R6 and strict R5", () => {
+    const course: FhirR6DosageDetails = {
+      step: [
+        { end: relativeDay(7), component: [tablet(1)] },
+        { start: relativeDay(7), end: relativeDay(14), component: [tablet(2)] }
+      ]
+    };
+    for (const input of [course, toDosageDetails(toFhirR5Dosages(course))]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("Days 1–7");
+      expect(formatSig(input, "long", { locale: "en" })).toContain("Days 8–14");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("วันที่ 1–7");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("วันที่ 8–14");
+    }
+    expect(formatSigBatch(toFhirR5Dosages(course), "long", { locale: "en" }))
+      .toContain("Days 8–14");
+  });
+
+  it("makes a seven-day STOP/RESUME gap explicit rather than joining identical doses", () => {
+    const course: FhirR6DosageDetails = {
+      step: [
+        { end: relativeDay(7), component: [tablet(1)] },
+        { start: relativeDay(14), end: relativeDay(21), component: [tablet(1)] }
+      ]
+    };
+    for (const input of [course, toDosageDetails(toFhirR5Dosages(course))]) {
+      const en = formatSig(input, "long", { locale: "en" });
+      const th = formatSig(input, "long", { locale: "th" });
+      expect(en).toContain("No doses on days 8–14");
+      expect(en).toContain("Days 15–21");
+      expect(th).toContain("งดยาในวันที่ 8–14");
+      expect(th).toContain("วันที่ 15–21");
+    }
+    expect(formatSigBatch(toFhirR5Dosages(course), "long", { locale: "en" }))
+      .toContain("No doses on days 8–14");
+  });
+
+  it("does not misrepresent an unknown relative-time context as treatment-day timing", () => {
+    const course: FhirR6DosageDetails = {
+      step: [{
+        start: {
+          contextDefinition: "dialysis",
+          offsetDuration: { value: 2, unit: "d" },
+          text: "two days after dialysis"
+        },
+        component: [tablet(1)]
+      }]
+    };
+    expect(formatSig(course, "long", { locale: "en" }))
+      .toContain("two days after dialysis");
+    expect(formatSig(course, "long", { locale: "en" }))
+      .not.toContain("from day 3");
+  });
 });

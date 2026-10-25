@@ -56,6 +56,7 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
     clause.schedule.boundsEnd !== undefined || clause.schedule.calendarEvents?.length ||
     clause.schedule.count !== undefined || clause.schedule.countMax !== undefined ||
     clause.schedule.occurrenceCap ||
+    clause.schedule.treatmentStartOffsetDays !== undefined ||
     clause.schedule.administrationOffsetMinutes !== undefined
   )
 );

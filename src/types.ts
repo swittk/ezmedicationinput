@@ -1683,7 +1683,7 @@ export interface CanonicalClinicalAdjuncts {
 export interface CanonicalSigClause {
   kind: "administration";
   /** Source-backed phase operation; resolved by the typed regimen graph. */
-  regimenAdjustment?: "replace" | "add";
+  regimenAdjustment?: "replace" | "add" | "replace-target";
   rawText: string;
   span?: TextRange;
   raw: CanonicalSourceSpan;

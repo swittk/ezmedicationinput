@@ -1,5 +1,8 @@
 import { terminalAdministrationDelay } from "./grammar";
-import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
+import {
+  AdviceArgumentRole, AdvicePolarity,
+  EventTiming as SequenceEventTiming, FhirPeriodUnit
+} from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from './types';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -204,6 +207,29 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
 }
 
 /**
+ * A terminal affirmative STOP with a finite elapsed-duration daughter is
+ * a medication-free pause before the next licensed regimen phase. This is
+ * distinct from a dosage course end and never creates a fictitious dose.
+ * There is no implied exact pause without both a typed STOP and its duration.
+ */
+function terminalTreatmentPauseDays(clause: CanonicalSigClause): number | undefined {
+  const graph = clause.instructionGraph;
+  const actions = graph?.actions;
+  const last = actions?.[actions.length - 1];
+  if (!last || last.predicate.semanticClass !== 'stop' ||
+      last.polarity === AdvicePolarity.Negate ||
+      (graph?.primaryAdministrationSpan &&
+        last.span.start < graph.primaryAdministrationSpan.end)) return undefined;
+  const quantity = last.args.find(arg =>
+    arg.role === AdviceArgumentRole.Duration)?.quantity;
+  if (!quantity || quantity.range || quantity.value === undefined ||
+      quantity.value <= 0 || !Number.isFinite(quantity.value)) return undefined;
+  const days = quantity.unit === 'd' ? quantity.value :
+    quantity.unit === 'wk' ? quantity.value * 7 : undefined;
+  return days !== undefined && Number.isInteger(days) ? days : undefined;
+}
+
+/**
  * License sequential schedule inheritance on the typed regimen graph before
  * canonical clauses are lowered to FHIR. A complete predecessor phase owns
  * the derived start, and only anchors shared by every predecessor daughter
@@ -258,10 +284,9 @@ export function scopeSequentialPhaseSemantics(
           note: 'The next source-typed phase starts at its explicit treatment-relative offset.' });
       }
       relativePhaseStarts.set(edge.to, explicitStart);
-      for (const member of next) {
-        const schedule = states[member]?.primaryClause.schedule;
-        if (schedule?.treatmentStartOffsetDays === explicitStart) delete schedule.treatmentStartOffsetDays;
-      }
+      // The same source onset also belongs to the succeeding step's start.
+      // Do not erase it after bounding the predecessor: R6/R5 lowering must
+      // still emit the exact treatment-relative date on the next phase.
     } else {
       const lengths = prior.map(index => {
         const schedule = states[index]?.primaryClause.schedule;
@@ -270,7 +295,29 @@ export function scopeSequentialPhaseSemantics(
           ? schedule.duration * (schedule.durationUnit === 'wk' ? 7 : 1) : undefined;
       });
       if (lengths.length && lengths.every((value): value is number => value !== undefined)) {
-        relativePhaseStarts.set(edge.to, priorStart + Math.max(...lengths));
+        const pauses = prior.map(index =>
+          states[index]?.primaryClause && terminalTreatmentPauseDays(states[index].primaryClause))
+          .filter((days): days is number => days !== undefined);
+        // The pause is a typed, single terminal action attached to a complete
+        // finite predecessor. Multiple or conflicting pauses remain editable
+        // counseling rather than executable guesses.
+        const pauseDays = pauses.length === 1 ? pauses[0] : 0;
+        const phaseStart = priorStart + Math.max(...lengths) + pauseDays;
+        relativePhaseStarts.set(edge.to, phaseStart);
+        if (pauseDays && lengths.every(length => length === lengths[0])) {
+          for (const member of next) {
+            const clause = states[member]?.primaryClause;
+            const schedule = clause?.schedule;
+            if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
+                schedule.boundsStart || schedule.boundsEnd) continue;
+            schedule.treatmentStartOffsetDays = phaseStart;
+            clause.evidence.push({
+              rule: "hpsg.regimen.terminal-treatment-pause",
+              spans: [], scheduleFields: ["treatmentStartOffsetDays"],
+              note: "The next administration starts after an explicit finite no-medication interval."
+            });
+          }
+        }
       }
     }
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
@@ -432,10 +479,11 @@ export function regimenMemberSequences(graph: RegimenGraph): number[] {
  * @param segments Source ranges corresponding to those states.
  * @param graph Source-licensed phase relations before wire projection.
  */
-export function expandAdditiveRegimenPhases(
+export function expandRegimenAdjustmentPhases(
   states: ParserState[], segments: HpsgSigSegment[], graph: RegimenGraph
 ): { states: ParserState[]; segments: HpsgSigSegment[]; graph: RegimenGraph } {
-  if (!states.some(state => state.primaryClause.regimenAdjustment === "add")) {
+  if (!states.some(state => state.primaryClause.regimenAdjustment === "add" ||
+      state.primaryClause.regimenAdjustment === "replace-target")) {
     return { states, segments, graph };
   }
   const outputStates: ParserState[] = [];
@@ -443,10 +491,12 @@ export function expandAdditiveRegimenPhases(
   const phases: RegimenPhase[] = [];
   for (const phase of graph.phases) {
     const members: number[] = [];
-    const additions = phase.members.filter(index => states[index]?.primaryClause.regimenAdjustment === "add");
+    const adjustments = phase.members.filter(index =>
+      states[index]?.primaryClause.regimenAdjustment === "add" ||
+      states[index]?.primaryClause.regimenAdjustment === "replace-target");
     const preceding = graph.sequences.find(edge => edge.to === phase.id);
     const prior = preceding ? phases[preceding.from] : undefined;
-    const target = additions.length ? states[additions[0]]?.primaryClause : undefined;
+    const target = adjustments.length ? states[adjustments[0]]?.primaryClause : undefined;
     if (target && prior) {
       const previous = prior.members.map(index => outputStates[index]);
       const sharedDose = previous[0]?.primaryClause.dose;
@@ -463,34 +513,66 @@ export function expandAdditiveRegimenPhases(
           target.patientInstruction = target.patientInstruction ?? target.rawText;
         }
       }
-      if (target.dose) for (const donorIndex of prior.members) {
-        const donor = outputStates[donorIndex];
-        const clone = new ParserState(donor.input, donor.tokens, donor.customSiteHints);
-        Object.assign(clone.primaryClause, cloneStructuredValue(donor.primaryClause));
-        clone.consumed = new Set(donor.consumed);
-        clone.methodVerb = donor.methodVerb;
-        clone.productFormKey = donor.productFormKey;
-        clone.warnings = [...donor.warnings];
-        delete clone.primaryClause.regimenAdjustment;
-        const schedule = clone.primaryClause.schedule;
-        if (schedule) {
-          // The new phase keeps prior recurrence but has its own course window.
-          delete schedule.duration; delete schedule.durationMax; delete schedule.durationUnit;
-          delete schedule.boundsStart; delete schedule.boundsEnd; delete schedule.calendarEvents;
-          if (target.schedule?.duration !== undefined) {
-            schedule.duration = target.schedule.duration;
-            schedule.durationUnit = target.schedule.durationUnit;
-            schedule.durationMax = target.schedule.durationMax;
+      // A source-licensed, restrictive clock adjustment replaces exactly
+      // its named administration. Preserve every unrelated predecessor slot.
+      // Without one explicit target clock there is no safe partial replacement.
+      const replacedClock = target.regimenAdjustment === "replace-target" &&
+        target.schedule?.timeOfDay?.length === 1
+        ? target.schedule.timeOfDay[0] : undefined;
+      if (target.dose && (target.regimenAdjustment !== "replace-target" ||
+          replacedClock && previous.some(state =>
+            state.primaryClause.schedule?.timeOfDay?.indexOf(replacedClock) !== -1))) {
+        for (const donorIndex of prior.members) {
+          const donor = outputStates[donorIndex];
+          const clone = new ParserState(donor.input, donor.tokens, donor.customSiteHints);
+          Object.assign(clone.primaryClause, cloneStructuredValue(donor.primaryClause));
+          clone.consumed = new Set(donor.consumed);
+          clone.methodVerb = donor.methodVerb;
+          clone.productFormKey = donor.productFormKey;
+          clone.warnings = [...donor.warnings];
+          delete clone.primaryClause.regimenAdjustment;
+          const schedule = clone.primaryClause.schedule;
+          if (schedule && replacedClock && target.regimenAdjustment === "replace-target") {
+            const oldClocks = schedule.timeOfDay ?? [];
+            if (oldClocks.indexOf(replacedClock) >= 0) {
+              const remaining = oldClocks.filter(clock => clock !== replacedClock);
+              if (!remaining.length && !schedule.when?.length) continue;
+              schedule.timeOfDay = remaining;
+              if (schedule.frequency === oldClocks.length && schedule.period === 1 &&
+                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+            }
           }
-          if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
-          if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;
+          if (schedule) {
+            // The new phase keeps prior recurrence but has its own course window.
+            delete schedule.duration; delete schedule.durationMax; delete schedule.durationUnit;
+            delete schedule.boundsStart; delete schedule.boundsEnd; delete schedule.calendarEvents;
+            // Cloned continuation daughters take the explicit onset of THIS
+            // phase, not the donor's old onset. Step.start is executable
+            // only when all new phase members agree on that source feature.
+            delete schedule.treatmentStartOffsetDays;
+            if (target.schedule?.treatmentStartOffsetDays !== undefined) {
+              schedule.treatmentStartOffsetDays = target.schedule.treatmentStartOffsetDays;
+            }
+            if (target.schedule?.duration !== undefined) {
+              schedule.duration = target.schedule.duration;
+              schedule.durationUnit = target.schedule.durationUnit;
+              schedule.durationMax = target.schedule.durationMax;
+            }
+            if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
+            if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;
+          }
+          clone.primaryClause.evidence.push({
+            rule: target.regimenAdjustment === "replace-target"
+              ? "hpsg.regimen.targeted-replacement-continuation"
+              : "hpsg.regimen.explicit-addition-continuation",
+            spans: [],
+            note: target.regimenAdjustment === "replace-target"
+              ? "The typed restricted adjustment retains this unaffected predecessor administration."
+              : "The typed ADD operation continues this preceding administration in the new phase."
+          });
+          members.push(outputStates.length);
+          outputStates.push(clone); outputSegments.push(outputSegments[donorIndex]);
         }
-        clone.primaryClause.evidence.push({
-          rule: "hpsg.regimen.explicit-addition-continuation", spans: [],
-          note: "The typed ADD operation continues this preceding administration in the new phase."
-        });
-        members.push(outputStates.length);
-        outputStates.push(clone); outputSegments.push(outputSegments[donorIndex]);
       }
     }
     for (const index of phase.members) {

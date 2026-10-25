@@ -13,12 +13,16 @@ import { LexKind } from '../lexer/token-types';
 import { EVENT_TIMING_TOKENS } from '../maps';
 import { parseClockToken } from '../hpsg/rule-context';
 import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
-import { ordinalWeekStageSequence, followingCourseDurationHeaderAt } from '../hpsg/rules/timing-rules';
+import {
+  ordinalWeekStageSequence, followingCourseDurationHeaderAt,
+  treatmentRelativePeriodStartAt
+} from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS,
+  HARD_SEGMENT_BOUNDARY_TOKENS, REGIMEN_SEQUENCE_CONNECTOR_PHRASES,
+  TREATMENT_PERIOD_START_LEADS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
 import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
@@ -36,6 +40,39 @@ import type { RejectedConstruction } from './grammar';
 /** Use the existing locale normalizer; grammar never maintains Thai connector spellings. */
 function lexeme(token: Token | undefined): string {
   return token ? (token.canonical ?? token.lower).replace(/^[.,;:]+|[.,;:]+$/g, '') : '';
+}
+
+const PHRASE_SEQUENCERS_BY_FIRST = new Map<string, Array<readonly string[]>>();
+for (const parts of REGIMEN_SEQUENCE_CONNECTOR_PHRASES) {
+  const bucket = PHRASE_SEQUENCERS_BY_FIRST.get(parts[0]) ?? [];
+  bucket.push(parts);
+  PHRASE_SEQUENCERS_BY_FIRST.set(parts[0], bucket);
+}
+
+/** Resolve one licensed source sequencing constituent, not arbitrary nearby words. */
+function sequenceConnectorEnd(tokens: readonly Token[], start: number): number | undefined {
+  const initial = lexeme(tokens[start]);
+  if (ACTION_SEQUENCE_MARKERS.has(initial)) return start + 1;
+  const canonicalCandidates = PHRASE_SEQUENCERS_BY_FIRST.get(initial);
+  const surface = tokens[start]?.lower;
+  const surfaceCandidates = surface && surface !== initial
+    ? PHRASE_SEQUENCERS_BY_FIRST.get(surface) : undefined;
+  // Most ordinary doses contain no phrasal sequence lead. Avoid allocating
+  // a matching closure for each token in the common mobile path.
+  if (!canonicalCandidates && !surfaceCandidates) return undefined;
+  const matched = (parts: readonly string[]): boolean => parts.every((part, offset) => {
+    const token = tokens[start + offset];
+    // A Thai surface lexeme can normalize to a wider English meaning,
+    // but a *complete* licensed Thai phrase remains a source constituent.
+    return token && (part === lexeme(token) || part === token.lower);
+  });
+  for (const parts of canonicalCandidates ?? []) {
+    if (matched(parts)) return start + parts.length;
+  }
+  for (const parts of surfaceCandidates ?? []) {
+    if (matched(parts)) return start + parts.length;
+  }
+  return undefined;
 }
 
 /** Recognize typed clock atoms, including a numeral followed by a shared meridiem token. */
@@ -168,6 +205,20 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     // The addition predicate supplies a source phase boundary; modifiers
     // such as BUT/THEN remain provenance on that boundary, not a dosage.
     if (i > 0 && phaseAdjustmentAt(tokens, i)?.kind === 'add') {
+      // A source-licensed treatment-relative header immediately preceding
+      // ADD already created the beginning of the next phase. Splitting at
+      // ADD again would strand that header on the previous administration
+      // and silently discard the new phase's onset.
+      let ownedByFrontedOnset = false;
+      for (let headerStart = Math.max(0, i - 6); headerStart < i; headerStart++) {
+        const header = treatmentRelativePeriodStartAt(tokens, headerStart);
+        if (header?.tokenEnd === i && header.offsetDays > 0 &&
+            sites.some(site => site.kind === 'sequence' && site.rightIndex === headerStart)) {
+          ownedByFrontedOnset = true;
+          break;
+        }
+      }
+      if (ownedByFrontedOnset) continue;
       let begin = i;
       while (begin > 0 && i - begin < 3) {
         const previous = tokens[begin - 1];
@@ -183,11 +234,50 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
         kind: 'sequence', surface: input.slice(boundaryStart, token.sourceStart) });
       continue;
     }
+    const precedingSeparator = token.original === ',' || token.original === ';' ||
+      token.original === '.' ? 1 : 0;
+    const head = i + precedingSeparator;
+    // A complete "from/in week 2" schedule daughter begins a new treatment
+    // phase even without THEN. Keep the whole source period on the right for
+    // the HPSG chart to retain its explicit treatment-relative onset. An
+    // isolated preposition or numeric duration does not license a seam.
+    const sourcePhaseOnset = TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[head]))
+      ? treatmentRelativePeriodStartAt(tokens, head) : undefined;
+    const previousIsSeparator = i > 0 && (
+      tokens[i - 1].original === ';' || tokens[i - 1].original === '.' ||
+      tokens[i - 1].original === ','
+    );
+    if (i > 0 && sourcePhaseOnset && sourcePhaseOnset.offsetDays > 0 &&
+        (precedingSeparator || !previousIsSeparator)) {
+      sites.push({
+        start: token.sourceStart,
+        end: precedingSeparator ? token.sourceEnd : token.sourceStart,
+        tokenIndex: i, lastTokenIndex: precedingSeparator ? i : i - 1,
+        rightIndex: head, kind: 'sequence',
+        surface: precedingSeparator ? input.slice(token.sourceStart, token.sourceEnd) : ''
+      });
+      continue;
+    }
+    const conjunctionBeforeHead = connectorKind(tokens[head]) === 'coordination' ? 1 : 0;
+    const sequenceEnd = sequenceConnectorEnd(tokens, head + conjunctionBeforeHead);
+    if (sequenceEnd !== undefined) {
+      sites.push({ start: token.sourceStart, end: tokens[sequenceEnd - 1].sourceEnd,
+        tokenIndex: i, lastTokenIndex: sequenceEnd - 1, rightIndex: sequenceEnd,
+        kind: 'sequence', surface: input.slice(token.sourceStart, tokens[sequenceEnd - 1].sourceEnd) });
+      i = sequenceEnd - 1;
+      continue;
+    }
     let kind = connectorKind(token);
-    if (token.original === ',' && connectorKind(tokens[i + 1])) {
+    const followingConnector = connectorKind(tokens[i + 1]);
+    // A strong punctuation mark followed by an explicit sequencing head is
+    // one source relation, just as ", then" is. Never let a preliminary
+    // independent-punctuation decision consume the THEN construction.
+    if (followingConnector && (token.original === ',' ||
+        ((token.original === ';' || token.original === '.') &&
+          followingConnector === 'sequence'))) {
       const end = tokens[i + 1].sourceEnd;
       sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: i + 1, rightIndex: i + 2,
-        kind: connectorKind(tokens[i + 1])!, surface: input.slice(token.sourceStart, end) });
+        kind: followingConnector, surface: input.slice(token.sourceStart, end) });
       i++; continue;
     }
     const punctuation = token.original === '.' || token.original === ';' || token.original === '!' || token.original === '?';

@@ -2681,12 +2681,25 @@ function precedingLeadingRelativeAdministrationInterval(
   return Boolean(relativeAdministrationIntervalSign(context, start - 1, relationToken, lower));
 }
 
-/** Ordinal course periods are relative to treatment, never clock offsets.
- * A source "for week 1" supplies a finite period; "from week 2" supplies
- * its onset. Ordinary quantity-first "for 2 weeks" stays a duration. */
-function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+/** The same bounded lexical treatment-period daughter is consumed by the
+ * HPSG schedule chart and the regimen seam proposer. A source "for week 1"
+ * supplies its finite duration; "from week 2" / "ในสัปดาห์ที่ 2"
+ * supplies its onset. Cardinal-first "for 2 weeks" is ordinary duration.
+ * This is a lexical constituent, not a separate source-string parser.
+ */
+const TREATMENT_PERIOD_LEAD_TOKENS = new Set([
+  ...lexicalClasses.treatmentPeriodRestrictors,
+  ...lexicalClasses.treatmentPeriodBoundLeads,
+  ...lexicalClasses.treatmentPeriodStartLeads
+]);
+function treatmentRelativePeriodHeaderAt(tokens: readonly Token[], start: number):
+  { tokenEnd: number; offsetDays: number; unit: FhirPeriodUnit.Week | FhirPeriodUnit.Day; bounded: boolean } | undefined {
+  // Cheap gate before creating any per-candidate grammar closures; normal
+  // medication doses have no treatment-relative week/day introducer.
+  const first = tokens[start];
+  if (!first || !TREATMENT_PERIOD_LEAD_TOKENS.has(normalizeTokenLower(first))) return undefined;
   let cursor = start;
-  const text = (index: number) => context.tokens[index] ? normalizeTokenLower(context.tokens[index]) : "";
+  const text = (index: number) => tokens[index] ? normalizeTokenLower(tokens[index]) : "";
   if (lexicalClasses.treatmentPeriodRestrictors.indexOf(text(cursor)) >= 0) cursor++;
   const bounded = lexicalClasses.treatmentPeriodBoundLeads.indexOf(text(cursor)) >= 0;
   const starts = lexicalClasses.treatmentPeriodStartLeads.indexOf(text(cursor)) >= 0;
@@ -2694,26 +2707,50 @@ function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number):
   cursor++;
   if (lexicalClasses.treatmentPeriodArticles.indexOf(text(cursor)) >= 0) cursor++;
   let unit = mapIntervalUnit(text(cursor));
-  let ordinalToken = context.tokens[cursor + 1];
-  if (unit !== "wk" && unit !== "d") {
-    ordinalToken = context.tokens[cursor];
+  let ordinalToken: Token | undefined;
+  let tokenEnd: number;
+  if (unit === "wk" || unit === "d") {
+    cursor++;
+    // A headed ordinal in Thai may have the grammatical particle "ที่",
+    // normalized to the same filler class as English "at/the".
+    if (tokens[cursor] && ORDINAL_WEEK_STAGE_FILLERS.has(text(cursor))) cursor++;
+    ordinalToken = tokens[cursor];
+    tokenEnd = cursor + 1;
+  } else {
+    ordinalToken = tokens[cursor];
     unit = mapIntervalUnit(text(cursor + 1));
-    // Cardinal-first quantities belong to the ordinary duration grammar.
     if (!ordinalToken || ordinalToken.kind === LexKind.Number ||
         ORDINAL_WEEK_STAGE_VALUES[text(cursor)] === undefined) return undefined;
+    tokenEnd = cursor + 2;
   }
   if (!ordinalToken || (unit !== "wk" && unit !== "d")) return undefined;
   const ordinal = ordinalToken.kind === LexKind.Number ? ordinalToken.value :
     ORDINAL_WEEK_STAGE_VALUES[normalizeTokenLower(ordinalToken)];
   if (!ordinal || !Number.isInteger(ordinal) || ordinal < 1) return undefined;
-  const members = tokensAvailable(context, start, cursor + 2 - start);
+  return { tokenEnd, offsetDays: (ordinal - 1) * (unit === "wk" ? 7 : 1),
+    unit, bounded };
+}
+
+/** Does a source lead license a new treatment-relative phase onset? No
+ * arbitrary numeric quantity or isolated "in/from" qualifies.
+ */
+export function treatmentRelativePeriodStartAt(tokens: readonly Token[], start: number):
+  { tokenEnd: number; offsetDays: number } | undefined {
+  const header = treatmentRelativePeriodHeaderAt(tokens, start);
+  return header && !header.bounded
+    ? { tokenEnd: header.tokenEnd, offsetDays: header.offsetDays } : undefined;
+}
+
+function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+  const header = treatmentRelativePeriodHeaderAt(context.tokens, start);
+  if (!header) return undefined;
+  const members = tokensAvailable(context, start, header.tokenEnd - start);
   if (!members) return undefined;
-  const offsetDays = (ordinal - 1) * (unit === "wk" ? 7 : 1);
   return lexicalSign({
     type: "schedule-sign", rule: "hpsg.lex.schedule.treatmentRelativePeriod", tokens: members,
     synsem: { head: { schedule: {
-      treatmentStartOffsetDays: offsetDays,
-      ...(bounded ? { duration: 1, durationUnit: unit } : {})
+      treatmentStartOffsetDays: header.offsetDays,
+      ...(header.bounded ? { duration: 1, durationUnit: header.unit } : {})
     } }, valence: {}, cont: { clauseKind: "administration" } },
     score: 52 + members.length
   });
@@ -2730,7 +2767,17 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     const relativePeriod = treatmentRelativePeriodSign(context, start);
     if (relativePeriod) return [relativePeriod];
     const ordinalWeekStage = ordinalWeekStageHeaderAt(context.tokens, start);
-    if (ordinalWeekStage && ordinalWeekStage.tokenEnd <= context.limit) {
+    // A prefixed relative period is one larger licensed schedule daughter:
+    // "from week 2" / "ในสัปดาห์ที่ 2" must not be reduced to the
+    // unanchored "week 2" header with its treatment onset discarded.
+    const prefixedRelativePeriod = ordinalWeekStage && (
+      start > 0 && treatmentRelativePeriodStartAt(context.tokens, start - 1)
+        ?.tokenEnd === ordinalWeekStage.tokenEnd ||
+      start > 1 && treatmentRelativePeriodStartAt(context.tokens, start - 2)
+        ?.tokenEnd === ordinalWeekStage.tokenEnd
+    );
+    if (ordinalWeekStage && !prefixedRelativePeriod &&
+        ordinalWeekStage.tokenEnd <= context.limit) {
       const members = context.tokens.slice(start, ordinalWeekStage.tokenEnd);
       if (members.every(member => !context.state.consumed.has(member.index))) {
         const schedule: HpsgScheduleFeature = {

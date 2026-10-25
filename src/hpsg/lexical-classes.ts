@@ -437,6 +437,13 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
 /** Closed-class contrast that connects two instructions, not a new action. */
 export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);
+/** Compositional phrasal sequencers; single-token THEN remains the relation lexicon's authority. */
+export const REGIMEN_SEQUENCE_CONNECTOR_PHRASES: readonly (readonly string[])[] =
+  source.regimenSequenceConnectorPhrases
+    .map(parts => [...parts])
+    .sort((left, right) => right.length - left.length);
+/** Cheap source-lexical gate for typed treatment-relative phase onsets. */
+export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
 /** Disjunction is alternative administration, never conjunctive dose sharing.

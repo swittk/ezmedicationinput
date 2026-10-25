@@ -3475,3 +3475,43 @@ The 100-file CodeRabbit review cap is unchanged (115 raw paths less the same
 15 existing configured exclusions). Original untracked diagnostic probe
 remains untouched and unstaged. No remote push, publication, merge or
 deployment performed.
+
+
+## 2026-10-25 — Source-relative edits, overnight schedules and FHIR display
+
+- A source-licensed `From week 2` time header now belongs to the following
+  complete ADD daughter. The boundary planner does not strand the header on
+  the previous dose or construct a second empty seam before ADD.
+- Regimen composition retains the explicit treatment-relative onset as an
+  independent R6 step start and propagates it to each unaffected administration
+  continued into an ADD or clock-targeted replacement phase. Editing the
+  preceding stage from seven to five days does **not** move a new dose
+  prescribed for the second week onto day six. Strict R5 persists this meaning.
+- Natural punctuation and lexical sequencing variants use existing typed phase
+  relationships; same-day conjunction and independent parallel-dose controls
+  remain distinct. Source, dose, cadence and calendar information are never
+  reconstructed from FHIR text.
+- An explicit STOP interval is an administration-free treatment gap. Daylight
+  and overnight WAKE→HS recurring windows execute in both native R6 and
+  strict R5, including after-midnight administrations owned by the previous
+  waking-day window.
+- Source-less R6 treatment-day start/end and medication-free gaps display
+  legibly in English and Thai. Multiclock, mixed-dose three-week and pause
+  cases preserve exact day ranges, amount distinctions and their 56/35-tablet
+  clinical totals across R6/R5. Authored text still wins when supplied;
+  unknown modifiers remain untouched, without warnings invented by display.
+- The retained R6-in-R5 course marker now omits invalid explicit `undefined`
+  optional fields in both public `parseSig().fhir` and
+  `toFhirR5Dosages()`. The shared structural copy is restricted to those
+  uncommon markers; ordinary dosage parsing is unaffected. No JSON string
+  serializer or second clinical interpreter was introduced.
+
+Final local Node22 source gate before PR review: 44 suites,
+**2924/2924 PASS**, with independent next-dose/supply/edit-stability controls.
+ESM/CJS build, declaration generation and packaged exports 4/4 PASS.
+Downstream FHIR dosage-schema validation and actual administration parity
+checks were green on the repaired staged cases. CodeRabbit remains at exactly
+100 reviewable paths under the same existing exclusion configuration.
+The original untracked diagnostic probe is neither staged nor deleted.
+The branch is ready for updated remote review; npm publication, merge and
+deployment are separate operations.
