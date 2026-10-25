@@ -19,7 +19,10 @@ export function buildSnomedFindingSitePostcoordinationCode(
   focusCode: string,
   siteCode: string
 ): string {
-  return `${focusCode}${SNOMED_FINDING_SITE_ATTRIBUTE_MARKER}${siteCode}`;
+  const site = siteCode.trim();
+  const value = /[:+]/u.test(site) && !(site.startsWith("(") && site.endsWith(")"))
+    ? `(${site})` : site;
+  return `${focusCode}${SNOMED_FINDING_SITE_ATTRIBUTE_MARKER}${value}`;
 }
 
 export function hasSnomedTopographicalModifierPostcoordination(code: string | undefined): boolean {
@@ -48,7 +51,7 @@ export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
   code: string | undefined
 ): { siteCode: string; modifierCode: string } | undefined {
   const markerIndex = code?.indexOf(SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER) ?? -1;
-  if (!code || markerIndex < 0) {
+  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
     return undefined;
   }
   const siteCode = code.slice(0, markerIndex).trim();
@@ -65,7 +68,7 @@ export function parseSnomedBodySiteLateralityPostcoordinationCode(
   code: string | undefined
 ): { siteCode: string; lateralityCode: string } | undefined {
   const markerIndex = code?.indexOf(SNOMED_LATERALITY_MARKER) ?? -1;
-  if (!code || markerIndex < 0) {
+  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
     return undefined;
   }
   const siteCode = code.slice(0, markerIndex).trim();
@@ -82,13 +85,15 @@ export function parseSnomedFindingSitePostcoordinationCode(
   code: string | undefined
 ): { focusCode: string; siteCode: string } | undefined {
   const markerIndex = code?.indexOf(SNOMED_FINDING_SITE_ATTRIBUTE_MARKER) ?? -1;
-  if (!code || markerIndex < 0) {
+  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
     return undefined;
   }
   const focusCode = code.slice(0, markerIndex).trim();
-  const siteCode = code
+  const siteValue = code
     .slice(markerIndex + SNOMED_FINDING_SITE_ATTRIBUTE_MARKER.length)
     .trim();
+  const siteCode = siteValue.startsWith("(") && siteValue.endsWith(")")
+    ? siteValue.slice(1, -1).trim() : siteValue;
   if (!focusCode || !siteCode) {
     return undefined;
   }

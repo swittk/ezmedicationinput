@@ -2040,6 +2040,7 @@
     },
     {
       "code": "continue-treatment",
+      "directiveOnlyAliases": ["continue"],
       "semanticClass": "course",
       "display": "Continue taking medication",
       "i18n": { "th": "กินต่อเนื่อง" },

@@ -83,6 +83,14 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   for (const coding of argument.codings ?? []) {
     nested.push({ url: "argumentCoding", valueCoding: wireCoding(coding) });
   }
+  for (const component of argument.components ?? []) {
+    const parts: FhirExtension[] = [
+      { url: "role", valueCode: component.role },
+      { url: "text", valueString: component.text }
+    ];
+    add(parts, valueCoding("coding", component.coding));
+    nested.push({ url: "component", extension: parts });
+  }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
     add(nested, valueInteger("spanEnd", argument.span.end));
@@ -216,6 +224,16 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
       .map((entry) => readCoding(entry.valueCoding))
       .filter((entry): entry is FhirCoding => Boolean(entry))
   };
+  const components: NonNullable<AdviceArgument["components"]> = [];
+  for (const component of children(extension, "component")) {
+    const role = child(component, "role")?.valueCode;
+    const text = child(component, "text")?.valueString;
+    if ((role === "head" || role === "qualifier" || role === "amount") && text !== undefined) {
+      const coding = readCoding(child(component, "coding")?.valueCoding);
+      components.push({ role, text, ...(coding ? { coding } : {}) });
+    }
+  }
+  if (components.length) argument.components = components;
   const spanStart = child(extension, "spanStart")?.valueInteger;
   const spanEnd = child(extension, "spanEnd")?.valueInteger;
   if (spanStart !== undefined && spanEnd !== undefined) argument.span = { start: spanStart, end: spanEnd };

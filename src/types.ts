@@ -781,6 +781,13 @@ export enum AdviceArgumentRole {
   Free = "free"
 }
 
+/** A constituent of a compound meaning, not an alternative coding of that whole meaning. */
+export interface InstructionConceptComponent {
+  role: "head" | "qualifier" | "amount";
+  text: string;
+  coding?: FhirCoding;
+}
+
 export interface AdviceArgument {
   role: AdviceArgumentRole;
   text: string;
@@ -791,6 +798,7 @@ export interface AdviceArgument {
   conceptId?: string;
   coding?: FhirCoding;
   codings?: FhirCoding[];
+  components?: InstructionConceptComponent[];
   i18n?: Record<string, string>;
   quantity?: {
     value?: number;
@@ -1088,6 +1096,8 @@ export interface MedicationInstructionActionDefinition {
   roundtripI18n?: Record<string, string>;
   /** Surface forms that should resolve to this action. */
   aliases?: string[];
+  /** Ambiguous aliases licensed only at a directive boundary or after an explicit directive. */
+  directiveOnlyAliases?: string[];
   /** Surface forms licensed only when immediately sequence-scoped (e.g. `then off`). */
   sequenceAliases?: string[];
   /** Locale-specific parser lexemes. Display translation belongs in `i18n`; parsing aliases are explicit. */
@@ -1174,6 +1184,8 @@ export interface MedicationInstructionConceptDefinition {
   localeAliases?: Record<string, string[]>;
   coding?: FhirCoding;
   externalCodings?: FhirCoding[];
+  /** Separately coded head and modifiers when there is no equivalent code for the whole phrase. */
+  components?: InstructionConceptComponent[];
 }
 
 export interface MedicationInstructionConceptInput

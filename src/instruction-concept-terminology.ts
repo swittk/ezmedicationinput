@@ -35,6 +35,7 @@ interface ConceptSource {
   localeAliases?: Record<string, string[]>;
   coding?: FhirCoding;
   externalCodings?: FhirCoding[];
+  components?: MedicationInstructionConceptDefinition["components"];
 }
 
 const DEFAULT_CONCEPTS = (source.concepts as ConceptSource[]).map(normalizeDefinition);
@@ -93,6 +94,15 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     : undefined;
 }
 
+function cloneComponents(
+  components: MedicationInstructionConceptDefinition["components"]
+): MedicationInstructionConceptDefinition["components"] {
+  return components?.map(component => ({
+    role: component.role, text: component.text,
+    ...(component.coding ? { coding: cloneCoding(component.coding) } : {})
+  }));
+}
+
 function cloneDefinition(
   definition: MedicationInstructionConceptDefinition
 ): MedicationInstructionConceptDefinition {
@@ -105,6 +115,7 @@ function cloneDefinition(
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
     coding: cloneCoding(definition.coding),
+    components: cloneComponents(definition.components),
     externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -119,6 +130,7 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     coding: cloneCoding(sourceDefinition.coding),
+    components: cloneComponents(sourceDefinition.components),
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -137,6 +149,7 @@ function normalizeCustomDefinition(
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     localeAliases: cloneLocaleAliases(input.localeAliases),
     coding: cloneCoding(input.coding),
+    components: cloneComponents(input.components),
     externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -195,7 +208,7 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     caseSensitive: true,
     content: "complete",
     concept: DEFAULT_CONCEPTS.filter((definition) =>
-      !definition.coding && !definition.externalCodings?.length
+      !definition.coding && !definition.externalCodings?.length && !definition.components?.length
     ).map((definition) => ({
       code: definition.code,
       display: definition.display,
@@ -217,6 +230,7 @@ export function medicationInstructionConceptCodings(
   if (definition.externalCodings?.length) {
     return definition.externalCodings.map((coding) => cloneCoding(coding)!);
   }
+  if (definition.components?.length) return [];
   return [{
     system: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
     code: definition.code,

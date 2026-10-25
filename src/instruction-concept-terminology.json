@@ -73,6 +73,7 @@
     },
     {
       "code": "thin-application-manner",
+      "coding": {"system": "http://snomed.info/sct", "code": "420162004", "display": "To be spread thinly"},
       "role": "manner",
       "display": "thinly",
       "i18n": { "th": "บางๆ" },
@@ -124,6 +125,7 @@
     },
     {
       "code": "plenty-of-water",
+      "components": [{"role": "head", "text": "water", "coding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}}, {"role": "amount", "text": "plenty"}],
       "role": "substance",
       "display": "plenty of water",
       "i18n": { "th": "น้ำดื่มจำนวนมาก" },
@@ -158,6 +160,7 @@
     },
     {
       "code": "other-medications",
+      "components": [{"role": "head", "text": "medication", "coding": {"system": "http://snomed.info/sct", "code": "763158003", "display": "Medicinal product"}}, {"role": "qualifier", "text": "other", "coding": {"system": "http://snomed.info/sct", "code": "74964007", "display": "Other"}}],
       "role": "substance",
       "display": "other medicines",
       "i18n": { "th": "ยาอื่น" },
@@ -326,6 +329,7 @@
     },
     {
       "code": "clean_water",
+      "components": [{"role": "head", "text": "water", "coding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}}, {"role": "qualifier", "text": "clean"}],
       "role": "substance",
       "display": "clean water",
       "i18n": {
@@ -744,6 +748,7 @@
     },
     {
       "code": "new_patch",
+      "components": [{"role": "head", "text": "patch", "coding": {"system": "http://snomed.info/sct", "code": "739003001", "display": "Patch"}}, {"role": "qualifier", "text": "new", "coding": {"system": "http://snomed.info/sct", "code": "7147002", "display": "New"}}],
       "role": "object",
       "display": "new patch",
       "i18n": {
@@ -776,6 +781,7 @@
     },
     {
       "code": "thoroughly",
+      "coding": {"system": "http://snomed.info/sct", "code": "769407000", "display": "Thoroughly"},
       "role": "manner",
       "display": "thoroughly",
       "i18n": {

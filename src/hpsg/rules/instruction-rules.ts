@@ -471,6 +471,7 @@ function parseTypedConceptInstruction(
       text,
       normalized: concept.display,
       conceptId: concept.code,
+      ...(concept.components?.length ? { components: concept.components } : {}),
       coding: codings[0],
       codings,
       i18n: { en: concept.display, ...(concept.i18n ?? {}) }

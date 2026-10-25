@@ -239,6 +239,11 @@ function actionMatchAt(
           resolveMedicationInstructionAction(candidate, options)
         : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
+        if ((definition.directiveOnlyAliases?.indexOf(normalizeActionSurface(candidate)) ?? -1) >= 0 && previous &&
+            !/^[,;.!?:]$/u.test(key(previous)) &&
+            !ACTION_SEQUENCE_MARKERS.has(key(previous)) &&
+            !ACTION_COORDINATION_CONNECTORS.has(key(previous)) &&
+            !actionAtIsGovernedByDirective(parts, index)) continue;
         // A declared nominal constituent owns a homographic verb surface:
         // "contact lenses" is a medication object, "open wounds" is a site.
         // Reuse the same typed concept vocabulary as argument parsing;
@@ -340,6 +345,7 @@ function internalArgument(
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
+    ...(definition.components?.length ? { components: definition.components } : {}),
     coding: preferredCoding,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) }

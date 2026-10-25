@@ -33,6 +33,8 @@ reviews:
     - "!test/terminology-coverage.spec.ts"
     - "!test/suggest.spec.ts"
     - "!test/advice.spec.ts"
+    - "!test/symptom-terminology.spec.ts"
+    - "!test/parser-state.spec.ts"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"

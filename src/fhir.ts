@@ -1,5 +1,6 @@
 import {
-  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays,
+  getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
@@ -1566,9 +1567,27 @@ function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
   return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
 }
 
+/** Restore explicitly supplied clinical guards without reparsing dosage text.
+ * @param dosage Editable FHIR dosage; native values take precedence in the shared getters.
+ */
+function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clinicalAdjuncts"] {
+  const condition = getDosageCondition(dosage);
+  const calendarDayCondition = getDosageCalendarDayCondition(dosage);
+  const excludedDates = getDosageExcludedDates(dosage);
+  const excludedWeekdays = getDosageExcludedWeekdays(dosage);
+  if (!condition && !excludedDates.length && !excludedWeekdays.length) return undefined;
+  return {
+    ...(condition ? { condition } : {}),
+    ...(calendarDayCondition ? { calendarDayCondition } : {}),
+    ...(excludedDates.length ? { excludedDates } : {}),
+    ...(excludedWeekdays.length ? { excludedWeekdays } : {})
+  };
+}
+
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
+  clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
   let routeCode: RouteCode | undefined;
 
@@ -1823,6 +1842,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
+  state.primaryClause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const timingBounds = extractCanonicalTimingBounds(dosage);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]

@@ -6,17 +6,18 @@ import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json
 import {
   parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, formatParseBatch, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
-  evaluateMedicationCondition, setDosageCondition, getDosageCondition,
+  getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FhirR6DosageDetails, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
-  canonicalFromFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
   toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition
 } from "../src/fhir";
 import { parseMedicationGuard } from "../src/medication-condition";
 import {
+  setDosageExcludedDates, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCalendarDayCondition,
   DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
   setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
 } from "../src/dosage-course";
@@ -2455,4 +2456,65 @@ describe("conflicting executable phase metadata", () => {
     expect(nextDueDoses(restored, options).filter(value => value.startsWith("2026-10-26"))).toHaveLength(8);
     expect(calculateTotalUnits({ ...options, from: orderedAt, dosage: restored, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(296);
   });
+});
+
+
+describe("FHIR clinical adjunct import", () => {
+  it.each([
+    "1 tab PO BID; HOLD if SBP <100",
+    "1 tab PO QD except Sundays",
+    "1 tab PO QD only on dialysis days"
+  ])("retains conditions without source text: %s", input => {
+    const parsed = parseSig(input);
+    for (const original of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      const row = { ...original, text: undefined };
+      setDosageExcludedDates(row, ["2026-11-03"]);
+      const clause = canonicalFromFhir(row);
+      const state = parserStateFromFhir(row);
+      expect(clause.clinicalAdjuncts).toBeDefined();
+      for (const reopened of [canonicalToFhir(clause), parserStateToFhir(state)]) {
+        expect(getDosageCondition(reopened)).toEqual(getDosageCondition(row));
+        expect(getDosageExcludedDates(reopened)).toEqual(getDosageExcludedDates(row));
+        expect(getDosageExcludedWeekdays(reopened)).toEqual(getDosageExcludedWeekdays(row));
+        expect(getDosageCalendarDayCondition(reopened)).toEqual(getDosageCalendarDayCondition(row));
+      }
+    }
+  });
+
+  it("does not restore a cleared native condition from the R5 bridge", () => {
+    const row = parseSig("1 tab PO QD; HOLD if SBP <100").fhir[0];
+    const edited = { ...row, condition: [] };
+    expect(getDosageCondition(edited)).toBeUndefined();
+    expect(canonicalFromFhir(edited).clinicalAdjuncts?.condition).toBeUndefined();
+    expect(parserStateFromFhir(edited).primaryClause.clinicalAdjuncts?.condition).toBeUndefined();
+  });
+});
+
+
+describe("nested SNOMED finding sites", () => {
+  it.each([
+    ["right big toe", "78883009:272741003=24028007", "right great toe"],
+    ["left fifth toe", "39915008:272741003=7771000", "left fifth toe"]
+  ])("retains the nested site expression for %s", (site, siteExpression, display) => {
+    const expression = "22253000:363698007=(" + siteExpression + ")";
+    const parsed = parseSig("1 tab PO PRN pain in " + site);
+    expect(parsed.fhir[0].asNeededFor?.[0].coding?.[0]?.code).toBe(expression);
+    expect(getBodySiteText(expression)).toBe(display);
+    const plain = { ...parsed.fhir[0], text: undefined,
+      asNeededFor: [{ coding: [{ system: "http://snomed.info/sct", code: expression }] }] };
+    const imported = canonicalFromFhir(plain);
+    expect(imported.prn?.reason?.text).toContain(display);
+    expect(canonicalToFhir(imported).asNeededFor?.[0].coding?.[0]?.code).toBe(expression);
+    expect(getBodySiteText(expression, { postcoordination: false })).toBeUndefined();
+  });
+});
+
+
+it("imports a finding whose explicit site expression has a topographical modifier", () => {
+  const expression = "22253000:363698007=(69536005:106233006=261183002)";
+  expect(getBodySiteText(expression)).toBe("top of head");
+  const row = { asNeededFor: [{ coding: [{ system: "http://snomed.info/sct", code: expression }] }] };
+  const clause = canonicalFromFhir(row);
+  expect(clause.prn?.reason?.text).toContain("top of head");
+  expect(canonicalToFhir(clause).asNeededFor?.[0].coding?.[0]?.code).toBe(expression);
 });

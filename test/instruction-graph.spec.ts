@@ -1359,3 +1359,82 @@ describe("standard instruction terminology", () => {
     expect(realizeInstructionGraph(reloaded, "th")).toBe(realizeInstructionGraph(graph, "th"));
   });
 });
+
+
+describe("continuation directive ownership", () => {
+  it.each([
+    "If symptoms continue, consult doctor",
+    "If symptoms CONTINUE, consult doctor",
+    "Consult doctor if symptoms continue",
+    "1 tab PO QD; if symptoms continue, consult doctor"
+  ])("keeps symptom persistence out of medication actions: %s", source => {
+    const frames = parseInstructionActions(source);
+    expect(frames.some(frame => frame.predicate.lemma === "continue-treatment")).toBe(false);
+    expect(frames.some(frame => frame.predicate.lemma === "consult")).toBe(true);
+    const parsed = parsePublicSig(source);
+    expect(parsed.longText).not.toContain("continue taking medication");
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["Continue", "Continue treatment", "Take 1 tab daily; then continue", "Do not continue"])(
+    "retains a continuation directive: %s", source => {
+      expect(parseInstructionActions(source).some(frame =>
+        frame.predicate.lemma === "continue-treatment")).toBe(true);
+    }
+  );
+});
+
+
+describe("composed instruction concepts", () => {
+  it.each([
+    ["Drink plenty of water", "plenty-of-water", "11713004", "plenty"],
+    ["Replace new patch", "new_patch", "739003001", "new"],
+    ["Rinse with clean water", "clean_water", "11713004", "clean"],
+    ["Avoid other medications", "other-medications", "763158003", "other"]
+  ])("preserves independently coded constituents of %s", (source, concept, headCode, qualifier) => {
+    const parsed = parsePublicSig(source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const arg = graph.actions.flatMap(frame => frame.args).find(value => value.conceptId === concept)!;
+    expect(arg).toBeDefined();
+    expect(arg.coding).toBeUndefined();
+    expect(arg.codings ?? []).toEqual([]);
+    expect(arg.components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "head", coding: expect.objectContaining({
+        system: "http://snomed.info/sct", code: headCode
+      }) }),
+      expect.objectContaining({ text: qualifier })
+    ]));
+    expect(buildMedicationInstructionConceptCodeSystem().concept.some(value => value.code === concept)).toBe(false);
+    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      const restored = parseInstructionGraphExtension(dosage.extension)!;
+      const copy = restored.actions.flatMap(frame => frame.args).find(value => value.conceptId === concept)!;
+      expect(copy.components).toEqual(JSON.parse(JSON.stringify(arg.components)));
+      expect(copy.text).toBe(arg.text);
+      expect(realizeInstructionGraph(restored, "en")).toBe(realizeInstructionGraph(graph, "en"));
+      expect(realizeInstructionGraph(restored, "th")).toBe(realizeInstructionGraph(graph, "th"));
+    }
+    if (concept === "plenty-of-water") {
+      expect(arg.quantity?.value).toBeUndefined();
+      expect(arg.components?.find(value => value.role === "amount")?.coding).toBeUndefined();
+    }
+  });
+
+  it("clones constituent codings and preserves an explicitly supplied expression as one coding", () => {
+    const first = getMedicationInstructionConcept("new_patch")!;
+    first.components![0].coding!.code = "changed";
+    expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("739003001");
+    const expression = "22253000:363698007=(78883009:272741003=24028007)";
+    const frames = parseInstructionActions("Avoid toe discomfort", 0, {
+      instructionConceptMap: {
+        "toe discomfort": { code: "toe-discomfort", role: AdviceArgumentRole.Object,
+          coding: { system: "http://snomed.info/sct", code: expression },
+          components: [{ role: "head", text: "pain", coding: { system: "http://snomed.info/sct", code: "22253000" } }]
+        }
+      }
+    });
+    const graph = { sourceText: "Avoid toe discomfort", actions: frames };
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    expect(restored.actions[0].args[0].coding?.code).toBe(expression);
+    expect(restored.actions[0].args[0].components?.[0].coding?.code).toBe("22253000");
+  });
+});

@@ -32,6 +32,7 @@ interface ActionSource {
   i18n?: Record<string, string>;
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
+  directiveOnlyAliases?: string[];
   sequenceAliases?: string[];
   localeAliases?: Record<string, string[]>;
   separableAliases?: Array<{ lead: string; particle: string }>;
@@ -172,6 +173,7 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    directiveOnlyAliases: definition.directiveOnlyAliases ? [...definition.directiveOnlyAliases] : undefined,
     sequenceAliases: definition.sequenceAliases ? [...definition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
     separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
@@ -212,6 +214,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    directiveOnlyAliases: sourceDefinition.directiveOnlyAliases ? [...sourceDefinition.directiveOnlyAliases] : undefined,
     sequenceAliases: sourceDefinition.sequenceAliases ? [...sourceDefinition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
@@ -257,6 +260,7 @@ function normalizeCustomDefinition(
     i18n: input.i18n ? { ...input.i18n } : undefined,
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    directiveOnlyAliases: input.directiveOnlyAliases ? [...input.directiveOnlyAliases] : undefined,
     sequenceAliases: input.sequenceAliases ? [...input.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),

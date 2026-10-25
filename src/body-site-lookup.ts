@@ -378,26 +378,15 @@ function bodySiteCodeFromInput(
   const shouldParsePostcoordination =
     options?.postcoordination !== false &&
     options?.parsePostcoordination !== false;
-  const parsedTopographicalModifier = shouldParsePostcoordination
-    ? parseSnomedBodySiteTopographicalModifierPostcoordinationCode(coding?.code)
-    : undefined;
-  if (parsedTopographicalModifier) {
-    return {
-      system: coding?.system ?? SNOMED_SYSTEM,
-      code: parsedTopographicalModifier.siteCode
-    };
-  }
-  const parsedPostcoordination =
-    !shouldParsePostcoordination
-      ? undefined
-      : parseSnomedFindingSitePostcoordinationCode(coding?.code);
-  if (parsedPostcoordination) {
-    return {
-      system: coding?.system ?? SNOMED_SYSTEM,
-      code: parsedPostcoordination.siteCode
-    };
-  }
-  return coding;
+  if (!shouldParsePostcoordination || (coding?.system ?? SNOMED_SYSTEM) !== SNOMED_SYSTEM) return coding;
+  const findingSite = parseSnomedFindingSitePostcoordinationCode(coding?.code);
+  const siteCoding = findingSite ? {
+    system: coding?.system ?? SNOMED_SYSTEM, code: findingSite.siteCode
+  } : coding;
+  const topographical = parseSnomedBodySiteTopographicalModifierPostcoordinationCode(siteCoding?.code);
+  return topographical
+    ? { system: siteCoding?.system ?? SNOMED_SYSTEM, code: topographical.siteCode }
+    : siteCoding;
 }
 
 function parsedPostcoordinationForInput(
@@ -412,15 +401,15 @@ function parsedPostcoordinationForInput(
   const shouldParse =
     options?.postcoordination !== false &&
     options?.parsePostcoordination !== false;
-  if (!shouldParse) {
+  if (!shouldParse || (originalCoding?.system ?? SNOMED_SYSTEM) !== SNOMED_SYSTEM) {
     return {};
   }
+  const findingSite = parseSnomedFindingSitePostcoordinationCode(originalCoding?.code);
+  const siteCode = findingSite?.siteCode ?? originalCoding?.code;
   return {
-    topographicalModifier: parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
-      originalCoding?.code
-    ),
-    laterality: parseSnomedBodySiteLateralityPostcoordinationCode(originalCoding?.code),
-    findingSite: parseSnomedFindingSitePostcoordinationCode(originalCoding?.code)
+    topographicalModifier: parseSnomedBodySiteTopographicalModifierPostcoordinationCode(siteCode),
+    laterality: parseSnomedBodySiteLateralityPostcoordinationCode(siteCode),
+    findingSite
   };
 }
 
