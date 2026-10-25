@@ -3,11 +3,11 @@
   "type": "collection",
   "entry": [
     {
-      "fullUrl": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-source",
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source",
       "resource": {
         "resourceType": "StructureDefinition",
         "id": "medication-course-reconciliation-source",
-        "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-source",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source",
         "version": "0.2.0-ez.0",
         "name": "MedicationCourseReconciliationSource",
         "title": "Original unmerged extension retained as structured source",
@@ -40,7 +40,7 @@
             {
               "id": "Extension.url",
               "path": "Extension.url",
-              "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-source"
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source"
             },
             {
               "id": "Extension.value[x]",
@@ -68,11 +68,11 @@
       }
     },
     {
-      "fullUrl": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-course-step",
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step",
       "resource": {
         "resourceType": "StructureDefinition",
         "id": "medication-retained-course-step",
-        "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-course-step",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step",
         "version": "0.2.0-ez.0",
         "name": "MedicationRetainedCourseStep",
         "title": "Unmatched typed course step retained as source",
@@ -105,7 +105,7 @@
             {
               "id": "Extension.url",
               "path": "Extension.url",
-              "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-course-step"
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step"
             },
             {
               "id": "Extension.value[x]",
@@ -4238,11 +4238,11 @@
       }
     },
     {
-      "fullUrl": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-r5-sequence",
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence",
       "resource": {
         "resourceType": "StructureDefinition",
         "id": "medication-retained-r5-sequence",
-        "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-r5-sequence",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence",
         "version": "0.2.0-ez.0",
         "name": "MedicationRetainedR5Sequence",
         "title": "Original editable R5 sequence",
@@ -4275,7 +4275,7 @@
             {
               "id": "Extension.url",
               "path": "Extension.url",
-              "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-r5-sequence"
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence"
             },
             {
               "id": "Extension.extension",
@@ -4298,11 +4298,11 @@
       }
     },
     {
-      "fullUrl": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-warning",
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning",
       "resource": {
         "resourceType": "StructureDefinition",
         "id": "medication-course-reconciliation-warning",
-        "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-warning",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning",
         "version": "0.2.0-ez.0",
         "name": "MedicationCourseReconciliationWarning",
         "title": "Course reconciliation note",
@@ -4335,7 +4335,7 @@
             {
               "id": "Extension.url",
               "path": "Extension.url",
-              "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-warning"
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning"
             },
             {
               "id": "Extension.extension",
@@ -4358,11 +4358,11 @@
       }
     },
     {
-      "fullUrl": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unrecognized-bridge-field",
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
       "resource": {
         "resourceType": "StructureDefinition",
         "id": "medication-unrecognized-bridge-field",
-        "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unrecognized-bridge-field",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
         "version": "0.2.0-ez.0",
         "name": "MedicationUnrecognizedBridgeField",
         "title": "Unrecognized typed bridge child retained in its source context",
@@ -4395,7 +4395,7 @@
             {
               "id": "Extension.url",
               "path": "Extension.url",
-              "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unrecognized-bridge-field"
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field"
             },
             {
               "id": "Extension.value[x]",

@@ -9,40 +9,40 @@ import {
 
 /** Modifier extensions: ignoring either can change whether a dose may be given. */
 export const DOSAGE_CONDITION_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose";
+  "urn:ezmedicationinput:StructureDefinition:medication-conditional-dose";
 /** Separate R6 DosageCondition-level extension: the R5 Dosage modifier has
  * a different context and nested child contract, so it cannot be reused. */
 export const DOSAGE_CONDITION_R6_LOGIC_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-condition-logic";
+  "urn:ezmedicationinput:StructureDefinition:medication-r6-condition-logic";
 export const DOSAGE_EXCLUDED_DATES_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-calendar-dates";
+  "urn:ezmedicationinput:StructureDefinition:medication-excluded-calendar-dates";
 export const DOSAGE_DETAILS_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-course-details";
+  "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details";
 /** Non-modifier metadata: preserves the author's entire literal instruction
  * without forcing ordinary R5 consumers to implement R6 safety semantics. */
 export const DOSAGE_RENDERED_INSTRUCTION_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction";
+  "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction";
 export const DOSAGE_EXCLUDED_WEEKDAYS_R5_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-weekdays";
+  "urn:ezmedicationinput:StructureDefinition:medication-excluded-weekdays";
 /** Non-modifier provenance emitted when an editable R5 projection and its
  * retained R6 source cannot be merged one-to-one. */
 export const DOSAGE_RECONCILIATION_WARNING_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-warning";
+  "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning";
 const DOSAGE_RECONCILIATION_SOURCE_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-course-reconciliation-source";
+  "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 const DOSAGE_RETAINED_R5_SEQUENCE_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-r5-sequence";
+  "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence";
 const DOSAGE_RETAINED_COURSE_STEP_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-retained-course-step";
+  "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step";
 /** Treatment-relative phase origin for an independent parallel component. */
 export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-parallel-component-phase-origin";
+  "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin";
 /** Local must-understand profile for exclusive administration choices.
  * Equal R5 sequences and R6 step components alone represent concurrency,
  * so grammar-proven alternatives need explicit membership in both formats.
  */
 export const DOSAGE_ALTERNATIVE_CHOICE_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-alternative-choice";
+  "urn:ezmedicationinput:StructureDefinition:medication-alternative-choice";
 
 /** Group identity is course-local; a branch may contain multiple dosages. */
 export interface DosageAlternativeChoice {
@@ -135,7 +135,7 @@ export function buildDosageAlternativeChoiceStructureDefinition() {
 }
 
 const CONDITION_CODE_SYSTEM = "http://hl7.org/fhir/CodeSystem/dosage-condition-code";
-const INTERNAL_CONDITION_CODE_SYSTEM = "https://github.com/swittk/ezmedicationinput/fhir/CodeSystem/medication-condition";
+const INTERNAL_CONDITION_CODE_SYSTEM = "urn:ezmedicationinput:CodeSystem:medication-condition";
 
 function replacementExtensions(
   dosage: Pick<FhirDosage, "modifierExtension">, url: string, value: FhirExtension | undefined
@@ -2245,7 +2245,7 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
     if (!field) {
       // Unknown bridge children retain their original context as provenance.
       const extensions = (result.extension ??= []) as FhirExtension[];
-      extensions.push({ url: "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-unrecognized-bridge-field",
+      extensions.push({ url: "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
         extension: [cloneStructuredValue(child)] });
       continue;
     }

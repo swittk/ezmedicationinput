@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-r6-condition-logic",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-condition-logic",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-r6-condition-logic",
   "version": "0.2.0-ez.0",
   "name": "MedicationR6ConditionLogic",
   "title": "Structured Boolean operands on an R6 dosage condition",
@@ -496,7 +496,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-condition-logic"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-r6-condition-logic"
       },
       {
         "id": "Extension.value[x]",

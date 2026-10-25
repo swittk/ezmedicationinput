@@ -834,7 +834,7 @@ describe("typed same-day Parkinson dose composition", () => {
       period: 4,
       periodUnit: "h",
       extension: [expect.objectContaining({
-        url: expect.stringContaining("/medication-timing-event-window"),
+        url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window"),
         extension: [
           { url: "start", valueCode: "WAKE" },
           { url: "end", valueCode: "HS" }

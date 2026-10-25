@@ -60,7 +60,6 @@ export interface CalendarExclusion {
   start: number;
   end: number;
   excluded: FhirDayOfWeek[];
-  included: FhirDayOfWeek[];
   dates: string[];
 }
 
@@ -132,7 +131,6 @@ export function matchCalendarExclusion(
   const suffixStart = rawStart + leadingWhitespace;
   const suffix = rawSuffix.slice(leadingWhitespace).replace(/\s+$/u, "");
   const excluded: FhirDayOfWeek[] = [];
-  const included = uniqueDays(source.slice(0, cue.index));
   let residual = suffix;
   const dates: string[] = [];
   const prefixed = "on " + suffix.replace(/^on\s+/iu, "");
@@ -169,7 +167,7 @@ export function matchCalendarExclusion(
   if (weekdayValues.length) excluded.push(...weekdayValues);
   if (residual.trim() && !isOnlyWeekdays(residual)) return undefined;
   if (!excluded.length && !dates.length) return undefined;
-  return { start: cue.index, end, excluded, included, dates: [...new Set(dates)].sort() };
+  return { start: cue.index, end, excluded, dates: [...new Set(dates)].sort() };
 }
 
 const COURSE_DURATION_RULE = countAndDurationRule();
@@ -636,7 +634,6 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
     return [clinicalAdjunctSign("hpsg.lex.clinical.calendar-exclusion", context, tokens, {
       excludedDates: exclusion.dates,
       excludedWeekdays: exclusion.excluded,
-      includedWeekdays: exclusion.included,
       localRanges: [{ start: exclusion.start, end: exclusion.end }],
       evidence: [{
         rule: "hpsg.lex.clinical.calendar-exclusion",

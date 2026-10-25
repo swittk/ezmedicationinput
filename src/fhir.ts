@@ -65,7 +65,7 @@ import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
-export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-cycle-day-eligibility";
+export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
 
 /** Read the recognized cycle constraint without interpreting narrative text.
  * @param dosage Editable R5/R6-compatible dosage with a retained known modifier.
@@ -106,9 +106,9 @@ function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): F
   };
 }
 
-export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min";
 /** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
-export const ADMINISTRATION_OFFSET_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-administration-offset";
+export const ADMINISTRATION_OFFSET_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-administration-offset";
 
 export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | undefined {
   const quantity = dosage.modifierExtension?.find(extension =>
@@ -118,7 +118,7 @@ export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | und
 }
 
 /** Modifier retaining a course duration alongside its absolute calendar bounds. */
-export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-anchored-course-duration";
+export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration";
 
 /** Read the authored temporal quantity without reconstructing it from dates or text.
  * @param dosage R5/R6-compatible dosage containing the known duration modifier.
@@ -131,17 +131,17 @@ export function getAnchoredCourseDuration(
     extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
 }
 
-export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
-export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
-export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
-export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-max";
+export const TIMING_OFFSET_EXACT_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-exact";
+export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window";
 /** Recurring administration opportunity window; distinct from a punctual
  * FHIR Timing.repeat.when WAKE or HS administration. */
 export const TIMING_EVENT_WINDOW_EXTENSION_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-window";
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-event-window";
 
 export const TIMING_CLOCK_WINDOW_EXTENSION_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-clock-window";
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-clock-window";
 
 /** Read a local-clock recurrence window from structural timing metadata.
  * @param repeat FHIR Timing.repeat containing a typed window extension.
@@ -183,7 +183,7 @@ export function getTimingMonthDays(repeat: FhirTimingRepeat | undefined): number
 }
 
 export const TIMING_WEEKDAY_ORDINAL_EXTENSION_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-timing-weekday-ordinal";
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-weekday-ordinal";
 
 /** Read the explicitly encoded ordinal, independent of prose and scheduling anchors.
  * @param repeat Typed FHIR timing repeat containing an optional ordinal extension.
@@ -211,13 +211,13 @@ export function getTimingEventWindow(
   return { start: start as EventTiming, end: end as EventTiming };
 }
 
-export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
-export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
-export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
-export const BODY_SITE_RESTRICTION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-body-site-restriction";
+export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-occurrence-cap";
+export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-event-calendar-source";
+export const PRN_TRIGGER_PHASE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase";
+export const BODY_SITE_RESTRICTION_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-body-site-restriction";
 
 export const INFUSION_CARRIER_MATERIAL_EXTENSION_URL =
-  "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-infusion-carrier-material";
+  "urn:ezmedicationinput:StructureDefinition:medication-infusion-carrier-material";
 
 /** Draft FHIR R5 extension definition, produced from the same typed child
  * contract as the live encoder. Carrier material is a descriptive vehicle

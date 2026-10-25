@@ -221,7 +221,6 @@ export interface HpsgClinicalAdjunctFeature {
   conditionTarget?: CanonicalClinicalAdjuncts["conditionTarget"];
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];
-  includedWeekdays?: FhirDayOfWeek[];
   /** Recognized adjunct boundary whose payload remains intentionally editable. */
   unresolved?: true;
   localRanges: TextRange[];

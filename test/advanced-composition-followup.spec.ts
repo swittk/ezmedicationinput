@@ -2148,6 +2148,10 @@ describe("CodeRabbit 2026-10-25 second review: compositional instruction fidelit
     const action = actions.find(action => action.predicate.lemma === lemma);
     expect(action).toBeDefined();
     expect(action?.args.some(arg => /contact lenses/i.test(arg.text))).toBe(true);
+    if (input.startsWith("Remove contact lenses")) {
+      expect(action?.args.find(arg => /contact lenses/i.test(arg.text))?.coding)
+        .toMatchObject({ system: "http://snomed.info/sct", code: "57368009" });
+    }
     if (/Do not/i.test(input)) expect(action?.polarity).toBe("negate");
     expect(parsed.longText).not.toMatch(/call lenses/i);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);

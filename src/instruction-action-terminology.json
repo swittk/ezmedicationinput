@@ -1,5 +1,5 @@
 {
-  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action",
+  "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
   "actions": [
     {
       "code": "notify",
@@ -2233,7 +2233,7 @@
       "acceptsAmount": true,
       "definesDose": true,
       "administrationMethod": {
-        "system": "https://solublelabs.com/fhir/CodeSystem/medication-action",
+        "system": "urn:ezmedicationinput:CodeSystem:medication-action",
         "code": "nebulize",
         "display": "Nebulize",
         "i18n": {

@@ -33,6 +33,7 @@ interface ConceptSource {
   i18n?: Record<string, string>;
   aliases?: string[];
   localeAliases?: Record<string, string[]>;
+  coding?: FhirCoding;
   externalCodings?: FhirCoding[];
 }
 
@@ -111,6 +112,7 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
+    coding: cloneCoding(sourceDefinition.coding),
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -179,12 +181,14 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
     name: "MedicationInstructionConcept",
-    title: "SolubleLabs Medication Instruction Concept",
+    title: "Medication Instruction Concept",
     status: "active",
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_CONCEPTS.map((definition) => ({
+    concept: DEFAULT_CONCEPTS.filter((definition) =>
+      !definition.coding && !definition.externalCodings?.length
+    ).map((definition) => ({
       code: definition.code,
       display: definition.display,
       designation: Object.keys(definition.i18n ?? {}).map((language) => ({
@@ -198,13 +202,14 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
 export function medicationInstructionConceptCodings(
   definition: MedicationInstructionConceptDefinition
 ): FhirCoding[] {
-  const primary = definition.coding
-    ? cloneCoding(definition.coding)!
-    : {
-      system: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
-      code: definition.code,
-      display: definition.display,
-      i18n: definition.i18n ? { ...definition.i18n } : undefined
-    };
-  return [primary, ...(definition.externalCodings ?? []).map((coding) => cloneCoding(coding)!)];
+  if (definition.coding) return [cloneCoding(definition.coding)!];
+  if (definition.externalCodings?.length) {
+    return definition.externalCodings.map((coding) => cloneCoding(coding)!);
+  }
+  return [{
+    system: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
+    code: definition.code,
+    display: definition.display,
+    i18n: definition.i18n ? { ...definition.i18n } : undefined
+  }];
 }

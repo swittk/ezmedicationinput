@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-r6-course-details",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-course-details",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details",
   "version": "0.2.0-ez.0",
   "name": "MedicationR6CourseDetails",
   "title": "Compact R5 course metadata and local dosage deltas",
@@ -35,7 +35,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-r6-course-details"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details"
       },
       {
         "id": "Extension.value[x]",

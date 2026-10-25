@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-conditional-dose",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-conditional-dose",
   "version": "0.2.0-ez.0",
   "name": "MedicationConditionalDose",
   "title": "Structured Boolean medication condition",
@@ -945,7 +945,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-conditional-dose"
       },
       {
         "id": "Extension.value[x]",

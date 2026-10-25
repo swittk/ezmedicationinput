@@ -138,11 +138,7 @@ function buildConceptArgument(
   const definition = resolveMedicationInstructionConcept(proposal.concept, options);
   if (!definition) return undefined;
   const codings = medicationInstructionConceptCodings(definition);
-  const preferred = definition.coding
-    ? codings[0]
-    : definition.externalCodings?.length
-      ? codings[1]
-      : codings[0];
+  const preferred = codings[0];
   return {
     role: proposal.role,
     text: sourceText,

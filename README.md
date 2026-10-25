@@ -254,7 +254,7 @@ The HPSG chart uses packed semantic state, an indexed agenda, and a compatible s
 
 FHIR cannot represent zero as `Timing.repeat.frequency` because the primitive is positive; a package-owned extension preserves an explicit lower bound of zero while `frequencyMax`, `period`, and `periodUnit` remain standard fields:
 
-`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+`urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min`
 
 ## Procedural instruction semantics and opaque-span enrichment
 

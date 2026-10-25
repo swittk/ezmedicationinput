@@ -2287,14 +2287,14 @@ Architecture:
 - action frames carry predicate, semantic class, polarity, relation, typed
   arguments, quantities, source spans, and multiple codings
 - added the stable package-owned CodeSystem URI
-  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-action`
+  `urn:ezmedicationinput:CodeSystem:medication-instruction-action`
   and public terminology enumeration/lookup APIs plus a FHIR-shaped CodeSystem
   resource generator
 - external terminology is additive: exact SNOMED mappings are attached where
   appropriate; actions without an honest SNOMED equivalent retain the internal
   action code rather than being coerced to a nearby concept
 - added a FHIR extension
-  `https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph`
+  `urn:ezmedicationinput:StructureDefinition:medication-instruction-graph`
   so the semantic graph survives Dosage serialization/deserialization while
   standard Dosage.text, patientInstruction and additionalInstruction remain
   conventional interoperable fallbacks
@@ -2369,7 +2369,7 @@ What changed:
 
 Argument semantics were generalized in parallel:
 - added package-owned
-  `https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept`
+  `urn:ezmedicationinput:CodeSystem:medication-instruction-concept`
 - moved common instruction concepts into declarative terminology: product,
   bottle, water, clean water, small amount, foam, use, event times, and the
   deliberately broad external-intimate-area concept
@@ -2647,7 +2647,7 @@ fixes intentionally moved more structure into HPSG:
 FHIR `Timing.repeat.frequency` is positiveInt and cannot encode the explicit
 lower bound 0. The canonical graph therefore projects frequency=0 through the
 package-owned extension
-`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+`urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min`
 while `frequencyMax`, period, and periodUnit remain standard FHIR fields. The
 extension round-trips through `fromFhirDosage()` and is exported publicly.
 Negated graph actions are also projected to standard

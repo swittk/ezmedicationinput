@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-excluded-weekdays",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-weekdays",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-excluded-weekdays",
   "version": "0.1.68-dev",
   "name": "MedicationExcludedWeekdays",
   "title": "Excluded weekdays wording",
@@ -79,7 +79,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-weekdays"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-excluded-weekdays"
       },
       {
         "id": "Extension.value[x]",

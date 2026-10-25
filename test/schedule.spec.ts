@@ -682,7 +682,7 @@ describe("calculateTotalUnits", () => {
       }
     });
     expect(res.totalUnits).toBe(480);
-    expect(res.totalContainers).toBe(1);
+    expect(res.totalContainers).toBeUndefined();
   });
 
   it("handles complex interval stepping (q3d) for 10 days", () => {
@@ -984,7 +984,7 @@ describe("calculateTotalUnits", () => {
       }
     });
     expect(res.totalUnits).toBe(200);
-    expect(res.totalContainers).toBe(2);
+    expect(res.totalContainers).toBeUndefined();
   });
 
   it("matches generated schedules for weird non-daily timing combinations", () => {

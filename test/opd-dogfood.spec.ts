@@ -61,7 +61,7 @@ describe("OPD clinician dogfood grammar", () => {
       .toEqual({ start: "WAKE", end: "HS" });
     expect(parsed.fhir.timing?.repeat?.extension).toContainEqual(
       expect.objectContaining({
-        url: expect.stringContaining("/medication-timing-event-window"),
+        url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window"),
         extension: [
           { url: "start", valueCode: "WAKE" },
           { url: "end", valueCode: "HS" }
@@ -140,7 +140,7 @@ describe("OPD clinician dogfood grammar", () => {
     );
     expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window"
+        url: "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window"
       })
     ]));
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);

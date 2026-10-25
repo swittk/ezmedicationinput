@@ -436,7 +436,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     const reason = parsed.meta.canonical.clauses[0]?.prn?.reason;
     expect(reason).toMatchObject({ triggerPhase: "onset", coding: { code: "37796009" } });
     expect(parsed.fhir.asNeededFor?.[0]?.extension).toContainEqual(expect.objectContaining({
-      url: "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase",
+      url: "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase",
       valueCode: "onset"
     }));
     expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.prn?.reason?.triggerPhase)

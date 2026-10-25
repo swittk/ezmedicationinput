@@ -325,8 +325,8 @@ function applyClinicalAdjunct(
       (adjunct.excludedWeekdays?.length || adjunct.excludedDates?.length)) {
     if (adjunct.excludedWeekdays?.length) {
       const excluded = new Set(adjunct.excludedWeekdays);
-      const allowed = (adjunct.includedWeekdays?.length
-        ? adjunct.includedWeekdays : [...ALL_DAYS]).filter((day) => !excluded.has(day));
+      const allowed = (schedule.dayOfWeek?.length
+        ? schedule.dayOfWeek : [...ALL_DAYS]).filter((day) => !excluded.has(day));
       // The exclusion is clinical meaning even if NO weekday is eligible.
       // An empty allowed set is a contradictory/non-executable course, not
       // permission to drop the exclusion and schedule the medication daily.

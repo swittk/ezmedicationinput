@@ -501,7 +501,7 @@ describe("R5 expression reconciliation repeat-save invariants", () => {
 describe("FHIR event-local timing projection invariants", () => {
   it("retains event-local offsets as typed FHIR extensions without inventing a global offset", () => {
     const activity = (relation: "before" | "after", minutes: number) => ({
-      url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window",
+      url: "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window",
       extension: [
         { url: "relation", valueCode: relation },
         { url: "activity", valueCodeableConcept: { text: "meal" } },

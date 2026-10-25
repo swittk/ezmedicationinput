@@ -1397,7 +1397,7 @@ describe("Parkinson wake, clock, meal and finite-phase execution", () => {
     expect(intervalRepeat?.when).toBeUndefined();
     expect(intervalRepeat?.extension).toContainEqual(
       expect.objectContaining({
-        url: expect.stringContaining("/medication-timing-event-window"),
+        url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window"),
         extension: [
           { url: "start", valueCode: "WAKE" },
           { url: "end", valueCode: "HS" }
@@ -1428,7 +1428,7 @@ describe("Parkinson wake, clock, meal and finite-phase execution", () => {
       component.timing?.repeat?.period === 4 &&
       component.timing?.repeat?.periodUnit === "h" &&
       component.timing.repeat.extension?.some(extension =>
-        extension.url.endsWith("/medication-timing-event-window"))
+        extension.url.endsWith("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window"))
     )).toBe(true);
     const expected = [
       "2026-11-02T06:30:00+07:00",

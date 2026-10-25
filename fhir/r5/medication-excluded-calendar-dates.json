@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-excluded-calendar-dates",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-calendar-dates",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-excluded-calendar-dates",
   "version": "0.1.68-dev",
   "name": "MedicationExcludedCalendarDates",
   "title": "Excluded administration dates",
@@ -81,7 +81,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-excluded-calendar-dates"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-excluded-calendar-dates"
       },
       {
         "id": "Extension.value[x]",

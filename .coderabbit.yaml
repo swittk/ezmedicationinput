@@ -31,6 +31,8 @@ reviews:
     # Keep the topical suite INCLUDED: it now contains new clinical oracles.
     - "!test/relation-terminology.spec.ts"
     - "!test/terminology-coverage.spec.ts"
+    - "!test/suggest.spec.ts"
+    - "!test/advice.spec.ts"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"

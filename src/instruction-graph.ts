@@ -334,11 +334,7 @@ function internalArgument(
   const definition = resolveMedicationInstructionConcept(canonical, options);
   if (!definition) return undefined;
   const codings = medicationInstructionConceptCodings(definition);
-  const preferredCoding = definition.coding
-    ? codings[0]
-    : definition.externalCodings?.length
-      ? codings[1]
-      : codings[0];
+  const preferredCoding = codings[0];
   return {
     role: definition.role,
     text: sourceText,

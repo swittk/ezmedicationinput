@@ -723,8 +723,11 @@ export function registeredActivityDayAt(
     // The noun prefix contributes logical polarity, not part of the positive
     // day-domain predicate. Keep the full source span separately unchanged.
     const positiveActivityStart = context.tokens[activityStart].sourceStart + prefixLength;
+    const dayHeadGap = dayHead &&
+      /\s/u.test(context.state.input.slice(dayHead.sourceEnd, positiveActivityStart)) ? " " : "";
     const text = !negativeNoun ? subjectText : frame.dayFirst && dayHead
-      ? dayHead.original + context.state.input.slice(positiveActivityStart, context.tokens[activityEnd - 1].sourceEnd)
+      ? dayHead.original + dayHeadGap +
+        context.state.input.slice(positiveActivityStart, context.tokens[activityEnd - 1].sourceEnd)
       : context.state.input.slice(positiveActivityStart, range.end).trim();
     const membership = { kind: "text" as const, text };
     return lexicalSign({

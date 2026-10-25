@@ -575,7 +575,8 @@ export interface MedicationContext {
   /** "Simple" strength string; might be the only way strength is provided
    * for discrete units this is the amount of medication for unit e.g. "500 mg" (1 tablet), or for mixed tablets might be like "400 mg + 80 mg"
    * for things like creams or fluids or syrupsit might be "2%", 5 g/100g, 100mg/ 100 g, 262 mg/15 mL, 200 mg/2 mL, 1 mg/dL, or "400 mg/5mL + 80 mg/5mL"
-   * In the "x + y" case, the strengthQuantity/strengthRatio will be the sum of the two ingredients.
+   * For combination products, individual ingredient strengths must remain
+   * separate; never sum the parts into one strengthQuantity/strengthRatio.
    */
   strength?: string;
   strengthQuantity?: FhirQuantity;

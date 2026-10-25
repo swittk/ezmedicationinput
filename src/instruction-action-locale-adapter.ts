@@ -212,7 +212,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         relationHasGrammarFeature(c.frame.relation, "timeComplement")
         ? localizeAdviceRelation(c.frame.relation, c.locale, "temporal") ?? c.frame.relation
         : undefined;
-      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.time ? ` ${relation ?? ""} ${c.time}` : ""}`;
+      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.time ? ` ${relation ? relation + " " : ""}${c.time}` : ""}`;
     }
     case "object-time": {
       const object = c.theme ?? c.site;

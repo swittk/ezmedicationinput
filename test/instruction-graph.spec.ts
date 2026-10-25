@@ -395,8 +395,8 @@ describe("procedural instruction graph", () => {
     });
     expect(graph?.actions[2]?.args[0]?.codings).toContainEqual(
       expect.objectContaining({
-        system: "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
-        code: "water"
+        system: "http://snomed.info/sct",
+        code: "11713004"
       })
     );
     expect(realizeInstructionGraph(graph!, "th")).toBe(
@@ -461,9 +461,12 @@ describe("procedural instruction graph", () => {
       status: "active",
       content: "complete"
     });
-    expect(codeSystem.concept).toContainEqual(
-      expect.objectContaining({ code: "water", display: "water" })
-    );
+    // Mapped SNOMED CT concepts are not duplicated in the fallback CodeSystem.
+    expect(codeSystem.concept.some((concept) => concept.code === "water")).toBe(false);
+    expect(codeSystem.concept.some((concept) => concept.code === "57368009")).toBe(false);
+    expect(getMedicationInstructionConcept("57368009")?.coding).toMatchObject({
+      system: "http://snomed.info/sct", code: "57368009"
+    });
   });
 
 

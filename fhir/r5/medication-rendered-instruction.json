@@ -1,7 +1,7 @@
 {
   "resourceType": "StructureDefinition",
   "id": "medication-rendered-instruction",
-  "url": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction",
   "version": "0.2.0-ez.0",
   "name": "MedicationRenderedInstruction",
   "title": "Original instruction with structured edit-provenance rows",
@@ -167,7 +167,7 @@
       {
         "id": "Extension.url",
         "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-rendered-instruction"
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction"
       },
       {
         "id": "Extension.value[x]",

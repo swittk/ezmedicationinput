@@ -19,7 +19,7 @@ import {
 } from "./fhir-translations";
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph";
+  "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
 
 function child(extension: FhirExtension, url: string): FhirExtension | undefined {
   return extension.extension?.find((entry) => entry.url === url);

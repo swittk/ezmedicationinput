@@ -3116,7 +3116,7 @@ describe("Parkinson week-phase and real administration execution oracles", () =>
     const extra = parsed.fhir.find(row => row.doseAndRate?.[0]?.doseQuantity?.value === 0.5);
     expect(regular?.timing?.repeat).toMatchObject({ period: 4, periodUnit: "h" });
     expect(regular?.timing?.repeat?.extension).toContainEqual(
-      expect.objectContaining({ url: expect.stringContaining("/medication-timing-event-window") })
+      expect.objectContaining({ url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window") })
     );
     expect(regular?.asNeeded).not.toBe(true);
     expect(regular?.timing?.repeat?.when).toBeUndefined();
@@ -3145,7 +3145,7 @@ describe("Parkinson week-phase and real administration execution oracles", () =>
     expect(parsed.meta.canonical.clauses[0]?.schedule?.eventWindow)
       .toEqual({ start: "WAKE", end: "HS" });
     const windowExtension = direct.timing?.repeat?.extension?.find(part =>
-      part.url.endsWith("/medication-timing-event-window")
+      part.url.endsWith("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window")
     );
     expect(windowExtension?.extension).toEqual([
       { url: "start", valueCode: "WAKE" },
@@ -3183,13 +3183,13 @@ describe("Parkinson week-phase and real administration execution oracles", () =>
     });
     expect(parsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.extension)
       .toContainEqual(expect.objectContaining({
-        url: expect.stringContaining("/medication-timing-event-window")
+        url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window")
       }));
     expect(parsed.fhirNext.step[1]?.component[0]?.timing?.repeat).toMatchObject({
       frequency: 4, period: 1, periodUnit: "d"
     });
     expect(parsed.fhirNext.step[1]?.component[0]?.timing?.repeat?.extension
-      ?.some(item => item.url.endsWith("/medication-timing-event-window")))
+      ?.some(item => item.url.endsWith("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window")))
       .not.toBe(true);
     for (const regimen of [parsed.fhirNext, strictR5]) {
       const day = (date: string) => nextDueDoses(regimen, { ...base,

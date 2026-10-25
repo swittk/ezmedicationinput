@@ -616,7 +616,6 @@ function mergeClinicalAdjunct(
     conditionTarget: left.conditionTarget ?? right.conditionTarget,
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
-    includedWeekdays: appendUnique(left.includedWeekdays, right.includedWeekdays),
     unresolved: left.unresolved || right.unresolved ? true : undefined,
     localRanges: appendUniqueStructured(left.localRanges, right.localRanges) ?? [],
     evidence: appendUniqueStructured(left.evidence, right.evidence) ?? []

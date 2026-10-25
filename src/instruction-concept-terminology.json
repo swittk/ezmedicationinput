@@ -1,5 +1,5 @@
 {
-  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+  "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept",
   "concepts": [
     {
       "code": "doctor",
@@ -9,8 +9,9 @@
       "aliases": ["doctor", "physician", "แพทย์"]
     },
     {
-      "code": "contact-lenses",
+      "code": "57368009",
       "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "57368009", "display": "Contact lenses" },
       "display": "contact lenses",
       "i18n": { "th": "คอนแทคเลนส์" },
       "aliases": ["contact lens", "contact lenses"]

@@ -4138,6 +4138,7 @@ function calculateTotalUnitsSingle(
   if (containerValue && containerValue > 0) {
     let effectiveUnits = totalUnits;
     let effectiveContainerValue = containerValue;
+    let containerComparable = true;
     if (
       containerUnit &&
       result.totalApproximateQuantity?.unit &&
@@ -4171,9 +4172,15 @@ function calculateTotalUnitsSingle(
       const converted = convertValue(totalUnits, doseUnit, containerUnit, strength as any);
       if (converted !== null) {
         effectiveUnits = converted;
+      } else {
+        // A multi-ingredient strength cannot provide a single concentration
+        // to infer container volume. Do not equate incompatible dose units.
+        containerComparable = false;
       }
     }
-    result.totalContainers = Math.ceil(effectiveUnits / effectiveContainerValue);
+    if (containerComparable) {
+      result.totalContainers = Math.ceil(effectiveUnits / effectiveContainerValue);
+    }
   }
 
   return result;

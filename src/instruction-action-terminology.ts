@@ -388,7 +388,7 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
     name: "MedicationInstructionAction",
-    title: "SolubleLabs Medication Instruction Action",
+    title: "Medication Instruction Action",
     status: "active",
     experimental: false,
     caseSensitive: true,

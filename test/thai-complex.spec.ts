@@ -273,7 +273,7 @@ describe("Thai clinician free-text parsing", () => {
     expect(minimum.meta.canonical.clauses[0]?.schedule?.duration).toBeUndefined();
     expect(minimum.fhir.timing?.repeat?.offset).toBeUndefined();
     expect(minimum.fhir.timing?.repeat?.extension).toContainEqual({
-      url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min",
+      url: "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min",
       valueInteger: 30
     });
     expect(minimum.longText).toBe("รับประทานก่อนอาหารอย่างน้อย 30 นาที.");
