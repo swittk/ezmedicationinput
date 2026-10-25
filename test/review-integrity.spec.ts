@@ -370,7 +370,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
         scheduleCode.version = "2.1.0";
       }
     }
-    expect(toDosageDetails(saved)).toEqual(parsed.fhirNext);
+    const restored = toDosageDetails(saved);
+    expect(restored).toMatchObject(JSON.parse(JSON.stringify(parsed.fhirNext)));
+    expect(restored.renderedInstruction).toBe(parsed.fhirNext.renderedInstruction);
+    expect(restored.step[0].component[0].route?.coding?.[0]?.version).toBe("2023");
+    expect(restored.extension?.some(extension => extension.url === DOSAGE_RECONCILIATION_WARNING_URL)).not.toBe(true);
     expect(calculateTotalUnits({ ...supply, dosage: saved }).totalUnits).toBe(296);
   });
 
@@ -583,7 +587,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(scheduled[0]).toBe(beginning);
   });
 
-  it("removes the live component while retaining its R6-only expression as provenance", () => {
+  it("deletes a component and its local expression without resurrecting either from other rows", () => {
     const original = parseSig(parallel).fhirNext;
     const edited: FhirR6DosageDetails = JSON.parse(JSON.stringify(original));
     edited.step[0].component[0].doseAndRate![0].doseExpression = {
@@ -596,11 +600,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(restored.step.flatMap(step => step.component)
       .some(component => component.doseAndRate?.some(rate => rate.doseExpression)))
       .toBe(false);
-    expect(JSON.stringify(restored)).toContain("%patient.weight * 0.5");
     expect(restored.renderedInstruction).toBeUndefined();
-    expect(restored.extension).toContainEqual(expect.objectContaining({
-      url: DOSAGE_RECONCILIATION_WARNING_URL
-    }));
+    expect(edited.step[0].component[0].doseAndRate![0].doseExpression?.expression).toBe("%patient.weight * 0.5");
+    expect(toDosageDetails(toFhirR5Dosages(restored)).step).toEqual(restored.step);
   });
 
   it("does not show an obsolete whole-course SIG when an R5 stage dose changes without editing its text", () => {
@@ -1133,15 +1135,14 @@ describe("structured FHIR extensions without serialization", () => {
     const details = parseSig(parallel).fhirNext;
     const rows = toFhirR5Dosages(details);
     const marker = rows[0].modifierExtension?.find(ext => ext.url === DOSAGE_DETAILS_R5_URL);
-    const course = marker?.extension?.find(child => child.url === "dosageDetails");
-    expect(course?.valueString).toBeUndefined();
-    const steps = course?.extension?.filter(child => child.url === "step");
-    expect(steps).toHaveLength(details.step.length);
-    expect(steps![0].extension?.filter(child => child.url === "component"))
-      .toHaveLength(details.step[0].component.length);
-    expect(inspectExtensions(rows)).toContainEqual(expect.objectContaining({
-      url: "doseQuantity", valueQuantity: expect.objectContaining({ value: 1, unit: "drop" })
-    }));
+    const phase = marker?.extension?.find(child => child.url === "step");
+    expect(phase?.valueString).toBeUndefined();
+    expect(phase?.extension?.find(child => child.url === "end")?.extension)
+      .toContainEqual(expect.objectContaining({
+        url: "offsetDuration", valueQuantity: expect.objectContaining({ value: 7, code: "d" })
+      }));
+    expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "drop" });
+    expect(Buffer.byteLength(JSON.stringify(rows))).toBeLessThan(12_000);
     for (const extension of inspectExtensions(rows)) {
       const values = Object.keys(extension).filter(key => key.startsWith("value") &&
         (extension as unknown as Record<string, unknown>)[key] !== undefined);
@@ -1232,7 +1233,9 @@ it("keeps independent editable course markers on every projected row", () => {
   const rows = toFhirR5Dosages(source);
   const marker = (index: number) => rows[index].modifierExtension!.find(value => value.url === DOSAGE_DETAILS_R5_URL)!;
   const beforeSecond = cloneStructuredValue(marker(1));
-  marker(0).extension![0].extension!.find(value => value.url === "renderedInstruction")!.valueString = "edited first row";
+  const phase = marker(0).extension!.find(value => value.url === "step")!;
+  phase.extension!.find(value => value.url === "end")!.extension!
+    .find(value => value.url === "offsetDuration")!.valueQuantity!.value = 9;
   expect(marker(1)).toEqual(beforeSecond);
   expect(source.renderedInstruction).toBe(parallel);
 });

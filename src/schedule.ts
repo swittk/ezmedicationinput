@@ -1,5 +1,5 @@
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
-import { getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
+import { getMissingCourseContext, getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
   getBodySiteAdministrationTargetCount
 } from "./body-site-target";
@@ -2012,6 +2012,9 @@ export function nextDueDoses(
     }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
       ? selectedAlternativeCourse(dosage as FhirR6DosageDetails, options) : undefined;
+    if (r6Course && getMissingCourseContext(r6Course) !== undefined)
+      throw new MedicationQuantityCalculationError("missing-course-context",
+        "Supply the complete dosage array or restore its shared course metadata before scheduling; the surviving rows remain editable.");
     const zone = options?.timeZone ?? options?.config?.timeZone;
     if (r6Course?.repeatCycle && zone) {
       return scheduleRepeatedCourse(r6Course, options, zone);
@@ -2039,8 +2042,8 @@ export function nextDueDoses(
     }, []).sort((a, b) => Date.parse(a) - Date.parse(b)).slice(0, Math.floor(limit));
   }
   const one = dosage as FhirDosage;
-  // A scalar wire row can retain the same typed course as an R5 array.
-  // Restore its relative starts and cycles before enumerating administrations.
+  // A scalar wire row carries its own phase metadata. Shared cycle context,
+  // when required, must accompany that row before enumerating administrations.
   if (one.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
     return nextDueDoses(toDosageDetails([one]), options);
   }
@@ -4125,6 +4128,9 @@ function calculateCourseTotalUnits(
   cycleDefaultEnd?: Date, cycleIndex?: number
 ): TotalUnitsResult {
   course = selectedAlternativeCourse(course, options);
+  if (getMissingCourseContext(course) !== undefined)
+    throw new MedicationQuantityCalculationError("missing-course-context",
+      "Supply the complete dosage array or restore its shared course metadata before calculating; the surviving rows remain editable.");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
     throw new MedicationQuantityCalculationError("time-zone-required",
@@ -4427,7 +4433,13 @@ function finiteAdministrationCompletion(
   const count = repeat.count ?? (arrayIncludes(repeat.when ?? [], EventTiming.Immediate) ? 1 : undefined);
   if (count === undefined || !Number.isInteger(count) || count <= 0 ||
       repeat.countMax !== undefined && repeat.countMax !== count) return undefined;
-  const due = nextDueDoses(dosage, { ...options, from: start, orderedAt: start, limit: count });
+  // The enclosing course has already supplied the predecessor/cycle context
+  // and resolved this component's cadence origin. Count only this local
+  // execution copy, rather than reopening it as an isolated persisted row.
+  const local = dosage.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)
+    ? { ...dosage, modifierExtension: dosage.modifierExtension.filter(extension => extension.url !== DOSAGE_DETAILS_R5_URL) }
+    : dosage;
+  const due = nextDueDoses(local, { ...options, from: start, orderedAt: start, limit: count });
   if (due.length !== count) return undefined;
   const last = new Date(due[due.length - 1]);
   if (repeat.duration && repeat.durationUnit) {
@@ -4446,9 +4458,8 @@ function scheduleRegimen(
   if (dosages.some(dosage => dosage.modifierExtension?.some(extension =>
     extension.url === DOSAGE_DETAILS_R5_URL
   ))) {
-    // Explicit R5 exports may carry the whole R6 source for lossless round
-    // trips. We recognize that modifier rather than treating it as an
-    // unknown extension; only unsupported R6-only execution rules are blocked.
+    // Restore typed local phase metadata before dropping the R5 storage
+    // marker from execution copies. The caller's editable rows stay intact.
     const restored = toDosageDetails(dosages);
     dosages = dosages.map(item => ({
       ...item,

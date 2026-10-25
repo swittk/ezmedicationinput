@@ -517,10 +517,9 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
       ? { kind: "any", conditions: ownConditions.map(conditionFromR6) } as MedicationCondition
       : undefined;
   const r6Modifiers = encoded.modifierExtension?.filter(value => {
-    // A retained-course marker contains a complete DosageDetails snapshot.
-    // Nesting it in a component would make every later R5/R6 round trip wrap
-    // the previous course again. Reconciliation provenance is retained once
-    // at course level instead.
+    // Storage metadata belongs beside the live row. Nesting its shared
+    // owner in an R6 component would wrap it again on every round trip.
+    // Reconciliation provenance is retained once at course level.
     if (value.url === DOSAGE_DETAILS_R5_URL) return false;
     if (value.url !== DOSAGE_CONDITION_R5_URL) return true;
     const bridged = parseConditionModifier(value);
@@ -831,8 +830,12 @@ function dosageProjectionFingerprint(dosage: FhirDosage | EzDosage): string {
     ...live,
     ...(extension?.some(item => item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL)
       ? { extension: extension.filter(item => item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) } : {}),
-    ...(modifierExtension?.some(item => item.url !== DOSAGE_DETAILS_R5_URL)
-      ? { modifierExtension: modifierExtension.filter(item => item.url !== DOSAGE_DETAILS_R5_URL) } : {})
+    ...(modifierExtension?.some(item => item.url !== DOSAGE_DETAILS_R5_URL ||
+      item.extension?.some(child => child.url === "rowIndex"))
+      ? { modifierExtension: modifierExtension.filter(item => item.url !== DOSAGE_DETAILS_R5_URL ||
+        item.extension?.some(child => child.url === "rowIndex")).map(item =>
+          item.url === DOSAGE_DETAILS_R5_URL ? { ...item, extension: item.extension?.filter(child =>
+            ["sequence", "stepCount", "step", "component", "context", "contextRequired", "course", "emptyStep", "missingContext"].indexOf(child.url) >= 0) } : item) } : {})
   });
 }
 
@@ -1269,10 +1272,9 @@ export function toDosageDetails(
   renderedInstruction?: string,
   course?: EzCourseMetadata
 ): FhirR6DosageDetails {
-  // Store the original course with every relative-stage dosage, not only
-  // the first. Removing the first row must not erase the remaining phases'
-  // essential start/end metadata from a persisted R5 dosage array.
-  // Every R5 course component can carry the original R6 data. Select the
+  if (dosages.some(compactCourseMarker)) return reconcileCompactCourse(dosages, renderedInstruction, course);
+  // Import historical complete-course markers without emitting them again.
+  // Earlier persisted R5 rows can carry an entire source course. Select the
   // first structurally usable snapshot deterministically; keep malformed or
   // disagreeing copies once as inert course-level source provenance.
   let original: FhirExtension | undefined;
@@ -1505,24 +1507,11 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
       }));
     }
   }
-  // A consumer may persist just the flat .fhir array and not its optional
-  // course metadata. Preserve the complete R6 step relationships on the
-  // first item as a modifier extension whenever R5 fields alone are
-  // insufficient. Strict R5 exporters already understand this same marker.
-  const retainedCourse = createCourseDetailsExtension(details);
-  if (retainedCourse) {
-    for (let index = 0; index < dosages.length; index++) {
-      const dosage = dosages[index];
-      const existing = dosage.modifierExtension ?? [];
-      // The new marker is already detached. Its first owner needs no second
-      // copy; subsequent rows still receive independent editable trees.
-      dosage.modifierExtension = existing.some(extension => equalStructuredValues(extension, retainedCourse))
-        ? existing
-        : [...existing, index === 0 ? retainedCourse : cloneStructuredValue(retainedCourse)];
-    }
-  }
+  attachCourseDetailsExtensions(dosages, details);
+  const editable = details.renderedInstruction === undefined ? dosages
+    : withDosageEditProvenance(dosages, details.renderedInstruction);
   return {
-    dosages,
+    dosages: editable,
     course: {
       ...(details.id ? { id: details.id } : {}),
       ...(details.extension?.length ? { extension: details.extension } : {}),
@@ -1552,57 +1541,425 @@ export function toFhirR5Dosages(
       result.push(cloneStructuredValue(fromR6Dosage(component, index + 1)));
     }
   }
-  // The rendered whole-course instruction is display information, not
-  // modifier semantics. Store it using a non-modifier extension; the core
-  // R5 dosage text can remain a faithful per-dose realization.
-  if (result.length && details.renderedInstruction !== undefined) {
-    result[0] = withDosageEditProvenance(result, details.renderedInstruction)[0];
-  }
-  const retainedCourse = createCourseDetailsExtension(details);
-  if (retainedCourse) {
-    for (let index = 0; index < result.length; index++) {
-      const dosage = result[index];
-      const existing = dosage.modifierExtension ?? [];
-      dosage.modifierExtension = existing.some(extension => equalStructuredValues(extension, retainedCourse))
-        ? existing : [...existing, index === 0 ? retainedCourse : cloneStructuredValue(retainedCourse)];
-    }
-  }
-  return result;
+  attachCourseDetailsExtensions(result, details);
+  // Source text has one non-modifier owner and a compact edit baseline.
+  return details.renderedInstruction === undefined ? result
+    : withDosageEditProvenance(result, details.renderedInstruction);
 }
 
-/** Create the structured course marker only when native R5 fields cannot carry
- * the complete relationships. Import/projection callers reuse it directly.
- * @param details Complete R6 course to retain alongside independently persisted rows.
+/** R5-only fields whose original R6 spelling or metadata needs a local delta. */
+interface ComponentDeltaBaseline {
+  condition?: string;
+  safety?: string;
+  site?: string;
+  doseAndRate?: Array<{ dose?: string; rate?: string }>;
+}
+
+/** Each marker belongs to its live row, never to another component's snapshot. */
+interface CompactCourseRow {
+  rowIndex: number;
+  sequence: number;
+  stepCount: number;
+  step?: Omit<FhirR6DosageDetails["step"][number], "component">;
+  component?: Partial<FhirR6Dosage>;
+  baseline?: ComponentDeltaBaseline;
+  context?: string;
+  contextRequired?: boolean;
+  course?: Omit<FhirR6DosageDetails, "step" | "renderedInstruction">;
+  emptyStep?: EzCourseStep[];
+  missingContext?: string[];
+}
+
+/** Native dose choice, excluding a separately retained R6 expression.
+ * @param entry The live editable dose/rate slot.
  */
-export function createCourseDetailsExtension(details: FhirR6DosageDetails): FhirExtension | undefined {
-  // R5 cannot express complete conditional trees, relative step timing,
-  // safety expressions or site references in core fields.
-  // Preserve the original R6 representation when lowering would lose
-  // any such information. Unfamiliar fields remain structured and editable.
-  const hasR6OnlyFields = Boolean(
-    details.repeatCycle || details.safety ||
-    // Human-readable renderedInstruction does not change administration
-    // semantics and must not force an isModifier extension on plain R5 doses.
+function doseChoice(entry: NonNullable<FhirDosage["doseAndRate"]>[number] | undefined) {
+  return { doseQuantity: entry?.doseQuantity, doseRange: entry?.doseRange };
+}
+
+/** Native rate choice, independent of an expression in the dose slot.
+ * @param entry The live editable dose/rate slot.
+ */
+function rateChoice(entry: NonNullable<FhirDosage["doseAndRate"]>[number] | undefined) {
+  return { rateQuantity: entry?.rateQuantity, rateRange: entry?.rateRange, rateRatio: entry?.rateRatio };
+}
+
+/** Build only the fields that cannot be reconstructed from this live row.
+ * Extended R5 dosages already own native condition/safety/expression fields;
+ * strict R5 needs typed deltas for those fields, but never another timing/dose copy.
+ * @param original Source component.
+ * @param row Its independently editable R5 or extended-R5 projection.
+ */
+function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
+  component?: Partial<FhirR6Dosage>; baseline?: ComponentDeltaBaseline
+} {
+  const projected = toR6Dosage(row);
+  const component: Partial<FhirR6Dosage> = {};
+  const baseline: ComponentDeltaBaseline = {};
+  if (!equalStructuredValues(original.condition, projected.condition)) {
+    component.condition = original.condition;
+    baseline.condition = compactProjectionFingerprint(parseDosageCondition(row));
+  }
+  if (!equalStructuredValues(original.safety, projected.safety)) {
+    component.safety = original.safety;
+    baseline.safety = compactProjectionFingerprint(toR6Safety(row));
+  }
+  if (original.site?.reference && !equalStructuredValues(original.site.reference, projected.site?.reference)) {
+    component.site = { reference: original.site.reference };
+    baseline.site = compactProjectionFingerprint(row.site);
+  }
+  if (original.doseAndRate?.some((entry, index) =>
+    !equalStructuredValues(entry.doseExpression, projected.doseAndRate?.[index]?.doseExpression) ||
+    !equalStructuredValues(entry.rateExpression, projected.doseAndRate?.[index]?.rateExpression))) {
+    component.doseAndRate = original.doseAndRate.map(entry => ({
+      ...(entry.doseExpression ? { doseExpression: entry.doseExpression } : {}),
+      ...(entry.rateExpression ? { rateExpression: entry.rateExpression } : {})
+    }));
+    baseline.doseAndRate = original.doseAndRate.map((entry, index) => ({
+      ...(entry.doseExpression ? { dose: compactProjectionFingerprint(doseChoice(row.doseAndRate?.[index])) } : {}),
+      ...(entry.rateExpression ? { rate: compactProjectionFingerprint(rateChoice(row.doseAndRate?.[index])) } : {})
+    }));
+  }
+  return Object.keys(component).length ? { component, baseline } : {};
+}
+
+/** Encode local phase metadata and unrepresentable component fields.
+ * Course-wide metadata has one owner, referenced by all participating rows.
+ * All rows are newly created by the caller; no source course is mutated.
+ * @param dosages Fresh flattened output rows in step/component order.
+ * @param details Typed source course, used only to calculate missing metadata.
+ */
+export function attachCourseDetailsExtensions(
+  dosages: (FhirDosage | EzDosage)[], details: FhirR6DosageDetails
+): void {
+  if (!dosages.length) return;
+  // Ordinary R5 prescriptions do not pay for a second projection.
+  const needed = details.id !== undefined || details.repeatCycle || details.safety ||
     details.extension?.length || details.modifierExtension?.length ||
-    details.step.some(step =>
-      step.start || step.end || step.count !== undefined || step.safety ||
-      step.extension?.length || step.modifierExtension?.length ||
-      step.component.some(component =>
-        component.condition?.length || component.safety ||
+    details.step.some(step => step.id !== undefined || step.start || step.end ||
+      step.count !== undefined || step.safety || step.extension?.length ||
+      step.modifierExtension?.length || !step.component.length ||
+      step.component.some(component => component.condition !== undefined || component.safety ||
         component.site?.reference ||
-        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)))
-  );
-  return hasR6OnlyFields ? {
-    url: DOSAGE_DETAILS_R5_URL,
-    extension: [encodeCourseDetails(details)]
-  } : undefined;
+        component.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL) ||
+        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)));
+  if (!needed) return;
+  const { step: steps, renderedInstruction: _instruction, ...course } = details;
+  const emptyStep = steps.flatMap(({ component, ...step }, index) =>
+    component.length ? [] : [{ sequence: index + 1, ...step }]);
+  const header = {
+    ...(Object.keys(course).some(key => course[key as keyof typeof course] !== undefined) ? { course } : {}),
+    ...(emptyStep.length ? { emptyStep } : {})
+  };
+  const context = Object.keys(header).length ? compactProjectionFingerprint(header) : undefined;
+  const contextRequired = Boolean(details.repeatCycle || details.safety || details.modifierExtension?.length || emptyStep.length);
+  let rowIndex = 0;
+  for (let index = 0; index < steps.length; index++) {
+    const { component: components, ...step } = steps[index];
+    const hasStep = Object.keys(step).some(key => step[key as keyof typeof step] !== undefined);
+    for (const component of components) {
+      const row = dosages[rowIndex];
+      const delta = componentDelta(component, row);
+      const missingContext = component.modifierExtension?.filter(value => value.url === DOSAGE_DETAILS_R5_URL)
+        .flatMap(value => value.extension?.filter(child => child.url === "missingContext")
+          .map(child => child.valueString).filter((value): value is string => value !== undefined) ?? []);
+      if (hasStep || delta.component || context || steps.length > 1 || missingContext?.length) {
+        const local: CompactCourseRow = {
+          rowIndex, sequence: index + 1, stepCount: steps.length,
+          ...(hasStep ? { step } : {}), ...delta,
+          ...(context ? { context, ...(contextRequired ? { contextRequired } : {}), ...(rowIndex === 0 ? header : {}) } : {}),
+          ...(missingContext?.length ? { missingContext } : {})
+        };
+        replacementExtensions(row, DOSAGE_DETAILS_R5_URL, {
+          url: DOSAGE_DETAILS_R5_URL, extension: encodeFields(local, COMPACT_ROW)
+        });
+      }
+      rowIndex++;
+    }
+  }
+}
+
+/** Detect the row-local contract without decoding ordinary R5 inputs.
+ * @param dosage Live row carrying optional course metadata.
+ */
+function compactCourseMarker(dosage: FhirDosage | EzDosage): FhirExtension | undefined {
+  return dosage.modifierExtension?.find(value => value.url === DOSAGE_DETAILS_R5_URL &&
+    value.extension?.some(child => child.url === "rowIndex"));
+}
+
+/** Preserve a superseded local delta without nesting its course owner again.
+ * @param marker The row's original structured extension.
+ */
+function localReconciliationSource(marker: FhirExtension): FhirExtension {
+  return { ...marker, extension: marker.extension?.filter(child =>
+    child.url !== "course" && child.url !== "emptyStep") };
+}
+
+/** Restore R6-only choices while respecting edits to each native R5 slot.
+ * @param dosage The authoritative live row.
+ * @param local Missing fields and compact native-slot baselines.
+ * @param warnings Notices about a superseded executable expression.
+ */
+function restoreComponentDelta(
+  dosage: FhirDosage | EzDosage, local: CompactCourseRow, warnings: string[]
+): FhirR6Dosage {
+  const fresh = toR6Dosage(dosage);
+  const delta = local.component;
+  if (!delta) return fresh;
+  const expanded = dosage as EzDosage;
+  if (delta.condition !== undefined && expanded.condition === undefined &&
+      local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
+    fresh.condition = delta.condition;
+  }
+  if (delta.safety && expanded.safety === undefined) {
+    fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
+      ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
+  }
+  if (delta.site?.reference && !Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
+      local.baseline?.site === compactProjectionFingerprint(dosage.site)) {
+    fresh.site = { ...fresh.site, reference: delta.site.reference };
+  }
+  if (delta.doseAndRate) {
+    const entries = fresh.doseAndRate?.map(entry => ({ ...entry }));
+    let superseded = false;
+    delta.doseAndRate.forEach((old, index) => {
+      const entry = entries?.[index];
+      const baseline = local.baseline?.doseAndRate?.[index];
+      if (old.doseExpression) {
+        if (entry && baseline?.dose === compactProjectionFingerprint(doseChoice(entry)) &&
+            !Object.prototype.hasOwnProperty.call(entry, "doseExpression")) entry.doseExpression = old.doseExpression;
+        else if (!entry || !equalStructuredValues(entry.doseExpression, old.doseExpression)) superseded = true;
+      }
+      if (old.rateExpression) {
+        if (entry && baseline?.rate === compactProjectionFingerprint(rateChoice(entry)) &&
+            !Object.prototype.hasOwnProperty.call(entry, "rateExpression")) entry.rateExpression = old.rateExpression;
+        else if (!entry || !equalStructuredValues(entry.rateExpression, old.rateExpression)) superseded = true;
+      }
+    });
+    if (entries) fresh.doseAndRate = entries;
+    if (superseded) addWarning(warnings,
+      "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
+  }
+  return fresh;
+}
+
+/** Missing shared context remains a typed, editable modifier on the component.
+ * @param component Surviving live component.
+ * @param contexts Unavailable course or predecessor identities.
+ */
+function withMissingCourseContext(component: FhirR6Dosage, contexts: readonly string[]): FhirR6Dosage {
+  return contexts.length ? { ...component, modifierExtension: [
+    ...(component.modifierExtension ?? []),
+    { url: DOSAGE_DETAILS_R5_URL, extension: contexts.map(valueString => ({ url: "missingContext", valueString })) }
+  ] } : component;
+}
+
+/** Numeric utilities must not silently execute a row whose shared context is absent.
+ * Parsing, formatting and editing continue to preserve all surviving data.
+ * @param course Reconstructed course with local typed missing-context markers.
+ */
+export function getMissingCourseContext(course: FhirR6DosageDetails): string | undefined {
+  for (const step of course.step) for (const component of step.component) {
+    for (const extension of component.modifierExtension ?? []) {
+      if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
+      const missing = extension.extension?.find(child => child.url === "missingContext")?.valueString;
+      if (missing !== undefined) return missing;
+    }
+  }
+  return undefined;
+}
+
+/** Reconstruct a course from current R5 fields and each row's local metadata.
+ * No component matching, historical dose snapshot or narrative parse is required.
+ * @param dosages Authoritative live rows; order within a sequence is retained.
+ * @param renderedInstruction Explicit replacement whole-course display.
+ * @param editedCourse Explicit editable course/step metadata, when supplied.
+ */
+function reconcileCompactCourse(
+  dosages: readonly (FhirDosage | EzDosage)[], renderedInstruction?: string,
+  editedCourse?: EzCourseMetadata
+): FhirR6DosageDetails {
+  const warnings: string[] = [];
+  const sources: FhirExtension[] = [];
+  const headers = new Map<string, CompactCourseRow>();
+  const conflictingContexts = new Set<string>();
+  let metadataEdited = false;
+  const metadata = new Map<number, { step: NonNullable<CompactCourseRow["step"]>; rowIndex: number; marker?: FhirExtension }>();
+  const localRows = dosages.map(dosage => {
+    const marker = compactCourseMarker(dosage);
+    for (const extension of dosage.modifierExtension ?? []) {
+      if (extension.url === DOSAGE_DETAILS_R5_URL && extension !== marker) sources.push(extension);
+    }
+    if (!marker) return undefined;
+    const decoded = decodeFields(marker.extension ?? [], COMPACT_ROW);
+    if (typeof decoded.rowIndex !== "number" || !Number.isInteger(decoded.rowIndex) || decoded.rowIndex < 0 ||
+        typeof decoded.sequence !== "number" || !Number.isInteger(decoded.sequence) || decoded.sequence < 1 ||
+        typeof decoded.stepCount !== "number" || !Number.isInteger(decoded.stepCount) || decoded.stepCount < 1) {
+      sources.push(marker);
+      addWarning(warnings, "Malformed retained R6 course metadata was preserved; live R5 fields remain available for correction.");
+      return undefined;
+    }
+    const value = { ...decoded, rowIndex: decoded.rowIndex,
+      sequence: decoded.sequence, stepCount: decoded.stepCount } as CompactCourseRow;
+    if (!equalStructuredValues(marker, { url: DOSAGE_DETAILS_R5_URL, extension: encodeFields(value, COMPACT_ROW) }))
+      sources.push(localReconciliationSource(marker));
+    if (value.context && (value.course || value.emptyStep)) {
+      const previous = headers.get(value.context);
+      if (previous && (!equalStructuredValues(previous.course, value.course) ||
+          !equalStructuredValues(previous.emptyStep, value.emptyStep))) {
+        if (value.contextRequired || previous.contextRequired) conflictingContexts.add(value.context);
+        sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: encodeFields({
+          course: previous.course, emptyStep: previous.emptyStep
+        }, COMPACT_ROW) });
+        sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: marker.extension?.filter(child =>
+          child.url === "course" || child.url === "emptyStep") });
+        addWarning(warnings, "Conflicting shared course metadata was preserved; resolve the shared owner before numeric execution.");
+      } else if (!previous) headers.set(value.context, value);
+    } else if (value.course || value.emptyStep) {
+      sources.push(marker);
+      addWarning(warnings, "Shared course metadata without its context identity was retained as source provenance.");
+    }
+    const previous = metadata.get(value.sequence);
+    const step = value.step ?? {};
+    if (previous && !equalStructuredValues(previous.step, step)) {
+      if (previous.marker) sources.push(localReconciliationSource(previous.marker));
+      sources.push(localReconciliationSource(marker));
+      addWarning(warnings, "Local course phase metadata differs; the first source row's phase was retained and conflicting metadata was preserved.");
+    }
+    if (!previous || value.rowIndex < previous.rowIndex) metadata.set(value.sequence, { step, rowIndex: value.rowIndex, marker });
+    return { value, marker };
+  });
+  // A separately persisted .course object can restore the same shared owner.
+  // Match the declared context; an unrelated partial object cannot erase a cycle.
+  if (editedCourse) {
+    const { step, renderedInstruction: _instruction, ...course } = editedCourse;
+    const base = Object.keys(course).length ? { course } : {};
+    const candidates: Array<Pick<CompactCourseRow, "course" | "emptyStep">> = [base];
+    const liveSequences = new Set(dosages.map(dosage => dosage.sequence ?? 1));
+    const emptyStep = step?.filter(value => !liveSequences.has(value.sequence));
+    if (emptyStep?.length) candidates.push({ ...base, emptyStep });
+    for (const candidate of candidates) {
+      const key = compactProjectionFingerprint(candidate);
+      if (!headers.has(key)) headers.set(key, {
+        rowIndex: 0, sequence: 1, stepCount: 1, context: key, ...candidate
+      });
+    }
+  }
+  const missing = new Set<string>(conflictingContexts);
+  let header: CompactCourseRow | undefined;
+  for (const local of localRows) {
+    if (!local) continue;
+    if (local.value.context) {
+      const owner = headers.get(local.value.context);
+      if (!owner && local.value.contextRequired) missing.add(local.value.context);
+      else if (owner && !header) header = owner;
+      else if (owner && header && (!equalStructuredValues(header.course, owner.course) || !equalStructuredValues(header.emptyStep, owner.emptyStep))) {
+        missing.add(local.value.context);
+        sources.push(localReconciliationSource(local.marker));
+      }
+    }
+    for (const context of local.value.missingContext ?? []) missing.add(context);
+  }
+  for (const step of header?.emptyStep ?? []) {
+    const { sequence, ...fields } = step;
+    metadata.set(sequence, { step: fields, rowIndex: -1 });
+  }
+  const editedSequences = new Set<number>();
+  for (const step of editedCourse?.step ?? []) {
+    const { sequence, ...fields } = step;
+    if (!Number.isInteger(sequence) || sequence < 1) {
+      sources.push(retainedCourseStepSource(step));
+      addWarning(warnings, "Invalid course step metadata was retained on the course but could not be assigned to an R6 stage.");
+      continue;
+    }
+    if (editedSequences.has(sequence)) {
+      sources.push(retainedCourseStepSource(step));
+      addWarning(warnings, "Duplicate course step metadata was retained as source provenance; the first editable stage metadata was used.");
+      continue;
+    }
+    editedSequences.add(sequence);
+    const merged = { ...metadata.get(sequence)?.step, ...fields };
+    if (!equivalentProjection(metadata.get(sequence)?.step ?? {}, merged)) metadataEdited = true;
+    metadata.set(sequence, { step: merged, rowIndex: -1 });
+  }
+  const instructionMarker = dosages.map(dosage => dosage.extension?.find(isRenderedInstructionMarker)).find(Boolean);
+  const savedInstruction = instructionMarker?.extension?.find(value => value.url === "instruction")?.valueString;
+  const baselineRows = instructionMarker?.extension?.filter(value => value.url === "row") ?? [];
+  const used = new Set<number>();
+  let instructionMatches = !metadataEdited && baselineRows.length === dosages.length && baselineRows.length > 0;
+  const live = dosages.map((dosage, index) => {
+    const local = localRows[index];
+    const sourceIndex = local?.value.rowIndex ?? index;
+    const baseline = baselineRows[sourceIndex]?.extension;
+    const expectedProjection = baseline?.find(value => value.url === "projectionFingerprint")?.valueString;
+    const expectedText = baseline?.find(value => value.url === "textFingerprint")?.valueString;
+    const expanded = dosage as EzDosage;
+    const delta = local?.value.component;
+    const nativeCleared = Boolean(delta && (
+      delta.site?.reference && Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
+        !equalStructuredValues(delta.site.reference, expanded.siteReference) ||
+      delta.condition !== undefined && expanded.condition !== undefined &&
+        !equalStructuredValues(delta.condition, expanded.condition)));
+    const projectionMatches = !nativeCleared &&
+      (expectedProjection === undefined || expectedProjection === dosageProjectionFingerprint(dosage));
+    const textMatches = expectedText === undefined || expectedText === dosageTextFingerprint(dosage);
+    if (!projectionMatches || !textMatches || used.has(sourceIndex) || !baseline) instructionMatches = false;
+    used.add(sourceIndex);
+    if (local && (!projectionMatches || !textMatches)) sources.push(localReconciliationSource(local.marker));
+    return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
+  });
+  const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
+  if (editedCourse && !equivalentProjection(header?.course ?? {}, { ...header?.course, ...courseEdits }))
+    instructionMatches = false;
+  const groups = new Map<number, FhirR6Dosage[]>();
+  live.forEach((dosage, index) => {
+    const requested = dosage.sequence ?? 1;
+    const sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
+    if (sequence !== requested) addWarning(warnings, "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction.");
+    const local = localRows[index];
+    const component = local ? restoreComponentDelta(dosage, local.value, warnings) : toR6Dosage(dosage);
+    if (warnings.some(value => value.includes("superseded by edited R5 dose fields")) && local)
+      sources.push(localReconciliationSource(local.marker));
+    const entries = groups.get(sequence) ?? [];
+    entries.push(component); groups.set(sequence, entries);
+  });
+  const stageCount = Math.max(0, ...localRows.map(local => local?.value.stepCount ?? 0));
+  const sequences = new Set([...groups.keys(), ...metadata.keys()]);
+  for (let sequence = 1; sequence <= stageCount; sequence++) sequences.add(sequence);
+  const steps = [...sequences].sort((a, b) => a - b).map(sequence => ({
+    ...metadata.get(sequence)?.step, component: groups.get(sequence) ?? []
+  }));
+  // A removed predecessor is harmless when the surviving phase has its own
+  // treatment-relative start. Otherwise its original elapsed time is unknown.
+  let missingPredecessor = false;
+  for (const step of steps) {
+    if (!step.component.length && !step.start && !step.end) { missingPredecessor = true; continue; }
+    if (missingPredecessor && !step.start && step.component.length) missing.add("predecessor");
+    if (step.start || step.end || step.component.length) missingPredecessor = false;
+  }
+  if (missing.size) {
+    addWarning(warnings, "Required course context is missing; surviving dosage fields remain editable.");
+    for (const step of steps) step.component = step.component.map(component => withMissingCourseContext(component, [...missing]));
+    instructionMatches = false;
+  }
+  const result: FhirR6DosageDetails = {
+    ...header?.course, ...courseEdits,
+    ...(explicitInstruction !== undefined ? { renderedInstruction: explicitInstruction }
+      : renderedInstruction !== undefined ? { renderedInstruction }
+      : instructionMatches && savedInstruction !== undefined ? { renderedInstruction: savedInstruction } : {}),
+    step: steps
+  };
+  if (savedInstruction !== undefined && !instructionMatches) addWarning(warnings,
+    "Structured dosage fields changed; the original rendered instruction was retained as source provenance instead of displayed as the current instruction.");
+  return withPreservedSourceExtension(withReconciliationSources(withReconciliationWarnings(result, warnings), sources),
+    instructionMarker && (!instructionMatches || hasUnrecognizedEditMetadata(instructionMarker)) ? instructionMarker : undefined);
 }
 
 
 /**
- * Private R6-in-R5 typed extension bridge. Kept with its only consumer, the
- * DosageDetails reconciliation owner, so grammar/clinical meaning stays
- * upstream and all R5 persistence uses one declared structural encoder.
+ * Shared typed extension codec for local missing fields and course metadata.
+ * Grammar/clinical meaning stays upstream; no JSON-string payload or second
+ * copy of an ordinary dosage is emitted.
  */
 /** A declared primitive/datatype value, nested backbone, or retained extension. */
 type ValueField = Extract<keyof FhirExtension, `value${string}`>;
@@ -1695,6 +2052,25 @@ const COURSE: BridgeShape = {
   safety: { fields: SAFETY }
 };
 const COURSE_STEP: BridgeShape = { ...STEP, sequence: { value: "valueInteger" } };
+const COMPACT_ROW: BridgeShape = {
+  rowIndex: { value: "valueInteger" },
+  sequence: { value: "valueInteger" },
+  stepCount: { value: "valueInteger" },
+  step: { fields: STEP },
+  component: { fields: COMPONENT },
+  baseline: { fields: {
+    condition: { value: "valueString" }, safety: { value: "valueString" },
+    site: { value: "valueString" },
+    doseAndRate: { repeated: true, fields: {
+      dose: { value: "valueString" }, rate: { value: "valueString" }
+    } }
+  } },
+  context: { value: "valueString" },
+  contextRequired: { value: "valueBoolean" },
+  course: { fields: COURSE },
+  emptyStep: { fields: COURSE_STEP, repeated: true },
+  missingContext: { value: "valueString", repeated: true }
+};
 const PREDICATE: Record<string, BridgeField> = {
   kind: { value: "valueCode" }, name: { value: "valueString" },
   operation: { value: "valueCode" }, value: { value: "valueDecimal" },
@@ -1841,13 +2217,6 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
     else result[child.url] = value;
   }
   return result;
-}
-
-/** Encode the complete R6 course using named, typed R5 extension children.
- * @param details Course whose step/component semantics must survive R5 storage.
- */
-function encodeCourseDetails(details: FhirR6DosageDetails): FhirExtension {
-  return { url: "dosageDetails", extension: encodeFields(details, COURSE) };
 }
 
 /** Recover a course from a structured extension, leaving malformed originals

@@ -112,56 +112,33 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     ]);
   });
 
-  it("recovers retained R6 meaning while preserving malformed and conflicting provenance", () => {
-    const expected = parseSig(
-      "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid"
-    ).fhirNext;
-    const semantics = (course: FhirR6DosageDetails) => course.step.map(step => ({
-      start: step.start?.offsetDuration,
-      end: step.end?.offsetDuration,
-      component: step.component.map(component => ({
-        site: component.site?.concept?.text,
-        timingCode: component.timing?.code?.text,
-        dose: component.doseAndRate?.[0]?.doseQuantity
-      }))
-    }));
-    const r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
-      ReturnType<typeof toFhirR5Dosages>;
-    expect(r5).toHaveLength(6);
-    const first = r5[0].modifierExtension?.find(ext => ext.url.includes("course-details"));
-    first!.extension![0].valueString = "{bad";
+  it("preserves unknown local metadata and reconciles conflicting phase copies without copying components", () => {
+    const expected = parseSig("1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid").fhirNext;
+    const r5 = toFhirR5Dosages(expected);
+    const marker = (index: number) => r5[index].modifierExtension!.find(ext => ext.url.includes("course-details"))!;
+    marker(0).extension!.push({ url: "externalAudit", valueBoolean: false });
+    const unknown = cloneStructuredValue(marker(0));
     const recovered = toDosageDetails(r5);
     expect(recovered.renderedInstruction).toBe(expected.renderedInstruction);
-    expect(semantics(recovered)).toEqual(semantics(expected));
-    expect(recovered.extension).toContainEqual(expect.objectContaining({
-      url: expect.stringContaining("medication-course-reconciliation-warning"),
-      valueString: expect.stringContaining("Malformed retained R6 course metadata")
-    }));
-    const recoveredSources = recovered.extension?.filter(extension =>
-      extension.url.includes("medication-course-reconciliation-source")
-    ) ?? [];
-    expect(recoveredSources).toHaveLength(2);
-    expect(recoveredSources.some(extension => extension.extension?.[0].extension?.[0].valueString === "{bad")).toBe(true);
+    expect(recovered.step).toEqual(expected.step);
+    expect(recovered.extension?.some(extension =>
+      extension.extension?.some(child => equalStructuredValues(child, unknown)))).toBe(true);
 
-    const conflicting = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as
-      ReturnType<typeof toFhirR5Dosages>;
-    const second = conflicting[1].modifierExtension?.find(ext => ext.url.includes("course-details"));
-    const structured = second!.extension!.find(child => child.url === "dosageDetails")!;
-    const firstStep = structured.extension!.find(child => child.url === "step")!;
-    const end = firstStep.extension!.find(child => child.url === "end")!;
+    const phase = marker(1).extension!.find(child => child.url === "step")!;
+    const end = phase.extension!.find(child => child.url === "end")!;
     end.extension!.find(child => child.url === "offsetDuration")!.valueQuantity!.value = 8;
-    const reconciled = toDosageDetails(conflicting);
-    expect(semantics(reconciled)).toEqual(semantics(expected));
+    const reconciled = toDosageDetails(r5);
+    expect(reconciled.step[0].end).toEqual(expected.step[0].end);
+    expect(reconciled.step.flatMap(step => step.component).map(row => row.doseAndRate))
+      .toEqual(expected.step.flatMap(step => step.component).map(row => row.doseAndRate));
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
       url: expect.stringContaining("medication-course-reconciliation-warning"),
-      valueString: expect.stringContaining("snapshots differ")
+      valueString: expect.stringContaining("phase metadata differs")
     }));
-    const conflictingSources = reconciled.extension?.filter(extension =>
-      extension.url.includes("medication-course-reconciliation-source")
-    ) ?? [];
-    expect(conflictingSources).toHaveLength(2);
-    expect(equalStructuredValues(conflictingSources[0], conflictingSources[1])).toBe(false);
-    expect(conflictingSources.every(extension => extension.extension?.length && extension.valueString === undefined)).toBe(true);
+    const sources = reconciled.extension?.filter(extension =>
+      extension.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(sources.length).toBeGreaterThanOrEqual(2);
+    expect(sources.every(extension => extension.extension?.length && extension.valueString === undefined)).toBe(true);
   });
 
   it("keeps optional real R6 semantics on normal EZMED dosages", () => {
@@ -390,7 +367,7 @@ describe("R5 edit versus retained R6 executable expression ownership", () => {
       extension.extension?.[0]?.url?.includes("course-details"));
     expect(originalSnapshot).toBeDefined();
     const encodedOriginal = originalSnapshot?.extension?.[0]
-      ?.extension?.find(extension => extension.url === "dosageDetails");
+      ?.extension?.find(extension => extension.url === "component");
     expect(encodedOriginal).toBeDefined();
     // Persisting the updated R6 course as strict R5 and reopening it cannot
     // resurrect the old expression as a second executable dose.
@@ -453,13 +430,10 @@ describe("FHIR R5/R6 coded instruction and source-edit invariants", () => {
     expect(live.timing?.repeat?.boundsPeriod).toBeUndefined();
     expect(updated.renderedInstruction).toBeUndefined();
     const historic = updated.extension?.find(extension =>
-      extension.url.endsWith("medication-course-reconciliation-source"));
-    expect(historic).toBeDefined();
-    const containsOriginalCodedAdvice = (extension: FhirExtension): boolean =>
-      extension.valueCodeableConcept?.coding?.some(coding =>
-        coding.code === "419444006") === true ||
-      extension.extension?.some(containsOriginalCodedAdvice) === true;
-    expect(containsOriginalCodedAdvice(historic!)).toBe(true);
+      extension.url.endsWith("medication-rendered-instruction"));
+    expect(historic?.extension).toContainEqual({
+      url: "instruction", valueString: original.renderedInstruction
+    });
     const reopened = toDosageDetails(toFhirR5Dosages(updated));
     expect(reopened.step[0].component[0].additionalInstruction?.[0].coding?.[0]?.code)
       .toBe("1287353006");
@@ -2157,5 +2131,210 @@ describe("parser state import preserves administration offsets", () => {
       expect(parserStateFromFhir(dosage).primaryClause.schedule?.administrationOffsetMinutes).toBeUndefined();
       expect(canonicalFromFhir(dosage).schedule?.administrationOffsetMinutes).toBeUndefined();
     }
+  });
+});
+
+
+describe("compact row-local R5 course persistence", () => {
+  const input = "1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid";
+
+  it("keeps the six-row independent taper below 12 KB in both public R5 outputs", () => {
+    const parsed = parseSig(input);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.fhir).toHaveLength(6);
+    for (const rows of [parsed.fhir, strict]) {
+      expect(Buffer.byteLength(JSON.stringify(rows), "utf8")).toBeLessThan(12_000);
+      expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(parsed.fhirNext);
+    }
+  });
+
+  it("grows linearly with independent stage metadata instead of copying the course per row", () => {
+    const course = (count: number): FhirR6DosageDetails => ({ step: Array.from({ length: count }, (_, index) => ({
+      start: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+        offsetDuration: { value: index, unit: "d", code: "d" } },
+      component: [{ timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    })) });
+    const small = Buffer.byteLength(JSON.stringify(toFhirR5Dosages(course(4))));
+    const large = Buffer.byteLength(JSON.stringify(toFhirR5Dosages(course(40))));
+    expect(large).toBeLessThan(small * 11);
+  });
+});
+
+describe("compact course metadata ownership and editing", () => {
+  const input = "1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid";
+  const options = { timeZone: "Asia/Bangkok", orderedAt: "2026-10-19T08:00:00+07:00",
+    from: "2026-10-19T08:00:00+07:00", limit: 4 };
+  const day = (value: number) => ({
+    contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+    offsetDuration: { value, unit: "d", code: "d" }
+  });
+  const component = (value = 1): FhirR6DosageDetails["step"][number]["component"][number] => ({
+    doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] } }
+  });
+
+  it("retains later independent phases after deleting every row of the first phase", () => {
+    const source = parseSig(input).fhirNext;
+    const remaining = toFhirR5Dosages(source).slice(2);
+    const restored = toDosageDetails(remaining);
+    expect(restored.step.map(step => step.component.length)).toEqual([0, 2, 2]);
+    expect(restored.step[1].start?.offsetDuration?.value).toBe(7);
+    expect(restored.step[2].start?.offsetDuration?.code).toBe("mo");
+    expect(nextDueDoses(remaining, options)).toEqual([
+      "2026-10-26T08:00:00+07:00", "2026-10-26T08:00:00+07:00",
+      "2026-10-26T12:00:00+07:00", "2026-10-26T12:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: remaining, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(184);
+  });
+
+  it("keeps a scalar later phase at its own treatment-relative start", () => {
+    const row = toFhirR5Dosages(parseSig(input).fhirNext)[2];
+    expect(nextDueDoses(row, options)).toEqual([
+      "2026-10-26T08:00:00+07:00", "2026-10-26T12:00:00+07:00",
+      "2026-10-26T16:00:00+07:00", "2026-10-26T20:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(92);
+  });
+
+  it("retains valid wording and independent component identities when rows are reordered", () => {
+    const source = parseSig(input);
+    const rows = toFhirR5Dosages(source.fhirNext).reverse();
+    const restored = toDosageDetails(rows);
+    expect(restored.renderedInstruction).toBe(input);
+    expect(restored.step[0].component.map(row => row.site?.concept?.text)).toEqual(["left eye", "right eye"]);
+    expect(restored.step.flatMap(step => step.component).every(row => !!row.text)).toBe(true);
+    expect(nextDueDoses(rows, options)).toEqual(nextDueDoses(source.fhirNext, options));
+    expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(296);
+  });
+
+  it("stores course-wide metadata once and requires its owner for numeric execution", () => {
+    const source: FhirR6DosageDetails = {
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      step: [
+        { start: day(0), end: day(3), component: [component()] },
+        { start: day(7), end: day(10), component: [component(2)] }
+      ]
+    };
+    const rows = toFhirR5Dosages(source);
+    const headers = rows.flatMap(row => row.modifierExtension ?? [])
+      .flatMap(extension => extension.extension ?? []).filter(child => child.url === "course");
+    expect(headers).toHaveLength(1);
+    expect(toDosageDetails(rows)).toEqual(source);
+    expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 28, durationUnit: "d" }).totalUnits).toBe(18);
+    const surviving = rows.slice(1);
+    const supplied = toDosageDetails(surviving, undefined, fromDosageDetails(source).course);
+    expect(calculateTotalUnits({ ...options, dosage: supplied, durationValue: 28, durationUnit: "d" }).totalUnits).toBe(12);
+    const restored = toDosageDetails(surviving);
+    expect(restored.step[1].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(restored.step[1].start).toEqual(day(7));
+    expect(() => formatSig(restored, "long")).not.toThrow();
+    for (const dosage of [surviving, restored, toFhirR5Dosages(restored), fromFhir(restored).fhirNext]) {
+      expect(() => nextDueDoses(dosage, options)).toThrow(/complete dosage array/);
+      expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 28, durationUnit: "d" })).toThrow(/complete dosage array/);
+    }
+    expect(rows[1].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+  });
+
+  it("does not turn the loss of non-modifier course annotations into an execution block", () => {
+    const source: FhirR6DosageDetails = {
+      id: "external-course",
+      extension: [{ url: "urn:example:author", valueString: "source author" }],
+      step: [
+        { start: day(0), end: day(3), component: [component()] },
+        { start: day(7), end: day(10), component: [component(2)] }
+      ]
+    };
+    const rows = toFhirR5Dosages(source);
+    expect(toDosageDetails(rows)).toEqual(source);
+    expect(calculateTotalUnits({ ...options, dosage: rows.slice(1), durationValue: 14, durationUnit: "d" }).totalUnits).toBe(6);
+  });
+
+  it("requires a removed predecessor only when the surviving phase has no independent start", () => {
+    const source: FhirR6DosageDetails = { step: [
+      { id: "initial", component: [{ ...component(), timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: "d", boundsDuration: { value: 7, unit: "d" }
+      } } }] },
+      { id: "continuation", component: [component(2)] }
+    ] };
+    const remaining = toFhirR5Dosages(source).slice(1);
+    expect(toDosageDetails(remaining).step[1].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(() => nextDueDoses(remaining, options)).toThrow(/complete dosage array/);
+    expect(() => calculateTotalUnits({ ...options, dosage: remaining, durationValue: 14, durationUnit: "d" })).toThrow(/complete dosage array/);
+  });
+
+  it("preserves an explicit empty initial phase without inventing an administration", () => {
+    const source: FhirR6DosageDetails = { step: [
+      { end: day(7), component: [] },
+      { start: day(7), end: day(14), component: [component()] }
+    ] };
+    const rows = toFhirR5Dosages(source);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sequence).toBe(2);
+    expect(toDosageDetails(rows)).toEqual(source);
+    expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 21, durationUnit: "d" }).totalUnits).toBe(7);
+  });
+
+  it("keeps native extended-R5 fields authoritative after JSON persistence and removal", () => {
+    const source: FhirR6DosageDetails = { step: [{ end: day(7), component: [{
+      ...component(), site: { reference: { reference: "BodyStructure/example" } },
+      condition: [{ code: { text: "Only if tolerated" }, text: "Only if tolerated" }],
+      doseAndRate: [{ doseExpression: { language: "text/fhirpath", expression: "%patient.weight * 0.5" } }]
+    }] }] };
+    const rows: EzDosage[] = JSON.parse(JSON.stringify(fromDosageDetails(source).dosages));
+    delete rows[0].siteReference;
+    rows[0].condition = [];
+    rows[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "mg" } }];
+    const restored = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+    const dose = restored.step[0].component[0];
+    expect(dose.site?.reference).toBeUndefined();
+    expect(dose.condition).toBeUndefined();
+    expect(dose.doseAndRate).toEqual([{ doseQuantity: { value: 2, unit: "mg" } }]);
+    expect(toDosageDetails(toFhirR5Dosages(restored)).step).toEqual(restored.step);
+  });
+
+  it("keeps repeated save/reopen payloads stable without creating nested course history", () => {
+    let rows = toFhirR5Dosages(parseSig(input).fhirNext);
+    const bytes = Buffer.byteLength(JSON.stringify(rows));
+    for (let cycle = 0; cycle < 10; cycle++) {
+      rows = toFhirR5Dosages(toDosageDetails(JSON.parse(JSON.stringify(rows))));
+      expect(Buffer.byteLength(JSON.stringify(rows))).toBe(bytes);
+      expect(rows).toHaveLength(6);
+    }
+  });
+});
+
+describe("compact shared metadata conflict preservation", () => {
+  it("retains both conflicting shared owners and does not choose a cycle silently", () => {
+    const source: FhirR6DosageDetails = {
+      repeatCycle: { value: 14, unit: "d" },
+      step: [{ component: [
+        { timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] },
+        { timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] }
+      ] }]
+    };
+    const rows = toFhirR5Dosages(source);
+    const marker = (index: number) => rows[index].modifierExtension!.find(extension => extension.url.endsWith("medication-r6-course-details"))!;
+    const other = cloneStructuredValue(marker(0).extension!.find(child => child.url === "course")!);
+    other.extension!.find(child => child.url === "repeatCycle")!.valueQuantity!.value = 21;
+    marker(1).extension!.push(other);
+    const restored = toDosageDetails(rows);
+    expect(restored.step[0].component.map(component => component.doseAndRate?.[0].doseQuantity?.value)).toEqual([1, 2]);
+    expect(restored.extension?.filter(extension => extension.url.endsWith("medication-course-reconciliation-source")).length).toBeGreaterThanOrEqual(2);
+    expect(() => nextDueDoses(restored, { from: "2026-10-19T08:00:00+07:00", timeZone: "Asia/Bangkok" }))
+      .toThrow(/complete dosage array/);
+  });
+
+  it("preserves unfamiliar course markers beside recognized row-local metadata", () => {
+    const rows = toFhirR5Dosages(parseSig("1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid").fhirNext);
+    const unknown: FhirExtension = {
+      url: rows[0].modifierExtension!.find(extension => extension.url.endsWith("medication-r6-course-details"))!.url,
+      extension: [{ url: "externalCourseLink", valueString: "source-only" }]
+    };
+    rows[1].modifierExtension!.push(unknown);
+    const restored = toDosageDetails(rows);
+    expect(restored.extension?.some(extension => extension.extension?.some(value => equalStructuredValues(value, unknown)))).toBe(true);
+    expect(restored.step[1].start?.offsetDuration?.value).toBe(7);
+    expect(toDosageDetails(toFhirR5Dosages(restored)).extension).toEqual(restored.extension);
   });
 });

@@ -3847,3 +3847,68 @@ The full PR remains **99 reviewable files**: 114 changed paths minus the same
 15 configured exclusions. The original untracked diagnostic probe remains
 unchanged. These fixes address all three findings from the completed review;
 they do not imply a new automated review of the follow-up commit.
+
+
+## 2026-10-25 — Compact R5 persistence with row-local course metadata
+
+Replaced the emitted per-row complete-course snapshot with the existing typed
+extension codec carrying local phase metadata and only component fields that
+native R5 cannot represent. Shared course metadata has one owner. Ordinary
+native dose, timing, route and site fields stay authoritative; `.fhir` remains
+the primary R5-shaped persistence surface and `.fhirNext` remains derived.
+Historical complete-course markers remain readable and re-export compactly.
+
+The six-row independent eye taper
+`1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid` now serializes to
+**9,926 UTF-8 JSON bytes**, down from **51,000** (**80.5% smaller**), through both
+primary and strict R5 exports. Native R6 remains **5,800 bytes**, structurally
+unchanged. The actual downstream schema/converter save-and-reload result is
+**10,604 bytes**. New size and growth regressions failed against the previous
+writer before the compact implementation was introduced.
+
+Row deletion and reordering retain surviving phase starts, component identities,
+conditions, safety data, unknown extensions and bilingual realization. Explicit
+native field edits supersede retained expressions. Source instruction provenance
+has one owner. Missing required shared cycle/safety context or an unanchored
+predecessor remains typed and editable; numeric scheduling and supply report
+`missing-course-context` until that context is restored. A separately persisted
+matching `.course` object can restore the shared owner. The enclosing-course
+counted-dose helper now uses its resolved local execution copy, preserving the
+existing additional-dose totals without reinterpreting that row in isolation.
+
+**3,439/3,439 source tests across 44 test files**, TypeScript, the package build
+and **4/4 packaged-export tests** pass. The 13 added regressions cover compact
+size, linear growth, deletion, reorder, explicit native edits, conflicting and
+missing shared owners, unknown markers and ten byte-stable save/reopen cycles.
+All 244 tracked input hashes stayed unchanged during the final test/type/build
+gate; this diary entry was added afterward. The built ESM SHA-256 is
+`2a0c9d15c01fd4bfde578704236b6f9974b656efa6da57c29cd5123b6be86538`.
+
+Actual-package consumers passed **70 checks** in four batches (14 compact
+persistence checks and the unchanged 18, 22 and 16 checks). They cover the real
+schema/converter, English and Thai rendering, schedules and the eye-taper totals
+of **296** drops, **388** after a dose edit and **184** after deleting its first
+phase. The unchanged **521-input compatibility replay** reports zero failures,
+populated-dose-value changes or dose-row-count changes. These batches overlap
+and are not a unique-input total. A separate full HL7 validator run is not claimed.
+
+Matched Node 22.22.0 measurements compared the prior built package with the new
+one in one process after warmup, alternating old/new order and taking the median
+of seven batch means:
+
+| Operation | Previous ms | Compact ms | Change |
+| --- | ---: | ---: | ---: |
+| Ordinary parse | 1.721 | 1.760 | +2.3% |
+| Ocular parse | 1.789 | 1.813 | +1.3% |
+| Independent-taper parse | 5.802 | 5.361 | -7.6% |
+| Taper export | 0.757 | 0.274 | -63.9% |
+| Taper reopen | 0.514 | 0.281 | -45.3% |
+| Taper schedule | 5.569 | 5.077 | -8.8% |
+| Taper supply | 10.676 | 10.449 | -2.1% |
+| Ordinary suggestions | 0.827 | 0.840 | +1.6% |
+| Ocular suggestions | 0.869 | 0.883 | +1.6% |
+
+These are shared-host measurements, not phone measurements or a claim of zero
+runtime regression. This work changes persistence and reconstruction, without
+expanding the grammar. The PR remains **99 reviewable files**: 114 changed paths
+minus the existing 15 configured exclusions. No new reviewable path was added.
