@@ -1645,8 +1645,10 @@ export function attachCourseDetailsExtensions(
         component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)));
   if (!needed) return;
   const { step: steps, renderedInstruction: _instruction, ...course } = details;
-  const emptyStep = steps.flatMap(({ component, ...step }, index) =>
-    component.length ? [] : [{ sequence: index + 1, ...step }]);
+  const emptyStep: EzCourseStep[] = [];
+  steps.forEach(({ component, ...step }, index) => {
+    if (!component.length) emptyStep.push({ sequence: index + 1, ...step });
+  });
   const header = {
     ...(Object.keys(course).some(key => course[key as keyof typeof course] !== undefined) ? { course } : {}),
     ...(emptyStep.length ? { emptyStep } : {})
@@ -1660,9 +1662,14 @@ export function attachCourseDetailsExtensions(
     for (const component of components) {
       const row = dosages[rowIndex];
       const delta = componentDelta(component, row);
-      const missingContext = component.modifierExtension?.filter(value => value.url === DOSAGE_DETAILS_R5_URL)
-        .flatMap(value => value.extension?.filter(child => child.url === "missingContext")
-          .map(child => child.valueString).filter((value): value is string => value !== undefined) ?? []);
+      const missingContext: string[] = [];
+      for (const extension of component.modifierExtension ?? []) {
+        if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
+        for (const child of extension.extension ?? []) {
+          if (child.url === "missingContext" && child.valueString !== undefined)
+            missingContext.push(child.valueString);
+        }
+      }
       if (hasStep || delta.component || context || steps.length > 1 || missingContext?.length) {
         const local: CompactCourseRow = {
           rowIndex, sequence: index + 1, stepCount: steps.length,

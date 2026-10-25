@@ -3880,9 +3880,15 @@ existing additional-dose totals without reinterpreting that row in isolation.
 and **4/4 packaged-export tests** pass. The 13 added regressions cover compact
 size, linear growth, deletion, reorder, explicit native edits, conflicting and
 missing shared owners, unknown markers and ten byte-stable save/reopen cycles.
-All 244 tracked input hashes stayed unchanged during the final test/type/build
-gate; this diary entry was added afterward. The built ESM SHA-256 is
-`2a0c9d15c01fd4bfde578704236b6f9974b656efa6da57c29cd5123b6be86538`.
+The final gate ran in the main checkout; all 244 tracked input hashes plus the
+original diagnostic probe stayed unchanged through tests, types, build,
+consumers and performance. This diary update followed the gate. The built ESM
+SHA-256 is
+`886a3dd527b0a2e9955f06c95fe2af96206f82e7f1a765a622f63bd8ddd8de19`.
+The main declaration build caught two new `Array.flatMap` calls beyond the ES6
+library target that the isolated build had accepted. Both calls were replaced
+with equivalent ES6 iteration before this final full gate; the type target was
+preserved.
 
 Actual-package consumers passed **70 checks** in four batches (14 compact
 persistence checks and the unchanged 18, 22 and 16 checks). They cover the real
@@ -3898,15 +3904,17 @@ of seven batch means:
 
 | Operation | Previous ms | Compact ms | Change |
 | --- | ---: | ---: | ---: |
-| Ordinary parse | 1.721 | 1.760 | +2.3% |
-| Ocular parse | 1.789 | 1.813 | +1.3% |
-| Independent-taper parse | 5.802 | 5.361 | -7.6% |
-| Taper export | 0.757 | 0.274 | -63.9% |
-| Taper reopen | 0.514 | 0.281 | -45.3% |
-| Taper schedule | 5.569 | 5.077 | -8.8% |
-| Taper supply | 10.676 | 10.449 | -2.1% |
-| Ordinary suggestions | 0.827 | 0.840 | +1.6% |
-| Ocular suggestions | 0.869 | 0.883 | +1.6% |
+| Ordinary parse | 1.820 | 1.741 | -4.4% |
+| Ocular parse | 1.771 | 1.830 | +3.3% |
+| Conditional parse | 6.193 | 6.276 | +1.3% |
+| Independent-taper parse | 6.027 | 5.285 | -12.3% |
+| Thai parse | 6.738 | 6.912 | +2.6% |
+| Taper export | 0.769 | 0.276 | -64.1% |
+| Taper reopen | 0.512 | 0.277 | -45.9% |
+| Taper schedule | 5.623 | 5.252 | -6.6% |
+| Taper supply | 10.365 | 10.202 | -1.6% |
+| Ordinary suggestions | 0.862 | 0.907 | +5.2% |
+| Ocular suggestions | 0.902 | 0.907 | +0.6% |
 
 These are shared-host measurements, not phone measurements or a claim of zero
 runtime regression. This work changes persistence and reconstruction, without
