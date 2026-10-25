@@ -10,7 +10,7 @@ import {
 } from "../../relation-terminology";
 import { composeLocalizedRecords } from "../../localization";
 import { joinLocalizedTokens } from "../../locale-realization";
-import { getProceduralFrames, sourceRangeAttachmentClass, followingProcedureOwnsTemporalAdjunct, actionEventRelationAt } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass, followingProcedureOwnsTemporalAdjunct, actionEventRelationAt, isConditionalAdviceFrame } from "../procedural-context";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
@@ -138,6 +138,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
 function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
   const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
+    isConditionalAdviceFrame(context, frame) ||
     medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
   return !(
     (!definition?.procedural && !scopedDirective) ||

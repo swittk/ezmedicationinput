@@ -56,6 +56,7 @@ import {
   FOOD_EVENT_ALIASES,
   FREQUENCY_ALTERNATIVE_CONNECTORS,
   LIST_SEPARATORS,
+  isThaiDaypartListSeparator,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
   MAXIMUM_COUNT_LEAD_SEQUENCES,
@@ -351,6 +352,26 @@ function monthlyOrdinalWeekdaySign(
   });
 }
 
+/** Recognize the separated operands of the existing dose-times-frequency SIG.
+ * @param context Source tokens and availability shared by lexical constructions.
+ * @param start First dose operand; this bounded lookahead creates no signs.
+ */
+function separatedDoseFrequencyAt(context: HpsgClauseContext, start: number): {
+  dose: number; frequency: number; tokens: Token[];
+} | undefined {
+  const dose = context.tokens[start];
+  if (dose?.kind !== LexKind.Number || dose.value === undefined || dose.value <= 0) return undefined;
+  const marker = context.tokens[start + 1];
+  if (!marker) return undefined;
+  const surface = normalizeTokenLower(marker);
+  if (surface !== "x" && surface !== "*") return undefined;
+  const frequency = context.tokens[start + 2];
+  if (frequency?.kind !== LexKind.Number || frequency.value === undefined ||
+      !Number.isInteger(frequency.value) || frequency.value <= 0) return undefined;
+  const tokens = tokensAvailable(context, start, 3);
+  return tokens ? { dose: dose.value, frequency: frequency.value, tokens } : undefined;
+}
+
 export function multiplicativeDoseFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.doseFrequency.multiplicative", (context, start) => {
     const first = tokensAvailable(context, start, 1)?.[0];
@@ -373,12 +394,17 @@ export function multiplicativeDoseFrequencyRule(): HpsgLexicalRule<HpsgClauseCon
       }
       const secondLower = normalizeTokenLower(second);
       const spaced = secondLower.match(/^[x*]([0-9]+)$/);
-      if (!spaced) {
-        return [];
+      if (spaced) {
+        dose = first.value;
+        frequency = parseFloat(spaced[1]);
+        tokens = [first, second];
+      } else if (secondLower === "x" || secondLower === "*") {
+        const separated = separatedDoseFrequencyAt(context, start);
+        if (!separated) return [];
+        dose = separated.dose;
+        frequency = separated.frequency;
+        tokens = separated.tokens;
       }
-      dose = first.value;
-      frequency = parseFloat(spaced[1]);
-      tokens = [first, second];
     }
 
     if (
@@ -730,6 +756,15 @@ function frequencyCardinalValue(token: Token | undefined): number | undefined {
   return value !== undefined && value >= 0 ? value : undefined;
 }
 
+/** Read the compact count marker used by total-dose and course-count nouns.
+ * @param token Source lexical token; the following noun licenses its meaning.
+ */
+function compactMarkedCountValue(token: Token | undefined): number | undefined {
+  if (!token) return undefined;
+  const matched = normalizeTokenLower(token).match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/u);
+  return matched ? Number(matched[1]) : undefined;
+}
+
 /** Counts are exact positive integers; unlike durations and frequencies they cannot be ranges. */
 function exactCountCardinalValue(token: Token | undefined): number | undefined {
   if (!token || token.kind === LexKind.NumberRange) return undefined;
@@ -1031,6 +1066,9 @@ export function countFrequencyRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!token) {
       return [];
     }
+    // A numeric complement after the multiplication marker completes a
+    // dose-frequency constituent, not a shorter "1 x" total-count phrase.
+    if (token.kind === LexKind.Number && separatedDoseFrequencyAt(context, start)) return [];
     // A complete leading relation + interval sign owns its cardinal and unit.
     // The suffix must not also become a recurring frequency (for example,
     // `after twelve hours` must not mean twelve times per hour).
@@ -1538,6 +1576,7 @@ function daypartMealRelationSign(
       previous &&
       (
         LIST_SEPARATORS.has(normalizeTokenLower(previous)) ||
+        isThaiDaypartListSeparator(previous, beforePrevious, context.tokens[start]) ||
         previousConnectorKind !== "unknown"
       ) &&
       beforePreviousEvent && mealAnchorForDaypart(beforePreviousEvent)
@@ -1568,6 +1607,7 @@ function daypartMealRelationSign(
       : "unknown";
     const joinsDayparts = Boolean(separator && (
       LIST_SEPARATORS.has(normalizeTokenLower(separator)) ||
+      isThaiDaypartListSeparator(separator, token, next) ||
       separatorKind === "conjunction"
     ));
     if (
@@ -1679,7 +1719,8 @@ function coordinatedRelatedEventsAt(
     const separator = context.tokens[tailStart];
     const separatorLower = separator ? normalizeTokenLower(separator) : "";
     if (separator && !context.state.consumed.has(separator.index) &&
-        LIST_SEPARATORS.has(separatorLower)) {
+        (LIST_SEPARATORS.has(separatorLower) ||
+         isThaiDaypartListSeparator(separator, members[members.length - 1], context.tokens[tailStart + 1]))) {
       if (coordinationConnectorKind(separatorLower) === "disjunction") break;
       connectors.push(separator);
       tailStart += 1;
@@ -3032,8 +3073,8 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     // Remaining count constructions select an occurrence noun or omit it.
     // A following time unit belongs exclusively to durationNominalAt above.
-    const compactCount = lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
-    if (compactCount) {
+    const compactCount = compactMarkedCountValue(token);
+    if (compactCount !== undefined) {
       const next = context.tokens[start + 1];
       if (next && mapIntervalUnit(normalizeTokenLower(next))) return signs;
       const occurrence = next && !context.state.consumed.has(next.index) &&
@@ -3041,7 +3082,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       const matched = occurrence ? [token, occurrence] : [token];
       return [lexicalSign({
         type: "schedule-sign", rule: "hpsg.lex.schedule.count.compact", tokens: matched,
-        synsem: { head: { schedule: { count: Number(compactCount[1]) } },
+        synsem: { head: { schedule: { count: compactCount } },
           valence: {}, cont: { clauseKind: "administration" } },
         score: occurrence ? 7 : 6
       })];
@@ -3557,14 +3598,16 @@ export function recurringCourseAt(
   const countLead = tokens[end];
   const headedCount = countLead && (DURATION_LEAD_TOKENS.has(normalizeTokenLower(countLead)) ||
     COUNT_MARKER_TOKENS.has(normalizeTokenLower(countLead)));
+  const compactCount = compactMarkedCountValue(countLead);
   const countIndex = end + (headedCount ? 1 : 0);
-  const count = frequencyCardinalValue(tokens[countIndex]);
-  const countNoun = tokens[countIndex + 1];
+  const count = compactCount ?? frequencyCardinalValue(tokens[countIndex]);
+  const countNounIndex = compactCount !== undefined ? end + 1 : countIndex + 1;
+  const countNoun = tokens[countNounIndex];
   let repeatCount: number | undefined;
   if (count !== undefined && countNoun &&
       CYCLE_COUNT_HEADS.has(normalizeTokenLower(countNoun))) {
     repeatCount = count;
-    end = countIndex + 2;
+    end = countNounIndex + 1;
   }
   const members = tokens.slice(start, end);
   const schedule: HpsgScheduleFeature = {
@@ -3623,7 +3666,8 @@ export interface CycleSchedule {
   sign?: HpsgSign;
 }
 const CYCLE_DAY_LIST = `${CYCLE_WORDS.dayPart}(?:${CYCLE_WORDS.listSeparator}${CYCLE_WORDS.dayPart})*`;
-const CYCLE_DAY_FRAME = `${CYCLE_WORDS.dayLead}(${CYCLE_DAY_LIST})(?:\\s+(?:of\\s+)?${CYCLE_WORDS.periodLead}(\\d{1,3})\\s*[-–]?\\s*${CYCLE_WORDS.periodUnit}(?:\\s+cycles?\\b)?)?`;
+const CYCLE_NAMED_DAY_LEAD = `(?:${CYCLE_WORDS.startLead}\\s+)?(?:\\bon\\s+)?${CYCLE_WORDS.name}\\s+days?\\s+`;
+const CYCLE_DAY_FRAME = `(?:(${CYCLE_NAMED_DAY_LEAD})|${CYCLE_WORDS.dayLead})(${CYCLE_DAY_LIST})(?:\\s+(?:of\\s+)?${CYCLE_WORDS.periodLead}(\\d{1,3})\\s*[-–]?\\s*${CYCLE_WORDS.periodUnit}(?:\\s+cycles?\\b)?)?(?:\\s+(of\\s+(?:the\\s+)?${CYCLE_WORDS.name}))?`;
 /** Project the already-composed HPSG course phrase into the shared cycle
  * inventory. This adapter assigns no grammatical meaning from source text. */
 function recurringCycles(
@@ -3662,7 +3706,7 @@ export function recognizeCycles(
   if (!/(?:days?\b|\bD\d|วันที่ของรอบ)/iu.test(input)) return result;
   const pattern = new RegExp(CYCLE_DAY_FRAME, 'giu');
   for (let match = pattern.exec(input); match; match = pattern.exec(input)) {
-    const [, list, periodValue] = match;
+    const [, namedLead, list, periodValue, namedTail] = match;
     let end = match.index + match[0].length;
     const lead = new RegExp(`^\\s+${CYCLE_WORDS.startLead}\\s*`, 'iu').exec(input.slice(end));
     const anchorMatch = lead ? parseMedicationDateListAt(`on ${input.slice(end + lead[0].length)}`, 0,
@@ -3671,10 +3715,10 @@ export function recognizeCycles(
     const countMatch = new RegExp(`^\\s+${CYCLE_WORDS.repeatCount}`, 'iu').exec(input.slice(end));
     const count = countMatch?.[1];
     if (countMatch) end += countMatch[0].length;
-    // Ordinary "on day 3" / "on days 1-5" is not an explicit cycle.
-    // Require a cycle length, repeat count, or named start anchor before
-    // grammar ownership may claim this text once the cycle is structurally recognized.
-    if (!periodValue && !countMatch && !lead) continue;
+    // A named cycle head licenses its complete day-ordinal constituent even
+    // when the calendar anchor is still unknown. Ordinary unqualified day
+    // references require the existing cycle length, count or anchor daughter.
+    if (!periodValue && !countMatch && !lead && !namedLead && !namedTail) continue;
     const sourceText = input.slice(match.index, end);
     pattern.lastIndex = Math.max(pattern.lastIndex, end);
     const days: number[] = [], seen = new Set<number>();
@@ -3700,6 +3744,7 @@ export function recognizeCycles(
         month: date.getUTCMonth() + 1, day: date.getUTCDate(), sourceText, inferredYear: anchor.inferredYear });
     }
     result.push({ kind: 'calendar-days', start: match.index, end, sourceText, days, cycles,
+      ...(count ? { repeatCount: cycles } : {}),
       periodDays, anchor: anchor?.isoDate, events, error });
   }
   return result.sort((left, right) => left.start - right.start || right.end - left.end);
@@ -3730,13 +3775,21 @@ export function cycleScheduleRule() {
         rule: 'hpsg.lex.instruction.unanchoredCycle',
         tokens,
         synsem: {
-          head: {},
+          head: { schedule: { cycleDayConstraint: {
+            days: cycle.days,
+            ...(cycle.periodDays !== undefined ? { periodDays: cycle.periodDays } : {}),
+            ...(cycle.repeatCount !== undefined ? { cycles: cycle.repeatCount } : {}),
+            ...(cycle.anchor ? { anchor: cycle.anchor } : {}),
+            reason: cycle.error,
+            sourceText: cycle.sourceText
+          }, sourceRanges: [{ start: cycle.start, end: cycle.end }] } },
           // Multiple independent counseling actions can follow this cycle.
           // Use the repeatable typed instruction valence, not the singular
           // patientInstruction slot that a subsequent HOLD could overwrite.
           valence: { instructions: [{ text: cycle.sourceText }] },
           cont: { clauseKind: 'administration' }
         },
+        scheduleFields: ['cycleDayConstraint'],
         warnings: [
 `Unresolved schedule: cycle day offsets cannot execute (${cycle.error}); confirm or correct the cycle while retaining the prescribed dose.`
         ],

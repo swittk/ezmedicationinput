@@ -282,6 +282,10 @@ export function shiftCanonicalSigClauses(
       materialRange.end += offset;
     }
 
+    if (clause.site?.range) {
+      clause.site.range.start += offset;
+      clause.site.range.end += offset;
+    }
     for (const restriction of clause.site?.restrictions ?? []) {
       if (restriction.range) {
         restriction.range.start += offset;

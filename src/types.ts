@@ -1100,6 +1100,8 @@ export interface MedicationInstructionActionDefinition {
   /** Declarative realization family used by English/Thai graph generation. */
   realizer?: MedicationInstructionActionRealizer;
   argumentParserConfig?: {
+    /** Polarity that licenses this lexical frame as a directive rather than an event predicate. */
+    requiredDirectivePolarity?: AdvicePolarity;
     /** Semantic effect of an affirmative conditional action on its medication-dose complement.
      * The selected-dose form requires an explicit medication object or a typed dose-slot target;
      * it never treats a bare avoidance verb, food object, or negation as withholding. */
@@ -1535,7 +1537,21 @@ export interface CanonicalCalendarEventExpr {
   inferredYear?: boolean;
 }
 
+/** A recognized cycle-day restriction whose calendar eligibility is unresolved.
+ * Independent dose/route/clock fields remain useful for clinician editing.
+ */
+export interface CanonicalCycleDayConstraint {
+  days: number[];
+  periodDays?: number;
+  cycles?: number;
+  anchor?: string;
+  reason: string;
+  sourceText: string;
+}
+
 export interface CanonicalScheduleExpr {
+  /** Required cycle-day eligibility; do not execute the independent cadence until resolved. */
+  cycleDayConstraint?: CanonicalCycleDayConstraint;
   /** Typed whole-course interval for a recurring active/rest construction. */
   repeatCycle?: FhirQuantity;
   /** Explicit finite number of whole-course repetitions; absent means unbounded. */

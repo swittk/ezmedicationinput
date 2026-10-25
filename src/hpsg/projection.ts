@@ -65,6 +65,10 @@ function applySchedule(
   schedule: HpsgScheduleFeature,
   deps: HpsgProjectionDeps
 ): void {
+  if (schedule.cycleDayConstraint) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.cycleDayConstraint = { ...schedule.cycleDayConstraint, days: [...schedule.cycleDayConstraint.days] };
+  }
   if (schedule.timingCode !== undefined) {
     state.timingCode = schedule.timingCode;
   }

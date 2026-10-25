@@ -167,7 +167,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   administrationDuration: [
     'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
   ],
-  calendarEvents: ['calendarEvents'],
+  calendarEvents: ['calendarEvents', 'cycleDayConstraint'],
   // A derived per-administration dependency is not a lexical trailing cadence.
   administrationDependency: ['administrationOffsetMinutes'],
   // A source anaphor is a typed request to the regimen donor, not an
@@ -189,7 +189,7 @@ const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
 const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
   'duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd',
   'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit',
-  'dayOfWeek', 'weekdayOrdinal', 'calendarEvents'
+  'dayOfWeek', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',

@@ -389,6 +389,18 @@ export const ANTE_MERIDIEM_TOKENS = setOf(source.anteMeridiemTokens);
 export const POST_MERIDIEM_TOKENS = setOf(source.postMeridiemTokens);
 export const MERIDIEM_TOKENS = setOf(source.meridiemTokens);
 export const LIST_SEPARATORS = setOf(source.listSeparators);
+
+const THAI_DAYPART_LIST_SEPARATORS = setOf(source.thaiDaypartListSeparators);
+/** Thai daypart daughters license their compact conjunction punctuation.
+ * Numeric dose slots and non-Thai time ranges do not use this lexical sense.
+ */
+export function isThaiDaypartListSeparator(
+  separator: LexToken | undefined, left: LexToken | undefined, right: LexToken | undefined
+): boolean {
+  return Boolean(separator && left && right &&
+    THAI_DAYPART_LIST_SEPARATORS.has(separator.canonical ?? separator.lower) &&
+    /[\u0E00-\u0E7F]/u.test(left.original) && /[\u0E00-\u0E7F]/u.test(right.original));
+}
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
@@ -594,6 +606,7 @@ export const LATERAL_MODIFIER_WORDS = setOf(source.lateralModifierWords);
 
 /** Explicit temporal construction vocabulary; no medication or specialty-specific dispatch. */
 export const CYCLE_WORDS = {
+  name: String.raw`(?:menstrual\s+)?cycle\b`,
   dayLead: String.raw`(?:\bon\s+days?\s+|\bdays?\s+|\bD(?=\d)|วันที่ของรอบ\s*)`,
   dayPart: String.raw`\d{1,3}(?:\s*[-–]\s*\d{1,3})?`,
   listSeparator: String.raw`\s*(?:,\s*(?:and\s+|และ\s*)?|and\s+|และ\s*)`,

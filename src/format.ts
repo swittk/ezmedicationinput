@@ -1776,6 +1776,30 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
+  const cycle = clause.schedule?.cycleDayConstraint;
+  if (cycle) {
+    const sourceQualifier = cycle.sourceText.trim();
+    const alreadyRealized = style === "long" && sourceQualifier &&
+      clause.additionalInstructions?.some(instruction => instruction.text?.trim() === sourceQualifier);
+    if (!alreadyRealized) {
+      // The known modifier is the authority after a textless FHIR import.
+      // Realize its retained qualifier without interpreting or executing it.
+      const rendered = formatCanonicalClause({ ...clause,
+        schedule: { ...clause.schedule, cycleDayConstraint: undefined }
+      }, style, localization, options);
+      const thai = localization?.locale.startsWith("th");
+      const details = [
+        ...(cycle.days.length ? [thai ? `วันที่ในรอบ ${cycle.days.join(", ")}` : `cycle days ${cycle.days.join(", ")}`] : []),
+        ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
+        ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
+        ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
+      ];
+      const qualifier = sourceQualifier ||
+        (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
+        (details.length ? ` (${details.join("; ")})` : "");
+      return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
+    }
+  }
   const clockWindow = clause.schedule?.clockWindow;
   if (clockWindow) {
     const schedule = { ...clause.schedule, clockWindow: undefined };

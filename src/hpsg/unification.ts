@@ -1,7 +1,8 @@
 import { formBodySiteRestriction } from "../body-site-grammar";
 import { composeLocalizedRecords } from "../localization";
-import { joinLocalizedTokens } from "../locale-realization";
-import { ACTION_COORDINATION_CONNECTOR_I18N } from "./lexical-classes";
+import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
+import { localizeAdviceRelation } from "../relation-terminology";
+import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import {
   HpsgDoseFeature,
@@ -21,7 +22,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceRelation, BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -503,6 +504,8 @@ function mergeSchedule(
   if (preferred) return preferred;
   const mergedClass = attachmentClass(left.attachmentClass);
   if (
+    (left.cycleDayConstraint && right.cycleDayConstraint &&
+      !equalStructuredValues(left.cycleDayConstraint, right.cycleDayConstraint)) ||
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
     !sameOptionalScalar(left.timingReference, right.timingReference) ||
     !sameOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays) ||
@@ -535,6 +538,7 @@ function mergeSchedule(
   }
   return {
     attachmentClass: mergedClass,
+    cycleDayConstraint: left.cycleDayConstraint ?? right.cycleDayConstraint,
     sourceRanges: appendUniqueStructured(left.sourceRanges, right.sourceRanges),
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     timingReference: mergeOptionalScalar(left.timingReference, right.timingReference),
@@ -947,10 +951,123 @@ function refinedDailyCadenceSynsem(
   };
 }
 
+/** A meal relation beside fixed clocks qualifies those same administrations.
+ * Explicit coordination or separate quantified heads retain their event union.
+ * @param clockSign Daughter supplying exact clock anchors.
+ * @param mealSign Daughter supplying a recognized meal-relative modifier.
+ * @param context Existing source ranges, used only for adjacency/coordination.
+ */
+function fixedClockMealAdjunctSynsem(
+  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const clock = clockSign.synsem.head.schedule;
+  const meal = mealSign.synsem.head.schedule;
+  if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
+      meal.timeOfDay?.length || !context.sourceText ||
+      (clockSign.synsem.head.dose && mealSign.synsem.head.dose)) return undefined;
+  const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
+    for (const values of MEAL_TIMING_BY_RELATION.values()) {
+      for (const value of values.values()) if (value === event) return true;
+    }
+    return false;
+  };
+  if (!meal.when.every(isMeal)) return undefined;
+  const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
+    const indices = new Set<number>();
+    for (const item of sign.evidence) {
+      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields) continue;
+      for (const index of item.tokenIndices) indices.add(index);
+    }
+    return sign.tokens.filter(token => indices.has(token.index));
+  };
+  const clocks = tokensFor(clockSign, "timeOfDay"), meals = tokensFor(mealSign, "when");
+  if (!clocks.length || !meals.length) return undefined;
+  // The clock-list constituent can own its introductory comma. That
+  // punctuation must not hide the following coordinator at its outer edge.
+  const clockEdges = clocks.filter(token => token.original !== ",");
+  const mealEdges = meals.filter(token => token.original !== ",");
+  if (!clockEdges.length || !mealEdges.length) return undefined;
+  const firstClock = clockEdges.reduce((a, b) => a.sourceStart < b.sourceStart ? a : b);
+  const lastClock = clockEdges.reduce((a, b) => a.sourceEnd > b.sourceEnd ? a : b);
+  const firstMeal = mealEdges.reduce((a, b) => a.sourceStart < b.sourceStart ? a : b);
+  const lastMeal = mealEdges.reduce((a, b) => a.sourceEnd > b.sourceEnd ? a : b);
+  const linked = (token: typeof firstClock) =>
+    coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown";
+  if (lastClock.sourceEnd <= firstMeal.sourceStart && (linked(lastClock) || linked(firstMeal)) ||
+      lastMeal.sourceEnd <= firstClock.sourceStart && (linked(lastMeal) || linked(firstClock))) return undefined;
+  const clockStart = Math.min(...clocks.map(token => token.sourceStart));
+  const clockEnd = Math.max(...clocks.map(token => token.sourceEnd));
+  const mealStart = Math.min(...meals.map(token => token.sourceStart));
+  const mealEnd = Math.max(...meals.map(token => token.sourceEnd));
+  const bridgeStart = clockEnd <= mealStart ? clockEnd : mealEnd;
+  const bridgeEnd = clockEnd <= mealStart ? mealStart : clockStart;
+  if (bridgeStart > bridgeEnd) return undefined;
+  const gap = context.sourceText(bridgeStart, bridgeEnd);
+  if (!/^[\s,;]*$/u.test(gap)) {
+    // Other schedule daughters can intervene without introducing another
+    // administration: the duration in "at 07:00 for 7 days before meals".
+    // Their existing typed evidence must own every non-separator token.
+    const allowed = new Set<number>();
+    const fields = ["boundsDuration", "duration", "durationMax", "durationUnit", "frequency", "frequencyMax", "period", "periodMax", "periodUnit", "count", "countMax"];
+    for (const sign of [clockSign, mealSign]) {
+      for (const evidence of sign.evidence) {
+        if (!evidence.scheduleFields?.length ||
+            !evidence.scheduleFields.every(field => fields.indexOf(field) >= 0)) continue;
+        for (const index of evidence.tokenIndices) allowed.add(index);
+      }
+    }
+    const bridge = [...clockSign.tokens, ...mealSign.tokens].filter(token =>
+      token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd);
+    if (!bridge.length || bridge.some(token =>
+      coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown" ||
+      (!/^[,;:]$/u.test(token.original) && !allowed.has(token.index)))) return undefined;
+  }
+  const text = context.sourceText(mealStart, mealEnd).trim();
+  if (!text) return undefined;
+  const i18n: Record<string, string> = {};
+  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
+    for (const locale of ["en", "th"]) {
+      const descriptions: string[] = [];
+      for (const event of meal.when) {
+        for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
+          for (const [anchor, value] of values) {
+            if (value !== event) continue;
+            const kind = relation === "before" ? AdviceRelation.Before :
+              relation === "after" ? AdviceRelation.After : AdviceRelation.With;
+            descriptions.push(joinLocalizedTokens(locale, [
+              localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
+            ]));
+          }
+        }
+      }
+      if (descriptions.length) i18n[locale] = descriptions.join(", ");
+    }
+  }
+  const instruction: HpsgInstructionFeature = {
+    text: i18n.en ?? text,
+    ...(Object.keys(i18n).length ? { i18n } : {}),
+    evidence: [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
+      spans: [{ start: mealStart, end: mealEnd, text }] }]
+  };
+  return {
+    ...mealSign.synsem,
+    head: { ...mealSign.synsem.head, schedule: {
+      ...meal, when: undefined, offset: undefined, offsetMin: undefined, offsetMax: undefined
+    } },
+    valence: { ...mealSign.synsem.valence,
+      instructions: mergeInstructions(mealSign.synsem.valence.instructions, [instruction]) }
+  };
+}
+
 function scheduleRefinementSynsems(
   left: HpsgSign,
-  right: HpsgSign
+  right: HpsgSign,
+  context: HpsgUnificationContext
 ): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
+  const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
+  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
+  const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);
+  if (qualifiedLeft) return { left: qualifiedLeft, right: right.synsem, refined: true };
   const refinedLeft = refinedDailyCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
   const refinedRight = refinedDailyCadenceSynsem(right, left);
@@ -968,7 +1085,7 @@ export function combineSigns(
   if (!selectedConstruction) return undefined;
   const target = selectedConstruction.construction.headSide === "left" ? left : right;
   const nonHead = selectedConstruction.construction.headSide === "left" ? right : left;
-  const refinement = scheduleRefinementSynsems(left, right);
+  const refinement = scheduleRefinementSynsems(left, right, context);
   const synsem = selectedConstruction.construction.operation === "scope"
     ? scopeSynsem(nonHead, target)
     : selectedConstruction.construction.operation === "form-site-relative"

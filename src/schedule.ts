@@ -37,6 +37,7 @@ import {
   getAdministrationOffsetMinutes,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
   getTimingOccurrenceCap,
+  getCycleDayConstraint,
   getTimingClockWindow,
   getTimingEventWindow,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL
@@ -2241,7 +2242,19 @@ function generateWakingHoursIntervalSeries(
   return results;
 }
 
+/** Known cycle-day eligibility cannot be replaced by an independent HS/QD cadence.
+ * @param dosage The selected dosage; unknown modifiers and editable source remain untouched.
+ */
+function requireResolvedCycleDays(dosage: FhirDosage): void {
+  const cycle = getCycleDayConstraint(dosage);
+  if (cycle) {
+    throw new MedicationQuantityCalculationError("unresolved-cycle-eligibility",
+      `Cannot calculate cycle-day administrations until the cycle is resolved (${cycle.reason}). The dose, route, timing and source remain editable.`);
+  }
+}
+
 function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): string[] {
+  requireResolvedCycleDays(dosage);
   if (!options || typeof options !== "object") {
     throw new Error("Options argument is required for nextDueDoses");
   }
@@ -3743,6 +3756,7 @@ function calculateTotalUnitsSingle(
   options: Omit<TotalUnitsOptions, "dosage"> & { dosage: FhirDosage }
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
+  requireResolvedCycleDays(sourceDosage);
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) throw new Error("timeZone is required for calculateTotalUnits");

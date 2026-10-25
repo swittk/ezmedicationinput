@@ -235,7 +235,7 @@ export function scopeSequentialPhaseSemantics(
     const donor = states[dependency.from]?.primaryClause;
     const recipient = states[dependency.to]?.primaryClause;
     if (!donor?.dose || !donor.schedule || !recipient) continue;
-    recipient.dose = cloneStructuredValue(donor.dose);
+    recipient.dose = recipient.dose ?? cloneStructuredValue(donor.dose);
     recipient.method = recipient.method ?? cloneStructuredValue(donor.method);
     recipient.route = recipient.route ?? cloneStructuredValue(donor.route);
     recipient.schedule = {

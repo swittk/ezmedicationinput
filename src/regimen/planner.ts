@@ -590,7 +590,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     ];
     let ownedSpan: Range | undefined;
     for (const item of scheduleEvidence) {
-      if (item.scheduleFields?.indexOf('when') === -1) continue;
+      if ((item.scheduleFields?.indexOf('when') ?? -1) < 0) continue;
       ownedSpan = item.spans.find(span =>
         summary.start + span.start <= site.start && summary.start + span.end >= site.end
       );

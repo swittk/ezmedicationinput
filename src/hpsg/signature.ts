@@ -9,6 +9,7 @@ import {
   CanonicalAdditionalInstructionExpr,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
+  CanonicalCycleDayConstraint,
   CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   AdministrationTargetCoordinationKind,
@@ -303,6 +304,7 @@ declare module "../types" {
 }
 
 export interface HpsgScheduleFeature {
+  cycleDayConstraint?: CanonicalCycleDayConstraint;
   /** Typed whole-course interval for a recurring active/rest construction. */
   repeatCycle?: FhirQuantity;
   /** Explicit finite number of whole-course repetitions; absent means unbounded. */

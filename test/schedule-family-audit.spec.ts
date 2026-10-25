@@ -10,6 +10,7 @@ import { canonicalToFhir } from "../src/fhir";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
+import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 
 const start = "2024-01-01T00:00:00Z";
 const due = {
@@ -2329,5 +2330,105 @@ describe("Thai duration lead remains part of the shared course constituent", () 
     expect(clause.instructionGraph?.actions[0].args).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "duration", quantity: { value: 1, unit: "min" } })
     ]));
+  });
+});
+
+
+describe("cycle-day constituents own their complete temporal phrase", () => {
+  it.each([
+    ["1 cap PV HS on cycle days 16-25 for 3 cycles", "on cycle days 16-25 for 3 cycles", 16, 25],
+    ["1 cap PV HS days 16-25 of menstrual cycle", "days 16-25 of menstrual cycle", 16, 25],
+    ["1 cap PV HS on cycle days 16-25 of every 28-day cycle", "on cycle days 16-25 of every 28-day cycle", 16, 25],
+    ["1 cap PV HS x10d starting on cycle day 16", "starting on cycle day 16", 16, 16]
+  ] as const)("keeps day ordinals and cycle heads out of the dose and body site: %s", (source, temporal, first, last) => {
+    const cycles = recognizeCycles(source);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0].kind).toBe("calendar-days");
+    expect(cycles[0].sourceText).toBe(temporal);
+    expect(cycles[0].start).toBe(source.indexOf(temporal));
+    expect(cycles[0].days).toEqual(Array.from({ length: last - first + 1 }, (_, i) => first + i));
+    expect(cycles[0].error).toBeDefined();
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "cap" });
+    expect(parsed.meta.canonical.clauses[0].dose?.range).toBeUndefined();
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : dosage.step.flatMap(step => step.component);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "cap" });
+      expect(rows[0].doseAndRate?.[0].doseRange).toBeUndefined();
+      const site = Array.isArray(dosage) ? dosage[0].site : dosage.step[0].component[0].site?.concept;
+      expect(site?.coding?.[0]?.code).toBe("76784001");
+      expect(formatSig(rows[0], "long", { locale: "en" })).not.toContain("into the cycle");
+    }
+  });
+
+  it("retains a fully anchored finite calendar cycle with the same independent vaginal dose", () => {
+    const source = "1 cap PV HS on days 16-25 of every 28-day cycle starting 2026-11-01 for 3 cycles";
+    const parsed = parseSig(source);
+    const orderedAt = "2026-11-01T00:00:00Z";
+    for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt, timeZone: "UTC",
+        durationValue: 84, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(30);
+    }
+    expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(parsed.fhir[0].site?.coding?.[0]?.code).toBe("76784001");
+  });
+});
+
+
+describe("Thai daypart punctuation composes one shared meal relation", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const options = {
+    orderedAt, from: orderedAt, timeZone: "Asia/Bangkok", limit: 30,
+    eventClock: {
+      [EventTiming.Breakfast]: "08:00", [EventTiming.Lunch]: "12:30",
+      [EventTiming.Dinner]: "18:30"
+    },
+    mealOffsets: {
+      [EventTiming["After Breakfast"]]: 30, [EventTiming["After Lunch"]]: 30,
+      [EventTiming["After Dinner"]]: 30
+    }
+  };
+  it.each([
+    "รับประทาน 1 เม็ด เช้า-เย็น หลังอาหาร x7d",
+    "รับประทาน 1 เม็ด เช้า/เย็น หลังอาหาร x7d",
+    "รับประทาน 1 เม็ด หลังอาหาร เช้า-เย็น x7d",
+    "รับประทาน 1 เม็ด วันละ 2 ครั้ง เช้า-เย็น หลังอาหาร x7d",
+    "รับประทาน 1 เม็ด เช้า เย็น หลังอาหาร x7d",
+    "รับประทาน 1 เม็ด เช้าและเย็น หลังอาหาร x7d",
+    "รับประทาน 1 เม็ด หลังอาหารเช้าและเย็น x7d"
+  ])("keeps both prescribed meal occasions without adding lunch: %s", source => {
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : toFhirR5Dosages(dosage);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(rows[0].timing?.repeat?.when).toEqual([
+        EventTiming["After Breakfast"], EventTiming["After Dinner"]
+      ]);
+      const dates = nextDueDoses(dosage, options);
+      expect(dates).toHaveLength(14);
+      expect(dates.filter(at => at.startsWith("2026-11-02")).map(at => at.slice(11, 16)))
+        .toEqual(["08:30", "19:00"]);
+      expect(dates[dates.length - 1]).toBe("2026-11-08T19:00:00+07:00");
+      expect(calculateTotalUnits({ dosage, ...options,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(14);
+    }
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("preserves the independent numeric meal-dash dose construction", () => {
+    const source = "1-0-1 PO PC x7d";
+    const parsed = parseSig(source, { context: { dosageForm: "tablet" }, enableMealDashSyntax: true });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, options)).toHaveLength(14);
+      expect(calculateTotalUnits({ dosage, ...options,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(14);
+    }
   });
 });

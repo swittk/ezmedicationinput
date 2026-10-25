@@ -33,16 +33,6 @@
         "isModifierReason": "Ignoring the represented condition or course relationship can change administration semantics."
       },
       {
-        "id": "Extension.url",
-        "path": "Extension.url",
-        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose"
-      },
-      {
-        "id": "Extension.value[x]",
-        "path": "Extension.value[x]",
-        "max": "0"
-      },
-      {
         "id": "Extension.extension",
         "path": "Extension.extension",
         "slicing": {
@@ -64,16 +54,6 @@
         "sliceName": "predicate",
         "min": 0,
         "max": "1"
-      },
-      {
-        "id": "Extension.extension:predicate.url",
-        "path": "Extension.extension.url",
-        "fixedUri": "predicate"
-      },
-      {
-        "id": "Extension.extension:predicate.value[x]",
-        "path": "Extension.extension.value[x]",
-        "max": "0"
       },
       {
         "id": "Extension.extension:predicate.extension",
@@ -99,14 +79,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:kind.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "kind"
-      },
-      {
         "id": "Extension.extension:predicate.extension:kind.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:kind.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "kind"
       },
       {
         "id": "Extension.extension:predicate.extension:kind.value[x]",
@@ -127,14 +107,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:name.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "name"
-      },
-      {
         "id": "Extension.extension:predicate.extension:name.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:name.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "name"
       },
       {
         "id": "Extension.extension:predicate.extension:name.value[x]",
@@ -155,14 +135,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:operation.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "operation"
-      },
-      {
         "id": "Extension.extension:predicate.extension:operation.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:operation.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "operation"
       },
       {
         "id": "Extension.extension:predicate.extension:operation.value[x]",
@@ -183,14 +163,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:value.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "value"
-      },
-      {
         "id": "Extension.extension:predicate.extension:value.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:value.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "value"
       },
       {
         "id": "Extension.extension:predicate.extension:value.value[x]",
@@ -211,14 +191,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:unit.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "unit"
-      },
-      {
         "id": "Extension.extension:predicate.extension:unit.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:unit.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "unit"
       },
       {
         "id": "Extension.extension:predicate.extension:unit.value[x]",
@@ -239,14 +219,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:text.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "text"
-      },
-      {
         "id": "Extension.extension:predicate.extension:text.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:text.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "text"
       },
       {
         "id": "Extension.extension:predicate.extension:text.value[x]",
@@ -267,14 +247,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:expected.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "expected"
-      },
-      {
         "id": "Extension.extension:predicate.extension:expected.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:expected.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "expected"
       },
       {
         "id": "Extension.extension:predicate.extension:expected.value[x]",
@@ -304,11 +284,6 @@
         ]
       },
       {
-        "id": "Extension.extension:predicate.extension:condition.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
-      },
-      {
         "id": "Extension.extension:predicate.extension:condition.extension",
         "path": "Extension.extension.extension.extension",
         "min": 1,
@@ -318,6 +293,11 @@
         "id": "Extension.extension:predicate.extension:condition.url",
         "path": "Extension.extension.extension.url",
         "fixedUri": "condition"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:condition.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
       },
       {
         "id": "Extension.extension:predicate.extension:conditions",
@@ -336,11 +316,6 @@
         ]
       },
       {
-        "id": "Extension.extension:predicate.extension:conditions.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
-      },
-      {
         "id": "Extension.extension:predicate.extension:conditions.extension",
         "path": "Extension.extension.extension.extension",
         "min": 1,
@@ -352,6 +327,11 @@
         "fixedUri": "conditions"
       },
       {
+        "id": "Extension.extension:predicate.extension:conditions.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
         "id": "Extension.extension:predicate.extension:empty",
         "path": "Extension.extension.extension",
         "sliceName": "empty",
@@ -359,14 +339,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:empty.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "empty"
-      },
-      {
         "id": "Extension.extension:predicate.extension:empty.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:empty.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "empty"
       },
       {
         "id": "Extension.extension:predicate.extension:empty.value[x]",
@@ -387,14 +367,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:emptyArray.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "emptyArray"
-      },
-      {
         "id": "Extension.extension:predicate.extension:emptyArray.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:emptyArray.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "emptyArray"
       },
       {
         "id": "Extension.extension:predicate.extension:emptyArray.value[x]",
@@ -413,16 +393,6 @@
         "sliceName": "retainedField",
         "min": 0,
         "max": "*"
-      },
-      {
-        "id": "Extension.extension:predicate.extension:retainedField.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "retainedField"
-      },
-      {
-        "id": "Extension.extension:predicate.extension:retainedField.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
       },
       {
         "id": "Extension.extension:predicate.extension:retainedField.extension",
@@ -448,14 +418,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:predicate.extension:retainedField.extension:name.url",
-        "path": "Extension.extension.extension.extension.url",
-        "fixedUri": "name"
-      },
-      {
         "id": "Extension.extension:predicate.extension:retainedField.extension:name.extension",
         "path": "Extension.extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:retainedField.extension:name.url",
+        "path": "Extension.extension.extension.extension.url",
+        "fixedUri": "name"
       },
       {
         "id": "Extension.extension:predicate.extension:retainedField.extension:name.value[x]",
@@ -474,6 +444,13 @@
         "sliceName": "value",
         "min": 0,
         "max": "1"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:retainedField.extension:value.extension",
+        "path": "Extension.extension.extension.extension.extension",
+        "min": 0,
+        "max": "*",
+        "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
       },
       {
         "id": "Extension.extension:predicate.extension:retainedField.extension:value.url",
@@ -498,11 +475,24 @@
         ]
       },
       {
-        "id": "Extension.extension:predicate.extension:retainedField.extension:value.extension",
-        "path": "Extension.extension.extension.extension.extension",
-        "min": 0,
-        "max": "*",
-        "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+        "id": "Extension.extension:predicate.extension:retainedField.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "retainedField"
+      },
+      {
+        "id": "Extension.extension:predicate.extension:retainedField.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:predicate.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "predicate"
+      },
+      {
+        "id": "Extension.extension:predicate.value[x]",
+        "path": "Extension.extension.value[x]",
+        "max": "0"
       },
       {
         "id": "Extension.extension:calendarDayPredicate",
@@ -512,16 +502,6 @@
         "max": "1",
         "short": "Source-certified whole-day predicate metadata",
         "definition": "Certifies that the encoded predicate has the same truth value throughout a local calendar day. This is not an additional administration condition. The metadata is usable only when its complete decoded predicate equals the live executable predicate; changed, cleared, or mixed time-varying predicates invalidate the certificate."
-      },
-      {
-        "id": "Extension.extension:calendarDayPredicate.url",
-        "path": "Extension.extension.url",
-        "fixedUri": "calendarDayPredicate"
-      },
-      {
-        "id": "Extension.extension:calendarDayPredicate.value[x]",
-        "path": "Extension.extension.value[x]",
-        "max": "0"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension",
@@ -547,14 +527,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:kind.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "kind"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:kind.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:kind.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "kind"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:kind.value[x]",
@@ -575,14 +555,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:name.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "name"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:name.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:name.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "name"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:name.value[x]",
@@ -603,14 +583,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:operation.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "operation"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:operation.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:operation.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "operation"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:operation.value[x]",
@@ -631,14 +611,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:value.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "value"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:value.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:value.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "value"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:value.value[x]",
@@ -659,14 +639,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:unit.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "unit"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:unit.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:unit.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "unit"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:unit.value[x]",
@@ -687,14 +667,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:text.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "text"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:text.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:text.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "text"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:text.value[x]",
@@ -715,14 +695,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:expected.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "expected"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:expected.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:expected.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "expected"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:expected.value[x]",
@@ -752,11 +732,6 @@
         ]
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:condition.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:condition.extension",
         "path": "Extension.extension.extension.extension",
         "min": 1,
@@ -766,6 +741,11 @@
         "id": "Extension.extension:calendarDayPredicate.extension:condition.url",
         "path": "Extension.extension.extension.url",
         "fixedUri": "condition"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:condition.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:conditions",
@@ -784,11 +764,6 @@
         ]
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:conditions.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:conditions.extension",
         "path": "Extension.extension.extension.extension",
         "min": 1,
@@ -800,6 +775,11 @@
         "fixedUri": "conditions"
       },
       {
+        "id": "Extension.extension:calendarDayPredicate.extension:conditions.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
         "id": "Extension.extension:calendarDayPredicate.extension:empty",
         "path": "Extension.extension.extension",
         "sliceName": "empty",
@@ -807,14 +787,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:empty.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "empty"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:empty.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:empty.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "empty"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:empty.value[x]",
@@ -835,14 +815,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "emptyArray"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.extension",
         "path": "Extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "emptyArray"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:emptyArray.value[x]",
@@ -861,16 +841,6 @@
         "sliceName": "retainedField",
         "min": 0,
         "max": "*"
-      },
-      {
-        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.url",
-        "path": "Extension.extension.extension.url",
-        "fixedUri": "retainedField"
-      },
-      {
-        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.value[x]",
-        "path": "Extension.extension.extension.value[x]",
-        "max": "0"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension",
@@ -896,14 +866,14 @@
         "max": "1"
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.url",
-        "path": "Extension.extension.extension.extension.url",
-        "fixedUri": "name"
-      },
-      {
         "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.extension",
         "path": "Extension.extension.extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.url",
+        "path": "Extension.extension.extension.extension.url",
+        "fixedUri": "name"
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:name.value[x]",
@@ -922,6 +892,13 @@
         "sliceName": "value",
         "min": 0,
         "max": "1"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.extension",
+        "path": "Extension.extension.extension.extension.extension",
+        "min": 0,
+        "max": "*",
+        "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
       },
       {
         "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.url",
@@ -946,11 +923,34 @@
         ]
       },
       {
-        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.extension:value.extension",
-        "path": "Extension.extension.extension.extension.extension",
-        "min": 0,
-        "max": "*",
-        "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.url",
+        "path": "Extension.extension.extension.url",
+        "fixedUri": "retainedField"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.extension:retainedField.value[x]",
+        "path": "Extension.extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "calendarDayPredicate"
+      },
+      {
+        "id": "Extension.extension:calendarDayPredicate.value[x]",
+        "path": "Extension.extension.value[x]",
+        "max": "0"
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "https://github.com/swittk/ezmedicationinput/fhir/StructureDefinition/medication-conditional-dose"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
       }
     ]
   }

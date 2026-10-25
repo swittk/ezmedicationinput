@@ -2411,3 +2411,75 @@ describe("registered clinical notification advice", () => {
     }
   });
 });
+
+
+describe("full review HPSG ownership corrections", () => {
+  it("does not turn ordinary missed-dose advice into a condition on the standing daily dose", () => {
+    const source = "Take 1 tablet daily. If you miss a dose, take it as soon as you remember.";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toBeUndefined();
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionScopes).toHaveLength(1);
+    expect(clause.instructionScopes![0].target.start).toBe(source.indexOf("take it"));
+    const graph = clause.instructionGraph!;
+    const condition = graph.relations.find(relation => relation.kind === "if")!;
+    expect(condition.text).toMatch(/^If you miss a dose,?$/u);
+    expect(graph.actions[condition.toActionIndex!].predicate.lemma).toBe("take");
+    expect(graph.actions.some(action => action.predicate.lemma === "miss" ||
+      action.predicate.lemma === "withhold-administration" && action.sourceText?.startsWith("miss")))
+      .toBe(false);
+    for (const dosage of [parsed.fhirNext, parsed.fhir,
+      toFhirR5Dosages(parsed.fhirNext), toDosageDetails(toFhirR5Dosages(parsed.fhirNext))]) {
+      const rows = Array.isArray(dosage) ? dosage : toFhirR5Dosages(dosage);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(getDosageCondition(rows[0])).toBeUndefined();
+      expect(calculateTotalUnits({ dosage, ...supply, durationValue: 7 }).totalUnits).toBe(7);
+    }
+  });
+
+  it.each(["omit", "skip", "withhold"])("keeps a genuine %s instruction attached to the stated BP condition", action => {
+    const parsed = parseSig(`1 tab PO QD; ${action} if SBP <100`);
+    const condition = getDosageCondition(parsed.fhir[0]);
+    expect(condition).toMatchObject({ kind: "not", condition: {
+      kind: "measurement", name: "sbp", operation: "lt", value: 100
+    } });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+  });
+
+  it.each([
+    "1 drop OD QID; 2 drops OS BID",
+    "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID"
+  ])("keeps explicit eye-site ranges absolute across later segments: %s", source => {
+    const parsed = parseSig(source);
+    const explicitSites = parsed.meta.canonical.clauses.filter(clause => clause.site?.range);
+    expect(explicitSites).toHaveLength(2);
+    for (const [index, token] of ["OD", "OS"].entries()) {
+      const range = explicitSites[index].site!.range!;
+      expect(range).toEqual({ start: source.indexOf(token), end: source.indexOf(token) + token.length });
+      expect(source.slice(range.start, range.end)).toBe(token);
+    }
+    expect(explicitSites.map(clause => clause.site?.text)).toEqual(["right eye", "left eye"]);
+    expect(explicitSites.map(clause => clause.dose?.value)).toEqual(source.includes("2 drops") ? [1, 2] : [1, 1]);
+  });
+});
+
+
+describe("equivalent written half-tablet doses", () => {
+  it.each(["½", "1/2", "0.5"])("keeps %s as the prescribed half tablet", fraction => {
+    const source = `${fraction} tab PO BID x7d`;
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : toFhirR5Dosages(dosage);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
+      expect(rows[0].timing?.repeat).toMatchObject({ frequency: 2,
+        boundsDuration: { value: 7, code: "d" } });
+      expect(calculateTotalUnits({ dosage, ...supply, durationValue: 28 }).totalUnits).toBe(7);
+    }
+  });
+});

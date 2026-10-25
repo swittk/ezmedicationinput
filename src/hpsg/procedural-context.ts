@@ -4,8 +4,8 @@ import {
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
-import { relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
-import { medicationGuardForContext, parseClockToken, type HpsgClauseContext } from "./rule-context";
+import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
+import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
 import { LexKind } from "../lexer/token-types";
 import { MEAL_TIMING_BY_RELATION } from "./lexical-classes";
 import { explicitDoseLexicalEnd } from "./rules/core-rules";
@@ -26,7 +26,33 @@ export function getProceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
 }
 
 
-const CONDITIONAL_ADVICE_CACHE = new WeakMap<object, Map<number, AdviceFrame>>();
+/** Existing action-sequence relation shared by condition closure and lexical ownership. */
+export function instructionActionsAreSequenced(
+  context: HpsgClauseContext, startSource: number, endSource: number
+): boolean {
+  if (context.state.input.slice(startSource, endSource).includes(",")) return true;
+  return context.tokens.some(token => startSource <= token.sourceStart &&
+    token.sourceEnd <= endSource && ACTION_SEQUENCE_RELATION_SURFACES.has(normalizeTokenLower(token)));
+}
+
+/** Compose the consecutive action daughters selected by one fronted condition. */
+export function proceduralInstructionProgram(
+  context: HpsgClauseContext, firstTargetIndex: number, frames: AdviceFrame[]
+): AdviceFrame[] {
+  const result = [frames[firstTargetIndex]];
+  let previous = frames[firstTargetIndex];
+  for (let index = firstTargetIndex + 1; index < frames.length; index += 1) {
+    const next = frames[index];
+    const gap = context.state.input.slice(previous.span.end, next.span.start);
+    if (/[.!?;]/u.test(gap) ||
+        !instructionActionsAreSequenced(context, previous.span.end, next.span.start)) break;
+    result.push(next);
+    previous = next;
+  }
+  return result;
+}
+
+const CONDITIONAL_ADVICE_CACHE = new WeakMap<object, Map<number, AdviceFrame[]>>();
 
 /** One source ownership map shared by PRN, timing and conditional-advice
  * constructions. A complete new dose remains an administration. An undosed
@@ -34,10 +60,10 @@ const CONDITIONAL_ADVICE_CACHE = new WeakMap<object, Map<number, AdviceFrame>>()
  * and temporal complements rather than changing the standing dose to PRN.
  * @param context Existing token stream and cached action daughters.
  */
-function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, AdviceFrame> {
+function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, AdviceFrame[]> {
   const cached = CONDITIONAL_ADVICE_CACHE.get(context.state);
   if (cached) return cached;
-  const owners = new Map<number, AdviceFrame>();
+  const owners = new Map<number, AdviceFrame[]>();
   CONDITIONAL_ADVICE_CACHE.set(context.state, owners);
   let frames: AdviceFrame[] | undefined;
   for (const token of context.tokens) {
@@ -62,7 +88,10 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
       let clauseStart = 0;
       for (const boundary of context.tokens) {
         if (boundary.sourceEnd > frame.span.start) break;
-        if (/^[;.!?]$/u.test(boundary.original)) clauseStart = boundary.sourceEnd;
+        // A delimited antecedent owns its own nominals ("if you miss a dose,").
+        // Only an amount after that delimiter can be a fronted argument of
+        // the following administration head.
+        if (/^[,;.!?]$/u.test(boundary.original)) clauseStart = boundary.sourceEnd;
       }
       const hasFrontedDose = context.tokens.some((candidate, index) => {
         if (candidate.sourceStart < clauseStart || index >= headIndex) return false;
@@ -77,7 +106,9 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
       });
       if (hasFrontedDose) continue;
     }
-    if (procedural || undosedAction) owners.set(token.index, frame);
+    if (procedural || undosedAction) {
+      owners.set(token.index, proceduralInstructionProgram(context, frames.indexOf(frame), frames));
+    }
   }
   return owners;
 }
@@ -88,14 +119,14 @@ export function conditionalAdviceOwnerAt(context: HpsgClauseContext, index: numb
   const token = context.tokens[index];
   if (!token || !relationHasGrammarFeature(
       resolveActionRelationSurface(token.canonical ?? token.lower), "conditionalTail")) return undefined;
-  return conditionalAdviceOwners(context).get(index);
+  return conditionalAdviceOwners(context).get(index)?.[0];
 }
 
 /** Whether this existing action daughter is governed as conditional advice. */
 export function isConditionalAdviceFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
   if (frame.args.some(argument => argument.role === AdviceArgumentRole.Amount ||
       argument.role === AdviceArgumentRole.Site)) return false;
-  for (const owner of conditionalAdviceOwners(context).values()) if (owner === frame) return true;
+  for (const program of conditionalAdviceOwners(context).values()) if (program.indexOf(frame) >= 0) return true;
   return false;
 }
 

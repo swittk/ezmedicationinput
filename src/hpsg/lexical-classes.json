@@ -677,6 +677,7 @@
   },
   "doseFractionWords": {
     "half": 0.5,
+    "½": 0.5,
     "quarter": 0.25,
     "fourth": 0.25,
     "third": 0.3333333333333333,
@@ -1176,6 +1177,10 @@
   "listSeparators": [
     ",",
     "and"
+  ],
+  "thaiDaypartListSeparators": [
+    "-",
+    "/"
   ],
   "phaseAdjustmentLeadSequences": [
     [

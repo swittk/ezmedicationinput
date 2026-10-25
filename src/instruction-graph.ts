@@ -2310,8 +2310,14 @@ export function parseInstructionActions(
       if (preposed) {
         attachPreposedActionRelation(frame, preposed, parts, sourceText, baseOffset, options);
       }
-      frames.push(frame);
-      sequenceIndex += 1;
+      // Nonvolitional event predicates can have a prohibitive directive sense.
+      // Apply the lexical license after shared negation has composed, so a
+      // positive antecedent predicate is not emitted as a commanded action.
+      const requiredPolarity = startingMatch?.definition.argumentParserConfig?.requiredDirectivePolarity;
+      if (!requiredPolarity || (frame.polarity ?? AdvicePolarity.Affirm) === requiredPolarity) {
+        frames.push(frame);
+        sequenceIndex += 1;
+      }
     }
     cursor = end;
     if (ACTION_SEQUENCE_MARKERS.has(key(parts.slice(cursor, cursor + 1)[0]))) cursor += 1;

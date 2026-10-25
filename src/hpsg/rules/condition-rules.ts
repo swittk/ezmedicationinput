@@ -10,13 +10,12 @@ import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstru
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
 import {
-  ACTION_SEQUENCE_RELATION_SURFACES,
   relationHasGrammarFeature,
   resolveActionRelationSurface
 } from "../../relation-terminology";
-import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame } from "../procedural-context";
+import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
-import { CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
+import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { countAndDurationRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
@@ -282,10 +281,13 @@ function withholdsMedicationAdministration(
     // A medication/product noun is a legitimate explicit medication target;
     // unrelated food, breath, container and activity objects remain distinct.
     if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Theme) return false;
-    if (argument.conceptId === "medication-dose" || argument.conceptId === "product") return true;
     const nominalTokens = context.tokens.filter(token =>
       tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument));
     const words = nominalTokens.map(normalizeTokenLower);
+    // An explicitly supplemental dose is a distinct referent, not the
+    // standing administration whose clinical guard is being constructed.
+    if (words.some(word => SUPPLEMENTAL_DOSE_MODIFIERS.has(word))) return false;
+    if (argument.conceptId === "medication-dose" || argument.conceptId === "product") return true;
     // A registered withholding predicate can select a temporal noun with an
     // elliptical DOSE head (hold 20:00 / omit PM). Physical objects remain
     // distinct; every token must belong to the temporal nominal constituent.
@@ -656,37 +658,6 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
 
 function hasStrongBoundary(text: string): boolean {
   return /[.!?;]/u.test(text);
-}
-
-function explicitlySequences(
-  context: HpsgClauseContext,
-  startSource: number,
-  endSource: number
-): boolean {
-  if (context.state.input.slice(startSource, endSource).includes(",")) return true;
-  return context.tokens.some((token) =>
-    startSource <= token.sourceStart && token.sourceEnd <= endSource &&
-    ACTION_SEQUENCE_RELATION_SURFACES.has(normalizeTokenLower(token))
-  );
-}
-
-function prefixProgram(
-  context: HpsgClauseContext,
-  firstTargetIndex: number,
-  frames: ReturnType<typeof getProceduralFrames>
-): typeof frames {
-  const result = [frames[firstTargetIndex]];
-  let previous = frames[firstTargetIndex];
-  for (let index = firstTargetIndex + 1; index < frames.length; index += 1) {
-    const next = frames[index];
-    const gap = context.state.input.slice(previous.span.end, next.span.start);
-    if (hasStrongBoundary(gap)) break;
-    const linked = explicitlySequences(context, previous.span.end, next.span.start);
-    if (!linked) break;
-    result.push(next);
-    previous = next;
-  }
-  return result;
 }
 
 function conditionTokens(

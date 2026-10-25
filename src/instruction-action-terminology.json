@@ -1623,7 +1623,7 @@
       "display": "Withhold administration",
       "i18n": { "th": "งดการให้ยา" },
       "aliases": [
-        "omit", "skip", "miss", "withhold", "งดให้ยา", "ไม่ต้องให้ยา"
+        "omit", "skip", "withhold", "งดให้ยา", "ไม่ต้องให้ยา"
       ],
       "procedural": true,
       "argumentParser": "object-duration",
@@ -1855,6 +1855,25 @@
       ],
       "procedural": true,
       "safetyScopeTarget": true
+    },
+    {
+      "code": "miss",
+      "semanticClass": "miss",
+      "display": "Miss",
+      "aliases": ["miss"],
+      "procedural": true,
+      "argumentParser": "object-duration",
+      "argumentParserConfig": { "requiredDirectivePolarity": "negate" },
+      "realizer": "source-faithful"
+    },
+    {
+      "code": "double",
+      "semanticClass": "administration_pattern",
+      "display": "Double",
+      "i18n": { "th": "เพิ่มเป็นสองเท่า" },
+      "aliases": ["double"],
+      "procedural": true,
+      "realizer": "source-faithful"
     },
     {
       "code": "adjust",

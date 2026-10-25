@@ -41,6 +41,7 @@ import {
   AdvicePolarity,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
+  CanonicalCycleDayConstraint,
   CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
@@ -62,6 +63,48 @@ import {
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
+
+/** Known modifier: an independent cadence is restricted by unresolved cycle days. */
+export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-cycle-day-eligibility";
+
+/** Read the recognized cycle constraint without interpreting narrative text.
+ * @param dosage Editable R5/R6-compatible dosage with a retained known modifier.
+ */
+export function getCycleDayConstraint(dosage: FhirDosage): CanonicalCycleDayConstraint | undefined {
+  const extension = dosage.modifierExtension?.find(item => item.url === CYCLE_DAY_ELIGIBILITY_EXTENSION_URL);
+  if (!extension) return undefined;
+  const child = (url: string) => extension.extension?.find(item => item.url === url);
+  const days = extension.extension?.filter(item => item.url === "day")
+    .map(item => item.valueInteger).filter((day): day is number => typeof day === "number") ?? [];
+  const periodDays = child("periodDays")?.valueInteger;
+  const cycles = child("cycles")?.valueInteger;
+  const anchor = child("anchor")?.valueString;
+  return {
+    days,
+    ...(periodDays !== undefined ? { periodDays } : {}),
+    ...(cycles !== undefined ? { cycles } : {}),
+    ...(anchor !== undefined ? { anchor } : {}),
+    reason: child("reason")?.valueCode ?? "unresolved-cycle-eligibility",
+    sourceText: child("source")?.valueString ?? ""
+  };
+}
+
+/** Preserve the source-decided cycle restriction as a genuine dosage modifier.
+ * @param constraint Recognized cycle ordinals and the unresolved calendar dependency.
+ */
+function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): FhirExtension {
+  return {
+    url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
+    extension: [
+      ...constraint.days.map(day => ({ url: "day", valueInteger: day })),
+      ...(constraint.periodDays !== undefined ? [{ url: "periodDays", valueInteger: constraint.periodDays }] : []),
+      ...(constraint.cycles !== undefined ? [{ url: "cycles", valueInteger: constraint.cycles }] : []),
+      ...(constraint.anchor !== undefined ? [{ url: "anchor", valueString: constraint.anchor }] : []),
+      { url: "reason", valueCode: constraint.reason },
+      { url: "source", valueString: constraint.sourceText }
+    ]
+  };
+}
 
 export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
 /** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
@@ -1433,6 +1476,10 @@ export function canonicalToFhir(
   // The HPSG clinical scope is already resolved in CanonicalSigClause.
   // FHIR projects it exactly once; it must never decide which daughter
   // receives an administration condition or calendar exclusion.
+  if (clause.schedule?.cycleDayConstraint) {
+    dosage.modifierExtension = [...(dosage.modifierExtension ?? []),
+      cycleDayConstraintExtension(clause.schedule.cycleDayConstraint)];
+  }
   const adjunct = clause.clinicalAdjuncts;
   if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition, adjunct.calendarDayCondition);
   if (adjunct?.excludedDates?.length) {
@@ -1552,6 +1599,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
   const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
+  const cycleDayConstraint = getCycleDayConstraint(dosage);
   const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
   if (
@@ -1563,6 +1611,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     clockWindow !== undefined ||
     weekdayOrdinal !== undefined ||
     eventWindow !== undefined ||
+    cycleDayConstraint !== undefined ||
     occurrenceCap !== undefined ||
     maxDosePerPeriod?.length ||
     repeat?.boundsDuration ||
@@ -1588,6 +1637,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
+      cycleDayConstraint,
       administrationOffsetMinutes,
       timingCode,
       count: repeat?.count,
@@ -1775,6 +1825,11 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     };
   }
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  const cycleConstraint = getCycleDayConstraint(dosage);
+  if (cycleConstraint) {
+    const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    schedule.cycleDayConstraint = cycleConstraint;
+  }
   state.maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);

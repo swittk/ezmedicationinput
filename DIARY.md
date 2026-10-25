@@ -3653,3 +3653,110 @@ parse or schema-validation pass was added for the closure fixes.
 Review scope remains **99 files**: 114 changed paths minus the same 15
 configured exclusions. The exclusions were not widened. The original
 untracked diagnostic probe remains untouched and outside the commit.
+
+
+## 2026-10-25 — HPSG scope, clinical shorthand and cycle eligibility closure
+
+The follow-up addresses ordinary supported SIGs exposed by the full review and
+an independent shorthand audit. Each correction retains a precise dose, cadence,
+course or source-coordinate oracle and positive controls. These changes extend
+the existing lexical and constituent grammar; the FHIR and scheduling consumers
+do not reinterpret the prose.
+
+- A named cycle-day constituent owns its complete temporal nominal. `1 cap PV
+  HS days 16-25 of menstrual cycle` retains one capsule, vaginal site and bedtime
+  timing; the day ordinals cannot become a 16–25-capsule dose or a body site.
+  Missing cycle anchor/period information travels as a typed cycle-day
+  constraint through canonical state, a known FHIR modifier and reopening.
+  Formatting and editing retain the known fields and qualifier. Only scheduling
+  and numeric supply require the unresolved cycle eligibility to be completed.
+  A fully anchored three-cycle example still yields its exact 30 capsules.
+- The existing marked-count daughter now serves total-dose and recurring-course
+  counts. `repeat x3 cycles`, `repeat x 3 cycles` and `repeat for 3 cycles` retain
+  three active courses and their intervening pauses: three 21-day daily courses
+  separated by seven-day rests yield 63 tablets, without a fourth course.
+- MISS is a distinct lexical meaning, separate from medication withholding. Its
+  prohibitive directive sense requires negative polarity, after existing shared
+  negation composition. `Do not miss meals` keeps its meal object as advice;
+  positive MISS inside `If you miss a dose` stays in the antecedent rather than
+  becoming the commanded action. The permanent regression checks the complete
+  antecedent and TAKE target, not only the unaffected medication quantity.
+  HPSG also shares the entire conditional action program between lexical
+  ownership and closure. Supplemental-dose nominals remain distinct from the
+  standing dose. The accepted counseling family retains one scheduled tablet
+  daily and seven tablets over seven days under either condition callback value.
+- Thai morning/evening daughters license their conventional hyphen/slash
+  conjunction inside the existing meal-event constituent. Both relation orders
+  retain breakfast and dinner, including an explicit twice-daily cadence.
+  The previously wrong 7- or 21-tablet outputs are now 14 tablets over seven
+  days. Numeric `1-0-1` meal-dose slots retain their separate construction.
+- Fixed clocks can head a schedule whose adjacent meal-relative daughter is a
+  qualifier. HPSG uses the daughters' typed field provenance and source
+  adjacency; explicit conjunction and separately quantified administrations
+  still introduce additional events. `1 tab PO at 07:00, 12:00 and 18:00 before
+  meals x7d` therefore retains those three exact daily times and 21 tablets,
+  with the meal qualifier preserved as an instruction in English and Thai.
+  Already-owned duration/cadence daughters may bridge the clock and meal
+  constituents, so `at 07:00, 12:00 and 18:00 for 7 days before meals` and
+  its semicolon variant also retain 21 tablets. The original external oracles
+  were kept unchanged. Imported native FHIR
+  containing an explicit clock/event union is unchanged by this grammar rule.
+- A bounded three-token multiplication daughter recognizes spaced `1 x 3` and
+  `1x 3`. The count construction cannot independently claim its incomplete
+  `1 x` prefix. With the supplied tablet-form context, every accepted spelling
+  retains one tablet three times daily for five days, totaling 15 tablets.
+  An explicit once-daily total-count instruction and fractional doses remain
+  covered by independent controls. The glyph `½` is one additional entry in
+  the existing HPSG fraction lexicon, preserving its original source and the
+  same half-tablet meaning as `1/2` and `0.5`, without Unicode source rewriting.
+- Delayed-target inheritance now fills an omitted recipient dose while retaining
+  an explicitly authored quantity. The right/left-eye examples keep 1/2 or 2/1
+  drops at 08:00/08:05; omitted amounts still inherit. Site source ranges rebase
+  with the other canonical ranges. Planner event ownership requires explicit
+  `when` field evidence, including when an evidence record lacks that field list.
+- Three FHIR extension differentials now follow base-element and depth-first
+  ordering. All element definitions keyed by id and all profile metadata remain
+  unchanged. Tests check ordering, contiguous descendants, unique ids, canonical
+  URLs and the existing value constraints. No full external HL7 validator run
+  is claimed.
+
+Final frozen gate: **3,410/3,410 tests across 44 suites**, plus TypeScript.
+All 167 source, test, profile and configuration file hashes remained unchanged
+through the full gate, build, actual-consumer checks and performance run.
+Source fingerprint:
+`da386be1d1511b5aaf6ed9522c5f0445004ee5b6ca417eb96d075320a0f76333`.
+ES6 ESM/CJS bundles, declaration generation and **4/4 packaged-export tests**
+passed. ESM fingerprint:
+`b9fe516f96314931556d2904b3ce022895194b55cf5a6856639fdc212be50212`.
+
+The actual built package passed the unchanged **84/84** independent shorthand
+oracles, **117** authority/round-trip checks, **18** consumer round trips,
+**462 assertions over 59 inputs**, and **20** ESM/CJS instruction-ownership and
+fraction checks. Independent consumer batches passed **221/221** mixed
+schedule, counseling, configured-label, cycle and reordered-meal checks,
+**16/16** dose/cycle/fraction round trips and **10/10** bilingual clock/meal
+round trips. These batches overlap in clinical families and are not presented
+as a unique-input total. The immutable **521-input compatibility replay** had
+zero exceptions, original-source loss, populated-dose-value changes or
+changed dose-row counts.
+
+Matched ES6 Node 22.22.0 medians used 30 warmups and seven alternating batches
+of 50 parses with GC, after all other correctness jobs finished:
+
+| Input family | Baseline ms | Current ms | Change |
+| --- | ---: | ---: | ---: |
+| Routine BID | 1.416 | 1.414 | -0.2% |
+| Ocular QID | 1.551 | 1.526 | -1.6% |
+| Thai BID | 3.443 | 3.462 | +0.6% |
+| Two-phase course | 3.892 | 4.089 | +5.0% |
+| Numeric HOLD | 4.587 | 4.519 | -1.5% |
+
+The largest measured increase was 0.196 ms. These shared-host measurements
+are not phone measurements. No additional general parse, schema-validation
+or serialization pass was added to the ordinary suggestion path.
+
+Review scope remains **99 files**: 114 changed paths minus the same 15 existing
+exclusions. No exclusion was widened and no production grammar was hidden from
+review. The original untracked diagnostic probe remains unchanged and outside
+this commit. These are bounded clinical regression and consumer results, not a
+claim that the parser understands arbitrary clinical prose.

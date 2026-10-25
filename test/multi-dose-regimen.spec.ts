@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import conditionBridgeDefinition from "../fhir/r5/medication-conditional-dose.json";
+import renderedInstructionDefinition from "../fhir/r5/medication-rendered-instruction.json";
+import conditionLogicDefinition from "../fhir/r6/medication-r6-condition-logic.json";
 import {
   formatSig,
   calculateTotalUnits,
@@ -1629,4 +1631,139 @@ describe("published condition bridge metadata contract", () => {
       id: "Extension.extension:calendarDayPredicate.extension:kind.value[x]", type: [{ code: "code" }]
     }));
   });
+});
+
+
+describe("repeated-course count constituents", () => {
+  it.each(["x3", "x 3", "for 3"])("composes repeat %s cycles using the same count meaning", count => {
+    const source = `1 tab PO QD x21d then HOLD x7d then repeat ${count} cycles`;
+    const p = parseSig(source);
+    expect(p.meta.canonical.clauses[0].schedule?.repeatCount).toBe(3);
+    const base = { from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok" };
+    for (const dosage of [p.fhirNext, toFhirR5Dosages(p.fhirNext)]) {
+      expect(calculateTotalUnits({ dosage, ...base, durationValue: 112, durationUnit: "d" }).totalUnits).toBe(63);
+      expect(nextDueDoses(dosage, { ...base, from: "2026-11-23T00:00:00+07:00", limit: 1 })[0]?.slice(0, 10)).toBe("2026-11-30");
+      expect(nextDueDoses(dosage, { ...base, from: "2027-01-25T00:00:00+07:00", limit: 1 })).toEqual([]);
+    }
+    expect(p.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("cycle eligibility stays visible on structured-only import", () => {
+  it("retains the typed qualifier without source label text or duplicated instructions", () => {
+    const p = parseSig("1 cap PV HS on cycle days 16-25 for 3 cycles");
+    const row = toFhirR5Dosages(p.fhirNext)[0];
+    const standalone: FhirDosage = {
+      doseAndRate: row.doseAndRate, route: row.route, site: row.site, timing: row.timing,
+      modifierExtension: row.modifierExtension?.filter(extension => extension.url.endsWith("medication-cycle-day-eligibility"))
+    };
+    const before = JSON.stringify(standalone);
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      const text = formatSig(standalone, style, { locale });
+      expect(text).toContain("on cycle days 16-25 for 3 cycles");
+      expect(text.split("cycle days")).toHaveLength(2);
+    }
+    expect(formatSig(row, "long", { locale: "en" }).toLowerCase().split("cycle days")).toHaveLength(2);
+    expect(JSON.stringify(standalone)).toBe(before);
+  });
+  it("still displays the structural cycle days when optional source wording is absent", () => {
+    const p = parseSig("1 cap PV HS on cycle days 16-25 for 3 cycles");
+    const row = toFhirR5Dosages(p.fhirNext)[0];
+    const standalone: FhirDosage = {
+      doseAndRate: row.doseAndRate, route: row.route, site: row.site, timing: row.timing,
+      modifierExtension: row.modifierExtension?.filter(extension => extension.url.endsWith("medication-cycle-day-eligibility"))
+        .map(extension => ({ ...extension, extension: extension.extension?.filter(child => child.url !== "source") }))
+    };
+    const text = formatSig(standalone, "long", { locale: "en" });
+    expect(text).toMatch(/cycle/iu);
+    expect(text).toContain("16");
+    expect(text).toContain("25");
+    expect(formatSig(standalone, "long", { locale: "th" })).toContain("รอบ");
+  });
+});
+
+
+describe("FHIR Extension differential ordering", () => {
+  it.each([
+    ["R5 conditional dose", conditionBridgeDefinition],
+    ["R5 rendered instruction", renderedInstructionDefinition],
+    ["R6 condition logic", conditionLogicDefinition]
+  ] as const)("keeps %s in base element and depth-first order", (_name, profile) => {
+    // HL7 StructureDefinition 5.4.6: base order, depth-first descendants,
+    // and unsliced descendants before slices. Slice order itself is retained.
+    const elements = profile.differential.element;
+    const ids = elements.map(element => element.id);
+    const order: Record<string, number> = { id: 0, extension: 1, url: 2, "value[x]": 3 };
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids[0]).toBe("Extension");
+    for (const [index, id] of ids.entries()) {
+      const descendants = ids.map((candidate, position) => candidate.startsWith(id + ".") ? position : -1)
+        .filter(position => position >= 0);
+      if (descendants.length) {
+        expect(descendants, id + " descendants").toEqual(
+          Array.from({ length: descendants.length }, (_, offset) => index + offset + 1));
+      }
+      const direct = ids.filter(candidate => candidate.startsWith(id + ".") &&
+        !candidate.slice(id.length + 1).includes("."));
+      const ranks = direct.map(candidate => order[candidate.slice(id.length + 1).split(":")[0]]);
+      expect(ranks.every(rank => rank !== undefined), id + " known Extension children").toBe(true);
+      expect(ranks, id + " base order").toEqual([...ranks].sort((left, right) => left - right));
+      for (const [position, child] of direct.entries()) {
+        const suffix = child.slice(id.length + 1);
+        if (!suffix.includes(":")) continue;
+        const unsliced = id + "." + suffix.split(":")[0];
+        if (ids.includes(unsliced)) expect(ids.indexOf(unsliced)).toBeLessThan(ids.indexOf(child));
+        expect(direct.slice(position + 1)).not.toContain(unsliced);
+      }
+    }
+  });
+});
+
+
+describe("dose-times-frequency whitespace preserves the same clinical regimen", () => {
+  const clocks = {
+    from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00",
+    timeZone: "Asia/Bangkok", eventClock: { CM: "08:00", CD: "12:30", CV: "18:30" },
+    mealOffsets: { PC: 30, PCM: 30, PCD: 30, PCV: 30 }
+  };
+  it.each(["1x3", "1 x3", "1x 3", "1 x 3", "1 * 3"])(
+    "keeps %s as one tablet three times daily, not three tablets once", shorthand => {
+      const source = `${shorthand} po pc x5d`;
+      const parsed = parseSig(source, { context: TABLET_CONTEXT });
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 3, period: 1, periodUnit: "d", duration: 5, durationUnit: "d" });
+      expect(parsed.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+      const strict = toFhirR5Dosages(parsed.fhirNext);
+      for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+        expect(calculateTotalUnits({ dosage, ...clocks, durationValue: 14, durationUnit: "d" }).totalUnits).toBe(15);
+        expect(nextDueDoses(dosage, { ...clocks, limit: 4 })).toEqual([
+          "2026-11-02T08:30:00+07:00", "2026-11-02T13:00:00+07:00",
+          "2026-11-02T19:00:00+07:00", "2026-11-03T08:30:00+07:00"
+        ]);
+        expect(nextDueDoses(dosage, { ...clocks, from: "2026-11-07T00:00:00+07:00", limit: 1 })).toEqual([]);
+      }
+    }
+  );
+  it("retains a fractional first operand as the per-administration amount", () => {
+    const parsed = parseSig("0.5 x 2 po pc x5d", { context: TABLET_CONTEXT });
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 2, duration: 5 });
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(calculateTotalUnits({ dosage, ...clocks, durationValue: 14, durationUnit: "d" }).totalUnits).toBe(5);
+    }
+  });
+  it.each(["1 tab PO QD x3", "1 tab PO QD x 3 doses"])(
+    "leaves an explicitly headed total-dose count unchanged: %s", source => {
+      const parsed = parseSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose?.value).toBe(1);
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, count: 3 });
+      for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(calculateTotalUnits({ dosage, ...clocks, durationValue: 14, durationUnit: "d" }).totalUnits).toBe(3);
+        expect(nextDueDoses(dosage, { ...clocks, limit: 20 })).toHaveLength(3);
+      }
+    }
+  );
 });
