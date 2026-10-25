@@ -2316,7 +2316,7 @@ describe("clinical Thai directive polarity", () => {
       const copied = copiedActions.find(value => value.sourceText.includes(entry.fragment));
       expect(copied).toMatchObject({ predicate: { lemma: entry.lemma }, polarity: "negate" });
       expect(copied?.modality).toBe(entry.modality);
-      expect(copied?.args).toMatchObject(action?.args ?? []);
+      expect(copied?.args).toMatchObject(JSON.parse(JSON.stringify(action?.args ?? [])));
       expect(rows.every(row => row.asNeeded !== true && !getDosageCondition(row))).toBe(true);
       if (entry.supply !== undefined) {
         expect(calculateTotalUnits({ dosage, from: start, orderedAt: start, timeZone: "UTC",

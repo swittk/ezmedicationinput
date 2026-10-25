@@ -4,7 +4,6 @@ import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
 const SNOMED = "http://snomed.info/sct";
-const LOCAL_ACTION = "urn:ezmedicationinput:CodeSystem:medication-instruction-action";
 
 describe("Thai formatter human-review follow-up", () => {
   it("keeps mixed WHEN + negated IF safety scope out of PRN", () => {
@@ -96,14 +95,14 @@ describe("Thai formatter human-review follow-up", () => {
     expect(parsed.longText).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง ตอนเช้า และ ตอนเย็น จำนวน 10 ครั้ง.");
   });
 
-  it("keeps patch-cut prohibition internally typed without inventing an external SNOMED mapping", () => {
+  it("keeps patch-cut prohibition negated with its standard action coding", () => {
     const parsed = parseSig("ห้ามตัดแผ่นแปะ", { locale: "th" });
     const action = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0];
     expect(action).toMatchObject({ predicate: { lemma: "cut" }, polarity: "negate" });
     expect(action?.predicate.codings).toEqual([
-      expect.objectContaining({ system: LOCAL_ACTION, code: "cut" })
+      expect.objectContaining({ system: SNOMED, code: "360314001" })
     ]);
-    expect(action?.predicate.codings?.some((coding) => coding.system === SNOMED)).toBe(false);
+    expect(action?.predicate.codings?.some((coding) => coding.system?.startsWith("urn:ezmedicationinput:"))).toBe(false);
     expect(parsed.fhir.additionalInstruction).toEqual([{ text: "ห้ามตัดแผ่นแปะ" }]);
   });
 

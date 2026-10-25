@@ -505,6 +505,7 @@
     },
     {
       "code": "remove",
+      "coding": {"system": "http://snomed.info/sct", "code": "129303008", "display": "Removal - action"},
       "semanticClass": "manipulate",
       "display": "Remove",
       "i18n": {
@@ -575,6 +576,7 @@
     },
     {
       "code": "stop",
+      "coding": {"system": "http://snomed.info/sct", "code": "421286000", "display": "Discontinue"},
       "semanticClass": "stop",
       "display": "Stop",
       "i18n": {
@@ -612,6 +614,7 @@
     },
     {
       "code": "measure",
+      "coding": {"system": "http://snomed.info/sct", "code": "129266000", "display": "Measurement - action"},
       "semanticClass": "measure",
       "display": "Measure",
       "i18n": {
@@ -782,6 +785,7 @@
     },
     {
       "code": "rinse_mouth",
+      "coding": {"system": "http://snomed.info/sct", "code": "59611000087105", "display": "Mouth rinsing"},
       "semanticClass": "cleanse",
       "display": "Rinse mouth",
       "i18n": {
@@ -893,6 +897,7 @@
     },
     {
       "code": "replace",
+      "coding": {"system": "http://snomed.info/sct", "code": "282089006", "display": "Replacement - action"},
       "semanticClass": "manipulate",
       "display": "Replace",
       "i18n": {
@@ -946,6 +951,7 @@
     },
     {
       "code": "shampoo",
+      "coding": {"system": "http://snomed.info/sct", "code": "420606003", "display": "Shampoo"},
       "semanticClass": "cleanse",
       "display": "Shampoo",
       "i18n": {
@@ -1011,6 +1017,7 @@
     },
     {
       "code": "administer",
+      "coding": {"system": "http://snomed.info/sct", "code": "418283001", "display": "Administer"},
       "semanticClass": "administration",
       "display": "Administer",
       "i18n": {
@@ -1082,6 +1089,7 @@
     },
     {
       "code": "use",
+      "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"},
       "semanticClass": "administration",
       "display": "Use",
       "i18n": {
@@ -1619,6 +1627,7 @@
     },
     {
       "code": "withhold-administration",
+      "coding": {"system": "http://snomed.info/sct", "code": "421139008", "display": "Hold"},
       "semanticClass": "withhold-administration",
       "display": "Withhold administration",
       "i18n": { "th": "งดการให้ยา" },
@@ -1931,6 +1940,7 @@
     },
     {
       "code": "cut",
+      "coding": {"system": "http://snomed.info/sct", "code": "360314001", "display": "Cutting - action"},
       "semanticClass": "manipulate",
       "display": "Cut",
       "i18n": {
@@ -2179,6 +2189,7 @@
     },
     {
       "code": "complete-course",
+      "coding": {"system": "http://snomed.info/sct", "code": "420604000", "display": "Finish"},
       "semanticClass": "course-completion",
       "display": "Complete the course",
       "i18n": {
@@ -2197,6 +2208,7 @@
     },
     {
       "code": "place",
+      "coding": {"system": "http://snomed.info/sct", "code": "421066005", "display": "Place"},
       "semanticClass": "administration",
       "display": "Place",
       "i18n": {
@@ -2218,6 +2230,7 @@
     },
     {
       "code": "nebulize",
+      "coding": {"system": "http://snomed.info/sct", "code": "56251003", "display": "Nebulizer therapy"},
       "semanticClass": "administration",
       "display": "Nebulize",
       "i18n": {
@@ -2233,9 +2246,9 @@
       "acceptsAmount": true,
       "definesDose": true,
       "administrationMethod": {
-        "system": "urn:ezmedicationinput:CodeSystem:medication-action",
-        "code": "nebulize",
-        "display": "Nebulize",
+        "system": "http://snomed.info/sct",
+        "code": "56251003",
+        "display": "Nebulizer therapy",
         "i18n": {
           "th": "พ่นละอองยา"
         }
@@ -2244,6 +2257,7 @@
     },
     {
       "code": "call",
+      "coding": {"system": "http://snomed.info/sct", "code": "420942008", "display": "Call"},
       "semanticClass": "communicate",
       "display": "Call",
       "i18n": {
@@ -2273,6 +2287,7 @@
     },
     {
       "code": "sprinkle",
+      "coding": {"system": "http://snomed.info/sct", "code": "422219000", "display": "Sprinkle"},
       "semanticClass": "prepare",
       "display": "Sprinkle",
       "i18n": {

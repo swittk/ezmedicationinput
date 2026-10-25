@@ -39,10 +39,16 @@ interface ConceptSource {
 
 const DEFAULT_CONCEPTS = (source.concepts as ConceptSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionConceptDefinition>();
+const DEFAULT_BY_CODING = new Map<string, MedicationInstructionConceptDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionConceptDefinition>();
 
 for (const definition of DEFAULT_CONCEPTS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
+  for (const coding of [definition.coding, ...(definition.externalCodings ?? [])]) {
+    if (!coding?.system || !coding.code) continue;
+    const key = coding.system + "|" + coding.code;
+    if (!DEFAULT_BY_CODING.has(key)) DEFAULT_BY_CODING.set(key, definition);
+  }
   for (const alias of [
     definition.code, definition.display, ...(definition.aliases ?? []),
     ...flattenLocaleAliases(definition.localeAliases)
@@ -166,9 +172,11 @@ export function resolveMedicationInstructionConcept(
 }
 
 export function getMedicationInstructionConcept(
-  code: string
+  code: string, system?: string
 ): MedicationInstructionConceptDefinition | undefined {
-  const definition = DEFAULT_BY_CODE.get(code);
+  const definition = !system || system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM
+    ? DEFAULT_BY_CODE.get(code)
+    : DEFAULT_BY_CODING.get(system + "|" + code);
   return definition ? cloneDefinition(definition) : undefined;
 }
 

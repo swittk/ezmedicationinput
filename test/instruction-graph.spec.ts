@@ -2,6 +2,8 @@ import { AdviceArgumentRole, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
+import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
+import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
 
@@ -1257,5 +1259,103 @@ describe("registered activity-day adjunct membership and exclusion", () => {
       expect(on(false)).toEqual(["08:00"]);
       expect(on(true)).toEqual(["08:00", "20:00"]);
     }
+  });
+});
+
+
+describe("standard instruction terminology", () => {
+  it.each([
+    ["doctor", "158965000"], ["household-spoon", "303514007"],
+    ["applicator", "408101000"], ["inhaler", "334980009"], ["spacer", "464036000"],
+    ["medication-tablet", "385055001"], ["medication-capsule", "385049006"],
+    ["cream", "385099005"], ["ointment", "385101003"], ["gel", "385100002"],
+    ["patch", "739003001"], ["open-wound", "59091005"],
+    ["drinking-activity", "30953006"], ["exercise", "256235009"],
+    ["swimming", "20461001"], ["bathing", "129002005"], ["sweating", "415691001"],
+    ["intercourse", "364316005"], ["morning", "73775008"], ["noon", "71997007"],
+    ["afternoon", "422133006"], ["evening", "3157002"], ["night", "2546009"],
+    ["bedtime", "21029003"], ["gently", "418449005"], ["immediacy", "88694003"]
+  ])("uses the standard concept without a duplicate local coding: %s", (name, code) => {
+    const concept = getMedicationInstructionConcept(name)!;
+    expect(concept.code).toBe(name);
+    expect(getMedicationInstructionConcept(code, "http://snomed.info/sct")?.code).toBe(name);
+    expect(getMedicationInstructionConcept(code, "http://example.test/unrelated")).toBeUndefined();
+    expect(medicationInstructionConceptCodings(concept)).toEqual([
+      expect.objectContaining({ system: "http://snomed.info/sct", code })
+    ]);
+    expect(buildMedicationInstructionConceptCodeSystem().concept
+      .some(value => value.code === name)).toBe(false);
+  });
+
+  it.each([
+    ["administer", "418283001"], ["use", "419385000"], ["place", "421066005"],
+    ["shampoo", "420606003"], ["sprinkle", "422219000"], ["stop", "421286000"],
+    ["complete-course", "420604000"], ["remove", "129303008"], ["replace", "282089006"],
+    ["measure", "129266000"], ["cut", "360314001"], ["nebulize", "56251003"],
+    ["rinse_mouth", "59611000087105"], ["call", "420942008"],
+    ["withhold-administration", "421139008"]
+  ])("uses the standard action without changing the grammar identity: %s", (name, code) => {
+    const action = getMedicationInstructionAction(name)!;
+    expect(action.code).toBe(name);
+    expect(medicationInstructionActionCodings(action)).toEqual([
+      expect.objectContaining({ system: "http://snomed.info/sct", code })
+    ]);
+    expect(buildMedicationInstructionActionCodeSystem().concept
+      .some(value => value.code === name)).toBe(false);
+  });
+
+  it("uses mapped external action codes directly while retaining caller-supplied additional codes", () => {
+    const apply = getMedicationInstructionAction("apply")!;
+    expect(medicationInstructionActionCodings(apply))
+      .toEqual(apply.externalCodings);
+    expect(buildMedicationInstructionActionCodeSystem().concept
+      .some(value => value.code === "apply")).toBe(false);
+    const first = { system: "http://snomed.info/sct", code: "417924000" };
+    const second = { system: "http://snomed.info/sct", code: "738991002" };
+    expect(medicationInstructionActionCodings({
+      ...apply, coding: first, externalCodings: [second]
+    })).toEqual([expect.objectContaining(first), expect.objectContaining(second)]);
+  });
+
+  it("uses the standard open-wound site and nebulization method in ordinary dosage output", () => {
+    const topical = parsePublicSig("Apply 1 g cream to open wounds BID");
+    expect(topical.fhir[0].site?.coding).toContainEqual(expect.objectContaining({
+      system: "http://snomed.info/sct", code: "59091005"
+    }));
+    const nebulized = parsePublicSig("Nebulize 2 mL BID");
+    expect(nebulized.fhir[0].method?.coding).toContainEqual(expect.objectContaining({
+      system: "http://snomed.info/sct", code: "56251003"
+    }));
+    expect(nebulized.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "mL" });
+    expect(nebulized.fhir[0].timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+  });
+
+  it("does not replace a general hold action with a medication-withholding code", () => {
+    const frame = parseInstructionActions("Hold breath for 10 seconds")[0];
+    expect(frame.predicate.lemma).toBe("hold");
+    expect(frame.predicate.codings?.some(coding => coding.code === "421139008")).toBe(false);
+    expect(getMedicationInstructionConcept("patch")?.coding?.code).not.toBe("385114002");
+  });
+
+  it.each([
+    ["Remove the applicator", "remove", "129303008", "applicator", "408101000"],
+    ["Call doctor", "call", "420942008", "doctor", "158965000"],
+    ["Measure 1 cm ribbon cream", "measure", "129266000", "cream", "385099005"],
+    ["Replace the patch", "replace", "282089006", "patch", "739003001"]
+  ])("retains standard action and object codings through the graph wire format: %s",
+      (source, verb, actionCode, noun, objectCode) => {
+    const graph = parseSig(source).meta.canonical.clauses[0].instructionGraph!;
+    const reloaded = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, reloaded]) {
+      const action = candidate.actions.find(value => value.predicate.lemma === verb)!;
+      expect(action.predicate.codings).toContainEqual(expect.objectContaining({
+        system: "http://snomed.info/sct", code: actionCode
+      }));
+      expect(action.args.find(arg => arg.conceptId === noun)?.coding).toMatchObject({
+        system: "http://snomed.info/sct", code: objectCode
+      });
+    }
+    expect(realizeInstructionGraph(reloaded, "en")).toBe(realizeInstructionGraph(graph, "en"));
+    expect(realizeInstructionGraph(reloaded, "th")).toBe(realizeInstructionGraph(graph, "th"));
   });
 });

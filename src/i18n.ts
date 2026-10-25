@@ -1273,7 +1273,7 @@ function formatActivityTimingThai(schedule: CanonicalScheduleExpr | undefined): 
   const result: string[] = [];
   for (const timing of schedule?.activityTiming ?? []) {
     const definition = timing.activity.coding?.code
-      ? getMedicationInstructionConcept(timing.activity.coding.code)
+      ? getMedicationInstructionConcept(timing.activity.coding.code, timing.activity.coding.system)
       : undefined;
     const activity = timing.activity.i18n?.th ?? definition?.i18n?.th ?? timing.activity.text;
     const relation = timing.relation === "before" ? "ก่อน" : "หลัง";
@@ -2026,7 +2026,7 @@ function thaiIntegratedAdministrationQualifier(
   );
   const declaredSuffix = definition?.verbSuffixI18n?.th?.trim();
   if (declaredSuffix) return declaredSuffix;
-  const concept = getMedicationInstructionConcept(coding.code);
+  const concept = getMedicationInstructionConcept(coding.code, coding.system);
   const typedStyle = concept && (
     concept.role === AdviceArgumentRole.Manner || concept.role === AdviceArgumentRole.Amount
   ) && instruction.frames?.some((frame) => frame.predicate.semanticClass === "administration");
@@ -2565,7 +2565,7 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
       (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??
       instruction.text ?? instruction.coding?.display;
     if (!instruction.i18n?.th && instruction.coding?.code) {
-      const concept = getMedicationInstructionConcept(instruction.coding.code);
+      const concept = getMedicationInstructionConcept(instruction.coding.code, instruction.coding.system);
       const definition = findAdditionalInstructionDefinitionByCoding(
         instruction.coding.system ?? "http://snomed.info/sct",
         instruction.coding.code

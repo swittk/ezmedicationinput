@@ -331,28 +331,27 @@ describe("source-typed previous-time phase references", () => {
 
 
 describe("typed phase addition contrasting instructions", () => {
-  it("retains the exact standard ADD dosing-fragment coding beside its local predicate", () => {
+  it("retains the exact standard ADD coding and internal predicate identity", () => {
     const parsed = parseSig("Take 1 tablet daily; do not add an extra tablet at bedtime.");
     const action = parsed.meta.canonical.clauses[0].instructionGraph?.actions
       .find(item => item.predicate.lemma === "add");
-    expect(action?.predicate.codings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ system: "http://snomed.info/sct", code: "422106007" }),
-      expect.objectContaining({ code: "add" })
-    ]));
+    expect(action?.predicate.lemma).toBe("add");
+    expect(action?.predicate.codings).toEqual([
+      expect.objectContaining({ system: "http://snomed.info/sct", code: "422106007" })
+    ]);
     expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
-    // Both the local compositional operator and its verified SNOMED CT
-    // dosing-fragment equivalent must survive ordinary FHIR persistence.
+    // The internal operator identity and standard coding both survive FHIR persistence.
     const strictR5 = toFhirR5Dosages(parsed.fhirNext)[0];
     for (const saved of [parsed.fhir[0], strictR5]) {
       const reopened = fromFhirDosage(saved).meta.normalized.instructionGraph?.actions
         .find(frame => frame.predicate.lemma === "add");
-      expect(reopened?.predicate.codings).toEqual(expect.arrayContaining([
+      expect(reopened?.predicate.lemma).toBe("add");
+      expect(reopened?.predicate.codings).toEqual([
         expect.objectContaining({
           system: "http://snomed.info/sct",
           code: "422106007"
-        }),
-        expect.objectContaining({ code: "add" })
-      ]));
+        })
+      ]);
     }
   });
   it.each([

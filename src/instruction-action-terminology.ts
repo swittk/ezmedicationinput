@@ -55,6 +55,7 @@ interface ActionSource {
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
   definesDose?: boolean;
+  coding?: FhirCoding;
   externalCodings?: FhirCoding[];
 }
 
@@ -238,6 +239,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
+    coding: cloneCoding(sourceDefinition.coding),
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -393,7 +395,9 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_ACTIONS.map((definition) => ({
+    concept: DEFAULT_ACTIONS.filter((definition) =>
+      !definition.coding && !definition.externalCodings?.length
+    ).map((definition) => ({
       code: definition.code,
       display: definition.display,
       designation: Object.keys(definition.i18n ?? {}).map((language) => ({
@@ -407,8 +411,9 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
 export function medicationInstructionActionCoding(
   definition: MedicationInstructionActionDefinition
 ): FhirCoding {
-  return definition.coding
-    ? cloneCoding(definition.coding)!
+  const coding = definition.coding ?? definition.externalCodings?.[0];
+  return coding
+    ? cloneCoding(coding)!
     : {
       system: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
       code: definition.code,
@@ -420,8 +425,12 @@ export function medicationInstructionActionCoding(
 export function medicationInstructionActionCodings(
   definition: MedicationInstructionActionDefinition
 ): FhirCoding[] {
-  return [
-    medicationInstructionActionCoding(definition),
+  if (definition.coding) return [
+    cloneCoding(definition.coding)!,
     ...(definition.externalCodings ?? []).map((coding) => cloneCoding(coding)!)
   ];
+  if (definition.externalCodings?.length) {
+    return definition.externalCodings.map((coding) => cloneCoding(coding)!);
+  }
+  return [medicationInstructionActionCoding(definition)];
 }

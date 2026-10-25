@@ -688,7 +688,7 @@ function formatActivityTimingEnglish(schedule: CanonicalScheduleExpr | undefined
   const result: string[] = [];
   for (const timing of schedule?.activityTiming ?? []) {
     const definition = timing.activity.coding?.code
-      ? getMedicationInstructionConcept(timing.activity.coding.code)
+      ? getMedicationInstructionConcept(timing.activity.coding.code, timing.activity.coding.system)
       : undefined;
     const activity = definition?.display ?? timing.activity.text;
     const relation = timing.relation;

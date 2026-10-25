@@ -1221,6 +1221,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     {
       names: ["open wound", "open wounds", "แผลเปิด"],
       definition: {
+        coding: { system: "http://snomed.info/sct", code: "59091005", display: "Open wound" },
         text: "open wound",
         i18n: { th: "แผลเปิด" },
         routeHint: RouteCode["Topical route"]
