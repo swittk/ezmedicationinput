@@ -1476,7 +1476,9 @@ export function connectorLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!CONNECTORS.has(lower) && !isPunctuation(lower) && !eventRelation) {
       return [];
     }
-    const following = token.original === "," ? context.tokens[start + 1] : undefined;
+    const following = token.original === ","
+      ? tokensAvailable(context, start + 1, 1)?.[0]
+      : undefined;
     const followingCoordination = following
       ? coordinationConnectorKind(normalizeTokenLower(following))
       : "unknown";

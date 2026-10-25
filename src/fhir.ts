@@ -319,7 +319,8 @@ function clinicalCarrierQuantityFromFhir(
   const doseUnit = active?.code ?? active?.unit;
   const volumeUnit = carrier?.code ?? carrier?.unit;
   const durationUnit = duration?.code ?? duration?.unit;
-  if (!material ||
+  const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
+  if ((!material && !selfCarrier) ||
       typeof active?.value !== "number" || !Number.isFinite(active.value) ||
       typeof carrier?.value !== "number" || !Number.isFinite(carrier.value) ||
       typeof duration?.value !== "number" || !Number.isFinite(duration.value) ||
@@ -334,9 +335,9 @@ function clinicalCarrierQuantityFromFhir(
     numerator: { value: carrier.value, unit: volumeUnit, dimension: "volume" },
     denominators: [{ value: duration.value, unit: periodUnit, dimension: "time" }],
     projectedDose: { value: active.value, unit: doseUnit },
-    rateNumerator: { value: carrier.value, unit: volumeUnit },
+    ...(material ? { rateNumerator: { value: carrier.value, unit: volumeUnit } } : {}),
     administrationDuration: { value: duration.value, unit: periodUnit },
-    carrierMaterial: material
+    ...(material ? { carrierMaterial: material } : {})
   };
 }
 

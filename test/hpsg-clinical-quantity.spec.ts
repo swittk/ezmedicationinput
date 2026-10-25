@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
-import { canonicalToFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import {
   calculateTotalUnits,
   parseInstructionActions,
@@ -33,6 +33,48 @@ describe("HPSG clinical quantity grammar", () => {
         denominator: { value: 30, code: "min" }
       }
     });
+  });
+
+  it("retains an explicit fluid infusion rate through both FHIR import paths", () => {
+    const parsed = parsePublicSig("Infuse 500 mL IV over 2 hours");
+    const row = parsed.fhir[0];
+    const expected = row.doseAndRate?.[0]?.rateRatio;
+    expect(expected).toMatchObject({
+      numerator: { value: 500, code: "mL" },
+      denominator: { value: 2, code: "h" }
+    });
+    expect(row.extension?.some(extension =>
+      extension.url.endsWith("medication-infusion-carrier-material"))).not.toBe(true);
+
+    const strictRow = toFhirR5Dosages(parsed.fhirNext)[0];
+    for (const clause of [
+      canonicalFromFhir(strictRow),
+      parserStateFromFhir(strictRow).primaryClause
+    ]) {
+      expect(clause.clinicalQuantity).toMatchObject({
+        representation: "dose-with-rate-ratio",
+        status: "resolved",
+        numerator: { value: 500, unit: "mL", dimension: "volume" },
+        projectedDose: { value: 500, unit: "mL" },
+        administrationDuration: { value: 2, unit: "h" }
+      });
+      expect(clause.clinicalQuantity?.carrierMaterial).toBeUndefined();
+      expect(canonicalToFhir(clause).doseAndRate?.[0]?.rateRatio).toEqual(expected);
+    }
+  });
+
+  it("does not infer a carrier meaning for unrelated active-dose and fluid-rate quantities", () => {
+    const row: FhirDosage = {
+      doseAndRate: [{
+        doseQuantity: { value: 5, unit: "mg" },
+        rateRatio: {
+          numerator: { value: 100, unit: "mL" },
+          denominator: { value: 2, unit: "h" }
+        }
+      }]
+    };
+    expect(canonicalFromFhir(row).clinicalQuantity).toBeUndefined();
+    expect(parserStateFromFhir(row).primaryClause.clinicalQuantity).toBeUndefined();
   });
 
   it("projects dimensional weight-rate evidence into canonical IR", () => {

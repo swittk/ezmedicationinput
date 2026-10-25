@@ -3,7 +3,7 @@ import { parseMedicationGuard } from "../src/hpsg/constructions";
 import { parseSig as parsePublicSig, getDosageCondition, toFhirR5Dosages, evaluateMedicationCondition } from "../src/index";
 import * as structuredValues from "../src/stable-structure";
 import { parseHpsgChart } from "../src/hpsg/chart";
-import { productLexicalRule } from "../src/hpsg/rules/core-rules";
+import { connectorLexicalRule, productLexicalRule } from "../src/hpsg/rules/core-rules";
 import { parseSig } from "./helpers/r5-parser";
 import {
   HPSG_TYPE_SYSTEM,
@@ -59,6 +59,27 @@ function firstLexicalMatch(
   }
   return undefined;
 }
+
+describe("bounded coordination tokens", () => {
+  it("does not consume a following connector past the constituent boundary", () => {
+    const context = clinicalRuleContext("take 1 tab, and 2 tabs");
+    const comma = context.tokens.findIndex(token => token.original === ",");
+    expect(comma).toBeGreaterThan(0);
+    context.limit = comma + 1;
+    const sign = connectorLexicalRule().match(context, comma)[0];
+    expect(sign?.consumedTokenIndices).toEqual([context.tokens[comma].index]);
+  });
+
+  it("does not reclaim a following connector already consumed by another construction", () => {
+    const context = clinicalRuleContext("take 1 tab, and 2 tabs");
+    const comma = context.tokens.findIndex(token => token.original === ",");
+    const next = context.tokens[comma + 1];
+    expect(next).toBeDefined();
+    context.state.consumed.add(next.index);
+    const sign = connectorLexicalRule().match(context, comma)[0];
+    expect(sign?.consumedTokenIndices).toEqual([context.tokens[comma].index]);
+  });
+});
 
 describe("formal HPSG typed feature structures", () => {
   it("uses a real subtype hierarchy for signs", () => {
