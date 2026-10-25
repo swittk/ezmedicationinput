@@ -2124,11 +2124,28 @@ describe("CodeRabbit 2026-10-25 dose preservation review", () => {
     original.site.range = shared;
     restriction.predicate.range = shared;
     original.evidence.push({ rule: "test.shared-site-evidence", spans: [shared] });
+    const separate = { start: 1, end: 6 };
+    const separateFrom = { ...separate };
+    original.clinicalAdjuncts = {
+      localRanges: [shared, separate],
+      evidence: [{ rule: "test.shared-adjunct-evidence", spans: [shared] }],
+      treatmentPause: { durationDays: 2, range: shared }
+    };
+    original.provisionalSchedule = {
+      evidence: [{ rule: "test.provisional-evidence", spans: [separate] }]
+    };
     const other = { ...original, raw: { ...original.raw } };
     shiftCanonicalSigClauses([original, other], 7);
     expect(shared).toEqual({ start: from.start + 7, end: from.end + 7 });
     expect(original.site.range).toBe(shared);
     expect(other.site?.restrictions?.[0]?.range).toBe(shared);
+    expect(original.clinicalAdjuncts.localRanges?.[0]).toBe(shared);
+    expect(original.clinicalAdjuncts.treatmentPause?.range).toBe(shared);
+    expect(original.clinicalAdjuncts.evidence?.[0]?.spans[0]).toBe(shared);
+    expect(separate).toEqual({
+      start: separateFrom.start + 7, end: separateFrom.end + 7
+    });
+    expect(original.provisionalSchedule.evidence?.[0]?.spans[0]).toBe(separate);
     expect(original.raw.start).toBe(local + 7);
     expect(other.raw.start).toBe(local + 7);
   });

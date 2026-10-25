@@ -467,6 +467,18 @@ describe("procedural instruction graph", () => {
     expect(getMedicationInstructionConcept("57368009")?.coding).toMatchObject({
       system: "http://snomed.info/sct", code: "57368009"
     });
+    for (const [name, code] of [
+      ["syringe", "61968008"], ["needle", "79068005"],
+      ["bottle", "68276009"], ["food", "255620007"]
+    ]) {
+      expect(getMedicationInstructionConcept(name)?.coding).toMatchObject({
+        system: "http://snomed.info/sct", code
+      });
+      expect(codeSystem.concept.some((concept) => concept.code === name)).toBe(false);
+    }
+    expect(parseInstructionActions("shake bottle")[0]?.args[0]?.coding).toMatchObject({
+      system: "http://snomed.info/sct", code: "68276009"
+    });
   });
 
 

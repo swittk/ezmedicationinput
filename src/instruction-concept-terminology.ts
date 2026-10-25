@@ -202,7 +202,10 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
 export function medicationInstructionConceptCodings(
   definition: MedicationInstructionConceptDefinition
 ): FhirCoding[] {
-  if (definition.coding) return [cloneCoding(definition.coding)!];
+  if (definition.coding) return [
+    cloneCoding(definition.coding)!,
+    ...(definition.externalCodings ?? []).map((coding) => cloneCoding(coding)!)
+  ];
   if (definition.externalCodings?.length) {
     return definition.externalCodings.map((coding) => cloneCoding(coding)!);
   }

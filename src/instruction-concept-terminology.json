@@ -166,6 +166,7 @@
     {
       "code": "needle",
       "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "79068005", "display": "Needle" },
       "display": "needle",
       "i18n": { "th": "เข็มฉีดยา" },
       "aliases": ["needle", "needles", "injection needle", "เข็มฉีดยา"]
@@ -201,6 +202,7 @@
     {
       "code": "syringe",
       "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "61968008", "display": "Syringe" },
       "display": "syringe",
       "i18n": { "th": "กระบอกฉีดยา" },
       "aliases": ["syringe", "syringes", "กระบอกฉีดยา"]
@@ -215,6 +217,7 @@
     {
       "code": "food",
       "role": "substance",
+      "coding": { "system": "http://snomed.info/sct", "code": "255620007", "display": "Food" },
       "display": "food",
       "i18n": { "th": "อาหาร" },
       "aliases": ["food", "foods", "meal", "meals", "อาหาร"]
@@ -258,6 +261,7 @@
     {
       "code": "bottle",
       "role": "container",
+      "coding": { "system": "http://snomed.info/sct", "code": "68276009", "display": "Bottle" },
       "display": "bottle",
       "i18n": {
         "th": "ขวด"

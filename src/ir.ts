@@ -278,6 +278,7 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.route?.evidence);
     shiftEvidenceSpans(clause.site?.evidence);
     shiftEvidenceSpans(clause.schedule?.evidence);
+    shiftEvidenceSpans(clause.provisionalSchedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
     // All provenance ranges refer to the original clinician instruction.
@@ -285,6 +286,10 @@ export function shiftCanonicalSigClauses(
     shiftSpan(clause.clinicalQuantity?.carrierMaterial?.range);
     shiftSpan(clause.site?.range);
     shiftSiteRestrictions(clause.site?.restrictions);
+    const adjuncts = clause.clinicalAdjuncts;
+    for (const range of adjuncts?.localRanges ?? []) shiftSpan(range);
+    shiftEvidenceSpans(adjuncts?.evidence);
+    shiftSpan(adjuncts?.treatmentPause?.range);
 
     const group = clause.administrationTargetGroup;
     shiftSpan(group?.range);
