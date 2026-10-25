@@ -1219,6 +1219,14 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
+      names: ["open wound", "open wounds", "แผลเปิด"],
+      definition: {
+        text: "open wound",
+        i18n: { th: "แผลเปิด" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["wound", "wounds", "แผล"],
       definition: {
         text: "wound",

@@ -984,3 +984,27 @@ describe("calendar month-day source ownership", () => {
     expect(getTimingMonthDays(parsed.fhir[0].timing?.repeat)).toBeUndefined();
   });
 });
+
+
+describe("CodeRabbit 2026-10-25 second review: schedule-only semantics", () => {
+  it("preserves a clinician-authored monthly-day restriction without requiring a separate QD token", () => {
+    const source = "1 tab PO on days 1-14 of each month";
+    const typed = parseClauseSign(source)?.synsem.head.schedule;
+    const actual = parseClauseState(source).primaryClause.schedule;
+    expect(typed?.dayOfMonth).toEqual(Array.from({ length: 14 }, (_, i) => i + 1));
+    expect(actual?.dayOfMonth).toEqual(typed?.dayOfMonth);
+    expect(getTimingMonthDays(canonicalToFhir(parseClauseState(source).primaryClause).timing?.repeat))
+      .toEqual(typed?.dayOfMonth);
+  });
+
+  it("preserves an unanchored menstrual-cycle restriction even without a separate cadence", () => {
+    const source = "1 tab PO on cycle days 3-7";
+    const typed = parseClauseSign(source)?.synsem.head.schedule;
+    const actual = parseClauseState(source).primaryClause.schedule;
+    expect(typed?.cycleDayConstraint?.days).toEqual([3, 4, 5, 6, 7]);
+    expect(actual?.cycleDayConstraint).toMatchObject({
+      days: [3, 4, 5, 6, 7],
+      reason: "missing-or-unresolved-cycle-anchor"
+    });
+  });
+});

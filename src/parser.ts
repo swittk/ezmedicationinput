@@ -261,6 +261,9 @@ function cleanupClause(state: ParserState): void {
       schedule.duration === undefined &&
       schedule.durationMax === undefined &&
       schedule.durationUnit === undefined &&
+      schedule.administrationDuration === undefined &&
+      schedule.administrationDurationMax === undefined &&
+      schedule.administrationDurationUnit === undefined &&
       schedule.administrationOffsetMinutes === undefined &&
       schedule.boundsStart === undefined &&
       schedule.boundsEnd === undefined &&
@@ -276,6 +279,12 @@ function cleanupClause(state: ParserState): void {
       schedule.eventWindow === undefined &&
       schedule.occurrenceCap === undefined &&
       !schedule.maxDosePerPeriod?.length &&
+      !schedule.dayOfMonth?.length &&
+      schedule.weekdayOrdinal === undefined &&
+      schedule.clockWindow === undefined &&
+      schedule.cycleDayConstraint === undefined &&
+      schedule.repeatCycle === undefined &&
+      schedule.repeatCount === undefined &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&

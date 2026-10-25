@@ -9,6 +9,13 @@
       "aliases": ["doctor", "physician", "แพทย์"]
     },
     {
+      "code": "contact-lenses",
+      "role": "object",
+      "display": "contact lenses",
+      "i18n": { "th": "คอนแทคเลนส์" },
+      "aliases": ["contact lens", "contact lenses"]
+    },
+    {
       "code": "household-spoon",
       "role": "object",
       "display": "household spoon",

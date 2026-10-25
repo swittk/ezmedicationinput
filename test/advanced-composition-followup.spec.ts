@@ -2133,3 +2133,88 @@ describe("CodeRabbit 2026-10-25 dose preservation review", () => {
     expect(other.raw.start).toBe(local + 7);
   });
 });
+
+
+describe("CodeRabbit 2026-10-25 second review: compositional instruction fidelity", () => {
+  it.each([
+    ["Remove contact lenses before instilling eye drops", "remove"],
+    ["Remove soft contact lenses before using eye drops", "remove"],
+    ["Do not wear contact lenses while using eye drops", "wear"]
+  ] as const)("keeps the noun phrase contact lenses under the governing action: %s", (input, lemma) => {
+    const parsed = parseProductionSig(input, { locale: "en" });
+    const actions = parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+    expect(actions.some(action => action.predicate.lemma === "call")).toBe(false);
+    const action = actions.find(action => action.predicate.lemma === lemma);
+    expect(action).toBeDefined();
+    expect(action?.args.some(arg => /contact lenses/i.test(arg.text))).toBe(true);
+    if (/Do not/i.test(input)) expect(action?.polarity).toBe("negate");
+    expect(parsed.longText).not.toMatch(/call lenses/i);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("preserves the separately licensed clinician-contact command", () => {
+    const parsed = parseProductionSig("Contact your doctor if eye pain develops", { locale: "en" });
+    const actions = parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []);
+    expect(actions.some(action => action.predicate.lemma === "call" &&
+      action.args.some(arg => /doctor/i.test(arg.text)))).toBe(true);
+    expect(parsed.longText).toMatch(/call your doctor/i);
+  });
+
+  it("retains a known site noun instead of inventing an action to open wounds", () => {
+    const parsed = parseProductionSig("Apply ointment to open wounds", { locale: "en" });
+    expect(parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions ?? []).some(action =>
+        action.predicate.lemma === "open")).toBe(false);
+    expect(parsed.longText).not.toMatch(/then open/i);
+  });
+
+  const external = (offset: number, clocks: string[]) => ({
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: clocks.length, period: 1,
+      periodUnit: "d" as const, timeOfDay: clocks } },
+    modifierExtension: [{
+      url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: offset, unit: "min",
+        system: "http://unitsofmeasure.org", code: "min" }
+    }]
+  });
+
+  it("does not present different-day shifted clocks as the same-day frequency list", () => {
+    const row = external(720, ["08:00:00", "20:00:00"]);
+    const en = formatSig(row, "long", { locale: "en" });
+    const th = formatSig(row, "long", { locale: "th" });
+    expect(en).toMatch(/720 minutes later each time/i);
+    expect(th).toContain("720 นาที");
+    expect(getAdministrationOffsetMinutes(row)).toBe(720);
+    expect(toFhirR5Dosages(toDosageDetails([row]))[0].modifierExtension)
+      .toEqual(row.modifierExtension);
+  });
+
+  it("labels negative clock shifts correctly when an administration crosses to the previous day", () => {
+    const row = external(-120, ["01:00:00"]);
+    const en = formatSig(row, "long", { locale: "en" });
+    const th = formatSig(row, "long", { locale: "th" });
+    expect(en).toMatch(/previous day|day earlier/i);
+    expect(th).toMatch(/วันก่อน|วันก่อนหน้า/);
+    expect(en).not.toMatch(/-1 days later/i);
+  });
+
+  it("labels mixed negative clock shifts as earlier relative to each original time", () => {
+    const row = external(-120, ["01:00:00", "20:00:00"]);
+    const en = formatSig(row, "long", { locale: "en" });
+    const th = formatSig(row, "long", { locale: "th" });
+    expect(en).toMatch(/120 minutes earlier each time/i);
+    expect(th).toContain("120 นาที");
+    expect(en).not.toMatch(/-120 minutes later/i);
+    expect(en).not.toMatch(/-1 days later/i);
+  });
+
+  it("still shows an unchanged date or a uniform following-day rollover normally", () => {
+    const original = external(0, ["08:00:00", "20:00:00"]);
+    const next = external(1440, ["08:00:00", "20:00:00"]);
+    expect(formatSig(original, "long", { locale: "en" })).not.toMatch(/day later|day earlier/);
+    expect(formatSig(next, "long", { locale: "en" })).toContain("following day");
+  });
+});

@@ -1851,19 +1851,37 @@ export function formatCanonicalClause(
         (second ? `:${second < 10 ? "0" : ""}${second}` : "") };
     });
     const thai = localization?.locale.startsWith("th");
+    const minutes = Math.abs(offset);
+    const offsetNote = offset < 0
+      ? thai ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
+        : minutes + " minutes earlier each time"
+      : thai ? "ช้ากว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
+        : minutes + " minutes later each time";
     if (clocks?.length && !schedule.when?.length && clocks.every(value => Number.isFinite(value.day))) {
+      const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
+      if (sameDayShift === undefined) {
+        // Mixed-day clocks cannot safely be displayed as an unqualified
+        // same-day list. Retain their original times and state the actual
+        // elapsed offset once, without fabricating an event chronology.
+        const original = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+        return original.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
+      }
       schedule.timeOfDay = clocks.map(value => value.clock);
       const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
-      const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
-      if (!sameDayShift) return rendered;
+      if (sameDayShift === 0) return rendered;
       const note = sameDayShift === 1
         ? thai ? "ในวันถัดไป" : "the following day"
-        : thai ? `หลังรอบต้นทาง ${sameDayShift} วัน` : `${sameDayShift} days later`;
-      return `${rendered.replace(/[.。]$/u, "")} (${note}).`;
+        : sameDayShift === -1
+          ? thai ? "ในวันก่อนหน้า" : "the previous day"
+          : sameDayShift < 0
+            ? thai ? "ก่อนรอบต้นทาง " + Math.abs(sameDayShift) + " วัน"
+              : Math.abs(sameDayShift) + " days earlier"
+            : thai ? "หลังรอบต้นทาง " + sameDayShift + " วัน"
+              : sameDayShift + " days later";
+      return rendered.replace(/[.。]$/u, "") + " (" + note + ").";
     }
     const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
-    const note = thai ? `ช้ากว่ากำหนดต้นทางแต่ละครั้ง ${offset} นาที` : `${offset} minutes later each time`;
-    return `${rendered.replace(/[.。]$/u, "")} (${note}).`;
+    return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
   }
   let shortDefault: string | undefined;
   let longDefault: string | undefined;

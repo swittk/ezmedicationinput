@@ -1513,6 +1513,7 @@
     "entire",
     "dry",
     "clean",
+    "open",
     "hairless",
     "intact",
     "wet",
@@ -1530,6 +1531,9 @@
     },
     "clean": {
       "th": "สะอาด"
+    },
+    "open": {
+      "th": "เปิด"
     },
     "hairless": {
       "th": "ไม่มีขน"

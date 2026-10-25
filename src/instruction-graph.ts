@@ -239,6 +239,17 @@ function actionMatchAt(
           resolveMedicationInstructionAction(candidate, options)
         : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
+        // A declared nominal constituent owns a homographic verb surface:
+        // "contact lenses" is a medication object, "open wounds" is a site.
+        // Reuse the same typed concept vocabulary as argument parsing;
+        // "contact your doctor" remains a genuine call action.
+        if (length === 1 && next) {
+          const nominal = resolveMedicationInstructionConcept(
+            key(current) + " " + key(next), options
+          );
+          if (nominal?.role === AdviceArgumentRole.Object ||
+              nominal?.role === AdviceArgumentRole.Site) continue;
+        }
         if (governingRelation) {
           const argument = parts[index + length];
           const unit = parts[index + length + 1];
