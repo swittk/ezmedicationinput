@@ -3939,10 +3939,12 @@ non-modifier annotations remain non-blocking, all row data and both source
 variants remain available, and unaffected phases remain independently usable.
 Reordering, R6 import, JSON persistence and re-export cannot silently remove the
 conflict. Correcting the original disagreeing live row restores the 296-drop
-course. After persistence, explicit reconciliation of the phase plus clearing
-its acknowledged conflict marker also restores the eight day-seven doses and
-296-drop total; this recovery was verified through the actual downstream
-schema/converter. The existing extension profile documents the reserved marker.
+course. After persistence, manually aligning both phase rows and removing the
+acknowledged conflict marker restores the eight day-seven doses and 296-drop
+total; this low-level recovery was verified through the actual downstream
+schema/converter. At this point there was no public confirmation helper, and
+editing the saved phase fields alone remained blocked. The follow-up below
+adds that API. The existing extension profile documents the reserved marker.
 
 Four primary/strict × right/left start-edit regressions failed against the prior
 implementation before the fix. All five added tests, including harmless
@@ -3961,3 +3963,135 @@ remained unchanged. Final ESM SHA-256:
 The ordinary eye taper remains **9,926 bytes** in primary/strict R5 and
 **10,604 bytes** after the actual schema save/reload. The PR remains
 **99 reviewable files** (114 raw paths, 15 configured exclusions).
+
+## 2026-10-25 — HPSG calendar days, weekly clocks and saved-phase recovery
+
+Four ordinary clinical defects required changes to typed grammar, calendar
+execution and course reconciliation. The 28-day examples below use an order
+starting 2026-11-01 in Asia/Bangkok.
+
+| Instruction / workflow | Previous behavior | Corrected behavior |
+| --- | --- | --- |
+| `1 tab PV HS twice weekly x28d` | 4 tablets | 8 tablets |
+| `1 tab PO three times weekly HS x28d` | 4 tablets | 12 tablets |
+| Daily bedtime for 14 days, then twice weekly | 16 tablets in 28 days | 18 tablets |
+| `1 tab PO QD on days 1-14 of each month` | Calendar range became a dose range; 392 tablets | One tablet on each selected day; 14 tablets |
+| Explicit cycle dates, November 3–7, without a redundant daily frequency | Supply rejected executable dates | 5 tablets; 3 when queried from November 5 |
+| Correcting both rows of a previously saved phase conflict | Still blocked unless callers edited the reserved marker themselves | Explicit public confirmation restores eight day-seven administrations and 296 drops over 30 days |
+
+### Typed ownership and execution
+
+HPSG now owns `dayOfMonth` through a bounded monthly-day constituent: a headed
+day noun, its ordinal/range or coordinated ordinals, and an explicit monthly
+complement. Calendar numbers cannot become tablet amounts in this constituent.
+The feature passes through unification, canonical projection and coordination.
+An indexed prefix lookup keeps unrelated inputs on a short path; no general
+reparse or additional schema-validation pass was added.
+
+FHIR uses repeated `Timing.repeat.extension` entries with the standard
+[`timing-dayOfMonth` URL](https://build.fhir.org/ig/HL7/fhir-extensions/StructureDefinition-timing-dayOfMonth.html)
+and `valuePositiveInt`. Imports retain unrelated metadata. English and Thai,
+short and long rendering, produce grammar-backed monthly phrases. Source-less
+range, single-day and separated-day forms reparse into a single dosage of one tablet
+with the same calendar membership.
+
+Scheduling, supply and occurrence-cap history share typed calendar selection.
+This includes elapsed intervals and explicit weekday intersections. Days absent
+from a shorter month are omitted rather than moved to another date. Exact
+dated events remain authoritative: a supplied month-day mask can restrict them,
+but a query anchor cannot invent a weekday ordinal and discard their dates.
+
+Weekly frequencies with bedtime, explicit clocks or meal events now use the
+existing per-period distribution policy. Clock anchors retain the full
+frequency. Offsets crossing midnight remain inside their actual query window,
+and later queries consume the occurrence cap using the same schedule.
+Finite exact-date courses no longer require an invented repeat frequency.
+
+### Resolving a saved phase conflict
+
+After correcting the live saved rows, callers can explicitly acknowledge the
+affected phase through the existing public import function:
+
+```ts
+const course = toDosageDetails(correctedRows, undefined, undefined, {
+  resolvedPhaseSequences: [2]
+});
+```
+
+Only the selected phase's old conflict flag is eligible to clear. The current
+rows are still compared, so confirming a phase whose live executable fields
+disagree does not make it executable. Other missing course context stays
+unresolved. The previous markers and unfamiliar extensions remain available as
+source provenance, and plain import/save operations cannot silently clear the
+conflict. This replaces the need for callers to remove a reserved extension
+child themselves; it does not add a parser or preview refusal gate.
+
+### Verification of the combined implementation
+
+The main checkout passed **3,485/3,485 source tests across 44 files**, with no
+skips or failures, TypeScript checking, ES6 ESM/CJS bundles and declarations,
+and **4/4 packaged-export checks**. The follow-up adds 41 source regressions:
+23 scheduling/supply checks, 13 HPSG/calendar-rendering checks and five saved
+phase-recovery checks. Failures were reproduced before their corresponding
+fixes, including the interval count/history and formatting integration defects.
+
+All **15 built consumer batches** passed. The new **38 scenarios per module
+format** traverse the actual downstream schema/converter for three save/reopen
+cycles each. They cover weekly clocks, monthly days, leap and short months,
+explicit dates, and correction of saved phase conflicts. The existing authority,
+clinical-family, shorthand, ownership, API, clock/meal, label/cycle, compact
+persistence and phase-conflict checks also pass. These batches overlap in
+clinical inputs and are not a unique-input total.
+
+The immutable **521-input compatibility replay** reports zero failures,
+populated-dose-value changes or dose-row-count changes. The compact persistence
+work remains intact: the independent eye taper is **9,926 bytes** in primary
+and strict R5, versus **51,000 bytes** before compaction; after the actual schema
+save/reload it is **10,604 bytes**. Native R6 remains **5,800 bytes**. Its
+296-drop total, 388 after a dose edit and 184 after removing the first phase
+remain verified. A separate full HL7 validator run is not claimed.
+
+### Runtime measurements
+
+After correctness jobs finished, sequential matched Node 22.22.0 runs compared
+independent module instances with warmup, alternating execution order and the
+median of seven batch means. The incremental five-input run used 30 warmups
+and 50 parses per batch against the immediately preceding built package:
+
+| Input | Previous ms | Current ms | Change |
+| --- | ---: | ---: | ---: |
+| Routine BID | 1.525 | 1.542 | +1.1% |
+| Ocular QID | 1.406 | 1.422 | +1.1% |
+| Thai BID | 3.555 | 3.508 | -1.3% |
+| Two-phase course | 4.006 | 4.154 | +3.7% |
+| Numeric HOLD | 4.606 | 4.415 | -4.2% |
+
+The broader comparison against the package before compact persistence also
+measured export, reopen, scheduling, supply and suggestions:
+
+| Operation | Previous ms | Current ms | Change |
+| --- | ---: | ---: | ---: |
+| parse ordinary | 1.636 | 1.826 | +11.6% |
+| parse eye | 1.818 | 1.765 | -3.0% |
+| parse conditional | 6.085 | 6.127 | +0.7% |
+| parse independent taper | 5.452 | 5.186 | -4.9% |
+| parse Thai | 7.006 | 7.029 | +0.3% |
+| export taper | 0.813 | 0.288 | -64.6% |
+| reopen taper | 0.547 | 0.271 | -50.5% |
+| schedule taper | 6.653 | 6.054 | -9.0% |
+| supply taper | 12.637 | 12.075 | -4.5% |
+| suggest ordinary | 0.865 | 0.887 | +2.4% |
+| suggest eye | 0.879 | 0.863 | -1.8% |
+
+The incremental changes range from -4.2% to +3.7%. The broader run observed
+a 0.190 ms increase (+11.6%) for ordinary finite-BID parsing, while taper export
+and reopen improved by 64.6% and 50.5%. These are shared-host measurements,
+not phone measurements or a claim of zero runtime regression.
+
+All **245 tracked/probe input hashes**, **91 built files**, and the consumer
+harness/schema hashes remained unchanged through the gates and measurements.
+This diary clarification followed verification. The original untracked probe
+is unchanged and excluded from the commit. Final ESM SHA-256:
+`933b2839f2d6634769a5930451c84d4da0f420aba1474bae7cde2841015ffe3e`.
+The PR still has **99 reviewable files**: 114 changed paths minus the same
+15 configured exclusions. No new path or exclusion was added.

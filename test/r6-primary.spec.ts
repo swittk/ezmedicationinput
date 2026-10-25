@@ -2391,6 +2391,59 @@ describe("conflicting executable phase metadata", () => {
     expect(calculateTotalUnits({ ...options, from: orderedAt, dosage: rows, durationValue: 30, durationUnit: "d" }).totalUnits).toBe(296);
   });
 
+
+  it.each([
+    ["primary", 2], ["primary", 3], ["strict", 2], ["strict", 3]
+  ] as const)("resolves an explicitly corrected saved conflict in %s row %i", (projection, rowIndex) => {
+    const parsed = parseSig(input);
+    const rows = cloneStructuredValue(projection === "primary" ? parsed.fhir : toFhirR5Dosages(parsed.fhirNext));
+    start(rows[rowIndex]).value = 8;
+    // A confirmation cannot make currently disagreeing rows executable.
+    const stillConflicting = toDosageDetails(rows, undefined, undefined, { resolvedPhaseSequences: [2] });
+    expect(() => nextDueDoses(stillConflicting, options)).toThrow(/conflicting course phase metadata/i);
+
+    // Begin with the SAVED conflict, whose historical marker must survive plain reopening.
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails(rows)))) as EzDosage[];
+    const note = { url: "https://example.org/reconciliation-note", valueString: "retain clinician note" };
+    saved[2].extension = [...(saved[2].extension ?? []), note];
+    for (const row of saved) if (row.sequence === 2) start(row).value = 7;
+    expect(() => nextDueDoses(saved, options)).toThrow(/conflicting course phase metadata/i);
+    const before = cloneStructuredValue(saved);
+    let resolved = toDosageDetails(saved, undefined, undefined, { resolvedPhaseSequences: [2] });
+    expect(saved).toEqual(before);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      expect(nextDueDoses(resolved, options).filter(value => value.startsWith("2026-10-26"))).toHaveLength(8);
+      expect(calculateTotalUnits({
+        ...options, from: orderedAt, dosage: resolved, durationValue: 30, durationUnit: "d"
+      }).totalUnits).toBe(296);
+      expect(resolved.extension?.filter(extension => extension.url.endsWith("medication-course-reconciliation-source")).length)
+        .toBeGreaterThanOrEqual(2);
+      const projected = toFhirR5Dosages(resolved);
+      expect(projected[2].extension).toContainEqual(note);
+      resolved = toDosageDetails(JSON.parse(JSON.stringify(projected)));
+    }
+    const imported = fromFhir(resolved);
+    expect(calculateTotalUnits({
+      ...options, from: orderedAt, dosage: toDosageDetails(imported.fhir, undefined, imported.course),
+      durationValue: 30, durationUnit: "d"
+    }).totalUnits).toBe(296);
+  });
+
+  it("does not confirm another phase or erase unrelated missing course context", () => {
+    const rows = toFhirR5Dosages(parseSig(input).fhirNext);
+    start(rows[2]).value = 8;
+    const saved = toFhirR5Dosages(toDosageDetails(rows));
+    for (const row of saved) if (row.sequence === 2) start(row).value = 7;
+    expect(() => nextDueDoses(
+      toDosageDetails(saved, undefined, undefined, { resolvedPhaseSequences: [1] }), options
+    )).toThrow(/conflicting course phase metadata/i);
+    saved[2].modifierExtension!.find(extension => extension.url.endsWith("medication-r6-course-details"))!
+      .extension!.push({ url: "missingContext", valueString: "unresolved-shared-owner" });
+    const resolved = toDosageDetails(saved, undefined, undefined, { resolvedPhaseSequences: [2] });
+    expect(() => nextDueDoses(resolved, options)).toThrow(/complete dosage array/i);
+    expect(JSON.stringify(resolved)).toContain("unresolved-shared-owner");
+  });
+
   it("keeps ID and non-modifier annotation disagreements numerically executable", () => {
     const rows = toFhirR5Dosages(parseSig(input).fhirNext);
     phase(rows[2]).extension!.push({ url: "id", valueString: "edited-phase-label" }, {

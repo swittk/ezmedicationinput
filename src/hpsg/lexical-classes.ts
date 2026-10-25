@@ -424,6 +424,9 @@ export const SLEEP_EVENT_ALIASES = setOf(source.sleepEventAliases);
 export const WAKE_EVENT_ALIASES = setOf(source.wakeEventAliases);
 export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
 export const DAY_RANGE_CONNECTORS = setOf(source.dayRangeConnectors);
+/** Typed calendar-month day nouns; prefix + numeric range + monthly daughter. */
+export const CALENDAR_MONTH_DAY_FRAMES = source.calendarMonthDayFrames;
+
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = getAdviceRelationCanonicalSetByGrammarFeature("durationLead");
 

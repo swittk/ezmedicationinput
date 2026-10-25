@@ -339,6 +339,8 @@ export interface HpsgScheduleFeature {
   offsetMax?: number;
   when?: EventTiming[];
   dayOfWeek?: FhirDayOfWeek[];
+  /** Recurring calendar dates of each month; e.g. days 1–14. */
+  dayOfMonth?: number[];
   timeOfDay?: string[];
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];

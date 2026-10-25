@@ -7,12 +7,14 @@ import {
   parseInstructionActions,
   getDosageCondition,
   nextDueDoses,
+  formatSig,
   parseSig as parsePublicSig,
   toDosageDetails,
   toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming } from "../src/types";
+import { EventTiming, FhirPeriodUnit, type FhirDosage } from "../src/types";
+import { getTimingMonthDays, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "../src/fhir";
 
 describe("HPSG clinical quantity grammar", () => {
   it("lowers resolved quantities directly from typed canonical semantics, without a post-parse clinical resolver", () => {
@@ -872,5 +874,113 @@ describe("finite duration follows an administration adjunct", () => {
     expect(parsed.fhir).toHaveLength(1);
     expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
+  });
+});
+
+
+describe("calendar month-day source ownership", () => {
+  const activeDays = Array.from({ length: 14 }, (_, index) => index + 1);
+  it.each([
+    "1 tab PO QD on days 1-14 of each month",
+    "1 tablet daily on days 1 through 14 each month",
+    "รับประทาน 1 เม็ด วันละครั้ง วันที่ 1-14 ของทุกเดือน"
+  ])("never projects monthly calendar ordinals into the prescribed dose: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0]).toEqual({
+      doseQuantity: { value: 1, unit: "tab" }
+    });
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.dayOfMonth).toEqual(activeDays);
+    expect(parsed.meta.canonical.clauses[0].dose?.range).toBeUndefined();
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const row of [parsed.fhir[0], strict[0]]) {
+      expect(getTimingMonthDays(row.timing?.repeat)).toEqual(activeDays);
+      expect(row.timing?.repeat?.extension?.filter(ext =>
+        ext.url === TIMING_DAY_OF_MONTH_EXTENSION_URL)).toHaveLength(14);
+    }
+    const reopened = toDosageDetails(strict);
+    expect(getTimingMonthDays(reopened.step[0].component[0].timing?.repeat)).toEqual(activeDays);
+    expect(formatSig(strict[0], "long", { locale: "en" })).toContain("on days 1–14 of each month");
+    expect(formatSig(strict[0], "long", { locale: "th" })).toContain("วันที่ 1–14 ของทุกเดือน");
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("keeps isolated monthly day 31 without fabricating shorter-month occurrences", () => {
+    const parsed = parsePublicSig("Take 1 tablet daily on day 31 of every month.");
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(getTimingMonthDays(parsed.fhir[0].timing?.repeat)).toEqual([31]);
+    expect(formatSig(parsed.fhir[0], "long")).toContain("on day 31 of each month");
+  });
+
+  it.each([
+    ["range", activeDays], ["single day", [31]], ["separate days", [1, 15]],
+    ["three separate days", [1, 15, 28]]
+  ] as const)("reparses source-less English and Thai monthly %s in both styles", (_name, days) => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        extension: days.map(day => ({ url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day }))
+      } }
+    };
+    for (const locale of ["en", "th"] as const) for (const style of ["short", "long"] as const) {
+      const text = formatSig(row, style, { locale });
+      const reparsed = parsePublicSig(text);
+      expect(reparsed.fhir, text).toHaveLength(1);
+      expect(reparsed.fhir[0].doseAndRate?.[0], text).toEqual({ doseQuantity: { value: 1, unit: "tab" } });
+      expect(getTimingMonthDays(reparsed.fhir[0].timing?.repeat), text).toEqual(days);
+      expect(reparsed.fhir[0].timing?.repeat?.frequency, text).toBe(1);
+    }
+  });
+
+  it.each([
+    ["1 tab PO QD on days 1-14 of each month", activeDays],
+    ["รับประทาน 1 เม็ด วันละครั้ง วันที่ 1-14 ของทุกเดือน", activeDays],
+    ["Take 1 tablet daily on day 31 of every month.", [31]]
+  ] as const)("can reparse human-readable EN/TH short AND long monthly restrictions: %s", (input, days) => {
+    const original = parsePublicSig(input);
+    for (const dosage of [original.fhir[0], toFhirR5Dosages(original.fhirNext)[0]]) {
+      for (const locale of ["en", "th"] as const) {
+        for (const mode of ["short", "long"] as const) {
+          const formatted = formatSig(dosage, mode, { locale });
+          expect(formatted).not.toContain("month:");
+          expect(formatted).not.toContain("วันที่:");
+          const reentered = parsePublicSig(formatted, { locale });
+          expect(reentered.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+          expect(reentered.fhir[0].doseAndRate?.[0]?.doseRange).toBeUndefined();
+          expect(getTimingMonthDays(reentered.fhir[0].timing?.repeat)).toEqual([...days]);
+        }
+      }
+    }
+  });
+
+  it("reparses a noncontiguous month-day set imported from FHIR in both languages", () => {
+    const base = parsePublicSig("Take 1 tablet daily on day 1 of every month.").fhir[0];
+    const imported = {
+      ...base, timing: { ...base.timing, repeat: { ...base.timing?.repeat, extension: [
+        { url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: 1 },
+        { url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: 15 }
+      ] } }
+    };
+    expect(getTimingMonthDays(imported.timing.repeat)).toEqual([1, 15]);
+    for (const locale of ["en", "th"] as const) {
+      for (const mode of ["short", "long"] as const) {
+        const formatted = formatSig(imported, mode, { locale });
+        expect(formatted).toContain(locale === "en"
+          ? "on days 1 and 15 of each month" : "วันที่ 1");
+        const next = parsePublicSig(formatted, { locale });
+        expect(next.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+        expect(next.fhir[0].doseAndRate?.[0]?.doseRange).toBeUndefined();
+        expect(getTimingMonthDays(next.fhir[0].timing?.repeat)).toEqual([1, 15]);
+      }
+    }
+  });
+
+  it("retains true medication quantity and finite course when no monthly-day head exists", () => {
+    const parsed = parsePublicSig("Take 2 tablets daily for 14 days.");
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(14);
+    expect(getTimingMonthDays(parsed.fhir[0].timing?.repeat)).toBeUndefined();
   });
 });

@@ -1266,13 +1266,22 @@ function reconcileRetainedCourse(
  * Export the R5-style extended dose array as strict R6 DosageDetails.
  * The optional course.step rows use the official R6 step fields, grouped
  * by the existing global R5 sequence number.
+ * @param dosages Authoritative live R5 rows, including retained course metadata.
+ * @param renderedInstruction Explicit replacement whole-course display.
+ * @param course Explicit editable course and step metadata, when supplied.
+ * @param options Confirm corrected phase sequences after editing saved rows.
+ * Only their persisted conflict flags are cleared; live disagreements still
+ * block numeric execution and the prior conflict remains source provenance.
+ * @returns The editable R6 course with any unresolved context retained.
  */
 export function toDosageDetails(
   dosages: readonly (FhirDosage | EzDosage)[],
   renderedInstruction?: string,
-  course?: EzCourseMetadata
+  course?: EzCourseMetadata,
+  options?: { resolvedPhaseSequences?: readonly number[] }
 ): FhirR6DosageDetails {
-  if (dosages.some(compactCourseMarker)) return reconcileCompactCourse(dosages, renderedInstruction, course);
+  if (dosages.some(compactCourseMarker))
+    return reconcileCompactCourse(dosages, renderedInstruction, course, options?.resolvedPhaseSequences);
   // Import historical complete-course markers without emitting them again.
   // Earlier persisted R5 rows can carry an entire source course. Select the
   // first structurally usable snapshot deterministically; keep malformed or
@@ -1798,10 +1807,11 @@ export function getCourseContextIssue(
  * @param dosages Authoritative live rows; order within a sequence is retained.
  * @param renderedInstruction Explicit replacement whole-course display.
  * @param editedCourse Explicit editable course/step metadata, when supplied.
+ * @param resolvedPhaseSequences Explicit confirmation of corrected saved phases.
  */
 function reconcileCompactCourse(
   dosages: readonly (FhirDosage | EzDosage)[], renderedInstruction?: string,
-  editedCourse?: EzCourseMetadata
+  editedCourse?: EzCourseMetadata, resolvedPhaseSequences?: readonly number[]
 ): FhirR6DosageDetails {
   const warnings: string[] = [];
   const sources: FhirExtension[] = [];
@@ -1844,8 +1854,11 @@ function reconcileCompactCourse(
       sources.push(marker);
       addWarning(warnings, "Shared course metadata without its context identity was retained as source provenance.");
     }
-    if (value.missingContext && value.missingContext.indexOf(CONFLICTING_PHASE_CONTEXT) >= 0)
-      conflictingPhases.add(value.sequence);
+    if (value.missingContext && value.missingContext.indexOf(CONFLICTING_PHASE_CONTEXT) >= 0) {
+      if ((resolvedPhaseSequences?.indexOf(value.sequence) ?? -1) >= 0)
+        sources.push(localReconciliationSource(marker));
+      else conflictingPhases.add(value.sequence);
+    }
     const previous = metadata.get(value.sequence);
     const step = value.step ?? {};
     if (previous && !equalStructuredValues(previous.step, step)) {

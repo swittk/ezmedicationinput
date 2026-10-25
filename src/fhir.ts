@@ -160,6 +160,28 @@ export function getTimingClockWindow(
   } : undefined;
 }
 
+/** Standard HL7 extension for day-of-month timing (repeatable positive integer). */
+export const TIMING_DAY_OF_MONTH_EXTENSION_URL =
+  "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth";
+
+/** Retrieve bounded executable month-day selection without interpreting prose.
+ * Unknown and malformed extensions remain in the original FHIR object.
+ * @param repeat Original FHIR R5 Timing.repeat with optional standard extensions.
+ * @returns Sorted unique calendar days, or undefined when none are recognized.
+ */
+export function getTimingMonthDays(repeat: FhirTimingRepeat | undefined): number[] | undefined {
+  const extensions = repeat?.extension;
+  if (!extensions?.length) return undefined;
+  const days: number[] = [];
+  for (const extension of extensions) {
+    if (extension.url !== TIMING_DAY_OF_MONTH_EXTENSION_URL) continue;
+    const value = extension.valuePositiveInt;
+    if (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 31 &&
+        days.indexOf(value) < 0) days.push(value);
+  }
+  return days.length ? days.sort((left, right) => left - right) : undefined;
+}
+
 export const TIMING_WEEKDAY_ORDINAL_EXTENSION_URL =
   "https://solublelabs.com/fhir/StructureDefinition/medication-timing-weekday-ordinal";
 
@@ -1203,6 +1225,16 @@ export function canonicalToFhir(
     repeat.dayOfWeek = [...schedule.dayOfWeek];
     hasRepeat = true;
   }
+  if (schedule?.dayOfMonth?.length) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      ...schedule.dayOfMonth.map(day => ({
+        url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day
+      }))
+    ];
+    hasRepeat = true;
+  }
+
   if (schedule?.when?.length) {
     repeat.when = [...schedule.when];
     hasRepeat = true;
@@ -1613,6 +1645,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const activityTiming = parseActivityTimingExtensions(repeat);
   const clockWindow = getTimingClockWindow(repeat);
   const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
+  const dayOfMonth = getTimingMonthDays(repeat);
   const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
   const cycleDayConstraint = getCycleDayConstraint(dosage);
@@ -1627,6 +1660,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     activityTiming?.length ||
     clockWindow !== undefined ||
     weekdayOrdinal !== undefined ||
+    dayOfMonth !== undefined ||
     eventWindow !== undefined ||
     cycleDayConstraint !== undefined ||
     occurrenceCap !== undefined ||
@@ -1682,6 +1716,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       occurrenceCap,
       maxDosePerPeriod,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
+      dayOfMonth,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
       calendarEvents: dosage.timing?.event
@@ -1831,6 +1866,10 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
   const clockWindow = getTimingClockWindow(dosage.timing?.repeat);
   if (clockWindow) state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), clockWindow };
+  const dayOfMonth = getTimingMonthDays(dosage.timing?.repeat);
+  if (dayOfMonth) {
+    state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), dayOfMonth };
+  }
   const weekdayOrdinal = getTimingWeekdayOrdinal(dosage.timing?.repeat);
   if (weekdayOrdinal !== undefined) {
     state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), weekdayOrdinal };

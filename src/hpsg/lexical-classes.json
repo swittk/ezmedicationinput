@@ -2485,5 +2485,69 @@
       "days",
       "when"
     ]
-  ]
+  ],
+  "calendarMonthDayFrames": {
+    "prefixes": [
+      [
+        "on",
+        "days"
+      ],
+      [
+        "on",
+        "day"
+      ],
+      [
+        "days"
+      ],
+      [
+        "day"
+      ],
+      [
+        "วัน",
+        "ที่"
+      ],
+      [
+        "วันที่"
+      ]
+    ],
+    "suffixes": [
+      [
+        "of",
+        "each",
+        "month"
+      ],
+      [
+        "of",
+        "every",
+        "month"
+      ],
+      [
+        "each",
+        "month"
+      ],
+      [
+        "every",
+        "month"
+      ],
+      [
+        "ของ",
+        "ทุกเดือน"
+      ],
+      [
+        "ทุกเดือน"
+      ]
+    ],
+    "rangeConnectors": [
+      "to",
+      "through",
+      "-",
+      "–"
+    ],
+    "listConnectors": [
+      "and",
+      ",",
+      "&",
+      "และ"
+    ]
+  }
 }

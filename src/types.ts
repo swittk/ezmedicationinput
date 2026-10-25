@@ -1593,6 +1593,8 @@ export interface CanonicalScheduleExpr {
   /** Maximum event offset in minutes when the source says “at most”. */
   offsetMax?: number;
   dayOfWeek?: FhirDayOfWeek[];
+  /** Source-specified calendar days of each month, not medication dose amounts. */
+  dayOfMonth?: number[];
   when?: EventTiming[];
   timeOfDay?: string[];
   /** Typed recurring window, distinct from an instantaneous WHEN event. */

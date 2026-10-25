@@ -562,6 +562,7 @@ function describeStandaloneOccurrenceCount(
     schedule?.periodMax !== undefined ||
     schedule?.periodUnit !== undefined ||
     schedule?.dayOfWeek?.length ||
+    schedule?.dayOfMonth?.length ||
     schedule?.when?.length ||
     schedule?.timeOfDay?.length ||
     schedule?.duration !== undefined ||
@@ -962,6 +963,20 @@ function describeCalendarEventsEnglish(
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
 }
 
+/** Describe typed month-day selection independently of medication amount.
+ * @param schedule Calendar-day membership from grammar or a structured import.
+ * @returns An English monthly day phrase when a selection is present.
+ */
+function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const days = schedule?.dayOfMonth ?? [];
+  if (!days.length) return undefined;
+  const sorted = [...days].sort((a, b) => a - b);
+  const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
+  if (sorted.length === 1) return `on day ${sorted[0]} of each month`;
+  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]} of each month`
+    : `on days ${sorted.join(" and ")} of each month`;
+}
+
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -1131,6 +1146,9 @@ function formatShort(clause: CanonicalSigClause): string {
   if (schedule.when?.length) {
     parts.push(schedule.when.join(" "));
   }
+  if (schedule.dayOfMonth?.length) {
+    parts.push(describeDayOfMonth(schedule)!);
+  }
   if (schedule.dayOfWeek?.length) {
     const days: string[] = [];
     for (const day of schedule.dayOfWeek) {
@@ -1260,6 +1278,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
+  const monthDayPart = describeDayOfMonth(schedule);
   const calendarEventPart = describeCalendarEventsEnglish(schedule);
   const calendarBoundsPart = describeCalendarBoundsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
@@ -1307,6 +1326,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (monthDayPart) {
+    segments.push(monthDayPart);
   }
   if (calendarBoundsPart) {
     segments.push(calendarBoundsPart);
@@ -1641,7 +1663,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.offset !== undefined ||

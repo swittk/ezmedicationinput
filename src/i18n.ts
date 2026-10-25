@@ -1203,6 +1203,7 @@ function describeStandaloneOccurrenceCountThai(
     schedule?.periodMax !== undefined ||
     schedule?.periodUnit !== undefined ||
     schedule?.dayOfWeek?.length ||
+    schedule?.dayOfMonth?.length ||
     schedule?.when?.length ||
     schedule?.timeOfDay?.length ||
     schedule?.duration !== undefined ||
@@ -1710,6 +1711,20 @@ function describeCalendarEventsThai(
   return `วันที่ ${parts.slice(0, -1).join(", ")} และ ${parts[parts.length - 1]}`;
 }
 
+/** Describe typed calendar month days in Thai.
+ * @param schedule Calendar-day membership from grammar or a structured import.
+ * @returns A Thai monthly day phrase when a selection is present.
+ */
+function describeDayOfMonthThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const days = schedule?.dayOfMonth ?? [];
+  if (!days.length) return undefined;
+  const sorted = [...days].sort((a, b) => a - b);
+  const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
+  return contiguous && sorted.length > 1
+    ? `วันที่ ${sorted[0]}–${sorted[sorted.length - 1]} ของทุกเดือน`
+    : `วันที่ ${sorted.join(" และ ")} ของทุกเดือน`;
+}
+
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -1928,6 +1943,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
     }
     parts.push(times.join(","));
   }
+  if (schedule.dayOfMonth?.length) {
+    parts.push(describeDayOfMonthThai(schedule)!);
+  }
   if (schedule.dayOfWeek?.length) {
     const days: string[] = [];
     for (const day of schedule.dayOfWeek) {
@@ -2099,6 +2117,7 @@ function formatLongThai(
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeekThai(schedule);
+  const monthDayPart = describeDayOfMonthThai(schedule);
   const calendarEventPart = describeCalendarEventsThai(schedule);
   const calendarBoundsPart = describeCalendarBoundsThai(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
@@ -2156,6 +2175,9 @@ function formatLongThai(
   }
   if (dayPart) {
     segments.push(dayPart);
+  }
+  if (monthDayPart) {
+    segments.push(monthDayPart);
   }
   if (calendarBoundsPart) {
     segments.push(calendarBoundsPart);
@@ -2439,7 +2461,8 @@ function formatLongThai(
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.offset !== undefined ||

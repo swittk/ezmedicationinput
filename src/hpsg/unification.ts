@@ -567,6 +567,7 @@ function mergeSchedule(
     repeatCount: mergeOptionalScalar(left.repeatCount, right.repeatCount),
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
+    dayOfMonth: appendUnique(left.dayOfMonth, right.dayOfMonth),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
     calendarEvents: appendUniqueStructured(left.calendarEvents, right.calendarEvents),
     activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),

@@ -36,6 +36,7 @@ import {
   parseActivityTimingExtensions,
   getAdministrationOffsetMinutes,
   getAnchoredCourseDuration,
+  getTimingMonthDays,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
   getTimingOccurrenceCap,
   getCycleDayConstraint,
@@ -810,8 +811,9 @@ function resolveDayFilteredSeriesRepeat(
   }
 }
 
-interface MonthlyWeekdayOrdinal {
-  ordinal: number;
+interface CalendarDaySelection {
+  ordinal?: number;
+  dayOfMonth?: readonly number[];
 }
 
 const WEEKDAY_TEXT: Readonly<Record<string, string>> = {
@@ -819,55 +821,65 @@ const WEEKDAY_TEXT: Readonly<Record<string, string>> = {
   friday: "fri", saturday: "sat", sunday: "sun"
 };
 
-/** Execute the typed monthly ordinal emitted by grammar or an import.
- * @param repeat Structured cadence, weekday and optional ordinal extension.
- * @param anchor Existing recurrence origin used when no ordinal was supplied.
+/** Resolve typed calendar-day restrictions from grammar or an imported Timing.
+ * @param repeat Cadence with month-day membership and optional weekday ordinal.
+ * @param anchor Existing recurrence origin used when no weekday ordinal was supplied.
  * @param timeZone Calendar zone for the recurrence origin.
- * @returns The supplied ordinal or the existing anchor-based monthly occurrence.
+ * @returns The specified day membership and any monthly weekday occurrence.
  */
-function resolveMonthlyWeekdayOrdinal(
+function resolveCalendarDaySelection(
   repeat: FhirTimingRepeat,
   anchor: Date,
   timeZone: string
-): MonthlyWeekdayOrdinal | undefined {
+): CalendarDaySelection | undefined {
+  const dayOfMonth = getTimingMonthDays(repeat);
+  const membership = dayOfMonth?.length ? { dayOfMonth } : undefined;
   if (repeat.periodUnit !== FhirPeriodUnit.Month || !(repeat.dayOfWeek?.length)) {
-    return undefined;
+    return membership;
   }
   for (const extension of repeat.extension ?? []) {
     if (!/(?:weekday-ordinal|week-of-month|weekdayOrdinal)$/iu.test(extension.url)) continue;
     const value = extension.valueInteger;
     if (value === -1 || value !== undefined && Number.isInteger(value) && value >= 1 && value <= 5) {
-      return { ordinal: value };
+      return { ...membership, ordinal: value };
     }
   }
   const parts = getTimeParts(anchor, timeZone);
   const nextWeek = addLocalDays(startOfLocalDay(anchor, timeZone), 7, timeZone);
   const isLast = getTimeParts(nextWeek, timeZone).month !== parts.month;
-  return { ordinal: isLast ? -1 : Math.ceil(parts.day / 7) };
+  return { ...membership, ordinal: isLast ? -1 : Math.ceil(parts.day / 7) };
 }
 
-function matchesMonthlyWeekdayOrdinal(
+/** Match explicit month days and any resolved weekday ordinal.
+ * @param date Candidate administration date.
+ * @param selection Typed restrictions, absent for an unrestricted calendar.
+ * @param timeZone Calendar zone used to read the local day.
+ * @returns Whether the candidate satisfies every supplied restriction.
+ */
+function matchesCalendarDaySelection(
   date: Date,
-  ordinal: MonthlyWeekdayOrdinal | undefined,
+  selection: CalendarDaySelection | undefined,
   timeZone: string
 ): boolean {
-  if (!ordinal) return true;
+  if (!selection) return true;
   const parts = getTimeParts(date, timeZone);
-  if (ordinal.ordinal === -1) {
+  if (selection.dayOfMonth && !arrayIncludes(selection.dayOfMonth, parts.day)) return false;
+  if (selection.ordinal === undefined) return true;
+  if (selection.ordinal === -1) {
     return getTimeParts(addLocalDays(date, 7, timeZone), timeZone).month !== parts.month;
   }
-  return Math.ceil(parts.day / 7) === ordinal.ordinal;
+  return Math.ceil(parts.day / 7) === selection.ordinal;
 }
 
 function matchesCalendarDay(
   date: Date,
   dayFilter: Set<string>,
   enforceDayFilter: boolean,
-  monthlyOrdinal: MonthlyWeekdayOrdinal | undefined,
+  calendarDays: CalendarDaySelection | undefined,
   timeZone: string
 ): boolean {
   return (!enforceDayFilter || dayFilter.has(getLocalWeekday(date, timeZone))) &&
-    matchesMonthlyWeekdayOrdinal(date, monthlyOrdinal, timeZone);
+    matchesCalendarDaySelection(date, calendarDays, timeZone);
 }
 
 function repeatOccurrenceCap(repeat: FhirTimingRepeat): number | undefined {
@@ -1138,6 +1150,10 @@ function exactTimingEventOccurrences(
     expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
   }
 
+  // Explicit dates already select their occurrences; never infer an ordinal
+  // from the query anchor. Apply only the supplied month-day membership here.
+  const dayOfMonth = getTimingMonthDays(repeat);
+  const calendarDays = dayOfMonth ? { dayOfMonth } : undefined;
   const candidates: Date[] = [];
   for (const value of timing.event) {
     const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
@@ -1176,6 +1192,7 @@ function exactTimingEventOccurrences(
     const time = candidate.getTime();
     if (time === previousTime) continue;
     previousTime = time;
+    if (!matchesCalendarDaySelection(candidate, calendarDays, timeZone)) continue;
     if (
       derivePriorCount &&
       (!orderedAt || candidate >= orderedAt) &&
@@ -1447,7 +1464,7 @@ function maximumUnscheduledCapCount(
   const excluded = new Set<string>(getDosageExcludedWeekdays(dosage));
   const dates = new Set(getDosageExcludedDates(dosage));
   const dayCondition = getDosageCalendarDayCondition(dosage);
-  const ordinal = repeat ? resolveMonthlyWeekdayOrdinal(repeat, from, timeZone) : undefined;
+  const ordinal = repeat ? resolveCalendarDaySelection(repeat, from, timeZone) : undefined;
   const ranges: Array<{ first: number; last: number }> = [];
   const intervals: Array<{ start: number; end: number }> = [];
   let day = startOfLocalDay(from, timeZone);
@@ -2189,7 +2206,7 @@ function generateWakingHoursIntervalSeries(
   limit: number,
   dayFilter: Set<string>,
   enforceDayFilter: boolean,
-  monthlyOrdinal: MonthlyWeekdayOrdinal | undefined
+  calendarDays: CalendarDaySelection | undefined
 ): string[] | undefined {
   const window = intervalEventWindow(repeat);
   const clockWindow = usesIntervalCadence(repeat) ? getTimingClockWindow(repeat) : undefined;
@@ -2219,7 +2236,7 @@ function generateWakingHoursIntervalSeries(
   while (results.length < limit && dayIterations < maxDays &&
       (!courseEnd || currentDay < courseEnd)) {
     if ((!firstTreatmentDay || currentDay >= firstTreatmentDay) && matchesCalendarDay(
-      currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone
+      currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone
     )) {
       const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
       const sleepDay = overnight ? addLocalDays(currentDay, 1, timeZone) : currentDay;
@@ -2453,7 +2470,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
-  const monthlyOrdinal = resolveMonthlyWeekdayOrdinal(repeat, baseTime, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, baseTime, timeZone);
 
   const wakingHours = generateWakingHoursIntervalSeries(
     repeat,
@@ -2465,13 +2482,13 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     effectiveLimit,
     dayFilter,
     enforceDayFilter,
-    monthlyOrdinal
+    calendarDays
   );
   if (wakingHours) return wakingHours;
   const elapsedOrigin = clockAnchoredElapsedOrigin(repeat, baseTime, timeZone);
   if (elapsedOrigin) {
     return generateIntervalSeries(elapsedOrigin, from, effectiveLimit, repeat, timeZone,
-      dayFilter, enforceDayFilter, orderedAt, courseEnd, monthlyOrdinal);
+      dayFilter, enforceDayFilter, orderedAt, courseEnd, calendarDays);
   }
 
   const whenCodes = repeat.when ?? [];
@@ -2504,6 +2521,12 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       if (expanded.length === 0) {
         return results.slice(0, effectiveLimit);
       }
+      if (hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
+        return results.concat(generateFrequencyPerPeriodSeries(
+          startOfLocalDay(cadenceAnchor, timeZone), from, effectiveLimit - results.length,
+          repeat, timeZone, orderedAt, courseEnd, expanded, calendarDays
+        )).slice(0, effectiveLimit);
+      }
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
       const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit);
@@ -2512,7 +2535,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
         iterations < maxIterations &&
         (!courseEnd || currentDay < courseEnd)
       ) {
-        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone) &&
+        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
             clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
@@ -2570,7 +2593,8 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       dayFilter,
       enforceDayFilter,
       orderedAt,
-      courseEnd
+      courseEnd,
+      calendarDays
     );
     return candidates;
   }
@@ -2587,7 +2611,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       orderedAt,
       limit: effectiveLimit,
       defaultClock: toLocalClock(baseTime, timeZone),
-      monthlyOrdinal
+      calendarDays
     }).slice(0, effectiveLimit);
   }
 
@@ -2600,7 +2624,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === FhirPeriodUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
       return generateFrequencyPerPeriodSeries(
-        baseTime, from, effectiveLimit, repeat, timeZone, orderedAt, courseEnd, clocks
+        baseTime, from, effectiveLimit, repeat, timeZone, orderedAt, courseEnd, clocks, calendarDays
       );
     }
     if (clocks.length === 0) return [];
@@ -2612,7 +2636,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
       iterations < maxIterations &&
       (!courseEnd || currentDay < courseEnd)
     ) {
-      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone)) {
+      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
         for (const clock of clocks) {
           const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
           if (!zoned) {
@@ -2668,7 +2692,7 @@ function derivePriorCountFromHistory(
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
-  const monthlyOrdinal = resolveMonthlyWeekdayOrdinal(repeat, orderedAt, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, orderedAt, timeZone);
   const seen = new Set<string>();
   let count = 0;
 
@@ -2692,7 +2716,7 @@ function derivePriorCountFromHistory(
     resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt, timeZone);
   if (elapsedOrigin) {
     return generateIntervalSeries(elapsedOrigin, orderedAt, normalizedCount ?? 100000,
-      repeat, timeZone, dayFilter, enforceDayFilter, orderedAt, from, monthlyOrdinal).length;
+      repeat, timeZone, dayFilter, enforceDayFilter, orderedAt, from, calendarDays).length;
   }
 
   const whenCodes = repeat.when ?? [];
@@ -2719,12 +2743,18 @@ function derivePriorCountFromHistory(
       if (expanded.length === 0) {
         return count;
       }
+      if (hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
+        return count + generateFrequencyPerPeriodSeries(
+          startOfLocalDay(cadenceAnchor, timeZone), orderedAt,
+          (normalizedCount ?? 100000) - count, repeat, timeZone, orderedAt, from, expanded, calendarDays
+        ).length;
+      }
 
       let currentDay = startOfLocalDay(orderedAt, timeZone);
       let iterations = 0;
       const maxIterations = calendarScanLimit(currentDay, from, normalizedCount ?? 1);
       while (currentDay < from && iterations < maxIterations) {
-        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone) &&
+        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
             clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
@@ -2767,8 +2797,7 @@ function derivePriorCountFromHistory(
     let guard = 0;
     const maxIterations = normalizedCount !== undefined ? normalizedCount * 1000 : 1000;
     while (current < from && guard < maxIterations) {
-      const weekday = getLocalWeekday(current, timeZone);
-      if (!enforceDayFilter || dayFilter.has(weekday)) {
+      if (matchesCalendarDay(current, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
         if (recordCandidate(current) && normalizedCount !== undefined && seen.size >= normalizedCount) {
           return count;
         }
@@ -2796,7 +2825,7 @@ function derivePriorCountFromHistory(
       orderedAt,
       limit: normalizedCount ?? 31 * 365,
       defaultClock: toLocalClock(orderedAt, timeZone),
-      monthlyOrdinal
+      calendarDays
     });
     return count + generated.length;
   }
@@ -2814,7 +2843,8 @@ function derivePriorCountFromHistory(
         timeZone,
         orderedAt,
         from,
-        clocks
+        clocks,
+        calendarDays
       ).length;
     }
     if (clocks.length === 0) {
@@ -2825,7 +2855,7 @@ function derivePriorCountFromHistory(
     let iterations = 0;
     const maxIterations = calendarScanLimit(currentDay, from, normalizedCount ?? 1);
     while (currentDay < from && iterations < maxIterations) {
-      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone)) {
+      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
         for (const clock of clocks) {
           const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
           if (!zoned) {
@@ -2878,7 +2908,7 @@ function generateIntervalSeries(
   enforceDayFilter: boolean,
   orderedAt: Date | null,
   upperBound?: Date | null,
-  monthlyOrdinal?: MonthlyWeekdayOrdinal
+  calendarDays?: CalendarDaySelection
 ): string[] {
   const increment = createIntervalStepper(repeat, timeZone);
   if (!increment) {
@@ -2902,7 +2932,7 @@ function generateIntervalSeries(
     guard < maxIterations &&
     (!upperBound || current < upperBound)
   ) {
-    if (matchesCalendarDay(current, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone)) {
+    if (matchesCalendarDay(current, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
       if (current < from) {
         // Ensure the current candidate respects the evaluation window.
         guard += 1;
@@ -2954,7 +2984,8 @@ function generateFrequencyPerPeriodSeries(
   timeZone: string,
   orderedAt: Date | null,
   upperBound?: Date | null,
-  clocks: readonly string[] = []
+  clocks: readonly (string | ClockEntry)[] = [],
+  calendarDays?: CalendarDaySelection
 ): string[] {
   const frequency = positiveInteger(repeat.frequency);
   const period = positiveNumber(repeat.period);
@@ -2964,6 +2995,12 @@ function generateFrequencyPerPeriodSeries(
   if (!advanceCycle) return [];
   const results: string[] = [];
   const seen = new Set<string>();
+  let earliestDayShift = 0;
+  let latestDayShift = 0;
+  for (const entry of clocks) if (typeof entry === "object") {
+    earliestDayShift = Math.min(earliestDayShift, entry.dayShift);
+    latestDayShift = Math.max(latestDayShift, entry.dayShift);
+  }
   let cycleStart = baseTime;
   let guard = 0;
   const maxCycles = Math.max(366, effectiveLimit * 366);
@@ -2971,13 +3008,14 @@ function generateFrequencyPerPeriodSeries(
   while (guard < maxCycles) {
     const next = advanceCycle(cycleStart);
     if (!next || next <= cycleStart) return results;
-    if (next > from) break;
+    if ((latestDayShift ? addLocalDays(next, latestDayShift, timeZone) : next) > from) break;
     cycleStart = next;
     guard += 1;
   }
 
   while (results.length < effectiveLimit && guard < maxCycles &&
-      (!upperBound || cycleStart < upperBound)) {
+      (!upperBound || (earliestDayShift
+        ? addLocalDays(cycleStart, earliestDayShift, timeZone) : cycleStart) < upperBound)) {
     const cycleEnd = advanceCycle(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
     const calendarUnit = periodUnit === FhirPeriodUnit.Day ||
@@ -2989,17 +3027,25 @@ function generateFrequencyPerPeriodSeries(
     const baseClock = toLocalClock(cycleStart, timeZone);
     for (let index = 0; index < frequency && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
+      let shiftedClock = false;
       if (calendarUnit && frequency <= spanDays) {
+        const entry = clocks[index % Math.max(1, clocks.length)];
+        const dayShift = typeof entry === "object" ? entry.dayShift : 0;
+        shiftedClock = dayShift !== 0;
         const day = addLocalDays(startOfLocalDay(cycleStart, timeZone),
-          Math.floor(index * spanDays / frequency), timeZone);
-        const clock = clocks[index % Math.max(1, clocks.length)] ?? baseClock;
+          Math.floor(index * spanDays / frequency) + dayShift, timeZone);
+        const clock = typeof entry === "string" ? entry : entry?.time ?? baseClock;
         candidate = makeZonedDateFromDay(day, timeZone, clock);
       } else {
         candidate = new Date(cycleStart.getTime() +
           Math.floor((cycleEnd.getTime() - cycleStart.getTime()) * index / frequency));
       }
-      if (!candidate || candidate < from || candidate < cycleStart || candidate >= cycleEnd ||
-          orderedAt && candidate < orderedAt || upperBound && candidate >= upperBound) continue;
+      // Meal offsets may place the administration outside its anchor cycle.
+      // Keep those occurrences when they are inside the actual query window.
+      if (!candidate || candidate < from ||
+          !shiftedClock && (candidate < cycleStart || candidate >= cycleEnd) ||
+          orderedAt && candidate < orderedAt || upperBound && candidate >= upperBound ||
+          !matchesCalendarDaySelection(candidate, calendarDays, timeZone)) continue;
       const iso = formatZonedIso(candidate, timeZone);
       if (!seen.has(iso)) {
         seen.add(iso);
@@ -3124,7 +3170,7 @@ type DayFilteredPeriodSeriesOptions = {
   orderedAt?: Date | null;
   limit: number;
   defaultClock?: string;
-  monthlyOrdinal?: MonthlyWeekdayOrdinal;
+  calendarDays?: CalendarDaySelection;
 };
 
 /**
@@ -3157,7 +3203,7 @@ function generateDayFilteredPeriodSeries(
     orderedAt,
     limit,
     defaultClock,
-    monthlyOrdinal
+    calendarDays
   } = options;
   if (limit <= 0) {
     return [];
@@ -3186,7 +3232,7 @@ function generateDayFilteredPeriodSeries(
       timeZone
     );
     if (inPeriodCycle && matchesCalendarDay(
-      currentDay, dayFilter, true, monthlyOrdinal, timeZone
+      currentDay, dayFilter, true, calendarDays, timeZone
     )) {
       for (const clock of clocks) {
         const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
@@ -3276,7 +3322,7 @@ function countScheduleEvents(
   const seen = new Set<string>();
   let count = 0;
   const timeZone = config.timeZone!;
-  const monthlyOrdinal = resolveMonthlyWeekdayOrdinal(repeat, baseTime, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, baseTime, timeZone);
   const priorCount = derivePriorCount &&
     normalizedCount !== undefined && orderedAt && from > orderedAt
       ? derivePriorCountFromHistory(dosage, timing, repeat, config, orderedAt, from, timeZone)
@@ -3313,7 +3359,7 @@ function countScheduleEvents(
   const elapsedOrigin = clockAnchoredElapsedOrigin(repeat, baseTime, timeZone);
   if (elapsedOrigin) {
     return generateIntervalSeries(elapsedOrigin, from, hardLimit, repeat, timeZone,
-      dayFilter, enforceDayFilter, orderedAt, to, monthlyOrdinal).length;
+      dayFilter, enforceDayFilter, orderedAt, to, calendarDays).length;
   }
 
   const whenCodes = repeat.when ?? [];
@@ -3339,12 +3385,18 @@ function countScheduleEvents(
 
     if (!canFallbackToFrequency) {
       if (expanded.length === 0) return count;
+      if (hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
+        return count + generateFrequencyPerPeriodSeries(
+          startOfLocalDay(cadenceAnchor, timeZone), from, hardLimit - count,
+          repeat, timeZone, orderedAt, to, expanded, calendarDays
+        ).length;
+      }
 
       let currentDay = startOfLocalDay(from, timeZone);
       let iterations = 0;
       const maxIterations = calendarScanLimit(currentDay, to, hardLimit);
       while (count < countLimit && currentDay < to && iterations < maxIterations) {
-        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone) &&
+        if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
             clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)) {
           for (const entry of expanded) {
             const targetDay = entry.dayShift === 0
@@ -3385,8 +3437,7 @@ function countScheduleEvents(
     }
 
     while (current < to && count < countLimit && guard < maxIterations) {
-      const weekday = getLocalWeekday(current, timeZone);
-      if (!enforceDayFilter || dayFilter.has(weekday)) {
+      if (matchesCalendarDay(current, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
         recordCandidate(current);
       }
       const next = increment(current);
@@ -3403,7 +3454,7 @@ function countScheduleEvents(
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === FhirPeriodUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
       return count + generateFrequencyPerPeriodSeries(
-        baseTime, from, hardLimit, repeat, timeZone, orderedAt, to, clocks
+        baseTime, from, hardLimit, repeat, timeZone, orderedAt, to, clocks, calendarDays
       ).length;
     }
     if (clocks.length === 0) return count;
@@ -3412,7 +3463,7 @@ function countScheduleEvents(
     let iterations = 0;
     const maxIterations = calendarScanLimit(currentDay, to, hardLimit);
     while (count < countLimit && currentDay < to && iterations < maxIterations) {
-      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, monthlyOrdinal, timeZone)) {
+      if (matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone)) {
         for (const clock of clocks) {
           const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
           if (zoned) recordCandidate(zoned);
@@ -3436,7 +3487,7 @@ function countScheduleEvents(
       orderedAt,
       limit: hardLimit,
       defaultClock: toLocalClock(baseTime, timeZone),
-      monthlyOrdinal
+      calendarDays
     });
     return count + generated.length;
   }
@@ -4268,7 +4319,7 @@ function calculateCourseTotalUnits(
         .reduce((earliest, candidate) =>
         candidate < earliest ? candidate : earliest, queryEnd);
       if (end <= begin || end <= queryStart) continue;
-      if (!dosage.timing?.repeat)
+      if (!dosage.timing?.repeat && !dosage.timing?.event?.length)
         throw new MedicationQuantityCalculationError("timing-required",
           "Stage " + (index + 1) + " has no executable frequency or dosing time for one component.");
       const bounded: FhirDosage = {
@@ -4388,6 +4439,23 @@ function resolveExplicitClockEntries(repeat: FhirTimingRepeat, config: NextDueDo
     entries.push(...inferWhenFallbackEntries(when, repeat));
   return entries;
 }
+/** Whether a calendar-period frequency needs more days than its clock anchors.
+ * @param repeat Typed frequency and calendar period.
+ * @param entries Resolved clocks, including meal offsets across midnight.
+ * @param dayFiltered Whether explicit weekdays already select eligible days.
+ * @returns True when the existing per-period distributor supplies the cadence.
+ */
+function hasDistributedClockFrequency(
+  repeat: FhirTimingRepeat, entries: readonly ClockEntry[], dayFiltered: boolean
+): boolean {
+  if (dayFiltered || !entries.length ||
+      !positiveInteger(repeat.frequency) || repeat.frequency! <= entries.length ||
+      !positiveNumber(repeat.period) || arrayIncludes(repeat.when ?? [], EventTiming.Immediate)) return false;
+  return repeat.periodUnit === FhirPeriodUnit.Week ||
+    repeat.periodUnit === FhirPeriodUnit.Month || repeat.periodUnit === FhirPeriodUnit.Year ||
+    repeat.periodUnit === FhirPeriodUnit.Day && repeat.period! > 1;
+}
+
 /** Clock anchors restrict time within an eligible period; they do not erase its cadence. */
 function clockCadenceEligible(day: Date, anchor: Date, repeat: FhirTimingRepeat, timeZone: string, dayFiltered: boolean): boolean {
   if (!repeat.period || !repeat.periodUnit || repeat.periodUnit === 'd' && repeat.period <= 1) return true;

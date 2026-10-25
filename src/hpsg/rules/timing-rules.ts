@@ -43,6 +43,7 @@ import {
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
   DAY_RANGE_CONNECTORS,
+  CALENDAR_MONTH_DAY_FRAMES,
   DOSE_TARGET_EVENT_MEMBERS,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_UNITS,
@@ -2354,6 +2355,104 @@ function expandDayRange(
     cursor = (cursor + 1) % DAY_ORDER.length;
   }
   return result;
+}
+
+const CALENDAR_MONTH_DAY_PREFIXES_BY_FIRST = new Map<string, Array<readonly string[]>>();
+for (const prefix of CALENDAR_MONTH_DAY_FRAMES.prefixes) {
+  const bucket = CALENDAR_MONTH_DAY_PREFIXES_BY_FIRST.get(prefix[0]) ?? [];
+  bucket.push(prefix);
+  CALENDAR_MONTH_DAY_PREFIXES_BY_FIRST.set(prefix[0], bucket);
+}
+
+/** A calendar-month day range is a recurrence selector, never a dose range.
+ * Both the headed day noun and its explicit monthly complement must be present,
+ * so ordinary “1–14 tablets”, duration ranges and menstrual cycle offsets
+ * cannot satisfy this constituent.
+ * @returns A lexical rule yielding typed calendar-day membership.
+ */
+export function monthlyDayOfMonthLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.schedule.monthlyDayOfMonth", (context, start) => {
+    const firstToken = context.tokens[start];
+    if (!firstToken) return [];
+    const normalizedFirst = normalizeTokenLower(firstToken);
+    const canonicalPrefixes = CALENDAR_MONTH_DAY_PREFIXES_BY_FIRST.get(normalizedFirst);
+    const surfacePrefixes = normalizedFirst !== firstToken.lower
+      ? CALENDAR_MONTH_DAY_PREFIXES_BY_FIRST.get(firstToken.lower) : undefined;
+    if (!canonicalPrefixes && !surfacePrefixes) return [];
+    const prefixes = canonicalPrefixes && surfacePrefixes
+      ? [...surfacePrefixes, ...canonicalPrefixes] : surfacePrefixes ?? canonicalPrefixes!;
+    const frames = CALENDAR_MONTH_DAY_FRAMES;
+    const read = (index: number): string | undefined =>
+      index < context.limit && context.tokens[index]
+        ? normalizeTokenLower(context.tokens[index]) : undefined;
+    const matches = (parts: readonly string[], index: number): boolean =>
+      parts.every((part, offset) => {
+        const token = context.tokens[index + offset];
+        return token && (read(index + offset) === part || token.lower === part);
+      });
+    for (const prefix of prefixes) {
+      if (!matches(prefix, start)) continue;
+      let cursor = start + prefix.length;
+      const first = context.tokens[cursor];
+      if (!first) continue;
+      let lower: number | undefined;
+      let upper: number | undefined;
+      const compact = read(cursor)?.match(/^(\d{1,2})[-–](\d{1,2})$/u);
+      if (compact) {
+        lower = Number(compact[1]); upper = Number(compact[2]);
+        cursor++;
+      } else {
+        const firstDay = first.value;
+        const connector = read(cursor + 1);
+        const secondDay = context.tokens[cursor + 2]?.value;
+        if (typeof firstDay === "number" && Number.isInteger(firstDay)) {
+          lower = firstDay;
+          if (connector && frames.rangeConnectors.indexOf(connector) >= 0 &&
+              typeof secondDay === "number" && Number.isInteger(secondDay)) {
+            upper = secondDay;
+            cursor += 3;
+          } else {
+            upper = lower;
+            cursor++;
+          }
+        }
+      }
+      if (lower === undefined || upper === undefined || lower < 1 ||
+          upper < lower || upper > 31) continue;
+      const days = Array.from({ length: upper - lower + 1 }, (_, index) => lower! + index);
+      // Coordinated day ordinals are licensed only within an explicit monthly
+      // heading. An unheaded numeric AND remains normal dose/quantity syntax.
+      while (cursor + 1 < context.limit) {
+        const connector = context.tokens[cursor];
+        const head = context.tokens[cursor + 1];
+        if (!connector || !head ||
+            (frames.listConnectors.indexOf(read(cursor) ?? "") < 0 &&
+              frames.listConnectors.indexOf(connector.lower) < 0) ||
+            typeof head.value !== "number" || !Number.isInteger(head.value) ||
+            head.value < 1 || head.value > 31) break;
+        if (days.indexOf(head.value) < 0) days.push(head.value);
+        cursor += 2;
+      }
+      days.sort((a, b) => a - b);
+      for (const suffix of frames.suffixes) {
+        if (!matches(suffix, cursor)) continue;
+        const members = tokensAvailable(context, start, cursor + suffix.length - start);
+        if (!members) continue;
+        const startOffset = members[0].sourceStart;
+        const endOffset = members[members.length - 1].sourceEnd;
+        return [lexicalSign({
+          type: "schedule-sign", rule: "hpsg.lex.schedule.monthlyDayOfMonth", tokens: members,
+          synsem: { head: { schedule: {
+            dayOfMonth: days,
+            sourceRanges: [{ start: startOffset, end: endOffset }]
+          } }, valence: {}, cont: { clauseKind: "administration" } },
+          scheduleFields: ["dayOfMonth"],
+          score: 48 + members.length
+        })];
+      }
+    }
+    return [];
+  });
 }
 
 export function dayRangeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {

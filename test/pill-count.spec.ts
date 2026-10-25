@@ -1274,3 +1274,313 @@ describe("anchored course duration preservation", () => {
     }
   });
 });
+
+describe("weekly clock frequency and exact calendar supply", () => {
+  const options = {
+    timeZone: "Asia/Bangkok",
+    from: "2026-11-01T00:00:00+07:00",
+    orderedAt: "2026-11-01T00:00:00+07:00",
+    eventClock: { HS: "22:00", CM: "08:00" },
+    mealOffsets: { PCM: 30 }
+  };
+  const twiceWeeklyDays = [1, 4, 8, 11, 15, 18, 22, 25];
+  const stamp = (day: number, clock: string) =>
+    `2026-11-${String(day).padStart(2, "0")}T${clock}:00+07:00`;
+  const forms = (input: string) => {
+    const parsed = parseBatch(input);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    return [parsed.fhir, parsed.fhirNext, strict,
+      toDosageDetails(JSON.parse(JSON.stringify(strict)))];
+  };
+
+  it.each([
+    ["1 tab PV HS twice weekly x28d", "22:00", twiceWeeklyDays],
+    ["1 tab PO twice weekly at 22:00 x28d", "22:00", twiceWeeklyDays],
+    ["1 tab PO twice weekly after breakfast x28d", "08:30", twiceWeeklyDays],
+    ["1 tab PO three times weekly HS x28d", "22:00", [1, 3, 5, 8, 10, 12, 15, 17, 19, 22, 24, 26]]
+  ] as const)("keeps the full frequency with a clock: %s", (input, clock, days) => {
+    const expected = days.map(day => stamp(day, clock));
+    for (const dosage of forms(input)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 40 })).toEqual(expected);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(days.length);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps loading plus twice-weekly bedtime maintenance at eighteen tablets", () => {
+    const input = "1 tab PV HS daily x14d then 1 tab PV HS twice weekly";
+    const expected = [
+      ...Array.from({ length: 14 }, (_, i) => stamp(i + 1, "22:00")),
+      ...[15, 18, 22, 25].map(day => stamp(day, "22:00"))
+    ];
+    for (const dosage of forms(input)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 40 })
+        .filter(value => Date.parse(value) < Date.parse("2026-11-29T00:00:00+07:00")))
+        .toEqual(expected);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(18);
+    }
+  });
+
+  it("preserves explicit weekdays and a once-weekly clock", () => {
+    for (const [input, days] of [
+      ["1 tab PV HS Mon Thu x28d", [2, 5, 9, 12, 16, 19, 23, 26]],
+      ["1 tab PV HS weekly x28d", [1, 8, 15, 22]]
+    ] as const) {
+      for (const dosage of forms(input)) {
+        expect(nextDueDoses(dosage, { ...options, limit: 40 }))
+          .toEqual(days.map(day => stamp(day, "22:00")));
+        expect(calculateTotalUnits({
+          ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(days.length);
+      }
+    }
+  });
+
+  it("uses the whole multiweek period and preserves an already-passed clock", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 2, period: 2, periodUnit: FhirPeriodUnit.Week, timeOfDay: ["22:00:00"]
+      } }
+    };
+    const late = { ...options, from: "2026-11-01T23:00:00+07:00", orderedAt: "2026-11-01T23:00:00+07:00" };
+    const expected = [8, 15, 22, 29].map(day => stamp(day, "22:00"));
+    expect(nextDueDoses(dosage, { ...late, limit: 4 })).toEqual(expected);
+    expect(calculateTotalUnits({
+      ...late, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(4);
+  });
+
+  it("keeps weekly meal offsets that cross the previous midnight", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week,
+        when: ["ACM" as EventTiming], offset: 120
+      } }
+    };
+    const earlyMeal = { ...options, eventClock: { CM: "01:00" } };
+    expect(nextDueDoses(dosage, { ...earlyMeal, limit: 8 }))
+      .toEqual([3, 7, 10, 14, 17, 21, 24, 28].map(day => stamp(day, "23:00")));
+    expect(calculateTotalUnits({
+      ...earlyMeal, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(8);
+    dosage.timing!.repeat!.count = 5;
+    const later = { ...earlyMeal, from: "2026-11-08T00:00:00+07:00" };
+    expect(nextDueDoses(dosage, { ...later, limit: 10 }))
+      .toEqual([10, 14, 17].map(day => stamp(day, "23:00")));
+    expect(calculateTotalUnits({
+      ...later, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(3);
+  });
+
+  it("derives the remaining occurrence cap from the same weekly clock cadence", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        count: 5, frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week,
+        when: [EventTiming["Before Sleep"]]
+      } }
+    };
+    const later = { ...options, from: "2026-11-08T00:00:00+07:00" };
+    expect(nextDueDoses(dosage, { ...later, limit: 10 }))
+      .toEqual([8, 11, 15].map(day => stamp(day, "22:00")));
+    expect(calculateTotalUnits({
+      ...later, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(3);
+  });
+
+  it.each([
+    "1 tab PO on days 3-7 of each 28-day cycle starting 2026-11-01 for 1 cycle",
+    "1 tab PO QD on days 3-7 of each 28-day cycle starting 2026-11-01 for 1 cycle"
+  ])("counts an explicit finite calendar without demanding another frequency: %s", input => {
+    for (const dosage of forms(input)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 20 }).map(value => value.slice(0, 10)))
+        .toEqual([3, 4, 5, 6, 7].map(day => stamp(day, "00:00").slice(0, 10)));
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(5);
+      expect(calculateTotalUnits({
+        ...options, from: "2026-11-05T00:00:00+07:00",
+        dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(3);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
+describe("monthly day membership supply", () => {
+  const options = {
+    timeZone: "Asia/Bangkok",
+    from: "2026-11-01T00:00:00+07:00",
+    orderedAt: "2026-11-01T00:00:00+07:00",
+    eventClock: { HS: "22:00" }
+  };
+  const forms = (input: string) => {
+    const parsed = parseBatch(input);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    return [parsed.fhir, parsed.fhirNext, strict,
+      toDosageDetails(JSON.parse(JSON.stringify(strict)))];
+  };
+  const dates = (month: string, days: readonly number[], clock = "09:00") =>
+    days.map(day => `${month}-${String(day).padStart(2, "0")}T${clock}:00+07:00`);
+  const firstFourteen = Array.from({ length: 14 }, (_, i) => i + 1);
+
+  it.each([
+    "1 tab PO QD on days 1-14 of each month",
+    "1 tab PO QD days 1 through 14 each month",
+    "1 tab PO on days 1-14 of each month QD",
+    "รับประทาน 1 เม็ด วันละครั้ง วันที่ 1-14 ของทุกเดือน"
+  ])("executes calendar membership without inflating the dose: %s", input => {
+    const expected = [
+      ...dates("2026-11", firstFourteen), ...dates("2026-12", firstFourteen)
+    ];
+    for (const dosage of forms(input)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 28 })).toEqual(expected);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 61, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(28);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(14);
+      expect(JSON.stringify(dosage)).toBe(before);
+      expect(before).toContain(input);
+    }
+  });
+
+  it("keeps month membership anchored when the supply query starts later", () => {
+    const later = { ...options, from: "2026-11-10T00:00:00+07:00" };
+    const expected = [
+      ...dates("2026-11", [10, 11, 12, 13, 14]),
+      ...dates("2026-12", [1, 2, 3, 4, 5, 6, 7])
+    ];
+    for (const dosage of forms("1 tab PO QD on days 1-14 of each month")) {
+      expect(nextDueDoses(dosage, { ...later, limit: 12 })).toEqual(expected);
+      expect(calculateTotalUnits({
+        ...later, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(12);
+    }
+  });
+
+  it.each([
+    ["2027", 59, ["2027-03-29", "2027-03-30", "2027-03-31"]],
+    ["2028", 60, ["2028-02-29", "2028-03-29", "2028-03-30", "2028-03-31"]]
+  ] as const)("omits nonexistent month days instead of clamping them in %s", (year, duration, expectedDates) => {
+    const start = `${year}-02-01T00:00:00+07:00`;
+    const calendar = { ...options, from: start, orderedAt: start };
+    for (const dosage of forms("1 tab PO QD on days 29-31 of each month")) {
+      expect(nextDueDoses(dosage, { ...calendar, limit: expectedDates.length }))
+        .toEqual(expectedDates.map(day => day + "T09:00:00+07:00"));
+      expect(calculateTotalUnits({
+        ...calendar, dosage, durationValue: duration, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(expectedDates.length);
+    }
+  });
+
+  it("intersects explicit weekdays and bedtime with monthly day membership", () => {
+    for (const dosage of forms("1 tab PO HS Mon Thu on days 1-14 of each month")) {
+      expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual([
+        ...dates("2026-11", [2, 5, 9, 12], "22:00"),
+        ...dates("2026-12", [3], "22:00")
+      ]);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(4);
+    }
+  });
+
+  it("applies month membership to elapsed intervals without changing their clock", () => {
+    const interval = {
+      ...options, from: "2026-11-01T08:00:00+07:00",
+      orderedAt: "2026-11-01T08:00:00+07:00"
+    };
+    const expected: string[] = [];
+    for (const day of firstFourteen) {
+      expected.push(...dates("2026-11", [day], "08:00"), ...dates("2026-11", [day], "20:00"));
+    }
+    for (const dosage of forms("1 tab PO q12h on days 1-14 of each month x28d")) {
+      expect(nextDueDoses(dosage, { ...interval, limit: 50 })).toEqual(expected);
+      expect(calculateTotalUnits({
+        ...interval, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(28);
+    }
+  });
+
+  it("counts only eligible month days toward an interval occurrence cap", () => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        count: 30, frequency: 1, period: 12, periodUnit: FhirPeriodUnit.Hour,
+        extension: firstFourteen.map(day => ({
+          url: "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth", valuePositiveInt: day
+        }))
+      } }
+    };
+    const native = toDosageDetails([dosage]);
+    const strict = toFhirR5Dosages(native);
+    const later = { ...options, orderedAt: "2026-11-01T08:00:00+07:00",
+      from: "2026-12-01T08:00:00+07:00" };
+    for (const value of [dosage, native, strict, toDosageDetails(JSON.parse(JSON.stringify(strict)))]) {
+      expect(nextDueDoses(value, { ...later, limit: 10 })).toEqual([
+        ...dates("2026-12", [1], "08:00"), ...dates("2026-12", [1], "20:00")
+      ]);
+      expect(calculateTotalUnits({
+        ...later, dosage: value, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(2);
+    }
+  });
+
+  it("keeps exact calendar dates authoritative instead of inferring a weekday ordinal", () => {
+    for (const restrictMonthDays of [false, true]) {
+      const dosage: FhirDosage = {
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { event: ["2026-11-02", "2026-11-09", "2026-11-16"], repeat: {
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Month,
+          dayOfWeek: ["mon" as FhirDayOfWeek],
+          extension: restrictMonthDays ? firstFourteen.map(day => ({
+            url: "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth", valuePositiveInt: day
+          })) : undefined
+        } }
+      };
+      const days = restrictMonthDays ? [2, 9] : [2, 9, 16];
+      expect(nextDueDoses(dosage, { ...options, limit: 10 }))
+        .toEqual(dates("2026-11", days, "00:00"));
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(days.length);
+    }
+  });
+
+  it("executes imported standard month-day extensions and preserves unrelated metadata", () => {
+    const url = "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth";
+    const note = { url: "https://example.org/clinical-note", valueString: "retain" };
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        extension: [{ url, valuePositiveInt: 1 }, { url, valuePositiveInt: 15 }, note]
+      } }
+    };
+    const native = toDosageDetails([dosage]);
+    const strict = toFhirR5Dosages(native);
+    const reopened = toDosageDetails(JSON.parse(JSON.stringify(strict)));
+    for (const value of [dosage, native, strict, reopened]) {
+      const before = JSON.stringify(value);
+      expect(nextDueDoses(value, { ...options, limit: 4 })).toEqual([
+        ...dates("2026-11", [1, 15]), ...dates("2026-12", [1, 15])
+      ]);
+      expect(calculateTotalUnits({
+        ...options, dosage: value, durationValue: 61, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(4);
+      expect(JSON.stringify(value)).toBe(before);
+    }
+    expect(toFhirR5Dosages(reopened)[0].timing?.repeat?.extension).toContainEqual(note);
+  });
+});

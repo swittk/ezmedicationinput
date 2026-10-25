@@ -69,6 +69,10 @@ function applySchedule(
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.cycleDayConstraint = { ...schedule.cycleDayConstraint, days: [...schedule.cycleDayConstraint.days] };
   }
+  if (schedule.dayOfMonth?.length) {
+    const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    target.dayOfMonth = [...schedule.dayOfMonth];
+  }
   if (schedule.timingCode !== undefined) {
     state.timingCode = schedule.timingCode;
   }
