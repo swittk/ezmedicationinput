@@ -538,6 +538,7 @@ export function coordinationConnectorKind(surface: string):
   return "unknown";
 }
 export const ACTION_SEQUENCE_RELATION_TOKENS = ACTION_SEQUENCE_RELATION_SURFACES;
+export const COURSE_DURATION_UNITS = setOf(source.courseDurationUnits);
 export const INSTRUCTION_DURATION_UNITS = new Map<string, string>(
   stringEntries(source.instructionDurationUnits)
 );

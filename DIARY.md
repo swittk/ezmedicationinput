@@ -3760,3 +3760,90 @@ exclusions. No exclusion was widened and no production grammar was hidden from
 review. The original untracked diagnostic probe remains unchanged and outside
 this commit. These are bounded clinical regression and consumer results, not a
 claim that the parser understands arbitrary clinical prose.
+
+## 2026-10-25 — Fresh review: calendar bounds and retained scope data
+
+The incremental review of `3c66055` exposed two data-restoration defects and
+one loss of course bounds. Each reproduced against a supported clinical or
+structured-data contract. The corrections retain the typed information already
+present in the grammar or FHIR object.
+
+- FHIR-to-parser-state restoration now carries a defined administration offset,
+  including zero, through the existing getter. It retains independent schedule
+  fields and supports a modifier-only object. Five new regressions first showed
+  the missing 0/5/720-minute and modifier-only 15-minute values, then verified
+  exact shifted execution after re-export. The invalid-unit control remains
+  unchanged; the complete R6 suite contains 152 passing tests.
+- Canonical rebasing shifts both the source and target ranges of a closed HPSG
+  instruction scope. Two ordinary later-segment prescriptions previously left
+  their IF and TAKE ranges local while the action graph was input-absolute.
+  The regressions require the exact antecedent/consequent source slices,
+  retained action identity and the intended 21-tablet clinical totals through
+  native R6, parser R5, strict R5 and reopening. The 309 affected review and
+  instruction-graph tests pass.
+- Anchored month/year courses materialize the inclusive calendar endpoint from
+  the existing clamped, exclusive anniversary policy. January 31 plus one month
+  stops before February 28 in a non-leap year and before February 29 in a leap
+  year. This preserves the 28/29-tablet totals instead of an open-ended 40-day
+  supply. A leap-day one-year course contains 365 daily administrations. The
+  next phase starts at the same calendar boundary; the tested one-month course
+  followed by seven days at two tablets yields 42 tablets.
+- FHIR retains the authored course quantity or range in the recognized
+  `medication-anchored-course-duration` modifier alongside `boundsPeriod`.
+  This respects the single `Timing.repeat.bounds[x]` choice while retaining
+  month/year units, partial-day durations, ranges and an earlier duration cap
+  within a later explicit end date. The existing duration-cap executor and both
+  import paths consume this shared typed getter. They do not reinterpret source
+  prose or approximate calendar months as a fixed number of days.
+- HPSG course quantities share the existing temporal-unit vocabulary, with a
+  declared course-unit license. This supplies the previously missing ordinary
+  `for 1 year` meaning while keeping procedural seconds on their instruction.
+  The complete suite exposed that unit-ownership interaction during integration;
+  the unchanged patch-pressing realization oracle and all 91 generation tests
+  pass after the lexical license correction.
+
+TypeScript and **3,426/3,426 source tests across 44 suites** pass. The final
+frozen gate covers 166 tracked source/test/profile/configuration inputs plus the
+untouched original diagnostic probe. All 167 hashes remained unchanged through
+the gate, package generation, actual consumers and performance. Source manifest:
+`2bcc57d889cf08b744d4a9f98517308b2ffd1291f786ad077029661539c78e98`.
+
+ES6 ESM/CJS bundles, declarations and **4/4 packaged-export tests** pass. The ESM
+package fingerprint is `4139e005780182b10ac68a330a486cb12f6557ce6b1da388415c1b8dee3def83`.
+
+Actual-package verification passed the unchanged **84/84 independent shorthand
+oracles**, **117** authority/round-trip checks, **18** actual-consumer round trips,
+**462 assertions over 59 clinical inputs**, and **20** ESM/CJS ownership/fraction
+checks. The existing consumer runners passed **221/221** mixed-schedule, label,
+counseling, cycle and reordered-meal checks, **16/16** dose/cycle/fraction checks,
+and **10/10** bilingual clock/meal checks. The added **22/22 review-closure
+consumer paths** cover nine calendar/fraction/range/phase oracles through the
+actual external schema/converter and four later-segment ESM/CJS scope checks.
+These batches overlap in clinical families and are not a unique-input total.
+
+The immutable **521-input compatibility replay** reported zero exceptions,
+original-source loss, populated-dose-value changes or dose-row-count changes.
+Profile ordering has structural regressions; a separate full HL7 validator run
+is not claimed.
+
+After all correctness jobs finished, the quiet matched ES6 Node 22.22.0 run used
+30 warmups and seven alternating batches of 50 parses with GC against the same
+immutable baseline (`12c309762191281425e3be739b260e1f63916081111c9b1dd1cb8248f8ac2652`):
+
+| Input family | Baseline ms | Current ms | Change |
+| --- | ---: | ---: | ---: |
+| Routine BID | 1.399 | 1.444 | +3.2% |
+| Ocular QID | 1.399 | 1.553 | +11.0% |
+| Thai BID | 3.327 | 3.487 | +4.8% |
+| Two-phase course | 3.921 | 4.122 | +5.1% |
+| Numeric HOLD | 4.401 | 4.625 | +5.1% |
+
+The increases in this run were 0.045–0.224 ms per parse; the largest
+relative increase was 11.0% on the ocular input. These are shared-host
+measurements, not phone measurements or a claim of zero runtime regression.
+No additional general parse or schema-validation pass was added.
+
+The full PR remains **99 reviewable files**: 114 changed paths minus the same
+15 configured exclusions. The original untracked diagnostic probe remains
+unchanged. These fixes address all three findings from the completed review;
+they do not imply a new automated review of the follow-up commit.

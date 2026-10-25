@@ -12,6 +12,7 @@ import {
 } from "../src/index";
 import {
   canonicalFromFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+  toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition
 } from "../src/fhir";
 import { parseMedicationGuard } from "../src/medication-condition";
@@ -2107,6 +2108,54 @@ describe("common half glyph uses the existing fraction lexicon without source re
       expect(calculateTotalUnits({ dosage, from: start, orderedAt: start,
         timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day
       }).totalUnits).toBe(7);
+    }
+  });
+});
+
+
+describe("parser state import preserves administration offsets", () => {
+  it.each([0, 5, 720])("retains an explicitly supplied %i-minute offset and its execution after reopening", minutes => {
+    const dosage: EzDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { timeOfDay: ["08:00:00"],
+        boundsDuration: { value: 2, unit: "d", code: "d" } } },
+      modifierExtension: [{ url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+        valueQuantity: { value: minutes, unit: "min", code: "min" } }]
+    };
+    const original = cloneStructuredValue(dosage);
+    const state = parserStateFromFhir(dosage);
+    expect(state.primaryClause.schedule?.administrationOffsetMinutes).toBe(minutes);
+    expect(state.primaryClause.schedule?.administrationOffsetMinutes)
+      .toBe(canonicalFromFhir(dosage).schedule?.administrationOffsetMinutes);
+    const rebuilt = parserStateToFhir(state);
+    expect(getAdministrationOffsetMinutes(rebuilt)).toBe(minutes);
+    const anchor = "2026-11-02T00:00:00+07:00";
+    const expected = ["2026-11-02", "2026-11-03"].map(day =>
+      Date.parse(day + "T08:00:00+07:00") + minutes * 60000);
+    for (const candidate of [rebuilt, toDosageDetails([rebuilt]), toFhirR5Dosages(toDosageDetails([rebuilt]))]) {
+      expect(nextDueDoses(candidate, { orderedAt: anchor, from: anchor,
+        timeZone: "Asia/Bangkok", limit: 4 }).map(value => Date.parse(value))).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: candidate, orderedAt: anchor, from: anchor,
+        timeZone: "Asia/Bangkok", durationValue: 4, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+    }
+    expect(dosage).toEqual(original);
+  });
+
+  it("creates the canonical schedule when only the offset modifier exists", () => {
+    const dosage: EzDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      modifierExtension: [{ url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+        valueQuantity: { value: 15, code: "min" } }] };
+    const state = parserStateFromFhir(dosage);
+    expect(state.primaryClause.schedule?.administrationOffsetMinutes).toBe(15);
+    expect(getAdministrationOffsetMinutes(parserStateToFhir(state))).toBe(15);
+  });
+
+  it("does not manufacture an offset from a missing modifier or an unsupported unit", () => {
+    for (const modifierExtension of [undefined, [{ url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: 5, code: "mg" } }]]) {
+      const dosage: EzDosage = { timing: { repeat: { timeOfDay: ["08:00:00"] } }, modifierExtension };
+      expect(parserStateFromFhir(dosage).primaryClause.schedule?.administrationOffsetMinutes).toBeUndefined();
+      expect(canonicalFromFhir(dosage).schedule?.administrationOffsetMinutes).toBeUndefined();
     }
   });
 });

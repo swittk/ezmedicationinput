@@ -45,6 +45,8 @@ import {
   DAY_RANGE_CONNECTORS,
   DOSE_TARGET_EVENT_MEMBERS,
   DURATION_LEAD_TOKENS,
+  INSTRUCTION_DURATION_UNITS,
+  COURSE_DURATION_UNITS,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -2826,6 +2828,12 @@ function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number):
   });
 }
 
+/** A course licenses temporal units from the shared instruction vocabulary. */
+function courseDurationUnit(surface: string): FhirPeriodUnit | undefined {
+  const unit = mapIntervalUnit(surface) ?? INSTRUCTION_DURATION_UNITS.get(surface);
+  return unit && COURSE_DURATION_UNITS.has(unit) ? unit as FhirPeriodUnit : undefined;
+}
+
 /**
  * A duration noun phrase contributes a quantity and a time dimension. Its
  * governing construction decides whether it is an active course, a rest
@@ -2866,18 +2874,18 @@ export function durationNominalAt(
   };
   const compactPrefixed = compactDurationParts(lower);
   if (compactPrefixed) return make(
-    start + 1, compactPrefixed.value, mapIntervalUnit(compactPrefixed.unitSurface),
+    start + 1, compactPrefixed.value, courseDurationUnit(compactPrefixed.unitSurface),
     "hpsg.lex.schedule.duration.compactQuantity", 20
   );
   const compact = lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)(min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|wk|w|week|weeks|mo|month|months)$/);
   if (compact) return make(
-    start + 1, Number(compact[1]), mapIntervalUnit(compact[2]),
+    start + 1, Number(compact[1]), courseDurationUnit(compact[2]),
     "hpsg.lex.schedule.duration.compact", 8
   );
   const splitCompact = lower.match(/^[x*]([0-9]+(?:\.[0-9]+)?)$/);
   if (splitCompact) return make(
     start + 2, Number(splitCompact[1]),
-    tokens[start + 1] && mapIntervalUnit(normalizeTokenLower(tokens[start + 1])),
+    tokens[start + 1] && courseDurationUnit(normalizeTokenLower(tokens[start + 1])),
     "hpsg.lex.schedule.duration.splitCompact", 9
   );
   const continuation = courseContinuationDurationAt(tokens, start, limit);
@@ -2900,7 +2908,7 @@ export function durationNominalAt(
   // an explicit cardinal below supplies its own value instead.
   if (headed && hasArticle) {
     const unitToken = tokens[cursor];
-    const unit = unitToken ? mapIntervalUnit(normalizeTokenLower(unitToken)) : undefined;
+    const unit = unitToken ? courseDurationUnit(normalizeTokenLower(unitToken)) : undefined;
     if (unit) return make(cursor + 1, 1, unit,
       "hpsg.lex.schedule.duration.indefiniteQuantity", 21);
   }
@@ -2923,7 +2931,7 @@ export function durationNominalAt(
     OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(trailingModifier));
   if (hasTrailingModifier) cursor += 1;
   const unitToken = tokens[cursor];
-  const unit = unitToken && mapIntervalUnit(normalizeTokenLower(unitToken));
+  const unit = unitToken && courseDurationUnit(normalizeTokenLower(unitToken));
   const rule = hasModifier ? "hpsg.lex.schedule.duration.quantityModified" :
     headed ? hasTrailingModifier ? "hpsg.lex.schedule.duration.postQuantityModified" :
       "hpsg.lex.schedule.duration.for" :

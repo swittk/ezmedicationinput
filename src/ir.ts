@@ -329,6 +329,13 @@ export function shiftCanonicalSigClauses(
       }
     }
 
+    for (const scope of clause.instructionScopes ?? []) {
+      scope.span.start += offset;
+      scope.span.end += offset;
+      scope.target.start += offset;
+      scope.target.end += offset;
+    }
+
     const shiftedInstructionFrames = new Set<object>();
     if (clause.instructionGraph) {
       if (clause.instructionGraph.primaryAdministrationSpan) {

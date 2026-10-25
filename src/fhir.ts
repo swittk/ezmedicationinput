@@ -117,6 +117,20 @@ export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | und
     (quantity.code ?? quantity.unit) === "min" && !quantity.comparator ? quantity.value : undefined;
 }
 
+/** Modifier retaining a course duration alongside its absolute calendar bounds. */
+export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-anchored-course-duration";
+
+/** Read the authored temporal quantity without reconstructing it from dates or text.
+ * @param dosage R5/R6-compatible dosage containing the known duration modifier.
+ * @returns The retained duration quantity or range, when supplied.
+ */
+export function getAnchoredCourseDuration(
+  dosage: Pick<FhirDosage, "modifierExtension">
+): Pick<FhirExtension, "valueQuantity" | "valueRange"> | undefined {
+  return dosage.modifierExtension?.find(extension =>
+    extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+}
+
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
 export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
 export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
@@ -979,29 +993,29 @@ function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUn
 }
 
 function extractCanonicalTimingBounds(
-  repeat: FhirTimingRepeat | undefined
+  dosage: FhirDosage
 ): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; warning?: string } {
-  if (!repeat) {
-    return {};
-  }
-
-  if (repeat.boundsDuration?.value !== undefined) {
-    const durationUnit = parseFhirDurationUnit(repeat.boundsDuration);
+  const repeat = dosage.timing?.repeat;
+  const retained = getAnchoredCourseDuration(dosage);
+  const boundsDuration = repeat?.boundsDuration ?? retained?.valueQuantity;
+  const boundsRange = repeat?.boundsRange ?? retained?.valueRange;
+  if (boundsDuration?.value !== undefined) {
+    const durationUnit = parseFhirDurationUnit(boundsDuration);
     if (!durationUnit) {
       return {};
     }
     return {
-      duration: repeat.boundsDuration.value,
+      duration: boundsDuration.value,
       durationUnit
     };
   }
 
-  if (!repeat.boundsRange) {
+  if (!boundsRange) {
     return {};
   }
 
-  const low = repeat.boundsRange.low;
-  const high = repeat.boundsRange.high;
+  const low = boundsRange.low;
+  const high = boundsRange.high;
   const lowUnit = parseFhirDurationUnit(low);
   const highUnit = parseFhirDurationUnit(high);
   const durationUnit = lowUnit ?? highUnit;
@@ -1128,20 +1142,22 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
-  // An anchored canonical schedule retains its source duration alongside the
-  // derived inclusive calendar end. FHIR Timing allows only one bounds[x], so
-  // boundsPeriod is the lossless executable projection while canonical keeps
-  // both typed facts for editing and provenance.
-  if (schedule?.duration !== undefined && schedule.durationUnit &&
-      !schedule.boundsStart && !schedule.boundsEnd) {
-    if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-      repeat.boundsRange = buildFhirBoundsRange(
-        schedule.duration,
-        schedule.durationMax,
-        schedule.durationUnit
-      );
+  // Timing permits one bounds[x]. Keep absolute bounds in boundsPeriod and
+  // retain the authored duration/range as a typed modifier for exact execution
+  // and editing, including partial days that have no date-only endpoint.
+  if (schedule?.duration !== undefined && schedule.durationUnit) {
+    const ranged = schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration;
+    const duration = ranged ? undefined : buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
+    const range = ranged ? buildFhirBoundsRange(schedule.duration, schedule.durationMax!, schedule.durationUnit) : undefined;
+    if (repeat.boundsPeriod) {
+      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
+        url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+        ...(range ? { valueRange: range } : { valueQuantity: duration! })
+      }];
+    } else if (range) {
+      repeat.boundsRange = range;
     } else {
-      repeat.boundsDuration = buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
+      repeat.boundsDuration = duration;
     }
     hasRepeat = true;
   }
@@ -1593,7 +1609,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   );
   const offsetMinExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
-  const timingBounds = extractCanonicalTimingBounds(repeat);
+  const timingBounds = extractCanonicalTimingBounds(dosage);
   const activityTiming = parseActivityTimingExtensions(repeat);
   const clockWindow = getTimingClockWindow(repeat);
   const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
@@ -1604,6 +1620,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
   if (
     administrationOffsetMinutes !== undefined ||
+    timingBounds.duration !== undefined || timingBounds.durationMax !== undefined ||
     timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
@@ -1770,7 +1787,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
-  const timingBounds = extractCanonicalTimingBounds(dosage.timing?.repeat);
+  const timingBounds = extractCanonicalTimingBounds(dosage);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
@@ -1825,6 +1842,11 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     };
   }
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
+  if (administrationOffsetMinutes !== undefined) {
+    const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    schedule.administrationOffsetMinutes = administrationOffsetMinutes;
+  }
   const cycleConstraint = getCycleDayConstraint(dosage);
   if (cycleConstraint) {
     const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});

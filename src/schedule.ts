@@ -35,6 +35,7 @@ import {
   getExactTimingOffsetMinutes,
   parseActivityTimingExtensions,
   getAdministrationOffsetMinutes,
+  getAnchoredCourseDuration,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
   getTimingOccurrenceCap,
   getCycleDayConstraint,
@@ -661,11 +662,15 @@ function earlierDate(left: Date | null, right: Date | null): Date | null {
 }
 
 function resolveRepeatDurationCapEnd(
-  repeat: FhirTimingRepeat | undefined,
+  dosage: Pick<FhirDosage, "timing" | "modifierExtension">,
   anchor: Date,
   timeZone: string
 ): Date | null {
-  if (!repeat) return null;
+  const repeat = dosage.timing?.repeat;
+  const retained = getAnchoredCourseDuration(dosage);
+  if (!repeat && !retained) return null;
+  const durationAnchor = retained
+    ? resolveRepeatBoundsStart(repeat, timeZone) ?? anchor : anchor;
 
   const advance = (quantity: FhirQuantity | undefined): Date | null => {
     const value = quantity?.value;
@@ -675,17 +680,18 @@ function resolveRepeatDurationCapEnd(
       return null;
     }
     const stepper = createIntervalStepper({ period: value, periodUnit: unit }, timeZone);
-    const result = stepper?.(anchor);
-    return result && result > anchor ? result : null;
+    const result = stepper?.(durationAnchor);
+    return result && result > durationAnchor ? result : null;
   };
 
   // boundsDuration is the more explicit course bound when an imported object
   // happens to contain both choices. For a duration range, the upper bound is
   // the useful maximum-plan horizon; fall back to the lower bound if only it
   // is executable. The original range remains untouched on the dosage.
-  const durationEnd = advance(repeat.boundsDuration);
+  const durationEnd = advance(repeat?.boundsDuration ?? retained?.valueQuantity);
   if (durationEnd) return durationEnd;
-  return advance(repeat.boundsRange?.high) ?? advance(repeat.boundsRange?.low);
+  const range = repeat?.boundsRange ?? retained?.valueRange;
+  return advance(range?.high) ?? advance(range?.low);
 }
 
 function validateRepeatBoundsPeriod(
@@ -1728,7 +1734,7 @@ function treatmentStepWindow(
   let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone) : undefined;
   if (!end) {
     const componentEnds = step.component.map(component => earlierDate(
-      resolveRepeatDurationCapEnd(component.timing?.repeat, start, timeZone),
+      resolveRepeatDurationCapEnd(component, start, timeZone),
       resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
     )).filter((value): value is Date => Boolean(value));
     if (componentEnds.length === step.component.length && componentEnds.length) {
@@ -1762,7 +1768,7 @@ function repeatedCourseHorizon(
       // Independently bounded concurrent components need not share an end.
       for (const component of course.step[index].component) {
         const ownEnd = earlierDate(
-          resolveRepeatDurationCapEnd(component.timing?.repeat, start, timeZone),
+          resolveRepeatDurationCapEnd(component, start, timeZone),
           resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
         );
         if (ownEnd && ownEnd > horizon) horizon = ownEnd;
@@ -1819,7 +1825,7 @@ function scheduleTreatmentRelativeCourse(
           ext.url !== DOSAGE_DETAILS_R5_URL)
       };
       const effectiveEnd = end ?? (cycleDefaultEnd ? earlierDate(
-        resolveRepeatDurationCapEnd(repeat, start, timeZone), absoluteEnd
+        resolveRepeatDurationCapEnd(dosage, start, timeZone), absoluteEnd
       ) ?? cycleDefaultEnd : undefined);
       if (effectiveEnd && from >= effectiveEnd) continue;
       // A calendar track may begin before the first relative treatment step:
@@ -2366,7 +2372,7 @@ function nextDueDosesSingle(dosage: FhirDosage, options: NextDueDoseOptions): st
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd = timing && repeat
     ? earlierDate(
-      resolveRepeatDurationCapEnd(repeat, baseTime, timeZone),
+      resolveRepeatDurationCapEnd(dosage, baseTime, timeZone),
       boundsPeriod.end
     )
     : null;
@@ -3880,7 +3886,7 @@ function calculateTotalUnitsSingle(
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   endDay = minDate(
     endDay,
-    resolveRepeatDurationCapEnd(repeat, baseTime, timeZone)
+    resolveRepeatDurationCapEnd(dosage, baseTime, timeZone)
   );
   endDay = minDate(
     endDay,
@@ -4206,7 +4212,7 @@ function calculateCourseTotalUnits(
       const stageStart = index === 0 && repeat?.boundsPeriod
         ? (calendarStart ?? start) : implicitStart;
       starts.push(calendarStart && calendarStart > stageStart ? calendarStart : stageStart);
-      const bound = earlierDate(resolveRepeatDurationCapEnd(repeat, cadenceOrigin, zone), calendarEnd);
+      const bound = earlierDate(resolveRepeatDurationCapEnd(dosage, cadenceOrigin, zone), calendarEnd);
       const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone);
       const countEnd = completion ? new Date(completion.end.getTime() + (completion.point ? 1 : 0)) : null;
       const end = earlierDate(bound, countEnd);
@@ -4498,7 +4504,7 @@ function scheduleRegimen(
       if (!repeat) return undefined;
       const start = memberStarts[memberIndex];
       const bound = earlierDate(
-        resolveRepeatDurationCapEnd(repeat, start, zone),
+        resolveRepeatDurationCapEnd(dosage, start, zone),
         resolveRepeatBoundsEndExclusive(repeat, zone)
       );
       const counted = finiteAdministrationCompletion(dosage, start, options, zone);

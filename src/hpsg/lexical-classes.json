@@ -1871,6 +1871,7 @@
       ]
     }
   ],
+  "courseDurationUnits": ["min", "h", "d", "wk", "mo", "a"],
   "instructionDurationUnits": {
     "second": "s",
     "seconds": "s",

@@ -97,7 +97,7 @@ function nextDate(value: string): string | undefined {
 }
 
 /**
- * A date-anchored exact day/week duration has one canonical inclusive window.
+ * A date-anchored whole-day or calendar-month duration has one inclusive window.
  * Materialize that window on the typed schedule before FHIR projection so the
  * wire layer never has to choose between boundsPeriod and boundsDuration.
  */
@@ -109,11 +109,23 @@ export function anchoredScheduleDurationEnd(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.boundsStart) || schedule.duration <= 0) {
     return undefined;
   }
-  const factor = schedule.durationUnit === 'd' ? 1 : schedule.durationUnit === 'wk' ? 7 : undefined;
-  if (factor === undefined || !Number.isInteger(schedule.duration * factor)) return undefined;
   const date = new Date(`${schedule.boundsStart}T00:00:00Z`);
   if (!Number.isFinite(date.getTime())) return undefined;
-  date.setUTCDate(date.getUTCDate() + schedule.duration * factor - 1);
+  const months = schedule.durationUnit === 'mo' ? schedule.duration :
+    schedule.durationUnit === 'a' ? schedule.duration * 12 : undefined;
+  if (months !== undefined) {
+    if (!Number.isInteger(months)) return undefined;
+    const day = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + months);
+    const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    // Clamp the exclusive anniversary before converting it to an inclusive day.
+    date.setUTCDate(Math.min(day, lastDay) - 1);
+  } else {
+    const factor = schedule.durationUnit === 'd' ? 1 : schedule.durationUnit === 'wk' ? 7 : undefined;
+    if (factor === undefined || !Number.isInteger(schedule.duration * factor)) return undefined;
+    date.setUTCDate(date.getUTCDate() + schedule.duration * factor - 1);
+  }
   return date.toISOString().slice(0, 10);
 }
 
@@ -126,17 +138,9 @@ function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedul
 function phaseEndExclusive(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule) return undefined;
   let endpoint = schedule.boundsEnd ? nextDate(schedule.boundsEnd) : undefined;
-  if (schedule.boundsStart && schedule.duration !== undefined && schedule.durationUnit) {
-    const factor = schedule.durationUnit === 'd' ? 1 : schedule.durationUnit === 'wk' ? 7 : undefined;
-    if (factor !== undefined && Number.isInteger(schedule.duration * factor) && schedule.duration > 0) {
-      const start = new Date(`${schedule.boundsStart}T00:00:00Z`);
-      if (Number.isFinite(start.getTime())) {
-        start.setUTCDate(start.getUTCDate() + schedule.duration * factor);
-        const durationEnd = start.toISOString().slice(0, 10);
-        if (!endpoint || durationEnd < endpoint) endpoint = durationEnd;
-      }
-    }
-  }
+  const inclusiveDurationEnd = anchoredScheduleDurationEnd(schedule);
+  const durationEnd = inclusiveDurationEnd ? nextDate(inclusiveDurationEnd) : undefined;
+  if (durationEnd && (!endpoint || durationEnd < endpoint)) endpoint = durationEnd;
   // Explicit finite phase bounds take precedence over the date of its last dose.
   if (endpoint) return endpoint;
   if (schedule.calendarEvents?.length) {

@@ -2483,3 +2483,44 @@ describe("equivalent written half-tablet doses", () => {
     }
   });
 });
+
+
+describe("rebased HPSG instruction scopes", () => {
+  it.each([
+    { source: "1 tab PO QAM x7d; 2 tabs PO HS x7d. If you miss a dose, take it as soon as you remember.",
+      doses: [1, 2], days: 7 },
+    { source: "1 tab PO BID x7d then Take 1 tablet daily. If you miss a dose, take it as soon as you remember.",
+      doses: [1, 1], days: 14 }
+  ])("keeps later conditional advice in full-input coordinates: $source", ({ source, doses, days }) => {
+    const parsed = parseSig(source);
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses[0].instructionScopes).toBeUndefined();
+    expect(clauses[1].instructionScopes).toHaveLength(1);
+    const scope = clauses[1].instructionScopes![0];
+    const antecedent = "If you miss a dose,";
+    const consequent = "take it as soon as you remember";
+    expect(scope).toEqual({
+      kind: "if",
+      span: { start: source.indexOf(antecedent), end: source.indexOf(antecedent) + antecedent.length },
+      target: { start: source.indexOf(consequent), end: source.indexOf(consequent) + consequent.length }
+    });
+    expect(source.slice(scope.span.start, scope.span.end)).toBe(antecedent);
+    expect(source.slice(scope.target.start, scope.target.end)).toBe(consequent);
+    const graph = clauses[1].instructionGraph!;
+    const relation = graph.relations.find(value => value.kind === "if")!;
+    expect(relation.span).toEqual(scope.span);
+    expect(graph.actions[relation.toActionIndex].span).toEqual(scope.target);
+    expect(graph.actions[relation.toActionIndex].predicate.lemma).toBe("take");
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    for (const dosage of [parsed.fhirNext, parsed.fhir, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : toFhirR5Dosages(dosage);
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual(doses);
+      expect(rows.every(row => row.asNeeded !== true && !getDosageCondition(row))).toBe(true);
+      expect(calculateTotalUnits({ dosage, from: "2026-11-02T00:00:00Z",
+        orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC", durationValue: days,
+        durationUnit: "d" }).totalUnits).toBe(21);
+    }
+  });
+});

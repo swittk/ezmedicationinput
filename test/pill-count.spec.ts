@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parserStateFromFhir } from "../src/fhir";
 import { calculateTotalUnits, formatSig, getDosageCondition, parseSig as parseBatch, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { EventTiming, FhirDosage, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
@@ -1207,5 +1208,69 @@ describe("fixed clock administrations with same-clause meal qualification", () =
       timing: { repeat: { timeOfDay: ["07:00:00"], when: [EventTiming["Before Breakfast"]] } } };
     expect(nextDueDoses(imported, { ...options, limit: 2 }).map(value => value.slice(11, 16)))
       .toEqual(["07:00", "07:30"]);
+  });
+});
+
+
+describe("anchored course duration preservation", () => {
+  it.each([
+    { source: "1 tab PO QD from 2027-01-31 for 1 month", start: "2027-01-31", end: "2027-02-27",
+      stop: "2027-02-28T00:00:00Z", value: 1, unit: "mo", total: 28, horizon: 40 },
+    { source: "1 tab PO QD from 2028-01-31 for 1 month", start: "2028-01-31", end: "2028-02-28",
+      stop: "2028-02-29T00:00:00Z", value: 1, unit: "mo", total: 29, horizon: 40 },
+    { source: "1 tab PO QD from 2027-08-31 for 1 month", start: "2027-08-31", end: "2027-09-29",
+      stop: "2027-09-30T00:00:00Z", value: 1, unit: "mo", total: 30, horizon: 40 },
+    { source: "1 tab PO QD from 2028-02-29 for 1 year", start: "2028-02-29", end: "2029-02-27",
+      stop: "2029-02-28T00:00:00Z", value: 1, unit: "a", total: 365, horizon: 400 },
+    { source: "1 tab PO BID from 2026-11-02 for 1.5 weeks", start: "2026-11-02", end: undefined,
+      stop: "2026-11-12T12:00:00Z", value: 1.5, unit: "wk", total: 21, horizon: 20 },
+    { source: "1 tab PO q12h from 2026-11-02 for 36 hours", start: "2026-11-02", end: undefined,
+      stop: "2026-11-03T12:00:00Z", value: 36, unit: "h", total: 3, horizon: 10 },
+    { source: "1 tab PO QD from 2026-11-02 for 5-7 days", start: "2026-11-02", end: undefined,
+      stop: "2026-11-09T00:00:00Z", value: 5, max: 7, unit: "d", total: 7, horizon: 20 },
+    { source: "1 tab PO QD from 2026-11-02 until 2026-11-30 for 7 days", start: "2026-11-02", end: "2026-11-30",
+      stop: "2026-11-09T00:00:00Z", value: 7, unit: "d", total: 7, horizon: 40 }
+  ])("keeps a finite executable course and original duration: $source", entry => {
+    const parsed = parseBatch(entry.source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.fhirNext.renderedInstruction).toBe(entry.source);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      duration: entry.value, durationUnit: entry.unit, boundsStart: entry.start
+    });
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext, strict, toDosageDetails(strict)]) {
+      const rows = Array.isArray(dosage) ? dosage : "fhirNext" in dosage
+        ? toFhirR5Dosages(dosage.fhirNext) : toFhirR5Dosages(dosage);
+      expect(rows).toHaveLength(1);
+      const repeat = rows[0].timing!.repeat!;
+      expect(repeat.boundsPeriod?.start).toBe(entry.start);
+      if (entry.end) expect(repeat.boundsPeriod?.end).toBe(entry.end);
+      expect([repeat.boundsPeriod, repeat.boundsDuration, repeat.boundsRange].filter(Boolean)).toHaveLength(1);
+      const restored = parserStateFromFhir(rows[0]).primaryClause.schedule!;
+      expect(restored.duration).toBe(entry.value);
+      expect(restored.durationMax).toBe(entry.max);
+      expect(restored.durationUnit).toBe(entry.unit);
+      const anchor = entry.start + "T00:00:00Z";
+      expect(calculateTotalUnits({ dosage, from: anchor, orderedAt: anchor,
+        timeZone: "UTC", durationValue: entry.horizon, durationUnit: "d" }).totalUnits).toBe(entry.total);
+      expect(nextDueDoses(dosage, { from: entry.stop, orderedAt: anchor,
+        timeZone: "UTC", limit: 2 })).toEqual([]);
+    }
+  });
+  it("starts the next anchored phase after the clamped calendar month", () => {
+    const source = "1 tab PO QD from 2027-01-31 for 1 month then 2 tabs PO QD for 7 days";
+    const parsed = parseBatch(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    const anchor = "2027-01-31T00:00:00Z";
+    const dates = ["2027-02-28", "2027-03-01", "2027-03-02", "2027-03-03",
+      "2027-03-04", "2027-03-05", "2027-03-06"];
+    for (const dosage of [parsed, parsed.fhir, parsed.fhirNext, strict, toDosageDetails(strict)]) {
+      expect(calculateTotalUnits({ dosage, from: anchor, orderedAt: anchor, timeZone: "UTC",
+        durationValue: 45, durationUnit: "d" }).totalUnits).toBe(42);
+      expect(nextDueDoses(dosage, { from: "2027-02-28T00:00:00Z", orderedAt: anchor,
+        timeZone: "UTC", limit: 10 }).map(value => new Date(value).toISOString()))
+        .toEqual(dates.map(date => date + "T09:00:00.000Z"));
+      expect(nextDueDoses(dosage, { from: "2027-03-07T00:00:00Z", orderedAt: anchor,
+        timeZone: "UTC", limit: 2 })).toEqual([]);
+    }
   });
 });
