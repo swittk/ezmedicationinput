@@ -623,8 +623,9 @@ describe("explicit R6 conditional edit precedence over retained R5 bridges", () 
     expect(restored.step[0].component[0].condition).toBeUndefined();
     expect(restored.step[0].component[0].modifierExtension?.some(ext =>
       ext.url.endsWith("medication-conditional-dose"))).not.toBe(true);
-    expect(restored.extension?.some(ext =>
-      ext.url.endsWith("medication-course-reconciliation-source"))).toBe(true);
+    // This condition now round-trips natively without a redundant R6 delta.
+    // Original authored wording remains retained independently of the cleared condition.
+    expect(restored.renderedInstruction).toBe(original.renderedInstruction);
     const reloaded = toDosageDetails(toFhirR5Dosages(restored));
     expect(reloaded.step[0].component[0].condition).toBeUndefined();
     expect(getDosageCondition(toFhirR5Dosages(reloaded)[0])).toBeUndefined();
@@ -2581,5 +2582,42 @@ describe("standard dosage quantity coding", () => {
     expect(row.doseAndRate?.[0]?.doseRange?.high?.value).toBe(2);
     const local = canonicalToFhir(canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "FTU" } }] }));
     expect(local.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "FTU" });
+  });
+});
+
+
+describe("R6 condition terminology without manufactured CodeSystems", () => {
+  it.each([
+    ["SBP", "8480-6"], ["DBP", "8462-4"],
+    ["temperature", "8310-5"], ["SpO2", "59408-5"]
+  ])("uses the exact LOINC observation for a known %s measurement", (name, loinc) => {
+    const source = `1 tab PO QD if ${name} > 100`;
+    const parsed = parseSig(source);
+    const condition = parsed.fhirNext.step[0].component[0].condition?.[0];
+    expect(condition?.code).toMatchObject({
+      text: name.toLowerCase(),
+      coding: [expect.objectContaining({ system: "http://loinc.org", code: loinc })]
+    });
+    expect(condition?.valueQuantity?.value).toBe(100);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(getDosageCondition(strict[0])).toMatchObject({
+      kind: "measurement", name: name.toLowerCase(), operation: "gt", value: 100
+    });
+    expect(toDosageDetails(strict).step[0].component[0].condition?.[0]?.code)
+      .toEqual(condition?.code);
+  });
+
+  it("keeps unspecified BP and Boolean expressions as typed data rather than fabricated codes", () => {
+    const generic = parseSig("1 tab PO QD if BP >160");
+    expect(generic.fhirNext.step[0].component[0].condition?.[0]?.code).toEqual({ text: "bp" });
+    const expression = parseSig("1 tab PO QD unless BP <90");
+    const r6 = expression.fhirNext.step[0].component[0].condition?.[0];
+    expect(r6?.code).toEqual({ text: "Medication conditional expression" });
+    expect(r6?.extension?.some(ext => ext.url.endsWith("medication-r6-condition-logic")))
+      .toBe(true);
+    expect(getDosageCondition(toFhirR5Dosages(expression.fhirNext)[0]))
+      .toMatchObject({
+        kind: "not", condition: { kind: "measurement", name: "bp", operation: "lt", value: 90 }
+      });
   });
 });

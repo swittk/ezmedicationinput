@@ -230,11 +230,7 @@ export function medicationInstructionConceptCodings(
   if (definition.externalCodings?.length) {
     return definition.externalCodings.map((coding) => cloneCoding(coding)!);
   }
-  if (definition.components?.length) return [];
-  return [{
-    system: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
-    code: definition.code,
-    display: definition.display,
-    i18n: definition.i18n ? { ...definition.i18n } : undefined
-  }];
+  // An uncoded referent (e.g. a container's tip) retains its conceptId,
+  // source text, and coded constituents, not a proprietary clinical Coding.
+  return [];
 }

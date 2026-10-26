@@ -424,18 +424,14 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
   };
 }
 
+/** Returns only a semantically equivalent clinical Coding. The lexical
+ * identity of an uncoded instruction is already preserved as predicateLemma.
+ * @param definition A declared action whose external mappings are optional.
+ */
 export function medicationInstructionActionCoding(
   definition: MedicationInstructionActionDefinition
-): FhirCoding {
-  const coding = definition.coding ?? definition.externalCodings?.[0];
-  return coding
-    ? cloneCoding(coding)!
-    : {
-      system: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
-      code: definition.code,
-      display: definition.display,
-      i18n: definition.i18n ? { ...definition.i18n } : undefined
-    };
+): FhirCoding | undefined {
+  return cloneCoding(definition.coding ?? definition.externalCodings?.[0]);
 }
 
 export function medicationInstructionActionCodings(
@@ -448,5 +444,7 @@ export function medicationInstructionActionCodings(
   if (definition.externalCodings?.length) {
     return definition.externalCodings.map((coding) => cloneCoding(coding)!);
   }
-  return [medicationInstructionActionCoding(definition)];
+  // "Prime", "wipe", etc. remain typed lexical actions, not fabricated
+  // externally interoperable clinical codes.
+  return [];
 }

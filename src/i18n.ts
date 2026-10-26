@@ -1274,7 +1274,7 @@ function formatActivityTimingThai(schedule: CanonicalScheduleExpr | undefined): 
   for (const timing of schedule?.activityTiming ?? []) {
     const definition = timing.activity.coding?.code
       ? getMedicationInstructionConcept(timing.activity.coding.code, timing.activity.coding.system)
-      : undefined;
+      : resolveMedicationInstructionConcept(timing.activity.text);
     const activity = timing.activity.i18n?.th ?? definition?.i18n?.th ?? timing.activity.text;
     const relation = timing.relation === "before" ? "ก่อน" : "หลัง";
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;

@@ -26,7 +26,8 @@ import {
   ACTION_SEQUENCE_MARKERS,
   localizeAdviceRelation,
   resolveActionRelationSurface,
-  resolveAdviceRelationSurface
+  resolveAdviceRelationSurface,
+  relationHasSemanticClass
 } from "./relation-terminology";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -662,10 +663,17 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
  * sufficient evidence that they refer to the same medication.
  */
 function materialReferent(frame: AdviceFrame): AdviceArgument | undefined {
-  return frame.args.find((arg) => [
-    AdviceArgumentRole.Object, AdviceArgumentRole.Theme,
-    AdviceArgumentRole.Material, AdviceArgumentRole.Substance, AdviceArgumentRole.Site
-  ].indexOf(arg.role) >= 0);
+  return frame.args.find((arg) =>
+    // The parser may attach "with water" to the frame's relation rather
+    // than the substance argument. Neither form makes that water the drug.
+    !relationHasSemanticClass(arg.relation, "accompaniment") &&
+    !(arg.role === AdviceArgumentRole.Substance &&
+      relationHasSemanticClass(frame.relation, "accompaniment")) &&
+    [
+      AdviceArgumentRole.Object, AdviceArgumentRole.Theme,
+      AdviceArgumentRole.Material, AdviceArgumentRole.Substance, AdviceArgumentRole.Site
+    ].indexOf(arg.role) >= 0
+  );
 }
 
 function referentIdentity(argument: AdviceArgument): string {

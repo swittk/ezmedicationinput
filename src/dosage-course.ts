@@ -135,7 +135,19 @@ export function buildDosageAlternativeChoiceStructureDefinition() {
 }
 
 const CONDITION_CODE_SYSTEM = "http://hl7.org/fhir/CodeSystem/dosage-condition-code";
-const INTERNAL_CONDITION_CODE_SYSTEM = "urn:ezmedicationinput:CodeSystem:medication-condition";
+/** Exact US LOINC observation concepts for named measurements. Generic "BP"
+ * and "glucose" deliberately remain text-only: their component/specimen is
+ * unspecified, and asserting SBP or blood glucose would fabricate meaning.
+ */
+const CONDITION_MEASUREMENT_CODES: Record<string, { code: string; display: string }> = {
+  sbp: { code: "8480-6", display: "Systolic blood pressure" },
+  dbp: { code: "8462-4", display: "Diastolic blood pressure" },
+  hr: { code: "8867-4", display: "Heart rate" },
+  "heart rate": { code: "8867-4", display: "Heart rate" },
+  temperature: { code: "8310-5", display: "Body temperature" },
+  weight: { code: "29463-7", display: "Body weight" },
+  spo2: { code: "59408-5", display: "Oxygen saturation in Arterial blood by Pulse oximetry" }
+};
 
 function replacementExtensions(
   dosage: Pick<FhirDosage, "modifierExtension">, url: string, value: FhirExtension | undefined
@@ -323,7 +335,15 @@ function describe(condition: MedicationCondition): string {
 function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
   if (condition.kind === "measurement") {
     return {
-      code: { coding: [{ system: INTERNAL_CONDITION_CODE_SYSTEM, code: "measurement", display: condition.name }], text: condition.name },
+      code: {
+        text: condition.name,
+        ...(CONDITION_MEASUREMENT_CODES[condition.name.toLowerCase()] ? {
+          coding: [{
+            system: "http://loinc.org",
+            ...CONDITION_MEASUREMENT_CODES[condition.name.toLowerCase()]
+          }]
+        } : {})
+      },
       operation: condition.operation,
       valueQuantity: {
         value: condition.value,
@@ -344,7 +364,7 @@ function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
   // FHIR R6 condition[] is OR. A whole Boolean expression must stay ONE
   // condition, with the logical tree retained in a declared extension.
   return {
-    code: { coding: [{ system: INTERNAL_CONDITION_CODE_SYSTEM, code: "expression", display: "Medication conditional expression" }] },
+    code: { text: "Medication conditional expression" },
     text: describe(condition),
     extension: [{ url: DOSAGE_CONDITION_R6_LOGIC_URL,
         extension: [encodeConditionPredicate(condition)] }]

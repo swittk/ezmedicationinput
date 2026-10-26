@@ -27,6 +27,7 @@
     },
     {
       "code": "bottle-tip",
+      "components": [{"role": "head", "text": "bottle", "coding": {"system": "http://snomed.info/sct", "code": "68276009", "display": "Bottle (physical object)"}}, {"role": "qualifier", "text": "tip"}],
       "role": "object",
       "display": "bottle tip",
       "i18n": { "th": "ปลายขวด" },
@@ -34,6 +35,7 @@
     },
     {
       "code": "tube-tip",
+      "components": [{"role": "head", "text": "tube", "coding": {"system": "http://snomed.info/sct", "code": "83059008", "display": "Tube (physical object)"}}, {"role": "qualifier", "text": "tip"}],
       "role": "object",
       "display": "tube tip",
       "i18n": { "th": "ปลายหลอด" },
@@ -620,6 +622,7 @@
     },
     {
       "code": "use",
+      "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"},
       "role": "activity",
       "display": "use",
       "i18n": {
@@ -777,6 +780,7 @@
     },
     {
       "code": "occlusive_dressing",
+      "components": [{"role": "head", "text": "dressing", "coding": {"system": "http://snomed.info/sct", "code": "333453004", "display": "Medical dressing (physical object)"}}, {"role": "qualifier", "text": "occlusive"}],
       "role": "material",
       "display": "an occlusive dressing",
       "i18n": {
