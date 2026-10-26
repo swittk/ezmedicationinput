@@ -133,7 +133,10 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "container-activity": {
       const container = c.container ?? c.theme;
-      return `${c.label}${container ? ` ${container}` : ""}${c.activity ? ` before ${c.activity}` : ""}`;
+      const relation = c.frame.relation
+        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+        : "before";
+      return `${c.label}${container ? ` ${container}` : ""}${c.activity ? ` ${relation} ${c.activity}` : ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
@@ -283,7 +286,10 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       return /[\u0E00-\u0E7F]/u.test(c.frame.sourceText) ? c.frame.sourceText.trim() : "ปรับการใช้ตามอาการ";
     case "container-activity": {
       const container = c.container ?? c.theme;
-      return `${c.label}${container ?? ""}${c.activity ? `ก่อน${c.activity}` : ""}`;
+      const relation = c.frame.relation
+        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+        : "ก่อน";
+      return `${c.label}${container ?? ""}${c.activity ? `${relation}${c.activity}` : ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;

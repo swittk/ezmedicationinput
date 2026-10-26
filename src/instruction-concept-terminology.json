@@ -138,6 +138,7 @@
     },
     {
       "code": "medication-tablet",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15054000", "display": "Tablet"}],
       "coding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"},
       "role": "object",
       "display": "tablet",
@@ -146,6 +147,7 @@
     },
     {
       "code": "medication-capsule",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15012000", "display": "Capsule"}],
       "coding": {"system": "http://snomed.info/sct", "code": "732937005", "display": "Capsule"},
       "role": "object",
       "display": "capsule",
@@ -236,6 +238,7 @@
     },
     {
       "code": "applicator",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30002000", "display": "Applicator"}],
       "coding": {"system": "http://snomed.info/sct", "code": "408101000", "display": "Applicator"},
       "role": "object",
       "display": "applicator",
@@ -289,6 +292,7 @@
     },
     {
       "code": "bottle",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30008000", "display": "Bottle"}],
       "role": "container",
       "coding": { "system": "http://snomed.info/sct", "code": "68276009", "display": "Bottle" },
       "display": "bottle",
@@ -302,6 +306,7 @@
     },
     {
       "code": "patch",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15036000", "display": "Patch"}],
       "coding": {"system": "http://snomed.info/sct", "code": "733005001", "display": "Patch"},
       "role": "object",
       "display": "patch",
@@ -462,6 +467,7 @@
     },
     {
       "code": "eye_drop_administration",
+      "coding": {"system": "http://snomed.info/sct", "code": "225698005", "display": "Instillation of eye drops to eye"},
       "role": "activity",
       "display": "eye drops",
       "i18n": {
@@ -731,6 +737,7 @@
     },
     {
       "code": "inhaler",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30026500", "display": "Inhaler"}],
       "coding": {"system": "http://snomed.info/sct", "code": "334980009", "display": "Inhaler"},
       "role": "object",
       "display": "inhaler",

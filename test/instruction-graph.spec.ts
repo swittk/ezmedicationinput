@@ -1284,9 +1284,11 @@ describe("standard instruction terminology", () => {
     expect(concept.code).toBe(name);
     expect(getMedicationInstructionConcept(code, "http://snomed.info/sct")?.code).toBe(name);
     expect(getMedicationInstructionConcept(code, "http://example.test/unrelated")).toBeUndefined();
-    expect(medicationInstructionConceptCodings(concept)).toEqual([
+    const codings = medicationInstructionConceptCodings(concept);
+    expect(codings).toContainEqual(
       expect.objectContaining({ system: "http://snomed.info/sct", code })
-    ]);
+    );
+    expect(codings.every(value => value.system !== "urn:ezmedicationinput:CodeSystem:medication-instruction-concept")).toBe(true);
     expect(buildMedicationInstructionConceptCodeSystem().concept
       .some(value => value.code === name)).toBe(false);
   });
@@ -1470,5 +1472,100 @@ describe("composed instruction concepts", () => {
     const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
     expect(restored.actions[0].args[0].coding?.code).toBe(expression);
     expect(restored.actions[0].args[0].components?.[0].coding?.code).toBe("22253000");
+  });
+});
+
+
+describe("field-matched international medication terminology", () => {
+  const edqm = "http://standardterms.edqm.eu";
+  it.each([
+    ["medication-tablet", "15054000"],
+    ["medication-capsule", "15012000"],
+    ["patch", "15036000"],
+    ["bottle", "30008000"],
+    ["applicator", "30002000"],
+    ["inhaler", "30026500"]
+  ])("preserves standard EDQM equivalence alongside existing SNOMED: %s", (name, code) => {
+    const concept = getMedicationInstructionConcept(name)!;
+    const codings = medicationInstructionConceptCodings(concept);
+    expect(codings[0]?.system).toBe("http://snomed.info/sct");
+    expect(codings).toContainEqual(expect.objectContaining({ system: edqm, code }));
+    expect(getMedicationInstructionConcept(code, edqm)?.code).toBe(name);
+    codings[1]!.code = "edited";
+    expect(medicationInstructionConceptCodings(getMedicationInstructionConcept(name)!)[1]?.code).toBe(code);
+    expect(buildMedicationInstructionConceptCodeSystem().concept.some(value => value.code === name)).toBe(false);
+  });
+
+  it.each([
+    ["Use the applicator", "applicator", "30002000"],
+    ["Shake the bottle before use", "bottle", "30008000"],
+    ["Clean the inhaler", "inhaler", "30026500"],
+    ["Replace patch", "patch", "15036000"]
+  ])("retains correctly typed EDQM device/unit coding across R5 storage: %s", (source, conceptId, code) => {
+    const parsed = parsePublicSig(source);
+    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph!;
+    const arg = graph.actions.flatMap(action => action.args).find(value => value.conceptId === conceptId);
+    expect(arg?.codings).toContainEqual(expect.objectContaining({ system: edqm, code }));
+    const reopened = parseInstructionGraphExtension(toFhirR5Dosages(parsed.fhirNext)[0].extension)!;
+    const copied = reopened.actions.flatMap(action => action.args).find(value => value.conceptId === conceptId);
+    expect(copied?.codings).toContainEqual(expect.objectContaining({ system: edqm, code }));
+  });
+
+  it("maps exact eye-drop administration activity as a procedure, not an eye-drop container", () => {
+    const concept = getMedicationInstructionConcept("eye_drop_administration")!;
+    expect(medicationInstructionConceptCodings(concept)).toEqual([
+      expect.objectContaining({ system: "http://snomed.info/sct", code: "225698005" })
+    ]);
+    expect(concept.role).toBe(AdviceArgumentRole.Activity);
+  });
+});
+
+
+describe("HL7 entity handling as exact composed instructions", () => {
+  const system = "http://terminology.hl7.org/CodeSystem/v3-EntityHandling";
+  it.each([
+    "Shake before use",
+    "Shake well before use",
+    "Shake the bottle before use",
+    "เขย่าก่อนใช้"
+  ])("codes the actual preparation instruction, not just its verb: %s", source => {
+    const parsed = parsePublicSig(source);
+    const code = { system, code: "SBU" };
+    const dosage = parsed.fhir[0];
+    expect(dosage.additionalInstruction).toContainEqual(expect.objectContaining({
+      coding: expect.arrayContaining([expect.objectContaining(code)])
+    }));
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.some(action => action.predicate.lemma === "shake" &&
+      action.relation === "before" && action.args.some(arg => arg.conceptId === "use"))).toBe(true);
+    const saved = toFhirR5Dosages(parsed.fhirNext)[0];
+    expect(saved.additionalInstruction).toContainEqual(expect.objectContaining({
+      coding: expect.arrayContaining([expect.objectContaining(code)])
+    }));
+    expect(fromFhirDosage(saved).meta.canonical.clauses[0].additionalInstructions)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ coding: expect.objectContaining(code) })
+      ]));
+  });
+  it("keeps the actual shake timing relation in both output languages", () => {
+    const result = parsePublicSig("Shake after use");
+    expect(result.meta.canonical.clauses[0].instructionGraph?.actions[0]?.relation).toBe("after");
+    expect(result.longText).toContain("Shake after use");
+    expect(formatSig(result.fhir[0], "long", { locale: "th" })).toContain("หลังใช้");
+  });
+
+  it.each([
+    "Shake",
+    "Shake after use",
+    "Shake before first use",
+    "Do not shake",
+    "Do not shake before use",
+    "Remain upright for 30 minutes",
+    "Keep bottle upright"
+  ])("does not invent the entity-handling instruction for %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhir.flatMap(dosage => dosage.additionalInstruction?.flatMap(
+      entry => entry.coding ?? []) ?? []).some(coding =>
+      coding.system === system && coding.code === "SBU")).toBe(false);
   });
 });

@@ -1,6 +1,52 @@
 {
   "rules": [
     {
+      "id": "hl7-entity-handling-shake-before-use",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "SBU",
+        "display": "Shake before use",
+        "text": "Shake before use",
+        "thai": "เขย่าก่อนใช้"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "shake",
+            "semanticClass": "prepare"
+          },
+          "relation": "before",
+          "args": [
+            {
+              "role": "activity",
+              "text": "use",
+              "conceptId": "use"
+            }
+          ]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "shake"
+          ],
+          "relations": [
+            "before"
+          ],
+          "polarity": "affirm",
+          "argConcepts": [
+            {
+              "conceptIds": [
+                "use"
+              ],
+              "role": "activity"
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "after-food",
       "definition": {
         "code": "225758001",
