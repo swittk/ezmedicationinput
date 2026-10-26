@@ -502,7 +502,10 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
     const relativeMarker = siteRelativeMarkerSign(token, lower);
-    if (relativeMarker) return [relativeMarker];
+    // Thai ที่ can introduce either a relative site predicate or a plain
+    // administration site. Keep both daughters for the chart to select.
+    if (relativeMarker && !SITE_ANCHORS.has(lower)) return [relativeMarker];
+    if (relativeMarker) signs.push(relativeMarker);
     const predicate = sitePredicateSign(context, start);
     if (predicate) return [predicate];
     if (

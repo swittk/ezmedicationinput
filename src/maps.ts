@@ -2054,7 +2054,9 @@ const EMA_UNIT_BY_CODE = new Map<string, string>(
  * https://api-evsrest.nci.nih.gov/api/v1/concept/ncit/C71321
  */
 const NCIT_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
-  FTU: "C71321", capful: "C102405", pump: "C111984", nebule: "C71204"
+  FTU: "C71321", capful: "C102405", pump: "C111984", nebule: "C71204",
+  // An ovule is a vaginal pessary presentation, not an ovum/anatomical entity.
+  ovule: "C149756"
 };
 /** Exact SNOMED CT US 2026 product-usage/amount qualifiers. */
 const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {

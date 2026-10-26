@@ -1788,3 +1788,69 @@ describe("authoritative occlusive topical route and complete technique", () => {
     }
   });
 });
+
+describe("standard coded oromucosal swish-and-swallow technique", () => {
+  it("adds the complete liquid technique without changing the original swallow method", () => {
+    const parsed = parsePublicSig("Swish 10 mL nystatin then swallow");
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.route?.coding).toEqual(expect.arrayContaining([
+        expect.objectContaining({ system: "http://snomed.info/sct", code: "26643006" }),
+        expect.objectContaining({
+          system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+          code: "SWISHSWAL"
+        }),
+        expect.objectContaining({
+          system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+          code: "C38303"
+        })
+      ]));
+      expect(row.method?.coding).toContainEqual(
+        expect.objectContaining({ system: "http://snomed.info/sct", code: "738995006" })
+      );
+      expect(row.doseAndRate?.[0]?.doseQuantity?.value).toBe(10);
+      expect(fromFhirDosage(row).meta.normalized.instructionGraph?.actions
+        .map(action => action.predicate.lemma)).toEqual(["swish", "swallow"]);
+    }
+    for (const source of [
+      "Swish 5mL and swallow the tablet",
+      "Take 1 tablet then swish 5mL and swallow",
+      "Swish 5mL then spit and swallow",
+      "Swish 5mL then spit"
+    ]) {
+      expect(parsePublicSig(source).fhir[0]?.route?.coding
+        ?.some(coding => coding.code === "SWISHSWAL")).not.toBe(true);
+    }
+  });
+});
+
+describe("standard coded oromucosal swish-and-spit technique", () => {
+  it("preserves both technique codes and the typed local instructions, excluding swallow or negated actions", () => {
+    const parsed = parsePublicSig("Swish 10 mL for 30 seconds and spit out");
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.route?.coding).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+          code: "SWISHSPIT"
+        }),
+        expect.objectContaining({
+          system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+          code: "C38302"
+        })
+      ]));
+      const actions = fromFhirDosage(row).meta.normalized.instructionGraph?.actions;
+      expect(actions?.map(action => action.predicate.lemma)).toEqual(["swish", "spit"]);
+      expect(actions?.find(action => action.predicate.lemma === "spit")
+        ?.predicate.codings).toContainEqual(expect.objectContaining({
+          system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
+          code: "spit"
+        }));
+    }
+    for (const source of ["swish 10mL then swallow", "Gargle 10 mL then spit",
+      "Do not swish and spit",
+      "Take 1 tablet and swish 5 mL mouthwash then spit",
+      "Apply 5 mL lotion then swish and spit"]) {
+      const route = parsePublicSig(source).fhir[0]?.route;
+      expect(route?.coding?.some(coding => coding.code === "SWISHSPIT")).not.toBe(true);
+    }
+  });
+});

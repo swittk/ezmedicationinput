@@ -2578,6 +2578,7 @@ describe("standard dosage quantity coding", () => {
       ["capful", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C102405"],
       ["pump", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C111984"],
       ["nebule", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C71204"],
+      ["ovule", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C149756"],
       ["dropperful", "http://snomed.info/sct", "421954001"],
       ["scoop", "http://snomed.info/sct", "415505006"],
       ["pea-sized amount", "http://snomed.info/sct", "769392001"],

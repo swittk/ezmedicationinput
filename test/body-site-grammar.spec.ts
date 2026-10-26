@@ -5,7 +5,10 @@ import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
   canonicalFromFhir
 } from "../src/fhir";
-import { parseClauseSign } from "../src/parser";
+import { parseClauseSign, tokenize } from "../src/parser";
+import { ParserState } from "../src/parser-state";
+import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
+import type { HpsgClauseContext } from "../src/hpsg/rule-context";
 import {
   HPSG_TYPE_SYSTEM,
   type HpsgFeatureNode,
@@ -291,5 +294,26 @@ describe("coded anatomical spatial qualifiers", () => {
     expect(relation?.relationCoding).toMatchObject({ system: "http://snomed.info/sct", code });
     const reopened = canonicalFromFhir(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]);
     expect(reopened.site?.spatialRelation?.relationCoding?.code).toBe(code);
+  });
+});
+
+
+describe("Thai site-anchor lexical ambiguity", () => {
+  it("retains both locative site and relative-where readings of ที่", () => {
+    const source = "ทาครีมที่แขนวันละ 2 ครั้ง";
+    const tokens = tokenize(source);
+    const index = tokens.findIndex(token => token.lower === "ที่");
+    expect(index).toBeGreaterThanOrEqual(0);
+    const context: HpsgClauseContext = {
+      state: new ParserState(source, tokens), tokens, limit: tokens.length,
+      dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"]
+    };
+    const signs = siteLexicalRule().match(context, index);
+    expect(signs?.some(sign => sign.type === "site-relative-marker-sign")).toBe(true);
+    expect(signs?.some(sign => sign.type === "site-sign" &&
+      sign.tokens.some(token => token.lower === "แขน"))).toBe(true);
+    const dosage = parseSig(source).fhir;
+    expect(dosage.site?.coding?.[0]?.code).toBe("302538001");
+    expect(dosage.timing?.repeat?.frequency).toBe(2);
   });
 });

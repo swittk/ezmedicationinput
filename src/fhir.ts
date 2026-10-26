@@ -1128,6 +1128,31 @@ export function canonicalToFhir(
       action.polarity !== AdvicePolarity.Negate &&
       action.args.some(arg => arg.conceptId === "occlusive_dressing")
     ));
+  // An ordered oral swish followed by spit is a complete coded technique,
+  // not two independent equivalent actions. Exclude swallowing and negation.
+  const instructionActions = clause.instructionGraph?.actions ?? [];
+  const swishIndex = instructionActions.findIndex(action =>
+    action.predicate.lemma === "swish" && action.polarity !== AdvicePolarity.Negate);
+  const swishSpit = swishIndex >= 0 &&
+    // A single Dosage.route cannot claim that a separately administered
+    // tablet/lotion has the same route as the oral rinse in a mixed clause.
+    !clause.route?.code && !clause.method?.coding?.code &&
+    !instructionActions.some(action =>
+      action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
+    instructionActions.some((action, index) =>
+      index > swishIndex && action.predicate.lemma === "spit" &&
+      action.polarity !== AdvicePolarity.Negate);
+  const swishSwallow = swishIndex >= 0 && !swishSpit &&
+    clause.route?.code === "26643006" &&
+    clause.method?.coding?.code === "738995006" &&
+    clause.dose?.unit === "mL" &&
+    !instructionActions.some(action =>
+      action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
+    instructionActions.some((action, index) =>
+      index > swishIndex && action.predicate.lemma === "swallow" &&
+      action.polarity !== AdvicePolarity.Negate &&
+      !action.args.some(arg =>
+        arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
@@ -1376,6 +1401,22 @@ export function canonicalToFhir(
     } else if (text) {
       dosage.route = { text };
     }
+  }
+
+  if (swishSpit || swishSwallow) {
+    dosage.route = {
+      text: dosage.route?.text ?? "swish and spit, oromucosal",
+      coding: [
+        ...(dosage.route?.coding ?? []),
+        { system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+          code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
+          display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal" },
+        { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+          code: swishSpit ? "C38302" : "C38303",
+          display: swishSpit ? "Swish and Spit Route of Administration"
+            : "Swish and Swallow Route of Administration" }
+      ]
+    };
   }
 
   if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation ||
