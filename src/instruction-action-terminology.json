@@ -163,6 +163,8 @@
     },
     {
       "code": "pour",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-02073479-v","display":"pour"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"pour","display":"Pour","i18n":{"th":"เท"}},
       "semanticClass": "transfer",
       "display": "Pour",
       "i18n": {
@@ -331,6 +333,8 @@
     },
     {
       "code": "lather",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-00513124-v","display":"lather"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"lather","display":"Lather","i18n":{"th":"ถูให้เกิดฟอง"}},
       "semanticClass": "prepare",
       "display": "Lather",
       "i18n": {
@@ -574,6 +578,8 @@
     },
     {
       "code": "leave",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-00136799-v","display":"leave"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"leave","display":"Leave","i18n":{"th":"ทิ้งไว้"}},
       "semanticClass": "retain",
       "display": "Leave",
       "i18n": {
@@ -590,6 +596,7 @@
     },
     {
       "code": "wipe",
+      "semanticComponents": [{"role":"mechanism","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01252288-v","display":"rub"}}],
       "semanticClass": "cleanse",
       "display": "Wipe",
       "i18n": {
@@ -673,6 +680,8 @@
     },
     {
       "code": "wait",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-02647547-v","display":"wait"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"wait","display":"Wait","i18n":{"th":"รอ"}},
       "semanticClass": "wait",
       "display": "Wait",
       "i18n": {
@@ -935,6 +944,7 @@
     },
     {
       "code": "prime",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"367559008","display":"Preparation - action"}}],
       "semanticClass": "prepare_device",
       "display": "Prime",
       "aliases": [
@@ -974,6 +984,7 @@
     },
     {
       "code": "draw_up",
+      "semanticComponents": [{"role":"operation","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01858118-v","display":"draw"}}],
       "semanticClass": "prepare_device",
       "display": "Draw up",
       "aliases": [
@@ -1770,7 +1781,7 @@
     },
     {
       "code": "hold",
-      "contextualCodings": [{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"https://www.nlm.nih.gov/mesh","code":"D062485","display":"Breath Holding"}},{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C192566","display":"Voluntary Breath Holding"}}],
+      "contextualCodings": [{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"https://www.nlm.nih.gov/mesh","code":"D062485","display":"Breath Holding"}},{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C192566","display":"Voluntary Breath Holding"}},{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-00004492-v","display":"hold"}},{"whenArgument":{"conceptId":"bottle","role":"container"},"coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01219234-v","display":"hold"}},{"whenArgument":{"conceptId":"inhaler","role":"object"},"coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01219234-v","display":"hold"}},{"whenArgument":{"conceptId":"syringe","role":"object"},"coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01219234-v","display":"hold"}}],
       "semanticClass": "retain",
       "display": "Hold",
       "i18n": {
@@ -1869,6 +1880,7 @@
     },
     {
       "code": "pump",
+      "semanticComponents": [{"role":"operation","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01228248-v","display":"pump"}}],
       "semanticClass": "manipulate",
       "display": "Pump",
       "i18n": {
@@ -1882,6 +1894,8 @@
     },
     {
       "code": "fold",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-01280538-v","display":"fold"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"fold","display":"Fold","i18n":{"th":"พับ"}},
       "semanticClass": "manipulate",
       "display": "Fold",
       "i18n": {
@@ -1895,6 +1909,8 @@
     },
     {
       "code": "pinch",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-01459400-v","display":"pinch"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"pinch","display":"Pinch","i18n":{"th":"หยิบจับ"}},
       "semanticClass": "manipulate",
       "display": "Pinch",
       "i18n": {
@@ -1908,6 +1924,8 @@
     },
     {
       "code": "aim",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-01153576-v","display":"aim"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"aim","display":"Aim","i18n":{"th":"เล็ง"}},
       "semanticClass": "position",
       "display": "Aim",
       "i18n": {
@@ -1926,6 +1944,8 @@
     },
     {
       "code": "touch",
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-01208838-v","display":"touch"}],
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"touch","display":"Touch","i18n":{"th":"สัมผัส"}},
       "semanticClass": "contact",
       "display": "Touch",
       "i18n": {
@@ -2133,6 +2153,7 @@
     },
     {
       "code": "blow",
+      "semanticComponents": [{"role":"operation","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-00007012-v","display":"blow"}}],
       "semanticClass": "prepare_site",
       "display": "Blow",
       "i18n": {
@@ -2231,7 +2252,7 @@
     },
     {
       "code": "blow-nose",
-      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12756","display":"Nose"}}],
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12756","display":"Nose"}},{"role":"operation","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-00034941-v","display":"blow"}}],
       "semanticClass": "prepare_site",
       "display": "Blow nose",
       "i18n": {
@@ -2280,6 +2301,7 @@
     },
     {
       "code": "aim-away-from",
+      "semanticComponents": [{"role":"operation","coding":{"system":"https://en-word.net/","version":"2025","code":"oewn-01153576-v","display":"aim"}}],
       "semanticClass": "position",
       "display": "Aim away from",
       "i18n": {

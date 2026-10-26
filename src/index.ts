@@ -1750,12 +1750,14 @@ function cloneCoding(
     code?: string;
     display?: string;
     system?: string;
+    version?: string;
     extension?: ReturnType<typeof cloneExtensions>;
   }
 ): {
   code?: string;
   display?: string;
   system?: string;
+  version?: string;
   extension?: ReturnType<typeof cloneExtensions>;
 } | undefined {
   if (!coding?.code && !coding?.display && !coding?.system) {
@@ -1765,6 +1767,7 @@ function cloneCoding(
     code: coding.code,
     display: coding.display,
     system: coding.system,
+    version: coding.version,
     extension: cloneExtensions(coding.extension)
   };
 }

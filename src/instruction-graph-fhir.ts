@@ -77,6 +77,7 @@ function wireCoding(value: FhirCoding): FhirCoding {
   const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
   return {
     ...(value.system !== undefined ? { system: value.system } : {}),
+    ...(value.version !== undefined ? { version: value.version } : {}),
     ...(value.code !== undefined ? { code: value.code } : {}),
     ...(value.display !== undefined ? { display: value.display } : {}),
     ...(value.extension?.length ? { extension: value.extension } : {}),

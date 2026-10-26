@@ -41,7 +41,8 @@ function cloneCoding(coding?: FhirCoding): FhirCoding | undefined {
   return {
     code: coding.code,
     display: coding.display,
-    system: coding.system
+    system: coding.system,
+    version: coding.version
   };
 }
 

@@ -225,14 +225,14 @@ describe("non-equivalent standardized constituents of local instruction actions"
     const breath = parseInstructionActions("hold breath for 10 seconds")[0]!;
     expect(breath.predicate.lemma).toBe("hold");
     expect(breath.predicate.codings?.map(coding => coding.code))
-      .toEqual(["hold", "D062485", "C192566"]);
+      .toEqual(["hold", "D062485", "C192566", "oewn-00004492-v"]);
     const other = parseInstructionActions("hold eye closed")[0]!;
     expect(other.predicate.codings?.map(coding => coding.code)).toEqual(["hold"]);
     const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
       sourceText: "hold breath for 10 seconds", actions: [breath]
     })!])!;
     expect(restored.actions[0].predicate.codings?.map(coding => coding.code))
-      .toEqual(["hold", "D062485", "C192566"]);
+      .toEqual(["hold", "D062485", "C192566", "oewn-00004492-v"]);
   });
 
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
@@ -331,5 +331,111 @@ describe("nebule-compatible respule unit", () => {
     expect(getDoseQuantityUnit({ ...expected, unit: "respule" })).toBe("respule");
     expect(getDoseQuantityUnit({ ...expected, unit: "nebule" })).toBe("nebule");
     expect(getStandardDoseUnitCoding("click")).toBeUndefined();
+  });
+});
+
+describe("Open English WordNet 2025 exact action sense codings", () => {
+  const WORDNET = "https://en-word.net/";
+  const LOCAL = "urn:ezmedicationinput:CodeSystem:medication-instruction-action";
+  const exact = [
+    ["pour", "oewn-02073479-v"],
+    ["lather", "oewn-00513124-v"],
+    ["leave", "oewn-00136799-v"],
+    ["wait", "oewn-02647547-v"],
+    ["fold", "oewn-01280538-v"],
+    ["pinch", "oewn-01459400-v"],
+    ["aim", "oewn-01153576-v"],
+    ["touch", "oewn-01208838-v"]
+  ] as const;
+  it.each(exact)("keeps local %s first, and exports its exact versioned WordNet sense", (action, code) => {
+    const definition = getMedicationInstructionAction(action)!;
+    const frame = parseInstructionActions(action).find(item => item.predicate.lemma === action)!;
+    const codings = frame.predicate.codings!;
+    expect(codings[0]).toMatchObject({ system: LOCAL, code: action });
+    expect(codings).toContainEqual(expect.objectContaining({
+      system: WORDNET, version: "2025", code
+    }));
+    expect(definition.externalCodings?.[0]).toMatchObject({
+      system: WORDNET, version: "2025", code
+    });
+    expect(buildMedicationInstructionActionCodeSystem().concept.some(item => item.code === action)).toBe(true);
+    const wire = buildInstructionGraphExtension({ sourceText: action, actions: [frame] })!;
+    const value = wire.extension?.find(item => item.url === "action")?.extension
+      ?.filter(item => item.url === "predicateCoding")
+      .map(item => item.valueCoding)
+      .find(item => item?.system === WORDNET);
+    expect(value).toMatchObject({ system: WORDNET, version: "2025", code });
+    const restored = parseInstructionGraphExtension([wire])!.actions[0];
+    expect(restored.predicate.codings).toContainEqual(expect.objectContaining({
+      system: WORDNET, version: "2025", code
+    }));
+  });
+
+  it("round-trips WordNet's version in a real parsed FHIR dosage", () => {
+    const parsed = parseSig("pour 5 mL into a cup");
+    const restored = parseInstructionGraphExtension(parsed.fhir.extension)!;
+    const codes = restored.actions.flatMap(action => action.predicate.codings ?? []);
+    expect(codes).toContainEqual(expect.objectContaining({
+      system: WORDNET, version: "2025", code: "oewn-02073479-v"
+    }));
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(5);
+  });
+
+  it.each([
+    ["wipe", "oewn-01252288-v", "mechanism"],
+    ["draw_up", "oewn-01858118-v", "operation"],
+    ["pump", "oewn-01228248-v", "operation"],
+    ["blow", "oewn-00007012-v", "operation"],
+    ["blow-nose", "oewn-00034941-v", "operation"],
+    ["aim-away-from", "oewn-01153576-v", "operation"]
+  ])("keeps the partial WordNet sense of %s outside equivalent whole-action codes", (action, code, role) => {
+    const frame = parseInstructionActions(action).find(value => value.predicate.lemma === action)!;
+    expect(frame).toBeDefined();
+    expect(frame.predicate.codings?.some(coding => coding.system === WORDNET)).toBe(false);
+    expect(frame.predicate.semanticComponents).toContainEqual({
+      role, coding: expect.objectContaining({ system: WORDNET, version: "2025", code })
+    });
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: action, actions: [frame]
+    })!])!.actions[0];
+    expect(restored.predicate.semanticComponents).toContainEqual({
+      role, coding: expect.objectContaining({ system: WORDNET, version: "2025", code })
+    });
+  });
+
+  it("uses different WordNet senses for breath-holding and gripping, not medication withholding", () => {
+    const cases = [
+      ["hold breath", "oewn-00004492-v"],
+      ["hold bottle", "oewn-01219234-v"],
+      ["hold inhaler", "oewn-01219234-v"],
+      ["hold syringe", "oewn-01219234-v"]
+    ] as const;
+    for (const [source, code] of cases) {
+      const frame = parseInstructionActions(source)[0]!;
+      expect(frame.predicate.codings).toContainEqual(expect.objectContaining({
+        system: WORDNET, version: "2025", code
+      }));
+    }
+    expect(parseInstructionActions("hold dose")[0]?.predicate.codings?.some(
+      coding => coding.system === WORDNET
+    )).toBe(false);
+    expect(getMedicationInstructionAction("prime")?.externalCodings).toBeUndefined();
+    expect(getMedicationInstructionAction("keep")?.externalCodings).toBeUndefined();
+  });
+});
+
+describe("Open English WordNet 2025 exact nonclinical result senses", () => {
+  it.each([
+    ["foam", "oewn-09462117-n"],
+    ["clean-result", "oewn-00418932-a"]
+  ])("preserves the original %s meaning alongside its versioned external sense", (name, code) => {
+    const concept = getMedicationInstructionConcept(name)!;
+    expect(medicationInstructionConceptCodings(concept).map(coding => [
+      coding.system, coding.version, coding.code
+    ])).toEqual([
+      ["urn:ezmedicationinput:CodeSystem:medication-instruction-concept", undefined, name],
+      ["https://en-word.net/", "2025", code]
+    ]);
+    expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
   });
 });

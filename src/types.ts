@@ -2,6 +2,8 @@ import type { SigTranslationConfig } from "./i18n";
 
 export interface FhirCoding {
   system?: string;
+  /** Terminology edition used to define this code. */
+  version?: string;
   code?: string;
   display?: string;
   extension?: FhirExtension[];

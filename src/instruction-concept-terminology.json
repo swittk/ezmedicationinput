@@ -475,6 +475,8 @@
     },
     {
       "code": "foam",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"foam","display":"foam","i18n":{"th":"ฟอง"}},
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-09462117-n","display":"lather"}],
       "role": "result",
       "display": "foam",
       "i18n": {
@@ -868,6 +870,8 @@
     },
     {
       "code": "clean-result",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"clean-result","display":"clean","i18n":{"th":"สะอาด"}},
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-00418932-a","display":"clean"}],
       "role": "result",
       "display": "clean",
       "i18n": {

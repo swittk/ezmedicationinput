@@ -124,6 +124,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding
     ? {
       system: coding.system,
+      version: coding.version,
       code: coding.code,
       display: coding.display,
       extension: coding.extension?.map((extension) => ({ ...extension })),

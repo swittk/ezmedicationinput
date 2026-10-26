@@ -278,7 +278,11 @@ describe("procedural instruction graph", () => {
       semanticClass: "transfer",
       display: "Pour"
     });
-    expect(getMedicationInstructionAction("pour")?.externalCodings).toBeUndefined();
+    expect(getMedicationInstructionAction("pour")?.externalCodings).toContainEqual(
+      expect.objectContaining({
+        system: "https://en-word.net/", version: "2025", code: "oewn-02073479-v"
+      })
+    );
     expect(getMedicationInstructionAction("rinse")?.externalCodings).toContainEqual(
       expect.objectContaining({ system: "http://snomed.info/sct", code: "782155003" })
     );
