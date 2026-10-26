@@ -2572,6 +2572,27 @@ describe("standard dosage quantity coding", () => {
     }
   });
 
+  it("retains the authored dose while coding exact NCIt and SNOMED presentation units", () => {
+    for (const [unit, system, code] of [
+      ["FTU", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C71321"],
+      ["capful", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C102405"],
+      ["pump", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C111984"],
+      ["nebule", "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C71204"],
+      ["dropperful", "http://snomed.info/sct", "421954001"],
+      ["scoop", "http://snomed.info/sct", "415505006"],
+      ["pea-sized amount", "http://snomed.info/sct", "769392001"],
+      ["enema", "http://snomed.info/sct", "1382282001"]
+    ]) {
+      const dosage = canonicalToFhir(canonicalFromFhir({
+        doseAndRate: [{ doseQuantity: { value: 2, unit } }]
+      }));
+      const retained = toFhirR5Dosages(toDosageDetails([dosage]))[0];
+      for (const row of [dosage, retained]) {
+        expect(row.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit, system, code });
+      }
+    }
+  });
+
   it("codes both range bounds and caps but leaves product-specific amounts unlabelled as UCUM", () => {
     const parsed = parseSig("1-2 tab PO q6h prn pain max 8 tab/day");
     const row = parsed.fhir[0];
@@ -2580,7 +2601,11 @@ describe("standard dosage quantity coding", () => {
     }
     expect(row.doseAndRate?.[0]?.doseRange?.high?.value).toBe(2);
     const local = canonicalToFhir(canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "FTU" } }] }));
-    expect(local.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "FTU" });
+    expect(local.doseAndRate?.[0]?.doseQuantity).toEqual({
+      value: 1, unit: "FTU",
+      system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+      code: "C71321"
+    });
   });
 });
 

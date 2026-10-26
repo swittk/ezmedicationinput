@@ -2034,6 +2034,20 @@ const EMA_UNIT_BY_CODE = new Map<string, string>(
   objectEntries(EMA_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
 );
 
+/** NCI/CDISC dosage-unit definitions (NCIt 26.09d). These are product
+ * presentation quantities, NOT fixed mass/volume conversions.
+ * https://api-evsrest.nci.nih.gov/api/v1/concept/ncit/C71321
+ */
+const NCIT_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
+  FTU: "C71321", capful: "C102405", pump: "C111984", nebule: "C71204"
+};
+/** Exact SNOMED CT US 2026 product-usage/amount qualifiers. */
+const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
+  dropperful: "421954001", scoop: "415505006", "pea-sized amount": "769392001",
+  enema: "1382282001"
+};
+
+
 /** Resolve standard codes and plain unit labels to the same calculation unit.
  * @param quantity A dose or limit quantity; its original display remains untouched.
  */
@@ -2072,6 +2086,14 @@ export function getStandardDoseUnitCoding(unit: string | undefined):
   if (emaPresentation) return {
     system: "http://spor.ema.europa.eu/v1/lists/200000000014",
     code: emaPresentation
+  };
+  const nciDoseUnit = NCIT_PRODUCT_DOSE_UNIT_CODES[canonical];
+  if (nciDoseUnit) return {
+    system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", code: nciDoseUnit
+  };
+  const snomedDoseUnit = SNOMED_PRODUCT_DOSE_UNIT_CODES[canonical];
+  if (snomedDoseUnit) return {
+    system: "http://snomed.info/sct", code: snomedDoseUnit
   };
   const measurable = UCUM_DOSE_UNIT_CODES[canonical];
   if (measurable) return { system: "http://unitsofmeasure.org", code: measurable };

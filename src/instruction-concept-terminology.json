@@ -45,6 +45,8 @@
     },
     {
       "code": "medication-dose",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "medication-dose", "display": "medication dose", "i18n": {"th": "ขนาดยาที่ให้"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25488", "display": "Dose"}],
       "role": "object",
       "display": "medication dose",
       "i18n": { "th": "ขนาดยาที่ให้" },
@@ -122,6 +124,8 @@
     },
     {
       "code": "supply-exhausted",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "supply-exhausted", "display": "all medication is taken", "i18n": {"th": "ยาหมด"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C200475", "display": "Exhausted"}],
       "role": "result",
       "display": "all medication is taken",
       "i18n": { "th": "ยาหมด" },
@@ -274,6 +278,8 @@
     },
     {
       "code": "administration-site",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "administration-site", "display": "sites", "i18n": {"th": "ตำแหน่ง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C77676", "display": "Application Site"}],
       "role": "object",
       "display": "sites",
       "i18n": { "th": "ตำแหน่ง" },
@@ -289,6 +295,8 @@
     },
     {
       "code": "product",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "product", "display": "product", "i18n": {"th": "ผลิตภัณฑ์"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C51980", "display": "Product"}],
       "role": "theme",
       "display": "product",
       "i18n": {
@@ -340,6 +348,8 @@
     },
     {
       "code": "breath",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "breath", "display": "breath", "i18n": {"th": "หายใจ"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "11891009", "display": "Breath"}],
       "role": "object",
       "display": "breath",
       "i18n": {
@@ -527,6 +537,8 @@
     },
     {
       "code": "washing",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "washing", "display": "washing", "i18n": {"th": "การล้าง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C65077", "display": "Wash"}],
       "role": "activity",
       "display": "washing",
       "i18n": {
@@ -545,6 +557,8 @@
     },
     {
       "code": "showering",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "showering", "display": "showering", "i18n": {"th": "การอาบน้ำ"}},
+      "components": [{"role": "head", "text": "washing", "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C65077", "display": "Wash"}}, {"role": "qualifier", "text": "showering"}],
       "role": "activity",
       "display": "showering",
       "i18n": {
@@ -608,6 +622,8 @@
     },
     {
       "code": "going_outdoors",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "going_outdoors", "display": "going outdoors", "i18n": {"th": "ออกกลางแจ้ง"}},
+      "components": [{"role": "qualifier", "text": "outdoors", "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C53541", "display": "Outdoors"}}],
       "role": "activity",
       "display": "going outdoors",
       "i18n": {
@@ -786,6 +802,7 @@
     {
       "code": "occlusive_dressing",
       "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "occlusive_dressing", "display": "an occlusive dressing", "i18n": {"th": "แผ่นปิดแบบทึบ"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D009779", "display": "Occlusive Dressings"}],
       "components": [{"role": "head", "text": "dressing", "coding": {"system": "http://snomed.info/sct", "code": "333453004", "display": "Medical dressing (physical object)"}}, {"role": "qualifier", "text": "occlusive"}],
       "role": "material",
       "display": "an occlusive dressing",
@@ -876,6 +893,8 @@
     },
     {
       "code": "needed",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "needed", "display": "needed", "i18n": {"th": "จำเป็น"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "410525008", "display": "Needed"}, {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C64499", "display": "As Needed"}],
       "role": "condition",
       "display": "needed",
       "i18n": {

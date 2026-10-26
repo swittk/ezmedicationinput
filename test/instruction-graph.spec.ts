@@ -1669,8 +1669,8 @@ describe("standards-first instruction relationships and event referents", () => 
       expect(embedded?.extension?.find(entry => entry.url === "relationCoding")?.valueCoding)
         .toMatchObject({ system: "http://snomed.info/sct", code: "421718005" });
     } else {
-      expect(embedded?.extension?.find(entry => entry.url === "relation")?.valueCode)
-        .toBe(AdviceRelation.After);
+      expect(embedded?.extension?.find(entry => entry.url === "relationCoding")?.valueCoding)
+        .toMatchObject({ system: "http://snomed.info/sct", code: "255234002" });
     }
   });
 
@@ -1742,6 +1742,49 @@ describe("preserve complete local codes alongside standard constituents", () => 
     for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(dosage.additionalInstruction?.flatMap(row => row.coding?.map(c => c.code) ?? []))
         .toContain("418693002");
+    }
+  });
+});
+
+
+describe("authoritative occlusive topical route and complete technique", () => {
+  it("adds the whole technique while retaining route, method, dressing, and local action codings", () => {
+    const parsed = parsePublicSig("Apply ointment then cover with occlusive dressing");
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.route?.coding).toEqual(expect.arrayContaining([
+        expect.objectContaining({ system: "http://snomed.info/sct", code: "6064005" }),
+        expect.objectContaining({ system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+          code: "OCDRESTA" })
+      ]));
+      expect(row.method?.coding).toEqual(expect.arrayContaining([
+        expect.objectContaining({ system: "http://snomed.info/sct", code: "738991002" }),
+        expect.objectContaining({ system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+          code: "C38286" }),
+        expect.objectContaining({ system: "http://snomed.info/sct",
+          code: "447056002" })
+      ]));
+      const action = fromFhirDosage(row).meta.normalized.instructionGraph?.actions
+        .find(item => item.predicate.lemma === "cover");
+      expect(action?.predicate.codings).toContainEqual(expect.objectContaining({
+        system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action", code: "cover"
+      }));
+      const dressing = action?.args.find(arg => arg.conceptId === "occlusive_dressing");
+      expect(dressing?.codings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          system: "urn:ezmedicationinput:CodeSystem:medication-instruction-concept",
+          code: "occlusive_dressing"
+        }),
+        expect.objectContaining({ system: "https://www.nlm.nih.gov/mesh", code: "D009779" })
+      ]));
+      expect(dressing?.components?.[0]?.coding?.code).toBe("333453004");
+    }
+    for (const source of [
+      "Do not cover ointment with occlusive dressing",
+      "Take 1 tablet and cover with occlusive dressing"
+    ]) {
+      const dosage = parsePublicSig(source).fhir[0];
+      expect(dosage.route?.coding?.some(c => c.code === "OCDRESTA")).not.toBe(true);
+      expect(dosage.method?.coding?.some(c => c.code === "C38286")).not.toBe(true);
     }
   });
 });

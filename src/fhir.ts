@@ -1117,6 +1117,17 @@ export function canonicalToFhir(
   if (instructionGraphExtension) {
     dosage.extension = [instructionGraphExtension];
   }
+  // The complete topical APPLY + COVER WITH OCCLUSIVE DRESSING program is
+  // a formally coded technique. A dressing OBJECT by itself is not that route.
+  // Keep the original route, method, action, object and all local codings.
+  const occlusiveTopicalTechnique =
+    clause.route?.code === "6064005" &&
+    clause.method?.coding?.code === "738991002" &&
+    Boolean(clause.instructionGraph?.actions.some(action =>
+      action.predicate.lemma === "cover" &&
+      action.polarity !== AdvicePolarity.Negate &&
+      action.args.some(arg => arg.conceptId === "occlusive_dressing")
+    ));
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
@@ -1355,7 +1366,11 @@ export function canonicalToFhir(
             system: SNOMED_SYSTEM,
             code: coding.code,
             display: coding.display
-          }
+          },
+          ...(occlusiveTopicalTechnique ? [{
+            system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+            code: "OCDRESTA", display: "Occlusive dressing technique"
+          }] : [])
         ]
       };
     } else if (text) {
@@ -1417,7 +1432,13 @@ export function canonicalToFhir(
             display: clause.method.coding.display,
             _display: clonePrimitiveElement(clause.method.coding._display) ??
               buildTranslationPrimitiveElement(clause.method.coding.i18n)
-          }
+          },
+          ...(occlusiveTopicalTechnique ? [
+            { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+              code: "C38286", display: "Occlusive Dressing Technique" },
+            { system: SNOMED_SYSTEM,
+              code: "447056002", display: "Occlusive dressing technique" }
+          ] : [])
         ]
         : undefined
     };

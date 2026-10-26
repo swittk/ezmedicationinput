@@ -93,6 +93,8 @@
     },
     {
       "code": "notify",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "notify", "display": "Notify", "i18n": {"th": "แจ้ง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25297", "display": "Notification"}],
       "semanticClass": "communicate",
       "display": "Notify",
       "i18n": { "th": "แจ้ง" },
@@ -128,6 +130,8 @@
     },
     {
       "code": "avoid",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "avoid", "display": "Avoid", "i18n": {"th": "งด"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C54264", "display": "Avoidance"}],
       "semanticClass": "avoidance",
       "display": "Avoid",
       "i18n": { "th": "งด" },
@@ -140,6 +144,8 @@
     },
     {
       "code": "shake",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "shake", "display": "Shake", "i18n": {"th": "เขย่า"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C64646", "display": "Shake"}],
       "semanticClass": "prepare",
       "display": "Shake",
       "i18n": {
@@ -270,6 +276,8 @@
     },
     {
       "code": "spread",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "spread", "display": "Spread", "i18n": {"th": "เกลี่ย"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C61404", "display": "Spread"}],
       "semanticClass": "apply",
       "display": "Spread",
       "i18n": {
@@ -295,6 +303,8 @@
     },
     {
       "code": "dab",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "dab", "display": "Dab", "i18n": {"th": "แตะ"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "1254782007", "display": "Dabbing"}],
       "semanticClass": "apply",
       "display": "Dab",
       "i18n": {
@@ -341,6 +351,8 @@
     },
     {
       "code": "clean",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "clean", "display": "Clean", "i18n": {"th": "ทำความสะอาด"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C65076", "display": "Clean"}],
       "semanticClass": "cleanse",
       "display": "Clean",
       "i18n": {
@@ -437,6 +449,8 @@
     },
     {
       "code": "douche",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "douche", "display": "Douche", "i18n": {"th": "สวนล้าง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C15374", "display": "Douche"}],
       "semanticClass": "cleanse",
       "display": "Douche",
       "i18n": {
@@ -521,6 +535,8 @@
     },
     {
       "code": "dry",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "dry", "display": "Dry", "i18n": {"th": "ทำให้แห้ง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C80399", "display": "Dry"}],
       "semanticClass": "cleanse",
       "display": "Dry",
       "i18n": {
@@ -539,6 +555,8 @@
     },
     {
       "code": "cover",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "cover", "display": "Cover", "i18n": {"th": "ปิดคลุม"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C68811", "display": "Cover"}],
       "semanticClass": "cover",
       "display": "Cover",
       "i18n": {
@@ -617,6 +635,8 @@
     },
     {
       "code": "discard",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "discard", "display": "Discard", "i18n": {"th": "ทิ้ง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C48166", "display": "Disposal"}],
       "semanticClass": "discard",
       "display": "Discard",
       "i18n": {
@@ -632,6 +652,8 @@
     },
     {
       "code": "observe",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "observe", "display": "Observe", "i18n": {"th": "สังเกตอาการ"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C61256", "display": "Monitoring"}],
       "semanticClass": "observe",
       "display": "Observe",
       "i18n": {
@@ -1707,6 +1729,8 @@
     },
     {
       "code": "stir",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "stir", "display": "Stir", "i18n": {"th": "คน"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C64645", "display": "Stir"}],
       "semanticClass": "prepare",
       "display": "Stir",
       "i18n": {
@@ -1899,6 +1923,8 @@
     },
     {
       "code": "change",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "change", "display": "Change", "i18n": {"th": "เปลี่ยน"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25446", "display": "Change"}],
       "semanticClass": "replace",
       "display": "Change",
       "i18n": {
@@ -1972,6 +1998,8 @@
     },
     {
       "code": "double",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "double", "display": "Double", "i18n": {"th": "เพิ่มเป็นสองเท่า"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "1305003", "display": "Double (qualifier value)"}],
       "semanticClass": "administration_pattern",
       "display": "Double",
       "i18n": { "th": "เพิ่มเป็นสองเท่า" },
@@ -1981,6 +2009,7 @@
     },
     {
       "code": "adjust",
+      "contextualCodings": [{"whenArgument": {"conceptId": "medication-dose", "role": "object"}, "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C82495", "display": "Dose Adjustment"}}],
       "semanticClass": "administration_pattern",
       "display": "Adjust use",
       "i18n": {
@@ -2049,6 +2078,8 @@
     },
     {
       "code": "wear",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "wear", "display": "Wear", "i18n": {"th": "ติดไว้"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C228964", "display": "Wear"}],
       "semanticClass": "retain",
       "display": "Wear",
       "i18n": {
@@ -2122,6 +2153,8 @@
     },
     {
       "code": "repeat",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "repeat", "display": "Repeat", "i18n": {"th": "ทำซ้ำ"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C47886", "display": "Repeat"}],
       "semanticClass": "repeat",
       "display": "Repeat",
       "i18n": {
