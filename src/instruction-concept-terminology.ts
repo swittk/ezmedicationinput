@@ -208,7 +208,10 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     caseSensitive: true,
     content: "complete",
     concept: DEFAULT_CONCEPTS.filter((definition) =>
-      !definition.coding && !definition.externalCodings?.length && !definition.components?.length
+      // An explicit local whole-phrase code remains part of this CodeSystem
+      // even when its standard-coded constituents are also available.
+      definition.coding?.system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM ||
+      (!definition.coding && !definition.externalCodings?.length && !definition.components?.length)
     ).map((definition) => ({
       code: definition.code,
       display: definition.display,
@@ -230,7 +233,11 @@ export function medicationInstructionConceptCodings(
   if (definition.externalCodings?.length) {
     return definition.externalCodings.map((coding) => cloneCoding(coding)!);
   }
-  // An uncoded referent (e.g. a container's tip) retains its conceptId,
-  // source text, and coded constituents, not a proprietary clinical Coding.
-  return [];
+  if (definition.components?.length) return [];
+  return [{
+    system: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
+    code: definition.code,
+    display: definition.display,
+    i18n: definition.i18n ? { ...definition.i18n } : undefined
+  }];
 }

@@ -135,6 +135,7 @@ export function buildDosageAlternativeChoiceStructureDefinition() {
 }
 
 const CONDITION_CODE_SYSTEM = "http://hl7.org/fhir/CodeSystem/dosage-condition-code";
+const INTERNAL_CONDITION_CODE_SYSTEM = "urn:ezmedicationinput:CodeSystem:medication-condition";
 /** Exact US LOINC observation concepts for named measurements. Generic "BP"
  * and "glucose" deliberately remain text-only: their component/specimen is
  * unspecified, and asserting SBP or blood glucose would fabricate meaning.
@@ -335,14 +336,17 @@ function describe(condition: MedicationCondition): string {
 function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
   if (condition.kind === "measurement") {
     return {
+      // Keep the existing explicit condition-kind code AND add any exact
+      // observation code. FHIR already retains the typed comparator/value.
       code: {
-        text: condition.name,
-        ...(CONDITION_MEASUREMENT_CODES[condition.name.toLowerCase()] ? {
-          coding: [{
+        coding: [
+          { system: INTERNAL_CONDITION_CODE_SYSTEM, code: "measurement", display: condition.name },
+          ...(CONDITION_MEASUREMENT_CODES[condition.name.toLowerCase()] ? [{
             system: "http://loinc.org",
             ...CONDITION_MEASUREMENT_CODES[condition.name.toLowerCase()]
-          }]
-        } : {})
+          }] : [])
+        ],
+        text: condition.name
       },
       operation: condition.operation,
       valueQuantity: {
@@ -364,7 +368,8 @@ function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
   // FHIR R6 condition[] is OR. A whole Boolean expression must stay ONE
   // condition, with the logical tree retained in a declared extension.
   return {
-    code: { text: "Medication conditional expression" },
+    code: { coding: [{ system: INTERNAL_CONDITION_CODE_SYSTEM, code: "expression",
+      display: "Medication conditional expression" }] },
     text: describe(condition),
     extension: [{ url: DOSAGE_CONDITION_R6_LOGIC_URL,
         extension: [encodeConditionPredicate(condition)] }]

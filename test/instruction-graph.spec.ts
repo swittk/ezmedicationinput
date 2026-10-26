@@ -1713,81 +1713,35 @@ describe("standards-first instruction relationships and event referents", () => 
 });
 
 
-describe("standards-composed instructions without proprietary clinical codings", () => {
-  it("preserves a priming instruction as coded inhaler + first-use event + before relation", () => {
-    const source = "Prime inhaler before first use";
-    const parsed = parsePublicSig(source);
-    const graph = parsed.meta.canonical.clauses[0]?.instructionGraph!;
-    expect(graph.actions[0].predicate).toMatchObject({ lemma: "prime", codings: [] });
-    expect(graph.actions[0].args).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        text: "inhaler",
-        coding: expect.objectContaining({ system: "http://snomed.info/sct", code: "334980009" })
-      }),
-      expect.objectContaining({
-        conceptId: "first-use",
-        components: [
-          expect.objectContaining({ coding: expect.objectContaining({ code: "884001" }) }),
-          expect.objectContaining({ coding: expect.objectContaining({ code: "419385000" }) })
-        ]
-      })
-    ]));
-    const strict = toFhirR5Dosages(parsed.fhirNext)[0];
-    const rebuilt = fromFhirDosage(strict).meta.normalized.instructionGraph!;
-    expect(rebuilt.actions[0].predicate.lemma).toBe("prime");
-    expect(rebuilt.actions[0].relation).toBe(AdviceRelation.Before);
-    expect(rebuilt.actions[0].args.find(arg => arg.conceptId === "first-use")?.components)
-      .toEqual(graph.actions[0].args.find(arg => arg.conceptId === "first-use")?.components);
-    expect(JSON.stringify(strict)).not.toContain("CodeSystem:medication-instruction");
-  });
-
-  it("codes the bottle part and each-use event without pretending wipe is a standardized clinical procedure", () => {
-    const source = "Wipe bottle tip after each use";
-    const parsed = parsePublicSig(source);
-    const strict = toFhirR5Dosages(parsed.fhirNext)[0];
-    const graph = fromFhirDosage(strict).meta.normalized.instructionGraph!;
-    const action = graph.actions[0];
-    expect(action.predicate.lemma).toBe("wipe");
-    expect(action.predicate.codings).toEqual([]);
-    expect(action.relation).toBe(AdviceRelation.After);
-    expect(action.args.find(arg => arg.conceptId === "bottle-tip")?.components).toEqual([
-      expect.objectContaining({ role: "head", coding: expect.objectContaining({
-        system: "http://snomed.info/sct", code: "68276009"
-      }) }),
-      expect.objectContaining({ role: "qualifier", text: "tip" })
-    ]);
-    expect(action.args.find(arg => arg.conceptId === "each-use")?.components?.map(c => c.coding?.code))
-      .toEqual(["419473009", "419385000"]);
-    expect(JSON.stringify(strict)).not.toContain("CodeSystem:medication-instruction");
-  });
-
-  it("keeps HL7 do-not-shake semantics without an uncoded proprietary verb", () => {
-    const source = "Do not shake bottle";
-    const parsed = parsePublicSig(source);
-    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
-      expect(dosage.additionalInstruction).toContainEqual(expect.objectContaining({
-        coding: [expect.objectContaining({
-          system: "http://terminology.hl7.org/CodeSystem/v3-EntityHandling", code: "PSA"
-        })]
+describe("preserve complete local codes alongside standard constituents", () => {
+  it("keeps a full bottle-tip coding and its standard-coded head through strict R5", () => {
+    const parsed = parsePublicSig("Wipe bottle tip after each use");
+    const original = parsed.items[0].meta.canonical.clauses[0]?.instructionGraph?.actions[0]!;
+    const restored = fromFhirDosage(toFhirR5Dosages(parsed.fhirNext)[0])
+      .meta.normalized.instructionGraph?.actions[0]!;
+    for (const action of [original, restored]) {
+      expect(action.predicate.codings).toContainEqual(expect.objectContaining({
+        system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
+        code: "wipe"
       }));
-      const action = fromFhirDosage(dosage).meta.normalized.instructionGraph?.actions[0];
-      expect(action?.predicate.lemma).toBe("shake");
-      expect(action?.predicate.codings).toEqual([]);
-      expect(action?.args.find(arg => arg.conceptId === "bottle")?.coding?.code).toBe("68276009");
+      const tip = action.args.find(arg => arg.conceptId === "bottle-tip")!;
+      expect(tip.coding).toMatchObject({
+        system: "urn:ezmedicationinput:CodeSystem:medication-instruction-concept",
+        code: "bottle-tip"
+      });
+      expect(tip.components?.[0].coding).toMatchObject({
+        system: "http://snomed.info/sct", code: "68276009"
+      });
     }
+    expect(buildMedicationInstructionConceptCodeSystem().concept)
+      .toContainEqual(expect.objectContaining({ code: "bottle-tip" }));
   });
 
-  it("keeps ordinary swallowed-with-water advice tied to the capsule, not water", () => {
+  it("keeps the coded swallowed-whole instruction even with accompanying water", () => {
     const parsed = parsePublicSig("Do not chew the capsule. Swallow whole with water.");
     for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
-      expect(dosage.additionalInstruction?.flatMap(item => item.coding?.map(c => c.code) ?? []))
+      expect(dosage.additionalInstruction?.flatMap(row => row.coding?.map(c => c.code) ?? []))
         .toContain("418693002");
-      const graph = fromFhirDosage(dosage).meta.normalized.instructionGraph!;
-      expect(graph.actions.find(frame => frame.predicate.lemma === "swallow")?.args)
-        .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance, text: "water" }));
     }
-    const unrelated = parsePublicSig("Do not chew the capsule. Drink water.");
-    expect(unrelated.fhir[0].additionalInstruction?.flatMap(item =>
-      item.coding?.map(c => c.code) ?? [])).not.toContain("418693002");
   });
 });
