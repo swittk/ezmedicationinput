@@ -2518,3 +2518,49 @@ it("imports a finding whose explicit site expression has a topographical modifie
   expect(clause.prn?.reason?.text).toContain("top of head");
   expect(canonicalToFhir(clause).asNeededFor?.[0].coding?.[0]?.code).toBe(expression);
 });
+
+
+describe("standard dosage quantity coding", () => {
+  it("codes physical quantities and EDQM presentation counts through R5/R6 without changing the dose", () => {
+    const examples = [
+      ["tab", "15054000"], ["cap", "15012000"], ["drop", "15022000"],
+      ["puff", "15061000"], ["actuation", "15001000"], ["patch", "15036000"],
+      ["suppository", "15051000"], ["sachet", "15045000"], ["vial", "15060000"],
+      ["pen", "15037000"], ["cartridge", "15013000"], ["blister", "15007000"],
+      ["bottle", "15009000"], ["ampule", "15002000"], ["syringe", "15052000"],
+      ["applicatorful", "15004000"], ["swab", "15062000"]
+    ];
+    for (const [unit, code] of examples) {
+      const clause = canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 2, unit } }] });
+      const row = canonicalToFhir(clause);
+      const reopened = toFhirR5Dosages(toDosageDetails([row]))[0];
+      for (const output of [row, reopened]) {
+        expect(output.doseAndRate?.[0]?.doseQuantity).toEqual({
+          value: 2, unit, system: "http://standardterms.edqm.eu", code
+        });
+      }
+    }
+    for (const [sig, unit, code] of [
+      ["5 mcg PO QD", "mcg", "ug"], ["5 mL PO BID", "mL", "mL"],
+      ["400 IU PO QD", "IU", "[iU]"], ["1 tsp PO BID", "tsp", "5.mL"]
+    ]) {
+      const parsed = parseSig(sig);
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({
+          unit, system: "http://unitsofmeasure.org", code
+        });
+      }
+    }
+  });
+
+  it("codes both range bounds and caps but leaves product-specific amounts unlabelled as UCUM", () => {
+    const parsed = parseSig("1-2 tab PO q6h prn pain max 8 tab/day");
+    const row = parsed.fhir[0];
+    for (const amount of [row.doseAndRate?.[0]?.doseRange?.low, row.doseAndRate?.[0]?.doseRange?.high]) {
+      expect(amount).toMatchObject({ system: "http://standardterms.edqm.eu", code: "15054000" });
+    }
+    expect(row.doseAndRate?.[0]?.doseRange?.high?.value).toBe(2);
+    const local = canonicalToFhir(canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "FTU" } }] }));
+    expect(local.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "FTU" });
+  });
+});

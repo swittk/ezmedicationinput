@@ -1569,3 +1569,29 @@ describe("HL7 entity handling as exact composed instructions", () => {
       coding.system === system && coding.code === "SBU")).toBe(false);
   });
 });
+
+
+describe("HL7 product handling instructions", () => {
+  it.each([
+    ["Do not shake", "PSA"],
+    ["Protect from light", "PRTL"],
+    ["Keep in a dry environment", "DRY"],
+    ["Keep bottle upright", "UPR"],
+    ["Refrigerate at 4-8°C", "REF"]
+  ])("preserves the exact handling meaning of %s", (source, code) => {
+    const parsed = parsePublicSig(source);
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.additionalInstruction?.some(instruction => instruction.coding?.some(coding =>
+        coding.system === "http://terminology.hl7.org/CodeSystem/v3-EntityHandling" && coding.code === code
+      ))).toBe(true);
+    }
+  });
+
+  it("does not turn patient positioning, site care, or a different temperature into product-handling codes", () => {
+    for (const source of ["Remain upright after taking", "Keep ear dry", "Refrigerate at 2-8°C", "Shake before use"]) {
+      const codes = parsePublicSig(source).fhir.flatMap(row =>
+        row.additionalInstruction?.flatMap(instruction => instruction.coding?.map(coding => coding.code) ?? []) ?? []);
+      expect(codes.some(code => ["UPR", "DRY", "REF", "PSA"].includes(code ?? ""))).toBe(false);
+    }
+  });
+});

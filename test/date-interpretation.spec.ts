@@ -64,7 +64,7 @@ describe("calendar date interpretation", () => {
     const dated = result.items[0];
     expect(dated.meta.leftoverText).toBeUndefined();
     expect(dated.fhir.site).toBeUndefined();
-    expect(dated.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(dated.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(dated.fhir.timing?.event).toEqual([
       "2026-09-28",
       "2026-10-01",
@@ -289,7 +289,7 @@ describe("calendar date interpretation", () => {
     const fraction = parseSig("take 1/2 tablet after breakfast", {
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(fraction.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(fraction.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 0.5,
       unit: "tab"
     });
@@ -301,7 +301,7 @@ describe("calendar date interpretation", () => {
       locale: "en-GB",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(dated.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(dated.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(dated.fhir.timing?.event).toEqual(["2026-09-28"]);
     expect(dated.fhir.timing?.repeat?.when).toEqual(["PCM"]);
     expect(dated.meta.leftoverText).toBeUndefined();
@@ -335,7 +335,7 @@ describe("calendar date interpretation", () => {
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
     expect(thai.fhir.timing?.event).toEqual(["2026-09-28"]);
-    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(thai.meta.leftoverText).toBeUndefined();
 
     const doseRange = parseSig("take 1-2 tablets daily", {
@@ -362,7 +362,7 @@ describe("calendar date interpretation", () => {
       locale: "en-GB",
       datePolicy: { referenceDate: REFERENCE_DATE }
     });
-    expect(bareAmbiguous.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(bareAmbiguous.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(bareAmbiguous.fhir.timing?.event).toBeUndefined();
     expect(bareAmbiguous.meta.leftoverText).toContain("28-9-26");
   });
@@ -695,7 +695,7 @@ describe("calendar date interpretation", () => {
   it("resolves attached Buddhist YMD dates in Thai medication context", () => {
     const options = { locale: "th", datePolicy: { referenceDate: "2026-10-22" } };
     const bounded = parseSig("รับประทาน 1 เม็ด ทุกวัน ถึง2569-11-01", options);
-    expect(bounded.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(bounded.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(bounded.fhir.timing?.repeat).toMatchObject({
       boundsPeriod: { end: "2026-11-01" }, frequency: 1, period: 1, periodUnit: "d"
     });
@@ -733,7 +733,7 @@ describe("calendar date interpretation", () => {
     ];
     for (const item of cases) {
       const parsed = parseSig(item.input, item.options);
-      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(parsed.fhir.timing?.repeat).toMatchObject({
         frequency: 1, period: 1, periodUnit: "d"
       });
@@ -901,7 +901,7 @@ describe("calendar date interpretation", () => {
     ]) {
       const parsed = parseSig(input);
       const dateText = input.match(/\d{4}-\d{2}-\d{2}/u)![0];
-      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(parsed.fhir.timing?.repeat).toMatchObject({
         frequency: 1, period: 1, periodUnit: "d"
       });

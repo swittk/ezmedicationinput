@@ -378,10 +378,10 @@ describe("typed phase addition contrasting instructions", () => {
     const continued = parsed.fhirNext.step[1].component;
     expect(continued).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]
+        doseAndRate: [expect.objectContaining({ doseQuantity: expect.objectContaining({ value: 0.5, unit: "tab" }) })]
       }),
       expect.objectContaining({
-        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+        doseAndRate: [expect.objectContaining({ doseQuantity: expect.objectContaining({ value: 1, unit: "tab" }) })]
       })
     ]));
     expect(toFhirR5Dosages(parsed.fhirNext)).toHaveLength(5);

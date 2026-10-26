@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
-  toDosageDetails, toFhirR5Dosages, fromFhir, getDosageCondition
+  toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { parseClauseState } from "../src/parser";
@@ -20,6 +20,30 @@ const options = (from: string, limit = 8) => ({
 });
 
 describe("concurrent independent treatment sequences", () => {
+  it("serializes later parallel-stage instruction-graph spans relative to their own source", () => {
+    const input =
+      "1 drop OD QID x7d then BID; " +
+      "1 drop OS QID x1mo then BID, do not touch dropper tip";
+    const parsed = parseSig(input);
+    expect(parsed.fhirNext.step).toHaveLength(3);
+    const absolute = parsed.items[3].meta.canonical.clauses[0]?.instructionGraph;
+    expect(absolute?.actions[0]?.span.start).toBe(input.indexOf("do not touch"));
+    const projected = [
+      parsed.fhir[parsed.fhir.length - 1],
+      parsed.fhirNext.step[2].component[1],
+      toFhirR5Dosages(parsed.fhirNext)[5]
+    ];
+    for (const dosage of projected) {
+      const graph = fromFhirDosage(dosage).meta.normalized.instructionGraph;
+      expect(graph?.sourceText).toBe("BID, do not touch dropper tip");
+      const action = graph?.actions.find(candidate => candidate.predicate.lemma === "touch");
+      expect(action?.sourceText).toBe("do not touch dropper tip");
+      expect(action?.span).toEqual({ start: 5, end: 29 });
+      expect(graph?.sourceText.slice(action!.span.start, action!.span.end))
+        .toBe(action?.sourceText);
+    }
+  });
+
   it("owns independent windows and dosage stages in the raw typed regimen graph", () => {
     const input =
       "1 drop OD q2h x1wk then 1 drop OD qid only if BP >160; " +

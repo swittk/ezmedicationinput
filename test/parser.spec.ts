@@ -78,7 +78,7 @@ function translationPrimitive(locale: string, value: string) {
 describe("parseSig core scenarios", () => {
   it("parses 1x3 po pc", () => {
     const result = parseSig("1x3 po pc", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 3,
@@ -96,7 +96,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses decimal multiplicative tokens", () => {
     const result = parseSig("1.5x3", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1.5, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 3,
@@ -110,7 +110,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses spaced decimal multiplicative tokens", () => {
     const result = parseSig("1.5 x3", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1.5, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 3,
@@ -124,7 +124,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses clinician shorthand leading-decimal doses", () => {
     const spaced = parseSig("take .5 tablet daily");
-    expect(spaced.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(spaced.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
     expect(spaced.fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
@@ -133,11 +133,11 @@ describe("parseSig core scenarios", () => {
     expect(spaced.meta.leftoverText).toBeUndefined();
 
     const compact = parseSig("take .5tab daily");
-    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
     expect(compact.meta.leftoverText).toBeUndefined();
 
     const thai = parseSig("รับประทาน .5 เม็ด หลังอาหารเช้า");
-    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.5, unit: "tab" });
+    expect(thai.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
     expect(thai.fhir.timing?.repeat?.when).toEqual(["PCM"]);
     expect(thai.meta.leftoverText).toBeUndefined();
   });
@@ -154,7 +154,7 @@ describe("parseSig core scenarios", () => {
       enableMealDashSyntax: true
     });
     expect(result.count).toBe(1);
-    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.items[0].fhir.timing?.repeat?.when).toEqual([
       EventTiming.Breakfast,
       EventTiming.Dinner
@@ -179,9 +179,9 @@ describe("parseSig core scenarios", () => {
       enableMealDashSyntax: true
     });
     expect(result.count).toBe(2);
-    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "tab" });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "tab" });
     expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"]]);
-    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 12, unit: "tab" });
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 12, unit: "tab" });
     expect(result.items[1].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Lunch"]]);
   });
 
@@ -200,7 +200,7 @@ describe("parseSig core scenarios", () => {
   it("keeps split timing clauses in one item when dosage context is identical", () => {
     const result = parseSig("1 tab po @ 8:00, 1 tab po hs", { context: TAB_CONTEXT });
     expect(result.count).toBe(1);
-    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.items[0].fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
     expect(result.items[0].fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
     expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
@@ -363,7 +363,7 @@ describe("parseSig core scenarios", () => {
     });
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Per vagina"]);
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.meta.leftoverText).toBeUndefined();
     expect(result.longText).toBe("Insert 1 tablet vaginally at bedtime once only.");
     expect(formatSig(result.fhir, "long", { locale: "th" })).toBe(
@@ -453,21 +453,21 @@ describe("parseSig core scenarios", () => {
     const result = parseSig("1x3 OD", {
       context: { dosageForm: "eye drops, solution" }
     });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.site?.text).toBe("right eye");
   });
 
   it("defaults ophthalmic units when only site hints are supplied", () => {
     const result = parseSig("1x3 OD");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.site?.text).toBe("right eye");
   });
 
   it("interprets OD as once daily when systemic cues are present", () => {
     const result = parseSig("1 tab OD", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QD");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 1,
@@ -480,14 +480,14 @@ describe("parseSig core scenarios", () => {
 
   it("preserves ophthalmic interpretation of OD when eye context exists", () => {
     const result = parseSig("1 drop OD");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.site?.text).toBe("right eye");
     expect(result.fhir.timing?.code).toBeUndefined();
   });
 
   it("treats OD as once daily for inhalation dosage-form context", () => {
     const result = parseSig("1 od", { context: { dosageForm: "inhalation" } });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "puff" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "puff" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QD");
     expect(result.fhir.site).toBeUndefined();
     expect(result.fhir.route?.coding?.[0]?.code).not.toBe(
@@ -497,7 +497,7 @@ describe("parseSig core scenarios", () => {
 
   it("interprets ophthalmic double OD as right eye once daily", () => {
     const result = parseSig("1 drop OD OD");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.site?.text).toBe("right eye");
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Ophthalmic route"]);
     expect(result.fhir.timing?.repeat).toMatchObject({
@@ -984,7 +984,7 @@ describe("parseSig core scenarios", () => {
 
   it("interprets dotted O.D. as once daily when paired with oral route", () => {
     const result = parseSig("500 mg po O.D.");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 500, unit: "mg" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 500, unit: "mg" });
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
@@ -996,7 +996,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses numeric per-day cadence shorthand", () => {
     const result = parseSig("1 tab 3/day", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 3,
@@ -1017,7 +1017,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses numeric per-week cadence", () => {
     const result = parseSig("2 puffs 2/week");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "puff" });
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 2,
       period: 1,
@@ -1027,7 +1027,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses numeric per-month cadence", () => {
     const result = parseSig("Apply 1 patch 1/month");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "patch" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "patch" });
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
@@ -1082,7 +1082,7 @@ describe("parseSig core scenarios", () => {
 
   it("infers inhalation units from respiratory route hints", () => {
     const result = parseSig("2 inh q4h");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "puff" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "puff" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(
       SNOMEDCTRouteCodes["Respiratory tract route (qualifier value)"]
     );
@@ -1103,13 +1103,13 @@ describe("parseSig core scenarios", () => {
 
   it("infers patch units for transdermal routes", () => {
     const result = parseSig("1 td daily");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "patch" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "patch" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Transdermal route"]);
   });
 
   it("infers suppository units for rectal routes", () => {
     const result = parseSig("1 pr q12h");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "suppository"
     });
@@ -1128,7 +1128,7 @@ describe("parseSig core scenarios", () => {
 
   it("normalizes spelled metric dose units", () => {
     const result = parseSig("500 milligrams po q12h");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 500,
       unit: "mg"
     });
@@ -1138,14 +1138,14 @@ describe("parseSig core scenarios", () => {
 
   it("supports spelled millilitre synonyms", () => {
     const result = parseSig("10 millilitres po qd");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "mL" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "mL" });
     expect(result.meta.normalized.unit).toBe("mL");
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
   });
 
   it("persists insulin shorthand units", () => {
     const result = parseSig("20 U sc hs");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 20, unit: "U" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 20, unit: "U" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Subcutaneous route"]);
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
     expect(result.fhir.additionalInstruction).toBeUndefined();
@@ -1157,13 +1157,13 @@ describe("parseSig core scenarios", () => {
       context: { dosageForm: "vial" }
     });
     expect(result.count).toBe(1);
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "U" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "U" });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Before Breakfast"], EventTiming["Before Dinner"]]);
   });
 
   it("parses million IU notation", () => {
     const result = parseSig("2.4M IU IM once");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2400000, unit: "IU" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
     expect(result.fhir.timing?.repeat).toMatchObject({ count: 1 });
     expect(result.fhir.timing?.repeat?.frequency).toBeUndefined();
@@ -1219,7 +1219,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses million IU notation with weekly cadence", () => {
     const result = parseSig("2.4M IU IM Q1week");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2400000, unit: "IU" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2400000, unit: "IU" });
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Intramuscular route"]);
     expect(result.fhir.timing?.repeat).toMatchObject({
       period: 1,
@@ -1229,7 +1229,7 @@ describe("parseSig core scenarios", () => {
 
   it("keeps tablet units while mapping trailing suppository text to rectal route", () => {
     const result = parseSig("1 tab suppository");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "tab"
     });
@@ -1239,7 +1239,7 @@ describe("parseSig core scenarios", () => {
 
   it("keeps tablet plurals while mapping shortened suppository tokens to rectal route", () => {
     const result = parseSig("11 tabs suppo");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 11,
       unit: "tab"
     });
@@ -1249,11 +1249,11 @@ describe("parseSig core scenarios", () => {
 
   it("parses household teaspoon and tablespoon measures", () => {
     const teaspoon = parseSig("1 teaspoon po q6h");
-    expect(teaspoon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tsp" });
+    expect(teaspoon.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tsp" });
     expect(teaspoon.meta.normalized.unit).toBe("tsp");
 
     const tablespoon = parseSig("2 tablespoons po q8h");
-    expect(tablespoon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tbsp" });
+    expect(tablespoon.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "tbsp" });
     expect(tablespoon.meta.normalized.unit).toBe("tbsp");
   });
 
@@ -1268,7 +1268,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses dose ranges with frequency code", () => {
     const result = parseSig("1-2 tabs po prn pain tid", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseRange).toEqual({
+    expect(result.fhir.doseAndRate?.[0]?.doseRange).toMatchObject({
       low: { value: 1, unit: "tab" },
       high: { value: 2, unit: "tab" }
     });
@@ -1291,14 +1291,14 @@ describe("parseSig core scenarios", () => {
 
   it("parses 1*3 po ac", () => {
     const result = parseSig("1*3 po ac", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("TID");
     expect(result.fhir.timing?.repeat?.when).toEqual(["AC"]);
   });
 
   it("parses daily without code", () => {
     const result = parseSig("500 mg po daily");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 500, unit: "mg" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 500, unit: "mg" });
     expect(result.fhir.timing?.code).toBeUndefined();
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 1,
@@ -1309,7 +1309,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses q6h prn", () => {
     const result = parseSig("2 tab po q6h prn pain");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q6H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
     expect(result.fhir.asNeeded).toBe(true);
@@ -1329,7 +1329,7 @@ describe("parseSig core scenarios", () => {
 
   it("parses period ranges with prn reasons", () => {
     const result = parseSig("2 supp q 6-8 h prn constipation");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "suppository" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "suppository" });
     expect(result.fhir.timing?.repeat).toMatchObject({
       period: 6,
       periodMax: 8,
@@ -2034,13 +2034,13 @@ describe("parseSig core scenarios", () => {
 
   it("parses 1xweekly tuesday", () => {
     const result = parseSig("1xweekly tuesday", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 1, periodUnit: "wk", dayOfWeek: ["tue"] });
   });
 
   it("parses 1*weekly wednesday", () => {
     const result = parseSig("1*weekly wednesday", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("WK");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 1, periodUnit: "wk", dayOfWeek: ["wed"] });
     expect(result.longText).toContain("once weekly on Wednesday");
@@ -2094,7 +2094,7 @@ describe("parseSig core scenarios", () => {
     ];
     for (const input of cases) {
       const result = parseSig(input, { context: TAB_CONTEXT });
-      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(result.fhir.timing?.repeat).toMatchObject({
         frequency: 1,
         period: 1,
@@ -2133,7 +2133,7 @@ describe("parseSig core scenarios", () => {
     ];
     for (const input of cases) {
       const result = parseSig(input, { context: TAB_CONTEXT });
-      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1.5, unit: "tab" });
       expect(result.fhir.timing?.repeat).toMatchObject({
         frequency: 1,
         period: 1,
@@ -2209,14 +2209,14 @@ describe("parseSig core scenarios", () => {
       { context: TAB_CONTEXT }
     );
     expect(result.count).toBe(2);
-    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.items[0].fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
       periodUnit: "d",
       dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
     });
-    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1.5, unit: "tab" });
     expect(result.items[1].fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
@@ -2231,14 +2231,14 @@ describe("parseSig core scenarios", () => {
       { context: TAB_CONTEXT }
     );
     expect(result.count).toBe(2);
-    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.items[0].fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
       periodUnit: "d",
       dayOfWeek: ["mon", "tue", "wed", "thu", "fri"]
     });
-    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1.5, unit: "tab" });
+    expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1.5, unit: "tab" });
     expect(result.items[1].fhir.timing?.repeat).toMatchObject({
       frequency: 1,
       period: 1,
@@ -2268,39 +2268,39 @@ describe("parseSig core scenarios", () => {
 
   it("maps AM to EventTiming", () => {
     const result = parseSig("1 po am", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("AM");
     expect(result.fhir.timing?.repeat?.when).toEqual(["MORN"]);
   });
 
   it("maps NOON", () => {
     const result = parseSig("1 po noon", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat?.when).toEqual(["NOON"]);
   });
 
   it("maps PM", () => {
     const result = parseSig("1 po pm", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("PM");
     expect(result.fhir.timing?.repeat?.when).toEqual(["EVE"]);
   });
 
   it("maps HS", () => {
     const result = parseSig("1xHS", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat?.when).toEqual(["HS"]);
   });
 
   it("maps STAT to immediate timing", () => {
     const result = parseSig("1 tab po stat", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming.Immediate]);
   });
 
   it("maps early morning combo", () => {
     const result = parseSig("1 tab early morning", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat?.when).toEqual([EventTiming["Early Morning"]]);
   });
 
@@ -2432,14 +2432,14 @@ describe("parseSig core scenarios", () => {
 
   it("infers unit from context", () => {
     const result = parseSig("1", { context: { dosageForm: "tab" } });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
   });
 
   it("uses container unit from context", () => {
     const result = parseSig("2", {
       context: { dosageForm: "sol", containerUnit: "mL" }
     });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "mL" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "mL" });
   });
 
   it("parses fractional topical container doses without treating slash fractions as clock times", () => {
@@ -2473,12 +2473,12 @@ describe("parseSig core scenarios", () => {
 
   it("normalizes complex dosage forms from context", () => {
     const result = parseSig("1", { context: { dosageForm: "capsule, soft" } });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "cap" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "cap" });
   });
 
   it("normalizes transdermal dosage forms", () => {
     const result = parseSig("1", { context: { dosageForm: "transdermal patch" } });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "patch" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "patch" });
   });
 
   it("parses patch td daily", () => {
@@ -2518,7 +2518,7 @@ describe("parseSig core scenarios", () => {
 
   it("captures site text", () => {
     const result = parseSig("1 mL IM left arm");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "mL" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "mL" });
     expect(result.fhir.site?.text).toBe("left arm");
     expect(result.fhir.route?.coding?.[0]?.code).toBe(
       SNOMEDCTRouteCodes["Intramuscular route"]
@@ -4392,7 +4392,7 @@ describe("unit normalization", () => {
 describe("ocular and injection scenarios", () => {
   it("parses right eye drops with QID", () => {
     const result = parseSig("1 drop OD QID");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("QID");
     expect(result.fhir.timing?.repeat).toMatchObject({
       frequency: 4,
@@ -4410,7 +4410,7 @@ describe("ocular and injection scenarios", () => {
 
   it("parses left eye drops every 2 hours", () => {
     const result = parseSig("1 drop OS Q2H");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q2H");
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "h" });
     expect(result.fhir.site?.text).toBe("left eye");
@@ -4418,7 +4418,7 @@ describe("ocular and injection scenarios", () => {
 
   it("parses both eyes every hour", () => {
     const result = parseSig("1 drop OU Q1H");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("Q1H");
     expect(result.fhir.site?.text).toBe("both eyes");
     expect(result.longText).toBe("Instill 1 drop every 1 hour in both eyes.");
@@ -4426,7 +4426,7 @@ describe("ocular and injection scenarios", () => {
 
   it("normalizes each-eye phrasing to the bilateral ocular site", () => {
     const result = parseSig("1 drop each eye q2h");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.site?.text).toBe("both eyes");
     expect(result.fhir.site?.coding?.[0]?.code).toBe("40638003");
     expect(
@@ -4438,7 +4438,7 @@ describe("ocular and injection scenarios", () => {
 
   it("parses AU as both ears", () => {
     const result = parseSig("1 drop au bid");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(result.fhir.site?.text).toBe("both ears");
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Otic route"]);
   });
@@ -4447,7 +4447,7 @@ describe("ocular and injection scenarios", () => {
     const result = parseSig("1 spray each nostril bid", {
       context: { dosageForm: "nasal spray, solution" }
     });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "spray" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "spray" });
     expect(result.fhir.site?.text).toBe("both nostrils");
     expect(result.fhir.site?.coding?.[0]?.code).toBe("244506005");
     expect(result.fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Nasal route"]);
@@ -4480,7 +4480,7 @@ describe("ocular and injection scenarios", () => {
 
   it("parses intramuscular injections", () => {
     const result = parseSig("1 mL IM q6h");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "mL" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "mL" });
     expect(result.fhir.timing?.repeat).toMatchObject({ period: 6, periodUnit: "h" });
     expect(result.fhir.route?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -4497,7 +4497,7 @@ describe("ocular and injection scenarios", () => {
 
   it("parses spaced IVT shorthand with eye side", () => {
     const result = parseSig("0.05 mL IVT OS q1mo");
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 0.05, unit: "mL" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.05, unit: "mL" });
     expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("MO");
     expect(result.fhir.route?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
@@ -5056,26 +5056,26 @@ describe("topical product forms and workflow", () => {
 
   it("captures topical quantity units including metric ribbons", () => {
     const pumps = parseSig("apply 2 pumps to face every morning");
-    expect(pumps.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(pumps.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 2,
       unit: "pump"
     });
 
     const ribbon = parseSig("apply 0.5 cm ribbon to eyelid nightly");
-    expect(ribbon.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(ribbon.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 0.5,
       unit: "cm ribbon"
     });
 
     const contextualLine = parseSig("1 cm to arm");
-    expect(contextualLine.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(contextualLine.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "cm line"
     });
     expect(contextualLine.fhir.timing?.repeat?.when).toBeUndefined();
 
     const trailingLine = parseSig("apply to arm 1cm");
-    expect(trailingLine.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(trailingLine.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "cm line"
     });
@@ -5083,14 +5083,14 @@ describe("topical product forms and workflow", () => {
     expect(trailingLine.fhir.timing?.repeat?.when).toBeUndefined();
 
     const multiTokenFollowingSite = parseSig("apply 1 cm to affected area");
-    expect(multiTokenFollowingSite.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(multiTokenFollowingSite.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "cm line"
     });
     expect(multiTokenFollowingSite.fhir.site?.text).toBe("affected area");
 
     const multiTokenTrailingSite = parseSig("apply to affected area 1 cm");
-    expect(multiTokenTrailingSite.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(multiTokenTrailingSite.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "cm line"
     });
@@ -5099,7 +5099,7 @@ describe("topical product forms and workflow", () => {
 
   it("captures natural topical amount units with unit semantics", () => {
     const fingertip = parseSig("apply 1 fingertip unit to affected area once daily");
-    expect(fingertip.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(fingertip.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "FTU"
     });
@@ -5117,7 +5117,7 @@ describe("topical product forms and workflow", () => {
     expect(fingertip.meta.canonical.clauses[0]?.leftovers).toEqual([]);
 
     const compact = parseSig("apply 1 FTU to affected area once daily");
-    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(compact.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "FTU"
     });
@@ -5324,7 +5324,7 @@ describe("topical product forms and workflow", () => {
 
     for (const fixture of fixtures) {
       const result = parseSig(fixture.sig);
-      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+      expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
         value: expect.any(Number),
         unit: fixture.unit
       });
@@ -5371,14 +5371,14 @@ describe("topical product forms and workflow", () => {
     expect(breakfast.fhir.doseAndRate).toBeUndefined();
 
     const oral = parseSig("1 tab cm");
-    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "tab"
     });
     expect(oral.fhir.timing?.repeat?.when).toEqual([EventTiming.Breakfast]);
 
     const subcutaneous = parseSig("1 unit sc cm");
-    expect(subcutaneous.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(subcutaneous.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 1,
       unit: "U"
     });
@@ -5485,7 +5485,7 @@ describe("assume single discrete dose", () => {
       context: { dosageForm: "tablet" },
       assumeSingleDiscreteDose: true
     });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
   });
 
   it("ignores non-discrete units", () => {
@@ -5629,7 +5629,7 @@ describe("issue regression tests", () => {
 
   it("keeps symptom-adjustment reasons from consuming following dose and schedule", () => {
     const result = parseSig("adjust according to headache 2 tabs bid", { context: TAB_CONTEXT });
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
     expect(result.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
     expect(result.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("25064002");
     expect(result.meta.canonical.clauses[0]?.evidence).toEqual(expect.arrayContaining([

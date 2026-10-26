@@ -2,6 +2,96 @@
   "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
   "actions": [
     {
+      "code": "protect-from-light",
+      "semanticClass": "storage",
+      "display": "Protect from light",
+      "i18n": {
+        "en": "Protect from light",
+        "th": "เก็บให้พ้นแสง"
+      },
+      "aliases": [
+        "protect from light",
+        "keep protected from light",
+        "เก็บให้พ้นแสง"
+      ],
+      "procedural": true,
+      "coding": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "PRTL",
+        "display": "Protect from light"
+      }
+    },
+    {
+      "code": "store-dry",
+      "semanticClass": "storage",
+      "display": "Store in a dry place",
+      "i18n": {
+        "en": "Store in a dry place",
+        "th": "เก็บในที่แห้ง"
+      },
+      "aliases": [
+        "store in a dry place",
+        "store in a dry environment",
+        "keep in a dry place",
+        "keep in a dry environment",
+        "เก็บในที่แห้ง"
+      ],
+      "procedural": true,
+      "coding": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "DRY",
+        "display": "Store in a dry place"
+      }
+    },
+    {
+      "code": "store-upright",
+      "semanticClass": "storage",
+      "display": "Store upright",
+      "i18n": {
+        "en": "Store upright",
+        "th": "เก็บภาชนะในแนวตั้ง"
+      },
+      "aliases": [
+        "store upright",
+        "keep bottle upright",
+        "keep the bottle upright",
+        "keep container upright",
+        "keep the container upright",
+        "เก็บขวดในแนวตั้ง",
+        "เก็บภาชนะในแนวตั้ง"
+      ],
+      "procedural": true,
+      "coding": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "UPR",
+        "display": "Store upright"
+      }
+    },
+    {
+      "code": "refrigerate-4-8",
+      "semanticClass": "storage",
+      "display": "Refrigerate at 4-8°C",
+      "i18n": {
+        "en": "Refrigerate at 4-8°C",
+        "th": "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"
+      },
+      "aliases": [
+        "refrigerate at 4-8°C",
+        "refrigerate at 4-8 C",
+        "refrigerate at 4-8 °C",
+        "store at 4-8°C",
+        "store at 4-8 C",
+        "store at 4-8 °C",
+        "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"
+      ],
+      "procedural": true,
+      "coding": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "REF",
+        "display": "Refrigerate at 4-8°C"
+      }
+    },
+    {
       "code": "notify",
       "semanticClass": "communicate",
       "display": "Notify",

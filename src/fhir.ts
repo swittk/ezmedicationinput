@@ -36,7 +36,8 @@ import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
   ROUTE_TEXT,
-  findPrnReasonDefinitionByCoding
+  findPrnReasonDefinitionByCoding,
+  getStandardDoseUnitCoding
 } from "./maps";
 import {
   AdvicePolarity,
@@ -845,20 +846,22 @@ function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): str
   return focusText && siteText ? `${focusText} at ${siteText}` : focusText;
 }
 
+/** Build a quantity using exact standard terminology when available.
+ * @param value Authored quantity; coding never changes its magnitude.
+ * @param unit Authored/canonical unit label, retained even for local units.
+ */
+function buildFhirDoseQuantity(value: number, unit: string | undefined): FhirSimpleQuantity {
+  return { value, unit, ...getStandardDoseUnitCoding(unit) };
+}
+
 function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
   const fhirRange: FhirRange = {};
 
   if (range.low !== undefined) {
-    fhirRange.low = {
-      value: range.low,
-      unit
-    };
+    fhirRange.low = buildFhirDoseQuantity(range.low, unit);
   }
   if (range.high !== undefined) {
-    fhirRange.high = {
-      value: range.high,
-      unit
-    };
+    fhirRange.high = buildFhirDoseQuantity(range.high, unit);
   }
 
   if (!fhirRange.low && !fhirRange.high) {
@@ -1288,7 +1291,7 @@ export function canonicalToFhir(
 
   if (schedule?.maxDosePerPeriod?.length) {
     dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({
-      numerator: { value: maximum.amount, unit: maximum.unit },
+      numerator: buildFhirDoseQuantity(maximum.amount, maximum.unit),
       denominator: {
         value: maximum.period,
         unit: maximum.periodUnit,
@@ -1329,10 +1332,7 @@ export function canonicalToFhir(
   } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
-        doseQuantity: {
-          value: clause.dose.value,
-          unit: clause.dose.unit
-        }
+        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit)
       }
     ];
   }
@@ -2120,12 +2120,7 @@ function projectHpsgClinicalQuantityToFhir(
     if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
       const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
       dosage.doseAndRate = [{
-        rateQuantity: {
-          value: quantity.numerator.value,
-          unit,
-          system: "http://unitsofmeasure.org",
-          code: unit
-        }
+        rateQuantity: buildFhirDoseQuantity(quantity.numerator.value, unit)
       }];
     }
     return;
@@ -2133,8 +2128,7 @@ function projectHpsgClinicalQuantityToFhir(
   if (quantity.representation === "dose") {
     const dose = dosage.doseAndRate?.[0]?.doseQuantity;
     if (dose && quantity.projectedDose) {
-      dose.system = "http://unitsofmeasure.org";
-      dose.code = quantity.projectedDose.unit;
+      Object.assign(dose, getStandardDoseUnitCoding(quantity.projectedDose.unit));
     }
     return;
   }
@@ -2142,33 +2136,21 @@ function projectHpsgClinicalQuantityToFhir(
     const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
     dosage.doseAndRate = [{
       ...(quantity.projectedDose ? {
-        doseQuantity: { ...quantity.projectedDose, system: "http://unitsofmeasure.org", code: quantity.projectedDose.unit }
+        doseQuantity: buildFhirDoseQuantity(quantity.projectedDose.value, quantity.projectedDose.unit)
       } : {}),
-      rateQuantity: {
-        value: quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
-        unit,
-        system: "http://unitsofmeasure.org",
-        code: unit
-      }
+      rateQuantity: buildFhirDoseQuantity(
+        quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
+        unit
+      )
     }];
     return;
   }
   const duration = quantity.administrationDuration;
   const dose = quantity.projectedDose;
   if (!duration || !dose) return;
-  const doseQuantity = {
-    value: dose.value,
-    unit: dose.unit,
-    system: "http://unitsofmeasure.org",
-    code: dose.unit
-  };
+  const doseQuantity = buildFhirDoseQuantity(dose.value, dose.unit);
   const rate = quantity.rateNumerator ?? dose;
-  const rateNumerator = {
-    value: rate.value,
-    unit: rate.unit,
-    system: "http://unitsofmeasure.org",
-    code: rate.unit
-  };
+  const rateNumerator = buildFhirDoseQuantity(rate.value, rate.unit);
   dosage.doseAndRate = [{
     doseQuantity,
     rateRatio: {

@@ -134,6 +134,77 @@ describe("HPSG clinical quantity grammar", () => {
     }));
   });
 
+  it.each([
+    "30 mg daily divided into 3 doses",
+    "30 mg daily in 3 divided doses"
+  ])("projects a daily total as three 10 mg administrations: %s", (source) => {
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "dose",
+      status: "resolved",
+      numerator: { value: 30, unit: "mg", dimension: "mass" },
+      denominators: [{ value: 1, unit: "d", dimension: "time" }],
+      dailyTotal: true,
+      dividedDoseCount: 3,
+      projectedDose: { value: 10, unit: "mg" }
+    });
+    expect(clause.dose).toEqual({ value: 10, unit: "mg" });
+    expect(clause.schedule).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(dosage.doseAndRate?.[0]?.doseQuantity).toMatchObject({
+        value: 10, unit: "mg"
+      });
+      expect(dosage.timing?.repeat).toMatchObject({
+        frequency: 3, period: 1, periodUnit: "d"
+      });
+      expect(nextDueDoses(dosage, {
+        from: "2026-10-26T08:00:00+07:00",
+        orderedAt: "2026-10-26T08:00:00+07:00",
+        timeZone: "Asia/Bangkok", limit: 3
+      })).toEqual([
+        "2026-10-26T08:00:00+07:00",
+        "2026-10-26T14:00:00+07:00",
+        "2026-10-26T20:00:00+07:00"
+      ]);
+    }
+  });
+
+  it("does not divide an ordinary once-daily 30 mg administration without a split", () => {
+    const parsed = parsePublicSig("30 mg daily");
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(30);
+    expect(parsed.fhir[0].timing?.repeat?.frequency).toBe(1);
+  });
+
+  it.each([
+    "one whole tablet PO BID",
+    "one entire tablet PO BID",
+    "one full tablet PO BID"
+  ])("recognizes the stated complete tablet as one tablet: %s", (source) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 1, unit: "tab"
+    });
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "d"
+    });
+    expect(toFhirR5Dosages(parsed.fhirNext)[0]?.doseAndRate?.[0]?.doseQuantity)
+      .toMatchObject({ value: 1, unit: "tab" });
+  });
+
+  it("understands pre-nominal division modifiers for a dimensional daily total", () => {
+    const clause = parseClauseState("10 mg/kg/day in 3 divided doses").primaryClause;
+    expect(clause.clinicalQuantity).toMatchObject({
+      numerator: { value: 10, unit: "mg" },
+      dividedDoseCount: 3,
+      projectedDose: { value: 10 / 3, unit: "mg/kg" }
+    });
+    expect(clause.schedule).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
+    expect(clause.leftovers).toEqual([]);
+  });
+
   it("keeps infusion duration per administration alongside recurring cadence", () => {
     const state = parseClauseState(
       "infuse dopamine at 5 mcg/kg/min IV for 30 minutes every 8 hours"
@@ -799,7 +870,7 @@ describe("conditional observation quantities never become medication doses", () 
   ])("preserves the two tablet administrations and the complete observation condition: %s", input => {
     const parsed = parsePublicSig(input);
     expect(parsed.fhir.map(row => row.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
     expect(parsed.fhir.every(row => row.timing?.repeat?.boundsDuration === undefined)).toBe(true);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
     expect(getDosageCondition(parsed.fhir[0])).toBeUndefined();
@@ -810,7 +881,7 @@ describe("conditional observation quantities never become medication doses", () 
     expect(last.text).toContain("3 days");
     const strict = toFhirR5Dosages(parsed.fhirNext);
     expect(strict.map(row => row.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 1, unit: "tab" }, { value: 1, unit: "tab" }]);
     for (const frame of parseInstructionActions(input)) {
       for (const argument of frame.args) {
         if (argument.role !== "amount" || !argument.span) continue;
@@ -833,7 +904,7 @@ describe("conditional observation quantities never become medication doses", () 
   ] as const)("keeps the observation window separate for adjacent quantified conditional forms: %s", (input, amount) => {
     const parsed = parsePublicSig(input);
     expect(parsed.fhir).toHaveLength(1);
-    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: amount, unit: "tab" });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: amount, unit: "tab" });
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
     expect(getDosageCondition(parsed.fhir[0])).toMatchObject({ kind: "text" });
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
@@ -869,7 +940,7 @@ describe("conditional observation quantities never become medication doses", () 
   ])("retains an explicit context-day condition without inventing the patient's calendar: %s", input => {
     const parsed = parsePublicSig(input);
     expect(parsed.fhir).toHaveLength(1);
-    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     // Calendar membership is supplied by the caller, not a coded patient problem.
     expect(getDosageCondition(parsed.fhir[0])).toMatchObject({ kind: "text" });
     for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
@@ -905,7 +976,7 @@ describe("finite duration follows an administration adjunct", () => {
   ])("keeps the course bound separate from the adjunct object: %s", input => {
     const parsed = parsePublicSig(input);
     expect(parsed.fhir).toHaveLength(1);
-    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(input.includes("14") ? 14 : 2);
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.code).toBe(input.includes("14") ? "d" : "wk");
     expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
@@ -914,7 +985,7 @@ describe("finite duration follows an administration adjunct", () => {
   it("does not promote the duration of an unrelated procedure into the medication course", () => {
     const parsed = parsePublicSig("Take 2 tablets with meals; wash hands for 14 seconds.");
     expect(parsed.fhir).toHaveLength(1);
-    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "tab" });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
   });
 });
@@ -929,7 +1000,7 @@ describe("calendar month-day source ownership", () => {
   ])("never projects monthly calendar ordinals into the prescribed dose: %s", input => {
     const parsed = parsePublicSig(input);
     expect(parsed.fhir).toHaveLength(1);
-    expect(parsed.fhir[0].doseAndRate?.[0]).toEqual({
+    expect(parsed.fhir[0].doseAndRate?.[0]).toMatchObject({
       doseQuantity: { value: 1, unit: "tab" }
     });
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
@@ -970,7 +1041,7 @@ describe("calendar month-day source ownership", () => {
       const text = formatSig(row, style, { locale });
       const reparsed = parsePublicSig(text);
       expect(reparsed.fhir, text).toHaveLength(1);
-      expect(reparsed.fhir[0].doseAndRate?.[0], text).toEqual({ doseQuantity: { value: 1, unit: "tab" } });
+      expect(reparsed.fhir[0].doseAndRate?.[0], text).toMatchObject({ doseQuantity: { value: 1, unit: "tab" } });
       expect(getTimingMonthDays(reparsed.fhir[0].timing?.repeat), text).toEqual(days);
       expect(reparsed.fhir[0].timing?.repeat?.frequency, text).toBe(1);
     }

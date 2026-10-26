@@ -522,7 +522,8 @@ function dividedDoseCountSign(context: HpsgClauseContext, start: number) {
   const count = countToken.kind === LexKind.Number
     ? countToken.value : FREQUENCY_NUMBER_WORDS[normalizeTokenLower(countToken)];
   if (count === undefined || !Number.isInteger(count) || count <= 0) return undefined;
-  if (context.tokens[cursor] && normalizeTokenLower(context.tokens[cursor]) === "equal") cursor += 1;
+  if (context.tokens[cursor] &&
+      /^(?:equal|divided)$/u.test(normalizeTokenLower(context.tokens[cursor]))) cursor += 1;
   const doses = context.tokens[cursor];
   if (!doses || !available(context, cursor) || !/^(?:dose|doses)$/u.test(normalizeTokenLower(doses))) return undefined;
   return lexicalSign({

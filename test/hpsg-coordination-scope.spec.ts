@@ -233,7 +233,7 @@ describe('HPSG coordination cadence scope', () => {
       expect(items.map(item => item.fhir.site?.coding?.[0]?.code))
         .toEqual([leftCode, rightCode]);
       expect(items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-        .toEqual([{ value: 1, unit: 'g' }, { value: 1, unit: 'g' }]);
+        .toMatchObject([{ value: 1, unit: 'g' }, { value: 1, unit: 'g' }]);
       expect(items.map(item => item.fhir.timing?.repeat?.timeOfDay))
         .toEqual([
           ['08:00:00', '20:00:00'],
@@ -300,7 +300,7 @@ describe('HPSG coordination cadence scope', () => {
     expect(coordinated.items.map(item => item.meta.canonical.clauses[0].site?.text))
       .toEqual(['right eye', 'left eye']);
     expect(coordinated.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 1, unit: 'drop' }, { value: 1, unit: 'drop' }]);
+      .toMatchObject([{ value: 1, unit: 'drop' }, { value: 1, unit: 'drop' }]);
     expect(coordinated.items.map(item => item.fhir.timing?.repeat?.frequency))
       .toEqual([4, 4]);
     expect(coordinated.meta.leftoverText).toBeUndefined();

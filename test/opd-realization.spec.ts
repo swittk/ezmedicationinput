@@ -105,7 +105,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     const eye = parseSig("1 drop od q1h while awake x2d then qid x5d");
     expect(eye.count).toBe(2);
     expect(eye.items.map((item) => item.fhir.site?.text)).toEqual(["right eye", "right eye"]);
-    expect(eye.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(eye.items[1].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(eye.items[0].fhir.additionalInstruction?.map((item) => item.text)).toContain("while awake");
     expect(eye.items[1].fhir.additionalInstruction).toBeUndefined();
   });
@@ -128,7 +128,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(parsed.items.map((item) => item.meta.canonical.clauses[0]?.schedule?.timingCode)).toEqual([
       "Q2H", "Q4H", "QID", "TID", "BID", "QD"
     ]);
-    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual(
+    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toMatchObject(
       Array.from({ length: 6 }, () => ({ value: 1, unit: "drop" }))
     );
     expect(parsed.items.map((item) => item.fhir.site?.text)).toEqual(
@@ -325,14 +325,14 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(thai).toBe("พ่นเข้ารูจมูกข้างละ 2 ครั้ง วันละครั้ง.");
     const reparsed = parseSig(thai, { locale: "th" });
     expect(reparsed.meta.leftoverText).toBeUndefined();
-    expect(reparsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "spray" });
+    expect(reparsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "spray" });
     expect(reparsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
     expect(reparsed.fhir.site?.text).toBe("both nostrils");
   });
 
   it("normalizes Thai insulin ยูนิต through the shared unit terminology", () => {
     const parsed = parseSig("ฉีด 10 ยูนิต ใต้ผิวหนัง ก่อนนอน", { locale: "th" });
-    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 10, unit: "U" });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 10, unit: "U" });
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("10 ยูนิต");
   });
 

@@ -181,7 +181,7 @@ describe("Thai clinician free-text parsing", () => {
     const parsed = parseSig(input, { locale: "th" });
 
     expect(parsed.count).toBe(2);
-    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+    expect(parsed.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toMatchObject([
       { value: 0.5, unit: "tab" },
       { value: 1, unit: "tab" }
     ]);
@@ -208,7 +208,7 @@ describe("Thai clinician free-text parsing", () => {
     const input = `หยอดตาทั้งสองข้างครั้งละ 1 หยด วันละ${cardinal}ครั้ง`;
     const parsed = parseSig(input, { locale: "th" });
 
-    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(parsed.fhir.timing?.repeat).toMatchObject({
       frequency,
       period: 1,
@@ -221,7 +221,7 @@ describe("Thai clinician free-text parsing", () => {
     const variants = ["ครึ่งเม็ด", "0.5 เม็ด", "1/2 เม็ด", "๐.๕ เม็ด"];
     const parsed = variants.map((dose) => parseSig(`รับประทาน ${dose}`, { locale: "th" }));
 
-    expect(parsed.map((result) => result.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+    expect(parsed.map((result) => result.fhir.doseAndRate?.[0]?.doseQuantity)).toMatchObject([
       { value: 0.5, unit: "tab" },
       { value: 0.5, unit: "tab" },
       { value: 0.5, unit: "tab" },
@@ -238,13 +238,13 @@ describe("Thai clinician free-text parsing", () => {
       ["หนึ่ง", 1], ["สอง", 2], ["สาม", 3], ["สี่", 4], ["๒", 2]
     ] as const) {
       expect(parseSig(`รับประทาน${cardinal}เม็ด`, { locale: "th" })
-        .fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value, unit: "tab" });
+        .fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value, unit: "tab" });
     }
   });
 
   it("parses natural Thai distributive doses and symptom conditions compositionally", () => {
     const oral = parseSig("กินวันละเม็ดเวลาที่ง่วง", { locale: "th" });
-    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(oral.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(oral.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
     expect(oral.fhir.asNeededFor?.[0]?.coding?.[0]).toMatchObject({
       system: "http://snomed.info/sct",
@@ -296,12 +296,12 @@ describe("Thai clinician free-text parsing", () => {
 
   it("uses the distributive-dose construction across discrete units", () => {
     const drops = parseSig("หยอดวันละหยด", { locale: "th" });
-    expect(drops.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "drop" });
+    expect(drops.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     expect(drops.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
     expect(drops.meta.leftoverText).toBeUndefined();
 
     const capsules = parseSig("กินวันละแคปซูลเวลาที่เวียนหัว", { locale: "th" });
-    expect(capsules.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "cap" });
+    expect(capsules.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "cap" });
     expect(capsules.fhir.asNeededFor?.[0]?.coding?.[0]?.code).toBe("404640003");
     expect(capsules.meta.leftoverText).toBeUndefined();
   });

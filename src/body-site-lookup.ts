@@ -140,6 +140,10 @@ function isPromise<T>(value: unknown): value is Promise<T> {
 
 const POSTCOORDINATABLE_RELATION_TEXTS = new Set([
   "above",
+  "center",
+  "middle",
+  "external",
+  "front",
   "back",
   "behind",
   "below",
@@ -153,6 +157,10 @@ const POSTCOORDINATABLE_RELATION_TEXTS = new Set([
 
 const RELATION_TEXT_BY_TOPOGRAPHICAL_MODIFIER_CODE: Record<string, string> = {
   "255551008": "back",
+  "255549009": "front",
+  "26216008": "center",
+  "260528009": "middle",
+  "261074009": "external",
   "261122009": "lower",
   "261183002": "top",
   "351726001": "below",

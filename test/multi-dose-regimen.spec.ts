@@ -32,9 +32,9 @@ describe("heterogeneous multi-dose regimens", () => {
       { context: TABLET_CONTEXT }
     );
     expect(result.count).toBe(3);
-    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
-    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
-    expect(dose(result, 2)).toEqual({ value: 1.5, unit: "tab" });
+    expect(dose(result, 0)).toMatchObject({ value: 1, unit: "tab" });
+    expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
+    expect(dose(result, 2)).toMatchObject({ value: 1.5, unit: "tab" });
     expect(repeat(result, 0)?.timeOfDay).toEqual(["12:00:00"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["16:00:00"]);
     expect(repeat(result, 2)?.when).toEqual(["HS"]);
@@ -52,9 +52,9 @@ describe("heterogeneous multi-dose regimens", () => {
       { locale: "th", context: TABLET_CONTEXT }
     );
     expect(result.count).toBe(3);
-    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
-    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
-    expect(dose(result, 2)).toEqual({ value: 1.5, unit: "tab" });
+    expect(dose(result, 0)).toMatchObject({ value: 1, unit: "tab" });
+    expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
+    expect(dose(result, 2)).toMatchObject({ value: 1.5, unit: "tab" });
     expect(repeat(result, 0)?.timeOfDay).toEqual(["12:00:00"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["16:00:00"]);
     expect(repeat(result, 2)?.when).toEqual(["HS"]);
@@ -77,7 +77,7 @@ describe("heterogeneous multi-dose regimens", () => {
       "ทาน 1 เม็ดเช้า",
       "1 เม็ดเย็น"
     ]);
-    expect(result.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+    expect(result.items.map((item) => item.fhir.doseAndRate?.[0]?.doseQuantity)).toMatchObject([
       { value: 1, unit: "tab" },
       { value: 2, unit: "tab" },
       { value: 1, unit: "tab" }
@@ -100,7 +100,7 @@ describe("heterogeneous multi-dose regimens", () => {
 
     expect(result.meta.segments).toHaveLength(2);
     expect(result.count).toBe(1);
-    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.fhir.timing?.repeat?.when).toEqual(["MORN", "EVE"]);
     expect(result.fhir.timing?.repeat?.boundsDuration).toMatchObject({
       value: 2,
@@ -132,9 +132,9 @@ describe("heterogeneous multi-dose regimens", () => {
       { context: TABLET_CONTEXT }
     );
     expect(result.count).toBe(2);
-    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(dose(result, 0)).toMatchObject({ value: 1, unit: "tab" });
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
-    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
     expect(result.items[1].warnings).toEqual([]);
@@ -148,9 +148,9 @@ describe("heterogeneous multi-dose regimens", () => {
       { locale: "th", context: TABLET_CONTEXT }
     );
     expect(result.count).toBe(2);
-    expect(dose(result, 0)).toEqual({ value: 1, unit: "tab" });
+    expect(dose(result, 0)).toMatchObject({ value: 1, unit: "tab" });
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
-    expect(dose(result, 1)).toEqual({ value: 2, unit: "tab" });
+    expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
     expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
     expect(result.items[1].warnings).toEqual([]);
@@ -279,7 +279,7 @@ describe("heterogeneous multi-dose regimens", () => {
     const parsed = parseSig(input, { locale: "th" });
     expect(parsed.items).toHaveLength(2);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }]);
     expect(parsed.items.map(item => item.fhir.timing?.repeat?.when))
       .toEqual([["MORN"], ["EVE"]]);
     expect(parsed.items.map(item => item.fhir.route?.text)).toEqual([undefined, undefined]);
@@ -357,7 +357,7 @@ describe("typed delayed loading and phase continuations", () => {
     const parsed = parseSig(input, { context: TABLET_CONTEXT });
     expect(parsed.items).toHaveLength(2);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
     expect(parsed.items[0]?.fhir.timing?.repeat?.when).toEqual(["IMD"]);
     expect(parsed.items.map(item => item.fhir.route?.coding?.[0]?.code))
       .toEqual(["26643006", "26643006"]);
@@ -385,7 +385,7 @@ describe("typed delayed loading and phase continuations", () => {
     expect(parsed.items.map(item => item.fhir.site?.text))
       .toEqual(["right eye", "right eye", "left eye"]);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([
+      .toMatchObject([
         { value: 1, unit: "drop" },
         { value: 1, unit: "drop" },
         { value: 1, unit: "drop" }
@@ -472,7 +472,7 @@ describe("typed ordinal-week Parkinson regimen phases", () => {
       "Week 3 onwards: take 1 tablet at 08:00, 14:00 and 20:00."
     ]);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([
+      .toMatchObject([
         { value: 0.5, unit: "tab" },
         { value: 1, unit: "tab" },
         { value: 1, unit: "tab" }
@@ -610,7 +610,7 @@ describe("typed ordinal-week Parkinson regimen phases", () => {
     const parsed = parseSig(input, { context: TABLET_CONTEXT });
 
     expect(parsed.items).toHaveLength(1);
-    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(parsed.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
     expect(parsed.fhir.timing?.repeat?.boundsDuration).toBeUndefined();
     expect(parsed.fhir.sequence).toBeUndefined();
@@ -734,7 +734,7 @@ describe("typed same-day Parkinson dose composition", () => {
     const parsed = parseSig(input, { context: TABLET_CONTEXT });
 
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([
+      .toMatchObject([
         { value: 1, unit: "tab" },
         { value: 0.5, unit: "tab" },
         { value: 1, unit: "tab" }
@@ -769,7 +769,7 @@ describe("typed same-day Parkinson dose composition", () => {
     const parsed = parseSig(input, { context: TABLET_CONTEXT });
 
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 1, unit: "tab" }, { value: 0.5, unit: "tab" }]);
+      .toMatchObject([{ value: 1, unit: "tab" }, { value: 0.5, unit: "tab" }]);
     expect(parsed.items[0]?.fhir.timing?.repeat).toMatchObject({ when: ["AC"], offset: 30 });
     expect(parsed.items[0]?.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
     expect(parsed.items[1]?.fhir.timing?.repeat).toMatchObject({ timeOfDay: ["22:00:00"] });
@@ -800,7 +800,7 @@ describe("typed same-day Parkinson dose composition", () => {
     const parsed = parseSig(input, { context: TABLET_CONTEXT });
 
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 1, unit: "tab" }, { value: 0.5, unit: "tab" }]);
+      .toMatchObject([{ value: 1, unit: "tab" }, { value: 0.5, unit: "tab" }]);
     expect(parsed.items.map(item => item.fhir.timing?.repeat?.when))
       .toEqual([["PCM", "PCD"], ["HS"]]);
     expect(parsed.fhirNext.step).toHaveLength(1);
@@ -829,7 +829,7 @@ describe("typed same-day Parkinson dose composition", () => {
     // duplicate the 06:30 dose just because the doctor mentions it twice.
     expect(parsed.items).toHaveLength(1);
     expect(parsed.items[0]?.fhir.doseAndRate?.[0]?.doseQuantity)
-      .toEqual({ value: 1, unit: "tab" });
+      .toMatchObject({ value: 1, unit: "tab" });
     expect(parsed.items[0]?.fhir.timing?.repeat).toMatchObject({
       period: 4,
       periodUnit: "h",
@@ -870,7 +870,7 @@ describe("typed additive doses", () => {
 
     expect(parsed.items).toHaveLength(1);
     expect(parsed.items[0]?.fhir.doseAndRate?.[0]?.doseQuantity)
-      .toEqual({ value, unit: "tab" });
+      .toMatchObject({ value, unit: "tab" });
     expect(parsed.items[0]?.fhir.timing?.repeat?.when).toEqual([event]);
     expect(parsed.items[0]?.meta.canonical.clauses[0]?.evidence.some(item =>
       item.rule === "hpsg.lex.clinicalQuantity.additiveFractionDose"
@@ -892,7 +892,7 @@ describe("typed conditional dosage alternatives", () => {
 
     expect(parsed.items).toHaveLength(2);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
     expect(parsed.items.some(item => item.fhir.asNeeded === true)).toBe(false);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
       .not.toContainEqual(expect.objectContaining({ value: 70, unit: "kg" }));
@@ -1043,7 +1043,7 @@ describe("independently dosed administration adjuncts", () => {
   ])("retains both amounts without assigning meal timing to the snack: %s", input => {
     const parsed = parseSig(input);
     expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity))
-      .toEqual([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+      .toMatchObject([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
     expect(parsed.items[0].fhir.timing?.repeat?.when).toContain("C");
     expect(parsed.items[1].fhir.timing?.repeat?.when).toBeUndefined();
     expect(parsed.items[1].longText.toLowerCase()).toContain("snack");
@@ -1377,7 +1377,7 @@ describe("source-licensed dose ellipsis in a PRN successor phase", () => {
     const p = parseSig(source);
     expect(p.items).toHaveLength(2);
     expect(p.fhirNext.step).toHaveLength(2);
-    expect(p.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity)).toEqual([
+    expect(p.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity)).toMatchObject([
       { value: 1, unit: "tab" }, { value: 1, unit: "tab" }
     ]);
     expect(p.items[0].fhir.asNeeded).not.toBe(true);

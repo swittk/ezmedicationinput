@@ -725,6 +725,7 @@
     },
     {
       "canonical": "inside",
+      "coding": {"system": "http://snomed.info/sct", "code": "260521003", "display": "Internal"},
       "aliases": [
         "inside",
         "within"
@@ -825,6 +826,7 @@
     },
     {
       "canonical": "external",
+      "coding": {"system": "http://snomed.info/sct", "code": "261074009", "display": "External"},
       "aliases": [
         "external"
       ],
@@ -848,6 +850,7 @@
     },
     {
       "canonical": "center",
+      "coding": {"system": "http://snomed.info/sct", "code": "26216008", "display": "Central"},
       "aliases": [
         "center",
         "centre"
@@ -866,6 +869,7 @@
     },
     {
       "canonical": "front",
+      "coding": {"system": "http://snomed.info/sct", "code": "255549009", "display": "Anterior"},
       "aliases": [
         "front"
       ],
@@ -951,6 +955,7 @@
     },
     {
       "canonical": "middle",
+      "coding": {"system": "http://snomed.info/sct", "code": "260528009", "display": "Middle"},
       "aliases": [
         "middle"
       ],

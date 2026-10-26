@@ -1,6 +1,147 @@
 {
   "rules": [
     {
+      "id": "hl7-entity-handling-do-not-shake",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "PSA",
+        "display": "Do not shake",
+        "text": "Do not shake",
+        "thai": "ห้ามเขย่า"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "polarity": "negate",
+          "predicate": {
+            "lemma": "shake",
+            "semanticClass": "prepare"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "shake"
+          ],
+          "polarity": "negate"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-protect-from-light",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "PRTL",
+        "display": "Protect from light",
+        "text": "Protect from light",
+        "thai": "เก็บให้พ้นแสง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "protect-from-light",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "protect-from-light"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-store-dry",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "DRY",
+        "display": "Store in a dry place",
+        "text": "Store in a dry place",
+        "thai": "เก็บในที่แห้ง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "store-dry",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "store-dry"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-store-upright",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "UPR",
+        "display": "Store upright",
+        "text": "Store upright",
+        "thai": "เก็บภาชนะในแนวตั้ง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "store-upright",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "store-upright"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-refrigerate-4-8",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "REF",
+        "display": "Refrigerate at 4-8°C",
+        "text": "Refrigerate at 4-8°C",
+        "thai": "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "refrigerate-4-8",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "refrigerate-4-8"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
       "id": "hl7-entity-handling-shake-before-use",
       "definition": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",

@@ -938,30 +938,35 @@ function finishParsedBatch(
     composeParsedStates(input, boundaryPlan, segments, states);
   const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const rawResults: ParseResult[] = [];
+  const projectedBatches: ParseResult[][] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
-    const segment = outputSegments[index];
-    const state = outputStates[index];
-    const projected = buildParseResults(state, options, phaseSequences[index]);
+    const projected = buildParseResults(outputStates[index], options, phaseSequences[index]);
+    projectedBatches.push(projected);
+    rawResults.push(...projected);
+  }
+
+  // Canonical parallel components share their segment-local graph frames with
+  // these projections. Serialize FHIR before rebasing in-memory source spans,
+  // otherwise sourceText stays local while its embedded spans turn absolute.
+  const parallel = canonicalParallel.kind === "resolved"
+    ? projectParallelRegimen(
+      canonicalParallel, rawResults.map(result => result.longText), input, {
+        bodySitePostcoordination: options?.bodySitePostcoordination,
+        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+      }
+    )
+    : canonicalParallel;
+  for (let index = 0; index < projectedBatches.length; index += 1) {
     const shiftedSpans = new WeakSet<object>();
-    for (const result of projected) {
-      rebaseParseResult(result, input, segment.start, shiftedSpans);
-      rawResults.push(result);
+    for (const result of projectedBatches[index]) {
+      rebaseParseResult(result, input, outputSegments[index].start, shiftedSpans);
     }
   }
 
   const results = rawResults;
   applyRegimenAlternativeMembership(results, boundaryPlan);
   const primary = resolvePrimaryParseResult(results, input, options);
-  const parallel = canonicalParallel.kind === "resolved"
-    ? projectParallelRegimen(
-      canonicalParallel, results.map(result => result.longText), input, {
-        bodySitePostcoordination: options?.bodySitePostcoordination,
-        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
-      }
-    )
-    : canonicalParallel;
-
   return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel.kind === "resolved" ? parallel : undefined);
 }

@@ -63,6 +63,7 @@ interface ActionSource {
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>();
+const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
@@ -74,8 +75,19 @@ for (const definition of DEFAULT_ACTIONS) {
     const normalized = normalizeActionSurface(alias);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) {
       DEFAULT_BY_ALIAS.set(normalized, definition);
+      const words = normalized.split(" ");
+      DEFAULT_SPAN_BY_LEAD.set(words[0], Math.max(
+        DEFAULT_SPAN_BY_LEAD.get(words[0]) ?? 4, words.length
+      ));
     }
   }
+}
+
+/** Bound phrase matching by the declared lexicon without widening unrelated scans.
+ * @param lead Normalized first token of a possible instruction action.
+ */
+export function medicationInstructionActionSpanLimit(lead: string): number {
+  return DEFAULT_SPAN_BY_LEAD.get(lead) ?? 4;
 }
 
 export function normalizeActionSurface(value: string): string {

@@ -4,8 +4,10 @@ import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realizatio
 import { localizeAdviceRelation } from "../relation-terminology";
 import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
+import { getUnitCategory } from "../utils/units";
 import {
   HpsgDoseFeature,
+  HpsgClinicalQuantityDimension,
   HpsgAdministrationTargetFeature,
   HpsgMethodFeature,
   HpsgRouteFeature,
@@ -726,12 +728,32 @@ export function unifySynsem(
   if (route === undefined && left.head.route && right.head.route) {
     return undefined;
   }
-  const dose = mergeDose(left.head.dose, right.head.dose);
+  let dose = mergeDose(left.head.dose, right.head.dose);
   if (dose === undefined && left.head.dose && right.head.dose) {
     return undefined;
   }
   let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
   if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
+  // A stated daily total divided into N doses is not N repetitions of the
+  // undivided scalar. The division complement licenses a typed period total,
+  // and the resulting schedule represents the individual administrations.
+  // Ordinary "30 mg daily" has no division complement and stays untouched.
+  if (dose?.divisionCount !== undefined && !dose.clinicalQuantity &&
+      dose.value !== undefined && dose.unit &&
+      schedule?.frequency === 1 && schedule.period === 1 && schedule.periodUnit === "d") {
+    const category = getUnitCategory(dose.unit);
+    const dimension: HpsgClinicalQuantityDimension = category === "other"
+      ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
+      : category;
+    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit };
+    dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
+      representation: "dose", status: "resolved",
+      numerator: { value: dose.value, unit: dose.unit, dimension },
+      denominators: [{ value: 1, unit: "d", dimension: "time" }],
+      dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
+    } };
+    schedule = { ...schedule, frequency: dose.divisionCount };
+  }
   if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
     const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
     if (period) {

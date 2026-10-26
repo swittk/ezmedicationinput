@@ -55,7 +55,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
 
   it("preserves ordinary fractional tablet doses without cycle syntax", () => {
     const parsed = parseSig("take .5 tab at 08:00");
-    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
       value: 0.5, unit: "tab"
     });
     expect(parsed.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
@@ -503,7 +503,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
 
   it("exports daily dose maximum and FHIR R5 PRN without serializing legacy asNeeded", () => {
     const result = parseSig("1 tab q6h prn fever max 4 tablets/day");
-    expect(result.fhir.maxDosePerPeriod).toEqual([{
+    expect(result.fhir.maxDosePerPeriod).toMatchObject([{
       numerator: { value: 4, unit: "tab" },
       denominator: { value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
     }]);
@@ -527,7 +527,7 @@ describe("clinical SIG correctness and boundary promotion", () => {
       expect(parsed.meta.canonical.clauses[0]?.schedule?.maxDosePerPeriod).toEqual([{
         amount, unit, period: 1, periodUnit
       }]);
-      expect(parsed.fhir.maxDosePerPeriod).toEqual([{
+      expect(parsed.fhir.maxDosePerPeriod).toMatchObject([{
         numerator: { value: amount, unit },
         denominator: {
           value: 1, unit: periodUnit,
@@ -917,7 +917,7 @@ describe("real-world Thai clinical meaning stays independent across source, cano
         .toEqual([expectedRoute, expectedRoute]);
       for (const rows of projections(parsed)) {
         expect(rows).toHaveLength(2);
-        expect(rows.map(row => dose(row))).toEqual([
+        expect(rows.map(row => dose(row))).toMatchObject([
           { value: 0.5, unit: "tab" }, { value: 1, unit: "tab" }
         ]);
         expect(rows.map(row => repeat(row)?.when)).toEqual([["MORN"], [later]]);
@@ -957,7 +957,7 @@ describe("real-world Thai clinical meaning stays independent across source, cano
       expect(clause?.schedule?.count).toBeUndefined();
       for (const rows of projections(parsed)) {
         expect(rows).toHaveLength(1);
-        expect(dose(rows[0])).toEqual({ value: 1, unit: "drop" });
+        expect(dose(rows[0])).toMatchObject({ value: 1, unit: "drop" });
         expect(site(rows[0])).toBe("both eyes");
         expect(rows[0].route?.text).toBe("ophthalmic");
         expect(repeat(rows[0])).toMatchObject({ frequency, period: 1, periodUnit: "d" });
@@ -1000,7 +1000,7 @@ describe("real-world Thai clinical meaning stays independent across source, cano
       }
       for (const rows of projections(parsed)) {
         expect(rows).toHaveLength(1);
-        expect(dose(rows[0])).toEqual({ value: 1, unit: "tab" });
+        expect(dose(rows[0])).toMatchObject({ value: 1, unit: "tab" });
         expect(rows[0].route?.text).toBe("by mouth");
         expect(repeat(rows[0])?.when).toEqual(expectedWhen);
         expect(repeat(rows[0])?.offset).toBeUndefined();
@@ -1049,8 +1049,8 @@ describe("real-world Thai clinical meaning stays independent across source, cano
         const left = rows.find(row => site(row) === "left eye");
         expect(right).toBeDefined();
         expect(left).toBeDefined();
-        expect(dose(right!)).toEqual({ value: 1, unit: "drop" });
-        expect(dose(left!)).toEqual({ value: 1, unit: "drop" });
+        expect(dose(right!)).toMatchObject({ value: 1, unit: "drop" });
+        expect(dose(left!)).toMatchObject({ value: 1, unit: "drop" });
         expect(repeat(right!)).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
         expect(repeat(left!)).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
         expect(repeat(right!)?.count).toBeUndefined();
@@ -1084,7 +1084,7 @@ describe("real-world Thai clinical meaning stays independent across source, cano
       .toEqual(["ophthalmic", "ophthalmic"]);
     for (const rows of projections(parsed)) {
       expect(rows).toHaveLength(2);
-      expect(rows.map(row => dose(row))).toEqual([
+      expect(rows.map(row => dose(row))).toMatchObject([
         { value: 0.5, unit: "drop" }, { value: 1, unit: "drop" }
       ]);
       expect(rows.map(row => site(row))).toEqual(["right eye", "left eye"]);
@@ -1128,7 +1128,7 @@ describe("real-world Thai clinical meaning stays independent across source, cano
       expect(canonicalSchedules[1]?.duration).toBe(secondHasCourse ? 7 : undefined);
       for (const rows of projections(parsed)) {
         expect(rows).toHaveLength(2);
-        expect(rows.map(row => dose(row))).toEqual([
+        expect(rows.map(row => dose(row))).toMatchObject([
           { value: 1, unit: "drop" }, { value: 1, unit: "drop" }
         ]);
         expect(rows.map(row => site(row))).toEqual(["right eye", "right eye"]);
@@ -2876,7 +2876,7 @@ describe("clinical execution adversarial source keeps patient intent and dose id
       expect(parsed.warnings).toEqual([]);
       const rows = parsed.items.map(item => item.fhir);
       expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity))
-        .toEqual([{ value: 5, unit: "U" }, { value: 8, unit: "U" }]);
+        .toMatchObject([{ value: 5, unit: "U" }, { value: 8, unit: "U" }]);
       expect(rows.map(row => row.timing?.repeat?.when)).toEqual([["ACM"], ["ACV"]]);
       const conditions = rows.map(getDosageCondition);
       conditions.forEach((condition, index) => {

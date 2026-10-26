@@ -1991,6 +1991,69 @@ export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = (() => {
   return map;
 })();
 
+/** Exact measurable units; household spoon volumes follow the existing metric policy. */
+const UCUM_DOSE_UNIT_CODES: Record<string, string> = {
+  kg: "kg", g: "g", mg: "mg", mcg: "ug", ug: "ug", microg: "ug", ng: "ng",
+  L: "L", mL: "mL", dL: "dL", mcL: "uL", uL: "uL", nL: "nL", cm3: "cm3",
+  IU: "[iU]", U: "[iU]", "[iU]": "[iU]", tsp: "5.mL", tbsp: "15.mL",
+  s: "s", min: "min", h: "h", d: "d", wk: "wk", mo: "mo", a: "a"
+};
+
+/** EDQM units of presentation, not the distinct container/device identifiers.
+ * Source: https://ig.fhir.de/igs/medication/1.0.6/ValueSet-EDQMUnitOfPresentation.html
+ */
+const EDQM_PRESENTATION_UNIT_CODES: Record<string, string> = {
+  actuation: "15001000", ampule: "15002000", applicatorful: "15004000",
+  bag: "15005000", blister: "15007000", bottle: "15009000", cap: "15012000",
+  cartridge: "15013000", container: "15016000", drop: "15022000", film: "15023000",
+  implant: "15025000", insert: "15027000", jar: "15028000", lozenge: "15029000",
+  pad: "15033000", patch: "15036000", pen: "15037000", pessary: "15039000",
+  sachet: "15045000", stick: "15048000", strip: "15050000", suppository: "15051000",
+  syringe: "15052000", tab: "15054000", tube: "15058000", vial: "15060000",
+  puff: "15061000", swab: "15062000"
+};
+
+const EDQM_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(EDQM_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
+
+/** Resolve standard codes and plain unit labels to the same calculation unit.
+ * @param quantity A dose or limit quantity; its original display remains untouched.
+ */
+export function getDoseQuantityUnit(quantity: { system?: string; code?: string; unit?: string } | undefined): string {
+  if (!quantity) return "";
+  if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
+    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+  }
+  const label = quantity.code ?? quantity.unit ?? "";
+  const canonical = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()] ?? label;
+  const measurable = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
+  return measurable === "5.mL" ? "tsp" : measurable === "15.mL" ? "tbsp" : measurable;
+}
+
+/** Resolve a known dosage unit without changing its display or numerical value.
+ * @param unit Canonical unit or supported synonym, including dimensional rates.
+ */
+export function getStandardDoseUnitCoding(unit: string | undefined):
+  { system: string; code: string } | undefined {
+  if (!unit) return undefined;
+  const canonical = DEFAULT_UNIT_SYNONYMS[unit.toLowerCase()] ?? unit;
+  const presentation = EDQM_PRESENTATION_UNIT_CODES[canonical];
+  if (presentation) return { system: "http://standardterms.edqm.eu", code: presentation };
+  const measurable = UCUM_DOSE_UNIT_CODES[canonical];
+  if (measurable) return { system: "http://unitsofmeasure.org", code: measurable };
+  if (!unit.includes("/")) return undefined;
+  const terms = unit.split("/");
+  const codes: string[] = [];
+  for (const term of terms) {
+    const normalized = DEFAULT_UNIT_SYNONYMS[term.toLowerCase()] ?? term;
+    const code = UCUM_DOSE_UNIT_CODES[normalized];
+    if (!code) return undefined;
+    codes.push(code);
+  }
+  return { system: "http://unitsofmeasure.org", code: codes.join("/") };
+}
+
 export interface ProductFormHint {
   routeHint?: RouteCode;
 }

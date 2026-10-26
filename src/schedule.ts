@@ -1,3 +1,4 @@
+import { getDoseQuantityUnit } from "./maps";
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
 import { getCourseContextIssue, getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
 import {
@@ -1562,8 +1563,8 @@ function executableQuantityCaps(
         ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(periodUnit) < 0) {
       continue;
     }
-    const actualUnit = dose.code ?? dose.unit ?? "";
-    const maximumUnit = numerator?.code ?? numerator?.unit ?? "";
+    const actualUnit = getDoseQuantityUnit(dose);
+    const maximumUnit = getDoseQuantityUnit(numerator);
     const normalizedActual = normalizeUnit(actualUnit);
     const normalizedMaximum = normalizeUnit(maximumUnit);
     const perTargetDose = normalizedActual === normalizedMaximum
@@ -3866,11 +3867,11 @@ function calculateTotalUnitsSingle(
   let lifetimeMaximum: number | undefined;
   const strength = resolveContextStrengthRatio(context) as any;
   const doseForLimits = dosage.doseAndRate?.[0]?.doseQuantity;
-  const doseUnitForLimits = doseForLimits?.code ?? doseForLimits?.unit ?? "";
+  const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = dosage.maxDosePerLifetime;
   if (lifetime?.value !== undefined && Number.isFinite(lifetime.value) &&
       lifetime.value >= 0 && !lifetime.comparator) {
-    const lifetimeUnit = lifetime.code ?? lifetime.unit ?? "";
+    const lifetimeUnit = getDoseQuantityUnit(lifetime);
     const converted = lifetimeUnit.toLowerCase() === doseUnitForLimits.toLowerCase()
       ? lifetime.value
       : convertValue(lifetime.value, lifetimeUnit, doseUnitForLimits, strength);
@@ -3891,8 +3892,8 @@ function calculateTotalUnitsSingle(
         limit.value < 0 || limit.comparator) {
       unevaluatedMaximumDose = true;
     } else {
-      const fromUnit = dose.code ?? dose.unit ?? "";
-      const limitUnit = limit.code ?? limit.unit ?? "";
+      const fromUnit = getDoseQuantityUnit(dose);
+      const limitUnit = getDoseQuantityUnit(limit);
       const perTarget = fromUnit.toLowerCase() === limitUnit.toLowerCase()
         ? dose.value : convertValue(dose.value, fromUnit, limitUnit, strength);
       if (perTarget === null || !Number.isFinite(perTarget)) {

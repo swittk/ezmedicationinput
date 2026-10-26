@@ -278,3 +278,18 @@ describe("typed eyelid administration location and length units", () => {
     expect(parsed.meta.canonical.clauses[0]?.rawText).toContain("outside");
   });
 });
+
+
+describe("coded anatomical spatial qualifiers", () => {
+  it.each([
+    ["center of chest", "26216008"],
+    ["front of knee", "255549009"],
+    ["inside cheek", "260521003"]
+  ])("retains the precise qualifier for %s", (site, code) => {
+    const parsed = parseSig(`Apply cream to ${site} BID`);
+    const relation = parsed.meta.canonical.clauses[0]?.site?.spatialRelation;
+    expect(relation?.relationCoding).toMatchObject({ system: "http://snomed.info/sct", code });
+    const reopened = canonicalFromFhir(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]);
+    expect(reopened.site?.spatialRelation?.relationCoding?.code).toBe(code);
+  });
+});

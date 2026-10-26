@@ -260,6 +260,7 @@ export type HpsgClinicalQuantityDimension =
   | "mass"
   | "volume"
   | "biologic-activity"
+  | "administration-unit"
   | "patient-mass"
   | "time";
 
