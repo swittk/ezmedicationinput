@@ -20,6 +20,40 @@ const options = (from: string, limit = 8) => ({
 });
 
 describe("concurrent independent treatment sequences", () => {
+  it("inherits previous recurrence even when anaphoric ParserState setter keys exist as undefined", () => {
+    const input = "Take 1 tablet QD at 09:00 for 7 days; increase to 2 tablets at the same times thereafter.";
+    const plan = createBoundaryPlan(input);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    const donor = states[0].primaryClause.schedule!;
+    const target = states[1].primaryClause.schedule!;
+    expect(donor).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d", timingCode: "QD",
+      timeOfDay: ["09:00:00"]
+    });
+    expect(target.timingReference).toBe("previous");
+    // Ordinary ParserState setters can leave keys present but undefined.
+    states[1].frequency = undefined;
+    states[1].period = undefined;
+    states[1].periodUnit = undefined;
+    states[1].timingCode = undefined;
+    states[1].timeOfDay = undefined;
+    expect(Object.hasOwn(target, "frequency")).toBe(true);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, input);
+    expect(target).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d", timingCode: "QD",
+      timeOfDay: ["09:00:00"]
+    });
+    expect(target.timingReference).toBeUndefined();
+    expect(target.duration).toBeUndefined();
+    expect(target.boundsStart).toBeUndefined();
+    expect(target.boundsEnd).toBeUndefined();
+    // The successor is independent; mutating a donor anchor after inheritance
+    // must not retroactively change the successor's schedule.
+    donor.timeOfDay![0] = "08:00:00";
+    expect(target.timeOfDay).toEqual(["09:00:00"]);
+  });
+
   it("serializes later parallel-stage instruction-graph spans relative to their own source", () => {
     const input =
       "1 drop OD QID x7d then BID; " +

@@ -380,7 +380,14 @@ export function scopeSequentialPhaseSemantics(
           timeOfDay: shared.timeOfDay, eventWindow: shared.eventWindow,
           offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
         };
-        Object.assign(schedule, { ...cloneStructuredValue(recurrence), ...schedule });
+        // ParserState setters may create own keys with an undefined value;
+        // only an actually defined local value can override inherited recurrence.
+        for (const key of Object.keys(recurrence) as (keyof typeof recurrence)[]) {
+          const inherited = recurrence[key];
+          if (schedule[key] === undefined && inherited !== undefined) {
+            (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
+          }
+        }
         delete schedule.timingReference;
         // Only remove the exact typed reference advice after it is resolved.
         // Without a predecessor the source preference stays readable/editable.
