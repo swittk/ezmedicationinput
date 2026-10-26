@@ -1683,6 +1683,9 @@ function treatmentRelativeInstant(
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }
   switch (unit) {
+    case "s": case "min": case "h":
+      return new Date(orderedAt.getTime() +
+        quantity * (unit === "h" ? 3_600_000 : unit === "min" ? 60_000 : 1_000));
     case "d": case "wk": {
       const days = unit === "wk" ? quantity * 7 : quantity;
       const parts = getTimeParts(orderedAt, timeZone);

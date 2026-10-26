@@ -2016,6 +2016,17 @@ const EDQM_PRESENTATION_UNIT_CODES: Record<string, string> = {
 const EDQM_UNIT_BY_CODE = new Map<string, string>(
   objectEntries(EDQM_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
 );
+/** EMA SPOR presentation entries without an EDQM mapping in this lexicon.
+ * https://pms.ema.europa.eu/fhir/ig/CodeSystem-200000000014.html
+ */
+const EMA_PRESENTATION_UNIT_CODES: Record<string, string> = {
+  dose: "200000016427", packet: "200000016428", wafer: "200000016444",
+  pellet: "200000016446", spray: "200000016451",
+  canister: "200000022801", ring: "200000022816", troche: "200000022841"
+};
+const EMA_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(EMA_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
 
 /** Resolve standard codes and plain unit labels to the same calculation unit.
  * @param quantity A dose or limit quantity; its original display remains untouched.
@@ -2024,6 +2035,9 @@ export function getDoseQuantityUnit(quantity: { system?: string; code?: string; 
   if (!quantity) return "";
   if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
     return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+  }
+  if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
+    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
   }
   const label = quantity.code ?? quantity.unit ?? "";
   const canonical = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()] ?? label;
@@ -2040,6 +2054,11 @@ export function getStandardDoseUnitCoding(unit: string | undefined):
   const canonical = DEFAULT_UNIT_SYNONYMS[unit.toLowerCase()] ?? unit;
   const presentation = EDQM_PRESENTATION_UNIT_CODES[canonical];
   if (presentation) return { system: "http://standardterms.edqm.eu", code: presentation };
+  const emaPresentation = EMA_PRESENTATION_UNIT_CODES[canonical];
+  if (emaPresentation) return {
+    system: "http://spor.ema.europa.eu/v1/lists/200000000014",
+    code: emaPresentation
+  };
   const measurable = UCUM_DOSE_UNIT_CODES[canonical];
   if (measurable) return { system: "http://unitsofmeasure.org", code: measurable };
   if (!unit.includes("/")) return undefined;

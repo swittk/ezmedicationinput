@@ -51,6 +51,7 @@
     },
     {
       "code": "broken-skin",
+      "components": [{"role": "head", "text": "broken skin", "coding": {"system": "http://snomed.info/sct", "code": "247442005", "display": "Broken skin (disorder)"}}],
       "role": "site",
       "display": "broken skin",
       "i18n": { "th": "ผิวหนังที่มีแผล" },
@@ -81,6 +82,7 @@
     },
     {
       "code": "first-use",
+      "components": [{"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}}, {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
       "role": "activity",
       "display": "first use",
       "i18n": { "th": "การใช้ครั้งแรก" },
@@ -209,6 +211,7 @@
     },
     {
       "code": "each-dose",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
       "role": "time",
       "display": "each dose",
       "i18n": { "th": "การให้ยาแต่ละครั้ง" },
@@ -216,6 +219,7 @@
     },
     {
       "code": "each-injection",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "injection", "coding": {"system": "http://snomed.info/sct", "code": "740685003", "display": "Inject"}}],
       "role": "time",
       "display": "each injection",
       "i18n": { "th": "การฉีดยาแต่ละครั้ง" },
@@ -223,6 +227,7 @@
     },
     {
       "code": "each-use",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
       "role": "time",
       "display": "each use",
       "i18n": { "th": "การใช้แต่ละครั้ง" },
@@ -270,6 +275,7 @@
     },
     {
       "code": "each-administration",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
       "role": "time",
       "display": "each time",
       "i18n": { "th": "ทุกครั้ง" },
@@ -751,6 +757,9 @@
     },
     {
       "code": "before_first_use",
+      "components": [{"role": "qualifier", "text": "before", "coding": {"system": "http://snomed.info/sct", "code": "421718005", "display": "Before"}},
+        {"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}},
+        {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
       "role": "material",
       "impliedArgument": {
         "role": "activity",
@@ -841,6 +850,7 @@
     },
     {
       "code": "after-first-administration",
+      "components": [{"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
       "role": "time",
       "display": "after the first administration",
       "i18n": {

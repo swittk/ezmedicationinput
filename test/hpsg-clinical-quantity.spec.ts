@@ -171,6 +171,17 @@ describe("HPSG clinical quantity grammar", () => {
     }
   });
 
+  it("does not retain a contradictory QD code after typed daily-total division", () => {
+    const parsed = parsePublicSig("30 mg PO QD in 3 divided doses");
+    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(dosage.doseAndRate?.[0]?.doseQuantity?.value).toBe(10);
+      expect(dosage.timing?.repeat).toMatchObject({
+        frequency: 3, period: 1, periodUnit: "d"
+      });
+      expect(dosage.timing?.code?.coding?.some(c => c.code === "QD")).not.toBe(true);
+    }
+  });
+
   it("does not divide an ordinary once-daily 30 mg administration without a split", () => {
     const parsed = parsePublicSig("30 mg daily");
     expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(30);
@@ -382,7 +393,6 @@ describe("HPSG clinical quantity grammar", () => {
 
       const scheduleOptions = {
         from: "2026-10-24T08:00:00+07:00",
-        to: "2026-10-25T08:00:00+07:00",
         timeZone: "Asia/Bangkok",
         limit: 3
       };
@@ -435,7 +445,6 @@ describe("HPSG clinical quantity grammar", () => {
       for (const representation of [infusion, strictR5, restoredR6]) {
         expect(nextDueDoses(representation, {
           from: "2026-10-24T08:00:00+07:00",
-          to: "2026-10-30T08:00:00+07:00",
           timeZone: "Asia/Bangkok",
           limit: 10
         })).toHaveLength(3);

@@ -87,7 +87,7 @@ describe("vendored administration-method terminology coverage", () => {
       code: "atomize"
     });
     expect(parsed.fhir.route?.coding?.[0]?.code).toBe(RouteCode["Nasal route"]);
-    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toEqual({ value: 2, unit: "spray" });
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 2, unit: "spray" });
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
 });

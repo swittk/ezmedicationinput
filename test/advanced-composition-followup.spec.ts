@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, fromFhirDosage,
-  getDosageCondition, getDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages,
+  getDosageCondition, getDosageExcludedWeekdays, nextDueDoses, toDosageDetails, toFhirR5Dosages,
   parseSig as parseProductionSig
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
@@ -2030,7 +2030,9 @@ describe("independent release oracles for newly observed realistic clinical erro
     expect(parsed.fhir).toHaveLength(1);
     expect(parsed.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
       .toBe(720);
-    expect(getAdministrationOffsetMinutes(parsed.fhir[0])).toBe(720);
+    expect(getAdministrationOffsetMinutes(parsed.items[0].fhir)).toBe(720);
+    expect(getAdministrationOffsetMinutes(parsed.fhir[0])).toBeUndefined();
+    expect(getAdministrationOffsetMinutes(parsed.fhirNext.step[0]?.component[0])).toBeUndefined();
     expect(parsed.fhirNext.step[0]?.start?.offsetDuration)
       .toMatchObject({ value: 12, code: "h" });
     const restored = toDosageDetails(parsed.fhir);
@@ -2038,6 +2040,18 @@ describe("independent release oracles for newly observed realistic clinical erro
       .toMatchObject({ value: 12, code: "h" });
     expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]?.start?.offsetDuration)
       .toMatchObject({ value: 12, code: "h" });
+  });
+
+  it("does not shift a treatment-relative daily administration twice", () => {
+    const parsed = parseProductionSig("Take 1 tablet QD 12 hours later");
+    expect(getAdministrationOffsetMinutes(parsed.items[0].fhir)).toBe(720);
+    expect(getAdministrationOffsetMinutes(parsed.fhirNext.step[0].component[0]))
+      .toBeUndefined();
+    const from = "2026-10-26T08:00:00+07:00";
+    const options = { from, orderedAt: from, timeZone: "Asia/Bangkok", limit: 2 };
+    const expected = ["2026-10-27T09:00:00+07:00", "2026-10-28T09:00:00+07:00"];
+    expect(nextDueDoses(parsed.fhirNext, options)).toEqual(expected);
+    expect(nextDueDoses(toDosageDetails(parsed.fhir), options)).toEqual(expected);
   });
 
   it.each([

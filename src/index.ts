@@ -25,7 +25,7 @@ import {
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
 import { formatCanonicalClause } from "./format";
-import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization } from "./i18n";
 import { ParserState } from "./parser-state";
@@ -650,6 +650,17 @@ function buildWholeCourseResult(
         ...(typedSteps.length ? { step: typedSteps } : {})
       }
       : undefined;
+  // R6 step.start now owns a shared typed delay. Keeping the same modifier
+  // on its component would apply the delay again during relative scheduling.
+  // Non-lowered, independently offset components preserve their modifier.
+  const loweredSequences = new Set((delayedSteps ?? []).map(step => step.sequence));
+  const courseDosages = loweredSequences.size
+    ? dosageItems.map(row => loweredSequences.has(row.sequence ?? 1) ? {
+      ...row,
+      modifierExtension: row.modifierExtension?.filter(extension =>
+        extension.url !== ADMINISTRATION_OFFSET_EXTENSION_URL)
+    } : row)
+    : dosageItems;
   const fhirNext = parallel?.details
     ? {
       ...parallel.details,
@@ -662,7 +673,7 @@ function buildWholeCourseResult(
         : {})
     }
     : toDosageDetails(
-      dosageItems,
+      courseDosages,
       input,
       typedCourse
     );

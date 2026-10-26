@@ -2,6 +2,7 @@
   "adviceRelations": [
     {
       "relation": "with",
+      "coding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"},
       "actionSurfaces": [
         "with"
       ],
@@ -69,6 +70,7 @@
     },
     {
       "relation": "before",
+      "coding": {"system": "http://snomed.info/sct", "code": "421718005", "display": "Before - dosing instruction fragment"},
       "actionSurfaces": [
         "before"
       ],
@@ -141,6 +143,7 @@
     },
     {
       "relation": "during",
+      "coding": {"system": "http://snomed.info/sct", "code": "421994004", "display": "During - dosing instruction fragment"},
       "actionSurfaces": [
         "during"
       ],
@@ -192,6 +195,7 @@
     },
     {
       "relation": "then",
+      "coding": {"system": "http://snomed.info/sct", "code": "421067001", "display": "Then - dosing instruction fragment"},
       "adviceSurfaces": [
         "then"
       ],
@@ -241,6 +245,7 @@
     },
     {
       "relation": "until",
+      "coding": {"system": "http://snomed.info/sct", "code": "421548005", "display": "Until - dosing instruction fragment"},
       "actionSurfaces": [
         "until"
       ],
@@ -426,6 +431,7 @@
     },
     {
       "relation": "to",
+      "coding": {"system": "http://snomed.info/sct", "code": "421035004", "display": "To - dosing instruction fragment"},
       "actionSurfaces": [
         "to"
       ],
@@ -449,6 +455,7 @@
     },
     {
       "relation": "if",
+      "coding": {"system": "http://snomed.info/sct", "code": "421803000", "display": "If - dosing instruction fragment"},
       "actionSurfaces": [
         "if"
       ],
@@ -505,6 +512,7 @@
     },
     {
       "relation": "when",
+      "coding": {"system": "http://snomed.info/sct", "code": "420974001", "display": "When - dosing instruction fragment"},
       "actionSurfaces": [
         "when"
       ],

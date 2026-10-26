@@ -752,7 +752,7 @@ export function unifySynsem(
       denominators: [{ value: 1, unit: "d", dimension: "time" }],
       dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
     } };
-    schedule = { ...schedule, frequency: dose.divisionCount };
+    schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
   }
   if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
     const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");

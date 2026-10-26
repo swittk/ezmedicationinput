@@ -1,4 +1,4 @@
-import { AdviceArgumentRole, type MedicationCondition } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
@@ -1594,4 +1594,120 @@ describe("HL7 product handling instructions", () => {
       expect(codes.some(code => ["UPR", "DRY", "REF", "PSA"].includes(code ?? ""))).toBe(false);
     }
   });
+});
+
+
+describe("standards-first instruction relationships and event referents", () => {
+  it.each([
+    [AdviceRelation.With, "421463005"],
+    [AdviceRelation.Before, "421718005"],
+    [AdviceRelation.During, "421994004"],
+    [AdviceRelation.Then, "421067001"],
+    [AdviceRelation.Until, "421548005"],
+    [AdviceRelation.If, "421803000"],
+    [AdviceRelation.When, "420974001"],
+    [AdviceRelation.To, "421035004"]
+  ])("encodes %s with its exact SNOMED dosing-fragment coding", (kind, code) => {
+    const graph = {
+      sourceText: "use",
+      actions: [{
+        force: AdviceForce.Instruction, relation: kind,
+        predicate: { lemma: "use" },
+        args: [{ role: AdviceArgumentRole.Activity, relation: kind, text: "use" }],
+        span: { start: 0, end: 3 }, sourceText: "use"
+      }],
+      relations: [{ kind, toActionIndex: 0 }]
+    };
+    const extension = buildInstructionGraphExtension(graph)!;
+    const action = extension.extension?.find(child => child.url === "action")!;
+    const argument = action.extension?.find(child => child.url === "argument")!;
+    const edge = extension.extension?.find(child => child.url === "graphRelation")!;
+    for (const [entry, field] of [[action, "relation"], [argument, "relation"], [edge, "kind"]] as const) {
+      expect(entry.extension?.find(part => part.url === field + "Coding")?.valueCoding)
+        .toMatchObject({ system: "http://snomed.info/sct", code });
+      expect(entry.extension?.some(part => part.url === field)).not.toBe(true);
+    }
+    const reopened = parseInstructionGraphExtension([extension])!;
+    expect(reopened.actions[0]?.relation).toBe(kind);
+    expect(reopened.actions[0]?.args[0]?.relation).toBe(kind);
+    expect(reopened.relations?.[0]?.kind).toBe(kind);
+  });
+
+  it("codes broken-skin as a clinical finding component, not an anatomical site structure", () => {
+    const concept = getMedicationInstructionConcept("broken-skin")!;
+    expect(concept.components?.[0]?.coding).toMatchObject({
+      system: "http://snomed.info/sct",
+      code: "247442005", display: "Broken skin (disorder)"
+    });
+    expect(concept.coding).toBeUndefined();
+    expect(medicationInstructionConceptCodings(concept)).toEqual([]);
+  });
+
+  it.each([AdviceRelation.Before, AdviceRelation.After])(
+    "uses HL7 %s only for actual linked actions", (relation) => {
+    const action = {
+      force: AdviceForce.Instruction, predicate: { lemma: "use" },
+      args: [], span: { start: 0, end: 3 }, sourceText: "use"
+    };
+    const graph = {
+      actions: [action, { ...action, span: { start: 10, end: 13 } }],
+      relations: [{ kind: relation, fromActionIndex: 0, toActionIndex: 1 }]
+    };
+    const extension = buildInstructionGraphExtension(graph)!;
+    const kind = extension.extension?.find(entry => entry.url === "graphRelation")
+      ?.extension?.find(entry => entry.url === "kindCoding")?.valueCoding;
+    expect(kind).toMatchObject({
+      system: "http://hl7.org/fhir/action-relationship-type", code: relation
+    });
+    expect(parseInstructionGraphExtension([extension])?.relations).toEqual(graph.relations);
+
+    const independent = buildInstructionGraphExtension({
+      actions: [{ ...action, relation }]
+    })!;
+    const embedded = independent.extension?.find(entry => entry.url === "action");
+    if (relation === AdviceRelation.Before) {
+      expect(embedded?.extension?.find(entry => entry.url === "relationCoding")?.valueCoding)
+        .toMatchObject({ system: "http://snomed.info/sct", code: "421718005" });
+    } else {
+      expect(embedded?.extension?.find(entry => entry.url === "relation")?.valueCode)
+        .toBe(AdviceRelation.After);
+    }
+  });
+
+  it("keeps non-equivalent English relations as typed local structures", () => {
+    const extension = buildInstructionGraphExtension({
+      actions: [{ force: AdviceForce.Instruction, relation: AdviceRelation.Unless,
+        predicate: { lemma: "hold" }, args: [], span: { start: 0, end: 4 }, sourceText: "hold" }]
+    })!;
+    const relation = extension.extension?.find(child => child.url === "action")
+      ?.extension?.find(child => child.url === "relation");
+    expect(relation?.valueCode).toBe("unless");
+    expect(parseInstructionGraphExtension([extension])?.actions[0]?.relation)
+      .toBe(AdviceRelation.Unless);
+  });
+
+  it.each([
+    ["each-dose", 2], ["each-injection", 2], ["each-use", 2],
+    ["each-administration", 2], ["first-use", 2],
+    ["after-first-administration", 2], ["before_first_use", 3]
+  ] as const)(
+    "persists compositional SNOMED qualifiers instead of a made-up whole-phrase coding for %s",
+    (conceptId, componentCount) => {
+      const concept = getMedicationInstructionConcept(conceptId)!;
+      expect(concept.components?.length).toBe(componentCount);
+      expect(concept.components?.every(part => part.coding?.system === "http://snomed.info/sct"))
+        .toBe(true);
+      expect(medicationInstructionConceptCodings(concept)).toEqual([]);
+      const graph = {
+        actions: [{
+          force: AdviceForce.Instruction, predicate: { lemma: "use" },
+          args: [{ role: AdviceArgumentRole.Activity, text: concept.display,
+            conceptId, components: concept.components }],
+          span: { start: 0, end: 3 }, sourceText: "use"
+        }]
+      };
+      const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+      expect(restored.actions[0]?.args[0]?.components).toEqual(concept.components);
+    }
+  );
 });

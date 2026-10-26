@@ -2553,6 +2553,25 @@ describe("standard dosage quantity coding", () => {
     }
   });
 
+  it("uses official EMA presentation identifiers for units absent from EDQM", () => {
+    for (const [unit, code] of [
+      ["spray", "200000016451"], ["dose", "200000016427"],
+      ["packet", "200000016428"], ["wafer", "200000016444"],
+      ["pellet", "200000016446"], ["canister", "200000022801"],
+      ["ring", "200000022816"], ["troche", "200000022841"]
+    ]) {
+      const row = canonicalToFhir(canonicalFromFhir({
+        doseAndRate: [{ doseQuantity: { value: 2, unit } }]
+      }));
+      const coded = row.doseAndRate?.[0]?.doseQuantity;
+      expect(coded).toMatchObject({
+        value: 2, unit, system: "http://spor.ema.europa.eu/v1/lists/200000000014", code
+      });
+      expect(toFhirR5Dosages(toDosageDetails([row]))[0].doseAndRate?.[0]?.doseQuantity)
+        .toEqual(coded);
+    }
+  });
+
   it("codes both range bounds and caps but leaves product-specific amounts unlabelled as UCUM", () => {
     const parsed = parseSig("1-2 tab PO q6h prn pain max 8 tab/day");
     const row = parsed.fhir[0];
