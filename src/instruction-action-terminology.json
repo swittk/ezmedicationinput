@@ -987,6 +987,8 @@
     },
     {
       "code": "attach",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"attach","display":"Attach","i18n":{"th":"ต่อ"}},
+      "externalCodings": [{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C61470","display":"Attachment"}],
       "semanticClass": "device",
       "display": "Attach",
       "i18n": {
@@ -1000,6 +1002,8 @@
     },
     {
       "code": "detach",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"detach","display":"Detach","i18n":{"th":"ถอด"}},
+      "externalCodings": [{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C212037","display":"Disconnect"}],
       "semanticClass": "device",
       "display": "Detach",
       "i18n": {
@@ -1816,6 +1820,7 @@
     },
     {
       "code": "warm",
+      "semanticComponents": [{"role":"mechanism","coding":{"system":"http://snomed.info/sct","code":"88999006","display":"Heat"}}],
       "semanticClass": "prepare",
       "display": "Warm",
       "i18n": {
@@ -1968,6 +1973,7 @@
     },
     {
       "code": "pull",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"129411004","display":"Traction - action"}}],
       "semanticClass": "manipulate",
       "display": "Pull",
       "i18n": {
@@ -2022,6 +2028,8 @@
     },
     {
       "code": "adjust",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"adjust","display":"Adjust use","i18n":{"th":"ปรับการใช้"}},
+      "externalCodings": [{"system":"http://snomed.info/sct","code":"129426002","display":"Adjustment - action"},{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C49157","display":"Adjustment"}],
       "contextualCodings": [{"whenArgument": {"conceptId": "medication-dose", "role": "object"}, "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C82495", "display": "Dose Adjustment"}}],
       "semanticClass": "administration_pattern",
       "display": "Adjust use",
@@ -2138,6 +2146,7 @@
     },
     {
       "code": "tilt",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"257912008","display":"Rotation - action"}}],
       "semanticClass": "position",
       "display": "Tilt",
       "i18n": {

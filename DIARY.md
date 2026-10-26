@@ -4225,3 +4225,31 @@ Addressed CodeRabbit PR#10 comment 4378045429: Thai ที่ has BOTH locative 
 Official HL7 THO RouteOfAdministration SWISHSPIT and SWISHSWAL, and NCIt C38302/C38303 respectively, now annotate COMPLETE ordered, positive oromucosal techniques. Swish+spit is not attached if a different primary oral/topical route/method already exists. Swish+swallow is only annotated for the source-consistent mL liquid dose with swallow method, not for tablet/capsule ingestion, spitting, or a mixed take+swish instruction. Original local SWISH/SPIT and other graphical action codings, dose values, route and bilingual realization are always retained. Both techniques explicitly round-trip into strict R5 and native R6 without datatype reparse.
 NCIt C149756 Pessary Dosage Unit now codes pharmaceutical ovule counts, preserving the specific original ovule unit label. This is a presentation-unit code, not an ovulation finding.
 Only existing PR reviewable source and test paths changed. No new runtime terminology lookup, backward compatibility hacks, novel parser pass, or global safety gate. The untouched pre-existing untracked test/__tmp_open_semantic_probe.ts remains in place.
+
+
+## 2026-10-27 — Second cross-system terminology audit (additive)
+
+Audited the remaining 22 generic action lexemes, five concept lexemes, ten dose labels and four relations. Sources: NCI EVS REST NCIt 26.09d, SNOMED CT US 2026-03-01 including the 390-descendant Action qualifier hierarchy and 48-descendant Additional dosage instruction hierarchy; NLM MeSH terms, published HL7 v3 ActCode (1302), ActClass (126), EntityHandling (18), ActRelationshipType (141), RoleCode (413); EDQM presentation/dose form (2025 open CodeSystem, 2026-01-30 released edition identified); FDA SPL units. Source versions: the current US September 2026 and International October 2026 releases were noted, but the public NCI EVS API exposes March 2026 US SNOMED, so this is not an exhaustive proof about the newer extensions or editions.
+
+Exact action equivalences found and added, always AFTER the existing local coding: attach = NCIt C61470 Attachment ("The act of affixing one thing to another"); detach = NCIt C212037 Disconnect ("To break the connection of or between things"); adjust = SNOMED 129426002 Adjustment - action (qualifier value) and NCIt C49157 Adjustment (the act of making necessary corrections or modifications). Existing contextual NCIt C82495 Dose Adjustment remains for explicit dose arguments; generic actions never require optional arguments to justify a generic coding.
+
+Additional independently coded constituents, NOT alternatives for whole action and NOT necessarily SNOMED postcoordination: warm = SNOMED 88999006 Heat (physical force) mechanism; pull = SNOMED 129411004 Traction - action (qualifier value) constituent rather than specific therapeutic traction; tilt = SNOMED 257912008 Rotation - action (qualifier value) constituent rather than a complete tilt instruction.
+
+New unit coding: respule = NCIt C71204 Nebule Dosing Unit, supported by current manufacturer-published descriptions of Respules as single-dose plastic containers for nebulizer solution. Source amount and unit label remain, with no universal fixed mL conversion. EDQM generic Capsule UOP, FDA CAPSULE and NCIt Softgel pharmaceutical dose form do not by themselves preserve the full meaning of a Softgel unit without modeling both count and formulation. Wipe is not automatically Pad/Swab, click is not automatically delivered Actuation.
+
+Rejected misleading direct action equivalences:
+- NCIt C103237 Decant is liquid transferred between containers, narrower than generic pour (which can be poured onto a surface).
+- NCIt C25476 Delay is a waiting time/state, not the patient waiting action.
+- NCIt C38535 Touch is a tactile sensation, not generic contact action.
+- SNOMED Fold is a morphologic abnormality; Pinch grip is not arbitrary pinching; clinical therapeutic traction procedure is not simply pulling a device.
+- Device detachment problem terms describe device failures, not patient device-disconnection instructions.
+- Heat findings are not warming actions.
+
+Additional unresolved concepts/relations:
+- SNOMED 79970003 Simultaneous and NCIt C25456 Concurrent are valid, but the registered same-time lexeme includes usual time and a consistent clock-time each day, which need not mean simultaneous administration. Do not assign these unconditionally.
+- NCIt C2190 Alcohol chemical versus alcoholic beverages; SNOMED 42798000 Area is not a resolved anatomical region; SNOMED Foam basic dose form is not soap lather; NCIt Clean is an action, not the resulting state.
+- While can be temporal overlap or conditional scope; do not confuse with existing During. Unless, Along, Where retain their typed grammar semantics.
+- Remaining device/package/body area units retain their original labels; no approximate conversions or silently broadened unit codes.
+
+Every original identifier must remain; no parser pass, validation gate, runtime terminology fetch or new dependency. Use typed constituents where exact wholes do not exist. MRCM certification is necessary before claiming a formally valid SNOMED postcoordinated expression.
+Verification: exact generic attach/detach/adjust actions parse with no optional argument; typed instruction graph external/local Codings survive FHIR serialization; explicit medication dose adjustment adds its previously verified contextual NCIt C82495. Warm/pull/tilt standard-coded components round-trip independently of the original local predicate codes. Respule and nebule both encode NCIt C71204, with independent source unit labels and no click→actuation substitution. Frozen pre-edit action 112/112 and concept 81/81 definitions and all historical direct local/external Codings preserved. All 44 source suites 3696/3696, ESM/CJS + TypeScript build, packaged exports 4/4 PASS; git diff --check clean. Remaining 16 generic action lexemes lack direct or constituent exact standards in this mapping pass; five concepts and nine unit labels remain unmapped, plus four logical/spatial relation kinds. No additional production source files.

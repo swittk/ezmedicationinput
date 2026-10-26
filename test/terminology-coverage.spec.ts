@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem } from "../src/index";
+import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { getDoseQuantityUnit, getStandardDoseUnitCoding } from "../src/maps";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 
 const SNOMED = "http://snomed.info/sct";
@@ -134,6 +135,9 @@ describe("non-equivalent standardized constituents of local instruction actions"
     ["rub in", "rub", "mechanism", "263762005"],
     ["press", "press", "operation", "257893003"],
     ["squeeze", "squeeze", "operation", "263720003"],
+    ["warm", "warm", "mechanism", "88999006"],
+    ["pull", "pull", "operation", "129411004"],
+    ["tilt", "tilt", "operation", "257912008"],
     ["moisten", "moisten", "target-state", "17461003"],
     ["part hair", "part", "target-site", "386045008"],
     ["wash hair out", "wash-hair-out", "technique", "C65120"],
@@ -236,7 +240,7 @@ describe("non-equivalent standardized constituents of local instruction actions"
     expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
     definition.semanticComponents![0].coding.code = "bad";
     expect(getMedicationInstructionAction("reapply")?.semanticComponents?.[0].coding.code).toBe("C47886");
-    expect(getMedicationInstructionAction("tilt")?.semanticComponents).toBeUndefined();
+    expect(getMedicationInstructionAction("tilt")?.semanticComponents?.[0].coding.code).toBe("257912008");
   });
 });
 
@@ -279,5 +283,53 @@ describe("partial coded clinical concept constituents", () => {
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
     concept.components![0].coding!.code = "mutated";
     expect(getMedicationInstructionConcept(name)?.components?.[0]?.coding?.code).toBe(code);
+  });
+});
+
+describe("generic exact external action mappings without optional arguments", () => {
+  it.each([
+    ["attach", ["C61470"]],
+    ["detach", ["C212037"]],
+    ["adjust", ["129426002", "C49157"]]
+  ])("retains local %s alongside exact generic external codes", (actionCode, standards) => {
+    const definition = getMedicationInstructionAction(actionCode)!;
+    const expectedCodes = [actionCode, ...standards];
+    const localSystem = "urn:ezmedicationinput:CodeSystem:medication-instruction-action";
+    expect(definition.coding).toMatchObject({ system: localSystem, code: actionCode });
+    expect(buildMedicationInstructionActionCodeSystem().concept
+      .some(item => item.code === actionCode)).toBe(true);
+    for (const source of [actionCode, `${actionCode} device`]) {
+      const frame = parseInstructionActions(source)
+        .find(frame => frame.predicate.lemma === actionCode)!;
+      expect(frame, source).toBeDefined();
+      expect(frame.predicate.codings?.map(coding => coding.code)).toEqual(expectedCodes);
+      expect(frame.predicate.codings?.[0]?.system).toBe(localSystem);
+      const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
+        actions: [frame], sourceText: source
+      })!])!.actions[0];
+      expect(restored.predicate.codings?.map(coding => [coding.system, coding.code]))
+        .toEqual(frame.predicate.codings?.map(coding => [coding.system, coding.code]));
+    }
+  });
+
+  it("keeps explicit medication-dose adjustment as an additive contextual specialization", () => {
+    const generic = parseInstructionActions("adjust")[0]!;
+    const dose = parseInstructionActions("adjust dose if dizzy")[0]!;
+    expect(generic.predicate.codings?.map(coding => coding.code))
+      .toEqual(["adjust", "129426002", "C49157"]);
+    expect(dose.predicate.codings?.map(coding => coding.code))
+      .toEqual(["adjust", "129426002", "C49157", "C82495"]);
+    expect(dose.args.some(argument => argument.conceptId === "medication-dose")).toBe(true);
+  });
+});
+
+describe("nebule-compatible respule unit", () => {
+  it("codes the single-dose respule as an NCIt nebule, while retaining its quantity label", () => {
+    const expected = { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", code: "C71204" };
+    expect(getStandardDoseUnitCoding("respule")).toEqual(expected);
+    expect(getStandardDoseUnitCoding("nebule")).toEqual(expected);
+    expect(getDoseQuantityUnit({ ...expected, unit: "respule" })).toBe("respule");
+    expect(getDoseQuantityUnit({ ...expected, unit: "nebule" })).toBe("nebule");
+    expect(getStandardDoseUnitCoding("click")).toBeUndefined();
   });
 });

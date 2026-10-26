@@ -2055,6 +2055,9 @@ const EMA_UNIT_BY_CODE = new Map<string, string>(
  */
 const NCIT_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
   FTU: "C71321", capful: "C102405", pump: "C111984", nebule: "C71204",
+  // A respule is a single-dose nebulizer solution container, equivalent to
+  // one nebule for unit-of-presentation counting (not a fixed mL conversion).
+  respule: "C71204",
   // An ovule is a vaginal pessary presentation, not an ovum/anatomical entity.
   ovule: "C149756"
 };
