@@ -4182,3 +4182,25 @@ Remaining grammatical relations: Unless (compositional negated conditional), Whi
 Final qualification of this exact standards pass: 112 actions = 70 direct external coding matches and 42 local-only, several of which have context-specific coded combinations; 81 concepts = 56 direct external, 16 externally composed, nine standalone local-only. 81 dose-unit labels = 70 coded, 11 device/brand/product context-dependent. 17 advice relations = 15 standardized; 26 site relations = 24 standardized. See preceding categorized remaining lists. This is NOT a claim that any future US/EU edition or focused terminology extension cannot add more.
 
 Independent frozen prior-code auditor compared 235 realistic source inputs across primary, native R6 and strict R5 representations (705 distinct wire outputs): all 3,415 historical Coding occurrences retained, zero missing, 124 additional Coding occurrences in this sample, no compared clinical structure changes, zero parser exceptions. Definition auditor confirms no loss of the original 121 action Codings and 75 concept Codings (full 112/81 lexicons), and both local CodeSystem enumerations remain 62/23 entries. 44 source suites 3656/3656 PASS, ESM/CJS and TypeScript declarations build PASS, packaged exports4/4 PASS; all new source paths already in the 100-reviewable-file PR scope. No unreviewed new production modules or new dependencies. Matched warm nine-input host Node24 medians compared to immutable de0dfa0 bundle: routine/everyday cases -2.8% to -0.3%, multi-site eye taper -2.8%, specific coded instructions -2.9% to +2.4%. Generated FHIR clinical metadata increases only for additionally coded cases; original dose, source and local vocab never removed. This performance test is host-side, not a mobile benchmark.
+
+
+## 2026-10-26 — Standard-coded action constituents and anatomy (post-audit)
+Verified against SNOMED CT US 2026-03-01 and NCIt 26.09d terminology.
+Finding/posture codes MUST NOT be substituted as equivalent imperative codes.
+True SNOMED postcoordination requires valid MRCM domain, attribute and range rules.
+Added independent semantic components to action graph predicates with an explicit role;
+they survive R5 graph FHIR serialization, without being merged into predicate.codings.
+Original in-house action codes remain unchanged and all components are additive.
+- remain-upright: NCIt C86043 Upright (target-state).
+- lie-down: SNOMED 102538003 Recumbent body position (target-state).
+- spit: SNOMED 12405001 Spitting (activity).
+- swab: NCIt C17627 Swab (technique).
+- reapply: NCIt C47886 Repeat plus SNOMED 738991002 Apply (operation, technique).
+- blow-nose: NCIt C12756 Nose (target-site).
+- keep-ear-upward and keep-ear-dry: NCIt C12394 Ear (target-site).
+Registered SNOMED 77142006 External genitalia structure alongside original
+local external_intimate_area Coding; added the same exact site alias to the
+primary dosage-site terminology. Existing canonical site mappings remain.
+These constituents are standards-coded structured semantics, NOT certified
+SNOMED postcoordinated expressions; unresolved action codes are not claimed
+to have exact whole-instruction equivalents. No terminology network runtime.

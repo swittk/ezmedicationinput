@@ -601,6 +601,7 @@
     },
     {
       "code": "swab",
+      "semanticComponents": [{"role":"technique","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C17627","display":"Swab"}}],
       "semanticClass": "cleanse",
       "display": "Swab",
       "i18n": {
@@ -916,6 +917,7 @@
     },
     {
       "code": "spit",
+      "semanticComponents": [{"role":"activity","coding":{"system":"http://snomed.info/sct","code":"12405001","display":"Spitting"}}],
       "semanticClass": "expel",
       "display": "Spit out",
       "i18n": {
@@ -1037,6 +1039,7 @@
     },
     {
       "code": "reapply",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C47886","display":"Repeat"}},{"role":"technique","coding":{"system":"http://snomed.info/sct","code":"738991002","display":"Apply"}}],
       "semanticClass": "administration",
       "display": "Reapply",
       "i18n": {
@@ -1819,6 +1822,7 @@
     },
     {
       "code": "remain-upright",
+      "semanticComponents": [{"role":"target-state","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C86043","display":"Upright"}}],
       "semanticClass": "position",
       "display": "Remain upright",
       "i18n": {
@@ -2192,6 +2196,7 @@
     },
     {
       "code": "lie-down",
+      "semanticComponents": [{"role":"target-state","coding":{"system":"http://snomed.info/sct","code":"102538003","display":"Recumbent body position"}}],
       "semanticClass": "position",
       "display": "Lie down",
       "i18n": {
@@ -2208,6 +2213,7 @@
     },
     {
       "code": "blow-nose",
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12756","display":"Nose"}}],
       "semanticClass": "prepare_site",
       "display": "Blow nose",
       "i18n": {
@@ -2223,6 +2229,7 @@
     },
     {
       "code": "keep-ear-upward",
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}}],
       "semanticClass": "position",
       "display": "Keep ear upward",
       "i18n": {
@@ -2240,6 +2247,7 @@
     },
     {
       "code": "keep-ear-dry",
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}}],
       "semanticClass": "site_care",
       "display": "Keep ear dry",
       "i18n": {

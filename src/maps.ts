@@ -1598,6 +1598,21 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "181367001", display: "Entire vein" }, routeHint: RouteCode["Intravenous route"] }
     },
     {
+      // Exact gender-neutral anatomical concept for a clinician's "external
+      // intimate area" site; no inference of male/female structures.
+      names: [
+        "external intimate area",
+        "external-intimate-area",
+        "บริเวณภายนอกจุดซ่อนเร้น"
+      ],
+      definition: {
+        coding: { code: "77142006", display: "External genitalia structure" },
+        text: "external intimate area",
+        i18n: { th: "บริเวณภายนอกจุดซ่อนเร้น" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: [
         "external genitalia",
         "external genitals",

@@ -788,6 +788,13 @@ export interface InstructionConceptComponent {
   coding?: FhirCoding;
 }
 
+/** A standard-coded constituent of an instruction predicate, not an equivalent
+ * code for the whole imperative or an unvalidated SNOMED expression. */
+export interface InstructionActionSemanticComponent {
+  role: "activity" | "technique" | "target-state" | "target-site" | "operation";
+  coding: FhirCoding;
+}
+
 export interface AdviceArgument {
   role: AdviceArgumentRole;
   text: string;
@@ -824,6 +831,8 @@ export interface AdviceFrame {
     realizerConfig?: MedicationInstructionActionRealizerConfig;
     /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
+    /** Independently coded constituents, not alternative predicate Codings. */
+    semanticComponents?: InstructionActionSemanticComponent[];
   };
   relation?: AdviceRelation;
   args: AdviceArgument[];
@@ -1159,6 +1168,8 @@ export interface MedicationInstructionActionDefinition {
   coding?: FhirCoding;
   /** Exact external terminology mappings; never fuzzy/approximate mappings. */
   externalCodings?: FhirCoding[];
+  /** Standard-coded parts of the instruction; preserve its local action coding. */
+  semanticComponents?: InstructionActionSemanticComponent[];
 }
 
 export interface MedicationInstructionActionInput

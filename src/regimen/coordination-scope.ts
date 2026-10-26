@@ -707,7 +707,10 @@ function cloneAdviceFrame(frame: AdviceFrame, offset: number): AdviceFrame {
           locales
         }
         : undefined,
-      codings: frame.predicate.codings?.map(coding => ({ ...coding }))
+      codings: frame.predicate.codings?.map(coding => ({ ...coding })),
+      semanticComponents: frame.predicate.semanticComponents?.map(part => ({
+        role: part.role, coding: { ...part.coding }
+      }))
     },
     args: frame.args.map(argument => ({
       ...argument,

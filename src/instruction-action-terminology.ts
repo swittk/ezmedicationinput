@@ -58,6 +58,7 @@ interface ActionSource {
   definesDose?: boolean;
   coding?: FhirCoding;
   externalCodings?: FhirCoding[];
+  semanticComponents?: MedicationInstructionActionDefinition["semanticComponents"];
 }
 
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
@@ -128,6 +129,13 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
       i18n: coding.i18n ? { ...coding.i18n } : undefined
     }
     : undefined;
+}
+
+/** Preserve coded constituents separately from equivalent whole-action codings. */
+export function cloneMedicationInstructionActionSemanticComponents(
+  components: MedicationInstructionActionDefinition["semanticComponents"]
+): MedicationInstructionActionDefinition["semanticComponents"] {
+  return components?.map(part => ({ role: part.role, coding: cloneCoding(part.coding)! }));
 }
 
 export function cloneMedicationInstructionActionRealizerConfig(
@@ -214,7 +222,8 @@ function cloneDefinition(
     acceptsAmount: definition.acceptsAmount,
     definesDose: definition.definesDose,
     coding: cloneCoding(definition.coding),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
   };
 }
 
@@ -255,7 +264,8 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
     coding: cloneCoding(sourceDefinition.coding),
-    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(sourceDefinition.semanticComponents)
   };
 }
 
@@ -301,7 +311,8 @@ function normalizeCustomDefinition(
     acceptsAmount: input.acceptsAmount,
     definesDose: input.definesDose,
     coding: cloneCoding(input.coding),
-    externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
+    externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(input.semanticComponents)
   };
 }
 

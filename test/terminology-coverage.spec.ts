@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, listMedicationInstructionActions } from "../src/index";
+import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 
 const SNOMED = "http://snomed.info/sct";
 
@@ -113,5 +115,70 @@ describe("vendored FHIR additional-instruction terminology coverage", () => {
       additionalInstruction: [{ coding: [{ system: SNOMED, code }] }]
     }, "long", { locale: "th" });
     expect(text).toContain(thai);
+  });
+});
+
+describe("non-equivalent standardized constituents of local instruction actions", () => {
+  it.each([
+    ["remain upright 5 minutes", "remain-upright", "target-state", "C86043"],
+    ["lie down 5 minutes", "lie-down", "target-state", "102538003"],
+    ["spit out", "spit", "activity", "12405001"],
+    ["swab", "swab", "technique", "C17627"],
+    ["reapply", "reapply", "operation", "C47886"],
+    ["blow nose", "blow-nose", "target-site", "C12756"],
+    ["keep ear upward 5 minutes", "keep-ear-upward", "target-site", "C12394"],
+    ["keep ear dry", "keep-ear-dry", "target-site", "C12394"]
+  ])("preserves local %s while carrying externally coded %s role", (source, actionCode, role, code) => {
+    const definition = getMedicationInstructionAction(actionCode)!;
+    expect(definition.semanticComponents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
+    ]));
+    const frames = parseInstructionActions(source);
+    const frame = frames.find(item => item.predicate.lemma === actionCode)!;
+    expect(frame, source).toBeDefined();
+    expect(frame.predicate.codings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
+        code: actionCode })
+    ]));
+    expect(frame.predicate.codings?.some(coding => coding.code === code)).toBe(false);
+    const signature = (parts: typeof definition.semanticComponents) =>
+      parts?.map(part => [part.role, part.coding.system, part.coding.code]);
+    expect(signature(frame.predicate.semanticComponents)).toEqual(signature(definition.semanticComponents));
+    const extension = buildInstructionGraphExtension({ sourceText: source, actions: [frame] })!;
+    const restored = parseInstructionGraphExtension([extension])!.actions[0];
+    expect(restored.predicate.codings?.map(coding => [coding.system, coding.code]))
+      .toEqual(frame.predicate.codings?.map(coding => [coding.system, coding.code]));
+    expect(signature(restored.predicate.semanticComponents)).toEqual(signature(definition.semanticComponents));
+    expect(restored.predicate.lemma).toBe(actionCode);
+  });
+
+  it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
+    const definition = getMedicationInstructionAction("reapply")!;
+    expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
+    definition.semanticComponents![0].coding.code = "bad";
+    expect(getMedicationInstructionAction("reapply")?.semanticComponents?.[0].coding.code).toBe("C47886");
+    expect(getMedicationInstructionAction("tilt")?.semanticComponents).toBeUndefined();
+  });
+});
+
+describe("gender-neutral external intimate anatomy code", () => {
+  it("retains the original local whole-site code and adds exact SNOMED external genitalia", () => {
+    const concept = getMedicationInstructionConcept("external_intimate_area")!;
+    const codes = medicationInstructionConceptCodings(concept);
+    expect(codes.map(coding => [coding.system, coding.code])).toEqual([
+      ["urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "external_intimate_area"],
+      ["http://snomed.info/sct", "77142006"]
+    ]);
+    for (const source of [
+      "Apply to external intimate area once daily",
+      "Apply to external-intimate-area once daily"
+    ]) {
+      const parsed = parseSig(source);
+      expect(parsed.fhir.site?.coding).toEqual(expect.arrayContaining([
+        expect.objectContaining({ system: SNOMED, code: "77142006" })
+      ]));
+      expect(parsed.fhir.route?.coding?.[0]?.code).toBe("6064005");
+      expect(parsed.longText).toContain("external intimate area");
+    }
   });
 });

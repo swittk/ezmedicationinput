@@ -207,6 +207,12 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     nested.push({ url: "predicateRealizerLocale", extension: localized });
   }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: wireCoding(coding) });
+  for (const part of frame.predicate.semanticComponents ?? []) {
+    nested.push({ url: "predicateComponent", extension: [
+      { url: "role", valueCode: part.role },
+      { url: "coding", valueCoding: wireCoding(part.coding) }
+    ] });
+  }
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
   add(nested, valueString("sourceText", frame.sourceText));
@@ -370,6 +376,15 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const translated = child(translation, "text")?.valueString;
     if (locale && translated) predicateI18n[locale] = translated;
   }
+  const semanticComponents: NonNullable<AdviceFrame["predicate"]["semanticComponents"]> = [];
+  for (const part of children(extension, "predicateComponent")) {
+    const role = child(part, "role")?.valueCode;
+    const coding = readCoding(child(part, "coding")?.valueCoding);
+    if ((role === "activity" || role === "technique" || role === "target-state" ||
+      role === "target-site" || role === "operation") && coding?.system && coding.code) {
+      semanticComponents.push({ role, coding });
+    }
+  }
   return {
     force,
     origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
@@ -389,7 +404,8 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
         : undefined,
       codings: children(extension, "predicateCoding")
         .map((entry) => readCoding(entry.valueCoding))
-        .filter((entry): entry is FhirCoding => Boolean(entry))
+        .filter((entry): entry is FhirCoding => Boolean(entry)),
+      ...(semanticComponents.length ? { semanticComponents } : {})
     },
     args,
     span: { start: spanStart, end: spanEnd },

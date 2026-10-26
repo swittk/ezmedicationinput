@@ -78,6 +78,7 @@ import {
 } from "./instruction-concept-terminology";
 import {
   cloneMedicationInstructionActionRealizerConfig,
+  cloneMedicationInstructionActionSemanticComponents,
   getMedicationInstructionAction,
   medicationInstructionActionCodings,
   medicationInstructionActionLocaleRealizerConfig,
@@ -1732,7 +1733,8 @@ function buildActionFrame(
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
       realizer: definition.realizer,
       realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
-      codings
+      codings,
+      semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
     },
     relation: frameRelation,
     args,

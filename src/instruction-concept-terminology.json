@@ -729,6 +729,8 @@
     },
     {
       "code": "external_intimate_area",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"external_intimate_area","display":"external intimate area","i18n":{"th":"บริเวณภายนอกจุดซ่อนเร้น"}},
+      "externalCodings": [{"system":"http://snomed.info/sct","code":"77142006","display":"External genitalia structure"}],
       "role": "site",
       "display": "external intimate area",
       "i18n": {
