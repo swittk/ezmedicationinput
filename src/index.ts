@@ -1489,7 +1489,14 @@ export function formatSig(
     }
     const clause = canonicalFromFhir(dosage);
     const localization = resolveSigLocalization(options?.locale, options?.i18n);
-    return provisionalFhirDisplay(dosage, clause, style, localization, options, false);
+    let displayed = provisionalFhirDisplay(dosage, clause, style, localization, options, false);
+    if (displayCondition) {
+      displayed = appendMedicationConditionText(displayed, displayCondition, options);
+    }
+    if (displayExcludedDates.length) {
+      displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
+    }
+    return displayed;
   }
   const quantity = dosage.doseAndRate?.[0];
   // Until rich rate and relative-weight units have dedicated realizers, retain
@@ -1672,12 +1679,24 @@ function fromFhirDosageInternal(
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0;
   const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
-  const shortText = suppressMaximumDisplay
+  let shortText = suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
-  const computedLong = suppressMaximumDisplay
+  let computedLong = suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
+  if (!exactSource) {
+    const condition = getDosageCondition(dosage);
+    const exclusions = getDosageExcludedDates(dosage);
+    if (condition) {
+      shortText = appendMedicationConditionText(shortText, condition, options);
+      computedLong = appendMedicationConditionText(computedLong, condition, options);
+    }
+    if (exclusions.length) {
+      shortText = appendMedicationExcludedDatesText(shortText, exclusions, options);
+      computedLong = appendMedicationExcludedDatesText(computedLong, exclusions, options);
+    }
+  }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];
   return {

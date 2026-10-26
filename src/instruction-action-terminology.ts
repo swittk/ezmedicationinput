@@ -412,7 +412,10 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     caseSensitive: true,
     content: "complete",
     concept: DEFAULT_ACTIONS.filter((definition) =>
-      !definition.coding && !definition.externalCodings?.length
+      // A local action remains part of the published CodeSystem even when
+      // extra NLM/HL7/SNOMED codings are provided for the same instruction.
+      definition.coding?.system === MEDICATION_INSTRUCTION_ACTION_SYSTEM ||
+      (!definition.coding && !definition.externalCodings?.length)
     ).map((definition) => ({
       code: definition.code,
       display: definition.display,

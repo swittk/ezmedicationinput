@@ -1996,6 +1996,12 @@ const UCUM_DOSE_UNIT_CODES: Record<string, string> = {
   kg: "kg", g: "g", mg: "mg", mcg: "ug", ug: "ug", microg: "ug", ng: "ng",
   L: "L", mL: "mL", dL: "dL", mcL: "uL", uL: "uL", nL: "nL", cm3: "cm3",
   IU: "[iU]", U: "[iU]", "[iU]": "[iU]", tsp: "5.mL", tbsp: "15.mL",
+  // The source labels retain *what* is measured (product ribbon, BSA, drops).
+  // UCUM conveys only the physical measure, never a calibrated device dose.
+  cm: "cm", "[in_i]": "[in_i]", "%": "%",
+  "cm ribbon": "cm", "inch ribbon": "[in_i]",
+  "cm strip": "cm", "cm line": "cm", "inch line": "[in_i]",
+  "% BSA": "%", "drop/min": "[drp]/min", "[drp]/min": "[drp]/min",
   s: "s", min: "min", h: "h", d: "d", wk: "wk", mo: "mo", a: "a"
 };
 

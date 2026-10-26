@@ -1247,6 +1247,8 @@
     },
     {
       "code": "drink",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "drink", "display": "Drink", "i18n": {"th": "ดื่ม"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D004326", "display": "Drinking"}],
       "semanticClass": "ingest",
       "display": "Drink",
       "i18n": {
@@ -1732,6 +1734,7 @@
     },
     {
       "code": "hold",
+      "contextualCodings": [{"whenArgument": {"conceptId": "breath", "role": "object"}, "coding": {"system": "https://www.nlm.nih.gov/mesh", "code": "D062485", "display": "Breath Holding"}}],
       "semanticClass": "retain",
       "display": "Hold",
       "i18n": {
@@ -2062,6 +2065,8 @@
     },
     {
       "code": "exhale",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "exhale", "display": "Exhale", "i18n": {"th": "หายใจออก"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D045853", "display": "Exhalation"}],
       "semanticClass": "breathing",
       "display": "Exhale",
       "i18n": {
@@ -2102,6 +2107,8 @@
     },
     {
       "code": "blink",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "blink", "display": "Blink", "i18n": {"th": "กะพริบตา"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D001767", "display": "Blinking"}],
       "semanticClass": "manipulate",
       "display": "Blink",
       "i18n": {
@@ -2263,6 +2270,8 @@
     },
     {
       "code": "eat-food",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "eat-food", "display": "Eat food", "i18n": {"th": "กินอาหาร"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D004435", "display": "Eating"}],
       "semanticClass": "ingest",
       "display": "Eat food",
       "i18n": {

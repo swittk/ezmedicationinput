@@ -389,7 +389,10 @@ function resolveDatePart(
   // without turning arbitrary distant four-digit years into Buddhist dates.
   if (part.isoYearFirst) {
     if (source.year === undefined) return undefined;
-    if (source.year >= 2400 && source.year <= 2999) {
+    const enabledCalendars = options?.datePolicy?.calendars;
+    const buddhistAllowed = enabledCalendars === undefined ||
+      enabledCalendars.some(calendar => calendar.toLowerCase() === "buddhist");
+    if (buddhistAllowed && source.year >= 2400 && source.year <= 2999) {
       const gregorianYear = source.year - 543;
       if (validGregorianDate(gregorianYear, source.month, source.day) &&
           inferredYearPlausible(gregorianYear, dateContext, options?.datePolicy)) {

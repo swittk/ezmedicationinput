@@ -162,6 +162,8 @@
     },
     {
       "code": "whole",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "whole", "display": "whole", "i18n": {"th": "ทั้งเม็ด"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "255503000", "display": "Entire (qualifier value)"}],
       "role": "manner",
       "display": "whole",
       "i18n": { "th": "ทั้งเม็ด" },
