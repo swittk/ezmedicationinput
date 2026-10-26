@@ -3337,7 +3337,9 @@ function countScheduleEvents(
 
   if (isSingleAdministrationRepeat(repeat)) {
     if (parseActivityTimingExtensions(repeat)?.length) {
-      return 0;
+      // A one-time activity trigger has no executable timestamp. Supply may
+      // still need one administration after the order, but never before it.
+      return orderedAt && to <= orderedAt ? 0 : 1;
     }
     const anchor = orderedAt ?? baseTime;
     if (anchor < from || anchor >= to) {
@@ -3907,6 +3909,10 @@ function calculateTotalUnitsSingle(
     unevaluatedMaximumDose = true;
   }
   const hasPartialR6Safety = Boolean((dosage as EzDosage).safety);
+  const unresolvedOneTimeActivity = Boolean(
+    dosage.timing?.repeat && isSingleAdministrationRepeat(dosage.timing.repeat) &&
+    parseActivityTimingExtensions(dosage.timing.repeat)?.length
+  );
   const conditional = getDosageCondition(dosage);
   const excludedDates = getDosageExcludedDates(dosage);
   const excludedWeekdays = getDosageExcludedWeekdays(dosage);
@@ -3914,7 +3920,8 @@ function calculateTotalUnitsSingle(
     (!!conditional && !options.evaluateCondition) ||
     maximalTiming.countMaximum || maximalTiming.frequencyMaximum ||
     maximalTiming.periodMinimum || maximalTiming.infusionDurationMaximum ||
-    lifetimeMaximum !== undefined || unevaluatedMaximumDose || hasPartialR6Safety;
+    lifetimeMaximum !== undefined || unevaluatedMaximumDose ||
+    hasPartialR6Safety || unresolvedOneTimeActivity;
 
   const orderedAtDate =
     options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
@@ -4015,12 +4022,16 @@ function calculateTotalUnitsSingle(
         options.priorCount === undefined && !dosage.asNeeded
       )
       : undefined;
+    // An unresolved one-time activity has no generated event history.
+    // Caller-supplied administrations therefore own its remaining capacity.
+    const activityPriorCount = unresolvedOneTimeActivity
+      ? (options.priorDoseTimes?.length ?? 0) : 0;
     count = exactEvents !== undefined
       ? exactEvents.length
       : countScheduleEvents(
         dosage, countFrom, endDay, config, baseTime, effectiveOrderedAt, 100000,
-        options.priorCount === undefined ? 0 : Math.floor(options.priorCount),
-        options.priorCount === undefined && !dosage.asNeeded
+        options.priorCount === undefined ? activityPriorCount : Math.floor(options.priorCount),
+        options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
       );
   }
 
@@ -4093,6 +4104,8 @@ function calculateTotalUnitsSingle(
     maximumExplanations.push("an unevaluable maximum-dose constraint was retained but could not be applied");
   if (hasPartialR6Safety)
     maximumExplanations.push("R6 safety details not expressible as numeric calendar limits were retained but not evaluated");
+  if (unresolvedOneTimeActivity)
+    maximumExplanations.push("the activity trigger has no known timestamp; a one-time dose is only a maximum supply estimate, not a scheduled administration");
 
   const result: TotalUnitsResult = {
     totalUnits,

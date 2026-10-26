@@ -1316,7 +1316,8 @@ describe("one-time execution uses structured administration timing, not counseli
       expect(p.meta.canonical.clauses[0].schedule?.activityTiming?.[0]).toMatchObject({ relation: "after" });
       for (const dosage of [p.fhirNext, toFhirR5Dosages(p.fhirNext)]) {
         expect(nextDueDoses(dosage, options)).toEqual([]);
-        expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(0);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 1, quantityKind: "maximum" });
       }
     }
   );

@@ -715,20 +715,21 @@ describe("calculateTotalUnits", () => {
     expect(res.totalUnits).toBe(1);
   });
 
-  it("does not count one-time schedules gated by unresolved relational instructions", () => {
+  it("reports one-time activity capacity without inventing a scheduled dose", () => {
     const parsed = parseSig("insert 1 tab pv once after menstruation ends", {
       context: { dosageForm: "tab" }
     });
-
-    const res = calculateTotalUnits({
+    const options = {
       dosage: parsed.fhir,
       from: "2024-01-01T09:00:00Z",
       durationValue: 30,
       durationUnit: FhirPeriodUnit.Day,
       timeZone: "UTC"
+    };
+    expect(nextDueDoses(parsed.fhir, options)).toEqual([]);
+    expect(calculateTotalUnits(options)).toMatchObject({
+      totalUnits: 1, quantityKind: "maximum"
     });
-
-    expect(res.totalUnits).toBe(0);
   });
 
   it("caps count-limited minute intervals for calculateTotalUnits", () => {
@@ -1912,11 +1913,33 @@ describe("one-time activity timing is owned by HPSG, not counseling text", () =>
         expect(nextDueDoses(input, options)).toEqual([]);
         expect(calculateTotalUnits({ ...options, dosage: input,
           durationValue: 1, durationUnit: FhirPeriodUnit.Day
-        }).totalUnits).toBe(0);
+        })).toMatchObject({
+          totalUnits: 1, unit: "tab", quantityKind: "maximum",
+          explanation: expect.stringContaining("activity trigger")
+        });
       }
       expect(parsed.longText.toLowerCase()).toContain(activity);
     }
   );
+
+  it("keeps a one-time unresolved activity as future supply capacity, not a timed event", () => {
+    const dosage = parseSig("Insert 1 tablet vaginally once after menstruation ends.").fhir;
+    const base = { ...options, from: "2026-11-10T08:00:00+07:00",
+      durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+    expect(nextDueDoses(dosage, base)).toEqual([]);
+    expect(calculateTotalUnits({ ...base, dosage })).toMatchObject({
+      totalUnits: 1, quantityKind: "maximum"
+    });
+    expect(calculateTotalUnits({ ...base, dosage, priorCount: 1 })).toMatchObject({
+      totalUnits: 0, quantityKind: "maximum"
+    });
+    expect(calculateTotalUnits({ ...base, dosage,
+      priorDoseTimes: ["2026-11-03T08:00:00+07:00"]
+    })).toMatchObject({ totalUnits: 0, quantityKind: "maximum" });
+    expect(calculateTotalUnits({ ...base, dosage,
+      from: "2026-11-01T08:00:00+07:00"
+    })).toMatchObject({ totalUnits: 0, quantityKind: "maximum" });
+  });
 
   it.each(["patientInstruction", "additionalInstruction"] as const)(
     "does not let imported %s veto a structured one-time dated dose", field => {
