@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveBodySitePhrase } from "../src/body-site-grammar";
+import {
+  resolveBodySitePhrase, resolveBodySiteRestrictionPredicate,
+  formBodySiteRestriction, realizeBodySiteRestriction
+} from "../src/body-site-grammar";
 import { formatCanonicalClause } from "../src/format";
 import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
@@ -64,6 +67,38 @@ describe("body-site terminal inheritance", () => {
     const resolved = resolveBodySitePhrase("dry knee", undefined, { allowTerminalModifierInheritance: true });
     expect(resolved?.coding?.code).toBe("72696002");
     expect(resolved?.displayText).toBe("dry knee");
+  });
+});
+
+describe("Thai typed relative-site existential realization", () => {
+  it.each([
+    ["there is rash", "ที่มีผื่น"],
+    ["there is eczema", "ที่มีผื่นแพ้"],
+    ["there is psoriasis", "ที่มีผื่นสะเก็ดเงิน"],
+    ["there is acne", "ที่เป็นสิว"],
+    ["there are hives", "ที่เป็นลมพิษ"]
+  ])("uses one complete condition phrase for %s", (source, thai) => {
+    const predicate = resolveBodySiteRestrictionPredicate(source);
+    expect(predicate.form).toBe("existential");
+    const restriction = formBodySiteRestriction(predicate, undefined, `where ${source}`);
+    expect(realizeBodySiteRestriction(restriction, "th")).toBe(thai);
+    expect(realizeBodySiteRestriction(restriction, "en")).toContain(source);
+  });
+
+  it("does not turn a non-existential site state into an existential one", () => {
+    const state = formBodySiteRestriction(resolveBodySiteRestrictionPredicate("irritated"));
+    expect(state.predicate.form).toBe("state");
+    expect(realizeBodySiteRestriction(state, "th")).toBe("ที่ระคายเคือง");
+  });
+
+  it("keeps the same Thai restriction through parsed clinical FHIR representation", () => {
+    const parsed = parseSig("apply 1 mL to skin where there is rash");
+    expect(parsed.meta.canonical.clauses[0]?.site?.restrictions?.[0]?.predicate.form)
+      .toBe("existential");
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ที่มีผื่น");
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).not.toContain("ที่มีมีผื่น");
+    expect(formatSig(toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0], "long",
+      { locale: "th" })).toContain("ที่มีผื่น");
   });
 });
 

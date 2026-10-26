@@ -873,9 +873,14 @@ export function realizeBodySiteRestriction(restriction: BodySiteRestriction, loc
       ? lexical?.i18n?.en ?? symptom?.conditionI18n?.en : undefined;
     return normalized ? `${relation} ${normalized}` : restriction.sourceText.trim() || `${relation} ${predicate.text}`;
   }
-  const localized = lexical?.i18n?.th ?? symptom?.conditionI18n?.th ?? symptom?.i18n?.th ??
+  const completeCondition = symptom?.conditionI18n?.th;
+  const localized = lexical?.i18n?.th ?? completeCondition ?? symptom?.i18n?.th ??
     (/^[\u0E00-\u0E7F]/u.test(predicate.text.trim()) ? predicate.text.trim() : undefined);
-  return localized ? `${relation}${predicate.form === "existential" ? "มี" : ""}${localized}` : undefined;
+  // Condition translations are already complete predicates (e.g. มีผื่น,
+  // เป็นสิว); prefix มี only when realizing a bare existential symptom noun.
+  const existentialLead = predicate.form === "existential" &&
+    localized !== completeCondition && !localized?.startsWith("มี") ? "มี" : "";
+  return localized ? `${relation}${existentialLead}${localized}` : undefined;
 }
 
 function resolveQualifiedBodySite(
