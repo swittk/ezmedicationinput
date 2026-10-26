@@ -2039,10 +2039,18 @@ export function getDoseQuantityUnit(quantity: { system?: string; code?: string; 
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
     return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
   }
-  const label = quantity.code ?? quantity.unit ?? "";
-  const canonical = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()] ?? label;
-  const measurable = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
-  return measurable === "5.mL" ? "tsp" : measurable === "15.mL" ? "tbsp" : measurable;
+  const recognizedUnit = (label: string | undefined): string | undefined => {
+    if (!label) return undefined;
+    if (label === "5.mL") return "tsp";
+    if (label === "15.mL") return "tbsp";
+    const canonical = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()] ?? label;
+    if (!getStandardDoseUnitCoding(canonical)) return undefined;
+    const measured = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
+    return measured === "5.mL" ? "tsp" :
+      measured === "15.mL" ? "tbsp" : measured;
+  };
+  return recognizedUnit(quantity.code) ?? recognizedUnit(quantity.unit) ??
+    quantity.unit ?? quantity.code ?? "";
 }
 
 /** Resolve a known dosage unit without changing its display or numerical value.

@@ -625,12 +625,14 @@ function buildWholeCourseResult(
   const relativeStarts = parallel ? undefined : typedRelativePhaseStartSteps(results);
   const sharedCourseEnds = parallel ? undefined : typedSharedCourseEndSteps(results);
   const typedSteps: NonNullable<EzCourseMetadata["step"]> = delayedSteps?.slice() ?? [];
+  const loweredSequences = new Set((delayedSteps ?? []).map(step => step.sequence));
   for (const relative of relativeStarts ?? []) {
     const step = typedSteps.find(item => item.sequence === relative.sequence);
     if (step) {
-      // A dose-local delay and a whole-phase start are different notions;
-      // do not invent one combined time when both are explicitly defined.
-      if (!step.start) step.start = relative.start;
+      // Step start owns the course/phase onset. Preserve a distinct dose-local
+      // delay on the component instead of overwriting its timing or applying it twice.
+      step.start = relative.start;
+      loweredSequences.delete(relative.sequence);
     } else typedSteps.push(relative);
   }
   for (const shared of sharedCourseEnds ?? []) {
@@ -653,7 +655,6 @@ function buildWholeCourseResult(
   // R6 step.start now owns a shared typed delay. Keeping the same modifier
   // on its component would apply the delay again during relative scheduling.
   // Non-lowered, independently offset components preserve their modifier.
-  const loweredSequences = new Set((delayedSteps ?? []).map(step => step.sequence));
   const courseDosages = loweredSequences.size
     ? dosageItems.map(row => loweredSequences.has(row.sequence ?? 1) ? {
       ...row,

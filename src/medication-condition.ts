@@ -30,8 +30,8 @@ const NUMERIC_IF_GUARD = new RegExp(
 // Qualified day membership (e.g. a named treatment/work day) is a
 // context-dependent condition, not a recurrence or a symptom PRN phrase.
 // The caller supplies membership; this lexical constituent invents no dates.
-const CONTEXT_DAY_IF_GUARD = /\bif\s+(?=(?:[\p{L}-]+\s+)+days?\b\s*(?:[,;.!?]|$))|(?:หาก|ถ้า|เมื่อ)\s*(?=(?:เป็น)?วัน[^\d,;.!?]+(?:[,;.!?]|$))/iu;
-const CONTEXT_DAY_NOMINAL = /^(?:(?:[\p{L}-]+\s+)+days?|(?:เป็น)?วัน[^\d,;.!?]+)$/iu;
+const CONTEXT_DAY_IF_GUARD = /\bif\s+(?=(?:(?:it\s+is\s+)?(?:an?|the)\s+)?(?:[\p{L}-]+\s+){1,2}days?\b\s*(?:[,;.!?]|$))|(?:หาก|ถ้า|เมื่อ)\s*(?=(?:เป็น)?วัน[^\d,;.!?]+(?:[,;.!?]|$))/iu;
+const CONTEXT_DAY_NOMINAL = /^(?:(?:(?:it\s+is\s+)?(?:an?|the)\s+)?(?:[\p{L}-]+\s+){1,2}days?|(?:เป็น)?วัน[^\d,;.!?]+)$/iu;
 const MEASUREMENT_UNIT = String.raw`(?:%|mmhg|mg/dl|mmol/l|bpm|kg|lbs?|°c|c|องศา)`;
 const MEASUREMENT = new RegExp(`^(.+?)\\s*(${OPERATOR})\\s*(${NUMBER})\\s*(${MEASUREMENT_UNIT})?$`, "iu");
 const HEADLESS_MEASUREMENT = new RegExp(`^(${OPERATOR})\\s*(${NUMBER})\\s*(${MEASUREMENT_UNIT})?$`, "iu");
