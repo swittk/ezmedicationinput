@@ -744,6 +744,8 @@
     },
     {
       "code": "nasal_spray",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"nasal_spray","display":"nasal spray","i18n":{"th":"ยาพ่นจมูก"}},
+      "components": [{"role":"qualifier","text":"nasal","coding":{"system":"http://snomed.info/sct","code":"738948007","display":"Nasal"}}],
       "role": "object",
       "display": "nasal spray",
       "i18n": {
@@ -956,6 +958,8 @@
     },
     {
       "code": "absorbed",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"absorbed","display":"absorbed","i18n":{"th":"ซึมหมด"}},
+      "components": [{"role":"head","text":"material absorption","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C71731","display":"Material Absorption"}}],
       "role": "result",
       "display": "absorbed",
       "i18n": {
@@ -975,6 +979,8 @@
     },
     {
       "code": "dissolved",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"dissolved","display":"dissolved","i18n":{"th":"ละลายหมด"}},
+      "components": [{"role":"head","text":"dissolve","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C64929","display":"Dissolve"}}],
       "role": "result",
       "display": "dissolved",
       "i18n": {

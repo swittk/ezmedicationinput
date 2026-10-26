@@ -381,7 +381,8 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const role = child(part, "role")?.valueCode;
     const coding = readCoding(child(part, "coding")?.valueCoding);
     if ((role === "activity" || role === "technique" || role === "target-state" ||
-      role === "target-site" || role === "operation") && coding?.system && coding.code) {
+      role === "target-site" || role === "target-object" || role === "operation" || role === "orientation" ||
+      role === "mechanism" || role === "situation") && coding?.system && coding.code) {
       semanticComponents.push({ role, coding });
     }
   }

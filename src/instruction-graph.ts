@@ -78,7 +78,8 @@ import {
 } from "./instruction-concept-terminology";
 import {
   cloneMedicationInstructionActionRealizerConfig,
-  cloneMedicationInstructionActionSemanticComponents,
+  medicationInstructionActionSemanticComponentsForArgs,
+  medicationInstructionActionContextualCodings,
   getMedicationInstructionAction,
   medicationInstructionActionCodings,
   medicationInstructionActionLocaleRealizerConfig,
@@ -1545,22 +1546,6 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   "duration-activity": DURATION_ACTIVITY_ARGUMENT_PARSER,
   activity: ACTIVITY_ARGUMENT_PARSER
 };
-function contextualActionCodings(definition: ActionDefinition, args: readonly AdviceArgument[]): FhirCoding[] {
-  const codings: FhirCoding[] = [];
-  for (const rule of definition.contextualCodings ?? []) {
-    const expected = rule.whenArgument;
-    const matched = args.some((arg) =>
-      (expected.role === undefined || arg.role === expected.role) &&
-      (expected.conceptId === undefined || arg.conceptId === expected.conceptId) &&
-      (expected.codingCode === undefined || arg.coding?.code === expected.codingCode) &&
-      (expected.normalized === undefined || arg.normalized === expected.normalized));
-    if (!matched || codings.some((coding) =>
-      coding.code === rule.coding.code && coding.system === rule.coding.system)) continue;
-    codings.push({ ...rule.coding });
-  }
-  return codings;
-}
-
 function buildActionFrame(
   parts: Lexeme[],
   segmentStart: number,
@@ -1710,7 +1695,7 @@ function buildActionFrame(
 
   const codings = [
     ...medicationInstructionActionCodings(definition),
-    ...contextualActionCodings(definition, args)
+    ...medicationInstructionActionContextualCodings(definition, args)
   ];
   let span = trimActionRange(input, rangeFor(parts, segmentStart, semanticEnd, offset), offset);
   const earliestArgumentStart = args.reduce((minimum, arg) =>
@@ -1734,7 +1719,7 @@ function buildActionFrame(
       realizer: definition.realizer,
       realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
       codings,
-      semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
+      semanticComponents: medicationInstructionActionSemanticComponentsForArgs(definition, args)
     },
     relation: frameRelation,
     args,

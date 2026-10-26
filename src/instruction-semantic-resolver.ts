@@ -6,7 +6,8 @@ import { lexInput } from "./lexer/lex";
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
   medicationInstructionActionCodings,
-  cloneMedicationInstructionActionSemanticComponents,
+  medicationInstructionActionContextualCodings,
+  medicationInstructionActionSemanticComponentsForArgs,
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import {
@@ -228,8 +229,11 @@ function validateActionProposal(
       semanticClass: definition.semanticClass,
       display: definition.display,
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
-      codings: medicationInstructionActionCodings(definition),
-      semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
+      codings: [
+        ...medicationInstructionActionCodings(definition),
+        ...medicationInstructionActionContextualCodings(definition, args)
+      ],
+      semanticComponents: medicationInstructionActionSemanticComponentsForArgs(definition, args)
     },
     args,
     span: absolute,

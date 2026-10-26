@@ -105,6 +105,7 @@
     },
     {
       "code": "recap",
+      "semanticComponents": [{"role":"target-object","coding":{"system":"http://snomed.info/sct","code":"228254002","display":"Cap"}}],
       "semanticClass": "prepare",
       "display": "Replace the cap",
       "i18n": { "th": "ปิดฝา" },
@@ -212,6 +213,7 @@
     },
     {
       "code": "rub",
+      "semanticComponents": [{"role":"mechanism","coding":{"system":"http://snomed.info/sct","code":"263762005","display":"Friction"}}],
       "semanticClass": "apply",
       "display": "Rub",
       "i18n": {
@@ -1025,6 +1027,7 @@
     },
     {
       "code": "rotate",
+      "contextualSemanticComponents": [{"whenArgument":{"conceptId":"administration-site"},"component":{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"49572008","display":"Alternating"}}},{"whenArgument":{"conceptId":"bottle"},"component":{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"257912008","display":"Rotation - action"}}}],
       "semanticClass": "administration_pattern",
       "display": "Rotate",
       "i18n": { "th": "สลับ" },
@@ -1119,6 +1122,7 @@
     },
     {
       "code": "moisten",
+      "semanticComponents": [{"role":"target-state","coding":{"system":"http://snomed.info/sct","code":"17461003","display":"Wet"}}],
       "semanticClass": "prepare",
       "display": "Moisten",
       "i18n": {
@@ -1717,6 +1721,7 @@
     },
     {
       "code": "part",
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://snomed.info/sct","code":"386045008","display":"Hair structure"}}],
       "semanticClass": "prepare_site",
       "display": "Part",
       "i18n": {
@@ -1761,7 +1766,7 @@
     },
     {
       "code": "hold",
-      "contextualCodings": [{"whenArgument": {"conceptId": "breath", "role": "object"}, "coding": {"system": "https://www.nlm.nih.gov/mesh", "code": "D062485", "display": "Breath Holding"}}],
+      "contextualCodings": [{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"https://www.nlm.nih.gov/mesh","code":"D062485","display":"Breath Holding"}},{"whenArgument":{"conceptId":"breath","role":"object"},"coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C192566","display":"Voluntary Breath Holding"}}],
       "semanticClass": "retain",
       "display": "Hold",
       "i18n": {
@@ -1778,6 +1783,7 @@
     },
     {
       "code": "close",
+      "semanticComponents": [{"role":"target-state","coding":{"system":"http://snomed.info/sct","code":"29179001","display":"Closed"}}],
       "semanticClass": "manipulate",
       "display": "Close",
       "i18n": {
@@ -1795,6 +1801,7 @@
     },
     {
       "code": "press",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"257893003","display":"Pressure - action"}}],
       "semanticClass": "apply_pressure",
       "display": "Press",
       "i18n": {
@@ -1942,6 +1949,7 @@
     },
     {
       "code": "squeeze",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"263720003","display":"Compression - action"}}],
       "semanticClass": "manipulate",
       "display": "Squeeze",
       "i18n": {
@@ -1992,6 +2000,7 @@
     },
     {
       "code": "miss",
+      "semanticComponents": [{"role":"situation","coding":{"system":"http://snomed.info/sct","code":"1269470004","display":"Missed dose"}}],
       "semanticClass": "miss",
       "display": "Miss",
       "aliases": ["miss"],
@@ -2229,7 +2238,7 @@
     },
     {
       "code": "keep-ear-upward",
-      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}}],
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}},{"role":"orientation","coding":{"system":"http://snomed.info/sct","code":"353734004","display":"Upward"}}],
       "semanticClass": "position",
       "display": "Keep ear upward",
       "i18n": {
@@ -2247,7 +2256,7 @@
     },
     {
       "code": "keep-ear-dry",
-      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}}],
+      "semanticComponents": [{"role":"target-site","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C12394","display":"Ear"}},{"role":"target-state","coding":{"system":"http://snomed.info/sct","code":"13880007","display":"Dry"}}],
       "semanticClass": "site_care",
       "display": "Keep ear dry",
       "i18n": {
@@ -2278,6 +2287,7 @@
     },
     {
       "code": "pause-use",
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"421139008","display":"Hold - dosing instruction fragment"}}],
       "semanticClass": "stop",
       "display": "Pause use",
       "i18n": {
@@ -2292,6 +2302,7 @@
     },
     {
       "code": "wash-hair-out",
+      "semanticComponents": [{"role":"technique","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C65120","display":"Rinse"}},{"role":"target-site","coding":{"system":"http://snomed.info/sct","code":"386045008","display":"Hair structure"}}],
       "semanticClass": "cleanse",
       "display": "Wash out",
       "i18n": {
@@ -2416,6 +2427,8 @@
     },
     {
       "code": "open",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-action","code":"open","display":"Open","i18n":{"th":"เปิด"}},
+      "externalCodings": [{"system":"http://snomed.info/sct","code":"312336005","display":"Opening - action"}],
       "semanticClass": "prepare",
       "display": "Open",
       "i18n": {

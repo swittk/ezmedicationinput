@@ -791,7 +791,7 @@ export interface InstructionConceptComponent {
 /** A standard-coded constituent of an instruction predicate, not an equivalent
  * code for the whole imperative or an unvalidated SNOMED expression. */
 export interface InstructionActionSemanticComponent {
-  role: "activity" | "technique" | "target-state" | "target-site" | "operation";
+  role: "activity" | "technique" | "target-state" | "target-site" | "target-object" | "operation" | "orientation" | "mechanism" | "situation";
   coding: FhirCoding;
 }
 
@@ -1075,6 +1075,13 @@ export interface MedicationInstructionActionContextualCodingRule {
   coding: FhirCoding;
 }
 
+/** Bind independently coded parts to a typed semantic argument rather than
+ * to an ambiguous bare verb. Reuses existing contextual coding match semantics. */
+export interface MedicationInstructionActionContextualSemanticComponentRule {
+  whenArgument: MedicationInstructionActionContextualCodingRule["whenArgument"];
+  component: InstructionActionSemanticComponent;
+}
+
 export interface MedicationInstructionActionLocaleRealizerConfig {
   fallbackObject?: string;
   suppressActivityConcepts?: string[];
@@ -1155,6 +1162,8 @@ export interface MedicationInstructionActionDefinition {
   applicationVerb?: boolean;
   /** Extra exact codings licensed by a typed semantic argument. */
   contextualCodings?: MedicationInstructionActionContextualCodingRule[];
+  /** Add accurate standard-coded constituents only in the matched argument context. */
+  contextualSemanticComponents?: MedicationInstructionActionContextualSemanticComponentRule[];
   /** A method-capable procedural action that may serve as the primary administration head. */
   primaryAdministrationHead?: boolean;
   /** Semantically light verb that yields to an immediately following stronger administration head. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions } from "../src/index";
+import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
@@ -123,11 +123,22 @@ describe("non-equivalent standardized constituents of local instruction actions"
     ["remain upright 5 minutes", "remain-upright", "target-state", "C86043"],
     ["lie down 5 minutes", "lie-down", "target-state", "102538003"],
     ["spit out", "spit", "activity", "12405001"],
+    ["replace the cap", "recap", "target-object", "228254002"],
     ["swab", "swab", "technique", "C17627"],
     ["reapply", "reapply", "operation", "C47886"],
     ["blow nose", "blow-nose", "target-site", "C12756"],
     ["keep ear upward 5 minutes", "keep-ear-upward", "target-site", "C12394"],
-    ["keep ear dry", "keep-ear-dry", "target-site", "C12394"]
+    ["keep ear upward 5 minutes", "keep-ear-upward", "orientation", "353734004"],
+    ["keep ear dry", "keep-ear-dry", "target-site", "C12394"],
+    ["keep ear dry", "keep-ear-dry", "target-state", "13880007"],
+    ["rub in", "rub", "mechanism", "263762005"],
+    ["press", "press", "operation", "257893003"],
+    ["squeeze", "squeeze", "operation", "263720003"],
+    ["moisten", "moisten", "target-state", "17461003"],
+    ["part hair", "part", "target-site", "386045008"],
+    ["wash hair out", "wash-hair-out", "technique", "C65120"],
+    ["wash hair out", "wash-hair-out", "target-site", "386045008"],
+    ["close eyes", "close", "target-state", "29179001"]
   ])("preserves local %s while carrying externally coded %s role", (source, actionCode, role, code) => {
     const definition = getMedicationInstructionAction(actionCode)!;
     expect(definition.semanticComponents).toEqual(expect.arrayContaining([
@@ -150,6 +161,74 @@ describe("non-equivalent standardized constituents of local instruction actions"
       .toEqual(frame.predicate.codings?.map(coding => [coding.system, coding.code]));
     expect(signature(restored.predicate.semanticComponents)).toEqual(signature(definition.semanticComponents));
     expect(restored.predicate.lemma).toBe(actionCode);
+  });
+
+  it("adds an exact Opening-action qualifier without discarding the original local Open code", () => {
+    const definition = getMedicationInstructionAction("open")!;
+    const frames = parseInstructionActions("open the bottle");
+    const frame = frames.find(item => item.predicate.lemma === "open")!;
+    expect(frame).toBeDefined();
+    expect(frame.predicate.codings?.map(coding => [coding.system, coding.code])).toEqual([
+      ["urn:ezmedicationinput:CodeSystem:medication-instruction-action", "open"],
+      ["http://snomed.info/sct", "312336005"]
+    ]);
+    const copy = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      actions: [frame], sourceText: "open the bottle"
+    })!])!;
+    expect(copy.actions[0].predicate.codings?.map(coding => [coding.system, coding.code]))
+      .toEqual(frame.predicate.codings?.map(coding => [coding.system, coding.code]));
+  });
+
+  it.each([
+    ["pause-use", "operation", "421139008"],
+    ["miss", "situation", "1269470004"]
+  ])("keeps registered conditional %s separate from entire predicate equivalence", (action, role, code) => {
+    const definition = getMedicationInstructionAction(action)!;
+    expect(definition.semanticComponents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role, coding: expect.objectContaining({ code, system: SNOMED }) })
+    ]));
+    const again = getMedicationInstructionAction(action)!;
+    again.semanticComponents![0].coding.code = "changed";
+    expect(getMedicationInstructionAction(action)?.semanticComponents?.[0]?.coding.code).toBe(code);
+  });
+
+  it("uses typed arguments for alternating injection sites versus physically rotating a bottle", () => {
+    const scenarios = [
+      ["rotate injection sites", "administration-site", "49572008"],
+      ["rotate bottle", "bottle", "257912008"]
+    ] as const;
+    for (const [source, argumentConcept, standardCode] of scenarios) {
+      const frame = parseInstructionActions(source).find(item => item.predicate.lemma === "rotate")!;
+      expect(frame).toBeDefined();
+      expect(frame.args.some(argument => argument.conceptId === argumentConcept)).toBe(true);
+      expect(frame.predicate.codings?.map(coding => coding.code)).toEqual(["rotate"]);
+      expect(frame.predicate.semanticComponents?.map(part => part.coding.code)).toEqual([standardCode]);
+      const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
+        sourceText: source, actions: [frame]
+      })!])!;
+      expect(restored.actions[0].predicate.semanticComponents?.map(part => part.coding.code))
+        .toEqual([standardCode]);
+    }
+    const bare = getMedicationInstructionAction("rotate")!;
+    expect(bare.semanticComponents).toBeUndefined();
+    expect(bare.contextualSemanticComponents).toHaveLength(2);
+    bare.contextualSemanticComponents![0].component.coding.code = "bad";
+    expect(getMedicationInstructionAction("rotate")!.contextualSemanticComponents![0].component.coding.code)
+      .toBe("49572008");
+  });
+
+  it("adds breath-holding terminology only when hold actually governs breath", () => {
+    const breath = parseInstructionActions("hold breath for 10 seconds")[0]!;
+    expect(breath.predicate.lemma).toBe("hold");
+    expect(breath.predicate.codings?.map(coding => coding.code))
+      .toEqual(["hold", "D062485", "C192566"]);
+    const other = parseInstructionActions("hold eye closed")[0]!;
+    expect(other.predicate.codings?.map(coding => coding.code)).toEqual(["hold"]);
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: "hold breath for 10 seconds", actions: [breath]
+    })!])!;
+    expect(restored.actions[0].predicate.codings?.map(coding => coding.code))
+      .toEqual(["hold", "D062485", "C192566"]);
   });
 
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
@@ -180,5 +259,25 @@ describe("gender-neutral external intimate anatomy code", () => {
       expect(parsed.fhir.route?.coding?.[0]?.code).toBe("6064005");
       expect(parsed.longText).toContain("external intimate area");
     }
+  });
+});
+
+describe("partial coded clinical concept constituents", () => {
+  it.each([
+    ["nasal_spray", "qualifier", "738948007"],
+    ["absorbed", "head", "C71731"],
+    ["dissolved", "head", "C64929"]
+  ])("preserves the whole local %s and separately codes only its established constituent", (name, role, code) => {
+    const concept = getMedicationInstructionConcept(name)!;
+    const codings = medicationInstructionConceptCodings(concept);
+    expect(codings.map(item => [item.system, item.code])).toEqual([
+      ["urn:ezmedicationinput:CodeSystem:medication-instruction-concept", name]
+    ]);
+    expect(concept.components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
+    ]));
+    expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
+    concept.components![0].coding!.code = "mutated";
+    expect(getMedicationInstructionConcept(name)?.components?.[0]?.coding?.code).toBe(code);
   });
 });

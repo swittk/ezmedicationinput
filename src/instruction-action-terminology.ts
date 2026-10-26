@@ -1,6 +1,7 @@
 import source from "./instruction-action-terminology.json";
 import { localizedConfig } from "./localization";
 import {
+  AdviceArgument,
   FhirCoding,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionInput,
@@ -46,6 +47,7 @@ interface ActionSource {
   administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
   preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
   contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
+  contextualSemanticComponents?: MedicationInstructionActionDefinition["contextualSemanticComponents"];
   administrationMethod?: FhirCoding;
   verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
   methodRouteOverride?: MedicationInstructionActionDefinition["methodRouteOverride"];
@@ -172,6 +174,66 @@ function cloneContextualCodings(
   }));
 }
 
+function cloneContextualSemanticComponents(
+  rules: MedicationInstructionActionDefinition["contextualSemanticComponents"]
+): MedicationInstructionActionDefinition["contextualSemanticComponents"] {
+  return rules?.map(rule => ({
+    whenArgument: { ...rule.whenArgument },
+    component: { role: rule.component.role, coding: cloneCoding(rule.component.coding)! }
+  }));
+}
+
+/** Shared typed-argument matcher for both equivalent context codings and
+ * independent standards-coded constituents. No new language interpretation. */
+export function matchesMedicationInstructionActionContextArgument(
+  expected: NonNullable<MedicationInstructionActionDefinition["contextualCodings"]>[number]["whenArgument"],
+  args: readonly AdviceArgument[]
+): boolean {
+  return args.some(arg =>
+    (expected.role === undefined || arg.role === expected.role) &&
+    (expected.conceptId === undefined || arg.conceptId === expected.conceptId) &&
+    (expected.codingCode === undefined || arg.coding?.code === expected.codingCode) &&
+    (expected.normalized === undefined || arg.normalized === expected.normalized)
+  );
+}
+
+/** Resolve exact whole-action mappings licensed by typed argument semantics.
+ * Shared by the primary HPSG graph and optional semantic-resolver graph. */
+export function medicationInstructionActionContextualCodings(
+  definition: MedicationInstructionActionDefinition,
+  args: readonly AdviceArgument[]
+): FhirCoding[] {
+  const codings: FhirCoding[] = [];
+  for (const rule of definition.contextualCodings ?? []) {
+    if (!matchesMedicationInstructionActionContextArgument(rule.whenArgument, args) ||
+        codings.some(coding =>
+          coding.code === rule.coding.code && coding.system === rule.coding.system)) continue;
+    codings.push(cloneCoding(rule.coding)!);
+  }
+  return codings;
+}
+
+/** Combine only constituents justified by this action's actual typed arguments.
+ * Do not place fragment/finding/qualifier codes in whole-predicate Codings. */
+export function medicationInstructionActionSemanticComponentsForArgs(
+  definition: MedicationInstructionActionDefinition,
+  args: readonly AdviceArgument[]
+): MedicationInstructionActionDefinition["semanticComponents"] {
+  const fixed = cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents);
+  if (!definition.contextualSemanticComponents?.length) return fixed;
+  const combined = fixed ?? [];
+  for (const rule of definition.contextualSemanticComponents) {
+    if (!matchesMedicationInstructionActionContextArgument(rule.whenArgument, args)) continue;
+    if (combined.some(part => part.role === rule.component.role &&
+      part.coding.system === rule.component.coding.system &&
+      part.coding.code === rule.component.coding.code)) continue;
+    combined.push({
+      role: rule.component.role, coding: cloneCoding(rule.component.coding)!
+    });
+  }
+  return combined.length ? combined : undefined;
+}
+
 function cloneContinuationLicenses(
   rules: MedicationInstructionActionDefinition["continuationLicenses"]
 ): MedicationInstructionActionDefinition["continuationLicenses"] {
@@ -211,6 +273,7 @@ function cloneDefinition(
     administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(definition.contextualSemanticComponents),
     administrationMethod: cloneCoding(definition.administrationMethod),
     verbRouteHint: definition.verbRouteHint,
     methodRouteOverride: definition.methodRouteOverride,
@@ -253,6 +316,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     administrationDurationIntroducers: sourceDefinition.administrationDurationIntroducers ? [...sourceDefinition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: sourceDefinition.preferredRelationSemanticClasses ? [...sourceDefinition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(sourceDefinition.contextualSemanticComponents),
     administrationMethod: cloneCoding(sourceDefinition.administrationMethod),
     verbRouteHint: sourceDefinition.verbRouteHint,
     methodRouteOverride: sourceDefinition.methodRouteOverride,
@@ -300,6 +364,7 @@ function normalizeCustomDefinition(
     administrationDurationIntroducers: input.administrationDurationIntroducers ? [...input.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: input.preferredRelationSemanticClasses ? [...input.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(input.contextualSemanticComponents),
     administrationMethod: cloneCoding(input.administrationMethod),
     verbRouteHint: input.verbRouteHint,
     methodRouteOverride: input.methodRouteOverride,
