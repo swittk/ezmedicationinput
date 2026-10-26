@@ -1267,14 +1267,18 @@ describe("standard instruction terminology", () => {
   it.each([
     ["doctor", "158965000"], ["household-spoon", "303514007"],
     ["applicator", "408101000"], ["inhaler", "334980009"], ["spacer", "464036000"],
-    ["medication-tablet", "385055001"], ["medication-capsule", "385049006"],
+    ["medication-tablet", "732936001"], ["medication-capsule", "732937005"],
     ["cream", "385099005"], ["ointment", "385101003"], ["gel", "385100002"],
-    ["patch", "739003001"], ["open-wound", "59091005"],
+    ["patch", "733005001"], ["open-wound", "59091005"],
     ["drinking-activity", "30953006"], ["exercise", "256235009"],
     ["swimming", "20461001"], ["bathing", "129002005"], ["sweating", "415691001"],
     ["intercourse", "364316005"], ["morning", "73775008"], ["noon", "71997007"],
     ["afternoon", "422133006"], ["evening", "3157002"], ["night", "2546009"],
-    ["bedtime", "21029003"], ["gently", "418449005"], ["immediacy", "88694003"]
+    ["bedtime", "21029003"], ["gently", "418449005"], ["immediacy", "88694003"],
+    ["transdermal-patch", "466056002"], ["small_amount", "769398002"],
+    ["overnight", "255270004"], ["application", "129425003"],
+    ["medication-administration", "18629005"], ["drink-product", "226465004"],
+    ["alcoholic-beverage", "53527002"], ["ethanol", "419442005"]
   ])("uses the standard concept without a duplicate local coding: %s", (name, code) => {
     const concept = getMedicationInstructionConcept(name)!;
     expect(concept.code).toBe(name);
@@ -1293,7 +1297,8 @@ describe("standard instruction terminology", () => {
     ["complete-course", "420604000"], ["remove", "129303008"], ["replace", "282089006"],
     ["measure", "129266000"], ["cut", "360314001"], ["nebulize", "56251003"],
     ["rinse_mouth", "59611000087105"], ["call", "420942008"],
-    ["withhold-administration", "421139008"]
+    ["withhold-administration", "421139008"], ["soak", "42691000"],
+    ["consult", "129430004"]
   ])("uses the standard action without changing the grammar identity: %s", (name, code) => {
     const action = getMedicationInstructionAction(name)!;
     expect(action.code).toBe(name);
@@ -1330,6 +1335,35 @@ describe("standard instruction terminology", () => {
     expect(nebulized.fhir[0].timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
   });
 
+  it("codes a generic patch as a presentation unit, and explicitly transdermal patches as devices", () => {
+    const generic = parseInstructionActions("Remove patch")[0];
+    const specialized = parseInstructionActions("Remove transdermal patch")[0];
+    expect(generic.args.find(arg => arg.conceptId === "patch")?.coding).toMatchObject({
+      system: "http://snomed.info/sct", code: "733005001"
+    });
+    expect(specialized.args.find(arg => arg.conceptId === "transdermal-patch")?.coding)
+      .toMatchObject({ system: "http://snomed.info/sct", code: "466056002" });
+    expect(getMedicationInstructionConcept("patch")?.aliases).not.toContain("transdermal patch");
+    expect(generic.args.some(arg => arg.coding?.code === "466056002")).toBe(false);
+    const restored = parseInstructionGraphExtension([
+      buildInstructionGraphExtension({
+        sourceText: "Remove transdermal patch", actions: [specialized]
+      })!
+    ])!;
+    expect(restored.actions[0].args.find(arg => arg.conceptId === "transdermal-patch")?.coding)
+      .toMatchObject({ system: "http://snomed.info/sct", code: "466056002" });
+  });
+
+  it("does not conflate explicitly named ethanol and alcoholic beverages with ambiguous alcohol", () => {
+    const beverage = parseInstructionActions("Avoid alcoholic beverages")[0];
+    const ethanol = parseInstructionActions("Use ethanol")[0];
+    expect(beverage?.args.find(arg => arg.conceptId === "alcoholic-beverage")?.coding)
+      .toMatchObject({ system: "http://snomed.info/sct", code: "53527002" });
+    expect(ethanol?.args.find(arg => arg.conceptId === "ethanol")?.coding)
+      .toMatchObject({ system: "http://snomed.info/sct", code: "419442005" });
+    expect(getMedicationInstructionConcept("alcohol")?.coding).toBeUndefined();
+  });
+
   it("does not replace a general hold action with a medication-withholding code", () => {
     const frame = parseInstructionActions("Hold breath for 10 seconds")[0];
     expect(frame.predicate.lemma).toBe("hold");
@@ -1341,7 +1375,7 @@ describe("standard instruction terminology", () => {
     ["Remove the applicator", "remove", "129303008", "applicator", "408101000"],
     ["Call doctor", "call", "420942008", "doctor", "158965000"],
     ["Measure 1 cm ribbon cream", "measure", "129266000", "cream", "385099005"],
-    ["Replace the patch", "replace", "282089006", "patch", "739003001"]
+    ["Replace the patch", "replace", "282089006", "patch", "733005001"]
   ])("retains standard action and object codings through the graph wire format: %s",
       (source, verb, actionCode, noun, objectCode) => {
     const graph = parseSig(source).meta.canonical.clauses[0].instructionGraph!;
@@ -1388,7 +1422,7 @@ describe("continuation directive ownership", () => {
 describe("composed instruction concepts", () => {
   it.each([
     ["Drink plenty of water", "plenty-of-water", "11713004", "plenty"],
-    ["Replace new patch", "new_patch", "739003001", "new"],
+    ["Replace new patch", "new_patch", "733005001", "new"],
     ["Rinse with clean water", "clean_water", "11713004", "clean"],
     ["Avoid other medications", "other-medications", "763158003", "other"]
   ])("preserves independently coded constituents of %s", (source, concept, headCode, qualifier) => {
@@ -1422,7 +1456,7 @@ describe("composed instruction concepts", () => {
   it("clones constituent codings and preserves an explicitly supplied expression as one coding", () => {
     const first = getMedicationInstructionConcept("new_patch")!;
     first.components![0].coding!.code = "changed";
-    expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("739003001");
+    expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("733005001");
     const expression = "22253000:363698007=(78883009:272741003=24028007)";
     const frames = parseInstructionActions("Avoid toe discomfort", 0, {
       instructionConceptMap: {

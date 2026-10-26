@@ -990,6 +990,7 @@
     },
     {
       "code": "soak",
+      "coding": {"system": "http://snomed.info/sct", "code": "42691000", "display": "Soak"},
       "semanticClass": "prepare",
       "display": "Soak",
       "i18n": {
@@ -1849,6 +1850,7 @@
     },
     {
       "code": "consult",
+      "coding": {"system": "http://snomed.info/sct", "code": "129430004", "display": "Consultation - action"},
       "semanticClass": "medical_advice",
       "display": "Consult a doctor",
       "i18n": {

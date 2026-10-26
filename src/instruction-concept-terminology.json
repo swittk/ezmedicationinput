@@ -104,6 +104,7 @@
     },
     {
       "code": "medication-administration",
+      "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"},
       "role": "activity",
       "display": "taking medication",
       "i18n": { "th": "การรับประทานยา" },
@@ -137,7 +138,7 @@
     },
     {
       "code": "medication-tablet",
-      "coding": {"system": "http://snomed.info/sct", "code": "385055001", "display": "Tablet"},
+      "coding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"},
       "role": "object",
       "display": "tablet",
       "i18n": { "th": "ยาเม็ด" },
@@ -145,7 +146,7 @@
     },
     {
       "code": "medication-capsule",
-      "coding": {"system": "http://snomed.info/sct", "code": "385049006", "display": "Capsule"},
+      "coding": {"system": "http://snomed.info/sct", "code": "732937005", "display": "Capsule"},
       "role": "object",
       "display": "capsule",
       "i18n": { "th": "ยาแคปซูล" },
@@ -172,6 +173,22 @@
       "display": "alcohol",
       "i18n": { "th": "แอลกอฮอล์" },
       "aliases": ["alcohol", "แอลกอฮอล์"]
+    },
+    {
+      "code": "alcoholic-beverage",
+      "coding": {"system": "http://snomed.info/sct", "code": "53527002", "display": "Alcoholic beverage"},
+      "role": "substance",
+      "display": "alcoholic beverage",
+      "i18n": { "th": "เครื่องดื่มแอลกอฮอล์" },
+      "aliases": ["alcoholic beverage", "alcoholic beverages", "เครื่องดื่มแอลกอฮอล์"]
+    },
+    {
+      "code": "ethanol",
+      "coding": {"system": "http://snomed.info/sct", "code": "419442005", "display": "Ethanol"},
+      "role": "substance",
+      "display": "ethanol",
+      "i18n": { "th": "เอทานอล" },
+      "aliases": ["ethanol", "เอทานอล"]
     },
     {
       "code": "needle",
@@ -235,6 +252,7 @@
     },
     {
       "code": "drink-product",
+      "coding": {"system": "http://snomed.info/sct", "code": "226465004", "display": "Drinks"},
       "role": "substance",
       "display": "drink",
       "i18n": { "th": "เครื่องดื่ม" },
@@ -284,7 +302,7 @@
     },
     {
       "code": "patch",
-      "coding": {"system": "http://snomed.info/sct", "code": "739003001", "display": "Patch"},
+      "coding": {"system": "http://snomed.info/sct", "code": "733005001", "display": "Patch"},
       "role": "object",
       "display": "patch",
       "i18n": {
@@ -292,9 +310,16 @@
       },
       "aliases": [
         "patch",
-        "transdermal patch",
         "แผ่นแปะ"
       ]
+    },
+    {
+      "code": "transdermal-patch",
+      "coding": {"system": "http://snomed.info/sct", "code": "466056002", "display": "Transdermal medicated patch"},
+      "role": "object",
+      "display": "transdermal patch",
+      "i18n": { "th": "แผ่นแปะยาผ่านผิวหนัง" },
+      "aliases": ["transdermal patch"]
     },
     {
       "code": "breath",
@@ -406,6 +431,7 @@
     },
     {
       "code": "small_amount",
+      "coding": {"system": "http://snomed.info/sct", "code": "769398002", "display": "Small amount"},
       "role": "amount",
       "display": "a small amount",
       "i18n": {
@@ -748,7 +774,7 @@
     },
     {
       "code": "new_patch",
-      "components": [{"role": "head", "text": "patch", "coding": {"system": "http://snomed.info/sct", "code": "739003001", "display": "Patch"}}, {"role": "qualifier", "text": "new", "coding": {"system": "http://snomed.info/sct", "code": "7147002", "display": "New"}}],
+      "components": [{"role": "head", "text": "patch", "coding": {"system": "http://snomed.info/sct", "code": "733005001", "display": "Patch"}}, {"role": "qualifier", "text": "new", "coding": {"system": "http://snomed.info/sct", "code": "7147002", "display": "New"}}],
       "role": "object",
       "display": "new patch",
       "i18n": {
@@ -836,6 +862,7 @@
     },
     {
       "code": "overnight",
+      "coding": {"system": "http://snomed.info/sct", "code": "255270004", "display": "Overnight"},
       "role": "duration",
       "display": "overnight",
       "i18n": {
@@ -850,6 +877,7 @@
     },
     {
       "code": "application",
+      "coding": {"system": "http://snomed.info/sct", "code": "129425003", "display": "Application - action"},
       "role": "activity",
       "display": "application",
       "i18n": {

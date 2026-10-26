@@ -551,6 +551,24 @@ describe("clinical SIG correctness and boundary promotion", () => {
     }
   );
 
+  it.each([
+    ["1 tab po q4h if pain no more than 4 doses per day", undefined],
+    ["Take 1 tablet if pain and at most 4 doses per day", undefined],
+    ["รับประทาน 1 เม็ด เมื่อปวด ไม่เกิน 4 ครั้งต่อวัน", "th"]
+  ] as const)("retains the bare pain PRN separately from a maximum count: %s", (source, locale) => {
+    const parsed = parseSig(source, locale ? { locale } : undefined);
+    expect(parsed.fhir.asNeeded).toBe(true);
+    expect(parsed.fhir.asNeededFor?.[0]?.coding?.[0]).toMatchObject({
+      system: "http://snomed.info/sct", code: "22253000"
+    });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.occurrenceCap)
+      .toMatchObject({ max: 4, period: 1, periodUnit: "d" });
+    expect(getDosageCondition(parsed.fhir)).toBeUndefined();
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 1, unit: "tab"
+    });
+  });
+
   it("keeps quantity maxima distinct from occurrence caps and limits PRN supply", () => {
     const quantityCapped = parseSig("2 tabs q4h PRN pain max 4 tablets/day");
     const occurrenceCapped = parseSig("2 tabs q4h PRN pain no more than 4 doses per day");
