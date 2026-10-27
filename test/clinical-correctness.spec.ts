@@ -6,6 +6,29 @@ import { parseMedicationGuard } from "../src/medication-condition";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { getDosageAlternativeChoice, setDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, fromFhir, fromFhirDosage, parseSig as parseBatch } from "../src";
 
+describe("Thai negated numeric guard comparators", () => {
+  it.each([
+    ["ไม่น้อยกว่า", "ge", 100, 100, 99],
+    ["ไม่มากกว่า", "le", 160, 160, 161],
+    ["ไม่สูงกว่า", "le", 160, 160, 161],
+    ["ไม่ต่ำกว่า", "ge", 100, 100, 99],
+    ["ไม่เกิน", "le", 160, 160, 161]
+  ] as const)("keeps a Thai blood-pressure guard %s pointed in the correct direction", (
+    comparative, operation, threshold, allowed, disallowed
+  ) => {
+    const source = `รับประทาน 1 เม็ด ถ้าความดัน${comparative} ${threshold}`;
+    const parsed = parseSig(source);
+    const condition = getDosageCondition(parsed.fhir);
+    expect(condition).toMatchObject({
+      kind: "measurement", name: "ความดัน", operation, value: threshold
+    });
+    expect(evaluateMedicationCondition(condition!, { ความดัน: allowed })).toBe(true);
+    expect(evaluateMedicationCondition(condition!, { ความดัน: disallowed })).toBe(false);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
 describe("clinical SIG correctness and boundary promotion", () => {
   it.each([
     ["second", "1 tab at 08:00, 1 tab at 20:00 only if BP > 160", [false, true]],

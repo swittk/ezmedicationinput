@@ -21,7 +21,7 @@ const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|�
 const OTHERWISE_HOLD = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\s+(?:hold|do\s+not\s+take|skip)\b(?=\s*(?:$|[.,;!?])|\s+(?:and|then)\b)|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?(?=\s*(?:$|[.,;!?]|และ|แล้ว|จากนั้น))/iu;
 const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
 const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d+)?|\.\d+)`;
-const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|exceeds?|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
+const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:greater\s+than|exceeds?|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|ไม่น้อยกว่า|ไม่มากกว่า|ไม่สูงกว่า|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
 // The guard lead and its measurement daughter share one comparison grammar.
 // Otherwise a valid operator (e.g. "under") can be consumed as mere advice.
 const NUMERIC_IF_GUARD = new RegExp(
@@ -49,8 +49,8 @@ const ALTERNATE_CUE = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\b|(?:มิฉะน�
 
 function canonicalOperator(value: string): "gt" | "ge" | "lt" | "le" | "eq" {
   const term = value.toLowerCase().replace(/\s+/gu, " ").trim();
-  if (/^(?:>=|at least|no less than|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า)$/iu.test(term)) return "ge";
-  if (/^(?:<=|at most|no more than|ไม่เกิน)$/iu.test(term)) return "le";
+  if (/^(?:>=|at least|no less than|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ไม่น้อยกว่า)$/iu.test(term)) return "ge";
+  if (/^(?:<=|at most|no more than|ไม่เกิน|ไม่มากกว่า|ไม่สูงกว่า)$/iu.test(term)) return "le";
   if (/^(?:>|above|over|greater than|exceeds?|มากกว่า|สูงกว่า)$/iu.test(term)) return "gt";
   if (/^(?:<|below|under|less than|ต่ำกว่า|น้อยกว่า)$/iu.test(term)) return "lt";
   return "eq";

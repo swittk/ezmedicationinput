@@ -367,7 +367,8 @@ function clinicalCarrierQuantityFromFhir(
  * @param repeat Editable FHIR timing currently being lowered.
  */
 function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
-  if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit || (repeat.timeOfDay?.length ?? 0) < 2) return;
+  if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit ||
+      (repeat.timeOfDay?.length ?? 0) < 2 || repeat.when?.length) return;
   const clocks = new Set(repeat.timeOfDay).size;
   if (repeat.periodUnit === 'd') {
     repeat.frequency = clocks;

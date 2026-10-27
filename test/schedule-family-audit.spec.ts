@@ -590,6 +590,45 @@ const clocks = ["08:00:00", "20:00:00"];
 const origin = "2024-01-01T00:00:00Z";
 
 describe("regimen clock-frequency normalization", () => {
+  it("does not invent a two-dose frequency for two clocks plus an additional bedtime event", () => {
+    const schedule: CanonicalScheduleExpr = {
+      period: 1, periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: ["08:00:00", "14:00:00"],
+      when: [EventTiming["Before Sleep"]]
+    };
+    const dosage = projectSchedule(schedule);
+    expect(dosage.timing?.repeat).toMatchObject({
+      period: 1, periodUnit: "d", timeOfDay: schedule.timeOfDay,
+      when: [EventTiming["Before Sleep"]]
+    });
+    expect(dosage.timing?.repeat?.frequency).toBeUndefined();
+    const opportunities = nextDueDoses(dosage, {
+      ...due, limit: 3,
+      eventClock: { [EventTiming["Before Sleep"]]: "22:00" }
+    });
+    expect(opportunities.map(time => time.slice(11, 16)))
+      .toEqual(["08:00", "14:00", "22:00"]);
+    expect(calculateTotalUnits({ ...supply, dosage,
+      eventClock: { [EventTiming["Before Sleep"]]: "22:00" }
+    }).totalUnits).toBe(6);
+  });
+
+  it("continues to infer clock-only frequency while preserving explicit cadence", () => {
+    const base: CanonicalScheduleExpr = {
+      period: 1, periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: ["08:00:00", "14:00:00"]
+    };
+    expect(projectSchedule(base).timing?.repeat?.frequency).toBe(2);
+    expect(projectSchedule({
+      ...base, when: [EventTiming["Before Sleep"]], frequency: 4
+    }).timing?.repeat?.frequency).toBe(4);
+    expect(projectSchedule({
+      period: 1, periodUnit: FhirPeriodUnit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday],
+      timeOfDay: base.timeOfDay, when: [EventTiming["Before Sleep"]]
+    }).timing?.repeat?.frequency).toBeUndefined();
+  });
+
   const weeklyCases: Array<{
     name: string;
     schedule: CanonicalScheduleExpr;
