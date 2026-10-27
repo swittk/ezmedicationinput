@@ -1,6 +1,7 @@
 import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { realizeInstructionAction } from "../src/instruction-graph";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
@@ -8,6 +9,26 @@ import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
 
 describe("procedural instruction graph", () => {
+  it.each([
+    ["Do not rub eyes", "Do not rub the eye"],
+    ["Do not dab skin", "Do not dab the skin"],
+    ["Do not massage scalp", "Do not massage the scalp"],
+    ["Do not lather scalp", "Do not lather the scalp"],
+    ["Do not apply skin", "Do not apply to the skin"],
+    ["Do not reapply skin", "Do not reapply to the skin"]
+  ])("realizes reconstructed site prohibitions with the verb's actual attachment: %s", (source, expected) => {
+    const action = parseInstructionActions(source)[0]!;
+    expect(action.polarity).toBe("negate");
+    expect(action.relation).toBeUndefined();
+    expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Site }));
+    // Unlike graph realization with an unchanged English source, generating
+    // one action from structured data calls the locale adapter directly.
+    expect(realizeInstructionAction(action, "en")).toBe(expected);
+    const extension = buildInstructionGraphExtension({ sourceText: source, actions: [action] })!;
+    const recovered = parseInstructionGraphExtension([extension])!.actions[0];
+    expect(realizeInstructionAction(recovered, "en")).toBe(expected);
+  });
+
   it("preserves graph action order, relation indices, and coding translations through FHIR", () => {
     const parsed = parseSig("wash hands then wait 5 minutes");
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;

@@ -1467,9 +1467,9 @@ function tryParseRelationInstruction(
   span: TextRange,
   context: AdviceParseContext,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (!words.length) {
     return undefined;
   }
@@ -1507,9 +1507,9 @@ function tryParseImplicitConceptInstruction(
   span: TextRange,
   context: AdviceParseContext,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (!words.length) {
     return undefined;
   }
@@ -1609,9 +1609,9 @@ function tryParseNegativeRelationInstruction(
   span: TextRange,
   context: AdviceParseContext,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (words.length < 3) return undefined;
   const prefix = parseLeadingClauseFeatures(words);
   if (!prefix || prefix.polarity !== AdvicePolarity.Negate || prefix.cursor >= words.length) return undefined;
@@ -1640,9 +1640,9 @@ function tryParseNoObjectInstruction(
   sourceText: string,
   span: TextRange,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (words.length < 2) {
     return undefined;
   }
@@ -1694,9 +1694,9 @@ function tryParseEllipticalEffectInstruction(
   span: TextRange,
   context: AdviceParseContext,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (!words.length) {
     return undefined;
   }
@@ -1847,9 +1847,9 @@ function tryParseClauseInstruction(
   span: TextRange,
   context: AdviceParseContext,
   sequenceIndex: number,
-  sequenceCount: number
+  sequenceCount: number,
+  words: string[]
 ): AdviceFrame[] | undefined {
-  const words = normalizeWords(sourceText);
   if (!words.length) {
     return undefined;
   }
@@ -1960,20 +1960,24 @@ function parseSequenceFrames(
   const frames: AdviceFrame[] = [];
   for (let index = 0; index < sequenceSegments.length; index++) {
     const segment = sequenceSegments[index];
+    // Share HPSG-compatible lexical surfaces across competing advice rules;
+    // never retain patient text beyond this local parse invocation.
+    const words = normalizeWords(segment.text);
     const parsed =
-      tryParseRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
-      tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
+      tryParseRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words) ??
+      tryParseImplicitConceptInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words) ??
       tryParseStyleInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
-      tryParseNegativeRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length) ??
-      tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length) ??
+      tryParseNegativeRelationInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words) ??
+      tryParseNoObjectInstruction(segment.text, segment.range, index, sequenceSegments.length, words) ??
       tryParseEllipticalEffectInstruction(
         segment.text,
         segment.range,
         context,
         index,
-        sequenceSegments.length
+        sequenceSegments.length,
+        words
       ) ??
-      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length);
+      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words);
     if (!parsed) {
       return [];
     }
