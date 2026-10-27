@@ -1426,7 +1426,8 @@ function appendSiteRestrictionsThai(
   if (!restrictions?.length) return sitePhrase;
   let result = sitePhrase;
   for (const restriction of restrictions) {
-    const phrase = realizeBodySiteRestriction(restriction, "th");
+    const phrase = realizeBodySiteRestriction(restriction, "th") ??
+      (restriction.sourceText.trim() ? ` (${restriction.sourceText.trim()})` : undefined);
     if (phrase && !result.includes(phrase)) result += phrase;
   }
   return result;

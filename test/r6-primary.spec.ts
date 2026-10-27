@@ -946,6 +946,63 @@ describe("choice execution over reloaded branch groups", () => {
 
 
 describe("dimensioned infusion carrier noun phrase composition", () => {
+  it("preserves independently authored active and carrier display labels for a self-carried infusion", () => {
+    const parsed = parseSig("Infuse 500 mL IV over 2 hours");
+    const row = cloneStructuredValue(parsed.fhir[0]);
+    const rate = row.doseAndRate?.[0]?.rateRatio;
+    expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      unit: "mL", system: "http://unitsofmeasure.org", code: "mL"
+    });
+    expect(rate?.numerator).toMatchObject({
+      unit: "mL", system: "http://unitsofmeasure.org", code: "mL"
+    });
+    rate!.numerator!.unit = "milliliter";
+    const imported = canonicalFromFhir(row);
+    expect(imported.clinicalQuantity).toMatchObject({
+      projectedDose: { value: 500, unit: "mL" },
+      numerator: { value: 500, unit: "milliliter" },
+      rateNumerator: { value: 500, unit: "milliliter" }
+    });
+    expect(imported.clinicalQuantity?.carrierMaterial).toBeUndefined();
+    const recreated = canonicalToFhir(imported).doseAndRate?.[0];
+    expect(recreated?.doseQuantity).toMatchObject({ unit: "mL", code: "mL" });
+    expect(recreated?.rateRatio?.numerator).toMatchObject({
+      value: 500, unit: "milliliter", system: "http://unitsofmeasure.org", code: "mL"
+    });
+  });
+
+  it("preserves authored FHIR UCUM labels independently of their comparison codes", () => {
+    const input = "Infuse 20 mcg drug in 100 mL diluent over 1 hour IV";
+    const parsed = parseSig(input);
+    const dosage = cloneStructuredValue(parsed.fhir[0]);
+    const measured = dosage.doseAndRate?.[0];
+    expect(measured?.doseQuantity?.code).toBe("ug");
+    expect(measured?.rateRatio?.numerator?.code).toBe("mL");
+    expect(dosage.extension?.some(item =>
+      item.url.endsWith("medication-infusion-carrier-material"))).toBe(true);
+
+    // Distinct authored display labels can represent the same UCUM measurement.
+    measured!.doseQuantity!.unit = "mcg";
+    measured!.rateRatio!.numerator!.unit = "milliliter";
+    const imported = canonicalFromFhir(dosage);
+    expect(imported.dose?.unit).toBe("mcg");
+    expect(imported.clinicalQuantity).toMatchObject({
+      projectedDose: { value: 20, unit: "mcg" },
+      numerator: { value: 100, unit: "milliliter" },
+      rateNumerator: { value: 100, unit: "milliliter" },
+      carrierMaterial: { text: "diluent" }
+    });
+    const exported = canonicalToFhir(imported);
+    expect(exported.doseAndRate?.[0]?.doseQuantity).toMatchObject({
+      value: 20, unit: "mcg", code: "ug", system: "http://unitsofmeasure.org"
+    });
+    expect(exported.doseAndRate?.[0]?.rateRatio?.numerator).toMatchObject({
+      value: 100, unit: "milliliter", code: "mL", system: "http://unitsofmeasure.org"
+    });
+    const twice = canonicalToFhir(canonicalFromFhir(exported));
+    expect(twice.doseAndRate?.[0]).toEqual(exported.doseAndRate?.[0]);
+  });
+
   it.each([
     ["Infuse 20 mg drug in 500 mL over four hours IV", 20, 500, 4, undefined],
     ["Infuse 20 mg drug in 500 mL normal saline over four hours IV", 20, 500, 4, "normal saline"],

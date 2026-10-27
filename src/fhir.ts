@@ -307,6 +307,17 @@ function infusionCarrierMaterialFromFhir(
   };
 }
 
+/** Retain a source FHIR quantity code if its authored label cannot reproduce
+ * that same coding on output; familiar aliases need no duplicated state.
+ */
+function nonRegenerableUnitCoding(quantity: FhirQuantity | undefined):
+  { system?: string; code: string } | undefined {
+  if (!quantity?.code) return undefined;
+  const inferred = getStandardDoseUnitCoding(quantity.unit ?? quantity.code);
+  if (inferred?.system === quantity.system && inferred?.code === quantity.code) return undefined;
+  return { ...(quantity.system ? { system: quantity.system } : {}), code: quantity.code };
+}
+
 /** Reconstitute dimensional R5 meaning only where the role and amount were
  * explicitly supplied. Other external rateRatio dosages remain untouched.
  */
@@ -320,6 +331,8 @@ function clinicalCarrierQuantityFromFhir(
   const duration = measure?.rateRatio?.denominator;
   const doseUnit = active?.code ?? active?.unit;
   const volumeUnit = carrier?.code ?? carrier?.unit;
+  const doseLabel = active?.unit ?? active?.code;
+  const volumeLabel = carrier?.unit ?? carrier?.code;
   const durationUnit = duration?.code ?? duration?.unit;
   const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
   if ((!material && !selfCarrier) ||
@@ -334,10 +347,17 @@ function clinicalCarrierQuantityFromFhir(
   return {
     representation: "dose-with-rate-ratio",
     status: "resolved",
-    numerator: { value: carrier.value, unit: volumeUnit, dimension: "volume" },
+    numerator: {
+      value: carrier.value, unit: volumeLabel ?? volumeUnit, dimension: "volume",
+      ...nonRegenerableUnitCoding(carrier)
+    },
     denominators: [{ value: duration.value, unit: periodUnit, dimension: "time" }],
-    projectedDose: { value: active.value, unit: doseUnit },
-    ...(material ? { rateNumerator: { value: carrier.value, unit: volumeUnit } } : {}),
+    projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active) },
+    ...(material || doseLabel !== volumeLabel
+      ? { rateNumerator: {
+          value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier)
+        } }
+      : {}),
     administrationDuration: { value: duration.value, unit: periodUnit },
     ...(material ? { carrierMaterial: material } : {})
   };
@@ -2210,9 +2230,13 @@ function projectHpsgClinicalQuantityToFhir(
   const duration = quantity.administrationDuration;
   const dose = quantity.projectedDose;
   if (!duration || !dose) return;
-  const doseQuantity = buildFhirDoseQuantity(dose.value, dose.unit);
+  const doseQuantity = { ...buildFhirDoseQuantity(dose.value, dose.unit),
+    ...(dose.system ? { system: dose.system } : {}),
+    ...(dose.code ? { code: dose.code } : {}) };
   const rate = quantity.rateNumerator ?? dose;
-  const rateNumerator = buildFhirDoseQuantity(rate.value, rate.unit);
+  const rateNumerator = { ...buildFhirDoseQuantity(rate.value, rate.unit),
+    ...(rate.system ? { system: rate.system } : {}),
+    ...(rate.code ? { code: rate.code } : {}) };
   dosage.doseAndRate = [{
     doseQuantity,
     rateRatio: {

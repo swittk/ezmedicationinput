@@ -264,9 +264,15 @@ export type HpsgClinicalQuantityDimension =
   | "patient-mass"
   | "time";
 
-export interface HpsgDimensionalQuantityTerm {
+/** Authored quantity label plus any FHIR unit coding that cannot be regenerated from it. */
+export interface HpsgCodedQuantityTerm {
   value: number;
   unit: string;
+  system?: string;
+  code?: string;
+}
+
+export interface HpsgDimensionalQuantityTerm extends HpsgCodedQuantityTerm {
   dimension: HpsgClinicalQuantityDimension;
 }
 
@@ -276,9 +282,9 @@ export interface HpsgClinicalQuantityFeature {
   numerator: HpsgDimensionalQuantityTerm;
   denominators: HpsgDimensionalQuantityTerm[];
   /** Per-administration value after an explicit daily total is divided. */
-  projectedDose?: { value: number; unit: string };
+  projectedDose?: HpsgCodedQuantityTerm;
   /** Carrier amount used for an administration rate when it differs from the active drug dose. */
-  rateNumerator?: { value: number; unit: string };
+  rateNumerator?: HpsgCodedQuantityTerm;
   /** Source-backed vehicle NP scoped to the carrier volume, not the active drug.
    * It is descriptive and uncoded unless terminology separately confirms it. */
   carrierMaterial?: { text: string; range?: TextRange };

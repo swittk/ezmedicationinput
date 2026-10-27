@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig } from "../src";
+import { formatSig, toDosageDetails, toFhirR5Dosages } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 const SNOMED = "http://snomed.info/sct";
@@ -7,6 +7,23 @@ const EXTERNAL_GENITALIA = "362207005";
 const VULVA = "45292006";
 
 describe("body-site preposition grammar", () => {
+  it("keeps untranslated site restrictions visible in Thai after FHIR round trips", () => {
+    const source = "apply 1 mL to skin where tender";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0]?.site?.restrictions?.[0])
+      .toMatchObject({ sourceText: "where tender", predicate: { form: "raw", text: "tender" } });
+    for (const dosage of [
+      parsed.fhir,
+      toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]
+    ]) {
+      const thai = formatSig(dosage, "long", { locale: "th" });
+      expect(thai).toContain("where tender");
+      expect(thai).toContain("ผิวหนัง");
+      expect(thai).toContain("1");
+    }
+    expect(formatSig(parsed.fhir, "long")).toContain("where tender");
+  });
+
   it.each([
     [
       "apply 1 mL at 08:00 to arm where irritated",
