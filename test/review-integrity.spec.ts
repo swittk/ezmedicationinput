@@ -2108,6 +2108,23 @@ describe("HPSG calendar clock ellipsis", () => {
 
 describe("HPSG day-domain predicate typing", () => {
   it.each([
+    "Take 1 tablet if needed every day",
+    "Take 1 tablet if needed each day",
+    "Take 1 tablet if pain every day"
+  ])("does not reinterpret PRN daily cadence as a named day-domain condition: %s", source => {
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalAdjuncts?.calendarDayCondition).toBeUndefined();
+    expect(clause.clinicalAdjuncts?.condition).toBeUndefined();
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.prn?.enabled).toBe(true);
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+
+  it.each([
     ["Take 1 tablet at 08:00 daily if it is a dialysis day.", "text"],
     ["Take 1 tablet at 08:00 daily only if it is a dialysis day and it is a treatment day.", "all"],
     ["Take 1 tablet at 08:00 daily only if it is a dialysis day or it is a treatment day.", "any"],

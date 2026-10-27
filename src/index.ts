@@ -24,10 +24,10 @@ import {
   administrationTargetProjections,
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
-import { formatCanonicalClause } from "./format";
+import { DAY_NAMES, formatCanonicalClause, joinWithAnd } from "./format";
 import { canonicalFromFhir, canonicalToFhir, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
-import { resolveSigLocalization } from "./i18n";
+import { DAY_NAMES_THAI, joinWithAndThai, resolveSigLocalization } from "./i18n";
 import { ParserState } from "./parser-state";
 import {
   applyPrnReasonCoding,
@@ -49,6 +49,7 @@ import {
 import {
   BodySiteCode,
   FhirDosage,
+  FhirDayOfWeek,
   FhirQuantity,
   EzDosage,
   EzDoseAndRate,
@@ -1170,6 +1171,25 @@ function appendMedicationExcludedDatesText(
     dates.join(separator) + ".";
 }
 
+/** Realize a typed weekday exclusion when no source-written instruction exists.
+ * Reuse the ordinary localizers rather than introducing a competing day lexicon.
+ */
+function appendMedicationExcludedWeekdaysText(
+  text: string,
+  days: readonly FhirDayOfWeek[],
+  options?: FormatOptions
+): string {
+  if (!days.length) return text;
+  const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
+  const labels = [...new Set(days)].map(day =>
+    (thai ? DAY_NAMES_THAI[day] : DAY_NAMES[day]) ?? day
+  );
+  const readable = thai ? joinWithAndThai(labels) : joinWithAnd(labels);
+  const trimmed = text.trim().replace(/[.!?]+$/u, "");
+  return (trimmed ? trimmed + " " : "") +
+    (thai ? "ยกเว้น" : "except ") + readable + ".";
+}
+
 function appendMedicationConditionText(
   text: string,
   condition: MedicationCondition,
@@ -1476,12 +1496,13 @@ export function formatSig(
   let displayExcludedDates = dosage.excludedDates?.length
     ? [...dosage.excludedDates]
     : [];
-  let hasDisplayRelevantModifier = false;
+  const displayExcludedWeekdays = getDosageExcludedWeekdays(dosage);
+  let hasDisplayRelevantModifier = displayExcludedWeekdays.length > 0;
   if (hasModifiers) {
     if (!displayCondition) displayCondition = getDosageCondition(dosage);
     displayExcludedDates = getDosageExcludedDates(dosage);
     hasDisplayRelevantModifier = displayCondition !== undefined ||
-      displayExcludedDates.length > 0;
+      displayExcludedDates.length > 0 || displayExcludedWeekdays.length > 0;
   }
   if (hasMaximumDoseForDisplay(dosage)) {
     if (typeof dosage.text === "string" && dosage.text.trim().length > 0) {
@@ -1496,6 +1517,9 @@ export function formatSig(
     if (displayExcludedDates.length) {
       displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
     }
+    if (displayExcludedWeekdays.length) {
+      displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
+    }
     return displayed;
   }
   const quantity = dosage.doseAndRate?.[0];
@@ -1508,8 +1532,7 @@ export function formatSig(
       quantity.doseQuantity.unit.indexOf("/kg") >= 0) ||
     dosage.condition?.length || dosage.safety || dosage.siteReference ||
     dosage.excludedDates?.length ||
-    hasDisplayRelevantModifier ||
-    (dosage.extension?.length && getDosageExcludedWeekdays(dosage).length > 0)
+    hasDisplayRelevantModifier
   )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
@@ -1519,6 +1542,9 @@ export function formatSig(
     : rendered;
   if (displayExcludedDates.length) {
     displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
+  }
+  if (displayExcludedWeekdays.length) {
+    displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
   }
   return displayed;
 }
@@ -1688,6 +1714,7 @@ function fromFhirDosageInternal(
   if (!exactSource) {
     const condition = getDosageCondition(dosage);
     const exclusions = getDosageExcludedDates(dosage);
+    const excludedWeekdays = getDosageExcludedWeekdays(dosage);
     if (condition) {
       shortText = appendMedicationConditionText(shortText, condition, options);
       computedLong = appendMedicationConditionText(computedLong, condition, options);
@@ -1695,6 +1722,10 @@ function fromFhirDosageInternal(
     if (exclusions.length) {
       shortText = appendMedicationExcludedDatesText(shortText, exclusions, options);
       computedLong = appendMedicationExcludedDatesText(computedLong, exclusions, options);
+    }
+    if (excludedWeekdays.length) {
+      shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
+      computedLong = appendMedicationExcludedWeekdaysText(computedLong, excludedWeekdays, options);
     }
   }
   const longText = computedLong || dosage.text || "";
@@ -1947,6 +1978,11 @@ function buildParseResult(
     if (excludedDates.length) {
       shortText = appendMedicationExcludedDatesText(shortText, excludedDates, options);
       longText = appendMedicationExcludedDatesText(longText, excludedDates, options);
+    }
+    const excludedWeekdays = clause.clinicalAdjuncts.excludedWeekdays ?? [];
+    if (excludedWeekdays.length) {
+      shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
+      longText = appendMedicationExcludedWeekdaysText(longText, excludedWeekdays, options);
     }
   }
   const fhir = canonicalToFhir(clause, longText, {

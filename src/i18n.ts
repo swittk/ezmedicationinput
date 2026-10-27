@@ -268,7 +268,7 @@ const WHEN_TEXT_THAI: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "ทันที"
 };
 
-const DAY_NAMES_THAI: Record<string, string> = {
+export const DAY_NAMES_THAI: Record<string, string> = {
   mon: "วันจันทร์",
   tue: "วันอังคาร",
   wed: "วันพุธ",
@@ -1330,7 +1330,7 @@ function collectWhenPhrasesThai(
   return collectLocalizedWhenPhrases(schedule, TH_TIMING_GRAMMAR, options);
 }
 
-function joinWithAndThai(parts: string[]): string {
+export function joinWithAndThai(parts: string[]): string {
   if (!parts.length) {
     return "";
   }

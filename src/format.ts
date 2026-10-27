@@ -106,7 +106,7 @@ const WHEN_TEXT: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "immediately"
 };
 
-const DAY_NAMES: Record<string, string> = {
+export const DAY_NAMES: Record<string, string> = {
   mon: "Monday",
   tue: "Tuesday",
   wed: "Wednesday",
@@ -745,7 +745,7 @@ function collectWhenPhrases(
   return collectLocalizedWhenPhrases(schedule, EN_TIMING_GRAMMAR, options);
 }
 
-function joinWithAnd(parts: string[]): string {
+export function joinWithAnd(parts: string[]): string {
   if (!parts.length) {
     return "";
   }

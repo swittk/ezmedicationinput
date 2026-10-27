@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
-import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
+import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, setDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
 import { createBoundaryPlan } from "../src/regimen/planner";
@@ -2238,6 +2238,47 @@ describe("dimensional carrier grammar admits generic medication noun heads", () 
   });
 });
 
+
+describe("source-less FHIR weekday exclusions remain visible in dosage text", () => {
+  it("shows the excluded weekday in English/Thai for ordinary, short and maximum-dose displays", () => {
+    const dosage = parseSig("Take 1 tablet twice daily").fhir;
+    delete dosage.text;
+    setDosageExcludedWeekdays(dosage, ["sun"]);
+
+    for (const style of ["short", "long"] as const) {
+      expect(formatSig(dosage, style)).toContain("except Sunday");
+      expect(formatSig(dosage, style, { locale: "th" })).toContain("ยกเว้นวันอาทิตย์");
+    }
+    expect(fromFhirDosage(dosage).shortText).toContain("except Sunday");
+    expect(fromFhirDosage(dosage).longText).toContain("except Sunday");
+    expect(fromFhirDosage(dosage, { locale: "th" }).longText).toContain("ยกเว้นวันอาทิตย์");
+    expect(getDosageExcludedWeekdays(dosage)).toEqual(["sun"]);
+
+    // Maximum-dose projection takes a different display branch.
+    dosage.maxDosePerAdministration = { value: 1, unit: "tab" };
+    expect(formatSig(dosage, "long")).toContain("except Sunday");
+    expect(fromFhirDosage(dosage).longText).toContain("except Sunday");
+  });
+
+  it("preserves inherited weekday exclusions visibly in concurrent dosing", () => {
+    const source = "instill 1 drop in left eye and 2 drops in right eye twice daily except Sunday";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map(item => getDosageExcludedWeekdays(item.fhir))).toEqual([
+      ["sun"], ["sun"]
+    ]);
+    expect(parsed.items[0].meta.canonical.clauses[0].clinicalAdjuncts?.localRanges).toBeUndefined();
+    expect(parsed.items[0].longText).toContain("except Sunday");
+    expect(parsed.items[0].fhir.text).toContain("except Sunday");
+    expect(parsed.items[1].longText).toContain("except Sunday");
+  });
+
+  it("keeps exact authored source text instead of adding duplicate exclusions", () => {
+    const source = "Take 1 tab twice daily except Sunday";
+    const parsed = parseSig(source);
+    expect(formatSig(parsed.fhir, "long")).toBe(source);
+  });
+});
 
 describe("universal weekday exclusion remains a structured contradiction", () => {
   it.each([

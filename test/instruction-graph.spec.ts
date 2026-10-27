@@ -1,6 +1,7 @@
 import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import adviceRulesSource from "../src/advice-rules.json";
 import { realizeInstructionAction } from "../src/instruction-graph";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
@@ -1597,6 +1598,24 @@ describe("HL7 entity handling as exact composed instructions", () => {
 
 
 describe("HL7 product handling instructions", () => {
+  it.each([
+    ["Keep in a dry environment", "DRY", "dry", "Store in a dry place", "เก็บในที่แห้ง"],
+    ["Keep bottle upright", "UPR", "upright", "Store upright", "เก็บภาชนะในแนวตั้ง"],
+    ["Refrigerate at 4-8°C", "REF", "Refrigerated temperature", "Refrigerate at 4-8°C", "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"]
+  ])("matches the authoritative HL7 EntityHandling Coding.display for %s", (source, code, display, original, thai) => {
+    const dosages = parsePublicSig(source).fhir;
+    const relevant = dosages.flatMap(row => row.additionalInstruction ?? [])
+      .find(instruction => instruction.coding?.some(coding =>
+        coding.system === "http://terminology.hl7.org/CodeSystem/v3-EntityHandling" && coding.code === code
+      ));
+    expect(relevant).toBeDefined();
+    expect(relevant?.coding).toContainEqual(expect.objectContaining({ code, display }));
+    expect(relevant?.text).toBe(original);
+    const definition = adviceRulesSource.rules.find(rule => rule.definition.code === code)?.definition;
+    expect(definition?.thai).toBe(thai);
+    expect(definition?.text).toBe(original);
+  });
+
   it.each([
     ["Do not shake", "PSA"],
     ["Protect from light", "PRTL"],
