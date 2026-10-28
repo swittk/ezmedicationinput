@@ -11,6 +11,39 @@ import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
 
 describe("procedural instruction graph", () => {
   it.each([
+    ["If you experience blurred or double vision, stop use and consult a doctor", ["stop", "consult"]],
+    ["If you experience double vision, stop using the medicine and consult a doctor", ["stop", "consult"]],
+    ["Double vision", []]
+  ])("never interprets a recognized diplopia noun phrase as a doubled-dose action: %s", (source, expected) => {
+    const actions = parseInstructionActions(source);
+    expect(actions.map(action => action.predicate.lemma)).toEqual(expected);
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses.flatMap(clause =>
+      clause.instructionGraph?.actions.map(action => action.predicate.lemma) ?? []
+    )).not.toContain("double");
+    if (expected.length) {
+      expect(parsed.longText.toLowerCase()).toContain("double vision");
+      expect(parsed.longText.toLowerCase()).toContain("stop");
+      expect(parsed.longText.toLowerCase()).toContain("consult");
+    }
+  });
+
+  it.each([
+    ["Double the dose", "affirm"],
+    ["Double the number of drops", "affirm"],
+    ["Do not double the dose", "negate"],
+    ["Do not double your next dose", "negate"]
+  ])("keeps deliberate positive and negative dose-doubling directives: %s", (source, polarity) => {
+    const actions = parseInstructionActions(source);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].predicate.lemma).toBe("double");
+    expect(actions[0].polarity ?? "affirm").toBe(polarity);
+    expect(actions[0].sourceText).toMatch(/double/iu);
+    const extension = buildInstructionGraphExtension({ sourceText: source, actions })!;
+    expect(parseInstructionGraphExtension([extension])?.actions[0].predicate.lemma).toBe("double");
+  });
+
+  it.each([
     ["Do not rub eyes", "Do not rub the eye"],
     ["Do not dab skin", "Do not dab the skin"],
     ["Do not massage scalp", "Do not massage the scalp"],

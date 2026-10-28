@@ -247,16 +247,17 @@ function actionMatchAt(
             !ACTION_SEQUENCE_MARKERS.has(key(previous)) &&
             !ACTION_COORDINATION_CONNECTORS.has(key(previous)) &&
             !actionAtIsGovernedByDirective(parts, index)) continue;
-        // A declared nominal constituent owns a homographic verb surface:
-        // "contact lenses" is a medication object, "open wounds" is a site.
-        // Reuse the same typed concept vocabulary as argument parsing;
-        // "contact your doctor" remains a genuine call action.
+        // A recognized nominal owns its modifier, even when the modifier is
+        // also a verb: "contact lenses" is an object, "open wounds" a site,
+        // and "double vision" is diplopia, not an instruction to double a dose.
+        // Prefer the existing typed terminology over a bare action candidate;
+        // "contact your doctor" and "double the dose" remain valid actions.
         if (length === 1 && next) {
-          const nominal = resolveMedicationInstructionConcept(
-            key(current) + " " + key(next), options
-          );
+          const phrase = key(current) + " " + key(next);
+          const nominal = resolveMedicationInstructionConcept(phrase, options);
           if (nominal?.role === AdviceArgumentRole.Object ||
-              nominal?.role === AdviceArgumentRole.Site) continue;
+              nominal?.role === AdviceArgumentRole.Site ||
+              resolveSymptomDefinition(phrase, options?.prnReasonMap, options?.symptomMap)) continue;
         }
         if (governingRelation) {
           const argument = parts[index + length];
