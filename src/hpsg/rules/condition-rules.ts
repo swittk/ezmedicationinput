@@ -584,7 +584,7 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   return lexicalRule("hpsg.lex.clinical.calendar-exclusion", (context, start) => {
     const lead = context.tokens[start];
     if (!lead || context.state.consumed.has(lead.index) ||
-        !/(?:except|excluding|ยกเว้น|เว้น)/iu.test(lead.sourceText ?? lead.original)) {
+        !EXCLUSION_CUE.test(lead.sourceText ?? lead.original)) {
       return [];
     }
     const clauseEnd = context.state.input.indexOf(";", lead.sourceStart) >= 0

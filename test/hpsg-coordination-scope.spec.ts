@@ -4,9 +4,12 @@ import {
   lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
+import { ParserState } from '../src/parser-state';
+import { calendarExclusionLexicalRule } from '../src/hpsg/rules/condition-rules';
+import type { HpsgClauseContext } from '../src/hpsg/rule-context';
 import {
   parseClauseSign,
-  parseClauseState
+  parseClauseState, tokenize
 } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
@@ -1249,5 +1252,54 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.items[0].meta.canonical.clauses[0].evidence.some(item =>
       item.rule === 'hpsg.cx.coordination.trailing-shared-cadence'
     )).toBe(false);
+  });
+});
+
+describe("Thai QOD cadence and excluded-day lexical separation", () => {
+  it("does not offer an unresolved calendar exclusion for bare วันเว้นวัน", () => {
+    const source = "รับประทาน 1 เม็ด วันเว้นวัน";
+    const tokens = tokenize(source);
+    const qodIndex = tokens.findIndex(token =>
+      token.original.includes("วันเว้นวัน"));
+    expect(qodIndex).toBeGreaterThanOrEqual(0);
+    const context: HpsgClauseContext = {
+      state: new ParserState(source, tokens), tokens, limit: tokens.length,
+      dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"]
+    };
+    expect(calendarExclusionLexicalRule().match(context, qodIndex)).toEqual([]);
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      period: 2, periodUnit: "d", timingCode: "QOD"
+    });
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts).toBeUndefined();
+  });
+
+  it.each([
+    ["รับประทาน 1 เม็ด วันเว้นวัน ยกเว้นวันหยุด", undefined, true],
+    ["รับประทาน 1 เม็ด วันเว้นวัน ยกเว้นวันอาทิตย์", ["sun"], false],
+    ["Take 1 tablet every other day except Sundays", ["sun"], false]
+  ] as const)("preserves QOD while independently recognizing a real exclusion: %s", (
+    source, excluded, unresolved
+  ) => {
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.schedule).toMatchObject({ period: 2, periodUnit: "d" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ period: 2, periodUnit: "d" });
+    expect(toFhirR5Dosages(parsed.fhirNext)[0].timing?.repeat)
+      .toMatchObject({ period: 2, periodUnit: "d" });
+    if (excluded) {
+      expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual([...excluded]);
+      expect(clause.clinicalAdjuncts?.excludedWeekdays).toEqual([...excluded]);
+    }
+    if (unresolved) {
+      expect(clause.clinicalAdjuncts?.evidence?.some(evidence =>
+        evidence.rule === "hpsg.lex.clinical.calendar-exclusion.unresolved"
+      )).toBe(true);
+      expect(clause.clinicalAdjuncts?.localRanges).toContainEqual(
+        expect.objectContaining({ start: source.indexOf("ยกเว้น") })
+      );
+    }
+    expect(parsed.fhir.text).toContain(source.slice(-10).trim());
   });
 });
