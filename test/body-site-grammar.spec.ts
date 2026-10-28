@@ -5,9 +5,10 @@ import {
 } from "../src/body-site-grammar";
 import { formatCanonicalClause } from "../src/format";
 import { getBodySiteRelationDefinition } from "../src/relation-terminology";
+import { getBodySiteText, buildBodySiteTopographicalModifierCoding } from "../src/body-site-lookup";
 import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
-  canonicalFromFhir
+  canonicalFromFhir, canonicalToFhir
 } from "../src/fhir";
 import { parseClauseSign, tokenize } from "../src/parser";
 import { ParserState } from "../src/parser-state";
@@ -355,6 +356,29 @@ describe("Thai site-anchor lexical ambiguity", () => {
 });
 
 describe("standards-accurate middle versus median body-site qualifier", () => {
+  it("does not mistake imported SNOMED Median for positional middle", () => {
+    const medianCode = "69536005:106233006=260528009";
+    const nested = "22253000:363698007=(" + medianCode + ")";
+    // SNOMED 260528009 is Median (the midline), not generic 'middle'.
+    // The original coding remains available even when no safe reverse phrase
+    // has been registered for that modifier.
+    expect(getBodySiteText(medianCode)).not.toBe("middle of head");
+    expect(getBodySiteText(nested)).not.toBe("middle of head");
+    expect(getBodySiteText("69536005:106233006=26216008")).toBe("center of head");
+    expect(getBodySiteText("69536005:106233006=261183002")).toBe("top of head");
+    const imported = canonicalFromFhir({
+      site: { coding: [{ system: "http://snomed.info/sct", code: medianCode }] }
+    });
+    expect(imported.site?.coding?.code).toBe(medianCode);
+    expect(canonicalToFhir(imported).site?.coding?.[0]?.code).toBe(medianCode);
+    expect(buildBodySiteTopographicalModifierCoding({
+      relationText: "middle",
+      relationCoding: { system: "http://snomed.info/sct", code: "260528009", display: "Median" },
+      targetText: "head",
+      targetCoding: { system: "http://snomed.info/sct", code: "69536005" }
+    })).toBeUndefined();
+  });
+
   it("uses NCIt Middle and never SNOMED Median for a middle-of-site instruction", () => {
     const relation = getBodySiteRelationDefinition("middle")!;
     expect(relation.realization.en?.surface).toBe("middle");
