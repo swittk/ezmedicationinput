@@ -1632,6 +1632,37 @@ describe("HL7 entity handling as exact composed instructions", () => {
 
 describe("HL7 product handling instructions", () => {
   it.each([
+    ["protect-from-light", "Protect from light", "PRTL", "Protect from Light", "เก็บให้พ้นแสง"],
+    ["store-dry", "Store in a dry place", "DRY", "dry", "เก็บในที่แห้ง"],
+    ["store-upright", "Store upright", "UPR", "upright", "เก็บภาชนะในแนวตั้ง"],
+    ["refrigerate-4-8", "Refrigerate at 4-8°C", "REF", "Refrigerated temperature", "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"]
+  ] as const)("keeps HL7 coding.display distinct from the clinician-facing %s action", (
+    actionCode, source, code, display, thai
+  ) => {
+    const definition = getMedicationInstructionAction(actionCode)!;
+    expect(definition.display).toBe(source);
+    expect(definition.i18n?.th).toBe(thai);
+    expect(definition.coding).toMatchObject({
+      system: "http://terminology.hl7.org/CodeSystem/v3-EntityHandling", code, display
+    });
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions.some(frame =>
+      frame.predicate.lemma === actionCode &&
+      frame.predicate.codings?.some(coding => coding.system === definition.coding?.system &&
+        coding.code === code && coding.display === display)
+    )).toBe(true);
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.additionalInstruction?.flatMap(value => value.coding ?? []))
+        .toContainEqual(expect.objectContaining({
+          system: definition.coding?.system, code, display
+        }));
+      expect(row.text?.toLowerCase()).toContain(source.toLowerCase());
+    }
+  });
+
+  it.each([
+    ["Do not shake", "PSA", "do not shake", "Do not shake", "ห้ามเขย่า"],
+    ["Protect from light", "PRTL", "Protect from Light", "Protect from light", "เก็บให้พ้นแสง"],
     ["Keep in a dry environment", "DRY", "dry", "Store in a dry place", "เก็บในที่แห้ง"],
     ["Keep bottle upright", "UPR", "upright", "Store upright", "เก็บภาชนะในแนวตั้ง"],
     ["Refrigerate at 4-8°C", "REF", "Refrigerated temperature", "Refrigerate at 4-8°C", "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"]

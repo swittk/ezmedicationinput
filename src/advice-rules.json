@@ -5,7 +5,7 @@
       "definition": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "PSA",
-        "display": "Do not shake",
+        "display": "do not shake",
         "text": "Do not shake",
         "thai": "ห้ามเขย่า"
       },
@@ -34,7 +34,7 @@
       "definition": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "PRTL",
-        "display": "Protect from light",
+        "display": "Protect from Light",
         "text": "Protect from light",
         "thai": "เก็บให้พ้นแสง"
       },
@@ -572,7 +572,7 @@
               "role": "substance"
             },
             {
-              "conceptIds": ["medication-administration"],
+              "conceptIds": ["medication-administration", "drinking-activity"],
               "role": "activity",
               "relations": ["before"]
             }

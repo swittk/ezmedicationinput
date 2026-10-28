@@ -276,8 +276,10 @@ describe("advanced compositional follow-up", () => {
         })
       ])
     });
+    // Drinking the prepared water is a typed positive consumption activity,
+    // distinct from water-only mixing or mixing after an unrelated event.
     expect(before.fhir.additionalInstruction?.flatMap(row =>
-      row.coding?.map(coding => coding.code) ?? [])).not.toContain("417995008");
+      row.coding?.map(coding => coding.code) ?? [])).toContain("417995008");
     expect(before.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.frames?.[0]?.args?.[0]?.coding?.code)
       .toBe("422400008");
   });
@@ -1312,6 +1314,57 @@ describe("reconstitution advice requires affirmative material and temporal entai
     expect(en).toMatch(/mix.*powder without water/iu);
     expect(en).not.toMatch(/without with water/iu);
   });
+  it.each([
+    ["Dissolve in water before drinking", "dissolve"],
+    ["Dissolve tablet in water before drinking", "dissolve"],
+    ["Mix powder with water before drinking", "mix"]
+  ] as const)("codes affirmative water reconstitution before the drinking event: %s", (source, verb) => {
+    const parsed = parseSig(source, { locale: "en" });
+    const dosage = parsed.fhir;
+    const action = parsed.meta.canonical.clauses[0].instructionGraph?.actions.find(a =>
+      a.predicate.lemma === verb);
+    expect(action).toBeDefined();
+    expect(action?.polarity).not.toBe("negate");
+    expect(action?.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "water" }),
+      expect.objectContaining({
+        role: AdviceArgumentRole.Activity,
+        conceptId: "drinking-activity",
+        relation: AdviceRelation.Before
+      })
+    ]));
+    const strict = toFhirR5Dosages(parsed.fhirNext)[0];
+    const imported = fromFhirDosage(strict, { locale: "en" });
+    for (const row of [dosage, strict, imported.fhir]) {
+      expect(row.additionalInstruction?.flatMap(value => value.coding ?? []) ?? [])
+        .toContainEqual(expect.objectContaining({
+          system: "http://snomed.info/sct", code
+        }));
+    }
+    expect(imported.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.args)
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        role: AdviceArgumentRole.Activity, conceptId: "drinking-activity",
+        relation: AdviceRelation.Before
+      })]));
+    expect(parsed.fhir.text?.toLowerCase()).toContain("before drinking");
+  });
+
+  it.each([
+    "Dissolve in water",
+    "Mix powder with water",
+    "Dissolve in water after drinking",
+    "Mix powder without water before drinking",
+    "Do not dissolve tablet in water before drinking"
+  ])("never invents affirmative reconstitution for missing/reversed temporal or material evidence: %s", source => {
+    const parsed = parseSig(source, { locale: "en" });
+    const strict = toFhirR5Dosages(parsed.fhirNext)[0];
+    const imported = fromFhirDosage(strict, { locale: "en" });
+    for (const row of [parsed.fhir, strict, imported.fhir]) {
+      expect(row.additionalInstruction?.flatMap(value => value.coding ?? [])
+        .some(coding => coding.code === code)).not.toBe(true);
+    }
+  });
+
   it.each([
     "Mix powder with water before taking",
     "Dissolve tablet in water before taking"

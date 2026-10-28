@@ -18,7 +18,7 @@
       "coding": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "PRTL",
-        "display": "Protect from light"
+        "display": "Protect from Light"
       }
     },
     {
@@ -40,7 +40,7 @@
       "coding": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "DRY",
-        "display": "Store in a dry place"
+        "display": "dry"
       }
     },
     {
@@ -64,7 +64,7 @@
       "coding": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "UPR",
-        "display": "Store upright"
+        "display": "upright"
       }
     },
     {
@@ -88,7 +88,7 @@
       "coding": {
         "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
         "code": "REF",
-        "display": "Refrigerate at 4-8°C"
+        "display": "Refrigerated temperature"
       }
     },
     {
