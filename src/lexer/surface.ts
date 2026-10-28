@@ -84,7 +84,8 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
   // Keep decimal points inside numeric tokens (e.g. 1.5 mL or clinician shorthand .5 tab).
-  if (/\d/.test(after) && (/\d/.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
+  if (/[0-9๐-๙]/u.test(after) &&
+      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
     return false;
   }
   // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.). A period

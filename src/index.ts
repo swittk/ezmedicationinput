@@ -2090,7 +2090,25 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
     internal.siteSource = carry.siteSource;
     internal.siteCoding = carry.siteCoding;
     internal.siteSpatialRelation = carry.siteSpatialRelation;
-    internal.administrationTargetGroup = carry.administrationTargetGroup;
+    const group = carry.administrationTargetGroup;
+    // A site carried from an earlier segment retains its meaning, not the
+    // donor's segment-local provenance. Rebase must never shift those spans
+    // as if they originated in the recipient.
+    internal.administrationTargetGroup = group && {
+      ...group,
+      range: undefined,
+      targets: group.targets.map(target => ({
+        ...target,
+        range: undefined,
+        evidence: undefined,
+        restrictions: target.restrictions?.map(restriction => ({
+          ...restriction,
+          range: undefined,
+          markerRange: undefined,
+          predicate: { ...restriction.predicate, range: undefined }
+        }))
+      }))
+    };
   }
 
   if (

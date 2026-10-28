@@ -23,6 +23,29 @@ import {
 } from "../src/dosage-course";
 
 describe("EZMED extended R5 dosage and R6 projection", () => {
+  it.each(["QHS", "QAM", "QPM", "BLD"] as const)(
+    "retains local %s identity in FHIR Timing.code.text and both import paths", abbreviation => {
+      const source = `Take 1 tablet PO ${abbreviation}`;
+      const parsed = parseSig(source);
+      const row = parsed.fhir[0];
+      expect(parsed.meta.canonical.clauses[0].schedule?.timingCode).toBe(abbreviation);
+      expect(row.timing?.code?.text).toBe(abbreviation);
+      expect(row.timing?.code?.coding).toBeUndefined();
+      expect(canonicalFromFhir(row).schedule?.timingCode).toBe(abbreviation);
+      expect(parserStateFromFhir(row).primaryClause.schedule?.timingCode).toBe(abbreviation);
+      const strict = toFhirR5Dosages(parsed.fhirNext)[0];
+      expect(canonicalFromFhir(strict).schedule?.timingCode).toBe(abbreviation);
+      expect(canonicalToFhir(canonicalFromFhir(strict)).timing?.code?.text).toBe(abbreviation);
+      expect(row.timing?.repeat).toEqual(strict.timing?.repeat);
+    }
+  );
+  it("does not reinterpret arbitrary FHIR Timing.code.text as an abbreviation", () => {
+    const row = parseSig("Take 1 tab PO QAM").fhir[0];
+    row.timing!.code = { text: "after my morning workout" };
+    expect(canonicalFromFhir(row).schedule?.timingCode).toBeUndefined();
+    expect(parserStateFromFhir(row).primaryClause.schedule?.timingCode).toBeUndefined();
+  });
+
   it("returns flat extended R5-ish dosages and a separate native R6 course", () => {
     const result = parseSig("1 tab po bid");
     expect(result.fhir).toHaveLength(1);

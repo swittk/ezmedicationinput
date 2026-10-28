@@ -176,6 +176,33 @@ describe("Thai clinician free-text parsing", () => {
     expect(decimalInput.slice(thaiDecimal?.sourceStart, thaiDecimal?.sourceEnd)).toBe("๐.๕");
   });
 
+  it.each([
+    "รับประทาน ๐.๕เม็ด วันละ 2 ครั้ง",
+    "รับประทาน ๐.๕ เม็ด วันละ 2 ครั้ง",
+    "รับประทาน 0.5เม็ด วันละ 2 ครั้ง"
+  ])("treats a compact Thai decimal as 0.5 tablets, never 0 plus 5: %s", source => {
+    const decimalText = source.includes("๐") ? "๐.๕" : "0.5";
+    const tokens = lexInput(source);
+    const quantity = tokens.filter(token => token.kind === "NUMBER")
+      .find(token => token.value === 0.5);
+    expect(quantity).toMatchObject({
+      kind: "NUMBER", value: 0.5,
+      original: decimalText, sourceText: decimalText
+    });
+    expect(source.slice(quantity?.sourceStart, quantity?.sourceEnd)).toBe(decimalText);
+    expect(tokens.filter(token => token.kind === "NUMBER").map(token => token.value))
+      .toEqual([0.5, 2]);
+    const parsed = parseSig(source, { locale: "th" });
+    expect(parsed.count).toBe(1);
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    // The editable source remains exact even when the FHIR display normalizes
+    // Thai numerals to ASCII decimal notation.
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhir.text).toContain("0.5");
+  });
+
   it("keeps different Thai morning and evening quantities independent", () => {
     const input = "รับประทาน ครึ่งเม็ดตอนเช้า และ 1 เม็ดตอนเย็น";
     const parsed = parseSig(input, { locale: "th" });

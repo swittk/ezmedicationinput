@@ -17,6 +17,28 @@ import { EventTiming, FhirPeriodUnit, type FhirDosage } from "../src/types";
 import { getTimingMonthDays, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "../src/fhir";
 
 describe("HPSG clinical quantity grammar", () => {
+  it("does not impose an invented one-dose cap on a PRN fixed-duration infusion", () => {
+    const input = "Infuse 25 mL IV over 1 hour as needed for pain";
+    const parsed = parsePublicSig(input);
+    expect(parsed.items).toHaveLength(1);
+    const dosage = parsed.fhir[0];
+    expect(dosage.asNeeded).toBe(true);
+    expect(dosage.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 25, code: "mL" });
+    expect(dosage.timing?.repeat).toMatchObject({ duration: 1, durationUnit: "h" });
+    expect(dosage.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.prn?.enabled).toBe(true);
+    const strict = toFhirR5Dosages(parsed.fhirNext)[0];
+    expect(strict.timing?.repeat?.count).toBeUndefined();
+    expect(canonicalFromFhir(strict).schedule?.count).toBeUndefined();
+
+    // Unlike PRN, an actually one-time fixed-duration infusion retains count=1.
+    const oneTime = parsePublicSig("Infuse 25 mL IV over 1 hour once").fhir[0];
+    expect(oneTime.timing?.repeat?.count).toBe(1);
+    const recurring = parsePublicSig("Infuse 25 mL IV over 1 hour QD PRN").fhir[0];
+    expect(recurring.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(recurring.timing?.repeat?.count).toBeUndefined();
+  });
+
   it("lowers resolved quantities directly from typed canonical semantics, without a post-parse clinical resolver", () => {
     const weightRate = canonicalToFhir(parseClauseState("dopamine 5 mcg/kg/min IV").primaryClause);
     expect(weightRate.doseAndRate?.[0].rateQuantity).toMatchObject({

@@ -1642,7 +1642,7 @@ export function toFhir(state: ParserState): FhirDosage {
 /** Recover local FHIR Timing.code.text only when it is a recognizable
  * abbreviation, not arbitrary prose. Coding identities always take priority.
  */
-const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
+const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|QAM|QPM|QHS|BLD|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
 function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
   const coding = dosage.timing?.code?.coding?.find(value => value.code)?.code;
   if (coding) return coding;

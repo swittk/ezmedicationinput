@@ -593,7 +593,8 @@ export function projectHpsgSignToState(
       delete target.durationMax;
       delete target.durationUnit;
     }
-    if (!hasRecurringSchedule(schedule) && target.count === undefined) target.count = 1;
+    if (!hasRecurringSchedule(schedule) && !sign.synsem.valence.prn &&
+        !state.asNeeded && target.count === undefined) target.count = 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct

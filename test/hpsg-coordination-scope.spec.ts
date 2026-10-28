@@ -75,6 +75,33 @@ function expectBid(items: ReturnType<typeof parseSig>['items']): void {
 }
 
 describe('HPSG coordination cadence scope', () => {
+  it("inherits coordinated sites without fabricating source spans in a later dosing segment", async () => {
+    const source = "Apply 1 g to scalp and forehead BID, then 2 g BID";
+    const groupText = "scalp and forehead";
+    const donorStart = source.indexOf(groupText);
+    for (const parsed of [parseSig(source), await parseSigAsync(source)]) {
+      expect(parsed.items).toHaveLength(4);
+      expect(parsed.items.map(item => item.fhir.site?.text))
+        .toEqual(["scalp", "forehead", "scalp", "forehead"]);
+      expect(parsed.items.map(item => item.fhir.doseAndRate?.[0]?.doseQuantity?.value))
+        .toEqual([1, 1, 2, 2]);
+      const donor = parsed.items[0].meta.canonical.clauses[0].administrationTargetGroup!;
+      const carried = parsed.items[2].meta.canonical.clauses[0].administrationTargetGroup!;
+      expect(donor.range).toEqual({ start: donorStart, end: donorStart + groupText.length });
+      expect(donor.targets.map(target => source.slice(target.range!.start, target.range!.end)))
+        .toEqual(["scalp", "forehead"]);
+      expect(carried.sourceText).toBe(groupText);
+      expect(carried.range).toBeUndefined();
+      expect(carried.targets.map(target => target.range)).toEqual([undefined, undefined]);
+      expect(carried.targets.every(target => target.evidence === undefined)).toBe(true);
+      expect(carried.targets.map(target => target.coding?.code))
+        .toEqual(donor.targets.map(target => target.coding?.code));
+      expect(carried).not.toBe(donor);
+      expect(carried.targets[0]).not.toBe(donor.targets[0]);
+      expect(parsed.items[2].meta.canonical.clauses[0].rawText).toBe("2 g BID");
+    }
+  });
+
   it('builds typed administration-target atoms before canonical and FHIR projection', () => {
     const input = 'apply to scalp and forehead bid';
     const sign = parseClauseSign(input);
