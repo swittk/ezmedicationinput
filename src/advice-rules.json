@@ -1042,6 +1042,17 @@
       "frames": [
         {
           "force": "instruction",
+          "polarity": "affirm",
+          "predicate": {
+            "lemma": "swallow",
+            "semanticClass": "ingest"
+          },
+          "args": [
+            { "role": "manner", "text": "whole", "conceptId": "whole" }
+          ]
+        },
+        {
+          "force": "instruction",
           "polarity": "negate",
           "predicate": {
             "lemma": "crush",

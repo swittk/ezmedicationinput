@@ -234,7 +234,7 @@ function actionMatchAt(
   }
   const previous = parts.slice(index - 1, index)[0];
   const governingRelation = previous ? resolveActionRelationSurface(key(previous)) : undefined;
-  const maxSpan = Math.min(medicationInstructionActionSpanLimit(key(current)), parts.length - index);
+  const maxSpan = Math.min(medicationInstructionActionSpanLimit(key(current), options), parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
     for (const candidate of actionPhraseCandidates(parts, index, length)) {
       const definition = previous && ACTION_SEQUENCE_MARKERS.has(key(previous))

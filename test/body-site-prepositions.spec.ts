@@ -7,6 +7,28 @@ const EXTERNAL_GENITALIA = "362207005";
 const VULVA = "45292006";
 
 describe("body-site preposition grammar", () => {
+  it.each([
+    "Apply where it hurts BID",
+    "Apply to where it hurts BID"
+  ])("resolves an exact registered relative site alias without inventing anatomy: %s", source => {
+    const result = parseSig(source);
+    const clause = result.meta.canonical.clauses[0];
+    expect(clause.site?.text).toBe("affected area");
+    expect(clause.site?.coding).toBeUndefined();
+    expect(result.items[0]?.fhir.site?.text).toBe("affected area");
+    expect(result.items[0]?.fhir.timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "d"
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("does not treat unregistered relative phrases as anatomical sites", () => {
+    expect(parseSig("Apply where you live BID").meta.canonical.clauses[0]?.site).toBeUndefined();
+    const qualified = parseSig("Apply to skin where it hurts BID").meta.canonical.clauses[0]?.site;
+    expect(qualified?.coding?.code).toBe("181469002");
+    expect(qualified?.restrictions?.[0]?.sourceText).toBe("where it hurts");
+  });
+
   it("keeps untranslated site restrictions visible in Thai after FHIR round trips", () => {
     const source = "apply 1 mL to skin where tender";
     const parsed = parseSig(source);

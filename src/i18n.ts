@@ -1140,7 +1140,12 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   }
   if (periodUnit === FhirPeriodUnit.Month && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "เดือนละครั้ง";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `เดือนละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
+      }
+      return frequency !== undefined && frequency !== 1
+        ? `เดือนละ ${stripTrailingZero(frequency)} ครั้ง`
+        : "เดือนละครั้ง";
     }
     if (periodMax && periodMax !== period) {
       return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
@@ -1149,7 +1154,12 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   }
   if (periodUnit === FhirPeriodUnit.Year && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "ปีละครั้ง";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `ปีละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
+      }
+      return frequency !== undefined && frequency !== 1
+        ? `ปีละ ${stripTrailingZero(frequency)} ครั้ง`
+        : "ปีละครั้ง";
     }
     if (periodMax && periodMax !== period) {
       return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;

@@ -492,7 +492,13 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Month && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "once monthly";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
+      }
+      if (frequency === 2) return "twice monthly";
+      return frequency !== undefined && frequency !== 1
+        ? `${stripTrailingZero(frequency)} times monthly`
+        : "once monthly";
     }
     if (periodMax && periodMax !== period) {
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
@@ -501,7 +507,13 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Year && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "once yearly";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times yearly`;
+      }
+      if (frequency === 2) return "twice yearly";
+      return frequency !== undefined && frequency !== 1
+        ? `${stripTrailingZero(frequency)} times yearly`
+        : "once yearly";
     }
     if (periodMax && periodMax !== period) {
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;

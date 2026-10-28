@@ -216,7 +216,7 @@ function coordinationStartsAction(context: HpsgClauseContext, index: number): bo
   );
 }
 
-function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
+function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
@@ -230,7 +230,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
-    SITE_RELATIVE_MARKERS.has(lower) ||
+    (!allowRelativeMarker && SITE_RELATIVE_MARKERS.has(lower)) ||
     SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
     INSTRUCTION_START_WORDS.has(lower) ||
     Boolean(
@@ -782,7 +782,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (
       (SITE_ANCHORS.has(firstLower) || SITE_SELF_DISPLAY_ANCHORS.has(firstLower)) ||
       isPunctuation(firstLower) ||
-      siteBoundary(firstLower, context)
+      siteBoundary(firstLower, context, true)
     ) {
       return [];
     }
@@ -793,7 +793,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const lowers = tokens.map((token) => normalizeTokenLower(token));
-      if (lowers.some((lower) => !lower || siteBoundary(lower, context))) {
+      if (lowers.some((lower) => !lower || siteBoundary(lower, context, true))) {
         continue;
       }
       const originalText = joinTokenText(tokens);

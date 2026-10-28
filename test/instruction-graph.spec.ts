@@ -375,6 +375,39 @@ describe("procedural instruction graph", () => {
     );
   });
 
+  it("recognizes longer caller-configured action surfaces and aliases before generic verbs", () => {
+    const options = {
+      instructionActionMap: {
+        "apply a thin layer of ointment": {
+          code: "coat-thin",
+          semanticClass: "procedure",
+          display: "Apply thin coating",
+          procedural: true,
+          aliases: ["spread a thin layer of ointment"],
+          localeAliases: { en: ["apply an even coating of ointment"] }
+        }
+      }
+    };
+    for (const phrase of [
+      "apply a thin layer of ointment",
+      "spread a thin layer of ointment",
+      "apply an even coating of ointment"
+    ]) {
+      const frames = parseInstructionActions(phrase, 0, options);
+      expect(frames[0]?.predicate.lemma).toBe("coat-thin");
+      expect(frames[0]?.span).toMatchObject({ start: 0, end: phrase.length });
+      const parsed = parseSig(phrase, options);
+      expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma)
+        .toBe("coat-thin");
+      const wire = buildInstructionGraphExtension({
+        sourceText: phrase, actions: frames
+      })!;
+      expect(parseInstructionGraphExtension([wire])?.actions[0]?.predicate.lemma)
+        .toBe("coat-thin");
+    }
+    expect(parseInstructionActions("apply", 0, options)[0]?.predicate.lemma).toBe("apply");
+  });
+
   it("supports caller-owned procedural actions and preserves their coding and labels through FHIR", () => {
     const options = {
       instructionActionMap: {

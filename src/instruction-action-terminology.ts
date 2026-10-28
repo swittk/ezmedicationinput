@@ -89,8 +89,23 @@ for (const definition of DEFAULT_ACTIONS) {
 /** Bound phrase matching by the declared lexicon without widening unrelated scans.
  * @param lead Normalized first token of a possible instruction action.
  */
-export function medicationInstructionActionSpanLimit(lead: string): number {
-  return DEFAULT_SPAN_BY_LEAD.get(lead) ?? 4;
+export function medicationInstructionActionSpanLimit(lead: string, options?: ParseOptions): number {
+  let limit = DEFAULT_SPAN_BY_LEAD.get(lead) ?? 4;
+  const customMap = options?.instructionActionMap;
+  if (!customMap) return limit;
+  for (const surface of Object.keys(customMap)) {
+    const input = customMap[surface];
+    for (const alias of [
+      surface, input.code ?? "", ...(input.aliases ?? []),
+      ...(input.sequenceAliases ?? []), ...flattenLocaleAliases(input.localeAliases)
+    ]) {
+      const normalized = normalizeActionSurface(alias);
+      if (!normalized) continue;
+      const words = normalized.split(" ");
+      if (words[0] === lead) limit = Math.max(limit, words.length);
+    }
+  }
+  return limit;
 }
 
 export function normalizeActionSurface(value: string): string {

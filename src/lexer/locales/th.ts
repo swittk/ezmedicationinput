@@ -352,6 +352,10 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ทุก", "สัปดาห์"], canonical: "weekly" },
   { parts: ["ทุก", "เดือน"], canonical: "monthly" },
   { parts: ["ทุก", "วัน"], canonical: "daily" },
+  // Keep the distributive ละ with ต่อ + period, not as an orphan count token.
+  { parts: ["ต่อ", "สัปดาห์", "ละ"], canonical: "weekly" },
+  { parts: ["ต่อ", "เดือน", "ละ"], canonical: "monthly" },
+  { parts: ["ต่อ", "วัน", "ละ"], canonical: "daily" },
   { parts: ["ต่อ", "สัปดาห์"], canonical: "weekly" },
   { parts: ["ต่อ", "เดือน"], canonical: "monthly" },
   { parts: ["ต่อ", "วัน"], canonical: "daily" },

@@ -80,6 +80,37 @@ describe("Thai clinician free-text parsing", () => {
     expect(tokens.find((token) => token.canonical === "ml")?.sourceText).toBe("มิลลิลิตร");
   });
 
+  it.each([
+    ["รับประทาน 1 เม็ด ต่อวันละ 2 ครั้ง", "ต่อวันละ", "daily", "d", "วันละ 2 ครั้ง"],
+    ["รับประทาน 1 เม็ด ต่อสัปดาห์ละ 2 ครั้ง", "ต่อสัปดาห์ละ", "weekly", "wk", "สัปดาห์ละ 2 ครั้ง"],
+    ["รับประทาน 1 เม็ด ต่อเดือนละ 2 ครั้ง", "ต่อเดือนละ", "monthly", "mo", "เดือนละ 2 ครั้ง"],
+    ["รับประทาน 1 เม็ด ต่อ วัน ละ 2 ครั้ง", "ต่อวันละ", "daily", "d", "วันละ 2 ครั้ง"]
+  ])("preserves the entire distributive cadence in %s", (source, phrase, cadence, periodUnit, realization) => {
+    const tokens = lexInput(source);
+    const cadenceToken = tokens.find(token => token.canonical === cadence);
+    expect(cadenceToken?.sourceText.replace(/\s+/gu, "")).toBe(phrase);
+    expect(tokens.some(token => token.lower === "ละ")).toBe(false);
+    const parsed = parseSig(source, { locale: "th" });
+    expect(parsed.items[0]?.fhir.timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit
+    });
+    expect(parsed.longText).toContain(realization);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("renders monthly and yearly multiple doses without losing the frequency", () => {
+    const monthly = parseSig("1 tab PO twice monthly").items[0].fhir;
+    expect(monthly.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "mo" });
+    expect(formatSig(monthly, "long", { locale: "en" })).toContain("twice monthly");
+    expect(formatSig(monthly, "long", { locale: "th" })).toContain("เดือนละ 2 ครั้ง");
+    const yearly = {
+      ...monthly,
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: "a" as const } }
+    };
+    expect(formatSig(yearly, "long", { locale: "en" })).toContain("twice yearly");
+    expect(formatSig(yearly, "long", { locale: "th" })).toContain("ปีละ 2 ครั้ง");
+  });
+
   it("extracts dose, BID cadence, event timing, and safeguards while preserving procedure prose", () => {
     const result = parseSig(COMPLEX_THAI_SIG, { locale: "th" });
     const repeat = result.fhir.timing?.repeat;
