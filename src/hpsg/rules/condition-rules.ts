@@ -17,7 +17,7 @@ import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, i
 import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
 import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
-import { countAndDurationRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
+import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { mapIntervalUnit } from "../timing-lexicon";
@@ -116,15 +116,19 @@ export function matchCalendarExclusion(
   source: string,
   options?: ParseOptions,
   knownDateSpans?: MedicationDateListMatch[],
-  scopeEnd?: number
+  scopeEnd?: number,
+  from = 0
 ): CalendarExclusion | undefined {
-  const cue = EXCLUSION_CUE.exec(source);
+  // Match from the lexical sign's own source offset. Another earlier
+  // exclusion is a separate constituent, never this sign's payload.
+  const cue = EXCLUSION_CUE.exec(source.slice(from));
   if (!cue) return undefined;
-  const clauseEnd = source.indexOf(";", cue.index) >= 0
-    ? source.indexOf(";", cue.index)
+  const cueStart = cue.index + from;
+  const clauseEnd = source.indexOf(";", cueStart) >= 0
+    ? source.indexOf(";", cueStart)
     : source.length;
   const end = Math.min(clauseEnd, scopeEnd ?? clauseEnd);
-  const rawStart = cue.index + cue[0].length;
+  const rawStart = cueStart + cue[0].length;
   const rawSuffix = source.slice(rawStart, end);
   const leadingWhitespace = rawSuffix.search(/\S/u);
   if (leadingWhitespace < 0) return undefined;
@@ -167,7 +171,35 @@ export function matchCalendarExclusion(
   if (weekdayValues.length) excluded.push(...weekdayValues);
   if (residual.trim() && !isOnlyWeekdays(residual)) return undefined;
   if (!excluded.length && !dates.length) return undefined;
-  return { start: cue.index, end, excluded, dates: [...new Set(dates)].sort() };
+  return { start: cueStart, end, excluded, dates: [...new Set(dates)].sort() };
+}
+
+const FOLLOWING_CADENCE_RULES = [timingLexicalRule(), countFrequencyRule()];
+
+/** An exclusion's unresolved nominal must not consume a following complete
+ * cadence sign. This lightweight scan runs only for an explicit exclusion
+ * cue and reuses the installed timing grammar, rather than reparsing text.
+ */
+function followingCadenceBoundary(
+  context: HpsgClauseContext,
+  exclusionLeadEnd: number,
+  clauseEnd: number
+): number | undefined {
+  for (const token of context.tokens) {
+    if (token.sourceStart < exclusionLeadEnd || token.sourceStart >= clauseEnd ||
+        context.state.consumed.has(token.index)) continue;
+    for (const rule of FOLLOWING_CADENCE_RULES) {
+      for (const sign of rule.match(context, token.index)) {
+        const schedule = sign.synsem.head.schedule;
+        if (!schedule || (!schedule.frequency && schedule.period === undefined &&
+            !schedule.timingCode && !schedule.when?.length)) continue;
+        if (!sign.tokens.length || sign.tokens[0].sourceStart !== token.sourceStart ||
+            sign.tokens[sign.tokens.length - 1].sourceEnd > clauseEnd) continue;
+        return token.sourceStart;
+      }
+    }
+  }
+  return undefined;
 }
 
 const COURSE_DURATION_RULE = countAndDurationRule();
@@ -593,11 +625,15 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
     const durationBoundary = trailingCourseDurationBoundary(
       context, lead.sourceStart, clauseEnd
     );
+    const cadenceBoundary = followingCadenceBoundary(context, lead.sourceEnd, clauseEnd);
+    const boundary = Math.min(durationBoundary ?? clauseEnd, cadenceBoundary ?? clauseEnd);
+    const scopeEnd = context.state.input.slice(0, boundary).replace(/\s+$/u, "").length;
     const exclusion = matchCalendarExclusion(
       context.state.input,
       context.options,
       context.dateSpans,
-      durationBoundary
+      scopeEnd,
+      lead.sourceStart
     );
     if (!exclusion) {
       const targeted = targetedWithholdingCalendarAt(context, start);
@@ -609,7 +645,7 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
       if (activityDay) return [activityDay];
       const range = {
         start: lead.sourceStart,
-        end: durationBoundary ?? clauseEnd
+        end: scopeEnd
       };
       const tokens = overlappingAvailableTokens(context, range.start, range.end);
       if (!tokens.length) return [];

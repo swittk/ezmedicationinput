@@ -4,8 +4,9 @@ import {
   lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
+import { shiftCanonicalSigClauses } from '../src/ir';
 import { ParserState } from '../src/parser-state';
-import { calendarExclusionLexicalRule } from '../src/hpsg/rules/condition-rules';
+import { calendarExclusionLexicalRule, matchCalendarExclusion } from '../src/hpsg/rules/condition-rules';
 import type { HpsgClauseContext } from '../src/hpsg/rule-context';
 import {
   parseClauseSign,
@@ -75,6 +76,19 @@ function expectBid(items: ReturnType<typeof parseSig>['items']): void {
 }
 
 describe('HPSG coordination cadence scope', () => {
+  it("rebases a method's independent source evidence along with the clause evidence", () => {
+    const state = parseClauseState("Take 1 tablet BID");
+    const method = state.primaryClause.method;
+    expect(method?.text).toBeTruthy();
+    method!.evidence = [{
+      rule: "hpsg.lex.method", spans: [{ start: 0, end: 4, text: "Take" }]
+    }];
+    shiftCanonicalSigClauses([state.primaryClause], 31, new WeakSet<object>());
+    expect(method!.evidence?.[0].spans[0]).toMatchObject({
+      start: 31, end: 35, text: "Take"
+    });
+  });
+
   it("inherits coordinated sites without fabricating source spans in a later dosing segment", async () => {
     const source = "Apply 1 g to scalp and forehead BID, then 2 g BID";
     const groupText = "scalp and forehead";
@@ -1283,6 +1297,73 @@ describe('HPSG coordination cadence scope', () => {
 });
 
 describe("Thai QOD cadence and excluded-day lexical separation", () => {
+  it("matches each genuine exclusion relative to its own HPSG source lead", () => {
+    const input = "Take 1 tablet daily except Sunday; Take 1 tablet BID except Wednesday";
+    const first = input.indexOf("except");
+    const second = input.lastIndexOf("except");
+    expect(matchCalendarExclusion(input, undefined, undefined, undefined, first))
+      .toMatchObject({ start: first, excluded: ["sun"] });
+    expect(matchCalendarExclusion(input, undefined, undefined, undefined, second))
+      .toMatchObject({ start: second, excluded: ["wed"] });
+  });
+
+  it.each([
+    ["Take 1 tablet except Sunday BID", ["sun"], "BID", "except Sunday"],
+    ["Take 1 tablet except public holidays twice daily", undefined, "BID", "except public holidays"]
+  ] as const)("preserves a following timing phrase separately from the exclusion: %s", (
+    input, excluded, timing, source
+  ) => {
+    const parsed = parseSig(input);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.schedule).toMatchObject({ timingCode: timing, frequency: 2, period: 1, periodUnit: "d" });
+    if (excluded) expect(getDosageExcludedWeekdays(parsed.fhir)).toEqual([...excluded]);
+    else expect(clause.clinicalAdjuncts?.evidence?.some(entry =>
+      entry.rule === "hpsg.lex.clinical.calendar-exclusion.unresolved"
+    )).toBe(true);
+    const ranges = clause.clinicalAdjuncts?.localRanges ?? [];
+    expect(ranges.map(range => input.slice(range.start, range.end))).toContain(source);
+    expect(parsed.meta.canonical.clauses[0]?.dose).toMatchObject({ value: 1, unit: "tab" });
+  });
+
+  it("retains an exact date exclusion with a standalone M/W/F weekday cadence", () => {
+    const input = "Take 1 tablet M/W/F except 2026-11-04";
+    const parsed = parseSig(input);
+    expect(parsed.items).toHaveLength(1);
+    const dosage = parsed.fhir;
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.dayOfWeek).toEqual(["mon", "wed", "fri"]);
+    expect(getDosageExcludedDates(dosage)).toEqual(["2026-11-04"]);
+    expect(getDosageExcludedDates(toFhirR5Dosages(parsed.fhirNext)[0]))
+      .toEqual(["2026-11-04"]);
+    const opts = {
+      from: "2026-11-01T00:00:00+07:00",
+      orderedAt: "2026-11-01T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 5
+    };
+    const due = nextDueDoses(dosage, opts);
+    expect(due.map(time => time.slice(0, 10))).toEqual([
+      "2026-11-02", "2026-11-06", "2026-11-09", "2026-11-11", "2026-11-13"
+    ]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("does not consume an after-exclusion BID cadence as unresolved holiday text", () => {
+    const input = "Take 1 tablet except holidays BID";
+    const parsed = parseSig(input);
+    const schedule = parsed.meta.canonical.clauses[0].schedule;
+    expect(schedule).toMatchObject({ timingCode: "BID", frequency: 2, period: 1, periodUnit: "d" });
+    const unresolved = parsed.meta.canonical.clauses[0].clinicalAdjuncts;
+    expect(unresolved?.evidence?.some(entry =>
+      entry.rule === "hpsg.lex.clinical.calendar-exclusion.unresolved"
+    )).toBe(true);
+    expect(unresolved?.localRanges).toContainEqual({
+      start: input.indexOf("except"), end: input.indexOf("BID") - 1
+    });
+    expect(parsed.meta.leftoverText).toContain("holidays");
+    expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(parsed.fhir.timing?.repeat?.frequency).toBe(2);
+  });
+
   it("does not offer an unresolved calendar exclusion for bare วันเว้นวัน", () => {
     const source = "รับประทาน 1 เม็ด วันเว้นวัน";
     const tokens = tokenize(source);

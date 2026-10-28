@@ -1431,6 +1431,35 @@ describe("monthly day membership supply", () => {
   const dates = (month: string, days: readonly number[], clock = "09:00") =>
     days.map(day => `${month}-${String(day).padStart(2, "0")}T${clock}:00+07:00`);
   const firstFourteen = Array.from({ length: 14 }, (_, i) => i + 1);
+  it("defaults standalone monthly day membership to one administration per selected day, without overriding BID", () => {
+    const firstFive = [1, 2, 3, 4, 5];
+    for (const [source, clocks] of [
+      ["Take 1 tablet on days 1-5 of each month", ["09:00"]],
+      ["Take 1 tablet BID on days 1-5 of each month", ["08:00", "20:00"]],
+      ["Take 1 tablet on days 1-5 of each month BID", ["08:00", "20:00"]]
+    ] as const) {
+      const parsed = parseBatch(source);
+      expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(parsed.meta.canonical.clauses[0].schedule?.dayOfMonth).toEqual(firstFive);
+      expect(parsed.fhir[0].timing?.repeat).toMatchObject({
+        frequency: clocks.length,
+        period: 1,
+        periodUnit: "d"
+      });
+      const expected = ["2026-11", "2026-12"].flatMap(month =>
+        firstFive.flatMap(day => clocks.map(time =>
+          `${month}-${String(day).padStart(2, "0")}T${time}:00+07:00`
+        ))
+      );
+      for (const dosage of forms(source)) {
+        expect(nextDueDoses(dosage, { ...options, limit: expected.length })).toEqual(expected);
+        expect(calculateTotalUnits({
+          ...options, dosage, durationValue: 61, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(expected.length);
+      }
+    }
+  });
+
 
   it.each([
     "1 tab PO QD on days 1-14 of each month",

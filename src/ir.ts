@@ -277,6 +277,7 @@ export function shiftCanonicalSigClauses(
     shiftEvidenceSpans(clause.evidence);
     shiftEvidenceSpans(clause.dose?.evidence);
     shiftEvidenceSpans(clause.route?.evidence);
+    shiftEvidenceSpans(clause.method?.evidence);
     shiftEvidenceSpans(clause.site?.evidence);
     shiftEvidenceSpans(clause.schedule?.evidence);
     shiftEvidenceSpans(clause.provisionalSchedule?.evidence);

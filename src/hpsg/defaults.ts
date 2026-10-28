@@ -552,6 +552,22 @@ function applyCoordinatedWeekdayFrequency(state: ParserState): void {
   }
 }
 
+/** A headed "days N–M of each month" construction selects eligible
+ * administration days, not the number of doses on each day. Supply one
+ * administration per eligible day only when no independent cadence or
+ * event/clock has already expressed how many administrations occur.
+ */
+function applyMonthlyDefaultForDayFilters(state: ParserState): void {
+  if (!state.primaryClause.schedule?.dayOfMonth?.length ||
+      state.occurrenceCap !== undefined ||
+      state.frequency !== undefined || state.frequencyMax !== undefined ||
+      state.period !== undefined || state.periodMax !== undefined ||
+      state.periodUnit !== undefined || state.when.length || state.timeOfDay?.length) return;
+  state.frequency = 1;
+  state.period = 1;
+  state.periodUnit = FhirPeriodUnit.Day;
+}
+
 function applyWeeklyDefaultForDayFilters(state: ParserState): void {
   if (
     state.dayOfWeek.length &&
@@ -580,6 +596,7 @@ export function applyHpsgDefaultConstraints(
   applyUnitDefault(state, tokens, context, options);
   applySingleDoseDefault(state, options);
   applyRouteSiteDefault(state);
+  applyMonthlyDefaultForDayFilters(state);
   applyWeeklyDefaultForDayFilters(state);
   applyCoordinatedWeekdayFrequency(state);
   applyAdministrationDurationSemantics(state, options);

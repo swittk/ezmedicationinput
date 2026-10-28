@@ -319,7 +319,10 @@ function applyClinicalAdjunct(
     schedule.frequency !== undefined ||
     schedule.period !== undefined ||
     schedule.when?.length ||
-    schedule.timeOfDay?.length
+    schedule.timeOfDay?.length ||
+    schedule.dayOfWeek?.length ||
+    schedule.dayOfMonth?.length ||
+    schedule.calendarEvents?.length
   ));
   if (schedule && hasCadence &&
       (adjunct.excludedWeekdays?.length || adjunct.excludedDates?.length)) {
