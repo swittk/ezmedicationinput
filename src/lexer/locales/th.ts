@@ -819,7 +819,12 @@ function splitTokensAtRecognizedThaiDateBoundaries(
 }
 
 export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
-  const dateBounded = splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" });
+  // Only numeric dates with adjoining digits and / or - can need the
+  // structural numeric-date token split. Ordinary Thai SIGs skip the date
+  // list scanner; English textual dates contain no numeric token cuts here.
+  const dateBounded = /[0-9๐-๙][/-][0-9๐-๙]/u.test(input)
+    ? splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" })
+    : tokens;
   const prepared = splitThaiGrammarPrefixTokens(splitThaiQuantityTokens(dateBounded, input));
   const normalized: LexToken[] = [];
   let cursor = 0;

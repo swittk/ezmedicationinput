@@ -4,6 +4,7 @@ import {
   formBodySiteRestriction, realizeBodySiteRestriction
 } from "../src/body-site-grammar";
 import { formatCanonicalClause } from "../src/format";
+import { getBodySiteRelationDefinition } from "../src/relation-terminology";
 import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
   canonicalFromFhir
@@ -350,5 +351,60 @@ describe("Thai site-anchor lexical ambiguity", () => {
     const dosage = parseSig(source).fhir;
     expect(dosage.site?.coding?.[0]?.code).toBe("302538001");
     expect(dosage.timing?.repeat?.frequency).toBe(2);
+  });
+});
+
+describe("standards-accurate middle versus median body-site qualifier", () => {
+  it("uses NCIt Middle and never SNOMED Median for a middle-of-site instruction", () => {
+    const relation = getBodySiteRelationDefinition("middle")!;
+    expect(relation.realization.en?.surface).toBe("middle");
+    expect(relation.realization.th?.surface).toBe("กลาง");
+    expect(relation.coding).toMatchObject({
+      system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+      code: "C25569",
+      display: "Middle"
+    });
+
+    const parsed = parseSig("Apply cream to the middle of the forearm");
+    const site = parsed.meta.canonical.clauses[0]?.site;
+    expect(site?.spatialRelation?.relationCoding).toMatchObject({
+      system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+      code: "C25569", display: "Middle"
+    });
+    expect(site?.spatialRelation?.targetCoding?.code).toBe("14975008");
+    expect(parsed.fhir.site?.text).toBe("middle of forearm");
+    // NCIt Middle is not a SNOMED modifier; never produce an invalid
+    // SNOMED expression containing either NCIt C25569 or Median 260528009.
+    expect(parsed.fhir.site?.coding?.some(coding =>
+      coding.system === "http://snomed.info/sct" &&
+      (coding.code?.includes("260528009") || coding.code?.includes("C25569"))
+    )).not.toBe(true);
+    const spatial = parsed.fhir.site?.extension?.find(item =>
+      item.url === "urn:ezmedicationinput:body-site-spatial-relation"
+    );
+    expect(spatial?.extension).toContainEqual(expect.objectContaining({
+      url: "relation",
+      valueCoding: expect.objectContaining({
+        system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+        code: "C25569"
+      })
+    }));
+    expect(spatial?.extension).toContainEqual(expect.objectContaining({
+      url: "target",
+      valueCodeableConcept: expect.objectContaining({
+        coding: expect.arrayContaining([expect.objectContaining({
+          system: "http://snomed.info/sct", code: "14975008"
+        })])
+      })
+    }));
+    const reloaded = canonicalFromFhir(parsed.fhir);
+    expect(reloaded.site?.spatialRelation?.relationCoding?.code).toBe("C25569");
+    const strict = toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0];
+    expect(strict.site?.coding?.some(coding => coding.system === "http://snomed.info/sct" &&
+      coding.code?.includes("260528009"))).not.toBe(true);
+    expect(fromFhirDosage(strict).meta.canonical.clauses[0]?.site?.spatialRelation?.relationCoding)
+      .toMatchObject({ code: "C25569", display: "Middle" });
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("กลาง");
+    expect(parsed.longText).toContain("middle of the forearm");
   });
 });

@@ -978,7 +978,7 @@
     },
     {
       "canonical": "middle",
-      "coding": {"system": "http://snomed.info/sct", "code": "260528009", "display": "Middle"},
+      "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25569", "display": "Middle"},
       "aliases": [
         "middle"
       ],
