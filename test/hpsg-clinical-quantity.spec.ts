@@ -135,6 +135,41 @@ describe("HPSG clinical quantity grammar", () => {
     });
   });
 
+  it.each([
+    "10 mg/kg daily divided into 3 doses",
+    "10 mg/kg daily in 3 divided doses",
+    "10 mg/kg PO daily divided into 3 doses",
+    "10 mg/kg QD divided into 3 doses",
+    "10 mg/kg once daily divided into 3 doses"
+  ])("divides an explicit daily weight-based total without erasing the patient-mass denominator: %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.items).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "dose",
+      status: "resolved",
+      numerator: { value: 10, unit: "mg", dimension: "mass" },
+      denominators: [
+        { value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 1, unit: "d", dimension: "time" }
+      ],
+      dailyTotal: true,
+      dividedDoseCount: 3,
+      requiresPatientWeight: true,
+      projectedDose: { value: 10 / 3, unit: "mg/kg" }
+    });
+    expect(clause.dose?.value).toBeCloseTo(10 / 3);
+    expect(clause.dose?.unit).toBe("mg/kg");
+    expect(clause.schedule).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(dosage.doseAndRate?.[0]?.doseQuantity?.value).toBeCloseTo(10 / 3);
+      expect(dosage.doseAndRate?.[0]?.doseQuantity?.code).toBe("mg/kg");
+      expect(dosage.timing?.repeat).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
+      expect(dosage.timing?.code?.coding?.some(coding => coding.code === "QD")).not.toBe(true);
+    }
+  });
+
   it("derives a per-administration dose and cadence from an explicit divided daily total", () => {
     const state = parseClauseState("10 mg/kg/day divided into 3 doses");
     expect(state.primaryClause.clinicalQuantity).toMatchObject({

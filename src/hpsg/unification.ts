@@ -738,7 +738,15 @@ export function unifySynsem(
   // undivided scalar. The division complement licenses a typed period total,
   // and the resulting schedule represents the individual administrations.
   // Ordinary "30 mg daily" has no division complement and stays untouched.
-  if (dose?.divisionCount !== undefined && !dose.clinicalQuantity &&
+  // A resolved weight-based dose (mg/kg) also needs this explicit daily-total
+  // projection when "daily" is separate from the unit, not written as "/day".
+  // Preserve its patient-mass denominator and weight requirement; only append
+  // the source-backed daily period. Rates with an existing time denominator
+  // must never be divided here a second time.
+  const quantity = dose?.clinicalQuantity;
+  if (dose?.divisionCount !== undefined &&
+      (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
+        !quantity.denominators.some(term => term.dimension === "time"))) &&
       dose.value !== undefined && dose.unit &&
       schedule?.frequency === 1 && schedule.period === 1 && schedule.periodUnit === "d") {
     const category = getUnitCategory(dose.unit);
@@ -747,9 +755,10 @@ export function unifySynsem(
       : category;
     const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit };
     dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
+      ...quantity,
       representation: "dose", status: "resolved",
-      numerator: { value: dose.value, unit: dose.unit, dimension },
-      denominators: [{ value: 1, unit: "d", dimension: "time" }],
+      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension },
+      denominators: [...(quantity?.denominators ?? []), { value: 1, unit: "d", dimension: "time" }],
       dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
     } };
     schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
