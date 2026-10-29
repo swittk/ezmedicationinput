@@ -208,8 +208,18 @@ function durationAfter(
 ): { value: number; unit: FhirPeriodUnit.Hour | FhirPeriodUnit.Minute; indices: number[] } | undefined {
   const limit = Math.min(context.limit, start + 8);
   for (let index = start; index + 2 < limit; index += 1) {
-    if (!available(context, index) ||
-        !INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[index]))) continue;
+    if (!available(context, index)) break;
+    const token = normalizeTokenLower(context.tokens[index]);
+    if (!INFUSION_DURATION_LEADS.has(token)) {
+      const next = context.tokens[index + 1];
+      // Only a route marker or an optional comma may intervene between a
+      // rate and its duration. Never cross into another clinical action.
+      if (/^(?:iv|intravenously)$/u.test(token) ||
+          (token === "," && next && available(context, index + 1) &&
+            (INFUSION_DURATION_LEADS.has(normalizeTokenLower(next)) ||
+              /^(?:iv|intravenously)$/u.test(normalizeTokenLower(next))))) continue;
+      break;
+    }
     const valueToken = context.tokens[index + 1];
     const unitToken = context.tokens[index + 2];
     const unit = unitToken ? timeUnit(normalizeTokenLower(unitToken)) : undefined;

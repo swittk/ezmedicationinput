@@ -4337,3 +4337,11 @@ Product gate: three ordinary clinician-facing issues reproduced RED. A source-le
 Fourth review item, "daily except all days" needing a mandatory modifier extension, deliberately rejected in the original review thread: contradictory source beyond ordinary competent instructions. Original text, seven excluded weekday codes and zero scheduled doses are preserved; partial exclusions still export the positive allowed weekdays. No additional conformance burden or hard stop for a pathological case.
 
 RED/GREEN clinical-oracle regressions, full source suites 3811/3811, ESM/CJS and TypeScript declaration build, and packaged exports 4/4 PASS. All changed source/test files already belong to PR #10; no new PR, parser pass, runtime dependency, destructive transformation or change to the unrelated temporary probe.
+
+## 2026-10-30 — PR #10 review: keep infusion duration within its own action
+
+**Clinical requirement (RED):** Ordinary "Infuse at 100 mL/h and observe for 30 minutes" was incorrectly projected as a 30-minute infusion because the bounded HPSG rate-duration scan skipped an independent observation action. Also reproduced for "then observe", comma+and, and semicolon. This changes an actual infusion duration, not merely its formatting.
+
+**Typed HPSG fix:** The existing durationAfter helper remains a bounded eight-token lexical scan, but now stops at unrelated lexical/action boundaries. It allows only existing for/over duration leads plus optional IV route markers and commas immediately preceding those markers or duration leads. Original text and all coded rate semantics stay recoverable. No extra parse pass, runtime dependency, mandatory safety check, or FHIR-stage reinterpretation.
+
+**Independent oracles:** Four negative examples failed RED and passed GREEN; four corresponding positive for/over/IV/comma variants retain legitimate infusion duration. An additional per-kg rate example (5 mcg/kg/min with separate observation) preserves patient-weight rate semantics without turning observation time into infusion duration. All 44 source suites passed 3820/3820; ESM/CJS plus TypeScript declarations build passed; packaged export tests passed 4/4. Only pre-existing files in PR #10 changed; the unrelated temporary probe remains untouched.

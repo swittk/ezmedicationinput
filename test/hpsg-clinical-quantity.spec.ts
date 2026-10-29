@@ -668,6 +668,61 @@ describe("HPSG clinical quantity grammar", () => {
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
 
+  it.each([
+    "Infuse at 100 mL/h and observe for 30 minutes",
+    "Infuse at 100 mL/h then observe for 30 minutes",
+    "Infuse at 100 mL/h; observe for 30 minutes",
+    "Infuse at 100 mL/h, and observe for 30 minutes"
+  ])("does not attach a separate observation duration to the infusion: %s", source => {
+    const result = parsePublicSig(source);
+    expect(result.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved",
+      numerator: { value: 100, unit: "mL" }
+    });
+    expect(result.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration).toBeUndefined();
+    expect(result.fhir[0].doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 100, code: "mL/h"
+    });
+    expect(result.fhir[0].timing?.repeat?.duration).toBeUndefined();
+    expect(result.fhir[0].text).toBe(source);
+  });
+
+  it.each([
+    "Infuse at 100 mL/h, over 2 hours",
+    "Infuse at 100 mL/h IV over 2 hours",
+    "Infuse at 100 mL/h, IV, over 2 hours",
+    "Infuse at 100 mL/h for 2 hours"
+  ])("keeps an infusion-local duration through optional commas and route: %s", source => {
+    const result = parsePublicSig(source);
+    expect(result.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration)
+      .toEqual({ value: 2, unit: "h" });
+    expect(result.fhir[0].doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 100, code: "mL/h"
+    });
+    expect(result.fhir[0].timing?.repeat).toMatchObject({
+      duration: 2, durationUnit: "h"
+    });
+    expect(result.fhir[0].timing?.repeat?.boundsDuration).toBeUndefined();
+  });
+
+  it("keeps a separate observation interval out of weight-based infusion time", () => {
+    const source = "Infuse IV at 5 mcg/kg/min and observe for 30 minutes";
+    const result = parsePublicSig(source);
+    expect(result.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved", requiresPatientWeight: true,
+      denominators: [
+        { value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 1, unit: "min", dimension: "time" }
+      ]
+    });
+    expect(result.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration).toBeUndefined();
+    expect(result.fhir[0].doseAndRate?.[0]?.rateQuantity).toMatchObject({
+      value: 5, code: "ug/kg/min"
+    });
+    expect(result.fhir[0].timing?.repeat?.duration).toBeUndefined();
+    expect(result.fhir[0].text).toBe(source);
+  });
+
   it("keeps an over-duration attached to a patient-weight infusion rate", () => {
     const parsed = parsePublicSig("Infuse IV at 5 mcg/kg/min over 8 hours");
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
