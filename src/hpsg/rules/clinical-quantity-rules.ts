@@ -208,7 +208,8 @@ function durationAfter(
 ): { value: number; unit: FhirPeriodUnit.Hour | FhirPeriodUnit.Minute; indices: number[] } | undefined {
   const limit = Math.min(context.limit, start + 8);
   for (let index = start; index + 2 < limit; index += 1) {
-    if (!available(context, index) || normalizeTokenLower(context.tokens[index]) !== "for") continue;
+    if (!available(context, index) ||
+        !INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[index]))) continue;
     const valueToken = context.tokens[index + 1];
     const unitToken = context.tokens[index + 2];
     const unit = unitToken ? timeUnit(normalizeTokenLower(unitToken)) : undefined;

@@ -1143,6 +1143,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `เดือนละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
       }
+      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
       return frequency !== undefined && frequency !== 1
         ? `เดือนละ ${stripTrailingZero(frequency)} ครั้ง`
         : "เดือนละครั้ง";
@@ -1935,7 +1936,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
     parts.push(timing);
   } else if (schedule.timingCode) {
     parts.push(schedule.timingCode);
-  } else if (schedule.period && schedule.periodUnit) {
+  } else if (schedule.period && schedule.periodUnit &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+        (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
       schedule.periodMax && schedule.periodMax !== schedule.period

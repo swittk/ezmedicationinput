@@ -649,6 +649,42 @@ describe("HPSG clinical quantity grammar", () => {
     });
   });
 
+  it.each([
+    "Infuse at 125 mL/h over 8 hours",
+    "Infuse at 125 mL/hr over 8 hours",
+    "Infuse at 125 mL/h for 8 hours"
+  ])("attaches the explicit duration to the infusion rate, not the course: %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved",
+      numerator: { value: 125, unit: "mL" },
+      administrationDuration: { value: 8, unit: "h" }
+    });
+    const dosage = parsed.fhir[0];
+    expect(dosage.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 125, code: "mL/h" });
+    expect(dosage.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    expect(dosage.timing?.repeat).toMatchObject({ duration: 8, durationUnit: "h" });
+    expect(dosage.timing?.repeat?.boundsDuration).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it("keeps an over-duration attached to a patient-weight infusion rate", () => {
+    const parsed = parsePublicSig("Infuse IV at 5 mcg/kg/min over 8 hours");
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved", requiresPatientWeight: true,
+      administrationDuration: { value: 8, unit: "h" },
+      denominators: [
+        { value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 1, unit: "min", dimension: "time" }
+      ]
+    });
+    for (const dosage of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(dosage.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 5, code: "ug/kg/min" });
+      expect(dosage.timing?.repeat).toMatchObject({ duration: 8, durationUnit: "h" });
+      expect(dosage.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+  });
+
   it("preserves an undivided daily total as a rate quantity instead of pretending it is a bolus", () => {
     const parsed = parseSig("10 mg/kg/day");
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
@@ -1131,6 +1167,25 @@ describe("calendar month-day source ownership", () => {
           expect(getTimingMonthDays(reentered.fhir[0].timing?.repeat)).toEqual([...days]);
         }
       }
+    }
+  });
+
+  it("does not say once monthly for imported days 1 and 15 without a frequency", () => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: {
+        period: 1, periodUnit: FhirPeriodUnit.Month,
+        extension: [1, 15].map(day => ({ url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day }))
+      } }
+    };
+    for (const locale of ["en", "th"] as const) for (const style of ["short", "long"] as const) {
+      const text = formatSig(row, style, { locale });
+      expect(text).not.toContain(locale === "en" ? "once monthly" : "เดือนละครั้ง");
+      if (style === "short") expect(text).not.toContain("Q1MO");
+      expect(text).toContain(locale === "en"
+        ? "on days 1 and 15 of each month" : "วันที่ 1 และ 15 ของทุกเดือน");
+      expect(getTimingMonthDays(parsePublicSig(text, { locale }).fhir[0].timing?.repeat))
+        .toEqual([1, 15]);
     }
   });
 

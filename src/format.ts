@@ -495,6 +495,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
       }
+      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
       if (frequency === 2) return "twice monthly";
       return frequency !== undefined && frequency !== 1
         ? `${stripTrailingZero(frequency)} times monthly`
@@ -1147,7 +1148,9 @@ function formatShort(clause: CanonicalSigClause): string {
     (!schedule.period || schedule.period === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
-  } else if (schedule.period && schedule.periodUnit) {
+  } else if (schedule.period && schedule.periodUnit &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+        (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
       schedule.periodMax && schedule.periodMax !== schedule.period
