@@ -4379,3 +4379,13 @@ Evidence: The new recurring-infusion cases failed RED before correction and pass
 CodeRabbit 100 reviewable file cap remains unchanged. The unrelated untracked test/__tmp_open_semantic_probe.ts was left untouched.
 
 Validation: source tests 3830/3830 across 44 suites PASS; ESM/CJS and TypeScript declarations build PASS; packaged export tests 4/4 PASS. git diff --check clean.
+
+## 2026-10-31 — PR #10 review: course-prefixed next week is a duration, not a phase seam
+
+Product gate: Reproduced ordinary "Take 1 tablet at 08:00 daily for the next week then take 2 tablets at 08:00 daily" losing its first phase course bound, with "next week" incorrectly split off as a new regimen connector. A following headless phase could be represented with overlapping administrations and missing 7-day course: real wrong-dose/course meaning, not adversarial input.
+
+Typed fix: The existing lexical sequence connector recognizes a duration lead immediately before "next week" (with optional "the"), so this phrase cannot become a phase separator. The existing bounded HPSG following-course duration rule now recognizes an implied cardinal one when next/following is directly followed by a time unit; normal enumerated "next 7 days" and "next 2 weeks" remain intact. Standalone "next week" still retains its phase sequence meaning. All logic is O(1) over the adjacent lexical tokens; no additional parse pass, FHIR-stage repair, hard stops or runtime dependencies.
+
+Independent oracles: Three ordinary next-week/optional-article/comma variants failed RED and pass GREEN, retaining both regimen phases, the first one-week course bound, original rendered instruction, and the 14-day supply of 21 tablets (7 at 1/day then 7 at 2/day) through both R6 and strict R5. Nearby following-week, next-month, next-two-weeks and independent next-week phase tests pass too.
+
+Validation: 44 source suites passed 3837/3837; ESM/CJS and TypeScript declaration build passed; packaged exports 4/4 passed; git diff --check clean. All changes are in pre-existing files of PR #10; unrelated untracked temporary semantic probe untouched.

@@ -130,7 +130,7 @@ const COURSE_CONTINUATION_MODIFIERS = new Set(lexicalClasses.courseContinuationM
  * @param start Candidate duration-lead index.
  */
 export function followingCourseDurationHeaderAt(tokens: readonly Token[], start: number):
-  { valueIndex: number; tokenEnd: number } | undefined {
+  { valueIndex: number; tokenEnd: number; implicitSingle?: boolean } | undefined {
   const lead = tokens[start];
   if (!lead || !DURATION_LEAD_TOKENS.has(normalizeTokenLower(lead))) return undefined;
   let cursor = start + 1;
@@ -139,6 +139,10 @@ export function followingCourseDurationHeaderAt(tokens: readonly Token[], start:
   if (!modifier || !COURSE_CONTINUATION_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
   const valueIndex = cursor + 1;
   const value = tokens[valueIndex];
+  // "for the next week" names one week without repeating "one".
+  if (value && mapIntervalUnit(normalizeTokenLower(value))) {
+    return { valueIndex, tokenEnd: valueIndex + 1, implicitSingle: true };
+  }
   if (!value || !(value.kind === LexKind.Number || value.kind === LexKind.NumberRange ||
       FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] !== undefined)) return undefined;
   let unitIndex = valueIndex + 1;
@@ -3013,6 +3017,12 @@ export function durationNominalAt(
   }
   if (headed && tokens[cursor] && normalizeTokenLower(tokens[cursor]) === "the") cursor += 1;
   const following = headed ? followingCourseDurationHeaderAt(tokens, start) : undefined;
+  if (following?.implicitSingle) {
+    const unit = tokens[following.valueIndex];
+    return make(following.tokenEnd, 1,
+      unit && courseDurationUnit(normalizeTokenLower(unit)),
+      "hpsg.lex.schedule.duration.followingImplicitOne", 21);
+  }
   if (following) cursor = following.valueIndex;
   const valueToken = tokens[cursor];
   if (!valueToken || cursor >= limit) return undefined;

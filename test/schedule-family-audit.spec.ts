@@ -1976,6 +1976,61 @@ describe("source-backed finite pause before medication resumption", () => {
 
 
 describe("real-world lexical phase transition variants", () => {
+  it.each([
+    "Take 1 tablet at 08:00 daily for the next week then take 2 tablets at 08:00 daily",
+    "Take 1 tablet at 08:00 daily for the next week, then take 2 tablets at 08:00 daily",
+    "Take 1 tablet at 08:00 daily for next week then take 2 tablets at 08:00 daily"
+  ])("keeps for-next-week duration intact before a separate subsequent phase: %s", input => {
+    const result = parseSig(input);
+    expect(result.meta.segments).toHaveLength(2);
+    expect(result.meta.segments[0].text).toContain("next week");
+    expect(result.fhir).toHaveLength(2);
+    expect(result.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
+    expect(result.fhir[0].timing?.repeat).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d",
+      boundsDuration: { value: 1, code: "wk" }
+    });
+    expect(result.fhir[1].doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+    expect(result.fhir[1].timing?.repeat).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(result.fhirNext.step).toHaveLength(2);
+    for (const dosage of [result.fhirNext, toFhirR5Dosages(result.fhirNext)]) {
+      expect(calculateTotalUnits({
+        dosage,
+        orderedAt: "2026-11-02T00:00:00+07:00",
+        from: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        durationValue: 14,
+        durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(21);
+    }
+    expect(result.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    ["Take 1 tablet daily for the following week", 1, "wk"],
+    ["Take 1 tablet daily for the next month", 1, "mo"],
+    ["Take 1 tablet daily for the next 2 weeks", 2, "wk"]
+  ])("preserves a source-backed following-course duration: %s", (input, value, unit) => {
+    const result = parseSig(input);
+    expect(result.fhir).toHaveLength(1);
+    expect(result.fhir[0].timing?.repeat?.boundsDuration).toMatchObject({
+      value, code: unit
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+    expect(result.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it("still interprets a bare next-week header as the subsequent phase", () => {
+    const input = "Take 1 tablet at 08:00 for 7 days; next week take 2 tablets at 08:00 daily.";
+    const result = parseSig(input);
+    expect(result.fhirNext.step).toHaveLength(2);
+    expect(result.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(7);
+    expect(result.fhir[1].doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
+  });
+
+
   const start = "2026-11-02T00:00:00+07:00";
   const sourceEnglish = "Take 1 tablet at 08:00 and 20:00 for 7 days";
   const sourceThai = "กิน 1 เม็ด เวลา 08:00 และ 20:00 เป็นเวลา 7 วัน";

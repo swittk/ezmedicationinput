@@ -494,6 +494,13 @@ function sequenceLexeme(token: LexToken | undefined): string {
 
 export function sequenceConnectorEnd(tokens: readonly LexToken[], start: number): number | undefined {
   const initial = sequenceLexeme(tokens[start]);
+  // "for [the] next week" is a bounded course, not a new regimen phase.
+  // Keep bare "next week" as an explicit subsequent-phase connector.
+  if (initial === "next" && sequenceLexeme(tokens[start + 1]) === "week") {
+    const before = sequenceLexeme(tokens[start - 1]);
+    const durationLead = before === "the" ? start - 2 : start - 1;
+    if (DURATION_LEAD_TOKENS.has(sequenceLexeme(tokens[durationLead]))) return undefined;
+  }
   if (ACTION_SEQUENCE_MARKERS.has(initial)) return start + 1;
   const canonicalCandidates = PHRASE_SEQUENCERS_BY_FIRST.get(initial);
   const surface = tokens[start]?.lower;
