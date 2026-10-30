@@ -273,7 +273,12 @@ function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolea
     schedule.periodMax !== undefined ||
     schedule.dayOfWeek?.length ||
     schedule.when?.length ||
-    schedule.timeOfDay?.length
+    schedule.timeOfDay?.length ||
+    schedule.dayOfMonth?.length ||
+    schedule.calendarEvents?.length ||
+    schedule.weekdayOrdinal !== undefined ||
+    schedule.cycleDayConstraint !== undefined ||
+    schedule.repeatCycle !== undefined
   ));
 }
 
@@ -596,8 +601,9 @@ export function projectHpsgSignToState(
       delete target.durationMax;
       delete target.durationUnit;
     }
-    if (!hasRecurringSchedule(schedule) && !sign.synsem.valence.prn &&
-        !state.asNeeded && target.count === undefined) target.count = 1;
+    if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
+        !sign.synsem.valence.prn && !state.asNeeded &&
+        target.count === undefined) target.count = 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct

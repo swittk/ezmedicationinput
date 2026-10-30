@@ -446,6 +446,33 @@ describe('HPSG coordination cadence scope', () => {
     expect(selected?.construction.headSide).toBeUndefined();
   });
 
+  it("keeps the administration head on the left when the right daughter supplies a shared course", () => {
+    const headed = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      leftHasSchedule: true,
+      leftHasCadence: true,
+      rightHasCourseDuration: true,
+      rightHasTrailingCourseDuration: true
+    }));
+    expect(headed?.semantic.construction.operation)
+      .toBe("inherit-administration-head-and-share-trailing-course-duration");
+    expect(headed?.construction.headSide).toBe("left");
+
+    const event = selectHpsgCoordinationScopeConstruction(scopeFacts({
+      relation: {
+        ...scopeFacts().relation, semanticLicense: "event-timing-ellipsis",
+        rule: "regimen.event-timing-ellipsis"
+      },
+      leftHasSchedule: true,
+      leftHasCadence: true,
+      rightExplicitDose: false,
+      rightHasCourseDuration: true,
+      rightHasTrailingCourseDuration: true
+    }));
+    expect(event?.semantic.construction.operation)
+      .toBe("inherit-event-timing-and-share-trailing-course-duration");
+    expect(event?.construction.headSide).toBe("left");
+  });
+
   it('licenses shared course scope only from a terminal typed course daughter', () => {
     const shared = selectHpsgCoordinationScopeConstruction(scopeFacts({
       leftHasSchedule: true,

@@ -439,7 +439,9 @@ export function selectHpsgCoordinationScopeConstruction(
       headSide: operation === "preserve-disjunctive-dosages"
         ? undefined
         : operation === "share-leading-adjuncts" || operation === "inherit-event-timing-administration" ||
-          operation === "inherit-administration-head"
+          operation === "inherit-event-timing-and-share-trailing-course-duration" ||
+          operation === "inherit-administration-head" ||
+          operation === "inherit-administration-head-and-share-trailing-course-duration"
           ? "left" : "right",
       leftType: "administration-clause",
       rightType: "administration-clause"

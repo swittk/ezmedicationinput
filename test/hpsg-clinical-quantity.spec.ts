@@ -39,6 +39,50 @@ describe("HPSG clinical quantity grammar", () => {
     expect(recurring.timing?.repeat?.count).toBeUndefined();
   });
 
+  it.each([
+    {
+      source: "Infuse 25 mL IV over 1 hour on days 1 and 15 of each month",
+      expected: ["2026-11-01", "2026-11-15", "2026-12-01", "2026-12-15"]
+    },
+    {
+      source: "Infuse 25 mL IV over 1 hour on day 1 of each month",
+      expected: ["2026-11-01", "2026-12-01", "2027-01-01", "2027-02-01"]
+    },
+    {
+      source: "Infuse 25 mL IV over 1 hour on 02/11/2026 and 09/11/2026",
+      expected: ["2026-11-02", "2026-11-09"]
+    }
+  ])("keeps recurring or source-dated infusions uncapped: $source", ({ source, expected }) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      administrationDuration: { value: 1, unit: "h" }
+    });
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.timing?.repeat?.count).toBeUndefined();
+      expect(row.timing?.repeat).toMatchObject({ duration: 1, durationUnit: "h" });
+      expect(row.doseAndRate?.[0]?.rateRatio).toMatchObject({
+        numerator: { value: 25, code: "mL" },
+        denominator: { value: 1, code: "h" }
+      });
+      const due = nextDueDoses(row, {
+        from: "2026-11-01T00:00:00+07:00",
+        orderedAt: "2026-11-01T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: expected.length
+      });
+      expect(due.map(iso => iso.slice(0, 10))).toEqual(expected);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains count one only for a genuinely one-time infusion", () => {
+    const parsed = parsePublicSig("Infuse 25 mL IV over 1 hour once");
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.timing?.repeat).toMatchObject({ count: 1, duration: 1, durationUnit: "h" });
+    }
+  });
+
   it("lowers resolved quantities directly from typed canonical semantics, without a post-parse clinical resolver", () => {
     const weightRate = canonicalToFhir(parseClauseState("dopamine 5 mcg/kg/min IV").primaryClause);
     expect(weightRate.doseAndRate?.[0].rateQuantity).toMatchObject({

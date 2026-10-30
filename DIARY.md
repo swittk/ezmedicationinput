@@ -4365,3 +4365,17 @@ RED/GREEN clinical-oracle regressions, full source suites 3811/3811, ESM/CJS and
 **Performance nitpick:** Tested CodeRabbit's custom activity-prefix caching idea with a 500-entry caller activity map. Temporary per-clause surface caching avoided stale values between calls but did not improve end-to-end parsing (~20.49 ms/parse baseline, ~21.35 ms/parse after in single sample). The likely larger cost remains custom dictionary resolution, so the unhelpful microcache and its test were rolled back. No device-specific tuning or speculative optimization retained.
 
 **Validation:** 3825/3825 source tests passed across all 44 suites; ESM/CJS and TypeScript declaration build succeeded, and four packaged-export tests passed. After adding the seven-day supply assertion, the entire date test file 49/49 and typecheck passed. Only files already in PR #10 modified; the untracked temporary semantic probe left untouched.
+
+## 2026-10-31 — PR #10 review: recurring infusion dates and shared-course head identity
+
+Product gate: A normal recurring infusion instruction, "Infuse 25 mL IV over 1 hour on days 1 and 15 of each month", incorrectly exported Timing.repeat.count=1. That capped the dosage after the first November administration and removed the prescribed November 15 and subsequent months. The same problem occurred with a single selected monthly day and a list of two concrete November dates. This is a real wrong-course error in a clinician-facing suggestion and execution helper.
+
+Typed HPSG correction: extend the existing hasRecurringSchedule helper to recognize month-day membership, calendar date events, cycle-day constraints, repeat cycles and weekday ordinal, not just frequency/day-of-week/clocks. The administration-duration projection checks both the source sign's schedule and the assembled clause's schedule before inferring count 1. Ordinary once-only fixed-duration infusions continue to explicitly retain count 1, and the administration duration remains independent of finite course bounds. No extra lexer pass, FHIR rewriting, hard stops or new dependency.
+
+Coordination head-side consistency: The head of inherited-event or inherited-administration coordination remains the left administration daughter even if a right trailing daughter supplies the shared course duration. The selector had mislabeled both trailing-course variants as right-headed. Updated only those two existing construction options; left/right semantic scope in the coordinating regimen is unchanged, and a source-backed metadata test verifies the head assignment. No extraneous parser logic.
+
+Evidence: The new recurring-infusion cases failed RED before correction and passed GREEN after, testing both direct and strict FHIR R5, the absence of an artificial count, executable due dates through February and exact rate/duration. A separate explicitly once-only infusion remains count 1. Coordination head-side metadata was RED and is now GREEN for both operations. Product source and original phrase remain fully recoverable.
+
+CodeRabbit 100 reviewable file cap remains unchanged. The unrelated untracked test/__tmp_open_semantic_probe.ts was left untouched.
+
+Validation: source tests 3830/3830 across 44 suites PASS; ESM/CJS and TypeScript declarations build PASS; packaged export tests 4/4 PASS. git diff --check clean.
