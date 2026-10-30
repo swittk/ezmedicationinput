@@ -548,7 +548,11 @@ function applyCoordinatedWeekdayFrequency(state: ParserState): void {
     weekdayRecurrence = true;
   }
   if (weekdayRecurrence) {
-    schedule.frequency = schedule.dayOfWeek.length * (schedule.timeOfDay?.length ?? 1);
+    // Standalone meal/daypart events are administration slots, just as
+    // explicit clocks are. Do not add both lists blindly: "08:00 morning"
+    // can describe one clock-qualified dose rather than two doses.
+    const slots = schedule.timeOfDay?.length || schedule.when?.length || 1;
+    schedule.frequency = schedule.dayOfWeek.length * slots;
   }
 }
 

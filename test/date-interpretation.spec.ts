@@ -8,7 +8,7 @@ import { normalizeBodySiteKey } from "../src/maps";
 import { parseClauseState, tokenize } from "../src/parser";
 import { ParserState } from "../src/parser-state";
 import type { HpsgSign } from "../src/hpsg/signature";
-import type { ParseOptions } from "../src/types";
+import { FhirPeriodUnit, type ParseOptions } from "../src/types";
 import { parseSig } from "./helpers/r5-parser";
 
 const REFERENCE_DATE = "2026-09-27";
@@ -1362,6 +1362,66 @@ describe("calendar date interpretation", () => {
       "2026-10-01T20:30:00+07:00",
       "2026-10-05T09:30:00+07:00",
       "2026-10-05T20:30:00+07:00"
+    ]);
+  });
+
+  it("counts both daily event anchors on each coordinated weekly weekday", () => {
+    for (const [source, morning] of [
+      ["รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เช้าและเย็น", "08:00"],
+      ["รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี ก่อนอาหารเช้าและหลังอาหารเย็น", "07:30"]
+    ] as const) {
+      const result = parseSig(source, { locale: "th" });
+      const schedule = result.meta.canonical.clauses[0]?.schedule;
+      expect(schedule).toMatchObject({
+        frequency: 4, period: 1, periodUnit: "wk",
+        dayOfWeek: ["mon", "thu"]
+      });
+      expect(schedule?.when).toHaveLength(2);
+      expect(result.fhir.timing?.repeat).toMatchObject({
+        frequency: 4, period: 1, periodUnit: "wk",
+        dayOfWeek: ["mon", "thu"],
+        when: schedule?.when
+      });
+      expect(nextDueDoses(result.fhir, {
+        from: "2026-11-02T00:00:00+07:00",
+        orderedAt: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        limit: 4
+      })).toEqual([
+        `2026-11-02T${morning}:00+07:00`,
+        "2026-11-02T19:00:00+07:00",
+        `2026-11-05T${morning}:00+07:00`,
+        "2026-11-05T19:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({
+        dosage: result.fhir,
+        from: "2026-11-02T00:00:00+07:00",
+        orderedAt: "2026-11-02T00:00:00+07:00",
+        timeZone: "Asia/Bangkok",
+        durationValue: 7, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(4);
+      expect(result.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it("does not double count a morning qualifier for the same fixed clock", () => {
+    const source = "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 08:00 ตอนเช้า";
+    const result = parseSig(source, { locale: "th" });
+    expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "wk",
+      dayOfWeek: ["mon", "thu"],
+      timeOfDay: ["08:00:00"],
+      when: ["MORN"]
+    });
+    expect(result.fhir.timing?.repeat?.frequency).toBe(2);
+    expect(nextDueDoses(result.fhir, {
+      from: "2026-11-02T00:00:00+07:00",
+      orderedAt: "2026-11-02T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      limit: 2
+    })).toEqual([
+      "2026-11-02T08:00:00+07:00",
+      "2026-11-05T08:00:00+07:00"
     ]);
   });
 
