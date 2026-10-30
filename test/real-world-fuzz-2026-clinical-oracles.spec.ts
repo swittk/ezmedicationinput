@@ -337,8 +337,11 @@ describe("typed phase addition contrasting instructions", () => {
       .find(item => item.predicate.lemma === "add");
     expect(action?.predicate.lemma).toBe("add");
     expect(action?.predicate.codings).toEqual([
-      expect.objectContaining({ system: "http://snomed.info/sct", code: "422106007" })
+      expect.objectContaining({ system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action", code: "add" })
     ]);
+    expect(action?.predicate.semanticComponents).toContainEqual(expect.objectContaining({
+      role: "operation", coding: expect.objectContaining({ system: "http://snomed.info/sct", code: "422106007" })
+    }));
     expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
     // The internal operator identity and standard coding both survive FHIR persistence.
     const strictR5 = toFhirR5Dosages(parsed.fhirNext)[0];
@@ -348,10 +351,14 @@ describe("typed phase addition contrasting instructions", () => {
       expect(reopened?.predicate.lemma).toBe("add");
       expect(reopened?.predicate.codings).toEqual([
         expect.objectContaining({
-          system: "http://snomed.info/sct",
-          code: "422106007"
+          system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
+          code: "add"
         })
       ]);
+      expect(reopened?.predicate.semanticComponents).toContainEqual(expect.objectContaining({
+        role: "operation",
+        coding: expect.objectContaining({ system: "http://snomed.info/sct", code: "422106007" })
+      }));
     }
   });
   it.each([

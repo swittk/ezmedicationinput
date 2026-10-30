@@ -465,7 +465,6 @@ describe("procedural instruction graph", () => {
     expect(frames[0]?.args[0]).toMatchObject({ role: "container", normalized: "bottle" });
   });
 
-
   it("parses colloquial Thai sequencing into coded actions without opaque glue", () => {
     const parsed = parseSig("เช็ดรอยโรคแล้วรอ 5 นาทีแล้วล้างด้วยน้ำ", { locale: "th" });
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
@@ -1391,7 +1390,7 @@ describe("standard instruction terminology", () => {
     ["complete-course", "420604000"], ["remove", "129303008"], ["replace", "282089006"],
     ["measure", "129266000"], ["cut", "360314001"], ["nebulize", "56251003"],
     ["rinse_mouth", "59611000087105"], ["call", "420942008"],
-    ["withhold-administration", "421139008"], ["soak", "42691000"],
+    ["soak", "42691000"],
     ["consult", "129430004"]
   ])("uses the standard action without changing the grammar identity: %s", (name, code) => {
     const action = getMedicationInstructionAction(name)!;
@@ -1401,6 +1400,24 @@ describe("standard instruction terminology", () => {
     ]);
     expect(buildMedicationInstructionActionCodeSystem().concept
       .some(value => value.code === name)).toBe(false);
+  });
+
+
+  it("keeps the local withhold-administration predicate while retaining the SNOMED hold fragment", () => {
+    const definition = getMedicationInstructionAction("withhold-administration")!;
+    expect(medicationInstructionActionCodings(definition)).toEqual([
+      expect.objectContaining({
+        system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
+        code: "withhold-administration"
+      })
+    ]);
+    expect(definition.semanticComponents).toContainEqual(expect.objectContaining({
+      role: "operation",
+      coding: expect.objectContaining({ system: "http://snomed.info/sct", code: "421139008" })
+    }));
+    expect(buildMedicationInstructionActionCodeSystem().concept.some(
+      item => item.code === "withhold-administration"
+    )).toBe(true);
   });
 
   it("uses mapped external action codes directly while retaining caller-supplied additional codes", () => {

@@ -116,10 +116,13 @@
       "code": "add",
       "semanticClass": "regimen-adjustment",
       "display": "Add",
-      "externalCodings": [{
-        "system": "http://snomed.info/sct",
-        "code": "422106007",
-        "display": "Add - dosing instruction fragment (qualifier value)"
+      "semanticComponents": [{
+        "role": "operation",
+        "coding": {
+          "system": "http://snomed.info/sct",
+          "code": "422106007",
+          "display": "Add - dosing instruction fragment (qualifier value)"
+        }
       }],
       "i18n": { "th": "เพิ่ม" },
       "aliases": ["add"],
@@ -1767,7 +1770,7 @@
     },
     {
       "code": "withhold-administration",
-      "coding": {"system": "http://snomed.info/sct", "code": "421139008", "display": "Hold"},
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"421139008","display":"Hold - dosing instruction fragment"}}],
       "semanticClass": "withhold-administration",
       "display": "Withhold administration",
       "i18n": { "th": "งดการให้ยา" },
@@ -2038,7 +2041,7 @@
     {
       "code": "double",
       "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action", "code": "double", "display": "Double", "i18n": {"th": "เพิ่มเป็นสองเท่า"}},
-      "externalCodings": [{"system": "http://snomed.info/sct", "code": "1305003", "display": "Double (qualifier value)"}],
+      "semanticComponents": [{"role":"operation","coding":{"system":"http://snomed.info/sct","code":"1305003","display":"Double (qualifier value)"}}],
       "semanticClass": "administration_pattern",
       "display": "Double",
       "i18n": { "th": "เพิ่มเป็นสองเท่า" },

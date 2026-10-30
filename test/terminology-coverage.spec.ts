@@ -184,6 +184,33 @@ describe("non-equivalent standardized constituents of local instruction actions"
   });
 
   it.each([
+    ["omit the next dose", "withhold-administration", "421139008"],
+    ["do not add a dose", "add", "422106007"],
+    ["double the next dose", "double", "1305003"]
+  ])("retains the SNOMED fragment for %s as a coded part, not a whole-action equivalent", (source, lemma, fragmentCode) => {
+    const definition = getMedicationInstructionAction(lemma)!;
+    const frame = parseInstructionActions(source).find(action => action.predicate.lemma === lemma)!;
+    expect(frame).toBeDefined();
+    expect(frame.predicate.codings).toContainEqual(expect.objectContaining({
+      system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action", code: lemma
+    }));
+    expect(frame.predicate.codings?.some(coding => coding.code === fragmentCode)).toBe(false);
+    expect(definition.semanticComponents).toContainEqual(expect.objectContaining({
+      role: "operation", coding: expect.objectContaining({ system: SNOMED, code: fragmentCode })
+    }));
+    expect(frame.predicate.semanticComponents).toContainEqual(expect.objectContaining({
+      role: "operation", coding: expect.objectContaining({ system: SNOMED, code: fragmentCode })
+    }));
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: source, actions: [frame]
+    })!])!;
+    expect(restored.actions[0].predicate.codings?.some(coding => coding.code === fragmentCode)).toBe(false);
+    expect(restored.actions[0].predicate.semanticComponents).toContainEqual(expect.objectContaining({
+      role: "operation", coding: expect.objectContaining({ system: SNOMED, code: fragmentCode })
+    }));
+  });
+
+  it.each([
     ["pause-use", "operation", "421139008"],
     ["miss", "situation", "1269470004"]
   ])("keeps registered conditional %s separate from entire predicate equivalence", (action, role, code) => {

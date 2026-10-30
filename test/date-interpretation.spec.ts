@@ -32,6 +32,7 @@ function parseRawHpsgSign(input: string, options?: ParseOptions): {
       isCompatibleRouteRefinement: (current, next) => current === undefined || current === next,
       markToken: () => undefined,
       normalizeSiteText: normalizeBodySiteKey,
+      sourceText: (start, end) => input.slice(start, end),
       recordEvidence: () => undefined,
       refreshMethodSurface: () => undefined,
       setRoute: () => undefined
