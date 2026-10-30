@@ -4389,3 +4389,11 @@ Typed fix: The existing lexical sequence connector recognizes a duration lead im
 Independent oracles: Three ordinary next-week/optional-article/comma variants failed RED and pass GREEN, retaining both regimen phases, the first one-week course bound, original rendered instruction, and the 14-day supply of 21 tablets (7 at 1/day then 7 at 2/day) through both R6 and strict R5. Nearby following-week, next-month, next-two-weeks and independent next-week phase tests pass too.
 
 Validation: 44 source suites passed 3837/3837; ESM/CJS and TypeScript declaration build passed; packaged exports 4/4 passed; git diff --check clean. All changes are in pre-existing files of PR #10; unrelated untracked temporary semantic probe untouched.
+
+## 2026-10-31 — PR #10 CodeRabbit: inherited field provenance across regimen segments
+
+**Real product bug (RED):** For "Apply 1 drop right eye at 08:00, wait 5 minutes, then left eye", the delayed recipient schedule reported the inherited 08:00 source at span 80-86 although the entire input ends at 62; highlighting and edit ownership selected the wrong source. A second instillation variant reproduced the same error. Other genuine inheritance paths (PRN dose/route/site/shared method and ADD target dose) had the same donor-local evidence copying problem.
+
+**Typed correction:** Reuse the existing shiftEvidence formula when cloning inherited dose, method, route, schedule and site, translating donor-local spans into recipient-local coordinates **before** standard full-input rebasing. Include the copied site's source range and restriction ranges. Never mutate the donor; do not erase evidence to hide a source mismatch. No new parser pass, FHIR repair, validation gate or runtime lookup; ordinary single-segment parses do not execute this helper.
+
+**Independent oracles:** Two real delayed eye-drop cases and direct PRN/all-field and ADD-phase inheritance fixtures failed RED then passed GREEN. Tests assert exact text under both local and final full-SIG spans, cloned-site range and unchanged donor metadata. No dose, schedule or FHIR behavior changed. All 44 source suites passed 3841/3841, ESM/CJS and TypeScript declarations build passed, packaged exports 4/4 passed. The unrelated untracked temporary semantic probe was untouched.

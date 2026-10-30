@@ -182,6 +182,43 @@ function shiftEvidence(
   };
 }
 
+/** Keep inherited source evidence in the recipient's local coordinate space.
+ * The standard final rebase will then point back to the actual donor text.
+ * Only cross-segment inheritance uses this; local parser evidence is unchanged.
+ */
+function cloneInheritedValue<T extends { evidence?: CanonicalEvidence[] }>(
+  source: T | undefined,
+  donorStart: number,
+  recipientStart: number
+): T | undefined {
+  if (!source) return undefined;
+  const copy = cloneStructuredValue(source);
+  if (copy.evidence?.length) {
+    copy.evidence = copy.evidence.map(item => shiftEvidence(item, donorStart, recipientStart));
+  }
+  return copy;
+}
+
+function cloneInheritedSite(
+  source: CanonicalSigClause["site"],
+  donorStart: number,
+  recipientStart: number
+): CanonicalSigClause["site"] {
+  const copy = cloneInheritedValue(source, donorStart, recipientStart);
+  if (!copy) return undefined;
+  const delta = donorStart - recipientStart;
+  const shift = (span: { start: number; end: number } | undefined) => {
+    if (span) { span.start += delta; span.end += delta; }
+  };
+  shift(copy.range);
+  for (const restriction of copy.restrictions ?? []) {
+    shift(restriction.range);
+    shift(restriction.markerRange);
+    shift(restriction.predicate.range);
+  }
+  return copy;
+}
+
 function appendPredecessorScheduleEvidence(
   target: CanonicalEvidence[],
   clause: CanonicalSigClause,
@@ -239,11 +276,13 @@ export function scopeSequentialPhaseSemantics(
     const donor = states[dependency.from]?.primaryClause;
     const recipient = states[dependency.to]?.primaryClause;
     if (!donor?.dose || !donor.schedule || !recipient) continue;
-    recipient.dose = recipient.dose ?? cloneStructuredValue(donor.dose);
-    recipient.method = recipient.method ?? cloneStructuredValue(donor.method);
-    recipient.route = recipient.route ?? cloneStructuredValue(donor.route);
+    const donorStart = segments[dependency.from]?.start ?? 0;
+    const recipientStart = segments[dependency.to]?.start ?? 0;
+    recipient.dose = recipient.dose ?? cloneInheritedValue(donor.dose, donorStart, recipientStart);
+    recipient.method = recipient.method ?? cloneInheritedValue(donor.method, donorStart, recipientStart);
+    recipient.route = recipient.route ?? cloneInheritedValue(donor.route, donorStart, recipientStart);
     recipient.schedule = {
-      ...cloneStructuredValue(donor.schedule),
+      ...cloneInheritedValue(donor.schedule, donorStart, recipientStart),
       administrationOffsetMinutes: (donor.schedule.administrationOffsetMinutes ?? 0) + dependency.delayMinutes
     };
     appendEvidence(recipient.evidence, {
@@ -339,6 +378,8 @@ export function scopeSequentialPhaseSemantics(
       if (!clause) continue;
 
       const fields: string[] = [];
+      const donorStart = segments[prior[0]]?.start ?? 0;
+      const recipientStart = segments[index]?.start ?? 0;
       if (edge.relation.semanticLicense === 'dose-continuation' && clause.prn?.enabled &&
           !clause.clinicalQuantity && !clause.evidence.some(item => item.lexicalCategory === 'dose' &&
             item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length))) {
@@ -348,7 +389,7 @@ export function scopeSequentialPhaseSemantics(
         const antecedents = prior.map(member => states[member]?.primaryClause);
         const first = antecedents[0];
         if (first?.dose && antecedents.every(value => equalStructuredValues(value?.dose, first.dose))) {
-          clause.dose = cloneStructuredValue(first.dose);
+          clause.dose = cloneInheritedValue(first.dose, donorStart, recipientStart);
           fields.push('dose');
         } else {
           // Earlier local ellipsis may have a nearest-neighbor quantity;
@@ -357,16 +398,16 @@ export function scopeSequentialPhaseSemantics(
           clause.patientInstruction = clause.patientInstruction ?? clause.rawText;
         }
         if (!clause.route && first?.route && antecedents.every(value => equalStructuredValues(value?.route, first.route))) {
-          clause.route = cloneStructuredValue(first.route);
+          clause.route = cloneInheritedValue(first.route, donorStart, recipientStart);
           fields.push('route');
         }
         if (!clause.site && first?.site && antecedents.every(value => equalStructuredValues(value?.site, first.site))) {
-          clause.site = cloneStructuredValue(first.site);
+          clause.site = cloneInheritedSite(first.site, donorStart, recipientStart);
           fields.push('site');
         }
       }
       if (sharedMethod && !clause.method) {
-        clause.method = cloneStructuredValue(sharedMethod);
+        clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         fields.push('method');
       }
       if (schedule?.timingReference === "previous" && sharedAnchors && shared) {
@@ -459,7 +500,6 @@ export function scopeSequentialPhaseSemantics(
           recipientSegment.start
         );
       }
-      const recipientStart = segments[index]?.start ?? 0;
       appendEvidence(scheduleEvidence, {
         rule: 'regimen.sequence.whole-predecessor-phase',
         spans: [{
@@ -530,8 +570,13 @@ export function expandRegimenAdjustmentPhases(
       if (!explicitDose && !target.clinicalQuantity) {
         const agreedDose = sharedDose && previous.every(state =>
           equalStructuredValues(state.primaryClause.dose, sharedDose));
-        if (agreedDose) target.dose = cloneStructuredValue(sharedDose);
-        else {
+        if (agreedDose) {
+          target.dose = cloneInheritedValue(
+            sharedDose,
+            outputSegments[prior.members[0]]?.start ?? 0,
+            segments[adjustments[0]]?.start ?? 0
+          );
+        } else {
           // An omitted amount has no unique antecedent. Keep the clinician's
           // source instruction editable rather than choose the last dose.
           delete target.dose;

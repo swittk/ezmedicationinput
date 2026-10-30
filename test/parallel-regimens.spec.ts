@@ -4,12 +4,13 @@ import {
   toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
+import { shiftCanonicalSigClauses } from "../src/ir";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen
 } from "../src/regimen/parallel-course";
 import {
-  buildRegimenGraph, scopeSequentialPhaseSemantics
+  buildRegimenGraph, scopeSequentialPhaseSemantics, expandRegimenAdjustmentPhases
 } from "../src/regimen/regimen";
 
 const twoSites =
@@ -20,6 +21,104 @@ const options = (from: string, limit = 8) => ({
 });
 
 describe("concurrent independent treatment sequences", () => {
+
+  it.each([
+    "Apply 1 drop right eye at 08:00, wait 5 minutes, then left eye",
+    "Instill 1 drop right eye at 08:00, wait 5 minutes, then 2 drops left eye"
+  ])("keeps delayed target's inherited clock evidence at its original full-source span: %s", input => {
+    const result = parseSig(input);
+    expect(result.meta.canonical.clauses).toHaveLength(2);
+    const donor = result.meta.canonical.clauses[0];
+    const recipient = result.meta.canonical.clauses[1];
+    const expectedStart = input.indexOf("08:00");
+    const original = donor.schedule?.evidence?.find(e => e.rule === "hpsg.lex.schedule.timeOfDay");
+    const inherited = recipient.schedule?.evidence?.find(e => e.rule === "hpsg.lex.schedule.timeOfDay");
+    expect(original?.spans[0]).toMatchObject({ start: expectedStart, text: "08:00," });
+    expect(inherited?.spans[0]).toMatchObject({ start: expectedStart, text: "08:00," });
+    for (const span of inherited?.spans ?? []) {
+      expect(input.slice(span.start, span.end)).toBe(span.text);
+    }
+  });
+
+
+
+  it("preserves predecessor dose, method, route and site provenance across a PRN successor", () => {
+    const source = "Instill 1 drop right eye at 08:00 for 7 days then as needed for pain";
+    const plan = createBoundaryPlan(source);
+    expect(plan.segments).toHaveLength(2);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const donor = states[0].primaryClause;
+    const recipient = states[1].primaryClause;
+    const graph = buildRegimenGraph(plan, plan.segments, states);
+    expect(graph.sequences).toHaveLength(1);
+    graph.sequences[0].relation.semanticLicense = "dose-continuation";
+    expect(recipient.prn?.enabled).toBe(true);
+    const evidence = (fragment: string) => {
+      const start = plan.segments[0].text.indexOf(fragment);
+      expect(start).toBeGreaterThanOrEqual(0);
+      return [{ rule: "test.inherited-source", spans: [
+        { start, end: start + fragment.length, text: fragment }
+      ] }];
+    };
+    expect(donor.dose).toBeDefined();
+    expect(donor.method).toBeDefined();
+    expect(donor.route).toBeDefined();
+    expect(donor.site).toBeDefined();
+    donor.dose!.evidence = evidence("1 drop");
+    donor.method!.evidence = evidence("Instill");
+    donor.route!.evidence = evidence("Instill");
+    donor.site!.evidence = evidence("right eye");
+    const siteStart = plan.segments[0].text.indexOf("right eye");
+    donor.site!.range = { start: siteStart, end: siteStart + "right eye".length };
+    const originals = [donor.dose, donor.method, donor.route, donor.site]
+      .map(value => value!.evidence![0].spans[0].start);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    for (const field of ["dose", "method", "route", "site"] as const) {
+      const value = recipient[field];
+      expect(value?.evidence, field).toHaveLength(1);
+      const span = value!.evidence![0].spans[0];
+      const fullStart = span.start + plan.segments[1].start;
+      expect(source.slice(fullStart, fullStart + span.text.length), field).toBe(span.text);
+    }
+    shiftCanonicalSigClauses([recipient], plan.segments[1].start);
+    expect(source.slice(recipient.site!.range!.start, recipient.site!.range!.end)).toBe("right eye");
+    for (const field of ["dose", "method", "route", "site"] as const) {
+      const span = recipient[field]!.evidence![0].spans[0];
+      expect(source.slice(span.start, span.end), field).toBe(span.text);
+    }
+    expect([donor.dose, donor.method, donor.route, donor.site]
+      .map(value => value!.evidence![0].spans[0].start)).toEqual(originals);
+  });
+
+  it("rebases inherited ADD-phase dose evidence to the original donor text", () => {
+    const input = "Take 1 tablet daily for 7 days then add a noon dose";
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments).toHaveLength(2);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments, states);
+    const original = states[0].primaryClause;
+    const target = states[1].primaryClause;
+    expect(original.dose).toBeDefined();
+    const phrase = "1 tablet";
+    const offset = plan.segments[0].text.indexOf(phrase);
+    expect(offset).toBeGreaterThanOrEqual(0);
+    original.dose!.evidence = [{
+      rule: "test.add-dose-owner",
+      spans: [{ start: offset, end: offset + phrase.length, text: phrase }]
+    }];
+    target.regimenAdjustment = "add";
+    delete target.dose;
+    expandRegimenAdjustmentPhases(states, [...plan.segments], graph);
+    expect(target.dose?.evidence?.[0].spans[0].start).toBe(
+      input.indexOf(phrase) - plan.segments[1].start
+    );
+    shiftCanonicalSigClauses([target], plan.segments[1].start);
+    expect(target.dose?.evidence?.[0].spans[0]).toMatchObject({
+      start: input.indexOf(phrase), text: phrase
+    });
+    expect(original.dose!.evidence![0].spans[0].start).toBe(offset);
+  });
+
   it("inherits previous recurrence even when anaphoric ParserState setter keys exist as undefined", () => {
     const input = "Take 1 tablet QD at 09:00 for 7 days; increase to 2 tablets at the same times thereafter.";
     const plan = createBoundaryPlan(input);
