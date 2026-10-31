@@ -470,17 +470,23 @@ function typedAdministrationOffsetSteps(
   )) return undefined;
 
   const sequenceOffsets = new Map<number, Array<number | undefined>>();
+  const anchoredSequences = new Set<number>();
   for (const item of results) {
     const sequence = item.fhir.sequence ?? 1;
     const offsets = sequenceOffsets.get(sequence) ?? [];
     offsets.push(item.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes);
     sequenceOffsets.set(sequence, offsets);
+    if (item.fhir.timing?.repeat?.timeOfDay?.length ||
+        item.fhir.timing?.repeat?.when?.length) anchoredSequences.add(sequence);
   }
   const steps: NonNullable<EzCourseMetadata["step"]> = [];
   for (const [sequence, offsets] of sequenceOffsets) {
     const minutes = offsets[0];
     if (minutes === undefined || minutes <= 0 || !Number.isFinite(minutes) ||
-        !offsets.every(offset => offset === minutes)) continue;
+        !offsets.every(offset => offset === minutes) ||
+        anchoredSequences.has(sequence)) continue;
+    // Absolute clock/event anchors stay on their component: shifting a whole
+    // course start instead would discard the dose-local time modifier.
     const unit = minutes % 1440 === 0 ? "d" : minutes % 60 === 0 ? "h" : "min";
     const value = unit === "d" ? minutes / 1440 : unit === "h" ? minutes / 60 : minutes;
     steps.push({ sequence, start: relativeTime({ value, unit }) });

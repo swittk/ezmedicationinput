@@ -152,13 +152,20 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
-      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : c.amount;
-      // One lexical object may also supply the canonical numeric dose.
-      // Realize that exact coextensive quantity with the shared unit localizer,
-      // not as raw "1 tab" plus a second invented amount.
+      // One object can be both the named theme and the parsed dose.
+      // Keep its localized amount ("1 tablet", not raw "1 tab").
       const coextensiveAmount = themeArg && amountArg?.quantity &&
         themeArg.text.trim() === amountArg.text.trim()
         ? c.translateQuantity(amountArg.quantity) : undefined;
+      // "ยา 1 เม็ด" also owns its amount, though the theme includes a noun.
+      // Neither form licenses another tablet-sized amount on plain water.
+      const amountAlreadyInTheme = Boolean(coextensiveAmount ||
+        (themeArg?.quantity && amountArg?.quantity &&
+          themeArg.quantity.value === amountArg.quantity.value &&
+          themeArg.quantity.unit === amountArg.quantity.unit &&
+          themeArg.text.includes(amountArg.text.trim())));
+      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity)
+        : amountAlreadyInTheme ? undefined : c.amount;
       const themeText = theme
         ? ` ${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
         : "";
@@ -305,10 +312,16 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
-      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : c.amount;
       const coextensiveAmount = themeArg && amountArg?.quantity &&
         themeArg.text.trim() === amountArg.text.trim()
         ? c.translateQuantity(amountArg.quantity) : undefined;
+      const amountAlreadyInTheme = Boolean(coextensiveAmount ||
+        (themeArg?.quantity && amountArg?.quantity &&
+          themeArg.quantity.value === amountArg.quantity.value &&
+          themeArg.quantity.unit === amountArg.quantity.unit &&
+          themeArg.text.includes(amountArg.text.trim())));
+      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity)
+        : amountAlreadyInTheme ? undefined : c.amount;
       const themeText = theme ? (coextensiveAmount ??
         `${theme}${themeAmount ? ` ${themeAmount}` : ""}`) : "";
       const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";

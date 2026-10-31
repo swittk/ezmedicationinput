@@ -524,6 +524,22 @@ describe("clinical SIG correctness and boundary promotion", () => {
     expect(parsed.warnings).toContainEqual(expect.stringContaining("conflicts with dosage-form context"));
   });
 
+  it.each([
+    ["1 tablet sublingually", "tablet", RouteCode["Sublingual route"]],
+    ["Insert 1 vaginal tablet", "tablet", RouteCode["Per vagina"]]
+  ] as const)("does not flag a generic tablet form as a route conflict: %s", (source, dosageForm, route) => {
+    const parsed = parseSig(source, { context: { dosageForm } });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe(route);
+    expect(parsed.warnings).not.toContainEqual(expect.stringContaining("conflicts with dosage-form context"));
+    expect(parsed.input).toBe(source);
+  });
+
+  it("still warns when an explicitly sublingual dosage form is prescribed orally", () => {
+    const parsed = parseSig("Take 1 tablet PO", { context: { dosageForm: "sublingual tablet" } });
+    expect(parsed.fhir.route?.coding?.[0]?.code).toBe(RouteCode["Oral route"]);
+    expect(parsed.warnings).toContainEqual(expect.stringContaining("conflicts with dosage-form context"));
+  });
+
   it("exports daily dose maximum and FHIR R5 PRN without serializing legacy asNeeded", () => {
     const result = parseSig("1 tab q6h prn fever max 4 tablets/day");
     expect(result.fhir.maxDosePerPeriod).toMatchObject([{

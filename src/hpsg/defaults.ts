@@ -38,6 +38,17 @@ function inferUnitFromRoute(state: ParserState): string | undefined {
   return undefined;
 }
 
+// Plain tablets/capsules describe the medicine's form, not an exclusive
+// administration route. The oral default must not override a stated
+// sublingual or vaginal route or create a false conflict warning.
+const ROUTE_NEUTRAL_ORAL_FORMS = new Set(["tablet", "capsule, hard"]);
+const TABLET_ALTERNATE_ROUTES = new Set<RouteCode>([
+  RouteCode["Sublingual route"],
+  RouteCode["Buccal route"],
+  RouteCode["Oropharyngeal route (qualifier value)"],
+  RouteCode["Per vagina"]
+]);
+
 function applyRouteDefault(
   state: ParserState,
   context: MedicationContext | undefined,
@@ -47,7 +58,10 @@ function applyRouteDefault(
   if (state.routeCode !== undefined) {
     // Routes such as topical vs intravitreal or oral vs sublingual are not
     // interchangeable. Do not invent broad route-family equivalences.
-    if (contextRoute !== undefined && state.routeCode !== contextRoute) {
+    if (contextRoute !== undefined && state.routeCode !== contextRoute &&
+        !(contextRoute === RouteCode["Oral route"] &&
+          ROUTE_NEUTRAL_ORAL_FORMS.has(normalizeDosageForm(context?.dosageForm) ?? "") &&
+          TABLET_ALTERNATE_ROUTES.has(state.routeCode))) {
       addWarning(
         state,
         `Explicit route ${ROUTE_TEXT[state.routeCode]} conflicts with dosage-form context route ${ROUTE_TEXT[contextRoute]}; using the explicit route.`

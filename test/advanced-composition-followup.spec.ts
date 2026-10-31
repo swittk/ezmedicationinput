@@ -1314,6 +1314,23 @@ describe("reconstitution advice requires affirmative material and temporal entai
     expect(en).toMatch(/mix.*powder without water/iu);
     expect(en).not.toMatch(/without with water/iu);
   });
+  it("does not put a tablet-sized amount on the water when dissolving tablets", () => {
+    const parsed = parseSig("Dissolve 1 tablet in water", { locale: "en" });
+    expect(parsed.longText).toBe("Dissolve 1 tablet in water.");
+    expect(parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0]?.predicate.lemma).toBe("dissolve");
+    const measuredWater = parseSig("Dissolve 2 tablets in 30 mL water", { locale: "en" });
+    expect(measuredWater.longText).toBe("Dissolve 2 tablets in 30 mL water.");
+  });
+
+  it("does not duplicate a dose onto the mixing water in Thai", () => {
+    const input = "ละลายยา 1 เม็ดในน้ำ";
+    const parsed = parseSig(input, { locale: "th" });
+    expect(parsed.longText).toContain("น้ำ");
+    expect(parsed.longText).not.toMatch(/น้ำ\s*1\s*เม็ด/u);
+    expect((parsed.longText.match(/1\s*เม็ด/gu) ?? [])).toHaveLength(1);
+    expect(parsed.input).toBe(input);
+  });
+
   it.each([
     ["Dissolve in water before drinking", "dissolve"],
     ["Dissolve tablet in water before drinking", "dissolve"],
@@ -2075,6 +2092,19 @@ describe("independent release oracles for newly observed realistic clinical erro
     expect(getAdministrationOffsetMinutes(strict[0])).toBe(720);
     expect(fromFhirDosage(strict[0]).meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
       .toBe(720);
+  });
+
+  it("keeps a clock-anchored delayed dose as a component offset, not an R6 course start", () => {
+    const input = "Take 1 tablet daily at 08:00 then another tablet 2 hours later";
+    const parsed = parseProductionSig(input);
+    expect(parsed.items[0]?.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes)
+      .toBe(120);
+    expect(parsed.items[0]?.fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(parsed.fhirNext.step[0]?.start).toBeUndefined();
+    expect(getAdministrationOffsetMinutes(parsed.fhirNext.step[0]?.component[0])).toBe(120);
+    expect(getAdministrationOffsetMinutes(parsed.fhir[0])).toBe(120);
+    expect(getAdministrationOffsetMinutes(toDosageDetails(parsed.fhir).step[0]?.component[0])).toBe(120);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
 
   it("keeps a single delayed administration as an R6 treatment-relative step", () => {
